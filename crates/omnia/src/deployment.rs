@@ -12,6 +12,8 @@ pub use manifest::{
 };
 #[cfg(feature = "link")]
 use omnia_core::ChainPolicy;
+#[cfg(not(feature = "link"))]
+use omnia_core::NoLinks;
 #[cfg(feature = "loader")]
 use omnia_core::RegistrySource;
 use omnia_core::wasmtime::component::Linker;
@@ -19,8 +21,8 @@ use omnia_core::wasmtime::{Config, Engine};
 use omnia_core::wasmtime_wasi::WasiView;
 use omnia_core::{
     GuestId, HasChain, HasDispatcher, Host, LevelFilter, LinkSeam, LoadedGuest, MountRegistry,
-    NoLinks, Registry, RegistryParts, Routes, Runtime, RuntimeOptions, RuntimeParts, Server,
-    Source, SourceSpec, StoreCtx, Telemetry, telemetry,
+    Registry, RegistryParts, Routes, Runtime, RuntimeOptions, RuntimeParts, Server, Source,
+    SourceSpec, StoreCtx, Telemetry, telemetry,
 };
 #[cfg(feature = "link")]
 use omnia_link::{FirstArgSelector, GuestSelector, InProcessLinks};
@@ -224,8 +226,16 @@ impl DeploymentBuilder {
             self.args
         };
 
-        // no host-mediated dispatch unless `link` overrides the seam below
-        let deployment = Deployment {
+        // host-mediated dispatch only with `link`
+        let seam: Arc<dyn LinkSeam<T>> = cfg_select! {
+            feature = "link" => Arc::new(InProcessLinks::new(
+                Arc::new(FirstArgSelector),
+                ChainPolicy::from(&options),
+            )),
+            _ => Arc::new(NoLinks),
+        };
+
+        Ok(Deployment {
             name,
             engine,
             linker,
@@ -233,7 +243,7 @@ impl DeploymentBuilder {
             guests,
             declared,
             routes: manifest.routes(),
-            seam: Arc::new(NoLinks),
+            seam,
             mounts,
             args: Arc::new(args),
             mode: self.mode,
@@ -243,16 +253,7 @@ impl DeploymentBuilder {
             #[cfg(feature = "loader")]
             loader: Loader { registry: None },
             rust_log,
-        };
-        #[cfg(feature = "link")]
-        let deployment = Deployment {
-            seam: Arc::new(InProcessLinks::new(
-                Arc::new(FirstArgSelector),
-                ChainPolicy::from(&deployment.options),
-            )),
-            ..deployment
-        };
-        Ok(deployment)
+        })
     }
 }
 
@@ -439,10 +440,10 @@ impl<B: Clone + Send + Sync + 'static> Deployment<StoreCtx<B>> {
             name: Arc::from(deployment.name.as_str()),
             args: deployment.args.to_vec(),
             mounts: Arc::clone(&deployment.mounts),
-            #[cfg(feature = "loader")]
-            packages: Some(Arc::clone(&registry)),
-            #[cfg(not(feature = "loader"))]
-            packages: None,
+            packages: cfg_select! {
+                feature = "loader" => Some(Arc::clone(&registry)),
+                _ => None,
+            },
             registry_config: deployment.registry_config.clone(),
             rust_log: deployment.rust_log.clone(),
             command_guest: deployment.command_guest.clone(),

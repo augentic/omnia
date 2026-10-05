@@ -6,7 +6,7 @@ Everything here uses in-memory defaults — no databases, brokers, or credential
 
 ## Prerequisites
 
-- **Rust 1.95 or later.** The repository's `rust-toolchain.toml` pins the toolchain and automatically installs the `wasm32-wasip2` compilation target the first time you build.
+- **Rust 1.99 or later.** The repository's `rust-toolchain.toml` pins the toolchain and automatically installs the `wasm32-wasip2` compilation target the first time you build.
 - A checkout of this repository.
 
 ## Step 1: Build a guest

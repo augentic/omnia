@@ -228,41 +228,44 @@ impl From<Error> for crate::Error {
 /// The default WASM implementation delegates to `omnia:plugins/loader`; off
 /// `wasm32` the signature is bare so native suites script loads.
 pub trait Plugins: Send + Sync {
-    /// Ensure the guest `from` names is active and return its handle, held
-    /// to `digest` when one is given; idempotent on (name, digest).
-    ///
-    /// # Errors
-    ///
-    /// Returns the loader's typed refusal ([`Error`]) when the deployment's
-    /// grant does not serve the location, or the host cannot acquire,
-    /// verify, validate, or register the bytes.
-    #[cfg(not(target_arch = "wasm32"))]
-    fn load(
-        &self, from: &Location, digest: Option<&Digest>,
-    ) -> impl Future<Output = Result<Plugin, Error>> + Send;
+    cfg_select! {
+        not(target_arch = "wasm32") => {
+            /// Ensure the guest `from` names is active and return its handle, held
+            /// to `digest` when one is given; idempotent on (name, digest).
+            ///
+            /// # Errors
+            ///
+            /// Returns the loader's typed refusal ([`Error`]) when the deployment's
+            /// grant does not serve the location, or the host cannot acquire,
+            /// verify, validate, or register the bytes.
+            fn load(
+                &self, from: &Location, digest: Option<&Digest>,
+            ) -> impl Future<Output = Result<Plugin, Error>> + Send;
+        }
+        _ => {
+            /// Ensure the guest `from` names is active and return its handle, held
+            /// to `digest` when one is given; idempotent on (name, digest).
+            ///
+            /// # Errors
+            ///
+            /// Returns the loader's typed refusal ([`Error`]) when the deployment's
+            /// grant does not serve the location, or the host cannot acquire,
+            /// verify, validate, or register the bytes.
+            fn load(
+                &self, from: &Location, digest: Option<&Digest>,
+            ) -> impl Future<Output = Result<Plugin, Error>> + Send {
+                use generated::omnia::plugins::loader;
 
-    /// Ensure the guest `from` names is active and return its handle, held
-    /// to `digest` when one is given; idempotent on (name, digest).
-    ///
-    /// # Errors
-    ///
-    /// Returns the loader's typed refusal ([`Error`]) when the deployment's
-    /// grant does not serve the location, or the host cannot acquire,
-    /// verify, validate, or register the bytes.
-    #[cfg(target_arch = "wasm32")]
-    fn load(
-        &self, from: &Location, digest: Option<&Digest>,
-    ) -> impl Future<Output = Result<Plugin, Error>> + Send {
-        use generated::omnia::plugins::loader;
-
-        let from = loader::Location::from(from);
-        let digest = digest.map(ToString::to_string);
-        async move {
-            let loaded = loader::load(from, digest).await?;
-            let digest = loaded.digest.parse().map_err(|error: Error| {
-                Error::Internal(format!("host reported a malformed digest: {error}"))
-            })?;
-            Ok(Plugin::new(loaded.id, digest))
+                let from = loader::Location::from(from);
+                let digest = digest.map(ToString::to_string);
+                async move {
+                    let loaded = loader::load(from, digest).await?;
+                    let digest = loaded.digest.parse().map_err(|error: Error| {
+                        Error::Internal(format!("host reported a malformed digest: {error}"))
+                    })?;
+                    Ok(Plugin::new(loaded.id, digest))
+                }
+            }
         }
     }
 }

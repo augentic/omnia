@@ -35,243 +35,235 @@ pub struct ObjectMetadata {
 /// Default WASM implementations delegate to `wasi:blobstore` via
 /// `omnia-wasi-blobstore`.
 pub trait BlobStore: Send + Sync {
-    /// Retrieve an object's data from a container.
-    #[cfg(not(target_arch = "wasm32"))]
-    fn get(
-        &self, container: &str, name: &str,
-    ) -> impl Future<Output = Result<Option<Vec<u8>>>> + Send;
+    cfg_select! {
+        not(target_arch = "wasm32") => {
+            /// Retrieve an object's data from a container.
+            fn get(
+                &self, container: &str, name: &str,
+            ) -> impl Future<Output = Result<Option<Vec<u8>>>> + Send;
 
-    /// Store an object in a container.
-    #[cfg(not(target_arch = "wasm32"))]
-    fn put(
-        &self, container: &str, name: &str, data: &[u8],
-    ) -> impl Future<Output = Result<()>> + Send;
+            /// Store an object in a container.
+            fn put(
+                &self, container: &str, name: &str, data: &[u8],
+            ) -> impl Future<Output = Result<()>> + Send;
 
-    /// Delete an object from a container.
-    #[cfg(not(target_arch = "wasm32"))]
-    fn delete(&self, container: &str, name: &str) -> impl Future<Output = Result<()>> + Send;
+            /// Delete an object from a container.
+            fn delete(
+                &self, container: &str, name: &str,
+            ) -> impl Future<Output = Result<()>> + Send;
 
-    /// List all object names in a container.
-    #[cfg(not(target_arch = "wasm32"))]
-    fn list(&self, container: &str) -> impl Future<Output = Result<Vec<String>>> + Send;
+            /// List all object names in a container.
+            fn list(&self, container: &str) -> impl Future<Output = Result<Vec<String>>> + Send;
 
-    /// Retrieve a byte range of an object's data.
-    ///
-    /// Both `start` and `end` offsets are inclusive.
-    #[cfg(not(target_arch = "wasm32"))]
-    fn get_range(
-        &self, container: &str, name: &str, start: u64, end: u64,
-    ) -> impl Future<Output = Result<Vec<u8>>> + Send;
+            /// Retrieve a byte range of an object's data.
+            ///
+            /// Both `start` and `end` offsets are inclusive.
+            fn get_range(
+                &self, container: &str, name: &str, start: u64, end: u64,
+            ) -> impl Future<Output = Result<Vec<u8>>> + Send;
 
-    /// Return metadata for an object.
-    #[cfg(not(target_arch = "wasm32"))]
-    fn object_info(
-        &self, container: &str, name: &str,
-    ) -> impl Future<Output = Result<ObjectMetadata>> + Send;
+            /// Return metadata for an object.
+            fn object_info(
+                &self, container: &str, name: &str,
+            ) -> impl Future<Output = Result<ObjectMetadata>> + Send;
 
-    /// Create a new empty container.
-    #[cfg(not(target_arch = "wasm32"))]
-    fn create_container(&self, name: &str) -> impl Future<Output = Result<()>> + Send;
+            /// Create a new empty container.
+            fn create_container(&self, name: &str) -> impl Future<Output = Result<()>> + Send;
 
-    /// Delete a container and all objects within it.
-    #[cfg(not(target_arch = "wasm32"))]
-    fn delete_container(&self, name: &str) -> impl Future<Output = Result<()>> + Send;
+            /// Delete a container and all objects within it.
+            fn delete_container(&self, name: &str) -> impl Future<Output = Result<()>> + Send;
 
-    /// Check whether a container exists.
-    #[cfg(not(target_arch = "wasm32"))]
-    fn container_exists(&self, name: &str) -> impl Future<Output = Result<bool>> + Send;
+            /// Check whether a container exists.
+            fn container_exists(&self, name: &str) -> impl Future<Output = Result<bool>> + Send;
 
-    /// Return metadata for a container.
-    #[cfg(not(target_arch = "wasm32"))]
-    fn container_info(
-        &self, container: &str,
-    ) -> impl Future<Output = Result<ContainerMetadata>> + Send;
-
-    /// Retrieve an object's data from a container.
-    #[cfg(target_arch = "wasm32")]
-    fn get(
-        &self, container: &str, name: &str,
-    ) -> impl Future<Output = Result<Option<Vec<u8>>>> + Send {
-        use anyhow::anyhow;
-        use omnia_wasi_blobstore::types::IncomingValue;
-
-        async move {
-            let ctr = open_container(container).await?;
-
-            // one round trip: a not-found error is `None`, rather than racing an existence check
-            let incoming = match ctr.get_data(name.to_string(), 0, u64::MAX).await {
-                Ok(incoming) => incoming,
-                // wasi-blobstore lowers a missing object to this message for every backend
-                Err(e) if e.contains("object not found") => return Ok(None),
-                Err(e) => return Err(anyhow!("reading object: {e}")),
-            };
-            let data = IncomingValue::incoming_value_consume_sync(incoming)
-                .map_err(|e| anyhow!("consuming incoming value: {e}"))?;
-            Ok(Some(data))
+            /// Return metadata for a container.
+            fn container_info(
+                &self, container: &str,
+            ) -> impl Future<Output = Result<ContainerMetadata>> + Send;
         }
-    }
+        _ => {
+            /// Retrieve an object's data from a container.
+            fn get(
+                &self, container: &str, name: &str,
+            ) -> impl Future<Output = Result<Option<Vec<u8>>>> + Send {
+                use anyhow::anyhow;
+                use omnia_wasi_blobstore::types::IncomingValue;
 
-    /// Store an object in a container.
-    #[cfg(target_arch = "wasm32")]
-    fn put(
-        &self, container: &str, name: &str, data: &[u8],
-    ) -> impl Future<Output = Result<()>> + Send {
-        use anyhow::anyhow;
-        use omnia_wasi_blobstore::types::OutgoingValue;
+                async move {
+                    let ctr = open_container(container).await?;
 
-        // the wasi:io write budget: `blocking-write-and-flush` takes at most 4096 bytes
-        const WRITE_CHUNK: usize = 4096;
-
-        async move {
-            let ctr = open_container(container).await?;
-            let outgoing = OutgoingValue::new_outgoing_value();
-            {
-                let body = outgoing
-                    .outgoing_value_write_body()
-                    .await
-                    .map_err(|e| anyhow!("getting write body: {e:?}"))?;
-                for chunk in data.chunks(WRITE_CHUNK) {
-                    body.blocking_write_and_flush(chunk)
-                        .map_err(|e| anyhow!("writing data: {e}"))?;
-                }
-            };
-            ctr.write_data(name.to_string(), &outgoing)
-                .await
-                .map_err(|e| anyhow!("writing object: {e}"))?;
-            OutgoingValue::finish(outgoing).map_err(|e| anyhow!("finishing write: {e}"))?;
-            Ok(())
-        }
-    }
-
-    /// Delete an object from a container.
-    #[cfg(target_arch = "wasm32")]
-    fn delete(&self, container: &str, name: &str) -> impl Future<Output = Result<()>> + Send {
-        use anyhow::anyhow;
-
-        async move {
-            let ctr = open_container(container).await?;
-            ctr.delete_object(name.to_string()).await.map_err(|e| anyhow!("deleting object: {e}"))
-        }
-    }
-
-    /// List all object names in a container.
-    #[cfg(target_arch = "wasm32")]
-    fn list(&self, container: &str) -> impl Future<Output = Result<Vec<String>>> + Send {
-        use anyhow::anyhow;
-
-        async move {
-            let ctr = open_container(container).await?;
-            let stream = ctr.list_objects().await.map_err(|e| anyhow!("listing objects: {e}"))?;
-            let mut names = Vec::new();
-            loop {
-                let (batch, done) = stream
-                    .read_stream_object_names(100)
-                    .await
-                    .map_err(|e| anyhow!("reading object names: {e}"))?;
-                names.extend(batch);
-                if done {
-                    break;
+                    // one round trip: a not-found error is `None`, rather than racing an existence check
+                    let incoming = match ctr.get_data(name.to_string(), 0, u64::MAX).await {
+                        Ok(incoming) => incoming,
+                        // wasi-blobstore lowers a missing object to this message for every backend
+                        Err(e) if e.contains("object not found") => return Ok(None),
+                        Err(e) => return Err(anyhow!("reading object: {e}")),
+                    };
+                    let data = IncomingValue::incoming_value_consume_sync(incoming)
+                        .map_err(|e| anyhow!("consuming incoming value: {e}"))?;
+                    Ok(Some(data))
                 }
             }
-            Ok(names)
-        }
-    }
 
-    /// Retrieve a byte range of an object's data.
-    ///
-    /// Both `start` and `end` offsets are inclusive.
-    #[cfg(target_arch = "wasm32")]
-    fn get_range(
-        &self, container: &str, name: &str, start: u64, end: u64,
-    ) -> impl Future<Output = Result<Vec<u8>>> + Send {
-        use anyhow::anyhow;
-        use omnia_wasi_blobstore::types::IncomingValue;
+            /// Store an object in a container.
+            fn put(
+                &self, container: &str, name: &str, data: &[u8],
+            ) -> impl Future<Output = Result<()>> + Send {
+                use anyhow::anyhow;
+                use omnia_wasi_blobstore::types::OutgoingValue;
 
-        async move {
-            let ctr = open_container(container).await?;
-            let incoming = ctr
-                .get_data(name.to_string(), start, end)
-                .await
-                .map_err(|e| anyhow!("reading object range: {e}"))?;
-            let data = IncomingValue::incoming_value_consume_sync(incoming)
-                .map_err(|e| anyhow!("consuming incoming value: {e}"))?;
-            Ok(data)
-        }
-    }
+                // the wasi:io write budget: `blocking-write-and-flush` takes at most 4096 bytes
+                const WRITE_CHUNK: usize = 4096;
 
-    /// Return metadata for an object.
-    #[cfg(target_arch = "wasm32")]
-    fn object_info(
-        &self, container: &str, name: &str,
-    ) -> impl Future<Output = Result<ObjectMetadata>> + Send {
-        use anyhow::anyhow;
+                async move {
+                    let ctr = open_container(container).await?;
+                    let outgoing = OutgoingValue::new_outgoing_value();
+                    {
+                        let body = outgoing
+                            .outgoing_value_write_body()
+                            .await
+                            .map_err(|e| anyhow!("getting write body: {e:?}"))?;
+                        for chunk in data.chunks(WRITE_CHUNK) {
+                            body.blocking_write_and_flush(chunk)
+                                .map_err(|e| anyhow!("writing data: {e}"))?;
+                        }
+                    };
+                    ctr.write_data(name.to_string(), &outgoing)
+                        .await
+                        .map_err(|e| anyhow!("writing object: {e}"))?;
+                    OutgoingValue::finish(outgoing).map_err(|e| anyhow!("finishing write: {e}"))?;
+                    Ok(())
+                }
+            }
 
-        async move {
-            let ctr = open_container(container).await?;
-            let info = ctr
-                .object_info(name.to_string())
-                .await
-                .map_err(|e| anyhow!("getting object info: {e}"))?;
-            Ok(ObjectMetadata {
-                name: info.name,
-                container: info.container,
-                created_at: info.created_at,
-                size: info.size,
-            })
-        }
-    }
+            /// Delete an object from a container.
+            fn delete(
+                &self, container: &str, name: &str,
+            ) -> impl Future<Output = Result<()>> + Send {
+                use anyhow::anyhow;
 
-    /// Create a new empty container.
-    #[cfg(target_arch = "wasm32")]
-    fn create_container(&self, name: &str) -> impl Future<Output = Result<()>> + Send {
-        use anyhow::anyhow;
+                async move {
+                    let ctr = open_container(container).await?;
+                    ctr.delete_object(name.to_string())
+                        .await
+                        .map_err(|e| anyhow!("deleting object: {e}"))
+                }
+            }
 
-        async move {
-            omnia_wasi_blobstore::blobstore::create_container(name.to_string())
-                .await
-                .map_err(|e| anyhow!("creating container: {e}"))?;
-            Ok(())
-        }
-    }
+            /// List all object names in a container.
+            fn list(&self, container: &str) -> impl Future<Output = Result<Vec<String>>> + Send {
+                use anyhow::anyhow;
 
-    /// Delete a container and all objects within it.
-    #[cfg(target_arch = "wasm32")]
-    fn delete_container(&self, name: &str) -> impl Future<Output = Result<()>> + Send {
-        use anyhow::anyhow;
+                async move {
+                    let ctr = open_container(container).await?;
+                    let stream =
+                        ctr.list_objects().await.map_err(|e| anyhow!("listing objects: {e}"))?;
+                    let mut names = Vec::new();
+                    loop {
+                        let (batch, done) = stream
+                            .read_stream_object_names(100)
+                            .await
+                            .map_err(|e| anyhow!("reading object names: {e}"))?;
+                        names.extend(batch);
+                        if done {
+                            break;
+                        }
+                    }
+                    Ok(names)
+                }
+            }
 
-        async move {
-            omnia_wasi_blobstore::blobstore::delete_container(name.to_string())
-                .await
-                .map_err(|e| anyhow!("deleting container: {e}"))
-        }
-    }
+            /// Retrieve a byte range of an object's data.
+            ///
+            /// Both `start` and `end` offsets are inclusive.
+            fn get_range(
+                &self, container: &str, name: &str, start: u64, end: u64,
+            ) -> impl Future<Output = Result<Vec<u8>>> + Send {
+                use anyhow::anyhow;
+                use omnia_wasi_blobstore::types::IncomingValue;
 
-    /// Check whether a container exists.
-    #[cfg(target_arch = "wasm32")]
-    fn container_exists(&self, name: &str) -> impl Future<Output = Result<bool>> + Send {
-        use anyhow::anyhow;
+                async move {
+                    let ctr = open_container(container).await?;
+                    let incoming = ctr
+                        .get_data(name.to_string(), start, end)
+                        .await
+                        .map_err(|e| anyhow!("reading object range: {e}"))?;
+                    let data = IncomingValue::incoming_value_consume_sync(incoming)
+                        .map_err(|e| anyhow!("consuming incoming value: {e}"))?;
+                    Ok(data)
+                }
+            }
 
-        async move {
-            omnia_wasi_blobstore::blobstore::container_exists(name.to_string())
-                .await
-                .map_err(|e| anyhow!("checking container existence: {e}"))
-        }
-    }
+            /// Return metadata for an object.
+            fn object_info(
+                &self, container: &str, name: &str,
+            ) -> impl Future<Output = Result<ObjectMetadata>> + Send {
+                use anyhow::anyhow;
 
-    /// Return metadata for a container.
-    #[cfg(target_arch = "wasm32")]
-    fn container_info(
-        &self, container: &str,
-    ) -> impl Future<Output = Result<ContainerMetadata>> + Send {
-        use anyhow::anyhow;
+                async move {
+                    let ctr = open_container(container).await?;
+                    let info = ctr
+                        .object_info(name.to_string())
+                        .await
+                        .map_err(|e| anyhow!("getting object info: {e}"))?;
+                    Ok(ObjectMetadata {
+                        name: info.name,
+                        container: info.container,
+                        created_at: info.created_at,
+                        size: info.size,
+                    })
+                }
+            }
 
-        async move {
-            let ctr = open_container(container).await?;
-            let info = ctr.info().map_err(|e| anyhow!("getting container info: {e}"))?;
-            Ok(ContainerMetadata {
-                name: info.name,
-                created_at: info.created_at,
-            })
+            /// Create a new empty container.
+            fn create_container(&self, name: &str) -> impl Future<Output = Result<()>> + Send {
+                use anyhow::anyhow;
+
+                async move {
+                    omnia_wasi_blobstore::blobstore::create_container(name.to_string())
+                        .await
+                        .map_err(|e| anyhow!("creating container: {e}"))?;
+                    Ok(())
+                }
+            }
+
+            /// Delete a container and all objects within it.
+            fn delete_container(&self, name: &str) -> impl Future<Output = Result<()>> + Send {
+                use anyhow::anyhow;
+
+                async move {
+                    omnia_wasi_blobstore::blobstore::delete_container(name.to_string())
+                        .await
+                        .map_err(|e| anyhow!("deleting container: {e}"))
+                }
+            }
+
+            /// Check whether a container exists.
+            fn container_exists(&self, name: &str) -> impl Future<Output = Result<bool>> + Send {
+                use anyhow::anyhow;
+
+                async move {
+                    omnia_wasi_blobstore::blobstore::container_exists(name.to_string())
+                        .await
+                        .map_err(|e| anyhow!("checking container existence: {e}"))
+                }
+            }
+
+            /// Return metadata for a container.
+            fn container_info(
+                &self, container: &str,
+            ) -> impl Future<Output = Result<ContainerMetadata>> + Send {
+                use anyhow::anyhow;
+
+                async move {
+                    let ctr = open_container(container).await?;
+                    let info = ctr.info().map_err(|e| anyhow!("getting container info: {e}"))?;
+                    Ok(ContainerMetadata {
+                        name: info.name,
+                        created_at: info.created_at,
+                    })
+                }
+            }
         }
     }
 }
@@ -283,155 +275,153 @@ pub trait BlobStore: Send + Sync {
 /// `wasm32` each is one `wasi:blobstore` host call. Implemented for every
 /// `BlobStore` by a blanket impl.
 pub trait BlobStoreExt: BlobStore {
-    /// Check whether an object exists in a container.
-    #[cfg(not(target_arch = "wasm32"))]
-    fn has(&self, container: &str, name: &str) -> impl Future<Output = Result<bool>> + Send {
-        async move { Ok(self.get(container, name).await?.is_some()) }
-    }
-
-    /// Delete multiple objects from a container.
-    #[cfg(not(target_arch = "wasm32"))]
-    fn delete_objects(
-        &self, container: &str, names: &[String],
-    ) -> impl Future<Output = Result<()>> + Send {
-        async move {
-            for name in names {
-                self.delete(container, name).await?;
+    cfg_select! {
+        not(target_arch = "wasm32") => {
+            /// Check whether an object exists in a container.
+            fn has(
+                &self, container: &str, name: &str,
+            ) -> impl Future<Output = Result<bool>> + Send {
+                async move { Ok(self.get(container, name).await?.is_some()) }
             }
-            Ok(())
-        }
-    }
 
-    /// Remove all objects from a container, leaving it empty.
-    #[cfg(not(target_arch = "wasm32"))]
-    fn clear(&self, container: &str) -> impl Future<Output = Result<()>> + Send {
-        async move {
-            for name in self.list(container).await? {
-                self.delete(container, &name).await?;
+            /// Delete multiple objects from a container.
+            fn delete_objects(
+                &self, container: &str, names: &[String],
+            ) -> impl Future<Output = Result<()>> + Send {
+                async move {
+                    for name in names {
+                        self.delete(container, name).await?;
+                    }
+                    Ok(())
+                }
             }
-            Ok(())
+
+            /// Remove all objects from a container, leaving it empty.
+            fn clear(&self, container: &str) -> impl Future<Output = Result<()>> + Send {
+                async move {
+                    for name in self.list(container).await? {
+                        self.delete(container, &name).await?;
+                    }
+                    Ok(())
+                }
+            }
+
+            /// Copy an object to the same or a different container.
+            ///
+            /// Overwrites the destination object if it already exists; fails if the
+            /// source object is missing, or if `put` refuses the destination
+            /// container.
+            fn copy_object(
+                &self, src_container: &str, src_name: &str, dest_container: &str, dest_name: &str,
+            ) -> impl Future<Output = Result<()>> + Send {
+                async move {
+                    let data = self.get(src_container, src_name).await?.ok_or_else(|| {
+                        anyhow::anyhow!("object not found: {src_container}/{src_name}")
+                    })?;
+                    self.put(dest_container, dest_name, &data).await
+                }
+            }
+
+            /// Move or rename an object to the same or a different container.
+            ///
+            /// Overwrites the destination object if it already exists; fails as
+            /// [`copy_object`](Self::copy_object) does, leaving the source in place.
+            fn move_object(
+                &self, src_container: &str, src_name: &str, dest_container: &str, dest_name: &str,
+            ) -> impl Future<Output = Result<()>> + Send {
+                async move {
+                    self.copy_object(src_container, src_name, dest_container, dest_name).await?;
+                    self.delete(src_container, src_name).await
+                }
+            }
         }
-    }
+        _ => {
+            /// Check whether an object exists in a container.
+            fn has(
+                &self, container: &str, name: &str,
+            ) -> impl Future<Output = Result<bool>> + Send {
+                use anyhow::anyhow;
 
-    /// Copy an object to the same or a different container.
-    ///
-    /// Overwrites the destination object if it already exists; fails if the
-    /// source object is missing, or if `put` refuses the destination
-    /// container.
-    #[cfg(not(target_arch = "wasm32"))]
-    fn copy_object(
-        &self, src_container: &str, src_name: &str, dest_container: &str, dest_name: &str,
-    ) -> impl Future<Output = Result<()>> + Send {
-        async move {
-            let data = self
-                .get(src_container, src_name)
-                .await?
-                .ok_or_else(|| anyhow::anyhow!("object not found: {src_container}/{src_name}"))?;
-            self.put(dest_container, dest_name, &data).await
-        }
-    }
+                async move {
+                    let ctr = open_container(container).await?;
+                    ctr.has_object(name.to_string())
+                        .await
+                        .map_err(|e| anyhow!("checking object existence: {e}"))
+                }
+            }
 
-    /// Move or rename an object to the same or a different container.
-    ///
-    /// Overwrites the destination object if it already exists; fails as
-    /// [`copy_object`](Self::copy_object) does, leaving the source in place.
-    #[cfg(not(target_arch = "wasm32"))]
-    fn move_object(
-        &self, src_container: &str, src_name: &str, dest_container: &str, dest_name: &str,
-    ) -> impl Future<Output = Result<()>> + Send {
-        async move {
-            self.copy_object(src_container, src_name, dest_container, dest_name).await?;
-            self.delete(src_container, src_name).await
-        }
-    }
+            /// Delete multiple objects from a container.
+            fn delete_objects(
+                &self, container: &str, names: &[String],
+            ) -> impl Future<Output = Result<()>> + Send {
+                use anyhow::anyhow;
 
-    /// Check whether an object exists in a container.
-    #[cfg(target_arch = "wasm32")]
-    fn has(&self, container: &str, name: &str) -> impl Future<Output = Result<bool>> + Send {
-        use anyhow::anyhow;
+                let names = names.to_vec();
+                async move {
+                    let ctr = open_container(container).await?;
+                    ctr.delete_objects(names).await.map_err(|e| anyhow!("deleting objects: {e}"))
+                }
+            }
 
-        async move {
-            let ctr = open_container(container).await?;
-            ctr.has_object(name.to_string())
-                .await
-                .map_err(|e| anyhow!("checking object existence: {e}"))
-        }
-    }
+            /// Remove all objects from a container, leaving it empty.
+            fn clear(&self, container: &str) -> impl Future<Output = Result<()>> + Send {
+                use anyhow::anyhow;
 
-    /// Delete multiple objects from a container.
-    #[cfg(target_arch = "wasm32")]
-    fn delete_objects(
-        &self, container: &str, names: &[String],
-    ) -> impl Future<Output = Result<()>> + Send {
-        use anyhow::anyhow;
+                async move {
+                    let ctr = open_container(container).await?;
+                    ctr.clear().await.map_err(|e| anyhow!("clearing container: {e}"))
+                }
+            }
 
-        let names = names.to_vec();
-        async move {
-            let ctr = open_container(container).await?;
-            ctr.delete_objects(names).await.map_err(|e| anyhow!("deleting objects: {e}"))
-        }
-    }
+            /// Copy an object to the same or a different container.
+            ///
+            /// Overwrites the destination object if it already exists. Returns an
+            /// error if the destination container does not exist.
+            fn copy_object(
+                &self, src_container: &str, src_name: &str, dest_container: &str, dest_name: &str,
+            ) -> impl Future<Output = Result<()>> + Send {
+                use anyhow::anyhow;
+                use omnia_wasi_blobstore::types::ObjectId;
 
-    /// Remove all objects from a container, leaving it empty.
-    #[cfg(target_arch = "wasm32")]
-    fn clear(&self, container: &str) -> impl Future<Output = Result<()>> + Send {
-        use anyhow::anyhow;
+                async move {
+                    let src = ObjectId {
+                        container: src_container.to_string(),
+                        object: src_name.to_string(),
+                    };
+                    let dest = ObjectId {
+                        container: dest_container.to_string(),
+                        object: dest_name.to_string(),
+                    };
+                    omnia_wasi_blobstore::blobstore::copy_object(src, dest)
+                        .await
+                        .map_err(|e| anyhow!("copying object: {e}"))
+                }
+            }
 
-        async move {
-            let ctr = open_container(container).await?;
-            ctr.clear().await.map_err(|e| anyhow!("clearing container: {e}"))
-        }
-    }
+            /// Move or rename an object to the same or a different container.
+            ///
+            /// Overwrites the destination object if it already exists. Returns an
+            /// error if the destination container does not exist.
+            fn move_object(
+                &self, src_container: &str, src_name: &str, dest_container: &str, dest_name: &str,
+            ) -> impl Future<Output = Result<()>> + Send {
+                use anyhow::anyhow;
+                use omnia_wasi_blobstore::types::ObjectId;
 
-    /// Copy an object to the same or a different container.
-    ///
-    /// Overwrites the destination object if it already exists. Returns an
-    /// error if the destination container does not exist.
-    #[cfg(target_arch = "wasm32")]
-    fn copy_object(
-        &self, src_container: &str, src_name: &str, dest_container: &str, dest_name: &str,
-    ) -> impl Future<Output = Result<()>> + Send {
-        use anyhow::anyhow;
-        use omnia_wasi_blobstore::types::ObjectId;
-
-        async move {
-            let src = ObjectId {
-                container: src_container.to_string(),
-                object: src_name.to_string(),
-            };
-            let dest = ObjectId {
-                container: dest_container.to_string(),
-                object: dest_name.to_string(),
-            };
-            omnia_wasi_blobstore::blobstore::copy_object(src, dest)
-                .await
-                .map_err(|e| anyhow!("copying object: {e}"))
-        }
-    }
-
-    /// Move or rename an object to the same or a different container.
-    ///
-    /// Overwrites the destination object if it already exists. Returns an
-    /// error if the destination container does not exist.
-    #[cfg(target_arch = "wasm32")]
-    fn move_object(
-        &self, src_container: &str, src_name: &str, dest_container: &str, dest_name: &str,
-    ) -> impl Future<Output = Result<()>> + Send {
-        use anyhow::anyhow;
-        use omnia_wasi_blobstore::types::ObjectId;
-
-        async move {
-            let src = ObjectId {
-                container: src_container.to_string(),
-                object: src_name.to_string(),
-            };
-            let dest = ObjectId {
-                container: dest_container.to_string(),
-                object: dest_name.to_string(),
-            };
-            omnia_wasi_blobstore::blobstore::move_object(src, dest)
-                .await
-                .map_err(|e| anyhow!("moving object: {e}"))
+                async move {
+                    let src = ObjectId {
+                        container: src_container.to_string(),
+                        object: src_name.to_string(),
+                    };
+                    let dest = ObjectId {
+                        container: dest_container.to_string(),
+                        object: dest_name.to_string(),
+                    };
+                    omnia_wasi_blobstore::blobstore::move_object(src, dest)
+                        .await
+                        .map_err(|e| anyhow!("moving object: {e}"))
+                }
+            }
         }
     }
 }

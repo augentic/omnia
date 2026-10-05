@@ -4,7 +4,7 @@
 
 ## Prerequisites
 
-- **Rust 1.97 or later** with the `wasm32-wasip2` target. Pin both in a `rust-toolchain.toml` at your workspace root so every checkout gets them automatically:
+- **Rust 1.99 or later** with the `wasm32-wasip2` target. Pin both in a `rust-toolchain.toml` at your workspace root so every checkout gets them automatically:
 
 ```toml
 [toolchain]

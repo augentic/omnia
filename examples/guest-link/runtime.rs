@@ -15,10 +15,10 @@
 //! The router exports a plain `run` rather than an HTTP/messaging trigger;
 //! running this binary starts the host and wires the link. See `README.md`.
 
-cfg_if::cfg_if! {
-    if #[cfg(not(target_arch = "wasm32"))] {
-        use omnia_wasi_http::{WasiHttp, HttpDefault};
-        use omnia_wasi_otel::{WasiOtel, OtelDefault};
+cfg_select! {
+    not(target_arch = "wasm32") => {
+        use omnia_wasi_http::{HttpDefault, WasiHttp};
+        use omnia_wasi_otel::{OtelDefault, WasiOtel};
 
         omnia::runtime!({
             guests: [
@@ -30,7 +30,8 @@ cfg_if::cfg_if! {
                 WasiOtel: OtelDefault,
             }
         });
-    } else {
+    }
+    _ => {
         fn main() {}
     }
 }

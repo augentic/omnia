@@ -1,10 +1,10 @@
 //! Vault example runtime.
 
-cfg_if::cfg_if! {
-    if #[cfg(not(target_arch = "wasm32"))] {
-        use omnia_wasi_http::{WasiHttp, HttpDefault};
-        use omnia_wasi_otel::{WasiOtel, OtelDefault};
-        use omnia_wasi_vault::{WasiVault, VaultDefault};
+cfg_select! {
+    not(target_arch = "wasm32") => {
+        use omnia_wasi_http::{HttpDefault, WasiHttp};
+        use omnia_wasi_otel::{OtelDefault, WasiOtel};
+        use omnia_wasi_vault::{VaultDefault, WasiVault};
 
         omnia::runtime!({
             hosts: {
@@ -13,7 +13,8 @@ cfg_if::cfg_if! {
                 WasiVault: VaultDefault,
             }
         });
-    } else {
+    }
+    _ => {
         fn main() {}
     }
 }
