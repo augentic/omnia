@@ -1,9 +1,9 @@
 //! WebSocket example runtime.
 
-cfg_if::cfg_if! {
-    if #[cfg(not(target_arch = "wasm32"))] {
-        use omnia_wasi_http::{WasiHttp, HttpDefault};
-        use omnia_wasi_otel::{WasiOtel, OtelDefault};
+cfg_select! {
+    not(target_arch = "wasm32") => {
+        use omnia_wasi_http::{HttpDefault, WasiHttp};
+        use omnia_wasi_otel::{OtelDefault, WasiOtel};
         use omnia_wasi_websocket::{WasiWebSocket, WebSocketDefault};
 
         omnia::runtime!({
@@ -13,7 +13,8 @@ cfg_if::cfg_if! {
                 WasiWebSocket: WebSocketDefault,
             }
         });
-    } else {
+    }
+    _ => {
         fn main() {}
     }
 }

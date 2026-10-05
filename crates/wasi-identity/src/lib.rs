@@ -5,12 +5,13 @@
 //! This module implements a runtime service for `wasi:identity`
 //! (<https://github.com/augentic/wasi-identity>).
 
-#[cfg(target_arch = "wasm32")]
-mod guest;
-#[cfg(target_arch = "wasm32")]
-pub use guest::*;
-
-#[cfg(not(target_arch = "wasm32"))]
-mod host;
-#[cfg(not(target_arch = "wasm32"))]
-pub use host::*;
+cfg_select! {
+    target_arch = "wasm32" => {
+        mod guest;
+        pub use guest::*;
+    }
+    _ => {
+        mod host;
+        pub use host::*;
+    }
+}

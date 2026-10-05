@@ -193,20 +193,21 @@ fn mint_request_id() -> String {
     format!("{high:016x}{low:016x}")
 }
 
-#[cfg(target_arch = "wasm32")]
-fn random_u64_pair() -> (u64, u64) {
-    use wasip3::random::random::get_random_u64;
-
-    (get_random_u64(), get_random_u64())
-}
-
-// The native path exists so the transports are testable off-target; it
+// The native arm exists so the transports are testable off-target; it
 // is unique per call but not a CSPRNG, and no native transport mints ids.
-#[cfg(not(target_arch = "wasm32"))]
 fn random_u64_pair() -> (u64, u64) {
-    use std::hash::{BuildHasher, RandomState};
+    cfg_select! {
+        target_arch = "wasm32" => {
+            use wasip3::random::random::get_random_u64;
 
-    (RandomState::new().hash_one(0_u8), RandomState::new().hash_one(1_u8))
+            (get_random_u64(), get_random_u64())
+        }
+        _ => {
+            use std::hash::{BuildHasher, RandomState};
+
+            (RandomState::new().hash_one(0_u8), RandomState::new().hash_one(1_u8))
+        }
+    }
 }
 
 /// Context owned by one handler call.

@@ -9,11 +9,12 @@
 //! every program has a matching test. A suite runs an artifact through
 //! `omnia_test::host`.
 
-#[cfg(target_arch = "wasm32")]
-mod helpers;
-
-#[cfg(target_arch = "wasm32")]
-pub use helpers::*;
-
-#[cfg(not(target_arch = "wasm32"))]
-include!(concat!(env!("OUT_DIR"), "/gen.rs"));
+cfg_select! {
+    target_arch = "wasm32" => {
+        mod helpers;
+        pub use helpers::*;
+    }
+    _ => {
+        include!(concat!(env!("OUT_DIR"), "/gen.rs"));
+    }
+}

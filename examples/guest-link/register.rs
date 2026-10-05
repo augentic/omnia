@@ -11,8 +11,8 @@
 //!
 //!   cargo run --example guest-link-register
 
-cfg_if::cfg_if! {
-    if #[cfg(not(target_arch = "wasm32"))] {
+cfg_select! {
+    not(target_arch = "wasm32") => {
         use std::path::Path;
 
         use anyhow::{Context as _, Result, bail};
@@ -85,7 +85,8 @@ cfg_if::cfg_if! {
                 other => bail!("router.run-to returned a non-string result: {other:?}"),
             }
         }
-    } else {
+    }
+    _ => {
         fn main() {}
     }
 }

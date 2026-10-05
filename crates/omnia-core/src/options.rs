@@ -264,12 +264,9 @@ impl From<&RuntimeOptions> for Config {
             .pagemap_scan(options.pool_pagemap_scan);
 
         // gc heaps only when compiled in
-        cfg_if::cfg_if! {
-            if #[cfg(feature = "gc")] {
-                if let Some(count) = options.pool_total_gc_heaps {
-                    pool.total_gc_heaps(count);
-                }
-            }
+        #[cfg(feature = "gc")]
+        if let Some(count) = options.pool_total_gc_heaps {
+            pool.total_gc_heaps(count);
         }
 
         // structural limits only when set, so unset keeps the wasmtime default
@@ -295,12 +292,11 @@ impl From<&RuntimeOptions> for Config {
             pool.max_component_instance_size(size);
         }
 
-        cfg_if::cfg_if! {
-            if #[cfg(feature = "mpk")] {
-                pool.memory_protection_keys(options.pool_memory_protection_keys);
-                if let Some(max) = options.pool_max_memory_protection_keys {
-                    pool.max_memory_protection_keys(max);
-                }
+        #[cfg(feature = "mpk")]
+        {
+            pool.memory_protection_keys(options.pool_memory_protection_keys);
+            if let Some(max) = options.pool_max_memory_protection_keys {
+                pool.max_memory_protection_keys(max);
             }
         }
 

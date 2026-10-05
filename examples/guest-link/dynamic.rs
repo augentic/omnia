@@ -5,8 +5,8 @@
 //! the `echo` import is wired; a `GuestEntry` naming a path instead would
 //! load at the guest's first use (see `register.rs`).
 
-cfg_if::cfg_if! {
-    if #[cfg(not(target_arch = "wasm32"))] {
+cfg_select! {
+    not(target_arch = "wasm32") => {
         use std::path::Path;
 
         use anyhow::Context as _;
@@ -26,8 +26,8 @@ cfg_if::cfg_if! {
         }
 
         fn main() -> anyhow::Result<()> {
-            let artifacts =
-                Path::new(env!("CARGO_MANIFEST_DIR")).join("../target/wasm32-wasip2/debug/examples");
+            let artifacts = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../target/wasm32-wasip2/debug/examples");
             let read = |file: &str| {
                 std::fs::read(artifacts.join(file)).with_context(|| {
                     format!("{file} not built: cargo build -p examples --examples --target wasm32-wasip2")
@@ -40,7 +40,8 @@ cfg_if::cfg_if! {
             host::run(DeploymentBuilder::new().manifest(manifest))?;
             Ok(())
         }
-    } else {
+    }
+    _ => {
         fn main() {}
     }
 }

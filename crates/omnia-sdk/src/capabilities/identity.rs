@@ -6,19 +6,25 @@ use anyhow::Result;
 
 /// Interacts with identity providers to obtain access tokens.
 pub trait Identity: Send + Sync {
-    /// Get an access token for the specified identity.
-    #[cfg(not(target_arch = "wasm32"))]
-    fn access_token(&self, identity: String) -> impl Future<Output = Result<String>> + Send;
+    cfg_select! {
+        not(target_arch = "wasm32") => {
+            /// Get an access token for the specified identity.
+            fn access_token(&self, identity: String)
+            -> impl Future<Output = Result<String>> + Send;
+        }
+        _ => {
+            /// Get an access token for the specified identity.
+            fn access_token(
+                &self, identity: String,
+            ) -> impl Future<Output = Result<String>> + Send {
+                use omnia_wasi_identity::credentials::get_identity;
 
-    /// Get an access token for the specified identity.
-    #[cfg(target_arch = "wasm32")]
-    fn access_token(&self, identity: String) -> impl Future<Output = Result<String>> + Send {
-        use omnia_wasi_identity::credentials::get_identity;
-
-        async move {
-            let identity = get_identity(identity).await?;
-            let access_token = identity.get_token(vec![]).await?;
-            Ok(access_token.token)
+                async move {
+                    let identity = get_identity(identity).await?;
+                    let access_token = identity.get_token(vec![]).await?;
+                    Ok(access_token.token)
+                }
+            }
         }
     }
 }

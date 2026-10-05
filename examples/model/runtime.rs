@@ -5,12 +5,12 @@
 //! network, and no configuration. Command mode drives the `create` guest's
 //! `wasi:cli/run` export once. See `README.md`.
 
-cfg_if::cfg_if! {
-    if #[cfg(not(target_arch = "wasm32"))] {
+cfg_select! {
+    not(target_arch = "wasm32") => {
         use std::sync::Arc;
 
         use omnia_wasi_model::{Answer, FutureResult, Request, ToolHost, WasiModel, WasiModelCtx};
-        use omnia_wasi_otel::{WasiOtel, OtelDefault};
+        use omnia_wasi_otel::{OtelDefault, WasiOtel};
 
         #[derive(Clone, Copy, Debug)]
         struct CannedVerdict;
@@ -43,7 +43,8 @@ cfg_if::cfg_if! {
                 WasiModel: CannedVerdict,
             }
         });
-    } else {
+    }
+    _ => {
         fn main() {}
     }
 }

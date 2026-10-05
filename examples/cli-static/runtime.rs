@@ -10,9 +10,9 @@
 //! binary's argv belongs to the guest, so it runs as `cli-static greet Ada`,
 //! not `cli-static run -- greet Ada`; see `README.md`.
 
-cfg_if::cfg_if! {
-    if #[cfg(not(target_arch = "wasm32"))] {
-        use omnia_wasi_otel::{WasiOtel, OtelDefault};
+cfg_select! {
+    not(target_arch = "wasm32") => {
+        use omnia_wasi_otel::{OtelDefault, WasiOtel};
 
         omnia::runtime!({
             mode: command,
@@ -23,7 +23,8 @@ cfg_if::cfg_if! {
                 { path: env!("CLI_WASM") },
             ],
         });
-    } else {
+    }
+    _ => {
         fn main() {}
     }
 }

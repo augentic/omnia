@@ -1,9 +1,9 @@
 //! HTTP proxy example runtime.
 
-cfg_if::cfg_if! {
-    if #[cfg(not(target_arch = "wasm32"))] {
-        use omnia_wasi_http::{WasiHttp, HttpDefault};
-        use omnia_wasi_otel::{WasiOtel, OtelDefault};
+cfg_select! {
+    not(target_arch = "wasm32") => {
+        use omnia_wasi_http::{HttpDefault, WasiHttp};
+        use omnia_wasi_otel::{OtelDefault, WasiOtel};
 
         omnia::runtime!({
             hosts: {
@@ -11,7 +11,8 @@ cfg_if::cfg_if! {
                 WasiOtel: OtelDefault,
             }
         });
-    } else {
+    }
+    _ => {
         fn main() {}
     }
 }

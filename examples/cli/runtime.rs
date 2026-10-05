@@ -10,9 +10,9 @@
 //! It runs through the `omnia` CLI's `run` subcommand, forwarding the guest's
 //! argv after `--`; see `README.md`.
 
-cfg_if::cfg_if! {
-    if #[cfg(not(target_arch = "wasm32"))] {
-        use omnia_wasi_otel::{WasiOtel, OtelDefault};
+cfg_select! {
+    not(target_arch = "wasm32") => {
+        use omnia_wasi_otel::{OtelDefault, WasiOtel};
 
         omnia::runtime!({
             mode: command,
@@ -20,7 +20,8 @@ cfg_if::cfg_if! {
                 WasiOtel: OtelDefault,
             },
         });
-    } else {
+    }
+    _ => {
         fn main() {}
     }
 }
