@@ -7,8 +7,11 @@
 //! the store never refreshes it — whoever wrote it: the fetcher, an
 //! operator's `cp`, or `wkg get <reference> -o <dir>/`.
 
+use std::fs::File;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::{fmt, io};
 
 use anyhow::{Context as _, Result, bail};
@@ -153,21 +156,41 @@ impl FsStore {
         }
     }
 
-    // A temp file beside the target, linked into place: `EEXIST` is the
-    // no-replace rule holding, not a fault.
+    // A temp file beside the target, linked into place: `EEXIST` on the link
+    // is the no-replace rule holding, not a fault. The temp name is unique to
+    // this call, never shared by a concurrent `put` of the same release, and
+    // opened `create_new` so a stale name is a loud error rather than a
+    // truncation of whatever stands there.
     fn write(&self, reference: &Reference, bytes: &[u8]) -> Result<()> {
+        static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
         let target = self.path(reference);
         std::fs::create_dir_all(&self.root)
             .with_context(|| format!("creating the store `{}`", self.root.display()))?;
-        let temp = self.root.join(format!(".{}.{}.tmp", reference.file_name(), std::process::id()));
-        std::fs::write(&temp, bytes).with_context(|| format!("writing `{}`", temp.display()))?;
-        let linked = match std::fs::hard_link(&temp, &target) {
+        let temp = self.root.join(format!(
+            ".{}.{}.{}.tmp",
+            reference.file_name(),
+            std::process::id(),
+            SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ));
+        let filed = Self::file(&temp, &target, bytes);
+        let _ = std::fs::remove_file(&temp);
+        filed
+    }
+
+    fn file(temp: &Path, target: &Path, bytes: &[u8]) -> Result<()> {
+        let mut file = File::options()
+            .write(true)
+            .create_new(true)
+            .open(temp)
+            .with_context(|| format!("creating `{}`", temp.display()))?;
+        file.write_all(bytes).with_context(|| format!("writing `{}`", temp.display()))?;
+        drop(file);
+        match std::fs::hard_link(temp, target) {
             Ok(()) => Ok(()),
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => Ok(()),
             Err(error) => Err(error).with_context(|| format!("filing `{}`", target.display())),
-        };
-        let _ = std::fs::remove_file(&temp);
-        linked
+        }
     }
 }
 
@@ -271,5 +294,32 @@ mod tests {
         store.put(&tool, b"first").await.expect("first put");
         store.put(&tool, b"second").await.expect("a second put is not a fault");
         assert_eq!(store.get(&tool).await.expect("readable"), Some(b"first".to_vec()));
+    }
+
+    // racing puts of one release each file their own temp, so the one that
+    // lands is whole and the rest are the no-replace rule holding
+    #[test]
+    fn fs_store_concurrent_puts() {
+        let dir = tempfile::tempdir().expect("scratch dir");
+        let store = FsStore::open(dir.path());
+        let tool = reference("acme:tool@1.2.3");
+        let payloads: Vec<Vec<u8>> = (0..16u8).map(|byte| vec![byte; 1 << 16]).collect();
+        std::thread::scope(|scope| {
+            for payload in &payloads {
+                scope.spawn(|| {
+                    futures::executor::block_on(store.put(&tool, payload))
+                        .expect("every put lands");
+                });
+            }
+        });
+
+        let stored =
+            futures::executor::block_on(store.get(&tool)).expect("readable").expect("filed");
+        assert!(payloads.contains(&stored), "the release is one put's whole bytes");
+        assert_eq!(
+            std::fs::read_dir(dir.path()).expect("listing").count(),
+            1,
+            "no temp file is left beside the release"
+        );
     }
 }

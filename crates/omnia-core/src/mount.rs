@@ -156,17 +156,20 @@ impl MountRegistry {
 
     /// The `(device, inode)` identity of `path`'s nearest existing ancestor
     /// (`path` itself when it exists) and of every directory above it,
-    /// nearest first.
+    /// nearest first. A relative `path` is placed against the current
+    /// directory.
     ///
     /// # Errors
     ///
     /// Returns an error if no ancestor of `path` exists, or one cannot be
     /// identified.
     pub fn ancestry(path: &Path) -> Result<Vec<(u64, u64)>> {
-        let existing = path
+        let absolute = std::path::absolute(path)
+            .with_context(|| format!("placing {} in the current directory", path.display()))?;
+        let existing = absolute
             .ancestors()
             .find(|dir| dir.exists())
-            .with_context(|| format!("no ancestor of {} exists", path.display()))?;
+            .with_context(|| format!("no ancestor of {} exists", absolute.display()))?;
         let canonical =
             existing.canonicalize().with_context(|| format!("resolving {}", existing.display()))?;
         canonical
@@ -301,6 +304,17 @@ mod tests {
         assert!(registry.beneath_writable(&aside.join("store")).expect("placed").is_none());
         assert!(registry.beneath_writable(&std::env::temp_dir()).expect("placed").is_none());
         MountRegistry::ancestry(Path::new("/no/such/root/anywhere")).expect("the root exists");
+    }
+
+    // a relative store that does not exist yet is placed under the current
+    // directory, not refused for its empty parent
+    #[test]
+    fn ancestry_of_relative_path() {
+        let relative = Path::new("omnia-reg-no-such-store").join("store");
+        let placed = MountRegistry::ancestry(&relative).expect("the current directory exists");
+        let cwd = std::env::current_dir().expect("a current directory");
+        assert_eq!(placed, MountRegistry::ancestry(&cwd.join(&relative)).expect("placed"));
+        assert_eq!(placed[0], identity_of(&cwd), "the nearest existing ancestor is the cwd");
     }
 
     #[test]
