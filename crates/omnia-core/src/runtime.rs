@@ -10,11 +10,12 @@ use wasmtime::Store;
 use wasmtime::component::{Instance, InstancePre};
 
 use crate::artifact::component;
+use crate::digest::Digest;
 use crate::extensions::Extensions;
 use crate::mount::MountRegistry;
 use crate::registry::{Guest, GuestId, HttpRoutes, PublishError, TriggerRouter};
-use crate::source::{AcquireError, RegistrySource, SourceSpec, Verified};
-use crate::store::HasLimits;
+use crate::source::{AcquireError, RegistrySource, Source, SourceSpec, Verified};
+use crate::store::{HasLimits, Stdio};
 use crate::{ChainCtx, Dispatcher, Registry, RuntimeOptions, StoreBase, StoreCtx};
 
 /// Guest exit code. [`code_u8`](Self::code_u8) and [`ExitCode`](std::process::ExitCode)
@@ -64,8 +65,8 @@ pub struct RuntimeParts<B: 'static> {
     pub mounts: Arc<MountRegistry>,
     /// Connected backend bundle.
     pub backends: B,
-    /// How a declared package source is fetched at first use. `None` when the
-    /// runtime has no registry client (omnia built without the `loader`
+    /// How a declared package source is acquired at first use. `None` when
+    /// the runtime has no registry client (omnia built without the `loader`
     /// feature), where every package guest's first use fails.
     pub packages: Option<Arc<dyn RegistrySource>>,
     /// The deployment's wasm-pkg client configuration (TOML), resolved to its
@@ -76,6 +77,9 @@ pub struct RuntimeParts<B: 'static> {
     /// process `RUST_LOG` ([`telemetry::directives`](crate::telemetry::directives))
     /// — set as every guest's `RUST_LOG`.
     pub rust_log: String,
+    /// Where every guest's stdout and stderr go; `None` inherits the process
+    /// streams.
+    pub stdio: Option<Stdio>,
     /// Command-mode guest identity, if any.
     pub command_guest: Option<GuestId>,
 }
@@ -105,6 +109,7 @@ struct RuntimeInner<B: 'static> {
     registry_config: Option<String>,
     // every store's `RUST_LOG`
     rust_log: String,
+    stdio: Option<Stdio>,
     extensions: Extensions,
 }
 
@@ -146,45 +151,48 @@ impl<B: Clone + Send + Sync + 'static> WeakRuntime<B> {
     }
 }
 
-/// Why [`Runtime::admit`] refused a late guest; each variant carries the
-/// refusal's description.
-#[derive(Clone, Debug)]
-pub enum AdmitError {
-    /// The bytes are not a loadable component, or failed pre-instantiation
-    /// against the deployment's host set.
-    ArtifactRefused(String),
-    /// The identity is already registered — an earlier or racing
-    /// registration holds it.
-    AlreadyRegistered(String),
-    /// Serve wiring or publication failed.
-    Internal(String),
+/// What bytes must satisfy before they become the guest an identity names:
+/// the two admission policies, chosen by the caller of
+/// [`Runtime::admit_bytes`].
+#[derive(Clone, Copy, Debug)]
+pub enum Policy<'a> {
+    /// The deployment's entry is the authority: the bytes hash to its pin,
+    /// a pre-compiled artifact is admitted as its source kind allows, and a
+    /// racing first use that seated the name first stands.
+    Declared(&'a Source),
+    /// A caller named the bytes: raw wasm alone, hashing to `pin` when one
+    /// is given, under a name the deployment does not declare; a name
+    /// already active attests on the same digest alone.
+    CallerNamed {
+        /// The digest the bytes must hash to, when the caller knows it.
+        pin: Option<Digest>,
+    },
 }
 
-impl fmt::Display for AdmitError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::ArtifactRefused(reason)
-            | Self::AlreadyRegistered(reason)
-            | Self::Internal(reason) => f.write_str(reason),
-        }
-    }
-}
-
-impl std::error::Error for AdmitError {}
-
-/// Why [`Runtime::guest`] could not produce the guest an identity names.
+/// Why the runtime could not produce the guest an identity names, from
+/// [`Runtime::guest`] or [`Runtime::admit_bytes`].
 #[derive(Clone, Debug)]
 pub enum GuestError {
     /// The deployment neither registered nor declares the identity.
     Unregistered(GuestId),
-    /// The declared source could not produce its bytes; a retry may succeed.
+    /// The source could not produce its bytes; a retry may succeed.
     Unavailable(String),
     /// The bytes were refused: they miss the pin, are a pre-compiled
-    /// artifact where raw wasm alone is admitted, or do not load as a
-    /// component against the deployment's host set.
+    /// artifact where raw wasm alone is admitted, do not load as a
+    /// component against the deployment's host set, were offered under a
+    /// name the deployment declares, or under a name active with other
+    /// bytes.
     Refused(String),
     /// The runtime has no registry to fetch a package from, or the
     /// registration itself failed.
+    Internal(String),
+}
+
+// How seating verified bytes as a guest failed.
+enum SeatError {
+    // an earlier or racing registration holds the identity
+    Occupied,
+    Refused(String),
     Internal(String),
 }
 
@@ -236,6 +244,7 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
             command_guest: parts.command_guest,
             registry_config: parts.registry_config,
             rust_log: parts.rust_log,
+            stdio: parts.stdio,
             extensions: Extensions::new(),
         }))
     }
@@ -257,12 +266,12 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
     /// The guest `id` names, loaded from its declared source on first use.
     ///
     /// A registered guest is returned as it stands. One the deployment
-    /// declares but has not loaded is read — or fetched, for a package —
-    /// verified against its entry, admitted as a late guest, and returned;
-    /// when a racing first use admitted it first, that registration stands
-    /// and is returned. Every way into a guest resolves through here, so a
-    /// declared guest loads the first time a route, the command drive, a
-    /// link call, a host dispatch, or the guest loader names it.
+    /// declares but has not loaded is [acquired](Self::acquire) and
+    /// [admitted](Self::admit_bytes) under its entry's policy; when a racing
+    /// first use admitted it first, that registration stands and is
+    /// returned. Every way into a guest resolves through here, so a declared
+    /// guest loads the first time a route, the command drive, a link call, a
+    /// host dispatch, or the guest loader names it.
     ///
     /// # Errors
     ///
@@ -277,41 +286,142 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
         if let Some(guest) = registry.get(id) {
             return Ok(guest);
         }
-        let Some(source) = registry.declared(id) else {
+        let Some(entry) = registry.declared(id) else {
             return Err(GuestError::Unregistered(id.clone()));
         };
+        let bytes = self.acquire(entry.spec(), None).await?;
+        self.admit_bytes(id.clone(), bytes, Policy::Declared(entry)).await
+    }
 
-        let bytes = match source.spec() {
+    /// The bytes a source names, acquired as its kind demands: embedded
+    /// bytes copied, a path read, a package fetched through the deployment's
+    /// registry source — from `endpoint` when the load names one and the
+    /// deployment's routing leaves the package's namespace open. Nothing is
+    /// verified here; [`admit_bytes`](Self::admit_bytes) does that under the
+    /// caller's [`Policy`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`GuestError::Unavailable`] when the source could not produce
+    /// its bytes; `Refused` when nothing routes the package or the registry
+    /// has no such release; `Internal` when a package has no registry to be
+    /// fetched from.
+    pub async fn acquire(
+        &self, spec: &SourceSpec, endpoint: Option<&str>,
+    ) -> Result<Vec<u8>, GuestError> {
+        match spec {
             SourceSpec::Package(package) => {
                 let Some(packages) = &self.inner.packages else {
                     return Err(GuestError::Internal(format!(
-                        "guest `{id}` is the package `{package}`, but this runtime has no \
-                         registry to fetch it from: build omnia with the `loader` feature"
+                        "package `{package}` cannot be fetched: this runtime has no registry \
+                         client; build omnia with the `loader` feature"
                     )));
                 };
-                packages.acquire(package, None).await.map_err(|error| match error {
+                packages.acquire(package, endpoint).await.map_err(|error| match error {
                     AcquireError::Refused(reason) => GuestError::Refused(reason),
                     AcquireError::Unavailable(reason) => GuestError::Unavailable(reason),
-                })?
+                })
             }
-            SourceSpec::Path(_) | SourceSpec::Bytes(_) => source
-                .read()
-                .await
-                .map_err(|error| GuestError::Unavailable(format!("{error:#}")))?,
-        };
-        let verified =
-            source.verified(bytes).map_err(|error| GuestError::Refused(format!("{error:#}")))?;
-        match self.admit(id.clone(), verified).await {
-            // a racing first use admitted it first; that registration stands
-            Ok(()) | Err(AdmitError::AlreadyRegistered(_)) => {}
-            Err(AdmitError::ArtifactRefused(reason)) => return Err(GuestError::Refused(reason)),
-            Err(AdmitError::Internal(reason)) => return Err(GuestError::Internal(reason)),
+            SourceSpec::Path(path) => tokio::fs::read(path).await.map_err(|error| {
+                GuestError::Unavailable(format!("reading `{}`: {error}", path.display()))
+            }),
+            SourceSpec::Bytes(bytes) => Ok(bytes.to_vec()),
         }
-        registry.get(id).ok_or_else(|| {
-            GuestError::Internal(format!(
-                "guest `{id}` was admitted and deregistered before it could be returned"
-            ))
-        })
+    }
+
+    /// Whether bytes may seat as `id` under `policy` at all: the check
+    /// [`admit_bytes`](Self::admit_bytes) makes before hashing anything,
+    /// exposed so a caller can refuse before acquiring. A name the
+    /// deployment declares is bound by its entry alone — [`Policy::Declared`]
+    /// with that entry passes, and anything else offered under the name is
+    /// refused.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`GuestError::Refused`] for caller-named bytes under a name
+    /// the deployment declares; `Internal` for a declared policy whose entry
+    /// is not the deployment's own for `id`.
+    pub fn admits(&self, id: &GuestId, policy: &Policy<'_>) -> Result<(), GuestError> {
+        match (policy, self.registry().declared(id)) {
+            (Policy::Declared(entry), Some(own)) if entry.id() == id && *entry == own => Ok(()),
+            (Policy::Declared(_), _) => Err(GuestError::Internal(format!(
+                "guest `{id}` was offered under a declared policy whose entry is not this \
+                 deployment's own"
+            ))),
+            (Policy::CallerNamed { .. }, Some(_)) => Err(GuestError::Refused(format!(
+                "`{id}` is a guest this deployment declares, bound by its entry alone; load it \
+                 as the declared guest `{id}`, whose source and pin are the deployment's"
+            ))),
+            (Policy::CallerNamed { .. }, None) => Ok(()),
+        }
+    }
+
+    /// Verify `bytes` under `policy`, admit them as `id`, and answer the
+    /// guest standing under `id` afterwards.
+    ///
+    /// A declared entry's bytes are verified as the entry declares (its pin,
+    /// the format its source kind admits); caller-named bytes are held to
+    /// the pin and admitted as raw wasm alone. Either way the bytes are
+    /// loaded as a boot guest's are, pre-instantiated against the shared
+    /// host set, wired into the host-mediated link serve side, and
+    /// published with their endpoint as one lifecycle transition, the digest
+    /// recorded on the entry ([`Guest::digest`]). A name already active when
+    /// the bytes arrive stands for a declared entry (a racing first use) and
+    /// attests caller-named bytes on the same digest alone. Whether the
+    /// component exports a linked interface is not checked: a guest that
+    /// exports none is still reachable through the host [`Dispatcher`], and
+    /// a link call to it fails at the call site.
+    ///
+    /// Every admitter passes here — [`guest`](Self::guest), the guest
+    /// loader, [`register`](Self::register) — so the rule that a declared
+    /// name is bound by its entry alone ([`admits`](Self::admits)) holds for
+    /// all of them.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`GuestError::Refused`] when the bytes miss the pin, are a
+    /// pre-compiled artifact where raw wasm alone is admitted, do not load
+    /// as a component, were offered caller-named under a declared name, or
+    /// under a name active with other bytes; `Internal` on a serve or
+    /// publication failure.
+    pub async fn admit_bytes(
+        &self, id: GuestId, bytes: Vec<u8>, policy: Policy<'_>,
+    ) -> Result<Arc<Guest<StoreCtx<B>>>, GuestError> {
+        self.admits(&id, &policy)?;
+
+        // verify under the policy
+        let refused = |error: anyhow::Error| GuestError::Refused(format!("{error:#}"));
+        let verified = match policy {
+            Policy::Declared(entry) => entry.verified(bytes).map_err(refused)?,
+            Policy::CallerNamed { pin } => {
+                Digest::checked(&bytes, pin, format_args!("guest `{id}`")).map_err(refused)?;
+                Verified::wasm(bytes).map_err(refused)?
+            }
+        };
+        let digest = verified.digest();
+
+        // seat them, or settle with the registration that got there first
+        match self.seat(id.clone(), verified).await {
+            Ok(guest) => Ok(guest),
+            Err(SeatError::Occupied) => {
+                let standing = self.registry().get(&id).ok_or_else(|| {
+                    GuestError::Internal(format!(
+                        "guest `{id}` was admitted by a racing load and deregistered before it \
+                         could be attested"
+                    ))
+                })?;
+                match policy {
+                    Policy::Declared(_) => Ok(standing),
+                    Policy::CallerNamed { .. } if standing.digest() == digest => Ok(standing),
+                    Policy::CallerNamed { .. } => Err(GuestError::Refused(format!(
+                        "guest `{id}` is active under other bytes ({}, not {digest})",
+                        standing.digest()
+                    ))),
+                }
+            }
+            Err(SeatError::Refused(reason)) => Err(GuestError::Refused(reason)),
+            Err(SeatError::Internal(reason)) => Err(GuestError::Internal(reason)),
+        }
     }
 
     /// The deployment name — read by trigger servers and the bootstrap log.
@@ -424,6 +534,7 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
                 args: Some(Arc::clone(&self.inner.args)),
                 mounts: Some(Arc::clone(&self.inner.mounts)),
                 env: Some(Arc::new(env)),
+                stdio: self.inner.stdio.clone(),
                 extensions: self.inner.extensions.clone(),
             }),
             backends: self.inner.backends.clone(),
@@ -488,80 +599,93 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
         command::drive(self).await
     }
 
-    /// Register a raw wasm component at run time under `id`. Pre-compiled
-    /// bytes are refused here: an embedder holding `omnia compile` output its
-    /// own pipeline produced admits it through [`admit`](Self::admit) with an
-    /// `unsafe` [`Verified::trusted`].
+    /// Register a raw wasm component at run time under `id`: the embedder's
+    /// caller-named admission, [`admit_bytes`](Self::admit_bytes) under
+    /// [`Policy::CallerNamed`] with no pin. Pre-compiled bytes are refused
+    /// here: an embedder holding `omnia compile` output its own pipeline
+    /// produced admits it through [`admit`](Self::admit) with an `unsafe`
+    /// [`Verified::trusted`].
     ///
-    /// The identity is opaque and must not already be registered; an upgrade
-    /// is [`deregister`](Self::deregister) + `register` (or a new id). A
-    /// failed registration leaves no partial state. The registry entry
+    /// The identity is opaque and must not be one the deployment declares;
+    /// an upgrade is [`deregister`](Self::deregister) + `register` (or a new
+    /// id), and an identity already active attests on the same bytes alone.
+    /// A failed registration leaves no partial state. The registry entry
     /// records the content digest of `bytes`, as it does for every guest.
     ///
     /// # Errors
     ///
-    /// Returns an error if the bytes are a pre-compiled artifact, `id` is
-    /// already registered, the bytes cannot be loaded, the component's
-    /// imports exceed the deployment's linked host set and declared link
-    /// interfaces, or its linked exports cannot be served.
+    /// Returns an error if the bytes are a pre-compiled artifact, `id` is a
+    /// name the deployment declares or is active under other bytes, the
+    /// bytes cannot be loaded, the component's imports exceed the
+    /// deployment's linked host set and declared link interfaces, or its
+    /// linked exports cannot be served.
     pub async fn register(&self, id: impl Into<GuestId>, bytes: Vec<u8>) -> Result<()> {
-        self.admit(id.into(), Verified::wasm(bytes)?).await.map_err(anyhow::Error::from)
+        self.admit_bytes(id.into(), bytes, Policy::CallerNamed { pin: None }).await?;
+        Ok(())
     }
 
-    /// Admit verified component bytes as a late guest under `id`: load them
-    /// as a boot guest's are loaded, pre-instantiate against the shared host
-    /// set, wire the host-mediated link serve side, then publish entry and
-    /// endpoint as one atomic lifecycle transition — no dispatch can ever
-    /// resolve the entry and miss the endpoint, or vice versa.
-    ///
+    /// Admit verified component bytes as a late guest under `id`: the
+    /// embedder's path for bytes it vouches for itself, seated exactly as
+    /// [`admit_bytes`](Self::admit_bytes) seats them and held to the same
+    /// rule that a name the deployment declares is bound by its entry alone.
     /// The token's digest is recorded on the registry entry, so the
-    /// attestation lives exactly as long as the entry —
-    /// [`Guest::digest`](crate::Guest::digest) reads it back. Acquisition and
-    /// digest policy live with the callers: [`guest`](Self::guest) for a
-    /// declared source, the guest loader (`omnia-plugin`) for a location a
-    /// guest names. Whether the component exports a linked interface is not
-    /// checked here: a guest that exports none is still reachable through
-    /// the host [`Dispatcher`], and a link call to it fails at the call site.
+    /// attestation lives exactly as long as the entry.
     ///
     /// # Errors
     ///
-    /// Returns a typed [`AdmitError`] naming the refusal: refused artifact,
-    /// an identity already registered (an earlier or racing registration), or
-    /// an internal serve/publication failure.
-    pub async fn admit(&self, id: GuestId, verified: Verified) -> Result<(), AdmitError> {
+    /// Returns [`GuestError::Refused`] for a name the deployment declares,
+    /// one already registered (an earlier or racing registration), or bytes
+    /// that do not load as a component against the deployment's host set;
+    /// `Internal` on a serve or publication failure.
+    pub async fn admit(&self, id: GuestId, verified: Verified) -> Result<(), GuestError> {
+        self.admits(&id, &Policy::CallerNamed { pin: None })?;
+        match self.seat(id.clone(), verified).await {
+            Ok(_) => Ok(()),
+            Err(SeatError::Occupied) => {
+                Err(GuestError::Refused(format!("guest `{id}` is already registered")))
+            }
+            Err(SeatError::Refused(reason)) => Err(GuestError::Refused(reason)),
+            Err(SeatError::Internal(reason)) => Err(GuestError::Internal(reason)),
+        }
+    }
+
+    // Seat verified bytes as the guest `id`: load them as a boot guest's are
+    // loaded, pre-instantiate against the shared host set, wire the
+    // host-mediated link serve side, then publish entry and endpoint as one
+    // lifecycle transition, so no dispatch resolves the entry and misses the
+    // endpoint or vice versa.
+    async fn seat(
+        &self, id: GuestId, verified: Verified,
+    ) -> Result<Arc<Guest<StoreCtx<B>>>, SeatError> {
         let registry = self.registry();
 
         // early occupancy check; the publish below re-checks transactionally
         if registry.get(&id).is_some() {
-            return Err(AdmitError::AlreadyRegistered(format!(
-                "guest `{id}` is already registered"
-            )));
+            return Err(SeatError::Occupied);
         }
 
         let digest = verified.digest();
-        let component = component(registry.engine(), verified).await.map_err(|error| {
-            AdmitError::ArtifactRefused(format!("validating `{id}`: {error:#}"))
-        })?;
-        let instance_pre = registry.instantiate_late(&id, &component).map_err(|error| {
-            AdmitError::ArtifactRefused(format!("pre-instantiating `{id}`: {error:#}"))
-        })?;
-        let guest = Guest::local(id.clone(), instance_pre, digest);
+        let component = component(registry.engine(), verified)
+            .await
+            .map_err(|error| SeatError::Refused(format!("validating `{id}`: {error:#}")))?;
+        let instance_pre = registry
+            .instantiate_late(&id, &component)
+            .map_err(|error| SeatError::Refused(format!("pre-instantiating `{id}`: {error:#}")))?;
+        let guest = Arc::new(Guest::local(id.clone(), instance_pre, digest));
 
         // serve as a pending endpoint, then publish endpoint and entry as one step
         registry.seam().serve(self.store_factory(), &guest).await.map_err(|error| {
-            AdmitError::Internal(format!("serving `{id}` seam exports: {error:#}"))
+            SeatError::Internal(format!("serving `{id}` seam exports: {error:#}"))
         })?;
-        registry.publish(guest).map_err(|error| match error {
-            PublishError::Occupied(id) => {
-                AdmitError::AlreadyRegistered(format!("guest `{id}` is already registered"))
-            }
+        registry.publish(Arc::clone(&guest)).map_err(|error| match error {
+            PublishError::Occupied => SeatError::Occupied,
             PublishError::Transport(error) => {
-                AdmitError::Internal(format!("publishing `{id}`: {error:#}"))
+                SeatError::Internal(format!("publishing `{id}`: {error:#}"))
             }
         })?;
 
         tracing::debug!(guest = %id, "guest registered");
-        Ok(())
+        Ok(guest)
     }
 
     /// Remove a late guest — one registered at run time, or a declared guest

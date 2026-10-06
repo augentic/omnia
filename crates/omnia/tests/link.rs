@@ -235,6 +235,28 @@ async fn register_refuses_precompiled() {
     assert_eq!(sync, "echoer pong: trusted");
 }
 
+// A declared name is bound by its entry alone before the entry ever loads:
+// `register` and `admit` are refused under it with nothing seated, and the
+// first use that follows still reaches the entry's own bytes.
+#[tokio::test]
+async fn register_declared_refused() {
+    let full = std::fs::read(test_programs::LINK_FULL).expect("reading the full guest");
+    let manifest = Manifest::new()
+        .guest(GuestEntry::new("full", full.clone()))
+        .guest(GuestEntry::new("echoer", test_programs::LINK_ECHOER));
+    let runtime = assemble(manifest, |builder| builder).await.expect("deployment boots");
+
+    let err = runtime.register("echoer", full.clone()).await.expect_err("a declared name");
+    assert!(format!("{err:#}").contains("declares"), "unexpected error: {err:#}");
+    let verified = Verified::wasm(full).expect("the full guest is raw wasm");
+    let err = runtime.admit("echoer".into(), verified).await.expect_err("a declared name");
+    assert!(format!("{err:#}").contains("declares"), "unexpected error: {err:#}");
+    assert!(runtime.registry().get(&GuestId::from("echoer")).is_none(), "nothing was admitted");
+
+    let sync = call(&runtime, "full", "poke", "hi").await.expect("the entry loads at first use");
+    assert_eq!(sync, "echoer pong: hi");
+}
+
 // The relay takes the id `echoer` because `full` hard-codes `ping("echoer",
 // ..)` and the default selector routes on that argument; every relay hop then
 // re-dispatches to itself, consuming one depth unit per hop.

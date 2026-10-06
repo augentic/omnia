@@ -63,6 +63,15 @@ async fn scenario() {
         assert_eq!(digest, expected, "the reported digest is the expected one");
     }
 
+    // The handle lists what the component exports, so a caller can hold it
+    // to the contract it expects before dispatching.
+    assert!(
+        first.exports().iter().any(|export| export == "omnia-test:link/ops"),
+        "the handle lists the exported interface: {:?}",
+        first.exports()
+    );
+    assert_eq!(second.exports(), first.exports());
+
     // The handle's identity routes host-mediated dispatch to the exporter.
     let answer = ops::ping(first.id(), "hi");
     assert_eq!(answer, format!("{name} pong: hi"));

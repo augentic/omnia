@@ -3,12 +3,17 @@
 mod manifest;
 
 use std::env;
+#[cfg(feature = "loader")]
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+#[cfg(feature = "loader")]
+use anyhow::bail;
 use anyhow::{Context, Result};
 pub use manifest::{
-    GuestEntry, GuestRoutes, Manifest, Mount, RegistryConfig, Transport, TransportKind,
+    GuestEntry, GuestRoutes, Manifest, Mount, PluginsConfig, RegistryConfig, Transport,
+    TransportKind,
 };
 #[cfg(feature = "link")]
 use omnia_core::ChainPolicy;
@@ -22,12 +27,12 @@ use omnia_core::wasmtime_wasi::WasiView;
 use omnia_core::{
     GuestId, HasChain, HasDispatcher, Host, LevelFilter, LinkSeam, LoadedGuest, MountRegistry,
     Registry, RegistryParts, Routes, Runtime, RuntimeOptions, RuntimeParts, Server, Source,
-    SourceSpec, StoreCtx, Telemetry, telemetry,
+    SourceSpec, Stdio, StoreCtx, Telemetry, telemetry,
 };
 #[cfg(feature = "link")]
 use omnia_link::{FirstArgSelector, GuestSelector, InProcessLinks};
 #[cfg(feature = "loader")]
-use omnia_plugin::{Plugins, RegistryClient, WasiPlugins};
+use omnia_plugin::{FsStore, NoStore, Plugins, RegistryClient, WasiPlugins};
 
 use crate::Mode;
 
@@ -55,6 +60,7 @@ pub struct DeploymentBuilder {
     program_name: Option<String>,
     guest_timeout: Option<Duration>,
     max_dispatch_depth: Option<usize>,
+    stdio: Option<Stdio>,
 }
 
 impl DeploymentBuilder {
@@ -156,18 +162,29 @@ impl DeploymentBuilder {
         self
     }
 
+    /// Direct every guest's stdout and stderr to `stdio` instead of the
+    /// process streams — how a host suite reads what a command wrote.
+    #[must_use]
+    pub fn stdio(mut self, stdio: Stdio) -> Self {
+        self.stdio = Some(stdio);
+        self
+    }
+
     /// Resolve the manifest into a [`Deployment`].
     ///
     /// If no manifest was supplied, the path in `OMNIA_MANIFEST` is loaded.
     /// Guests the process already holds as bytes load (and compile) here; a
-    /// path or package source is declared and loads at its first use.
+    /// path or package source is declared and loads at its first use. A
+    /// leading `~/` on a mount path or the package store expands against
+    /// `$HOME` here.
     ///
     /// # Errors
     ///
-    /// Returns an error if no manifest resolves, the manifest is invalid, or
-    /// the deployment cannot be built.
+    /// Returns an error if no manifest resolves, the manifest is invalid, a
+    /// `~/` path has no `$HOME` to expand against, the package store lies
+    /// beneath a writable mount, or the deployment cannot be built.
     pub async fn build<T: LinkStore>(self) -> Result<Deployment<T>> {
-        let manifest = if let Some(manifest) = self.manifest {
+        let mut manifest = if let Some(manifest) = self.manifest {
             manifest
         } else if self.allow_empty {
             // a dynamic deployment may start empty and register guests later
@@ -178,6 +195,7 @@ impl DeploymentBuilder {
             Manifest::load(path)?
         };
         manifest.validate(self.allow_empty, manifest::Features::COMPILED)?;
+        manifest.expand_home()?;
 
         // read once, so a bad configuration fails startup rather than the first load
         let registry_config = manifest.registry_config()?;
@@ -209,6 +227,24 @@ impl DeploymentBuilder {
 
         // open every preopen once, so a misconfigured mount fails at startup
         let mounts = Arc::new(MountRegistry::open(manifest.preopens())?);
+
+        // W^X: a store a guest could write through a mount loads nothing
+        #[cfg(feature = "loader")]
+        let store = match manifest.store_root() {
+            Some(root) => {
+                if let Some(mount) = mounts.beneath_writable(root)? {
+                    bail!(
+                        "the package store {} lies beneath the writable mount `{}` at {}: a \
+                         guest could rewrite what the deployment loads",
+                        root.display(),
+                        mount.name,
+                        mount.host_path.display()
+                    );
+                }
+                Some(root.to_path_buf())
+            }
+            None => None,
+        };
 
         // embedded bytes load now, in parallel; a path or package loads at first use
         let (embedded, declared): (Vec<Source>, Vec<Source>) = manifest
@@ -251,8 +287,12 @@ impl DeploymentBuilder {
             command_guest: manifest.command_guest(),
             registry_config,
             #[cfg(feature = "loader")]
-            loader: Loader { registry: None },
+            loader: Loader {
+                store,
+                registry: None,
+            },
             rust_log,
+            stdio: self.stdio,
         })
     }
 }
@@ -283,24 +323,27 @@ pub struct Deployment<T: WasiView + 'static> {
     loader: Loader,
     // every store's `RUST_LOG`
     rust_log: String,
+    stdio: Option<Stdio>,
 }
 
 #[cfg(feature = "loader")]
 #[derive(Default)]
 struct Loader {
-    // `None` installs a cacheless `RegistryClient` over the deployment's `registries`
+    // the package store's root; `None` keeps nothing fetched
+    store: Option<PathBuf>,
+    // `None` installs a `RegistryClient` over the store and the deployment's `registries`
     registry: Option<Arc<dyn RegistrySource>>,
 }
 
 #[cfg(feature = "loader")]
 impl Loader {
     fn registry(&self, config: Option<&str>) -> Result<Arc<dyn RegistrySource>> {
-        Ok(match &self.registry {
-            Some(registry) => Arc::clone(registry),
-            None => Arc::new(match config {
-                Some(config) => RegistryClient::from_toml(config)?,
-                None => RegistryClient::default(),
-            }),
+        if let Some(registry) = &self.registry {
+            return Ok(Arc::clone(registry));
+        }
+        Ok(match &self.store {
+            Some(root) => Arc::new(RegistryClient::from_toml(config, FsStore::open(root))?),
+            None => Arc::new(RegistryClient::from_toml(config, NoStore)?),
         })
     }
 }
@@ -340,14 +383,15 @@ impl<T: WasiView> Deployment<T> {
         self
     }
 
-    /// Select the registry package sources are fetched from — the manifest's
+    /// Select where package sources are acquired — the manifest's
     /// `source.package` guests at their first use, and the packages a guest
-    /// names through the loader — typically a [`RegistryClient`] with a cache
-    /// store attached.
+    /// names through the loader — in place of the client the deployment's
+    /// `plugins` table builds.
     ///
-    /// Without this call, [`assemble`](Self::assemble) installs a cacheless
-    /// [`RegistryClient`] routed by the deployment's `registries`
-    /// configuration. Chainable.
+    /// Without this call, [`assemble`](Self::assemble) installs a
+    /// [`RegistryClient`] over the deployment's package store (`plugins.store`,
+    /// else none) routed by its `plugins.registries` configuration.
+    /// Chainable.
     #[cfg(feature = "loader")]
     pub fn registry_source(&mut self, registry: impl RegistrySource) -> &mut Self {
         self.loader.registry = Some(Arc::new(registry));
@@ -417,11 +461,12 @@ impl<B: Clone + Send + Sync + 'static> Deployment<StoreCtx<B>> {
     /// The loader host is linked here, beside WASI, whenever omnia is built
     /// with the `loader` feature; wasmtime wires it only into worlds that
     /// import `omnia:plugins/loader`. The grant it serves is the runtime's
-    /// first-use seam for the guests the deployment declares, the
-    /// deployment's read-only mounts as the roots a path load reads through,
-    /// and the `registries` configuration every package — declared or named
-    /// by a guest — is fetched by unless
-    /// [`registry_source`](Self::registry_source) selected a registry.
+    /// first-use seam for the guests the deployment declares and the
+    /// deployment's read-only mounts as the roots a path load reads through;
+    /// every package — declared or named by a guest — is acquired through the
+    /// runtime's own client, the deployment's package store first and the
+    /// registry its `plugins.registries` routes it to after, unless
+    /// [`registry_source`](Self::registry_source) selected one.
     ///
     /// # Errors
     ///
@@ -441,25 +486,26 @@ impl<B: Clone + Send + Sync + 'static> Deployment<StoreCtx<B>> {
             args: deployment.args.to_vec(),
             mounts: Arc::clone(&deployment.mounts),
             packages: cfg_select! {
-                feature = "loader" => Some(Arc::clone(&registry)),
+                feature = "loader" => Some(registry),
                 _ => None,
             },
             registry_config: deployment.registry_config.clone(),
             rust_log: deployment.rust_log.clone(),
+            stdio: deployment.stdio.clone(),
             command_guest: deployment.command_guest.clone(),
             backends,
             registry: Arc::new(deployment.into_registry().context("assembling registry")?),
         });
 
         #[cfg(feature = "loader")]
-        Plugins::install(&runtime, registry).context("installing the guest loader")?;
+        Plugins::install(&runtime).context("installing the guest loader")?;
 
         runtime.serve_links().await.context("serving the guests' linked exports")?;
         Ok(runtime)
     }
 
     // Linked beside WASI so wasmtime wires it only into worlds that import
-    // `omnia:plugins/loader`; `assemble` installs the registry on it.
+    // `omnia:plugins/loader`; `assemble` hands the registry to the runtime.
     #[cfg(feature = "loader")]
     fn with_loader_host(mut self) -> Result<(Self, Loader)> {
         self.host::<WasiPlugins, B>().context("linking the guest loader host")?;

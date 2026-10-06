@@ -1,17 +1,15 @@
 //! The `omnia:plugins/loader` load path.
 
 use std::future::Future;
-use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::{Context as _, bail, ensure};
-use cap_fs_ext::MetadataExt as _;
 use cap_std::fs::Dir;
-use omnia_core::{AdmitError, Digest, GuestId, MountRegistry, Runtime, Verified};
+use omnia_core::{Digest, Guest, GuestId, MountRegistry, Runtime};
 
-use crate::admission::{Admission, Registration};
+use crate::admission::Admission;
 use crate::error::LoadError;
-use crate::source::{Location, RegistrySource};
+use crate::source::Location;
 
 /// Host-side `omnia:plugins/loader.load` — embedder sugar over the runtime's
 /// installed [`Plugins`] extension.
@@ -46,15 +44,14 @@ impl<B: Clone + Send + Sync + 'static> PluginLoader for Runtime<B> {
 
 /// The deployment's grant over the runtime's seams: the guests it declares,
 /// reached through the runtime's first-use seam; its read-only mounts; and
-/// the registry its packages are fetched from.
+/// the registry source its packages are fetched through.
 ///
 /// The grant is fixed at install. `load` resolves a location inside it — a
 /// declared name to the deployment's own entry, a path to the read-only
 /// mount beneath which it lies, a package to the registry the deployment
-/// routes it to — and admits the bytes it finds there. Nothing a caller
-/// passes widens it.
+/// routes it to — and admits the bytes it finds there through the runtime's
+/// one admission body. Nothing a caller passes widens it.
 pub struct Plugins {
-    registry: Arc<dyn RegistrySource>,
     mounts: Vec<Root>,
     admission: Box<dyn Admission>,
 }
@@ -69,24 +66,23 @@ struct Root {
 }
 
 impl Plugins {
-    /// Install the loader capability on `runtime`: `registry` fetches the
-    /// packages a load names, and the runtime's mounts are the roots a path
-    /// load resolves against — the read-only ones as code roots, the
-    /// writable ones as refusals. Mount directories are told apart by
-    /// identity, not path: two mount points of one directory are one
-    /// directory here. A declared name loads through the runtime's own
-    /// first-use seam, so nothing of the deployment's guests is copied here.
+    /// Install the loader capability on `runtime`: its mounts are the roots
+    /// a path load resolves against — the read-only ones as code roots, the
+    /// writable ones as refusals — and its registry source fetches the
+    /// packages a load names. Mount directories are told apart by identity,
+    /// not path: two mount points of one directory are one directory here. A
+    /// declared name loads through the runtime's own first-use seam, so
+    /// nothing of the deployment's guests is copied here.
     ///
     /// # Errors
     ///
     /// Returns an error if a writable mount and a read-only mount share or
     /// nest their directories, or the capability is already installed.
-    pub fn install<B>(runtime: &Runtime<B>, registry: Arc<dyn RegistrySource>) -> anyhow::Result<()>
+    pub fn install<B>(runtime: &Runtime<B>) -> anyhow::Result<()>
     where
         B: Clone + Send + Sync + 'static,
     {
         let plugins = Self {
-            registry,
             mounts: roots(runtime.mounts())?,
             admission: Box::new(runtime.downgrade()),
         };
@@ -101,10 +97,11 @@ impl Plugins {
     /// declared name goes through the runtime's first-use seam: the
     /// deployment's entry is its source and its pin, and a guest already
     /// loaded is attested. A path or package is acquired inside the
-    /// deployment's grant, held to `pin` when one is given, admitted as raw
-    /// wasm alone through the runtime's admission seam under the name the
-    /// location derives; a name already active under the same bytes is
-    /// attested. Idempotent on (name, digest).
+    /// deployment's grant and admitted through the runtime's one admission
+    /// body as caller-named bytes — held to `pin` when one is given, raw
+    /// wasm alone, under the name the location derives, which no entry of
+    /// the deployment may declare; a name already active under the same
+    /// bytes is attested. Idempotent on (name, digest).
     ///
     /// # Errors
     ///
@@ -119,7 +116,8 @@ impl Plugins {
     pub async fn load(&self, from: Location, pin: Option<Digest>) -> Result<Plugin, LoadError> {
         let id = from.id();
 
-        // acquire the bytes the location names, inside the grant
+        // acquire the bytes the location names, inside the grant; a name the
+        // runtime refuses caller-named bytes under is refused before any read
         let bytes = match &from {
             Location::Declared(name) => {
                 if pin.is_some() {
@@ -128,52 +126,23 @@ impl Plugins {
                          no digest"
                     )));
                 }
-                let digest = self.admission.ensure(&id).await?;
-                tracing::info!(%id, %digest, "declared guest loaded");
-                return Ok(Plugin { id, digest });
+                let plugin = self.admission.guest(&id).await?;
+                tracing::info!(%id, digest = %plugin.digest, "declared guest loaded");
+                return Ok(plugin);
             }
-            // a declared name is bound by its entry alone; the caller's bytes
-            // must not seat where the deployment's belong
-            Location::Path(_) | Location::Registry { .. } if self.admission.is_declared(&id) => {
-                return Err(LoadError::Refused(format!(
-                    "`{from}` would register as `{id}`, a guest this deployment declares; load \
-                     it as the declared guest `{id}`, whose source and pin are the deployment's"
-                )));
+            Location::Path(path) => {
+                self.admission.admits(&id)?;
+                self.read(path).await?
             }
-            Location::Path(path) => self.read(path).await?,
             Location::Registry { package, endpoint } => {
-                self.registry.acquire(package, endpoint.as_deref()).await?
+                self.admission.admits(&id)?;
+                self.admission.acquire(package, endpoint.as_deref()).await?
             }
         };
 
-        // nothing attests where a caller's bytes came from, so raw wasm alone is admitted
-        let refused = |error: anyhow::Error| LoadError::Refused(format!("{error:#}"));
-        Digest::checked(&bytes, pin, format_args!("guest `{id}`")).map_err(refused)?;
-        let verified = Verified::wasm(bytes).map_err(refused)?;
-        let digest = verified.digest();
-
-        // admit them, or attest the registration that got there first
-        match self.admission.admit(id.clone(), verified).await {
-            Ok(()) => {
-                tracing::info!(%id, %digest, "guest loaded");
-                Ok(Plugin { id, digest })
-            }
-            // another load registered the name first: the same bytes attest,
-            // other bytes never re-bind an active name
-            Err(AdmitError::AlreadyRegistered(_)) => match self.admission.registration(&id)? {
-                Registration::Active(recorded) if recorded == digest => Ok(Plugin { id, digest }),
-                Registration::Active(recorded) => Err(LoadError::Refused(format!(
-                    "`{from}` would register as `{id}`, which is active under other bytes \
-                     ({recorded}, not {digest})"
-                ))),
-                Registration::Absent => Err(LoadError::Internal(format!(
-                    "`{id}` was admitted by a racing load and deregistered before it could be \
-                     attested"
-                ))),
-            },
-            Err(AdmitError::ArtifactRefused(reason)) => Err(LoadError::Refused(reason)),
-            Err(AdmitError::Internal(reason)) => Err(LoadError::Internal(reason)),
-        }
+        let plugin = self.admission.admit_bytes(id.clone(), bytes, pin).await?;
+        tracing::info!(%id, digest = %plugin.digest, "guest loaded");
+        Ok(plugin)
     }
 
     // Read the component at `path` through the read-only mount it lies
@@ -232,7 +201,7 @@ fn roots(mounts: &MountRegistry) -> anyhow::Result<Vec<Root>> {
         .entries()
         .iter()
         .map(|mount| {
-            let lineage = ancestry(&mount.host_path).with_context(|| {
+            let lineage = MountRegistry::ancestry(&mount.host_path).with_context(|| {
                 format!("resolving mount `{}` at {}", mount.name, mount.host_path.display())
             })?;
             Ok((mount, lineage))
@@ -269,18 +238,6 @@ fn roots(mounts: &MountRegistry) -> anyhow::Result<Vec<Root>> {
         .collect())
 }
 
-// `(device, inode)` of `path` and each directory above it, nearest first
-fn ancestry(path: &Path) -> anyhow::Result<Vec<(u64, u64)>> {
-    let path = path.canonicalize()?;
-    path.ancestors()
-        .map(|dir| {
-            let meta =
-                std::fs::metadata(dir).with_context(|| format!("identifying {}", dir.display()))?;
-            Ok((meta.dev(), meta.ino()))
-        })
-        .collect()
-}
-
 fn check_subpath(path: &str, subpath: &str) -> Result<(), LoadError> {
     // A leading '/' surfaces as an empty first segment, so the split check
     // also refuses absolute paths.
@@ -294,14 +251,25 @@ fn check_subpath(path: &str, subpath: &str) -> Result<(), LoadError> {
     Ok(())
 }
 
-/// Loaded plugin: routed identity plus content digest.
+/// Loaded plugin: routed identity, content digest, and what it exports.
 #[derive(Clone, Debug)]
 pub struct Plugin {
     id: GuestId,
     digest: Digest,
+    exports: Arc<[String]>,
 }
 
 impl Plugin {
+    /// The handle of a seated guest.
+    #[must_use]
+    pub fn of<T: 'static>(guest: &Guest<T>) -> Self {
+        Self {
+            id: guest.id().clone(),
+            digest: guest.digest(),
+            exports: Arc::clone(guest.exports()),
+        }
+    }
+
     /// Routed identity for host-mediated dispatch.
     #[must_use]
     pub const fn id(&self) -> &GuestId {
@@ -313,15 +281,23 @@ impl Plugin {
     pub const fn digest(&self) -> Digest {
         self.digest
     }
+
+    /// The names the component exports, as [`Guest::exports`] lists them.
+    #[must_use]
+    pub fn exports(&self) -> &[String] {
+        &self.exports
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use omnia_core::ResolvedPreopen;
 
     use super::*;
 
-    fn preopen(name: &str, path: &std::path::Path, writable: bool) -> ResolvedPreopen {
+    fn preopen(name: &str, path: &Path, writable: bool) -> ResolvedPreopen {
         ResolvedPreopen::new(name.to_owned(), path.to_path_buf(), writable)
     }
 

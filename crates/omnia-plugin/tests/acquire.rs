@@ -1,22 +1,23 @@
-//! Acquisition over wasm-pkg-client's `local` backend: fresh-release-preferred
-//! resolution, the store as fallback and byte cache, poisoned entries,
-//! configuration routing, the registry a load names, and unrouted packages —
-//! all offline.
+//! Acquisition over wasm-pkg-client's `local` backend, store first: a stored
+//! release served with no registry, a fetched one verified and written once,
+//! what the store never reads, configuration routing, the registry a load
+//! names, and unrouted packages — all offline.
 
 #![cfg(not(target_arch = "wasm32"))]
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
 
-use futures::FutureExt as _;
-use futures::future::BoxFuture;
-use omnia::{AcquireError, Digest};
-use omnia_plugin::{ContentStore, RegistryClient, RegistrySource as _, ReleaseStore};
+use omnia::wasmtime::Engine;
+use omnia::{AcquireError, CompileOptions};
+use omnia_plugin::{
+    FsStore, NoStore, PackageStore, Reference, RegistryClient, RegistrySource as _,
+};
 use tempfile::TempDir;
 use wasm_pkg_client::{Config, Registry};
 
 const PACKAGE: &str = "test:adapter@1.0.0";
+// the file the store keeps `PACKAGE` under
+const STORED: &str = "test_adapter@1.0.0.wasm";
 const DEFAULT_REGISTRY: &str = "registry.test";
 // A closed local port: connection refused immediately, no network reached.
 const UNROUTABLE_REGISTRY: &str = "127.0.0.1:1";
@@ -54,203 +55,193 @@ fn defaulting_to(name: &str) -> Config {
     config
 }
 
-// cacheless, defaulting to a local backend at `root`
-fn registry_acquirer(root: &Path) -> RegistryClient {
+// routes every package to a local backend at `root`
+fn routed_to(root: &Path) -> Config {
     let mut config = defaulting_to(DEFAULT_REGISTRY);
     add_local_registry(&mut config, DEFAULT_REGISTRY, root);
-    RegistryClient::new(config)
+    config
 }
 
-// the `sha256:<hex>` the registry reports
-fn key(bytes: &[u8]) -> String {
-    Digest::of(bytes).to_string()
+// storeless, defaulting to a local backend at `root`
+fn registry_acquirer(root: &Path) -> RegistryClient {
+    RegistryClient::new(routed_to(root), NoStore)
 }
 
-type ReleaseKey = (String, String, String);
-
-// a `ContentStore` + `ReleaseStore` double with direct map access, so tests
-// can inspect and poison entries without going through the traits
-#[derive(Clone, Default)]
-struct MemStore {
-    content: Arc<Mutex<HashMap<String, Vec<u8>>>>,
-    releases: Arc<Mutex<HashMap<ReleaseKey, String>>>,
+fn reference(package: &str) -> Reference {
+    package.parse().expect("test references are exact")
 }
 
-impl MemStore {
-    fn content_of(&self, digest: &str) -> Option<Vec<u8>> {
-        self.content.lock().expect("content lock").get(digest).cloned()
-    }
-
-    fn poison(&self, digest: &str, bytes: &[u8]) {
-        self.content.lock().expect("content lock").insert(digest.to_owned(), bytes.to_vec());
-    }
-}
-
-impl ContentStore for MemStore {
-    fn content<'a>(&'a self, digest: &'a str) -> BoxFuture<'a, anyhow::Result<Option<Vec<u8>>>> {
-        let bytes = self.content_of(digest);
-        async move { Ok(bytes) }.boxed()
-    }
-
-    fn put_content<'a>(
-        &'a self, digest: &'a str, bytes: &'a [u8],
-    ) -> BoxFuture<'a, anyhow::Result<()>> {
-        self.content.lock().expect("content lock").insert(digest.to_owned(), bytes.to_vec());
-        async move { Ok(()) }.boxed()
-    }
-}
-
-impl ReleaseStore for MemStore {
-    fn release<'a>(
-        &'a self, registry: &'a str, package: &'a str, version: &'a str,
-    ) -> BoxFuture<'a, anyhow::Result<Option<String>>> {
-        let key = (registry.to_owned(), package.to_owned(), version.to_owned());
-        let digest = self.releases.lock().expect("release lock").get(&key).cloned();
-        async move { Ok(digest) }.boxed()
-    }
-
-    fn put_release<'a>(
-        &'a self, registry: &'a str, package: &'a str, version: &'a str, digest: &'a str,
-    ) -> BoxFuture<'a, anyhow::Result<()>> {
-        let key = (registry.to_owned(), package.to_owned(), version.to_owned());
-        self.releases.lock().expect("release lock").insert(key, digest.to_owned());
-        async move { Ok(()) }.boxed()
-    }
+// what `omnia compile` writes
+fn precompiled(scratch: &Path) -> Vec<u8> {
+    let target = scratch.join("echoer.bin");
+    omnia::compile::compile(
+        Path::new(test_programs::LINK_ECHOER),
+        Some(target.clone()),
+        None,
+        &CompileOptions::default(),
+    )
+    .expect("compiling the echoer");
+    let bytes = std::fs::read(target).expect("reading the compiled echoer");
+    assert!(Engine::detect_precompiled(&bytes).is_some(), "what it wrote is pre-compiled");
+    bytes
 }
 
 #[tokio::test]
 async fn registry_fetch() {
     let registry = TempDir::new().expect("registry dir");
     stage(registry.path(), PACKAGE, b"component bytes");
-    let acquirer = registry_acquirer(registry.path()).cached(MemStore::default());
+    let acquirer = registry_acquirer(registry.path());
 
     let bytes = acquirer.acquire(PACKAGE, None).await.expect("acquires");
     assert_eq!(bytes, b"component bytes");
 }
 
+// A fetched release is written to the store once it has hashed, so the next
+// acquisition is served from the store with no registry reached — the
+// registry republishing the version changes nothing until the file goes.
 #[tokio::test]
-async fn store_miss() {
+async fn fetched_then_stored() {
     let registry = TempDir::new().expect("registry dir");
-    stage(registry.path(), PACKAGE, b"component bytes");
-    let store = MemStore::default();
-    let acquirer = registry_acquirer(registry.path()).cached(store.clone());
-
-    let digest = key(b"component bytes");
-    assert!(store.content_of(&digest).is_none(), "the store starts empty");
-    acquirer.acquire(PACKAGE, None).await.expect("acquires");
-    assert!(store.content_of(&digest).is_some(), "the store gains the digest-keyed entry");
-}
-
-#[tokio::test]
-async fn fresh_over_warm() {
-    let registry = TempDir::new().expect("registry dir");
+    let store = TempDir::new().expect("store dir");
     stage(registry.path(), PACKAGE, b"first bytes");
-    let acquirer = registry_acquirer(registry.path()).cached(MemStore::default());
-    acquirer.acquire(PACKAGE, None).await.expect("warms the store");
+    let acquirer = RegistryClient::new(routed_to(registry.path()), FsStore::open(store.path()));
 
-    // The registry re-publishes the same version with different content. A
-    // release-record cache would keep serving the stored bytes; the fresh
-    // resolution must win.
+    assert!(!store.path().join(STORED).exists(), "the store starts empty");
+    let bytes = acquirer.acquire(PACKAGE, None).await.expect("fetches");
+    assert_eq!(bytes, b"first bytes");
+    let stored = std::fs::read(store.path().join(STORED)).expect("the release was written");
+    assert_eq!(stored, b"first bytes", "under the reference's `_` spelling");
+
     stage(registry.path(), PACKAGE, b"second bytes");
-    let bytes = acquirer.acquire(PACKAGE, None).await.expect("re-acquires");
-    assert_eq!(bytes, b"second bytes", "the reachable registry is the authority");
+    let bytes = acquirer.acquire(PACKAGE, None).await.expect("serves the store");
+    assert_eq!(bytes, b"first bytes", "the stored release is final");
+
+    std::fs::remove_file(store.path().join(STORED)).expect("removing the stored release");
+    let bytes = acquirer.acquire(PACKAGE, None).await.expect("fetches again");
+    assert_eq!(bytes, b"second bytes", "removing the file is the refresh");
 }
 
+// A file copied under a reference is served with no registry reached at
+// all: nothing routes the package, and the registry would not answer.
 #[tokio::test]
-async fn network_failure_fallback() {
-    let registry = TempDir::new().expect("registry dir");
-    stage(registry.path(), PACKAGE, b"component bytes");
-    let store = MemStore::default();
+async fn stored_without_registry() {
+    let store = TempDir::new().expect("store dir");
+    std::fs::write(store.path().join(STORED), b"copied bytes").expect("copying into the store");
+    let acquirer = RegistryClient::new(Config::empty(), FsStore::open(store.path()));
 
-    // Warm the store under the unroutable registry *name*, served by a
-    // local backend mapping.
-    let mut config = defaulting_to(UNROUTABLE_REGISTRY);
-    add_local_registry(&mut config, UNROUTABLE_REGISTRY, registry.path());
-    let warm = RegistryClient::new(config).cached(store.clone());
-    warm.acquire(PACKAGE, None).await.expect("warms the store");
-
-    // Same registry name and store, no backend mapping: resolution now dials
-    // the closed port and fails as a network error, so the stored record and
-    // content serve the load.
-    let offline = RegistryClient::new(defaulting_to(UNROUTABLE_REGISTRY)).cached(store);
-    let bytes = offline.acquire(PACKAGE, None).await.expect("falls back");
-    assert_eq!(bytes, b"component bytes");
+    let bytes = acquirer.acquire(PACKAGE, None).await.expect("the store answers");
+    assert_eq!(bytes, b"copied bytes");
+    let bytes = acquirer.acquire(PACKAGE, Some(UNROUTABLE_REGISTRY)).await.expect("still answers");
+    assert_eq!(bytes, b"copied bytes", "a stored release is served whatever registry is named");
 }
 
+// Only the `namespace_name@version.wasm` spelling is a stored release: the
+// `:` spelling, the bare name, and wkg's temporary files are never read.
 #[tokio::test]
-async fn network_failure_no_record() {
-    let acquirer =
-        RegistryClient::new(defaulting_to(UNROUTABLE_REGISTRY)).cached(MemStore::default());
+async fn off_reference_names_unread() {
+    let store = TempDir::new().expect("store dir");
+    for name in ["test:adapter@1.0.0.wasm", "adapter.wasm", ".wkg-get-test_adapter@1.0.0.wasm"] {
+        std::fs::write(store.path().join(name), b"off-reference bytes").expect("writing a file");
+    }
+    let acquirer = RegistryClient::new(Config::empty(), FsStore::open(store.path()));
 
-    let error = acquirer.acquire(PACKAGE, None).await.expect_err("nothing stored to fall back to");
+    let error = acquirer.acquire(PACKAGE, None).await.expect_err("nothing stored answers");
     assert!(
-        matches!(&error, AcquireError::Unavailable(detail) if detail.contains("resolving")),
-        "resolution failure: {error:?}"
+        matches!(&error, AcquireError::Refused(detail) if detail.contains("no registry routes") && detail.contains(STORED)),
+        "the refusal names the file the store would read: {error:?}"
     );
 }
 
 // A configuration that routes the package nowhere — no default, no mapping
-// for its namespace — refuses before any registry is dialled, even though a
-// registry that could serve it is configured.
+// for its namespace — refuses before any registry is dialled, naming the
+// namespace and the store that holds no file for it.
 #[tokio::test]
 async fn unrouted_package() {
     let registry = TempDir::new().expect("registry dir");
+    let store = TempDir::new().expect("store dir");
     stage(registry.path(), PACKAGE, b"component bytes");
     let mut config = Config::empty();
     add_local_registry(&mut config, DEFAULT_REGISTRY, registry.path());
-    let acquirer = RegistryClient::new(config);
+    let acquirer = RegistryClient::new(config, FsStore::open(store.path()));
 
     let error = acquirer.acquire(PACKAGE, None).await.expect_err("nothing routes the package");
+    let root = store.path().display().to_string();
     assert!(
-        matches!(&error, AcquireError::Refused(detail) if detail.contains("no registry routes") && detail.contains("`test` namespace")),
-        "refusal names the namespace: {error:?}"
+        matches!(&error, AcquireError::Refused(detail) if detail.contains("no registry routes") && detail.contains("`test` namespace") && detail.contains(&root) && detail.contains(STORED)),
+        "refusal names the namespace, the store, and the file: {error:?}"
+    );
+    assert!(!store.path().join(STORED).exists(), "nothing was written");
+
+    let storeless = RegistryClient::new(Config::empty(), NoStore);
+    let error = storeless.acquire(PACKAGE, None).await.expect_err("nothing routes the package");
+    assert!(
+        matches!(&error, AcquireError::Refused(detail) if detail.contains("no store is attached")),
+        "refusal says no store could hold it: {error:?}"
     );
 }
 
+// The registry's digest is checked before anything is written, and a
+// pre-compiled release is refused the same way — nothing of either lands in
+// the store, so a later acquisition reaches the registry again.
 #[tokio::test]
-async fn poisoned_store() {
+async fn precompiled_never_stored() {
     let registry = TempDir::new().expect("registry dir");
-    stage(registry.path(), PACKAGE, b"honest bytes");
-    let store = MemStore::default();
-    let acquirer = registry_acquirer(registry.path()).cached(store.clone());
-    acquirer.acquire(PACKAGE, None).await.expect("warms the store");
+    let store = TempDir::new().expect("store dir");
+    stage(registry.path(), PACKAGE, &precompiled(registry.path()));
+    let acquirer = RegistryClient::new(routed_to(registry.path()), FsStore::open(store.path()));
 
-    let digest = key(b"honest bytes");
-    store.poison(&digest, b"poison");
+    let error = acquirer.acquire(PACKAGE, None).await.expect_err("pre-compiled is refused");
+    assert!(
+        matches!(&error, AcquireError::Refused(detail) if detail.contains("pre-compiled")),
+        "refusal: {error:?}"
+    );
+    assert!(!store.path().join(STORED).exists(), "nothing was written");
 
-    let bytes = acquirer.acquire(PACKAGE, None).await.expect("a poisoned entry refetches");
-    assert_eq!(bytes, b"honest bytes");
-    let healed = store.content_of(&digest).expect("reading the store entry");
-    assert_eq!(healed, b"honest bytes", "the refetch overwrites the poisoned entry");
+    stage(registry.path(), PACKAGE, b"raw bytes");
+    let bytes = acquirer.acquire(PACKAGE, None).await.expect("the raw release fetches");
+    assert_eq!(bytes, b"raw bytes");
 }
 
-// Release records are scoped per registry: the same package and version
-// routed to another registry never answers from the first one's record.
+// A store that cannot be read is a source that may recover, not a refusal.
 #[tokio::test]
-async fn release_scoped() {
-    let first_root = TempDir::new().expect("first registry dir");
-    stage(first_root.path(), PACKAGE, b"first registry bytes");
-    let second_root = TempDir::new().expect("second registry dir");
-    stage(second_root.path(), PACKAGE, b"second registry bytes");
-    let store = MemStore::default();
+async fn unreadable_store() {
+    let scratch = TempDir::new().expect("scratch dir");
+    let root = scratch.path().join("not-a-directory");
+    std::fs::write(&root, b"a file where the store root should be").expect("writing the file");
+    let acquirer = RegistryClient::new(Config::empty(), FsStore::open(&root));
 
-    let mut first = defaulting_to(DEFAULT_REGISTRY);
-    add_local_registry(&mut first, DEFAULT_REGISTRY, first_root.path());
-    let bytes = RegistryClient::new(first)
-        .cached(store.clone())
-        .acquire(PACKAGE, None)
-        .await
-        .expect("first acquires");
-    assert_eq!(bytes, b"first registry bytes");
+    let error = acquirer.acquire(PACKAGE, None).await.expect_err("the store cannot be read");
+    assert!(matches!(error, AcquireError::Unavailable(_)), "unavailable: {error:?}");
+}
 
-    let mut second = defaulting_to("second.test");
-    add_local_registry(&mut second, "second.test", second_root.path());
-    let bytes = RegistryClient::new(second)
-        .cached(store)
-        .acquire(PACKAGE, None)
-        .await
-        .expect("second acquires");
-    assert_eq!(bytes, b"second registry bytes");
+// `put` never replaces: a release already stored stays as it is, and a
+// missing root is created on the first write.
+#[tokio::test]
+async fn put_is_final() {
+    let scratch = TempDir::new().expect("scratch dir");
+    let root = scratch.path().join("store");
+    let store = FsStore::open(&root);
+    let reference = reference(PACKAGE);
+
+    assert!(store.get(&reference).await.expect("a missing root reads empty").is_none());
+    store.put(&reference, b"first").await.expect("the first write creates the root");
+    store.put(&reference, b"second").await.expect("a second write is a no-op");
+    let held = store.get(&reference).await.expect("the store reads").expect("the release");
+    assert_eq!(held, b"first");
+    assert_eq!(std::fs::read(root.join(STORED)).expect("the file"), b"first");
+    let entries = std::fs::read_dir(&root).expect("listing the store").count();
+    assert_eq!(entries, 1, "no temporary file is left behind");
+}
+
+#[tokio::test]
+async fn network_failure() {
+    let acquirer = RegistryClient::new(defaulting_to(UNROUTABLE_REGISTRY), NoStore);
+
+    let error = acquirer.acquire(PACKAGE, None).await.expect_err("the registry is unreachable");
+    assert!(
+        matches!(&error, AcquireError::Unavailable(detail) if detail.contains("resolving")),
+        "resolution failure: {error:?}"
+    );
 }
 
 // The configuration alone decides a package's registry: a package override
@@ -275,7 +266,7 @@ async fn config_routing() {
     add_local_registry(&mut config, DEFAULT_REGISTRY, default_root.path());
     add_local_registry(&mut config, "acme.test", acme_root.path());
     add_local_registry(&mut config, "pinned.test", pinned_root.path());
-    let acquirer = RegistryClient::new(config);
+    let acquirer = RegistryClient::new(config, NoStore);
 
     let unmapped = acquirer.acquire(PACKAGE, None).await.expect("default acquires");
     assert_eq!(unmapped, b"default registry bytes", "an unmapped namespace falls to the default");
@@ -304,7 +295,7 @@ async fn endpoint_named_on_load() {
         .expect("routing config parses");
     add_local_registry(&mut unrouted, "acme.test", acme_root.path());
     add_local_registry(&mut unrouted, "named.test", named_root.path());
-    let acquirer = RegistryClient::new(unrouted);
+    let acquirer = RegistryClient::new(unrouted, NoStore);
     let bytes = acquirer.acquire(PACKAGE, Some("named.test")).await.expect("named acquires");
     assert_eq!(bytes, b"named registry bytes", "an unrouted namespace takes the named registry");
     let routed = acquirer
@@ -332,7 +323,7 @@ async fn endpoint_named_on_load() {
     let mut defaulted = defaulting_to(DEFAULT_REGISTRY);
     add_local_registry(&mut defaulted, DEFAULT_REGISTRY, default_root.path());
     add_local_registry(&mut defaulted, "named.test", named_root.path());
-    let acquirer = RegistryClient::new(defaulted);
+    let acquirer = RegistryClient::new(defaulted, NoStore);
     let error = acquirer
         .acquire(PACKAGE, Some("named.test"))
         .await
@@ -341,19 +332,6 @@ async fn endpoint_named_on_load() {
         matches!(&error, AcquireError::Refused(detail) if detail.contains("routed to `registry.test`")),
         "refusal: {error:?}"
     );
-}
-
-#[tokio::test]
-async fn cacheless() {
-    let registry = TempDir::new().expect("registry dir");
-    stage(registry.path(), PACKAGE, b"first bytes");
-    let acquirer = registry_acquirer(registry.path());
-
-    let first = acquirer.acquire(PACKAGE, None).await.expect("acquires");
-    assert_eq!(first, b"first bytes");
-    stage(registry.path(), PACKAGE, b"second bytes");
-    let second = acquirer.acquire(PACKAGE, None).await.expect("re-acquires");
-    assert_eq!(second, b"second bytes", "nothing cached anywhere");
 }
 
 #[tokio::test]

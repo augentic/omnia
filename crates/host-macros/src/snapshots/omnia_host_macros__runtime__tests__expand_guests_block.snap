@@ -1,6 +1,6 @@
 ---
 source: crates/host-macros/src/runtime.rs
-expression: "expand_pretty(quote!({\n    guests: [{ path: \"engine.wasm\" },], registries:\n    include_str!(\"wasm-pkg.toml\"), mounts:\n    [{ name: \".\", path: project_root() },], hosts: { WasiOtel: OtelDefault, },\n}))"
+expression: "expand_pretty(quote!({\n    guests: [{ path: \"engine.wasm\" },], plugins:\n    { store: \"~/.app/store\", registries: include_str!(\"wasm-pkg.toml\"), },\n    mounts: [{ name: \".\", path: project_root() },], hosts:\n    { WasiOtel: OtelDefault, },\n}))"
 ---
 mod runtime {
     use omnia::anyhow::Result;
@@ -53,6 +53,7 @@ mod runtime {
     pub fn manifest() -> omnia::ManifestSource {
         omnia::ManifestSource::Inline(
             omnia::Manifest::new()
+                .store(::std::path::PathBuf::from("~/.app/store"))
                 .registries(
                     omnia::RegistryConfig::contents(include_str!("wasm-pkg.toml")),
                 )

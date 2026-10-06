@@ -1,17 +1,21 @@
 //! A manifest-driven command deployment run over a backend bundle.
 
+use std::path::PathBuf;
+
 use anyhow::{Context as _, Result};
+use omnia::wasmtime_wasi::p2::pipe::MemoryOutputPipe;
 use omnia::{
     DeploymentBuilder, ExitStatus, GuestEntry, Host, LevelFilter, Manifest, ManifestSource, Mode,
-    Mount, Provides, RegistryConfig, Runtime, Server, SourceSpec, StoreCtx, Wiring,
+    Mount, Provides, RegistryConfig, Runtime, Server, SourceSpec, Stdio, StoreCtx, Wiring,
 };
 use omnia_wasi_otel::WasiOtel;
 
-/// One command-mode deployment: guests, mounts, arguments, registries, and the tracing level.
+/// One command-mode deployment: guests, mounts, arguments, the package
+/// store and registries, and the tracing level.
 ///
 /// What guests call between themselves is read off their components,
-/// declared nowhere; `registries` is the routing a guest's package source is
-/// fetched through.
+/// declared nowhere; `store` is where a package a guest names is kept, and
+/// `registries` the routing one the store lacks is fetched through.
 ///
 /// Built from nothing, or as an overlay on the manifest a production
 /// `runtime!` compiled in (`Deployment::from(runtime::manifest())`): the
@@ -21,7 +25,8 @@ use omnia_wasi_otel::WasiOtel;
 /// through the generated wiring with [`run_with`](Self::run_with), or link
 /// hosts by hand with [`run`](Self::run); either way the guest loader is
 /// assembly's, and a guest added as an [`entry`](Self::entry) loads at its
-/// first use.
+/// first use. [`captured`](Self::captured) reads back what the guests wrote
+/// to stdout and stderr beside the exit status.
 ///
 /// ```no_run
 /// use omnia::{ExitStatus, GuestEntry};
@@ -44,8 +49,10 @@ pub struct Deployment {
     command: Option<String>,
     mounts: Vec<Mount>,
     args: Vec<String>,
+    store: Option<PathBuf>,
     registries: Option<RegistryConfig>,
     level: Option<LevelFilter>,
+    stdio: Option<Stdio>,
 }
 
 // One added through `guest` is read into bytes when the manifest is built,
@@ -124,12 +131,40 @@ impl Deployment {
         self
     }
 
+    /// The package store every package a guest names is read from, and a
+    /// fetched one written to, replacing the base manifest's — a scratch
+    /// directory, so a test stages a release under its reference's file
+    /// name and nothing is fetched.
+    #[must_use]
+    pub fn store(mut self, root: impl Into<PathBuf>) -> Self {
+        self.store = Some(root.into());
+        self
+    }
+
     /// The wasm-pkg configuration package sources are fetched through,
     /// replacing the base manifest's.
     #[must_use]
     pub fn registries(mut self, config: impl Into<RegistryConfig>) -> Self {
         self.registries = Some(config.into());
         self
+    }
+
+    /// Captures every guest's stdout and stderr instead of inheriting the
+    /// test process's streams, so a run answers what the command wrote
+    /// beside its exit status.
+    #[must_use]
+    pub fn captured(self) -> Captured {
+        let stdout = MemoryOutputPipe::new(CAPTURE_BYTES);
+        let stderr = MemoryOutputPipe::new(CAPTURE_BYTES);
+        let deployment = Self {
+            stdio: Some(Stdio::new(stdout.clone(), stderr.clone())),
+            ..self
+        };
+        Captured {
+            deployment,
+            stdout,
+            stderr,
+        }
     }
 
     /// The tracing level for the run: the bare level of every guest's
@@ -156,6 +191,9 @@ impl Deployment {
     pub fn manifest(&self) -> Result<Manifest> {
         let base = self.base.clone().map(ManifestSource::into_manifest).transpose()?;
         let mut manifest = base.unwrap_or_default().mounts(self.mounts.iter().cloned());
+        if let Some(store) = &self.store {
+            manifest = manifest.store(store.clone());
+        }
         if let Some(registries) = &self.registries {
             manifest = manifest.registries(registries.clone());
         }
@@ -178,12 +216,15 @@ impl Deployment {
     }
 
     fn builder(&self, manifest: Manifest) -> DeploymentBuilder {
-        let builder =
+        let mut builder =
             DeploymentBuilder::new().manifest(manifest).mode(Mode::Command).args(self.args.clone());
-        match self.level {
-            Some(level) => builder.level(level),
-            None => builder,
+        if let Some(level) = self.level {
+            builder = builder.level(level);
         }
+        if let Some(stdio) = &self.stdio {
+            builder = builder.stdio(stdio.clone());
+        }
+        builder
     }
 
     /// Assembles the runtime by hand: builds the deployment, links the
@@ -265,5 +306,87 @@ impl Deployment {
     {
         let deployment = self.builder(self.manifest()?).build::<StoreCtx<B>>().await?;
         omnia::run_with::<B, H>(deployment, backends).await
+    }
+}
+
+// generous, since a run past it traps the guest's write
+const CAPTURE_BYTES: usize = 64 << 20;
+
+/// A [`Deployment`] whose guests write to captured streams, from
+/// [`Deployment::captured`]; each run answers a [`Run`].
+#[derive(Clone, Debug)]
+pub struct Captured {
+    deployment: Deployment,
+    stdout: MemoryOutputPipe,
+    stderr: MemoryOutputPipe,
+}
+
+/// What one captured run produced.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Run {
+    /// The command guest's exit status.
+    pub status: ExitStatus,
+    /// Everything the guests wrote to stdout, lossily as UTF-8.
+    pub stdout: String,
+    /// Everything the guests wrote to stderr, lossily as UTF-8.
+    pub stderr: String,
+}
+
+impl Captured {
+    /// The deployment beneath, for its manifest or a hand-driven boot.
+    #[must_use]
+    pub const fn deployment(&self) -> &Deployment {
+        &self.deployment
+    }
+
+    /// [`Deployment::run`], answering the streams beside the status.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Deployment::run`].
+    pub async fn run<B>(
+        &self, backends: B, link: impl FnOnce(&mut omnia::Deployment<StoreCtx<B>>) -> Result<()>,
+    ) -> Result<Run>
+    where
+        B: Clone + Send + Sync + 'static,
+    {
+        let status = self.deployment.run(backends, link).await?;
+        Ok(self.collect(status))
+    }
+
+    /// [`Deployment::run_host`], answering the streams beside the status.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Deployment::run_host`].
+    pub async fn run_host<H, B>(&self, backends: B) -> Result<Run>
+    where
+        H: Host<StoreCtx<B>> + Server<B>,
+        B: Provides<WasiOtel> + Clone + Send + Sync + 'static,
+    {
+        let status = self.deployment.run_host::<H, B>(backends).await?;
+        Ok(self.collect(status))
+    }
+
+    /// [`Deployment::run_with`], answering the streams beside the status.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Deployment::run_with`].
+    pub async fn run_with<H, B>(&self, backends: B) -> Result<Run>
+    where
+        H: Wiring<B>,
+        B: Clone + Send + Sync + 'static,
+    {
+        let status = self.deployment.run_with::<H, B>(backends).await?;
+        Ok(self.collect(status))
+    }
+
+    fn collect(&self, status: ExitStatus) -> Run {
+        Run {
+            status,
+            stdout: String::from_utf8_lossy(&self.stdout.contents()).into_owned(),
+            stderr: String::from_utf8_lossy(&self.stderr.contents()).into_owned(),
+        }
     }
 }

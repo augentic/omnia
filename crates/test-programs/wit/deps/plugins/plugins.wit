@@ -2,27 +2,32 @@ package omnia:plugins@0.1.0;
 
 /// Host-side guest loading. A caller names where a guest's bytes come from
 /// — a guest the deployment declares, a component beneath one of its
-/// read-only mounts, or a package one of its registries serves — and the
-/// host acquires, verifies, and admits them. Component bytes never cross
-/// this interface, and every location resolves inside what the deployment
-/// granted: its guest list, its mounts, and its `registries` routing.
+/// read-only mounts, or a package the deployment's store holds or one of
+/// its registries serves — and the host acquires, verifies, and admits
+/// them. Component bytes never cross this interface, and every location
+/// resolves inside what the deployment granted: its guest list, its mounts,
+/// its package store, and its `registries` routing.
 interface loader {
     /// An exact package reference and the registry it is fetched from.
     record registry-ref {
-        /// The exact `namespace:name@version` to fetch.
+        /// The exact `namespace:name@version` to acquire: read from the
+        /// deployment's package store when it holds the release, fetched
+        /// from a registry and written to the store once otherwise.
         %package: string,
         /// The registry to fetch from when the deployment's `registries`
         /// routes the package's namespace nowhere; `none` takes that
         /// routing. A namespace the deployment routes is fetched from its
-        /// registry alone — naming another is refused.
+        /// registry alone — naming another is refused. A release the store
+        /// holds is served from it whatever registry wrote it.
         endpoint: option<string>,
     }
 
     /// Where a guest's component bytes come from, and the name it registers
     /// under.
     variant location {
-        /// A package registry; registers as the package reference without
-        /// its version (`acme:tool@1.2.3` registers as `acme:tool`).
+        /// A package, from the deployment's store or a registry; registers
+        /// as the package reference without its version (`acme:tool@1.2.3`
+        /// registers as `acme:tool`).
         registry(registry-ref),
         /// A component path beneath one of the deployment's read-only
         /// mounts, read fresh on every load; registers as the path's file
@@ -63,6 +68,11 @@ interface loader {
         /// The `sha256:<hex>` content digest of the bytes the guest was
         /// loaded from — the pin that makes an unpinned load reproducible.
         digest: string,
+        /// The names the component exports — each interface by its full
+        /// id (`acme:tool/run@1.0.0`) and each bare function by name — so
+        /// a caller can hold a guest to the contract it expects before any
+        /// dispatch.
+        exports: list<string>,
     }
 
     /// Ensure the guest `from` names is active and return its handle,

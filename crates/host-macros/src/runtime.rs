@@ -260,7 +260,10 @@ mod tests {
             guests: [
                 { path: "engine.wasm" },
             ],
-            registries: include_str!("wasm-pkg.toml"),
+            plugins: {
+                store: "~/.app/store",
+                registries: include_str!("wasm-pkg.toml"),
+            },
             mounts: [
                 { name: ".", path: project_root() },
             ],
@@ -272,10 +275,36 @@ mod tests {
 
     // valid: the guests arrive at run time or over the cli
     #[test]
-    fn expand_registries_only() {
+    fn expand_plugins_only() {
         insta::assert_snapshot!(expand_pretty(quote!({
-            registries: include_str!("wasm-pkg.toml"),
+            plugins: { registries: include_str!("wasm-pkg.toml") },
         })));
+    }
+
+    // either key alone is a block; neither is nothing to declare
+    #[test]
+    fn plugins_block_keys() {
+        syn::parse2::<Config>(quote!({ plugins: { store: "store" } }))
+            .expect("a store alone is a plugins block");
+        let error = syn::parse2::<Config>(quote!({ plugins: {} }))
+            .err()
+            .expect("an empty block must be refused");
+        assert!(error.to_string().contains("empty"), "{error}");
+        let error = syn::parse2::<Config>(quote!({ plugins: { cache: "store" } }))
+            .err()
+            .expect("an unknown key must be refused");
+        assert!(error.to_string().contains("unknown plugins key `cache`"), "{error}");
+    }
+
+    // the retired top-level key is refused at the key, naming its new home
+    #[test]
+    fn top_level_registries_refused() {
+        let error = syn::parse2::<Config>(quote!({
+            registries: include_str!("wasm-pkg.toml"),
+        }))
+        .err()
+        .expect("a top-level registries key must be refused");
+        assert!(error.to_string().contains("plugins: { registries: ... }"), "{error}");
     }
 
     // an unnamed package is named by its reference without the version; a
@@ -296,7 +325,7 @@ mod tests {
                 },
                 { name: "tool", package: "acme:tool@2.0.0" },
             ],
-            registries: include_str!("wasm-pkg.toml"),
+            plugins: { registries: include_str!("wasm-pkg.toml") },
         })));
     }
 
@@ -366,16 +395,16 @@ mod tests {
         assert!(error.to_string().contains("missing `path`"), "{error}");
     }
 
-    // `registries` is manifest data, so it conflicts with `manifest:` like
-    // every other inline key; the file declares `[registries]`.
+    // `plugins` is manifest data, so it conflicts with `manifest:` like
+    // every other inline key; the file declares `[plugins]`.
     #[test]
-    fn registries_refused_beside_manifest() {
+    fn plugins_refused_beside_manifest() {
         let error = syn::parse2::<Config>(quote!({
             manifest: concat!(env!("CARGO_MANIFEST_DIR"), "/omnia.toml"),
-            registries: include_str!("wasm-pkg.toml"),
+            plugins: { registries: include_str!("wasm-pkg.toml") },
         }))
         .err()
-        .expect("registries beside manifest must be refused");
+        .expect("plugins beside manifest must be refused");
         assert!(error.to_string().contains("mutually exclusive"), "{error}");
     }
 }

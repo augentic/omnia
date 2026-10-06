@@ -4,10 +4,11 @@
 //! A [`Source`] is one `[[guest]]` entry resolved for loading: the identity
 //! it registers under, the [`SourceSpec`] naming its bytes, and the digest
 //! the bytes must hash to. Embedded bytes load at boot through
-//! [`Source::load`]; a path or package loads at first use — read through
-//! [`Source::read`], or fetched from the runtime's package source — verified
-//! through [`Source::verified`] and admitted through the runtime. The checks
-//! are one body either way, so the two paths cannot drift.
+//! [`Source::load`]; a path or package loads at first use — acquired by the
+//! runtime, verified through [`Source::verified`], and admitted through the
+//! runtime's one admission body, which the guest loader and an embedder's
+//! registration pass through under a policy of their own. The checks are
+//! one body for every admitter, so no two paths can drift.
 //!
 //! What verification yields is a [`Verified`]: the bytes with their digest,
 //! and the only thing the runtime will load a component from. A
@@ -45,7 +46,7 @@ pub struct LoadedGuest {
 ///
 /// Modelled as an externally tagged enum so TOML's `source.path = "..."` and
 /// `source.package = "..."` each select a variant.
-#[derive(Clone, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SourceSpec {
     /// A local component file, read at first use: raw `.wasm`, or `omnia
@@ -60,9 +61,9 @@ pub enum SourceSpec {
     /// programmatic guest-entry API.
     #[serde(skip)]
     Bytes(Cow<'static, [u8]>),
-    /// An exact `namespace:name@version` package reference, fetched at first
-    /// use from the registry the deployment's `[registries]` routes it to;
-    /// raw wasm alone.
+    /// An exact `namespace:name@version` package reference, acquired at first
+    /// use from the deployment's package store or the registry its
+    /// `[plugins] registries` routes it to; raw wasm alone.
     Package(String),
 }
 
@@ -140,7 +141,7 @@ impl From<Vec<u8>> for SourceSpec {
 
 /// One declared guest, resolved for loading: its identity, where its bytes
 /// come from, and what the bytes must satisfy before they become a guest.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Source {
     id: GuestId,
     spec: SourceSpec,

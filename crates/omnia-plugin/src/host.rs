@@ -93,6 +93,7 @@ impl<T> loader::HostWithStore<T> for WasiPlugins {
         Ok(loader::Plugin {
             id: plugin.id().to_string(),
             digest: plugin.digest().to_string(),
+            exports: plugin.exports().to_vec(),
         })
     }
 }

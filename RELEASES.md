@@ -147,6 +147,26 @@ Unreleased
     is not registered"). `dispatch`, the command driver, the trigger hosts,
     the link relay (through the new `Dispatcher::ensure(&id)`), and the
     loader's `declared` arm all resolve through it.
+  - Admission is one body. `Runtime::admit_bytes(id, bytes, policy)`
+    verifies bytes under a `Policy` — `Declared(&Source)`, the entry's pin
+    and the format its source kind admits; `CallerNamed { pin }`, the
+    call's pin and raw wasm alone — seats them, and answers the guest
+    standing under the id afterwards (a declared entry attests a racing
+    first use; caller-named bytes attest on the same digest alone, and are
+    refused under a name active with other bytes). `Runtime::acquire(spec,
+    endpoint)` produces a source's bytes — a path read, a package fetched
+    through `RuntimeParts.packages`, embedded bytes as they are. `guest`,
+    `register`, and the loader's `path` and `registry` arms all pass through
+    `admit_bytes`, so the rule that a name the deployment declares is bound
+    by its entry alone (`Runtime::admits(id, &policy)`, the one home of the
+    rule) holds for all of them: `Runtime::register` and `Runtime::admit`
+    under a declared name are refused where they used to seat the
+    embedder's bytes for the next declared load to attest, `register` of
+    the bytes already active under an id attests instead of failing, and
+    `admit` returns `GuestError` (`AdmitError` is gone). The loader's
+    `Admission` seam is `admits`, `guest`, `acquire`, and `admit_bytes`
+    over `WeakRuntime`, and the loader refuses a path or package deriving a
+    declared name before any read or fetch, through the runtime's rule.
   - `Registry::assemble(RegistryParts { engine, linker, options, loaded,
     declared, routes, seam, allow_empty })` takes the declared `Source`s
     beside the loaded guests (`Registry::declared(&id)`, `is_declared`); a
@@ -157,12 +177,14 @@ Unreleased
     and each trigger host probes the resolved guest's exports per event.
   - `RegistrySource` and its `AcquireError { Refused, Unavailable }` live in
     `omnia-core` (re-exported by `omnia` and `omnia-plugin`) as the acquirer
-    `RuntimeParts.packages: Option<Arc<dyn RegistrySource>>` fetches a
-    `source.package` guest through; `Deployment::assemble` sets it to the
-    loader's `RegistryClient` under the `loader` feature, and a manifest
-    declaring a package guest without the feature is refused at startup
-    beside one declaring `registries`. `Plugins::install(runtime, registry)`
-    takes no guest table.
+    `RuntimeParts.packages: Option<Arc<dyn RegistrySource>>` fetches every
+    package through — a `source.package` guest at first use and a package a
+    load names alike; `Deployment::assemble` sets it to the loader's
+    `RegistryClient` under the `loader` feature, and a manifest declaring a
+    package guest without the feature is refused at startup beside one
+    declaring `registries`. `Plugins::install(runtime)` takes no guest
+    table and no registry: the loader's grant is the runtime's mounts, and
+    `From<AcquireError> for LoadError` is gone with the loader's own fetch.
   - `Manifest::sources()` is the one list (`boot_sources()` and
     `on_demand_sources()` are gone; `Deployment::build` partitions it on
     `SourceSpec::Bytes`), `Manifest::from_wasm(path) -> Result<Self>` reads
@@ -199,18 +221,19 @@ Unreleased
     `Verified::wasm`, which admits raw wasm alone; and the `unsafe`
     `Verified::trusted`, the embedder's word for an artifact of its own.
     `Runtime::admit(id, verified)` takes it (where it took bytes and a
-    digest), `register` delegates through `Verified::wasm`, and the loader
-    hands over the token it verified rather than hashing twice.
+    digest), and `register` and the loader's caller-named loads go through
+    `Runtime::admit_bytes`, which verifies under its `Policy` and hashes
+    once.
   - The digest is never optional. Every path a guest's bytes take runs
-    through one body, `Runtime::admit`, and every registration records
-    the digest of the bytes it was loaded from: `Guest::digest` and
+    through one body, `Runtime::admit_bytes`, and every registration
+    records the digest of the bytes it was loaded from: `Guest::digest` and
     `LoadedGuest::digest` are a `Digest`, `Plugin::digest` is a `Digest` on
     the host and a `&Digest` in the SDK (the WIT record's `digest` is a
     `string`), and a load of an active guest always attests it.
     `Guest::with_digest` and the test loader's `ScriptedLoader::unhashed`
     are gone with the `None` they scripted. `Digest::checked(bytes, pin,
     subject)` is the one pin check ("resolved to .., not its declared digest
-    ..") `Source::verified` and the loader's caller-named loads share.
+    ..") `Source::verified` and the caller-named policy share.
   - One `Source` for every declared guest. `omnia::Source` (in `omnia-core`,
     beside the `SourceSpec` that moved there under the same
     `omnia::SourceSpec` path) is a `[[guest]]` entry resolved for loading —
@@ -310,7 +333,7 @@ Unreleased
     links `WasiPlugins` beside WASI whenever omnia is built with the
     feature, hands the runtime its `RegistryClient` as the package source
     (above), and installs the loader's grant through
-    `Plugins::install(runtime, registry)`; `Wiring::extend` and
+    `Plugins::install(runtime)`; `Wiring::extend` and
     `Deployment::plugin_locations` are removed, and the generated `Hooks`
     carry `link` and `serve` alone.
   - `RegistryClient::new` takes the wasm-pkg `Config` (there is no
@@ -367,7 +390,7 @@ Unreleased
     routes is refused rather than fetched elsewhere.
   - `source.package = "ns:name@1.0.0"` (the macro's `package:`,
     `SourceSpec::package(..)`, `GuestEntry::package(..)`) declares a guest
-    as an exact package reference fetched through `[registries]` at its
+    as an exact package reference acquired through `[plugins]` at its
     first use — a route, the command drive, a link call, a host dispatch,
     or a `declared` load — and named by the reference without its version
     unless the entry names it. It takes `routes` and `command` like any
@@ -383,8 +406,7 @@ Unreleased
   - `omnia::Digest` is the typed `sha256:<hex>` value host-side — `Copy`,
     `Digest::of(bytes)`, `FromStr`/`Display` in the canonical lowercase
     spelling, serde as that string — and replaces
-    `sha256_digest(bytes) -> String` (a `ContentStore` that verified with it
-    compares `Digest::of(bytes).to_string()` instead). The registry records
+    `sha256_digest(bytes) -> String`. The registry records
     the digest of every guest it admitted (`LoadedGuest::digest`,
     `Guest::digest`), and the loader's `Plugin::digest` reports it on an
     attested name.
@@ -404,12 +426,78 @@ Unreleased
     `digest` and `refuse` scripts by that name, holds a call's digest
     against the resolved one, and records `loads()` as
     `(Location, Option<Digest>)` in call order.
-  - Validating at load that a guest exports what its caller will import —
-    refused typed at `load` rather than trapping at the first dispatch — is
-    filed, not shipped, with its two homes: an `expects: list<string>` on
-    the WIT `load` call the loader checks against the component's exports,
-    or a check the requester makes against the returned handle once the
-    loader exposes them.
+  - A loaded handle says what the guest exports. The WIT `plugin` record
+    gains `exports: list<string>` — each exported interface by its full id
+    (`acme:tool/run@1.0.0`) and each bare export by name — so a requester
+    checks that a guest exports what it will import before the first
+    dispatch, refusing it typed instead of trapping; `omnia_sdk::plugins::
+    Plugin::exports()` reads it, `Plugin::new(id, digest, exports)` builds
+    one, and the host-side `omnia_plugin::Plugin` carries the same list
+    (`Plugin::of(&guest)`), computed once at admission from the component
+    type (`Guest::exports`). The test host's `ScriptedLoader::exporting(name,
+    exports)` scripts the list a name resolves with. A loader-side
+    `expects` check stays filed.
+- Every package comes through the deployment's package store. A
+  `source.package` guest at its first use and a package a `registry` load
+  names are acquired by the same `RegistryClient`, store first: the
+  `PackageStore` the deployment names answers before any registry, and a
+  release it lacks is fetched by the `registries` routing, verified against
+  the registry's digest, and written to the store once. The store is a
+  flat directory of one file per release, named by the reference under
+  the `_` spelling — `acme:tool@1.2.3` is `acme_tool@1.2.3.wasm` — and
+  only that spelling is read, so `tool.wasm` beside it, an unversioned
+  name, and a tool's temporary files are not releases. A stored release
+  is served whoever wrote it, whatever `endpoint` the load names, and
+  with no network: `wkg get acme:tool@1.2.3 -o <store>/` or a plain `cp`
+  stage one by hand, a build that copies its own component there runs it
+  with nothing fetched, and the one INFO line per acquisition says which
+  answered. `put` never replaces a file already there, so removing the
+  file is the refresh; a pre-compiled release a registry serves is refused
+  before the write, so the store never holds one; and the store may not
+  lie beneath a writable mount — present, or a directory a guest could
+  create through the mount, judged by the `(device, inode)` ancestry of
+  its nearest existing ancestor (`MountRegistry::beneath_writable`,
+  `MountRegistry::ancestry`) — since a guest could then write what the
+  deployment loads; `Deployment::build` refuses it naming the mount.
+  - The manifest names both under one table. `[plugins] store = "~/.app/
+    store"` and `[plugins] registries.path = "wasm-pkg.toml"`
+    (`Manifest.plugins: Option<PluginsConfig { store, registries }>`,
+    the fluent `Manifest::store(path)` and `Manifest::registries(config)`,
+    `Manifest::store_root()`, `Manifest::registry_config()`) replace the
+    top-level `[registries]` table, which is an unknown key now; either
+    key may stand alone, and a manifest naming either without the `loader`
+    feature is refused at startup as a package guest is. In the `runtime!`
+    macro the block is `plugins: { store: "~/.app/store", registries:
+    include_str!("wasm-pkg.toml") }`; a top-level `registries:` is a
+    compile error pointing at the block, as are an empty block and an
+    unknown key in it. A leading `~/` on the store, or on a mount's path,
+    is the operator's home, expanded against `$HOME` when the deployment
+    builds (`Manifest::expand_home`; unset, the build fails) — the one
+    place a manifest reads the environment.
+  - `RegistryClient<S: PackageStore>` is built over its store —
+    `RegistryClient::new(config, store)`, `RegistryClient::from_toml(
+    Option<&str>, store)` (`None` is an empty routing) — and
+    `Deployment::assemble` installs one over an `FsStore::open(root)` when
+    the manifest names a store (a missing root is an empty store, created
+    at the first write) and over `NoStore` otherwise, where every fetch is
+    served and nothing kept. `PackageStore { get, put, describe }` is the
+    trait a store of your own implements, keyed by `Reference` (the parsed
+    `ns:name@version`, `Display` in that spelling, `file_name()` in the
+    store's), and `describe` supplies the refusal's last clause: a package
+    the routing leaves nowhere is refused before any fetch, naming the
+    reference, its namespace, and where the store looked ("the store
+    `<root>` holds no `<file>`"). A `put` that fails warns and the release
+    is served from the fetched bytes; a `get` that fails is the load's
+    error.
+  - A guest's stdout and stderr are the embedder's to capture.
+    `StoreConfig::stdio(Stdio)` (`omnia::Stdio::new(stdout, stderr)`, two
+    shared `StdoutStream`s) hands every store a sink pair where it
+    inherited the process's; `DeploymentBuilder::stdio(..)` sets it for a
+    deployment, and the test host's `Deployment::captured()` wraps a
+    deployment so its `run`, `run_host`, and `run_with` answer a `Run {
+    status, stdout, stderr }` — the whole of what the guests wrote, over
+    in-memory pipes — while `Deployment::store(root)` overlays the store
+    root the way `mount` overlays a mount.
 
 ### Removed
 
@@ -425,6 +513,19 @@ Unreleased
   verbosity flags and the process `RUST_LOG` (above) — the same
   directives-then-`RUST_LOG` layering `set_filter` did for one guest, now
   decided once for the whole process; nothing reloads it at run time.
+- `RegistryClient::cached`, `ContentStore`, and `ReleaseStore`. The two
+  caches keyed by endpoint, reference, and digest are one `PackageStore`
+  keyed by `Reference` (above), which every `RegistryClient` carries; a
+  store implemented against the old traits implements `get`, `put`, and
+  `describe` instead. `omnia-backends` drops its filesystem store for the
+  built-in `FsStore` and re-points its Azure Blob store at the trait.
+- The per-start refresh of a `package:` guest. A release the store holds
+  is never fetched again while its file stands, whatever registry the
+  deployment routes its namespace to or a load names: a deployment that
+  expected each start to pick up a re-pushed tag removes the stored file
+  to refresh, and one that wants a new release names a new version. A
+  `digest` pin on the entry or the load holds the stored bytes as it held
+  the fetched ones.
 
 ---
 

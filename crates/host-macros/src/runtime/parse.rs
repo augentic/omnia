@@ -47,22 +47,32 @@ pub struct HostEntry {
     pub options: Option<Expr>,
 }
 
-/// Inline manifest keys (`guests`, `registries`, `mounts`) parsed from
+/// Inline manifest keys (`guests`, `mounts`, `plugins`) parsed from
 /// `runtime!({ ... })`; mirrors the `omnia::Manifest` schema.
 #[derive(Default)]
 pub struct ManifestSpec {
     /// The `guests:` list — every component the deployment may run.
     pub guests: Vec<GuestSpec>,
     pub mounts: Vec<MountSpec>,
-    /// The `registries:` expression — the wasm-pkg configuration (TOML) that
-    /// routes package sources, typically an `include_str!`.
-    pub registries: Option<Expr>,
+    /// The `plugins: { .. }` block — the package store and the routing of
+    /// every package source.
+    pub plugins: Option<PluginsSpec>,
 }
 
 impl ManifestSpec {
     pub const fn is_empty(&self) -> bool {
-        self.guests.is_empty() && self.mounts.is_empty() && self.registries.is_none()
+        self.guests.is_empty() && self.mounts.is_empty() && self.plugins.is_none()
     }
+}
+
+/// The `plugins: { store: ..., registries: ... }` block.
+pub struct PluginsSpec {
+    /// The `store:` path expression — the directory every package is kept
+    /// in; a leading `~/` expands against `$HOME` at start-up.
+    pub store: Option<Expr>,
+    /// The `registries:` expression — the wasm-pkg configuration (TOML) that
+    /// routes package sources, typically an `include_str!`.
+    pub registries: Option<Expr>,
 }
 
 /// One `{ path: ..., name: ..., routes: { ... }, command: true }` (or
@@ -138,8 +148,8 @@ impl Parse for Config {
                     manifest.guests = g;
                     inline_span.get_or_insert(span);
                 }
-                OptValue::Registries(r) => {
-                    manifest.registries = Some(r);
+                OptValue::Plugins(p) => {
+                    manifest.plugins = Some(p);
                     inline_span.get_or_insert(span);
                 }
                 OptValue::Mounts(m) => {
@@ -174,7 +184,7 @@ impl Config {
         if let (Some(_), Some(inline)) = (spans.manifest, spans.inline) {
             return Err(syn::Error::new(
                 inline,
-                "`manifest:` and the inline keys (`guests`, `registries`, `mounts`) are mutually \
+                "`manifest:` and the inline keys (`guests`, `mounts`, `plugins`) are mutually \
                  exclusive; declare the deployment in the manifest file",
             ));
         }
@@ -225,6 +235,7 @@ mod kw {
     syn::custom_keyword!(hosts);
     syn::custom_keyword!(manifest);
     syn::custom_keyword!(guests);
+    syn::custom_keyword!(plugins);
     syn::custom_keyword!(registries);
     syn::custom_keyword!(mounts);
 }
@@ -241,7 +252,7 @@ enum OptValue {
     Hosts(Vec<HostEntry>),
     Manifest(Expr),
     Guests(Vec<GuestSpec>),
-    Registries(Expr),
+    Plugins(PluginsSpec),
     Mounts(Vec<MountSpec>),
 }
 
@@ -266,10 +277,17 @@ impl Parse for Opt {
             let key = input.parse::<kw::guests>()?;
             input.parse::<Token![:]>()?;
             ("guests", key.span, OptValue::Guests(parse_bracketed_list(input)?))
-        } else if l.peek(kw::registries) {
-            let key = input.parse::<kw::registries>()?;
+        } else if l.peek(kw::plugins) {
+            let key = input.parse::<kw::plugins>()?;
             input.parse::<Token![:]>()?;
-            ("registries", key.span, OptValue::Registries(input.parse()?))
+            ("plugins", key.span, OptValue::Plugins(input.parse()?))
+        } else if l.peek(kw::registries) {
+            // the retired top-level key, refused with its new home
+            let key = input.parse::<kw::registries>()?;
+            return Err(syn::Error::new(
+                key.span,
+                "`registries:` moved under `plugins:`; write `plugins: { registries: ... }`",
+            ));
         } else if l.peek(kw::mounts) {
             let key = input.parse::<kw::mounts>()?;
             input.parse::<Token![:]>()?;
@@ -278,6 +296,33 @@ impl Parse for Opt {
             return Err(l.error());
         };
         Ok(Self { name, span, value })
+    }
+}
+
+impl Parse for PluginsSpec {
+    fn parse(input: ParseStream) -> Result<Self> {
+        let mut store = None;
+        let mut registries = None;
+        let span = parse_kv_block(input, |key, value| {
+            match key.to_string().as_str() {
+                "store" => store = Some(value.parse()?),
+                "registries" => registries = Some(value.parse()?),
+                other => {
+                    return Err(syn::Error::new(
+                        key.span(),
+                        format!("unknown plugins key `{other}`; expected `store` or `registries`"),
+                    ));
+                }
+            }
+            Ok(())
+        })?;
+        if store.is_none() && registries.is_none() {
+            return Err(syn::Error::new(
+                span,
+                "`plugins:` block is empty; name a `store`, a `registries` configuration, or both",
+            ));
+        }
+        Ok(Self { store, registries })
     }
 }
 

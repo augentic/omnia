@@ -105,15 +105,19 @@ pub enum Location {
     /// A component path beneath one of the deployment's read-only mounts,
     /// read fresh on every load. Registers as the path's file stem.
     Path(String),
-    /// An exact `namespace:name@version` from a package registry. Registers
-    /// as the package reference without its version.
+    /// An exact `namespace:name@version` package, from the deployment's
+    /// store or a package registry. Registers as the package reference
+    /// without its version.
     Registry {
-        /// The exact package reference to fetch.
+        /// The exact package reference to acquire: read from the
+        /// deployment's store when it holds the release, fetched from a
+        /// registry and written to the store once otherwise.
         package: String,
         /// The registry to fetch from when the deployment's `registries`
         /// routes the package's namespace nowhere; `None` takes that
         /// routing, and a namespace the deployment routes is fetched from
-        /// its registry alone.
+        /// its registry alone. A release the store holds is served from it
+        /// whatever registry wrote it.
         endpoint: Option<String>,
     },
 }
@@ -145,7 +149,8 @@ impl std::fmt::Display for Location {
     }
 }
 
-/// A loaded plugin: the routed dispatch identity plus its content digest.
+/// A loaded plugin: the routed dispatch identity, its content digest, and
+/// what it exports.
 ///
 /// A plain value — loading confers no lifecycle authority over the loaded
 /// component.
@@ -153,16 +158,20 @@ impl std::fmt::Display for Location {
 pub struct Plugin {
     id: String,
     digest: Digest,
+    exports: Vec<String>,
 }
 
 impl Plugin {
-    /// A handle over a routed identity and its content digest — the
-    /// constructor native suites use to script loads.
+    /// A handle over a routed identity, its content digest, and the names
+    /// it exports — the constructor native suites use to script loads.
     #[must_use]
-    pub fn new(id: impl Into<String>, digest: Digest) -> Self {
+    pub fn new(
+        id: impl Into<String>, digest: Digest, exports: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
         Self {
             id: id.into(),
             digest,
+            exports: exports.into_iter().map(Into::into).collect(),
         }
     }
 
@@ -176,6 +185,13 @@ impl Plugin {
     #[must_use]
     pub const fn digest(&self) -> &Digest {
         &self.digest
+    }
+
+    /// The names the component exports: each interface by its full id
+    /// (`acme:tool/run@1.0.0`), each bare function by name.
+    #[must_use]
+    pub fn exports(&self) -> &[String] {
+        &self.exports
     }
 }
 
@@ -263,7 +279,7 @@ pub trait Plugins: Send + Sync {
                     let digest = loaded.digest.parse().map_err(|error: Error| {
                         Error::Internal(format!("host reported a malformed digest: {error}"))
                     })?;
-                    Ok(Plugin::new(loaded.id, digest))
+                    Ok(Plugin::new(loaded.id, digest, loaded.exports))
                 }
             }
         }

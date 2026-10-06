@@ -73,7 +73,7 @@ Everything in this repository runs against in-memory defaults, so no external se
 
 ## Configuration and secrets
 
-Everything is environment variables — backend connection strings, runtime limits, pool sizes (see [Configuration](../reference/configuration.md)). In containers, inject them through your orchestrator's secret mechanism; nothing is read from files except the deployment manifest (`OMNIA_MANIFEST`) and the `registries` configuration it names.
+Everything is environment variables — backend connection strings, runtime limits, pool sizes (see [Configuration](../reference/configuration.md)). In containers, inject them through your orchestrator's secret mechanism; nothing is read from files except the deployment manifest (`OMNIA_MANIFEST`), the `registries` configuration it names, and the releases its package store holds.
 
 Two variables deserve attention in production:
 
