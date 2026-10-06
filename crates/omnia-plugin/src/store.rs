@@ -120,9 +120,9 @@ pub trait PackageStore: Send + Sync + 'static {
 /// <root>/` writes it, an operator's `cp` writes it, `rm` forgets a release,
 /// and `ls` lists them. `get` reads the file the reference names and nothing
 /// else; a missing root is an empty store, and `put` creates it. An entry is
-/// complete or absent: `put` writes beside the target and links it into
-/// place, so a reader never sees a partial file, and a file already there is
-/// never replaced.
+/// complete or absent: `put` writes beside the target, syncs the bytes to
+/// disk, and links them into place, so neither a reader nor a crash sees a
+/// partial release, and a file already there is never replaced.
 #[derive(Clone, Debug)]
 pub struct FsStore {
     root: PathBuf,
@@ -178,6 +178,8 @@ impl FsStore {
         filed
     }
 
+    // The bytes are durable before the link is: a release the store holds is
+    // final, so a crash must leave the target absent, never short.
     fn file(temp: &Path, target: &Path, bytes: &[u8]) -> Result<()> {
         let mut file = File::options()
             .write(true)
@@ -185,6 +187,7 @@ impl FsStore {
             .open(temp)
             .with_context(|| format!("creating `{}`", temp.display()))?;
         file.write_all(bytes).with_context(|| format!("writing `{}`", temp.display()))?;
+        file.sync_all().with_context(|| format!("syncing `{}`", temp.display()))?;
         drop(file);
         match std::fs::hard_link(temp, target) {
             Ok(()) => Ok(()),

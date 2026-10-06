@@ -18,19 +18,40 @@ use crate::store::{NoStore, PackageStore, Reference};
 ///
 /// Fetches exact `namespace:name@version` references only. The store answers
 /// first: a release it holds is served with no network, whoever wrote it. One
-/// it lacks is fetched, verified against the registry's content digest, and
-/// written to the store once — a stored release is final until removed. The
-/// configuration bounds where a package is fetched from: one it routes — by
-/// its `package_registry_overrides` entry, its namespace's
+/// it lacks is fetched and verified against the registry's content digest.
+/// The configuration bounds where a package is fetched from: one it routes —
+/// by its `package_registry_overrides` entry, its namespace's
 /// `namespace_registries` entry, or the `default_registry` — is fetched from
 /// that registry alone, and a load naming another is refused; one it routes
 /// nowhere is fetched from the registry the load names, and refused, naming
 /// the namespace and the store, when it names none.
 ///
+/// The store keeps the deployment's word alone. A release the configuration
+/// routed is written to the store once — final until removed — while one
+/// fetched from the registry a load named is served to that load and kept
+/// nowhere, so nothing a caller names becomes what a later acquisition of
+/// the reference is served.
+///
 /// [wasm-pkg-client]: https://github.com/bytecodealliance/wasm-pkg-tools
 pub struct RegistryClient<S = NoStore> {
     config: Config,
     store: S,
+}
+
+// Whose word a package's registry is: the deployment's, by its `registries`
+// routing, or the load's, for a package the deployment routes nowhere.
+#[derive(Debug, PartialEq, Eq)]
+enum Origin {
+    Routed(Registry),
+    Named(Registry),
+}
+
+impl Origin {
+    const fn registry(&self) -> &Registry {
+        match self {
+            Self::Routed(registry) | Self::Named(registry) => registry,
+        }
+    }
 }
 
 impl<S: PackageStore> RegistryClient<S> {
@@ -65,7 +86,7 @@ impl<S: PackageStore> RegistryClient<S> {
     // the registry the load names, and refused when it names none.
     fn registry(
         &self, reference: &Reference, endpoint: Option<&str>,
-    ) -> Result<Registry, AcquireError> {
+    ) -> Result<Origin, AcquireError> {
         let package = reference.package();
         let named = endpoint
             .map(|endpoint| {
@@ -81,8 +102,8 @@ impl<S: PackageStore> RegistryClient<S> {
                 "`{package}` is routed to `{routed}` by the deployment's `registries`; it cannot \
                  be fetched from `{named}`"
             ))),
-            (Some(routed), _) => Ok(routed.clone()),
-            (None, Some(named)) => Ok(named),
+            (Some(routed), _) => Ok(Origin::Routed(routed.clone())),
+            (None, Some(named)) => Ok(Origin::Named(named)),
             (None, None) => Err(AcquireError::Refused(format!(
                 "no registry routes `{reference}`: the load names none, the deployment's \
                  `registries` routes neither the `{}` namespace nor a default, and {}",
@@ -123,16 +144,32 @@ impl<S: PackageStore> RegistryClient<S> {
             return Ok(bytes);
         }
 
-        // then the registry the deployment routes it to
-        let registry = self.registry(&reference, endpoint)?;
-        let bytes = self.fetch(&reference, &registry).await?;
-        if let Err(error) = self.store.put(&reference, &bytes).await {
-            tracing::warn!(package, error = format!("{error:#}"), "failed to store the package");
-        }
+        // then the registry the deployment routes it to, or the load names
+        let origin = self.registry(&reference, endpoint)?;
+        let bytes = self.fetch(&reference, origin.registry()).await?;
+
+        // SECURITY: only the deployment's routing writes the store; a release
+        // a load fetched from a registry it named would otherwise be served to
+        // every later acquisition of the reference, a declared guest's included
+        let stored = match &origin {
+            Origin::Routed(_) => match self.store.put(&reference, &bytes).await {
+                Ok(()) => true,
+                Err(error) => {
+                    tracing::warn!(
+                        package,
+                        error = format!("{error:#}"),
+                        "failed to store the package"
+                    );
+                    false
+                }
+            },
+            Origin::Named(_) => false,
+        };
         tracing::info!(
             package,
-            registry = %registry,
+            registry = %origin.registry(),
             digest = %Digest::of(&bytes),
+            stored,
             "package fetched from the registry"
         );
         Ok(bytes)
@@ -278,21 +315,25 @@ mod tests {
     }
 
     // The configuration bounds the load: an unrouted package takes the
-    // registry the load names, a routed one is served by its route alone.
+    // registry the load names, on the load's word; a routed one is served by
+    // its route alone, on the deployment's, even when the load names it too.
     #[test]
     fn endpoint_precedence() {
         let unrouted = RegistryClient::default();
         let tool = reference("acme:tool@1.0.0");
         let named = unrouted.registry(&tool, Some("ghcr.io")).expect("named");
-        assert_eq!(named.to_string(), "ghcr.io");
+        assert_eq!(named, Origin::Named("ghcr.io".parse().expect("a registry")));
         let error = unrouted.registry(&tool, Some("not a registry")).expect_err("");
         assert!(
             matches!(error, AcquireError::Refused(detail) if detail.contains("not a valid name"))
         );
 
         let routed = routed("[namespace_registries]\nacme = \"acme.test\"\n");
+        let acme = "acme.test".parse().expect("a registry");
+        assert_eq!(routed.registry(&tool, None).expect("routed"), Origin::Routed(acme));
         let same = routed.registry(&tool, Some("acme.test")).expect("same route");
-        assert_eq!(same.to_string(), "acme.test");
+        assert_eq!(same.registry().to_string(), "acme.test");
+        assert!(matches!(same, Origin::Routed(_)), "the route is the deployment's word");
         let error = routed.registry(&tool, Some("ghcr.io")).expect_err("refused");
         assert!(
             matches!(&error, AcquireError::Refused(detail) if detail.contains("routed to `acme.test`")),
@@ -312,7 +353,7 @@ mod tests {
         let tool = reference("acme:tool@1.0.0");
         let registry = client.registry(&tool, None).expect("routed");
         let mapping = client
-            .client(tool.package(), &registry)
+            .client(tool.package(), registry.registry())
             .config()
             .package_registry_override(tool.package())
             .cloned();
@@ -321,12 +362,12 @@ mod tests {
         let other = reference("acme:other@1.0.0");
         let named = client.registry(&other, Some("ghcr.io")).expect("named");
         let mapping = client
-            .client(other.package(), &named)
+            .client(other.package(), named.registry())
             .config()
             .package_registry_override(other.package())
             .cloned();
         assert!(
-            matches!(&mapping, Some(RegistryMapping::Registry(registry)) if *registry == named),
+            matches!(&mapping, Some(RegistryMapping::Registry(registry)) if registry == named.registry()),
             "{mapping:?}"
         );
         assert!(client.config.package_registry_override(other.package()).is_none());

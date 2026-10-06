@@ -1044,6 +1044,36 @@ async fn precompiled_package_never_stored() {
     assert!(!store.join(ECHOER_STORED).exists(), "nothing was written to the store");
 }
 
+// A release fetched from the registry a load names, for a namespace the
+// deployment routes nowhere, is served to that load and kept nowhere: the
+// store holds the deployment's word alone. Otherwise a loading guest could
+// plant bytes of its choosing under a reference the deployment later
+// acquires on its own, where the store answers before the routing refusal.
+#[tokio::test]
+async fn named_endpoint_never_stored() {
+    let scratch = scratch();
+    let store = store_root(&scratch);
+    let planted = scratch.path().join("planted.wasm");
+    std::fs::write(&planted, changed_echoer(b"planted")).expect("staging the planted release");
+    stage_package(scratch.path(), ECHOER_PACKAGE, planted.to_str().expect("a utf-8 path"));
+
+    let manifest = requester(test_programs::PLUGINS_LOAD)
+        .store(&store)
+        .registries(RegistryConfig::contents(local_backend_toml(scratch.path())));
+    let status =
+        run(manifest, &["registry@registry.test", ECHOER_PACKAGE]).await.expect("deployment runs");
+    assert_eq!(status, ExitStatus::SUCCESS, "the load was served from the registry it named");
+    assert!(!store.join(ECHOER_STORED).exists(), "the named registry's release was not stored");
+
+    // with nothing routed and nothing named, the refusal stands: the store
+    // did not learn the reference
+    let manifest = requester(test_programs::PLUGINS_REFUSED).store(&store);
+    let status = run(manifest, &["registry", ECHOER_PACKAGE, "refused", "`test` namespace"])
+        .await
+        .expect("deployment runs");
+    assert_eq!(status, ExitStatus::SUCCESS, "the routing refusal was not bypassed");
+}
+
 // The store is where loaded code comes from, so it is refused beneath a
 // writable mount at assembly — whether the directory exists yet or not,
 // since a guest could create it through the mount.

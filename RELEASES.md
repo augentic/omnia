@@ -442,7 +442,12 @@ Unreleased
   names are acquired by the same `RegistryClient`, store first: the
   `PackageStore` the deployment names answers before any registry, and a
   release it lacks is fetched by the `registries` routing, verified against
-  the registry's digest, and written to the store once. The store is a
+  the registry's digest, and written to the store once. The store keeps
+  the deployment's word alone: a release a load fetched from the
+  `endpoint` it named, for a namespace the routing leaves unrouted, is
+  served to that load and never stored, so nothing a loading guest names
+  becomes what a later acquisition of the reference — a declared
+  `source.package` guest's first use included — is served. The store is a
   flat directory of one file per release, named by the reference under
   the `_` spelling — `acme:tool@1.2.3` is `acme_tool@1.2.3.wasm` — and
   only that spelling is read, so `tool.wasm` beside it, an unversioned
