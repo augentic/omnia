@@ -14,9 +14,9 @@ Point the runtime at a manifest with `--manifest` (or the `OMNIA_MANIFEST` envir
 cargo run --example http-routing -- run --manifest examples/http-routing/omnia.toml
 ```
 
-The `runtime!` macro can also compile a default deployment into the binary: a path via `manifest:`, or the manifest itself via the inline `guests` / `registries` / `mounts` keys, where each guest's component is embedded in the binary and carries its own `routes`. That default is used only when the command line supplies no source. See [Composing a Runtime](composing-a-runtime.md#default-manifest-manifest).
+The `runtime!` macro can also compile a default deployment into the binary: a path via `manifest:`, or the manifest itself via the inline `guests` / `mounts` / `plugins` keys, where each guest's component is embedded in the binary and carries its own `routes`. That default is used only when the command line supplies no source. See [Composing a Runtime](composing-a-runtime.md#default-manifest-manifest).
 
-A manifest declares guests, mounts, routes, registries, and (eventually) transports. Every field is optional except at least one `[[guest]]`. Paths resolve relative to the manifest's own directory.
+A manifest declares guests, mounts, routes, the package store and registries, and (eventually) transports. Every field is optional except at least one `[[guest]]`. Paths resolve relative to the manifest's own directory.
 
 ```toml
 [[guest]]
@@ -37,7 +37,7 @@ The full field reference lives in [Configuration](../reference/configuration.md#
 
 ## Programmatic manifests
 
-Everything the TOML expresses can also be assembled in Rust. `omnia::Manifest` is the same schema as a value, with fluent setters for guests, mounts, registries, and routes. Pass it to the deployment builder (or the `runtime!`-generated `run(builder)`) instead of a file path:
+Everything the TOML expresses can also be assembled in Rust. `omnia::Manifest` is the same schema as a value, with fluent setters for guests, mounts, the store, registries, and routes. Pass it to the deployment builder (or the `runtime!`-generated `run(builder)`) instead of a file path:
 
 ```rust,ignore
 use omnia::{DeploymentBuilder, GuestEntry, Manifest};

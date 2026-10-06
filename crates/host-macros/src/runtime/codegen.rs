@@ -76,10 +76,21 @@ fn emit_manifest(config: &Config) -> Option<TokenStream> {
 }
 
 fn emit_manifest_builder(manifest: &ManifestSpec) -> TokenStream {
-    // the expression is the configuration's contents, compiled in
-    let registries = manifest.registries.as_ref().map(|config| {
+    // the registries expression is the configuration's contents, compiled in
+    let plugins = manifest.plugins.as_ref().map(|plugins| {
+        let store = plugins.store.as_ref().map(|path| {
+            quote! {
+                .store(::std::path::PathBuf::from(#path))
+            }
+        });
+        let registries = plugins.registries.as_ref().map(|config| {
+            quote! {
+                .registries(omnia::RegistryConfig::contents(#config))
+            }
+        });
         quote! {
-            .registries(omnia::RegistryConfig::contents(#config))
+            #store
+            #registries
         }
     });
 
@@ -146,7 +157,7 @@ fn emit_manifest_builder(manifest: &ManifestSpec) -> TokenStream {
 
     quote! {
         omnia::Manifest::new()
-            #registries
+            #plugins
             #(#guests)*
             #(#mounts)*
     }

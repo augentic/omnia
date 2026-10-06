@@ -5,14 +5,48 @@
 //! [`StoreView`] blanket every host's `add_to_linker` accessor rides
 //! (`StoreView<H> for StoreCtx<B> where B: Provides<H>`).
 
+use std::fmt;
 use std::sync::Arc;
 
 use wasmtime::component::HasData;
 use wasmtime::{StoreLimits, StoreLimitsBuilder};
+use wasmtime_wasi::cli::StdoutStream;
 use wasmtime_wasi::{FsPerms, ResourceTable, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 use wasmtime_wasi_http::{WasiHttpCtxView, WasiHttpView};
 
 use crate::{ChainCtx, Dispatcher, Extensions, HostCtx, MountRegistry, Provides, RuntimeOptions};
+
+/// Where every guest's stdout and stderr go when a deployment redirects
+/// them: one shared stream pair, each store opening a fresh writer onto it.
+///
+/// Unset on a [`StoreConfig`], a guest inherits the process streams. A test
+/// host sets a pair of memory pipes to read a command guest's envelope.
+#[derive(Clone)]
+pub struct Stdio {
+    /// The guest's stdout.
+    pub stdout: Arc<dyn StdoutStream + Sync>,
+    /// The guest's stderr.
+    pub stderr: Arc<dyn StdoutStream + Sync>,
+}
+
+impl Stdio {
+    /// A pair over `stdout` and `stderr`.
+    pub fn new(
+        stdout: impl StdoutStream + Sync + 'static, stderr: impl StdoutStream + Sync + 'static,
+    ) -> Self {
+        Self {
+            stdout: Arc::new(stdout),
+            stderr: Arc::new(stderr),
+        }
+    }
+}
+
+// Manual: the streams carry no `Debug`.
+impl fmt::Debug for Stdio {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("Stdio")
+    }
+}
 
 /// Exposes a store context's [`StoreLimits`] so the runtime can install a
 /// per-guest resource limiter on every [`Store`](wasmtime::Store) it creates.
@@ -49,6 +83,9 @@ pub struct StoreConfig<'a> {
     /// Complete guest environment replacing host inheritance; `None` inherits
     /// the host env.
     pub env: Option<Arc<Vec<(String, String)>>>,
+    /// Where the guest's stdout and stderr go; `None` inherits the process
+    /// streams.
+    pub stdio: Option<Stdio>,
     /// The runtime's installed extensions; [`Extensions::new`] for hand-built
     /// store contexts, where a capability that reads its extension refuses.
     pub extensions: Extensions,
@@ -91,7 +128,8 @@ impl StoreBase {
     ///
     /// Applies the guest environment (the explicit [`env`](StoreConfig::env)
     /// list when set, host inheritance otherwise), inherits stdin, wires
-    /// stdout/stderr to the host streams, applies the configured argv, and caps
+    /// stdout/stderr to the [`stdio`](StoreConfig::stdio) pair when set and
+    /// the host streams otherwise, applies the configured argv, and caps
     /// linear-memory growth.
     #[must_use]
     pub fn new(config: StoreConfig<'_>) -> Self {
@@ -106,7 +144,15 @@ impl StoreBase {
                 wasi_builder.inherit_env();
             }
         }
-        wasi_builder.inherit_stdin().stdout(tokio::io::stdout()).stderr(tokio::io::stderr());
+        wasi_builder.inherit_stdin();
+        match config.stdio {
+            Some(stdio) => {
+                wasi_builder.stdout(stdio.stdout).stderr(stdio.stderr);
+            }
+            None => {
+                wasi_builder.stdout(tokio::io::stdout()).stderr(tokio::io::stderr());
+            }
+        }
         if let Some(args) = &config.args {
             wasi_builder.args(args.as_slice());
         }

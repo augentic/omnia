@@ -54,11 +54,11 @@ The embedder-path variant — `no deployment manifest supplied and OMNIA_MANIFES
 
 ### `no guest ... is declared by this deployment`
 
-A guest called `omnia:plugins/loader.load` with a `declared` name the manifest does not declare. A `declared` load names only `[[guest]]` entries (the macro's `guests:`); add one for the name — a manifest file's entry loads at that first `load` — or, for a component the deployment does not declare, have the guest name its `path` beneath a read-only mount or its `registry` package instead. A runtime built without omnia's `loader` feature has no loader at all: a guest importing it fails at instantiation, and a manifest declaring `registries` or a `source.package` guest is refused at startup until the feature is enabled.
+A guest called `omnia:plugins/loader.load` with a `declared` name the manifest does not declare. A `declared` load names only `[[guest]]` entries (the macro's `guests:`); add one for the name — a manifest file's entry loads at that first `load` — or, for a component the deployment does not declare, have the guest name its `path` beneath a read-only mount or its `registry` package instead. A runtime built without omnia's `loader` feature has no loader at all: a guest importing it fails at instantiation, and a manifest declaring `plugins` or a `source.package` guest is refused at startup until the feature is enabled.
 
 ### `no registry routes ...`
 
-A `source.package` guest (the macro's `package:`) was first used, or a guest named a `registry` package of its own, but the `registries` configuration (`registries: include_str!("wasm-pkg.toml")` in the macro, `[registries] path` in a manifest) is absent or names neither a `default_registry` nor the package's namespace. Add one, pin the package to its registry under `[package_registry_overrides]`, or — for a package a guest names — have the load name its registry `endpoint`, which serves a namespace the configuration routes nowhere.
+A `source.package` guest (the macro's `package:`) was first used, or a guest named a `registry` package of its own; the deployment's store holds no release under that reference, and the `registries` configuration (`plugins: { registries: include_str!("wasm-pkg.toml") }` in the macro, `[plugins] registries.path` in a manifest) is absent or names neither a `default_registry` nor the package's namespace. The refusal names the store file that would have served the release: fetch it there (`wkg get <reference> -o <store>/`) or copy a component under that name, route the namespace, pin the package to its registry under `[package_registry_overrides]`, or — for a package a guest names — have the load name its registry `endpoint`, which serves a namespace the configuration routes nowhere (and is never written to the store, so every such load fetches).
 
 ### `... is routed to ... by the deployment's registries; it cannot be fetched from ...`
 
@@ -68,9 +68,9 @@ A guest named a `registry` package with an `endpoint` other than the registry th
 
 A guest named a component `path` beneath a mount the deployment marks `writable`. A component loads from a read-only mount alone — what a guest can write, it cannot run. Mount the code directory read-only and keep the guest's state under a mount of its own; the two may not share or nest directories (`writable mount ... shares its directory with the read-only mount ...` at startup, judged by directory identity, so a bind mount or firmlink of the code directory counts as it).
 
-### `... would register as ..., a guest this deployment declares`
+### `... is a guest this deployment declares, bound by its entry alone`
 
-A guest named a `path` or `registry` package whose derived name — the path's file stem, the package reference without its version — is a `[[guest]]` the deployment declares, whether or not that guest has loaded yet. A declared name is bound by its entry alone, so nothing a caller names can seat other bytes under it: load the guest as `declared(name)`, or rename the file or the entry so the two no longer collide.
+A guest named a `path` or `registry` package whose derived name — the path's file stem, the package reference without its version — is a `[[guest]]` the deployment declares, whether or not that guest has loaded yet; or an embedder called `Runtime::register` or `Runtime::admit` under such a name. A declared name is bound by its entry alone, on every admission path, so nothing a caller names can seat other bytes under it: load the guest as `declared(name)`, or rename the file or the entry so the two no longer collide.
 
 ### `... resolved to sha256:..., not its declared digest ...`
 

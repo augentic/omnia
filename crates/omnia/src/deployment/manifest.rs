@@ -18,9 +18,10 @@
 //! command drive, a link call, a host dispatch, or the guest loader names
 //! it. An entry may pin the `digest` its bytes must hash to; the format it
 //! admits follows from the source (see [`SourceSpec`]). Each guest's
-//! `routes` tables and the `[registries]` configuration that routes package
-//! sources are consumed too. Distributed `[transport]` is not yet
-//! implemented: only the in-process default is accepted.
+//! `routes` tables and the `[plugins]` table — the package store and the
+//! `registries` configuration that routes package sources — are consumed
+//! too. Distributed `[transport]` is not yet implemented: only the
+//! in-process default is accepted.
 
 use std::borrow::Cow;
 use std::collections::BTreeSet;
@@ -38,8 +39,7 @@ use serde::Deserialize;
 /// declare what the build serves.
 #[derive(Clone, Copy, Debug)]
 pub struct Features {
-    /// The `loader` feature (the `[registries]` configuration and package
-    /// sources).
+    /// The `loader` feature (the `[plugins]` table and package sources).
     pub loader: bool,
 }
 
@@ -51,7 +51,7 @@ impl Features {
 }
 
 /// The deployment manifest: every guest that may run, what they mount, and
-/// where package sources are fetched from.
+/// where packages are kept and fetched from.
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Manifest {
@@ -61,9 +61,10 @@ pub struct Manifest {
     /// Working-tree mounts preopened into the guest sandbox.
     #[serde(rename = "mount")]
     pub mounts: Vec<Mount>,
-    /// Where the wasm-pkg client configuration that routes package sources
-    /// comes from; absent, every package source is refused.
-    pub registries: Option<RegistryConfig>,
+    /// The package store and the registry routing every package — a
+    /// declared `source.package` or one a guest loads — is acquired through;
+    /// absent, every package is refused.
+    pub plugins: Option<PluginsConfig>,
     /// Transport configuration for host-mediated calls.
     pub transport: Transport,
 }
@@ -126,11 +127,27 @@ impl Manifest {
         self
     }
 
+    /// Set the `[plugins]` table: the package store and the registry routing.
+    #[must_use]
+    pub fn plugins(mut self, config: PluginsConfig) -> Self {
+        self.plugins = Some(config);
+        self
+    }
+
     /// Set where the wasm-pkg client configuration comes from (the manifest's
-    /// `[registries]` table): the routing of every package source.
+    /// `[plugins] registries`): the routing of every package.
     #[must_use]
     pub fn registries(mut self, config: impl Into<RegistryConfig>) -> Self {
-        self.registries = Some(config.into());
+        self.plugins.get_or_insert_default().registries = Some(config.into());
+        self
+    }
+
+    /// Set the package store (the manifest's `[plugins] store`): the
+    /// directory every acquired package is read from first and written to
+    /// once.
+    #[must_use]
+    pub fn store(mut self, root: impl Into<PathBuf>) -> Self {
+        self.plugins.get_or_insert_default().store = Some(root.into());
         self
     }
 
@@ -143,7 +160,7 @@ impl Manifest {
     /// Returns an error if a `[[guest]]` entry names no guest or repeats a
     /// name, no entry exists when `allow_empty` is false, more than one entry
     /// is the command guest, the transport is not in-process, or the manifest
-    /// declares `registries` or a package source that `features` lacks the
+    /// declares `[plugins]` or a package source that `features` lacks the
     /// `loader` to serve.
     pub fn validate(&self, allow_empty: bool, features: Features) -> Result<()> {
         let mut names = BTreeSet::new();
@@ -179,9 +196,9 @@ impl Manifest {
         }
         // refuse policy the compiled runtime cannot serve, rather than never install it
         if !features.loader {
-            if self.registries.is_some() {
+            if self.plugins.is_some() {
                 bail!(
-                    "this runtime was built without the `loader` feature; remove `registries` or \
+                    "this runtime was built without the `loader` feature; remove `plugins` or \
                      enable the feature on the `omnia` dependency (`features = [\"loader\"]`)"
                 );
             }
@@ -230,15 +247,55 @@ impl Manifest {
             }
         }
         for mount in &mut self.mounts {
-            if mount.path.is_relative() {
+            if mount.path.is_relative() && !is_home_relative(&mount.path) {
                 mount.path = base.join(&mount.path);
             }
         }
-        if let Some(RegistryConfig::Path(path)) = &mut self.registries
-            && path.is_relative()
-        {
-            *path = base.join(&*path);
+        if let Some(plugins) = &mut self.plugins {
+            if let Some(RegistryConfig::Path(path)) = &mut plugins.registries
+                && path.is_relative()
+            {
+                *path = base.join(&*path);
+            }
+            if let Some(store) = &mut plugins.store
+                && store.is_relative()
+                && !is_home_relative(store)
+            {
+                *store = base.join(&*store);
+            }
         }
+    }
+
+    /// Expand a leading `~/` in every mount path and the package store
+    /// against `$HOME` — `~/` alone, never `~user/` — so a deployment names
+    /// the operator's home without knowing it.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a path starts with `~/` and `$HOME` is unset.
+    pub fn expand_home(&mut self) -> Result<()> {
+        let mut home = None;
+        let mut expand = |path: &mut PathBuf| -> Result<()> {
+            let Ok(rest) = path.strip_prefix("~") else {
+                return Ok(());
+            };
+            let home =
+                match &home {
+                    Some(home) => home,
+                    None => home.insert(std::env::var_os("HOME").map(PathBuf::from).with_context(
+                        || format!("expanding `{}`: HOME is unset", path.display()),
+                    )?),
+                };
+            *path = home.join(rest);
+            Ok(())
+        };
+        for mount in &mut self.mounts {
+            expand(&mut mount.path)?;
+        }
+        if let Some(store) = self.plugins.as_mut().and_then(|plugins| plugins.store.as_mut()) {
+            expand(store)?;
+        }
+        Ok(())
     }
 
     /// The wasm-pkg client configuration as TOML text: a `Path` read now, or
@@ -248,8 +305,9 @@ impl Manifest {
     ///
     /// Returns an error if the configuration is a `Path` that cannot be read.
     pub fn registry_config(&self) -> Result<Option<String>> {
-        self.registries
+        self.plugins
             .as_ref()
+            .and_then(|plugins| plugins.registries.as_ref())
             .map(|config| match config {
                 RegistryConfig::Path(path) => fs::read_to_string(path).with_context(|| {
                     format!("reading the `registries` configuration {}", path.display())
@@ -257,6 +315,13 @@ impl Manifest {
                 RegistryConfig::Contents(contents) => Ok(contents.to_string()),
             })
             .transpose()
+    }
+
+    /// The package store's directory, as the manifest names it; `None` when
+    /// it names none, where a fetched package is kept nowhere.
+    #[must_use]
+    pub fn store_root(&self) -> Option<&Path> {
+        self.plugins.as_ref().and_then(|plugins| plugins.store.as_deref())
     }
 
     /// Resolve every `[[guest]]` into its loadable source, in declaration
@@ -298,14 +363,43 @@ impl Manifest {
     }
 }
 
-/// Where the wasm-pkg client configuration comes from: the `[registries]`
-/// table of a manifest names a `path`; the `runtime!` macro and the
-/// programmatic API carry the `contents`.
+// a path the deployment names relative to the operator's home, expanded at
+// assembly rather than against the manifest's directory
+fn is_home_relative(path: &Path) -> bool {
+    path.starts_with("~")
+}
+
+/// The `[plugins]` table: where acquired packages are kept and how they are
+/// routed to a registry.
+///
+/// Every package — a declared `source.package` at its first use, a package a
+/// guest loads — is read from the `store` first and, when it is not there,
+/// fetched from the registry `registries` routes it to and written to the
+/// store once. A deployment naming neither refuses every package.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(default, deny_unknown_fields)]
+pub struct PluginsConfig {
+    /// The package store: one directory, each release filed as
+    /// `namespace_name@version.wasm`. A leading `~/` is the operator's home;
+    /// [`Manifest::load`] resolves another relative path against the
+    /// manifest's directory. It need not exist until a package is written,
+    /// and may not lie beneath a writable mount. Absent, a fetched package is
+    /// kept nowhere.
+    pub store: Option<PathBuf>,
+    /// Where the wasm-pkg client configuration that routes packages comes
+    /// from; absent, a package the store does not hold is refused.
+    pub registries: Option<RegistryConfig>,
+}
+
+/// Where the wasm-pkg client configuration comes from: the `[plugins]`
+/// table of a manifest names a `registries.path`; the `runtime!` macro and
+/// the programmatic API carry the `contents`.
 ///
 /// The configuration is the schema of `wkg`'s own `config.toml`: a
 /// `default_registry`, `namespace_registries` and `package_registry_overrides`
 /// routing past it, and per-registry backend settings. It alone routes a
-/// guest's package source; one it routes nowhere is refused.
+/// package to a registry; one it routes nowhere, and the store lacks, is
+/// refused.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum RegistryConfig {
@@ -676,46 +770,94 @@ mod tests {
     }
 
     #[test]
-    fn parse_and_resolve_registries() {
+    fn parse_and_resolve_plugins() {
         let toml = r#"
             [[guest]]
             name = "engine"
             source.path = "./engine.wasm"
 
-            [registries]
-            path = "wasm-pkg.toml"
+            [plugins]
+            store = "store"
+            registries.path = "wasm-pkg.toml"
         "#;
 
         let mut manifest: Manifest = toml::from_str(toml).expect("manifest should parse");
         manifest.resolve_paths(Path::new("/deploy/app"));
         // relative resolves against the manifest's directory, like a source or mount
         assert_eq!(
-            manifest.registries,
-            Some(RegistryConfig::Path(PathBuf::from("/deploy/app/wasm-pkg.toml")))
+            manifest.plugins,
+            Some(PluginsConfig {
+                store: Some(PathBuf::from("/deploy/app/store")),
+                registries: Some(RegistryConfig::Path(PathBuf::from("/deploy/app/wasm-pkg.toml"))),
+            })
         );
-        manifest
-            .validate(false, Features { loader: true })
-            .expect("a registries configuration is allowed");
+        assert_eq!(manifest.store_root(), Some(Path::new("/deploy/app/store")));
+        manifest.validate(false, Features { loader: true }).expect("a plugins table is allowed");
+    }
+
+    // The retired top-level `[registries]` table is an unknown key like any
+    // other; the routing lives under `[plugins]`.
+    #[test]
+    fn reject_top_level_registries() {
+        let toml = "[[guest]]\nname = \"a\"\nsource.path = \"./a.wasm\"\n\n\
+             [registries]\npath = \"wasm-pkg.toml\"\n";
+        toml::from_str::<Manifest>(toml).unwrap_err();
     }
 
     #[test]
-    fn registries_without_loader_feature() {
+    fn plugins_without_loader_feature() {
         let manifest = Manifest::new()
             .guest(GuestEntry::new("a", "./a.wasm"))
             .registries("default_registry = \"ghcr.io\"\n");
         let error = manifest
             .validate(false, Features { loader: false })
-            .expect_err("registries need the loader feature");
+            .expect_err("a plugins table needs the loader feature");
         assert!(error.to_string().contains("without the `loader` feature"), "{error}");
+
+        let manifest = Manifest::new().guest(GuestEntry::new("a", "./a.wasm")).store("store");
+        manifest.validate(false, Features { loader: false }).expect_err("a store needs it too");
     }
 
-    // A `[registries]` table names a path; the contents variant is the
+    // A `[plugins] registries` names a path; the contents variant is the
     // macro's and the programmatic API's alone.
     #[test]
     fn reject_registries_contents_in_toml() {
         let toml = "[[guest]]\nname = \"a\"\nsource.path = \"./a.wasm\"\n\n\
-             [registries]\ncontents = \"default_registry = 'ghcr.io'\"\n";
+             [plugins]\nregistries.contents = \"default_registry = 'ghcr.io'\"\n";
         toml::from_str::<Manifest>(toml).unwrap_err();
+    }
+
+    // `~/` is the operator's home, left alone by the manifest's directory and
+    // expanded at assembly; `~user/` is nobody's.
+    #[test]
+    fn home_relative_paths() {
+        let toml = r#"
+            [[guest]]
+            name = "engine"
+            source.path = "./engine.wasm"
+
+            [[mount]]
+            name = "home"
+            path = "~/work"
+
+            [[mount]]
+            name = "other"
+            path = "~other/work"
+
+            [plugins]
+            store = "~/.app/store"
+        "#;
+        let mut manifest: Manifest = toml::from_str(toml).expect("manifest should parse");
+        manifest.resolve_paths(Path::new("/deploy/app"));
+        assert_eq!(manifest.mounts[0].path, PathBuf::from("~/work"));
+        assert_eq!(manifest.mounts[1].path, PathBuf::from("/deploy/app/~other/work"));
+        assert_eq!(manifest.store_root(), Some(Path::new("~/.app/store")));
+
+        let home = std::env::var_os("HOME").map(PathBuf::from).expect("HOME is set under test");
+        manifest.expand_home().expect("HOME is set");
+        assert_eq!(manifest.mounts[0].path, home.join("work"));
+        assert_eq!(manifest.mounts[1].path, PathBuf::from("/deploy/app/~other/work"));
+        assert_eq!(manifest.store_root(), Some(home.join(".app/store").as_path()));
     }
 
     // The two carriers materialize the same way: a path is read, contents

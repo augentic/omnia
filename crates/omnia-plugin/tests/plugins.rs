@@ -20,8 +20,8 @@ use omnia::wasmtime::Engine;
 use omnia::wasmtime::component::Val;
 use omnia::{
     AcquireError, ChainCtx, CompileOptions, DeploymentBuilder, Digest, ExitStatus, GuestEntry,
-    GuestId, LoadError, Location, Manifest, Mode, PluginLoader as _, RegistryClient,
-    RegistryConfig, RegistrySource, Runtime, SourceSpec, StoreCtx,
+    GuestId, LoadError, Location, Manifest, Mode, Mount, NoStore, PluginLoader as _, PluginsConfig,
+    RegistryClient, RegistryConfig, RegistrySource, Runtime, SourceSpec, StoreCtx,
 };
 use omnia_test::host::{Backends, Scratch, scratch};
 use omnia_wasi_otel::WasiOtel;
@@ -392,7 +392,7 @@ async fn plugins_load_package() {
 async fn custom_registry_source() {
     let scratch = scratch();
     stage_package(scratch.path(), ECHOER_PACKAGE, test_programs::LINK_ECHOER);
-    let client = RegistryClient::from_toml(&local_registry_toml(scratch.path()))
+    let client = RegistryClient::from_toml(Some(&local_registry_toml(scratch.path())), NoStore)
         .expect("the local registry configuration parses");
 
     let manifest = requester(test_programs::PLUGINS_LOAD).guest(echoer_package());
@@ -434,8 +434,8 @@ async fn plugins_refused() {
     let rows: [(&str, GuestEntry, &str, &str); 4] = [
         ("junk", GuestEntry::new("junk", junk), "refused", "validating `junk`"),
         ("absent", GuestEntry::new("absent", absent), "unavailable", "reading"),
-        // no `registries` at all: nothing routes any package
-        (ECHOER_NAME, echoer_package(), "refused", "no registry routes `test:echoer`"),
+        // no `plugins` at all: nothing routes any package, and no store holds one
+        (ECHOER_NAME, echoer_package(), "refused", "no registry routes `test:echoer@1.0.0`"),
         // a guest declared under another name is still just a name
         (
             "nonesuch",
@@ -866,30 +866,28 @@ async fn pinned_reload() {
     runtime.shutdown();
 }
 
-// An identity the embedder re-registered outside the load path is active, so
-// a load attests it as it stands — with the digest `Runtime::register`
-// recorded for the re-registered bytes — rather than re-binding or
-// re-admitting it from the declared source.
+// A declared name is bound by its entry alone on every admission path, the
+// embedder's `Runtime::register` included: other bytes cannot seat under a
+// deregistered declared name for the next declared load to attest, so that
+// load reaches the entry's own source again.
 #[tokio::test]
-async fn reregister_attests() {
+async fn reregister_refused() {
     let manifest = requester(test_programs::PLUGINS_LOAD)
         .guest(GuestEntry::new("plugin", test_programs::LINK_ECHOER));
     let runtime = boot(manifest, &[]).await.expect("assembling runtime");
 
     let first = runtime.load(declared("plugin"), None).await.expect("first load");
     runtime.deregister(first.id()).expect("deregistering the loaded plugin");
-    let reregistered = changed_echoer(b"reregister");
-    runtime.register("plugin", reregistered.clone()).await.expect("re-registering externally");
+    let refused = runtime
+        .register("plugin", changed_echoer(b"reregister"))
+        .await
+        .expect_err("a declared name is its entry's alone");
+    assert!(format!("{refused:#}").contains("declares"), "{refused:#}");
+    assert_eq!(recorded(&runtime, "plugin"), Registered::Absent, "nothing seated under the name");
 
-    let attested =
-        runtime.load(declared("plugin"), None).await.expect("an active identity attests");
-    assert_eq!(attested.id(), first.id());
-    assert_eq!(
-        attested.digest(),
-        Digest::of(&reregistered),
-        "the embedder's registration recorded its bytes' digest"
-    );
-    assert_ne!(attested.digest(), first.digest(), "the declared source was not re-admitted");
+    let reloaded = runtime.load(declared("plugin"), None).await.expect("the entry loads again");
+    assert_eq!(reloaded.id(), first.id());
+    assert_eq!(reloaded.digest(), first.digest(), "the declared source was re-admitted");
     runtime.shutdown();
 }
 
@@ -912,9 +910,9 @@ fn wit_copies_stay_identical() {
 
 // Compile-time proof that the macro's inline keys lower into the manifest
 // data this crate consumes: a `package` guest with a `digest`, named by its
-// reference, and the `registries` contents that route it. The macro's
-// snapshot suite pins the expansion shape; this pins the types and the
-// carried data.
+// reference, and the `plugins` block with the store that keeps it and the
+// `registries` contents that route it. The macro's snapshot suite pins the
+// expansion shape; this pins the types and the carried data.
 mod loader_grammar {
     omnia::runtime!({
         guests: [
@@ -923,7 +921,10 @@ mod loader_grammar {
                 digest: "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
             },
         ],
-        registries: "default_registry = \"ghcr.io\"\n",
+        plugins: {
+            store: "~/.app/store",
+            registries: "default_registry = \"ghcr.io\"\n",
+        },
     });
 }
 
@@ -934,8 +935,12 @@ fn loader_grammar() {
     let _ = (loader_grammar::main, loader_grammar::run, loader_grammar::run_with::<()>);
     let manifest = loader_grammar::manifest().into_manifest().expect("inline source resolves");
     assert_eq!(
-        manifest.registries,
-        Some(RegistryConfig::contents("default_registry = \"ghcr.io\"\n"))
+        manifest.plugins,
+        Some(PluginsConfig {
+            store: Some(PathBuf::from("~/.app/store")),
+            registries: Some(RegistryConfig::contents("default_registry = \"ghcr.io\"\n")),
+        }),
+        "the store is carried as written; `~/` expands when the deployment builds"
     );
     let [tool] = manifest.guests.as_slice() else {
         panic!("one guest: {:?}", manifest.guests);
@@ -943,6 +948,204 @@ fn loader_grammar() {
     assert_eq!(tool.name, "acme:tool", "the reference without its version");
     assert_eq!(tool.digest, Some(Digest::of(b"")), "the empty input's digest, as written");
     assert!(matches!(&tool.source, SourceSpec::Package(package) if package == "acme:tool@1.2.3"));
+}
+
+// the file the deployment's store keeps the echoer package under
+const ECHOER_STORED: &str = "test_echoer@1.0.0.wasm";
+
+fn store_root(scratch: &Scratch) -> PathBuf {
+    scratch.path().join("store")
+}
+
+// A package a guest names is fetched once: the first start writes the
+// release to the store after hashing it, and the second start serves it from
+// there with no registry routed at all — the store is the one place a
+// package's bytes come from once it holds them.
+#[tokio::test]
+async fn second_start_fetches_nothing() {
+    let scratch = scratch();
+    let store = store_root(&scratch);
+    stage_package(scratch.path(), ECHOER_PACKAGE, test_programs::LINK_ECHOER);
+
+    let manifest = requester(test_programs::PLUGINS_LOAD)
+        .store(&store)
+        .registries(RegistryConfig::contents(local_registry_toml(scratch.path())));
+    assert!(!store.exists(), "the store is created on first use");
+    let status = run(manifest, &["registry", ECHOER_PACKAGE]).await.expect("deployment runs");
+    assert_eq!(status, ExitStatus::SUCCESS, "the requester's assertions all held");
+    assert_eq!(
+        Digest::of(&std::fs::read(store.join(ECHOER_STORED)).expect("the release was written")),
+        digest_of(test_programs::LINK_ECHOER),
+        "the fetched release is stored under its reference"
+    );
+
+    // nothing routes the package now; the store alone answers
+    let manifest = requester(test_programs::PLUGINS_LOAD).store(&store);
+    let status = run(manifest, &["registry", ECHOER_PACKAGE]).await.expect("deployment runs");
+    assert_eq!(status, ExitStatus::SUCCESS, "the stored release loaded");
+}
+
+// A release copied into the store under its reference loads with no registry
+// configured, held to the pin the load carries; one under any other name is
+// not a stored release, and the refusal names the namespace, the store, and
+// the file it would have read.
+#[tokio::test]
+async fn stored_release() {
+    let scratch = scratch();
+    let store = store_root(&scratch);
+    std::fs::create_dir_all(&store).expect("creating the store");
+    std::fs::copy(test_programs::LINK_ECHOER, store.join(ECHOER_STORED))
+        .expect("copying the release into the store");
+    let digest = digest_of(test_programs::LINK_ECHOER).to_string();
+
+    let manifest = requester(test_programs::PLUGINS_LOAD).store(&store);
+    let status =
+        run(manifest, &["registry", ECHOER_PACKAGE, &digest]).await.expect("deployment runs");
+    assert_eq!(status, ExitStatus::SUCCESS, "the copied release loaded, pinned");
+
+    let other = Digest::of(b"other bytes").to_string();
+    let manifest = requester(test_programs::PLUGINS_REFUSED).store(&store);
+    let status =
+        run(manifest, &["registry", ECHOER_PACKAGE, "refused", "not its declared digest", &other])
+            .await
+            .expect("deployment runs");
+    assert_eq!(status, ExitStatus::SUCCESS, "a mismatched pin is refused against the store");
+
+    let off_reference = store_root(&scratch).join("off-reference");
+    std::fs::create_dir_all(&off_reference).expect("creating the store");
+    for name in ["test:echoer@1.0.0.wasm", "echoer.wasm", ".wkg-get-test_echoer@1.0.0.wasm"] {
+        std::fs::copy(test_programs::LINK_ECHOER, off_reference.join(name))
+            .expect("copying an off-reference file");
+    }
+    let needle = format!("the store `{}` holds no `{ECHOER_STORED}`", off_reference.display());
+    let manifest = requester(test_programs::PLUGINS_REFUSED).store(&off_reference);
+    let status = run(manifest, &["registry", ECHOER_PACKAGE, "refused", &needle])
+        .await
+        .expect("deployment runs");
+    assert_eq!(status, ExitStatus::SUCCESS, "nothing off-reference was read");
+}
+
+// A pre-compiled release a registry serves is refused before it is written,
+// so the store holds nothing a later start would load.
+#[tokio::test]
+async fn precompiled_package_never_stored() {
+    let scratch = scratch();
+    let store = store_root(&scratch);
+    let plugin_bin = precompile(&scratch, "plugin.bin", test_programs::LINK_ECHOER);
+    stage_package(scratch.path(), ECHOER_PACKAGE, plugin_bin.to_str().expect("a utf-8 path"));
+
+    let manifest = requester(test_programs::PLUGINS_REFUSED)
+        .store(&store)
+        .registries(RegistryConfig::contents(local_registry_toml(scratch.path())));
+    let status = run(manifest, &["registry", ECHOER_PACKAGE, "refused", "pre-compiled"])
+        .await
+        .expect("deployment runs");
+    assert_eq!(status, ExitStatus::SUCCESS, "the requester's assertions all held");
+    assert!(!store.join(ECHOER_STORED).exists(), "nothing was written to the store");
+}
+
+// A release fetched from the registry a load names, for a namespace the
+// deployment routes nowhere, is served to that load and kept nowhere: the
+// store holds the deployment's word alone. Otherwise a loading guest could
+// plant bytes of its choosing under a reference the deployment later
+// acquires on its own, where the store answers before the routing refusal.
+#[tokio::test]
+async fn named_endpoint_never_stored() {
+    let scratch = scratch();
+    let store = store_root(&scratch);
+    let planted = scratch.path().join("planted.wasm");
+    std::fs::write(&planted, changed_echoer(b"planted")).expect("staging the planted release");
+    stage_package(scratch.path(), ECHOER_PACKAGE, planted.to_str().expect("a utf-8 path"));
+
+    let manifest = requester(test_programs::PLUGINS_LOAD)
+        .store(&store)
+        .registries(RegistryConfig::contents(local_backend_toml(scratch.path())));
+    let status =
+        run(manifest, &["registry@registry.test", ECHOER_PACKAGE]).await.expect("deployment runs");
+    assert_eq!(status, ExitStatus::SUCCESS, "the load was served from the registry it named");
+    assert!(!store.join(ECHOER_STORED).exists(), "the named registry's release was not stored");
+
+    // with nothing routed and nothing named, the refusal stands: the store
+    // did not learn the reference
+    let manifest = requester(test_programs::PLUGINS_REFUSED).store(&store);
+    let status = run(manifest, &["registry", ECHOER_PACKAGE, "refused", "`test` namespace"])
+        .await
+        .expect("deployment runs");
+    assert_eq!(status, ExitStatus::SUCCESS, "the routing refusal was not bypassed");
+}
+
+// The store is where loaded code comes from, so it is refused beneath a
+// writable mount at assembly — whether the directory exists yet or not,
+// since a guest could create it through the mount.
+#[tokio::test]
+async fn store_beneath_writable_refused() {
+    let scratch = scratch();
+    let present = scratch.path().join("present");
+    std::fs::create_dir_all(&present).expect("creating the present store");
+    let absent = scratch.path().join("missing").join("store");
+
+    for store in [present, absent] {
+        let manifest =
+            requester(test_programs::PLUGINS_LOAD).store(&store).mounts([scratch.mount(true)]);
+        let Err(error) = deployment(manifest, &["declared", "requester"]).await else {
+            panic!("a store beneath a writable mount at {} is refused", store.display());
+        };
+        let message = format!("{error:#}");
+        assert!(
+            message.contains("beneath the writable mount `.`")
+                && message.contains(&store.display().to_string()),
+            "refusal names the mount and the store: {message}"
+        );
+    }
+
+    // beside the mount, or beneath a read-only one, it stands
+    let beside = store_root(&scratch);
+    let manifest =
+        requester(test_programs::PLUGINS_LOAD).store(&beside).mounts([scratch.mount(false)]);
+    assert!(
+        deployment(manifest, &["declared", "requester"]).await.is_ok(),
+        "a read-only mount is fine"
+    );
+}
+
+// A leading `~/` on the store or a mount is the operator's home, expanded
+// against `$HOME` when the deployment builds — here overlaid onto the
+// scratch directory, so the release staged beneath it is what loads.
+#[tokio::test]
+async fn home_relative_store() {
+    let scratch = scratch();
+    let store = store_root(&scratch);
+    std::fs::create_dir_all(&store).expect("creating the store");
+    std::fs::copy(test_programs::LINK_ECHOER, store.join(ECHOER_STORED))
+        .expect("copying the release into the store");
+    std::fs::create_dir_all(scratch.path().join("work")).expect("creating the mount");
+
+    // SAFETY: nextest runs each test in a process of its own, so no other
+    // thread reads the environment while it is written.
+    #[expect(unsafe_code, reason = "the operator's home is the process environment's")]
+    unsafe {
+        std::env::set_var("HOME", scratch.path());
+    }
+
+    let manifest = requester(test_programs::PLUGINS_LOAD).store("~/store").mounts([Mount {
+        name: "work".to_owned(),
+        path: PathBuf::from("~/work"),
+        writable: false,
+    }]);
+    let deployment =
+        deployment(manifest, &["registry", ECHOER_PACKAGE]).await.expect("building deployment");
+    let mounts = deployment.mounts();
+    let work = mounts.entries().iter().find(|mount| mount.name == "work").expect("the mount");
+    assert_eq!(
+        work.host_path.canonicalize().expect("the mount exists"),
+        scratch.path().join("work").canonicalize().expect("the directory exists"),
+        "the mount expanded against the overlaid home"
+    );
+    let runtime =
+        deployment.assemble(Backends::defaults().await).await.expect("assembling runtime");
+    let status = runtime.run_command().await.expect("deployment runs");
+    assert_eq!(status, ExitStatus::SUCCESS, "the release under the expanded store loaded");
+    runtime.shutdown();
 }
 
 // `RegistrySource` stays the seam an embedder fills: a source of its own is

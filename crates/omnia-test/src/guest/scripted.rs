@@ -304,6 +304,7 @@ pub struct ScriptedLoader {
 struct LoaderInner {
     declared: Mutex<BTreeSet<String>>,
     digests: Mutex<BTreeMap<String, Digest>>,
+    exports: Mutex<BTreeMap<String, Vec<String>>>,
     default: Mutex<Option<Digest>>,
     refusals: Mutex<BTreeMap<String, plugins::Error>>,
     loads: Mutex<Vec<(Location, Option<Digest>)>>,
@@ -343,6 +344,24 @@ impl ScriptedLoader {
     #[must_use]
     pub fn defaulting(self, digest: Digest) -> Self {
         *self.inner.default.lock().expect("default lock") = Some(digest);
+        self
+    }
+
+    /// Lists `exports` on the handle every load of the name `name` answers;
+    /// a name scripted none answers an empty list.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a lock is poisoned.
+    #[must_use]
+    pub fn exporting(
+        self, name: impl Into<String>, exports: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        self.inner
+            .exports
+            .lock()
+            .expect("exports lock")
+            .insert(name.into(), exports.into_iter().map(Into::into).collect());
         self
     }
 
@@ -402,7 +421,9 @@ impl ScriptedLoader {
                 "`{from}` resolved to {resolved}, not its pinned digest {pin}"
             )));
         }
-        Ok(Plugin::new(name, resolved))
+        let exports =
+            self.inner.exports.lock().expect("exports lock").get(name).cloned().unwrap_or_default();
+        Ok(Plugin::new(name, resolved, exports))
     }
 }
 

@@ -1,6 +1,6 @@
 ---
 source: crates/host-macros/src/runtime.rs
-expression: "expand_pretty(quote!({ registries: include_str!(\"wasm-pkg.toml\"), }))"
+expression: "expand_pretty(quote!({\n    plugins: { registries: include_str!(\"wasm-pkg.toml\") },\n}))"
 ---
 mod runtime {
     use omnia::anyhow::Result;

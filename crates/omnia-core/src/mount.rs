@@ -22,7 +22,7 @@
 //! [`WasiCtxBuilder::preopened_dir`]: wasmtime_wasi::WasiCtxBuilder::preopened_dir
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context as _, Result};
@@ -136,6 +136,51 @@ impl MountRegistry {
     pub fn match_identity(&self, dev: u64, ino: u64) -> Option<&Mount> {
         self.entries.iter().find(|entry| entry.identity == (dev, ino))
     }
+
+    /// The writable mount `path` lies at or beneath, if any — told by
+    /// directory identity, not by spelling, so a second path to one
+    /// directory is the same directory here.
+    ///
+    /// A path that does not exist yet is placed by its nearest existing
+    /// ancestor, so a directory a guest could create through a writable
+    /// mount is beneath it before it is there.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if no ancestor of `path` exists, or one cannot be
+    /// identified.
+    pub fn beneath_writable(&self, path: &Path) -> Result<Option<&Mount>> {
+        let lineage = Self::ancestry(path)?;
+        Ok(self.entries.iter().find(|mount| mount.writable && lineage.contains(&mount.identity)))
+    }
+
+    /// The `(device, inode)` identity of `path`'s nearest existing ancestor
+    /// (`path` itself when it exists) and of every directory above it,
+    /// nearest first. A relative `path` is placed against the current
+    /// directory.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if no ancestor of `path` exists, or one cannot be
+    /// identified.
+    pub fn ancestry(path: &Path) -> Result<Vec<(u64, u64)>> {
+        let absolute = std::path::absolute(path)
+            .with_context(|| format!("placing {} in the current directory", path.display()))?;
+        let existing = absolute
+            .ancestors()
+            .find(|dir| dir.exists())
+            .with_context(|| format!("no ancestor of {} exists", absolute.display()))?;
+        let canonical =
+            existing.canonicalize().with_context(|| format!("resolving {}", existing.display()))?;
+        canonical
+            .ancestors()
+            .map(|dir| {
+                let meta = std::fs::metadata(dir)
+                    .with_context(|| format!("identifying {}", dir.display()))?;
+                Ok((meta.dev(), meta.ino()))
+            })
+            .collect()
+    }
 }
 
 // The winner keeps the position of its name's first occurrence, so the order
@@ -235,6 +280,41 @@ mod tests {
         let entry = &registry.entries()[0];
         assert_eq!(entry.host_path, cli_root, "the last entry wins");
         assert!(entry.writable, "the winning entry's permissions apply");
+    }
+
+    // a path beneath a writable mount is placed by identity whether or not it
+    // exists yet; one beneath a read-only mount, or beside every mount, is not
+    #[test]
+    fn beneath_writable_by_ancestor() {
+        let root = temp_root("beneath");
+        let aside = temp_root("beside");
+        let registry = MountRegistry::open(vec![
+            ResolvedPreopen::new(".".to_owned(), root.clone(), true),
+            ResolvedPreopen::new("aside".to_owned(), aside.clone(), false),
+        ])
+        .expect("opening registry");
+
+        let present = root.join("store");
+        std::fs::create_dir(&present).expect("creating the present store");
+        let absent = root.join("missing").join("store");
+        for path in [&present, &absent, &root] {
+            let mount = registry.beneath_writable(path).expect("placed").expect("beneath `.`");
+            assert_eq!(mount.name, ".", "{}", path.display());
+        }
+        assert!(registry.beneath_writable(&aside.join("store")).expect("placed").is_none());
+        assert!(registry.beneath_writable(&std::env::temp_dir()).expect("placed").is_none());
+        MountRegistry::ancestry(Path::new("/no/such/root/anywhere")).expect("the root exists");
+    }
+
+    // a relative store that does not exist yet is placed under the current
+    // directory, not refused for its empty parent
+    #[test]
+    fn ancestry_of_relative_path() {
+        let relative = Path::new("omnia-reg-no-such-store").join("store");
+        let placed = MountRegistry::ancestry(&relative).expect("the current directory exists");
+        let cwd = std::env::current_dir().expect("a current directory");
+        assert_eq!(placed, MountRegistry::ancestry(&cwd.join(&relative)).expect("placed"));
+        assert_eq!(placed[0], identity_of(&cwd), "the nearest existing ancestor is the cwd");
     }
 
     #[test]

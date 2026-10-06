@@ -107,18 +107,27 @@ pub struct Guest<T: 'static> {
     id: GuestId,
     target: Target<T>,
     digest: Digest,
+    exports: Arc<[String]>,
 }
 
 impl<T: 'static> Guest<T> {
     /// Create a guest backed by a local pre-instantiated component, recording
     /// the content digest of the bytes it was loaded from so the attestation
-    /// lives and dies with the registry entry itself.
+    /// lives and dies with the registry entry itself, and the names the
+    /// component exports.
     #[must_use]
-    pub const fn local(id: GuestId, instance_pre: InstancePre<T>, digest: Digest) -> Self {
+    pub fn local(id: GuestId, instance_pre: InstancePre<T>, digest: Digest) -> Self {
+        let component = instance_pre.component();
+        let exports = component
+            .component_type()
+            .exports(component.engine())
+            .map(|(name, _)| name.to_owned())
+            .collect();
         Self {
             id,
             target: Target::Local(instance_pre),
             digest,
+            exports,
         }
     }
 
@@ -132,6 +141,15 @@ impl<T: 'static> Guest<T> {
     #[must_use]
     pub const fn digest(&self) -> Digest {
         self.digest
+    }
+
+    /// The names the component exports — its interfaces
+    /// (`wasi:cli/run@0.2.0`) and bare functions — as the component type
+    /// lists them, so a caller can tell what a guest serves before any
+    /// dispatch.
+    #[must_use]
+    pub const fn exports(&self) -> &Arc<[String]> {
+        &self.exports
     }
 
     /// Returns the guest's pre-instantiated component, ready to instantiate
@@ -367,7 +385,7 @@ impl<T: 'static> Registry<T> {
     /// deregister + register), discarding the pending endpoint; on refusal the
     /// registry map is untouched, so a failed registration leaves no partial
     /// state.
-    pub(crate) fn publish(&self, guest: Guest<T>) -> Result<(), PublishError> {
+    pub(crate) fn publish(&self, guest: Arc<Guest<T>>) -> Result<(), PublishError> {
         let id = guest.id().clone();
 
         // lifecycle write first, then the inner maps
@@ -376,12 +394,12 @@ impl<T: 'static> Registry<T> {
         match guests.entry(id.clone()) {
             btree_map::Entry::Occupied(_) => {
                 self.seam.discard(&id);
-                return Err(PublishError::Occupied(id));
+                return Err(PublishError::Occupied);
             }
             btree_map::Entry::Vacant(slot) => {
                 // seam before entry, so a refused publish leaves the map untouched
                 self.seam.publish(&id).map_err(PublishError::Transport)?;
-                slot.insert(Arc::new(guest));
+                slot.insert(guest);
             }
         }
         drop(guests);
@@ -436,7 +454,7 @@ impl<T: 'static> Registry<T> {
 #[derive(Debug)]
 pub enum PublishError {
     /// The identity is already registered.
-    Occupied(GuestId),
+    Occupied,
     /// Link-endpoint installation failed.
     Transport(anyhow::Error),
 }
