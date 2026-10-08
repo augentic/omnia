@@ -57,8 +57,11 @@ Unreleased
   `WasiVcsCtx`) resolves the location beneath the authorized mount before
   the backend runs, refusing a descriptor that is not a mount root, a
   subpath that leaves the mount or starts at `/`, and a mutation beneath a
-  read-only mount, and admits a subpath nothing holds yet for the operation
-  that creates it. A typed `error` the backend returns crosses as its
+  read-only mount, and lays down a subpath nothing holds yet for the
+  operation that creates it. The backend receives each location as a
+  `Place`: an open directory handle beneath the mount, held for as long as
+  the backend runs, so a guest rearranging its tree meanwhile cannot
+  redirect the operation. A typed `error` the backend returns crosses as its
   variant; any other failure lowers to `other` with its detail. The crate
   ships no default backend — a repository is a tree on disk — so a
   deployment that links `WasiVcs` names one (`omnia-git` in

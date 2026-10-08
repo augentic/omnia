@@ -127,7 +127,7 @@ interface transport {
         depth: option<u32>,
     }
 
-    /// A clone of `url` at `at`, which must not exist yet.
+    /// A clone of `url` at `at`, which must hold nothing yet.
     clone: async func(url: string, at: location, options: clone-options) -> result<_, error>;
 
     /// Brings `remote`'s commits and labels into the repository.

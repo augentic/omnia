@@ -15,7 +15,7 @@ where
         accessor: &Accessor<T, Self>, url: String, at: Location, options: CloneOptions,
     ) -> Result<()> {
         Self::dispatch(accessor, |access| {
-            let at = Self::locate(access, &at, Intent::Mutate)?;
+            let at = Self::locate(access, &at, Intent::Create)?;
             Ok(access.get().ctx.clone_repo(url, at, options))
         })
         .await

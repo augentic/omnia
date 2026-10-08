@@ -13,7 +13,7 @@ where
 {
     async fn init(accessor: &Accessor<T, Self>, at: Location) -> Result<()> {
         Self::dispatch(accessor, |access| {
-            let at = Self::locate(access, &at, Intent::Mutate)?;
+            let at = Self::locate(access, &at, Intent::Create)?;
             Ok(access.get().ctx.init(at))
         })
         .await
@@ -25,7 +25,7 @@ where
         Self::dispatch(accessor, |access| {
             // the repository records the working copy, so both locations are written
             let repo = Self::locate(access, &repo, Intent::Mutate)?;
-            let at = Self::locate(access, &at, Intent::Mutate)?;
+            let at = Self::locate(access, &at, Intent::Create)?;
             Ok(access.get().ctx.add(repo, at, revision))
         })
         .await

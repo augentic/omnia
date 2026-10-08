@@ -5,7 +5,8 @@
 //! This module implements the runtime boundary for `omnia:vcs`: a guest
 //! names repositories and working copies as locations beneath its mounts
 //! and the host carries each operation to a version-control backend, which
-//! works on the resolved host paths and never sees a descriptor.
+//! works through an open directory handle beneath the mount and never sees
+//! a descriptor.
 
 cfg_select! {
     target_arch = "wasm32" => {

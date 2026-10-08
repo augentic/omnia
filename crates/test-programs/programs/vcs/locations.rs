@@ -2,8 +2,8 @@
 //! runs. A nested descriptor is not a mount root; a subpath leaves the root
 //! or starts at `/`; a mutation beneath a read-only mount is refused where a
 //! read is answered; a symlink the guest planted out of the mount or toward
-//! nothing is not a place to create; a subpath that does not exist yet
-//! resolves for the operation that creates it.
+//! nothing is not a place to create; a subpath that does not exist yet is
+//! refused for a read and laid down for the operation that creates it.
 
 #![cfg(target_arch = "wasm32")]
 
@@ -75,14 +75,20 @@ async fn scenario() {
     root.symlink_at("nowhere".to_owned(), "dangling".to_owned())
         .await
         .expect("plant a dangling symlink");
-    let error = workspace::init(at(root, "escape")).await.expect_err("symlink out refused");
-    refused(error, "opening location subpath");
-    let error = workspace::init(at(root, "dangling")).await.expect_err("dangling symlink refused");
-    refused(error, "dangling symlink");
-    let error =
-        workspace::init(at(root, "dangling/repo")).await.expect_err("beneath a dangling symlink");
-    refused(error, "dangling symlink");
+    for subpath in ["escape", "dangling", "dangling/repo"] {
+        let error = workspace::init(at(root, subpath)).await.expect_err("symlink refused");
+        refused(error, "not a directory");
+        let error = store::head(at(root, subpath)).await.expect_err("symlink refused for a read");
+        refused(error, "opening location subpath");
+    }
 
-    // a subpath nothing holds yet resolves for the operation that creates it
+    // a subpath nothing holds yet is refused for a read and laid down for
+    // the operation that creates it
+    let error = store::head(at(root, "fresh/repo")).await.expect_err("read at nothing refused");
+    refused(error, "opening location subpath");
     workspace::init(at(root, "fresh/repo")).await.expect("init at a new subpath");
+    assert_eq!(
+        store::head(at(root, "fresh/repo")).await.expect("read at what init laid down"),
+        "head-sha"
+    );
 }

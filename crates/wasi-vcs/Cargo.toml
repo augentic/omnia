@@ -30,6 +30,7 @@ wasip3.workspace = true
 wit-bindgen.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+cap-std.workspace = true
 futures.workspace = true
 omnia = { path = "../omnia" }
 omnia-test = { path = "../omnia-test", default-features = false, features = ["host"] }

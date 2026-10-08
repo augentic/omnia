@@ -180,7 +180,7 @@ pub trait Vcs: Send + Sync {
             /// What the working copy at `at` holds that its head does not.
             fn pending(&self, at: &str) -> impl Future<Output = Result<Vec<Change>, Error>> + Send;
 
-            /// A clone of `url` at `at`, which must not exist yet.
+            /// A clone of `url` at `at`, which must hold nothing yet.
             fn clone_repo(
                 &self, url: &str, at: &str, options: CloneOptions,
             ) -> impl Future<Output = Result<(), Error>> + Send;
@@ -301,7 +301,7 @@ pub trait Vcs: Send + Sync {
                 }
             }
 
-            /// A clone of `url` at `at`, which must not exist yet.
+            /// A clone of `url` at `at`, which must hold nothing yet.
             fn clone_repo(
                 &self, url: &str, at: &str, options: CloneOptions,
             ) -> impl Future<Output = Result<(), Error>> + Send {
