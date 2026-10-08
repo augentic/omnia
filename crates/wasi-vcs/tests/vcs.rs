@@ -231,4 +231,10 @@ async fn vcs_locations() {
             format!("init {}", shown(&project.path().join("fresh/repo"))),
         ]
     );
+    for link in ["escape", "dangling"] {
+        assert!(
+            fs::symlink_metadata(project.path().join(link)).is_ok_and(|meta| meta.is_symlink()),
+            "the guest planted `{link}` through the mount"
+        );
+    }
 }

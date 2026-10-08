@@ -1,8 +1,9 @@
 //! Raw bindings: what the host holds a `location` to before any backend
 //! runs. A nested descriptor is not a mount root; a subpath leaves the root
 //! or starts at `/`; a mutation beneath a read-only mount is refused where a
-//! read is answered; a subpath that does not exist yet resolves for the
-//! operation that creates it.
+//! read is answered; a symlink the guest planted out of the mount or toward
+//! nothing is not a place to create; a subpath that does not exist yet
+//! resolves for the operation that creates it.
 
 #![cfg(target_arch = "wasm32")]
 
@@ -65,6 +66,22 @@ async fn scenario() {
     refused(error, "read-only");
     let error = workspace::init(at(readonly, "fresh")).await.expect_err("mutation beneath refused");
     refused(error, "read-only");
+
+    // a symlink the guest planted is not a place to create, whether it leads
+    // out of the mount or to nothing within it
+    root.symlink_at("../../nowhere".to_owned(), "escape".to_owned())
+        .await
+        .expect("plant a symlink out");
+    root.symlink_at("nowhere".to_owned(), "dangling".to_owned())
+        .await
+        .expect("plant a dangling symlink");
+    let error = workspace::init(at(root, "escape")).await.expect_err("symlink out refused");
+    refused(error, "opening location subpath");
+    let error = workspace::init(at(root, "dangling")).await.expect_err("dangling symlink refused");
+    refused(error, "dangling symlink");
+    let error =
+        workspace::init(at(root, "dangling/repo")).await.expect_err("beneath a dangling symlink");
+    refused(error, "dangling symlink");
 
     // a subpath nothing holds yet resolves for the operation that creates it
     workspace::init(at(root, "fresh/repo")).await.expect("init at a new subpath");

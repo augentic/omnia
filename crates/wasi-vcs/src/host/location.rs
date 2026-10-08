@@ -7,7 +7,7 @@
 //! so an operation can never reach outside the mount.
 
 use std::io;
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 
 use anyhow::{Context as _, anyhow, ensure};
 use cap_std::fs::{Dir, Metadata, MetadataExt as _};
@@ -51,11 +51,14 @@ pub fn resolve(
     Ok(entry.host_path.join(&location.subpath))
 }
 
-// Refuse a subpath that is not a plain relative `/`-separated path.
+// Refuse a subpath that is not a plain relative `/`-separated path. The
+// component walk is what catches a Windows drive prefix such as `C:evil`,
+// which `Path::join` would take as a replacement rather than a child.
 fn check_subpath(subpath: &str) -> anyhow::Result<()> {
     let plain = !subpath.starts_with('/')
         && !subpath.contains('\\')
-        && subpath.split('/').all(|part| !part.is_empty() && part != "." && part != "..");
+        && subpath.split('/').all(|part| !part.is_empty() && part != "." && part != "..")
+        && Path::new(subpath).components().all(|part| matches!(part, Component::Normal(_)));
     ensure!(plain, "location subpath `{subpath}` is not a plain relative path");
     Ok(())
 }
@@ -63,7 +66,9 @@ fn check_subpath(subpath: &str) -> anyhow::Result<()> {
 // Open the deepest existing prefix of `subpath` through cap-std, which
 // resolves beneath the verified mount root and refuses any escape, so a
 // symlink along the way cannot lead the backend out; the remainder does
-// not exist yet and is the operation's to create.
+// not exist yet and is the operation's to create. A prefix cap-std cannot
+// open but can still `lstat` is a dangling symlink: the backend would
+// create its target with ambient authority, so it is refused as well.
 fn confine(root: &Dir, subpath: &str) -> anyhow::Result<()> {
     let mut parts: Vec<&str> = subpath.split('/').collect();
     while !parts.is_empty() {
@@ -71,6 +76,10 @@ fn confine(root: &Dir, subpath: &str) -> anyhow::Result<()> {
         match root.open_dir(&prefix) {
             Ok(_) => return Ok(()),
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                ensure!(
+                    root.symlink_metadata(&prefix).is_err(),
+                    "location subpath `{prefix}` is a dangling symlink"
+                );
                 parts.pop();
             }
             Err(error) => {
@@ -112,6 +121,15 @@ mod tests {
         }
     }
 
+    // on unix `C:evil` is an ordinary file name and `join` keeps it a child
+    #[cfg(windows)]
+    #[test]
+    fn drive_prefixed_subpath() {
+        for subpath in ["C:evil", "C:/evil"] {
+            check_subpath(subpath).unwrap_err();
+        }
+    }
+
     #[test]
     fn confine_existing_and_absent() {
         let root = temp_dir("confine");
@@ -136,5 +154,27 @@ mod tests {
         confine(&dir, "escape/repo").unwrap_err();
         let _ = fs::remove_dir_all(root);
         let _ = fs::remove_dir_all(outside);
+    }
+
+    // cap-std already refuses a link that leads out, dangling or not; a link
+    // to nothing within the root is the case it reports as absent
+    #[cfg(unix)]
+    #[test]
+    fn confine_refuses_dangling_symlink() {
+        let root = temp_dir("confine-dangling");
+        std::os::unix::fs::symlink("../../nowhere", root.join("out")).expect("linking out");
+        std::os::unix::fs::symlink("nowhere", root.join("within")).expect("linking within");
+        fs::create_dir(root.join("dir")).expect("seeding");
+        std::os::unix::fs::symlink("nowhere", root.join("dir").join("within"))
+            .expect("linking within below");
+        let dir = Dir::open_ambient_dir(&root, ambient_authority()).expect("opening root");
+
+        confine(&dir, "out").unwrap_err();
+        confine(&dir, "out/repo").unwrap_err();
+        confine(&dir, "within").unwrap_err();
+        confine(&dir, "within/repo").unwrap_err();
+        confine(&dir, "dir/within").unwrap_err();
+        confine(&dir, "dir/within/repo").unwrap_err();
+        let _ = fs::remove_dir_all(root);
     }
 }
