@@ -1,6 +1,7 @@
 //! A manifest-driven command deployment run over a backend bundle.
 
 use std::path::PathBuf;
+use std::time::Duration;
 
 use anyhow::{Context as _, Result};
 use omnia::wasmtime_wasi::p2::pipe::MemoryOutputPipe;
@@ -52,6 +53,7 @@ pub struct Deployment {
     store: Option<PathBuf>,
     registries: Option<RegistryConfig>,
     level: Option<LevelFilter>,
+    guest_timeout: Option<Duration>,
     stdio: Option<Stdio>,
 }
 
@@ -182,6 +184,15 @@ impl Deployment {
         self
     }
 
+    /// The wall-clock cap on each trigger invocation, whatever the test
+    /// process sets in `GUEST_TIMEOUT_MS`, so a suite pins a hung guest
+    /// without waiting out the default.
+    #[must_use]
+    pub const fn guest_timeout(mut self, timeout: Duration) -> Self {
+        self.guest_timeout = Some(timeout);
+        self
+    }
+
     /// The manifest this overlay describes.
     ///
     /// # Errors
@@ -220,6 +231,9 @@ impl Deployment {
             DeploymentBuilder::new().manifest(manifest).mode(Mode::Command).args(self.args.clone());
         if let Some(level) = self.level {
             builder = builder.level(level);
+        }
+        if let Some(timeout) = self.guest_timeout {
+            builder = builder.guest_timeout(timeout);
         }
         if let Some(stdio) = &self.stdio {
             builder = builder.stdio(stdio.clone());

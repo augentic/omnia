@@ -20,7 +20,7 @@ workspace = true
 anyhow.workspace = true
 futures.workspace = true
 omnia-core.workspace = true
-tokio = { workspace = true, features = ["sync", "time"] }
+tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
 tracing.workspace = true
 wasmtime.workspace = true
 wasmtime-wasi.workspace = true

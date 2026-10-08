@@ -139,6 +139,11 @@ path = "programs/messaging/handle_err.rs"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "messaging_handle_sleep"
+path = "programs/messaging/handle_sleep.rs"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "messaging_produce_handle"
 path = "programs/messaging/produce_handle.rs"
 crate-type = ["cdylib"]

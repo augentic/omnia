@@ -54,7 +54,7 @@ impl omnia_wasi_messaging::incoming_handler::Guest for Messaging {
 }
 ```
 
-The guest router matches registered topics exactly; broker subscription patterns remain host configuration (`KAFKA_TOPICS`, `NATS_TOPICS`). `consume` decodes JSON and acknowledges successful handler output. The current WIT handler returns only `result<_, error>`: `Ok(())` acknowledges, while handler failures return `error.other` for host-defined retry or rejection behavior. In multi-guest deployments, each guest's `routes.messaging` patterns select it by NATS-style topic match — see [Multi-Guest Deployments](multi-guest-deployments.md#routing-inbound-traffic).
+The guest router matches registered topics exactly; broker subscription patterns remain host configuration (`KAFKA_TOPICS`, `NATS_TOPICS`). `consume` decodes JSON and returns `Ok(())` for successful handler output. The current WIT handler returns only `result<_, error>`: the host logs and counts a returned `error.other`, a trap, and a timeout alike, and the backend decides what each means for the message — the in-memory default and NATS are finished with it, while Kafka ends its consumer so the process restarts and the record is redelivered (see the [`omnia-kafka` README](https://github.com/augentic/omnia-backends/tree/main/crates/kafka)). In multi-guest deployments, each guest's `routes.messaging` patterns select it by NATS-style topic match — see [Multi-Guest Deployments](multi-guest-deployments.md#routing-inbound-traffic).
 
 For non-JSON payloads, register the route with `consume_with(handler, decode)` instead: the decoder `Fn(&Delivery) -> Result<I, DecodeError>` sees the whole delivery (payload, `content_type`, metadata), and a decode failure rejects the message just as malformed JSON does under `consume`.
 

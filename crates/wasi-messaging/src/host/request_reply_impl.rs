@@ -3,7 +3,7 @@ use std::time::Duration;
 use wasmtime::component::{Access, Accessor, Resource};
 
 use crate::host::generated::wasi::messaging::request_reply::{
-    Error, Host, HostRequestOptions, HostRequestOptionsWithStore, HostWithStore,
+    Host, HostRequestOptions, HostRequestOptionsWithStore, HostWithStore,
 };
 use crate::host::generated::wasi::messaging::types::Topic;
 use crate::host::resource::{ClientProxy, Message, RequestOptions};
@@ -18,13 +18,7 @@ impl<T> HostWithStore<T> for WasiMessaging {
         let client = get_client(accessor, &c)?;
         let request = get_message(accessor, &message)?;
         let options = accessor.with(|mut access| {
-            let options = if let Some(opts) = options {
-                let options = access.get().table.get(&opts)?;
-                Some(options.clone())
-            } else {
-                None
-            };
-            Ok::<_, Error>(options)
+            options.map(|options| access.get().table.get(&options).cloned()).transpose()
         })?;
 
         let reply = client.request(topic, request, options).await?;
