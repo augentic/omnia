@@ -28,6 +28,7 @@ omnia-wasi-model.workspace = true
 omnia-wasi-otel.workspace = true
 omnia-wasi-sql.workspace = true
 omnia-wasi-vault.workspace = true
+omnia-wasi-vcs.workspace = true
 omnia-wasi-websocket.workspace = true
 opentelemetry = { workspace = true, features = ["metrics", "trace"] }
 schemars.workspace = true
@@ -360,6 +361,16 @@ crate-type = ["cdylib"]
 [[example]]
 name = "vault_locker"
 path = "programs/vault/locker.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "vcs_flow"
+path = "programs/vcs/flow.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "vcs_locations"
+path = "programs/vcs/locations.rs"
 crate-type = ["cdylib"]
 
 [[example]]

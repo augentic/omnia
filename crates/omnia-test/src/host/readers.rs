@@ -5,7 +5,7 @@ use omnia_wasi_keyvalue::WasiKeyValueCtx;
 
 use super::{Backends, STATE_BUCKET};
 
-impl<M, K, B, D, S, V, G, I, O> Backends<M, K, B, D, S, V, G, I, O>
+impl<M, K, B, D, S, V, G, I, O, C> Backends<M, K, B, D, S, V, G, I, O, C>
 where
     K: WasiKeyValueCtx,
     B: WasiBlobstoreCtx,
@@ -18,6 +18,7 @@ where
     G: Sync,
     I: Sync,
     O: Sync,
+    C: Sync,
 {
     /// One entry of the bucket the guest's `StateStore` writes, read through
     /// the keyvalue handle.

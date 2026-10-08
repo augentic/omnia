@@ -57,6 +57,7 @@ omnia-wasi-identity.workspace = true
 omnia-wasi-keyvalue.workspace = true
 omnia-wasi-messaging.workspace = true
 omnia-wasi-model.workspace = true
+omnia-wasi-vcs.workspace = true
 omnia-wasi-websocket.workspace = true
 omnia-wasi-otel.workspace = true
 wasip3.workspace = true

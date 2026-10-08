@@ -21,7 +21,7 @@ pub use {anyhow, bytes, http, http_body, tracing};
 #[doc(hidden)]
 pub use {
     omnia_wasi_blobstore, omnia_wasi_http, omnia_wasi_identity, omnia_wasi_keyvalue,
-    omnia_wasi_messaging, omnia_wasi_otel, wasip3, wit_bindgen,
+    omnia_wasi_messaging, omnia_wasi_otel, omnia_wasi_vcs, wasip3, wit_bindgen,
 };
 
 #[cfg(feature = "http")]

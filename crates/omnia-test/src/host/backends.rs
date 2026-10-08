@@ -16,6 +16,7 @@ use omnia_wasi_model::{ModelDefault, WasiModel, WasiModelCtx};
 use omnia_wasi_otel::{OtelDefault, WasiOtel, WasiOtelCtx};
 use omnia_wasi_sql::{ConnectOptions as SqlOptions, SqlDefault, WasiSql, WasiSqlCtx};
 use omnia_wasi_vault::{VaultDefault, WasiVault, WasiVaultCtx};
+use omnia_wasi_vcs::{WasiVcs, WasiVcsCtx};
 use omnia_wasi_websocket::{WasiWebSocket, WebSocketDefault};
 
 #[cfg(doc)]
@@ -43,7 +44,10 @@ pub const STATE_BUCKET: &str = "cache";
 /// One type parameter per swappable host, each defaulting to the in-memory
 /// backend, so `Backends` with no arguments is the all-default bundle and a
 /// setter changes exactly one parameter. Config, HTTP, and websocket have no
-/// production backend to swap in and stay concrete.
+/// production backend to swap in and stay concrete. Version control has no
+/// in-memory backend at all: the slot holds [`NoVcs`] until
+/// [`vcs`](Self::vcs) fills it, and a deployment linking `WasiVcs` over the
+/// default bundle fails to link.
 #[derive(Clone, Debug)]
 pub struct Backends<
     M = ModelDefault,
@@ -55,6 +59,7 @@ pub struct Backends<
     G = MessagingDefault,
     I = IdentityStub,
     O = OtelDefault,
+    C = NoVcs,
 > {
     /// The `wasi:blobstore` backend.
     pub blobstore: B,
@@ -78,9 +83,20 @@ pub struct Backends<
     pub sql: S,
     /// The `wasi:vault` backend.
     pub vault: V,
+    /// The `omnia:vcs` backend, [`NoVcs`] until one is set.
+    pub vcs: C,
     /// In-process `omnia:websocket` serving no listener.
     pub websocket: WebSocketDefault,
 }
+
+/// The empty `omnia:vcs` slot: no backend, so no deployment links `WasiVcs`
+/// over it.
+///
+/// `omnia:vcs` ships no in-memory default, since a repository is a tree on
+/// disk; a scenario that drives it sets a backend with
+/// [`Backends::vcs`].
+#[derive(Clone, Copy, Debug, Default)]
+pub struct NoVcs;
 
 impl Backends {
     /// Every default, freshly constructed from nothing in the environment.
@@ -112,12 +128,13 @@ impl Backends {
             .await
             .expect("in-memory sqlite"),
             vault: VaultDefault::connect_with(NoOptions).await.expect("in-memory vault"),
+            vcs: NoVcs,
             websocket: WebSocketDefault::new(),
         }
     }
 }
 
-impl<M, K, B, D, S, V, G, I, O> Backends<M, K, B, D, S, V, G, I, O> {
+impl<M, K, B, D, S, V, G, I, O, C> Backends<M, K, B, D, S, V, G, I, O, C> {
     /// The same bundle answering `wasi:config` lookups from `vars` alone.
     #[must_use]
     pub fn config<Key, Value>(mut self, vars: impl IntoIterator<Item = (Key, Value)>) -> Self
@@ -133,7 +150,9 @@ impl<M, K, B, D, S, V, G, I, O> Backends<M, K, B, D, S, V, G, I, O> {
     /// The same bundle answering completions with `model` — a
     /// [`ScriptedModel`] or any other `WasiModelCtx`.
     #[must_use]
-    pub fn model<N: WasiModelCtx + Clone>(self, model: N) -> Backends<N, K, B, D, S, V, G, I, O> {
+    pub fn model<N: WasiModelCtx + Clone>(
+        self, model: N,
+    ) -> Backends<N, K, B, D, S, V, G, I, O, C> {
         Backends {
             blobstore: self.blobstore,
             config: self.config,
@@ -146,6 +165,7 @@ impl<M, K, B, D, S, V, G, I, O> Backends<M, K, B, D, S, V, G, I, O> {
             otel: self.otel,
             sql: self.sql,
             vault: self.vault,
+            vcs: self.vcs,
             websocket: self.websocket,
         }
     }
@@ -154,7 +174,7 @@ impl<M, K, B, D, S, V, G, I, O> Backends<M, K, B, D, S, V, G, I, O> {
     #[must_use]
     pub fn keyvalue<N: WasiKeyValueCtx + Clone>(
         self, keyvalue: N,
-    ) -> Backends<M, N, B, D, S, V, G, I, O> {
+    ) -> Backends<M, N, B, D, S, V, G, I, O, C> {
         Backends {
             blobstore: self.blobstore,
             config: self.config,
@@ -167,6 +187,7 @@ impl<M, K, B, D, S, V, G, I, O> Backends<M, K, B, D, S, V, G, I, O> {
             otel: self.otel,
             sql: self.sql,
             vault: self.vault,
+            vcs: self.vcs,
             websocket: self.websocket,
         }
     }
@@ -175,7 +196,7 @@ impl<M, K, B, D, S, V, G, I, O> Backends<M, K, B, D, S, V, G, I, O> {
     #[must_use]
     pub fn blobstore<N: WasiBlobstoreCtx + Clone>(
         self, blobstore: N,
-    ) -> Backends<M, K, N, D, S, V, G, I, O> {
+    ) -> Backends<M, K, N, D, S, V, G, I, O, C> {
         Backends {
             blobstore,
             config: self.config,
@@ -188,6 +209,7 @@ impl<M, K, B, D, S, V, G, I, O> Backends<M, K, B, D, S, V, G, I, O> {
             otel: self.otel,
             sql: self.sql,
             vault: self.vault,
+            vcs: self.vcs,
             websocket: self.websocket,
         }
     }
@@ -196,7 +218,7 @@ impl<M, K, B, D, S, V, G, I, O> Backends<M, K, B, D, S, V, G, I, O> {
     #[must_use]
     pub fn docstore<N: WasiDocStoreCtx + Clone>(
         self, docstore: N,
-    ) -> Backends<M, K, B, N, S, V, G, I, O> {
+    ) -> Backends<M, K, B, N, S, V, G, I, O, C> {
         Backends {
             blobstore: self.blobstore,
             config: self.config,
@@ -209,13 +231,14 @@ impl<M, K, B, D, S, V, G, I, O> Backends<M, K, B, D, S, V, G, I, O> {
             otel: self.otel,
             sql: self.sql,
             vault: self.vault,
+            vcs: self.vcs,
             websocket: self.websocket,
         }
     }
 
     /// The same bundle serving `wasi:sql` from `sql`.
     #[must_use]
-    pub fn sql<N: WasiSqlCtx + Clone>(self, sql: N) -> Backends<M, K, B, D, N, V, G, I, O> {
+    pub fn sql<N: WasiSqlCtx + Clone>(self, sql: N) -> Backends<M, K, B, D, N, V, G, I, O, C> {
         Backends {
             blobstore: self.blobstore,
             config: self.config,
@@ -228,13 +251,16 @@ impl<M, K, B, D, S, V, G, I, O> Backends<M, K, B, D, S, V, G, I, O> {
             otel: self.otel,
             sql,
             vault: self.vault,
+            vcs: self.vcs,
             websocket: self.websocket,
         }
     }
 
     /// The same bundle serving `wasi:vault` from `vault`.
     #[must_use]
-    pub fn vault<N: WasiVaultCtx + Clone>(self, vault: N) -> Backends<M, K, B, D, S, N, G, I, O> {
+    pub fn vault<N: WasiVaultCtx + Clone>(
+        self, vault: N,
+    ) -> Backends<M, K, B, D, S, N, G, I, O, C> {
         Backends {
             blobstore: self.blobstore,
             config: self.config,
@@ -247,6 +273,7 @@ impl<M, K, B, D, S, V, G, I, O> Backends<M, K, B, D, S, V, G, I, O> {
             otel: self.otel,
             sql: self.sql,
             vault,
+            vcs: self.vcs,
             websocket: self.websocket,
         }
     }
@@ -255,7 +282,7 @@ impl<M, K, B, D, S, V, G, I, O> Backends<M, K, B, D, S, V, G, I, O> {
     #[must_use]
     pub fn messaging<N: WasiMessagingCtx + Clone>(
         self, messaging: N,
-    ) -> Backends<M, K, B, D, S, V, N, I, O> {
+    ) -> Backends<M, K, B, D, S, V, N, I, O, C> {
         Backends {
             blobstore: self.blobstore,
             config: self.config,
@@ -268,6 +295,7 @@ impl<M, K, B, D, S, V, G, I, O> Backends<M, K, B, D, S, V, G, I, O> {
             otel: self.otel,
             sql: self.sql,
             vault: self.vault,
+            vcs: self.vcs,
             websocket: self.websocket,
         }
     }
@@ -276,7 +304,7 @@ impl<M, K, B, D, S, V, G, I, O> Backends<M, K, B, D, S, V, G, I, O> {
     #[must_use]
     pub fn identity<N: WasiIdentityCtx + Clone>(
         self, identity: N,
-    ) -> Backends<M, K, B, D, S, V, G, N, O> {
+    ) -> Backends<M, K, B, D, S, V, G, N, O, C> {
         Backends {
             blobstore: self.blobstore,
             config: self.config,
@@ -289,13 +317,14 @@ impl<M, K, B, D, S, V, G, I, O> Backends<M, K, B, D, S, V, G, I, O> {
             otel: self.otel,
             sql: self.sql,
             vault: self.vault,
+            vcs: self.vcs,
             websocket: self.websocket,
         }
     }
 
     /// The same bundle serving `wasi:otel` from `otel`.
     #[must_use]
-    pub fn otel<N: WasiOtelCtx + Clone>(self, otel: N) -> Backends<M, K, B, D, S, V, G, I, N> {
+    pub fn otel<N: WasiOtelCtx + Clone>(self, otel: N) -> Backends<M, K, B, D, S, V, G, I, N, C> {
         Backends {
             blobstore: self.blobstore,
             config: self.config,
@@ -308,6 +337,28 @@ impl<M, K, B, D, S, V, G, I, O> Backends<M, K, B, D, S, V, G, I, O> {
             otel,
             sql: self.sql,
             vault: self.vault,
+            vcs: self.vcs,
+            websocket: self.websocket,
+        }
+    }
+
+    /// The same bundle serving `omnia:vcs` from `vcs`, the one slot with no
+    /// default to replace.
+    #[must_use]
+    pub fn vcs<N: WasiVcsCtx + Clone>(self, vcs: N) -> Backends<M, K, B, D, S, V, G, I, O, N> {
+        Backends {
+            blobstore: self.blobstore,
+            config: self.config,
+            docstore: self.docstore,
+            http: self.http,
+            identity: self.identity,
+            keyvalue: self.keyvalue,
+            messaging: self.messaging,
+            model: self.model,
+            otel: self.otel,
+            sql: self.sql,
+            vault: self.vault,
+            vcs,
             websocket: self.websocket,
         }
     }
@@ -321,13 +372,16 @@ fn config_from(vars: WasiConfigVariables) -> ConfigDefault {
 
 /// One `Provides` impl per host, each yielding the named field's borrow.
 ///
-/// Every impl carries the full set of bounds so that a bundle holding a
-/// non-backend in any slot fails to link at all, rather than for the one
-/// host that reaches the slot.
+/// Every impl carries the full set of bounds over the slots that have a
+/// default, so that a bundle holding a non-backend in one of them fails to
+/// link at all, rather than for the one host that reaches the slot. The
+/// `vcs` slot stays unbounded here: it holds [`NoVcs`] by default, and only
+/// the `WasiVcs` impl below asks it for a backend.
 macro_rules! provides {
     ($($host:ty => $field:ident),* $(,)?) => {
         $(
-            impl<M, K, B, D, S, V, G, I, O> Provides<$host> for Backends<M, K, B, D, S, V, G, I, O>
+            impl<M, K, B, D, S, V, G, I, O, C> Provides<$host>
+                for Backends<M, K, B, D, S, V, G, I, O, C>
             where
                 M: WasiModelCtx + Clone,
                 K: WasiKeyValueCtx + Clone,
@@ -338,6 +392,7 @@ macro_rules! provides {
                 G: WasiMessagingCtx + Clone,
                 I: WasiIdentityCtx + Clone,
                 O: WasiOtelCtx + Clone,
+                C: Clone + Send,
             {
                 fn borrow(&mut self) -> <$host as HostCtx>::Borrow<'_> {
                     &mut self.$field
@@ -360,4 +415,22 @@ provides! {
     WasiSql => sql,
     WasiVault => vault,
     WasiWebSocket => websocket,
+}
+
+impl<M, K, B, D, S, V, G, I, O, C> Provides<WasiVcs> for Backends<M, K, B, D, S, V, G, I, O, C>
+where
+    M: WasiModelCtx + Clone,
+    K: WasiKeyValueCtx + Clone,
+    B: WasiBlobstoreCtx + Clone,
+    D: WasiDocStoreCtx + Clone,
+    S: WasiSqlCtx + Clone,
+    V: WasiVaultCtx + Clone,
+    G: WasiMessagingCtx + Clone,
+    I: WasiIdentityCtx + Clone,
+    O: WasiOtelCtx + Clone,
+    C: WasiVcsCtx + Clone,
+{
+    fn borrow(&mut self) -> <WasiVcs as HostCtx>::Borrow<'_> {
+        &mut self.vcs
+    }
 }

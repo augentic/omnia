@@ -47,6 +47,30 @@ Unreleased
   `HasExtensions`), `ChainPolicy::enter(&caller, &target)` derives the
   callee's, and `Dispatcher::invoke` takes the caller's context ahead of
   the target.
+- `omnia-wasi-vcs`: the `omnia:vcs` capability, version control over a
+  guest's lent mounts. The WIT package carries three interfaces — `store`
+  (`resolve`, `head`, `commit`, `merge` under a policy of glob rules),
+  `workspace` (`init`, `add`, `remove`, `pending`), and `transport`
+  (`clone`, `fetch`, `label`, `push`) — every function async, each naming a
+  repository or working copy as a `location`: a borrowed mount-root
+  descriptor plus a relative subpath. The host (`WasiVcs`, a backend behind
+  `WasiVcsCtx`) resolves the location beneath the authorized mount before
+  the backend runs, refusing a descriptor that is not a mount root, a
+  subpath that leaves the mount or starts at `/`, and a mutation beneath a
+  read-only mount, and admits a subpath nothing holds yet for the operation
+  that creates it. A typed `error` the backend returns crosses as its
+  variant; any other failure lowers to `other` with its detail. The crate
+  ships no default backend — a repository is a tree on disk — so a
+  deployment that links `WasiVcs` names one (`omnia-git` in
+  `omnia-backends`), and the test host's `Backends` holds `NoVcs` in the
+  slot until `Backends::vcs` sets a `WasiVcsCtx`. `omnia_sdk::vcs` is the
+  guest capability: the `Vcs` trait over deployment-local paths (`"."` the
+  project mount, `"./sub"` or `"/mount/sub"` beneath one), resolved against
+  the preopens by the lend rule `Model::complete` already uses for its
+  workspace, with mirrored `Rule`, `Strategy`, `Merged`, `Change`,
+  `ChangeKind`, `CloneOptions`, and a `vcs::Error` carrying its wire
+  `code()` and a default taxonomy onto `omnia_sdk::Error`; the transport
+  `clone` is `Vcs::clone_repo`, so a `Clone` provider keeps its `clone`.
 
 ### Changed
 

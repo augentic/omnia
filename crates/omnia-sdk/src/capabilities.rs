@@ -25,12 +25,14 @@ mod config;
 mod document;
 mod http;
 mod identity;
+mod lend;
 mod messaging;
 pub mod model;
 pub mod plugins;
 mod state;
 #[cfg(feature = "sql")]
 mod table;
+pub mod vcs;
 
 pub use blob::{BlobStore, BlobStoreExt, ContainerMetadata, ObjectMetadata};
 pub use broadcast::Broadcast;
@@ -51,3 +53,7 @@ pub use plugins::WasiPlugins;
 pub use state::{CasError, StateStore};
 #[cfg(feature = "sql")]
 pub use table::TableStore;
+// Version-control wire names stay scoped to the vcs capability.
+pub use vcs::Vcs;
+#[cfg(target_arch = "wasm32")]
+pub use vcs::WasiVcs;

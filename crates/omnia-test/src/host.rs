@@ -8,7 +8,7 @@ mod model;
 mod readers;
 mod scratch;
 
-pub use backends::{Backends, STATE_BUCKET};
+pub use backends::{Backends, NoVcs, STATE_BUCKET};
 pub use deployment::{Captured, Deployment, Run};
 pub use model::{Completion, ScriptedModel, Step};
 pub use scratch::{Scratch, scratch};

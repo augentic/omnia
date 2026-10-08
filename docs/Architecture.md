@@ -117,7 +117,7 @@ pub trait Backend: Sized + Sync + Send {
 
 ### WASI Interface Crates (`crates/wasi-*`)
 
-Each interface crate provides guest bindings, a host implementation, and a default backend:
+Each interface crate provides guest bindings, a host implementation, and, with one exception, a default backend:
 
 | Crate            | Interface        | Purpose                          | Default backend                           |
 | ---------------- | ---------------- | -------------------------------- | ----------------------------------------- |
@@ -133,6 +133,7 @@ Each interface crate provides guest bindings, a host implementation, and a defau
 | `wasi-otel`      | Custom           | Guest OpenTelemetry export       | `OtelDefault` — log-only                  |
 | `wasi-websocket` | Custom           | WebSocket connections (trigger)  | `WebSocketDefault` — tungstenite server   |
 | `wasi-model`     | `omnia:model`    | Model completions with grants    | `ModelDefault` — deterministic echo       |
+| `wasi-vcs`       | `omnia:vcs`      | Version control over lent mounts | none — `omnia-git` in `omnia-backends`    |
 
 Conditional compilation lets one crate serve both sides — guests get bindings on `wasm32`, hosts get the implementation on native:
 
