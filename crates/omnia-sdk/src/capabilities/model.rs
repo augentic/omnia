@@ -5,9 +5,10 @@
 //! descriptor lend — a `wasi:filesystem` resource that only exists on
 //! `wasm32` — so a guest names the directory with the plain
 //! [`Request::workspace`] path and the `wasm32` default body resolves it
-//! against the guest's preopens at the call site: the longest preopen whose
-//! name prefixes the path becomes the lent root descriptor and the
-//! remainder rides as the grant's subpath.
+//! against the guest's preopens at the call site, by the lend rule every
+//! lending capability shares: the longest preopen whose name prefixes the
+//! path becomes the lent root descriptor and the remainder rides as the
+//! grant's subpath.
 //!
 //! Acceptance of an answer is the guest's: a request with [`Request::check`]
 //! set receives each candidate as a tool call named `check` and answers
@@ -310,6 +311,8 @@ pub trait Model: Send + Sync {
                 use omnia_wasi_model::{completion, wit_stream};
                 use wasip3::filesystem::preopens;
 
+                use super::lend::resolve_lend;
+
                 async move {
                     // the lent workspace borrows a descriptor, so the table outlives `create`
                     let directories = if request.workspace.is_some() {
@@ -397,24 +400,6 @@ pub struct WasiModel;
 
 #[cfg(target_arch = "wasm32")]
 impl Model for WasiModel {}
-
-// The longest preopen that equals the path or prefixes it at a `/` boundary
-// wins; the remainder is the grant's subpath (empty for the mount itself).
-#[cfg(any(target_arch = "wasm32", test))]
-fn resolve_lend<'a, D>(directories: &'a [(D, String)], path: &'a str) -> Option<(&'a D, &'a str)> {
-    directories
-        .iter()
-        .filter_map(|(dir, name)| Some((dir, lend_subpath(name, path)?)))
-        .max_by_key(|(_, subpath)| std::cmp::Reverse(subpath.len()))
-}
-
-#[cfg(any(target_arch = "wasm32", test))]
-fn lend_subpath<'a>(name: &str, path: &'a str) -> Option<&'a str> {
-    if path == name {
-        return Some("");
-    }
-    path.strip_prefix(name)?.strip_prefix('/').filter(|rest| !rest.is_empty())
-}
 
 // conversions between the target-independent records above and the bindings
 #[cfg(target_arch = "wasm32")]
@@ -528,33 +513,5 @@ mod wire {
                 completion::Error::Backend(detail) => Self::Backend(detail),
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::resolve_lend;
-
-    fn preopens() -> Vec<(u8, String)> {
-        vec![(0, ".".to_string()), (1, "/emery-workspaces".to_string())]
-    }
-
-    #[test]
-    fn resolves_mount() {
-        let dirs = preopens();
-        assert_eq!(resolve_lend(&dirs, ".").map(|(_, sub)| sub), Some(""));
-        assert_eq!(resolve_lend(&dirs, "/emery-workspaces/ws-1").map(|(_, sub)| sub), Some("ws-1"));
-        assert_eq!(
-            resolve_lend(&dirs, "/emery-workspaces/ws-1/nested").map(|(_, sub)| sub),
-            Some("ws-1/nested")
-        );
-    }
-
-    #[test]
-    fn refuses_paths() {
-        let dirs = preopens();
-        assert!(resolve_lend(&dirs, "/elsewhere").is_none());
-        assert!(resolve_lend(&dirs, "/emery-workspaces-evil/x").is_none());
-        assert!(resolve_lend(&dirs, "/emery-workspaces/").is_none());
     }
 }

@@ -1,0 +1,39 @@
+[package]
+name = "omnia-wasi-vcs"
+description = "WASI version-control interface (the omnia:vcs boundary) for the Omnia runtime"
+readme = "README.md"
+authors.workspace = true
+categories.workspace = true
+edition.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[lints]
+workspace = true
+
+# host dependencies
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+anyhow.workspace = true
+cap-std.workspace = true
+omnia-core.workspace = true
+tracing.workspace = true
+wasmtime.workspace = true
+wasmtime-wasi.workspace = true
+
+# guest dependencies
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasip3.workspace = true
+wit-bindgen.workspace = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+cap-std.workspace = true
+futures.workspace = true
+omnia = { path = "../omnia" }
+omnia-test = { path = "../omnia-test", default-features = false, features = ["host"] }
+parking_lot.workspace = true
+test-programs.workspace = true
+tokio = { workspace = true, features = ["macros", "rt"] }

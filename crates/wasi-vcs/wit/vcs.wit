@@ -1,0 +1,148 @@
+package omnia:vcs@0.1.0;
+
+/// Version-controlled repository access in the nouns git and jj share, cut
+/// into three interfaces a backend exports what it has of: `store`, the
+/// commit graph; `workspace`, working copies materialised beneath a mount;
+/// `transport`, remotes and labels. A repository is the location of its
+/// clone and a working copy is its own, so no handle crosses an interface and
+/// no host path reaches a guest. A working copy carries no branch: it sits on
+/// a sealed commit and holds pending changes until `commit` seals them.
+interface types {
+    use wasi:filesystem/types@0.3.0.{descriptor};
+
+    /// A place beneath an authorised mount: the `workspace-grant` idiom. The
+    /// host resolves it against the mount registry, so nothing outside a
+    /// mount is touched.
+    record location {
+        /// Must be an authorised mount root.
+        root: borrow<descriptor>,
+        /// `/`-separated plain relative path beneath `root`; empty names the
+        /// mount itself. Resolved beneath the verified root, so it can never
+        /// escape the mount. The location need not exist yet: `init`, `add`,
+        /// and `clone` create it.
+        subpath: string,
+    }
+
+    /// Typed failure.
+    variant error {
+        /// The location holds no repository or working copy.
+        not-a-repository,
+        /// A working copy already exists at the location.
+        exists(string),
+        /// A revision, remote, or label the repository does not know.
+        not-found(string),
+        /// A working copy holds pending changes where none may.
+        pending(list<string>),
+        /// The remote refused, could not be reached, or wants credentials.
+        access(string),
+        /// Any other failure, with the backend's detail.
+        other(string),
+    }
+}
+
+/// The commit graph: sealed snapshots, and the merge under a policy.
+interface store {
+    use types.{location, error};
+
+    /// How a conflict at a matching path is resolved before it is reported.
+    enum strategy {
+        /// Both sides' lines kept, each once: declaration and import lists.
+        union,
+        /// The working copy's side kept whole, for the caller to regenerate:
+        /// lockfiles.
+        ours,
+        /// The merged-in side kept whole.
+        theirs,
+    }
+
+    /// A glob over root-relative paths; the first rule that matches applies.
+    record rule {
+        paths: string,
+        strategy: strategy,
+    }
+
+    /// A merge is data, not an error: the commit when it completed, the paths
+    /// in conflict no rule resolved when it did not. The working copy is back
+    /// on its head either way; a backend that records conflicts as commits
+    /// abandons them.
+    record merged {
+        commit: option<string>,
+        conflicts: list<string>,
+    }
+
+    /// A label, tag, or commit prefix to the commit it names.
+    resolve: async func(repo: location, revision: string) -> result<string, error>;
+
+    /// The sealed commit the working copy at `at` sits on.
+    head: async func(at: location) -> result<string, error>;
+
+    /// Seals every pending change as one commit; none when there is nothing.
+    commit: async func(at: location, message: string) -> result<option<string>, error>;
+
+    /// Merges `revision` into the working copy's head under `policy` and
+    /// advances it.
+    merge: async func(at: location, revision: string, message: string, policy: list<rule>) -> result<merged, error>;
+}
+
+/// Working copies: a snapshot laid beneath a mount, and what it holds past it.
+interface workspace {
+    use types.{location, error};
+
+    /// What a working copy did to a path its head does not hold that way.
+    enum change-kind {
+        added,
+        modified,
+        deleted,
+    }
+
+    /// One pending change, its path root-relative to the working copy.
+    record change {
+        path: string,
+        kind: change-kind,
+    }
+
+    /// A repository with no history, at `at`.
+    init: async func(at: location) -> result<_, error>;
+
+    /// A working copy at `at` on `revision` and on no label: detached in
+    /// git, a named workspace in jj. Where a backend needs a name, it is its
+    /// own.
+    add: async func(repo: location, at: location, revision: string) -> result<_, error>;
+
+    /// Removes the working copy and its files; pending changes go with it.
+    remove: async func(at: location) -> result<_, error>;
+
+    /// What the working copy holds that `head` does not.
+    pending: async func(at: location) -> result<list<change>, error>;
+}
+
+/// Remotes and labels: the half that crosses the network, and the one noun
+/// a repository is addressed by from outside it.
+interface transport {
+    use types.{location, error};
+
+    /// No `bare`: the clone's own working copy is the integration tree, and
+    /// the layout beneath it is the backend's.
+    record clone-options {
+        depth: option<u32>,
+    }
+
+    /// A clone of `url` at `at`, which must hold nothing yet.
+    clone: async func(url: string, at: location, options: clone-options) -> result<_, error>;
+
+    /// Brings `remote`'s commits and labels into the repository.
+    fetch: async func(repo: location, remote: string) -> result<_, error>;
+
+    /// Points the label at the commit, creating or moving it: the one place
+    /// a branch or bookmark exists.
+    label: async func(repo: location, name: string, revision: string) -> result<_, error>;
+
+    /// Sends the label and the commits it reaches to `remote`.
+    push: async func(repo: location, remote: string, label: string) -> result<_, error>;
+}
+
+world imports {
+    import store;
+    import workspace;
+    import transport;
+}

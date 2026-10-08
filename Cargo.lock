@@ -2419,6 +2419,7 @@ dependencies = [
  "omnia-wasi-model",
  "omnia-wasi-otel",
  "omnia-wasi-sql",
+ "omnia-wasi-vcs",
  "omnia-wasi-websocket",
  "schemars",
  "serde",
@@ -2456,6 +2457,7 @@ dependencies = [
  "omnia-wasi-otel",
  "omnia-wasi-sql",
  "omnia-wasi-vault",
+ "omnia-wasi-vcs",
  "omnia-wasi-websocket",
  "tempfile",
  "test-programs",
@@ -2689,6 +2691,26 @@ dependencies = [
  "test-programs",
  "tokio",
  "tracing",
+ "wasmtime",
+ "wasmtime-wasi",
+ "wit-bindgen 0.62.0",
+]
+
+[[package]]
+name = "omnia-wasi-vcs"
+version = "0.37.0"
+dependencies = [
+ "anyhow",
+ "cap-std",
+ "futures",
+ "omnia",
+ "omnia-core",
+ "omnia-test",
+ "parking_lot",
+ "test-programs",
+ "tokio",
+ "tracing",
+ "wasip3",
  "wasmtime",
  "wasmtime-wasi",
  "wit-bindgen 0.62.0",
@@ -4036,6 +4058,7 @@ dependencies = [
  "omnia-wasi-otel",
  "omnia-wasi-sql",
  "omnia-wasi-vault",
+ "omnia-wasi-vcs",
  "omnia-wasi-websocket",
  "opentelemetry",
  "schemars",

@@ -52,6 +52,7 @@ host = [
     "dep:omnia-wasi-otel",
     "dep:omnia-wasi-sql",
     "dep:omnia-wasi-vault",
+    "dep:omnia-wasi-vcs",
     "dep:omnia-wasi-websocket",
     "dep:tempfile",
 ]
@@ -80,6 +81,7 @@ omnia-wasi-model = { workspace = true, optional = true }
 omnia-wasi-otel = { workspace = true, optional = true }
 omnia-wasi-sql = { workspace = true, optional = true }
 omnia-wasi-vault = { workspace = true, optional = true }
+omnia-wasi-vcs = { workspace = true, optional = true }
 omnia-wasi-websocket = { workspace = true, optional = true }
 tempfile = { workspace = true, optional = true }
 

@@ -25,7 +25,9 @@ use crate::guest::{
 /// Each capability impl delegates to the `pub` field named for it, seeded
 /// through a consuming builder of the same name. `StateStore` and `BlobStore`
 /// share the one `storage` field, as one [`Memory`] serves both — the shape a
-/// production provider's single storage backend has.
+/// production provider's single storage backend has. No `Vcs` double ships:
+/// a handler over version control scripts its own provider, since a
+/// repository is a tree on disk and no in-memory value stands for one.
 ///
 /// ```rust
 /// use omnia_sdk::model::{Model as _, Request};
