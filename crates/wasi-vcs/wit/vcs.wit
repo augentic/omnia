@@ -35,6 +35,9 @@ interface types {
         pending(list<string>),
         /// The remote refused, could not be reached, or wants credentials.
         access(string),
+        /// The remote's label holds commits the pushed one does not; nothing
+        /// was forced.
+        diverged(string),
         /// Any other failure, with the backend's detail.
         other(string),
     }
@@ -70,8 +73,27 @@ interface store {
         conflicts: list<string>,
     }
 
+    /// One entry of a `log`: a sealed commit's id and its whole message,
+    /// the trailers a caller wrote into it included.
+    record entry {
+        id: string,
+        message: string,
+    }
+
     /// A label, tag, or commit prefix to the commit it names.
     resolve: async func(repo: location, revision: string) -> result<string, error>;
+
+    /// Whether `ancestor` is in `descendant`'s history, itself included. An
+    /// endpoint the repository does not know is `not-found` naming it.
+    descends: async func(repo: location, ancestor: string, descendant: string) -> result<bool, error>;
+
+    /// The first-parent chain from `revision` back to `base`, newest first,
+    /// `base` itself left out: what was sealed over a base and how each
+    /// commit describes itself. A merge counts once, as the commit that
+    /// sealed it, never through the side it merged in. A `revision` the
+    /// repository does not know is `not-found`; one `base` does not reach is
+    /// the whole chain from `revision`.
+    log: async func(repo: location, revision: string, base: string) -> result<list<entry>, error>;
 
     /// The sealed commit the working copy at `at` sits on.
     head: async func(at: location) -> result<string, error>;
@@ -137,7 +159,14 @@ interface transport {
     /// a branch or bookmark exists.
     label: async func(repo: location, name: string, revision: string) -> result<_, error>;
 
-    /// Sends the label and the commits it reaches to `remote`.
+    /// The commit the label points at, in the namespace `label` writes alone:
+    /// a tag, a remote's label, or a commit of that spelling is never it. A
+    /// label the repository lacks is `not-found`.
+    labelled: async func(repo: location, name: string) -> result<string, error>;
+
+    /// Sends the label and the commits it reaches to `remote`. A remote whose
+    /// label holds commits the pushed one does not is `diverged`; nothing is
+    /// forced.
     push: async func(repo: location, remote: string, label: string) -> result<_, error>;
 }
 

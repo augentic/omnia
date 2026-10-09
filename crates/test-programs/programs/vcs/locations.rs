@@ -3,7 +3,8 @@
 //! or starts at `/`; a mutation beneath a read-only mount is refused where a
 //! read is answered; a symlink the guest planted out of the mount or toward
 //! nothing is not a place to create; a subpath that does not exist yet is
-//! refused for a read and laid down for the operation that creates it.
+//! `not-a-repository` for a read and laid down for the operation that
+//! creates it.
 
 #![cfg(target_arch = "wasm32")]
 
@@ -68,7 +69,8 @@ async fn scenario() {
     refused(error, "read-only");
 
     // a symlink the guest planted is not a place to create, whether it leads
-    // out of the mount or to nothing within it
+    // out of the mount or to nothing within it; for a read, one that leads
+    // out is the escape it is, and one to nothing within is what it names
     root.symlink_at("../../nowhere".to_owned(), "escape".to_owned())
         .await
         .expect("plant a symlink out");
@@ -78,14 +80,18 @@ async fn scenario() {
     for subpath in ["escape", "dangling", "dangling/repo"] {
         let error = workspace::init(at(root, subpath)).await.expect_err("symlink refused");
         refused(error, "not a directory");
-        let error = store::head(at(root, subpath)).await.expect_err("symlink refused for a read");
-        refused(error, "opening location subpath");
+    }
+    let error = store::head(at(root, "escape")).await.expect_err("symlink out refused for a read");
+    refused(error, "opening location subpath");
+    for subpath in ["dangling", "dangling/repo"] {
+        let error = store::head(at(root, subpath)).await.expect_err("dangling link read");
+        assert!(matches!(error, Error::NotARepository), "at `{subpath}`: {error:?}");
     }
 
-    // a subpath nothing holds yet is refused for a read and laid down for
-    // the operation that creates it
+    // a subpath nothing holds yet is no repository for a read and is laid
+    // down for the operation that creates it
     let error = store::head(at(root, "fresh/repo")).await.expect_err("read at nothing refused");
-    refused(error, "opening location subpath");
+    assert!(matches!(error, Error::NotARepository), "{error:?}");
     workspace::init(at(root, "fresh/repo")).await.expect("init at a new subpath");
     assert_eq!(
         store::head(at(root, "fresh/repo")).await.expect("read at what init laid down"),

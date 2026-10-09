@@ -17,7 +17,8 @@ use futures::FutureExt as _;
 use omnia::{ExitStatus, Mount};
 use omnia_test::host::{Backends, Deployment, scratch};
 use omnia_wasi_vcs::{
-    Change, ChangeKind, CloneOptions, Error, FutureResult, Merged, Place, Rule, WasiVcs, WasiVcsCtx,
+    Change, ChangeKind, CloneOptions, Entry, Error, FutureResult, Merged, Place, Rule, WasiVcs,
+    WasiVcsCtx,
 };
 use parking_lot::Mutex;
 
@@ -47,9 +48,11 @@ async fn run_guest(wasm: &str, mounts: Vec<Mount>) -> Recorder {
 // ------------------------------------------------------------------------
 
 // Records every call with the host paths the locations resolved to and
-// answers each from a fixed script: `resolve("missing")` is a typed
-// `not-found`, `push(.., "offline", ..)` an untyped failure, and a merge of
-// `conflicting` comes back in conflict.
+// answers each from a fixed script: `resolve("missing")` and
+// `labelled("missing")` are a typed `not-found`, `push(.., "moved", ..)` a
+// typed `diverged`, `push(.., "offline", ..)` an untyped failure, a merge of
+// `conflicting` comes back in conflict, `descends` from `unrelated` is
+// false, and a log is two commits over its base.
 #[derive(Clone, Debug, Default)]
 struct Recorder {
     calls: Arc<Mutex<Vec<String>>>,
@@ -97,6 +100,11 @@ impl WasiVcsCtx for Recorder {
         .boxed()
     }
 
+    fn descends(&self, repo: Place, ancestor: String, descendant: String) -> FutureResult<bool> {
+        self.record(format!("descends {} {ancestor} {descendant}", held(&repo)));
+        async move { Ok(ancestor != "unrelated") }.boxed()
+    }
+
     fn head(&self, at: Place) -> FutureResult<String> {
         self.record(format!("head {}", held(&at)));
         async { Ok("head-sha".to_owned()) }.boxed()
@@ -124,6 +132,23 @@ impl WasiVcsCtx for Recorder {
                 commit: Some(format!("m:{revision}")),
                 conflicts: vec![],
             })
+        }
+        .boxed()
+    }
+
+    fn log(&self, repo: Place, revision: String, base: String) -> FutureResult<Vec<Entry>> {
+        self.record(format!("log {} {revision} {base}", held(&repo)));
+        async move {
+            Ok(vec![
+                Entry {
+                    id: format!("l2:{revision}"),
+                    message: "second\n\nSlice: SLICE-002\n".to_owned(),
+                },
+                Entry {
+                    id: format!("l1:{revision}"),
+                    message: "first\n\nSlice: SLICE-001\n".to_owned(),
+                },
+            ])
         }
         .boxed()
     }
@@ -179,11 +204,25 @@ impl WasiVcsCtx for Recorder {
         async { Ok(()) }.boxed()
     }
 
+    fn labelled(&self, repo: Place, name: String) -> FutureResult<String> {
+        self.record(format!("labelled {} {name}", held(&repo)));
+        async move {
+            if name == "missing" {
+                return Err(Error::NotFound(name).into());
+            }
+            Ok(format!("lbl:{name}"))
+        }
+        .boxed()
+    }
+
     fn push(&self, repo: Place, remote: String, label: String) -> FutureResult<()> {
         self.record(format!("push {} {remote} {label}", held(&repo)));
         async move {
             if remote == "offline" {
                 return Err(anyhow!("network down"));
+            }
+            if remote == "moved" {
+                return Err(Error::Diverged(label).into());
             }
             Ok(())
         }
@@ -214,10 +253,13 @@ async fn vcs_flow() {
         recorder.calls(),
         [
             format!("resolve {root} main"),
+            format!("descends {root} sha:base sha:main"),
+            format!("descends {root} unrelated sha:main"),
             format!("head {}", under("work")),
             format!("commit {} \"seal it\"", under("work")),
             format!("merge {} feature \"merge it\" [*.lock=Strategy::Ours]", under("work")),
             format!("merge {} conflicting \"merge it\" []", under("work")),
+            format!("log {root} emery/rev sha:base"),
             format!("init {}", under("fresh")),
             format!("add {root} {} sha:main", under(".cache/work")),
             format!("pending {}", under("work")),
@@ -225,8 +267,11 @@ async fn vcs_flow() {
             format!("clone https://example.test/repo.git {} depth=Some(1)", under("clone")),
             format!("fetch {} origin", under("clone")),
             format!("label {} emery/rev sha:main", under("clone")),
+            format!("labelled {} emery/rev", under("clone")),
             format!("push {} origin emery/rev", under("clone")),
             format!("resolve {root} missing"),
+            format!("labelled {} missing", under("clone")),
+            format!("push {} moved emery/rev", under("clone")),
             format!("push {} offline emery/rev", under("clone")),
         ]
     );
