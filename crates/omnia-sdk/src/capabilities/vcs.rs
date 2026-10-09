@@ -46,6 +46,15 @@ pub struct Merged {
     pub conflicts: Vec<String>,
 }
 
+/// One entry of a [`Vcs::log`]: a sealed commit's id and its whole message.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Entry {
+    /// The commit's id.
+    pub id: String,
+    /// The whole message, the trailers a caller wrote into it included.
+    pub message: String,
+}
+
 /// What a working copy did to a path its head does not hold that way.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ChangeKind {
@@ -91,6 +100,10 @@ pub enum Error {
     /// The remote refused, could not be reached, or wants credentials.
     #[error("access: {0}")]
     Access(String),
+    /// The remote's label holds commits the pushed one does not; nothing
+    /// was forced.
+    #[error("diverged: {0}")]
+    Diverged(String),
     /// Any other failure, with the backend's detail.
     #[error("{0}")]
     Other(String),
@@ -106,14 +119,15 @@ impl Error {
             Self::NotFound(_) => "not-found",
             Self::Pending(_) => "pending",
             Self::Access(_) => "access",
+            Self::Diverged(_) => "diverged",
             Self::Other(_) => "other",
         }
     }
 }
 
 // The default taxonomy: what the repository lacks is `not_found`, a remote
-// that cannot be reached is the gateway's, a location or working copy in
-// the wrong state is the request's, and the rest is the host's.
+// that cannot be reached is the gateway's, a location, working copy, or
+// label in the wrong state is the request's, and the rest is the host's.
 impl From<Error> for crate::Error {
     fn from(error: Error) -> Self {
         let code = error.code().to_owned();
@@ -122,7 +136,7 @@ impl From<Error> for crate::Error {
             Error::NotFound(_) => Self::NotFound { code, description },
             Error::Access(_) => Self::BadGateway { code, description },
             Error::Other(_) => Self::ServerError { code, description },
-            Error::NotARepository | Error::Exists(_) | Error::Pending(_) => {
+            Error::NotARepository | Error::Exists(_) | Error::Pending(_) | Error::Diverged(_) => {
                 Self::BadRequest { code, description }
             }
         }
@@ -150,6 +164,12 @@ pub trait Vcs: Send + Sync {
                 &self, repo: &str, revision: &str,
             ) -> impl Future<Output = Result<String, Error>> + Send;
 
+            /// Whether `ancestor` is in `descendant`'s history, itself included,
+            /// in the repository at `repo`.
+            fn descends(
+                &self, repo: &str, ancestor: &str, descendant: &str,
+            ) -> impl Future<Output = Result<bool, Error>> + Send;
+
             /// The sealed commit the working copy at `at` sits on.
             fn head(&self, at: &str) -> impl Future<Output = Result<String, Error>> + Send;
 
@@ -164,6 +184,12 @@ pub trait Vcs: Send + Sync {
             fn merge(
                 &self, at: &str, revision: &str, message: &str, policy: &[Rule],
             ) -> impl Future<Output = Result<Merged, Error>> + Send;
+
+            /// The first-parent chain from `revision` back to `base` in the
+            /// repository at `repo`, newest first, `base` left out.
+            fn log(
+                &self, repo: &str, revision: &str, base: &str,
+            ) -> impl Future<Output = Result<Vec<Entry>, Error>> + Send;
 
             /// A repository with no history at `at`.
             fn init(&self, at: &str) -> impl Future<Output = Result<(), Error>> + Send;
@@ -196,7 +222,14 @@ pub trait Vcs: Send + Sync {
                 &self, repo: &str, name: &str, revision: &str,
             ) -> impl Future<Output = Result<(), Error>> + Send;
 
-            /// Sends `label` and the commits it reaches to `remote`.
+            /// The commit the label `name` points at in the repository at
+            /// `repo`, in the namespace [`label`](Self::label) writes alone.
+            fn labelled(
+                &self, repo: &str, name: &str,
+            ) -> impl Future<Output = Result<String, Error>> + Send;
+
+            /// Sends `label` and the commits it reaches to `remote`; nothing is
+            /// forced.
             fn push(
                 &self, repo: &str, remote: &str, label: &str,
             ) -> impl Future<Output = Result<(), Error>> + Send;
@@ -212,6 +245,20 @@ pub trait Vcs: Send + Sync {
                     let directories = wire::preopens();
                     let repo = wire::lend(&directories, &repo)?;
                     Ok(omnia_wasi_vcs::store::resolve(repo, revision).await?)
+                }
+            }
+
+            /// Whether `ancestor` is in `descendant`'s history, itself included,
+            /// in the repository at `repo`.
+            fn descends(
+                &self, repo: &str, ancestor: &str, descendant: &str,
+            ) -> impl Future<Output = Result<bool, Error>> + Send {
+                let (repo, ancestor, descendant) =
+                    (repo.to_owned(), ancestor.to_owned(), descendant.to_owned());
+                async move {
+                    let directories = wire::preopens();
+                    let repo = wire::lend(&directories, &repo)?;
+                    Ok(omnia_wasi_vcs::store::descends(repo, ancestor, descendant).await?)
                 }
             }
 
@@ -253,6 +300,21 @@ pub trait Vcs: Send + Sync {
                     let merged =
                         omnia_wasi_vcs::store::merge(at, revision, message, policy).await?;
                     Ok(merged.into())
+                }
+            }
+
+            /// The first-parent chain from `revision` back to `base` in the
+            /// repository at `repo`, newest first, `base` left out.
+            fn log(
+                &self, repo: &str, revision: &str, base: &str,
+            ) -> impl Future<Output = Result<Vec<Entry>, Error>> + Send {
+                let (repo, revision, base) =
+                    (repo.to_owned(), revision.to_owned(), base.to_owned());
+                async move {
+                    let directories = wire::preopens();
+                    let repo = wire::lend(&directories, &repo)?;
+                    let entries = omnia_wasi_vcs::store::log(repo, revision, base).await?;
+                    Ok(entries.into_iter().map(Into::into).collect())
                 }
             }
 
@@ -339,7 +401,21 @@ pub trait Vcs: Send + Sync {
                 }
             }
 
-            /// Sends `label` and the commits it reaches to `remote`.
+            /// The commit the label `name` points at in the repository at
+            /// `repo`, in the namespace [`label`](Self::label) writes alone.
+            fn labelled(
+                &self, repo: &str, name: &str,
+            ) -> impl Future<Output = Result<String, Error>> + Send {
+                let (repo, name) = (repo.to_owned(), name.to_owned());
+                async move {
+                    let directories = wire::preopens();
+                    let repo = wire::lend(&directories, &repo)?;
+                    Ok(omnia_wasi_vcs::transport::labelled(repo, name).await?)
+                }
+            }
+
+            /// Sends `label` and the commits it reaches to `remote`; nothing is
+            /// forced.
             fn push(
                 &self, repo: &str, remote: &str, label: &str,
             ) -> impl Future<Output = Result<(), Error>> + Send {
@@ -361,6 +437,12 @@ delegate_deref!(Vcs {
         (**self).resolve(repo, revision)
     }
 
+    fn descends(
+        &self, repo: &str, ancestor: &str, descendant: &str,
+    ) -> impl Future<Output = Result<bool, Error>> + Send {
+        (**self).descends(repo, ancestor, descendant)
+    }
+
     fn head(&self, at: &str) -> impl Future<Output = Result<String, Error>> + Send {
         (**self).head(at)
     }
@@ -375,6 +457,12 @@ delegate_deref!(Vcs {
         &self, at: &str, revision: &str, message: &str, policy: &[Rule],
     ) -> impl Future<Output = Result<Merged, Error>> + Send {
         (**self).merge(at, revision, message, policy)
+    }
+
+    fn log(
+        &self, repo: &str, revision: &str, base: &str,
+    ) -> impl Future<Output = Result<Vec<Entry>, Error>> + Send {
+        (**self).log(repo, revision, base)
     }
 
     fn init(&self, at: &str) -> impl Future<Output = Result<(), Error>> + Send {
@@ -411,6 +499,10 @@ delegate_deref!(Vcs {
         (**self).label(repo, name, revision)
     }
 
+    fn labelled(&self, repo: &str, name: &str) -> impl Future<Output = Result<String, Error>> + Send {
+        (**self).labelled(repo, name)
+    }
+
     fn push(
         &self, repo: &str, remote: &str, label: &str,
     ) -> impl Future<Output = Result<(), Error>> + Send {
@@ -434,7 +526,7 @@ mod wire {
     use wasip3::filesystem::preopens;
     use wasip3::filesystem::types::Descriptor;
 
-    use super::{Change, ChangeKind, CloneOptions, Error, Merged, Rule, Strategy};
+    use super::{Change, ChangeKind, CloneOptions, Entry, Error, Merged, Rule, Strategy};
     use crate::capabilities::lend::resolve_lend;
 
     // the lent root borrows a descriptor, so the preopens outlive the call
@@ -481,6 +573,15 @@ mod wire {
         }
     }
 
+    impl From<store::Entry> for Entry {
+        fn from(entry: store::Entry) -> Self {
+            Self {
+                id: entry.id,
+                message: entry.message,
+            }
+        }
+    }
+
     impl From<workspace::Change> for Change {
         fn from(change: workspace::Change) -> Self {
             Self {
@@ -514,6 +615,7 @@ mod wire {
                 types::Error::NotFound(detail) => Self::NotFound(detail),
                 types::Error::Pending(paths) => Self::Pending(paths),
                 types::Error::Access(detail) => Self::Access(detail),
+                types::Error::Diverged(label) => Self::Diverged(label),
                 types::Error::Other(detail) => Self::Other(detail),
             }
         }
@@ -532,6 +634,7 @@ mod tests {
             (Error::NotFound("v1".into()), "not-found"),
             (Error::Pending(vec!["a".into(), "b".into()]), "pending"),
             (Error::Access("denied".into()), "access"),
+            (Error::Diverged("emery/x".into()), "diverged"),
             (Error::Other("boom".into()), "other"),
         ];
         for (error, code) in cases {
@@ -541,7 +644,10 @@ mod tests {
                 Error::NotFound(_) => assert!(matches!(mapped, crate::Error::NotFound { .. })),
                 Error::Access(_) => assert!(matches!(mapped, crate::Error::BadGateway { .. })),
                 Error::Other(_) => assert!(matches!(mapped, crate::Error::ServerError { .. })),
-                Error::NotARepository | Error::Exists(_) | Error::Pending(_) => {
+                Error::NotARepository
+                | Error::Exists(_)
+                | Error::Pending(_)
+                | Error::Diverged(_) => {
                     assert!(matches!(mapped, crate::Error::BadRequest { .. }));
                 }
             }

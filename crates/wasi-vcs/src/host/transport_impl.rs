@@ -39,6 +39,16 @@ where
         .await
     }
 
+    async fn labelled(
+        accessor: &Accessor<T, Self>, repo: Location, name: String,
+    ) -> Result<String> {
+        Self::dispatch(accessor, |access| {
+            let repo = Self::locate(access, &repo, Intent::Read)?;
+            Ok(access.get().ctx.labelled(repo, name))
+        })
+        .await
+    }
+
     async fn push(
         accessor: &Accessor<T, Self>, repo: Location, remote: String, label: String,
     ) -> Result<()> {

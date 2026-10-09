@@ -17,7 +17,7 @@ use cap_std::fs::{Dir, Metadata, MetadataExt as _};
 use omnia_core::MountRegistry;
 use wasmtime_wasi::filesystem::Descriptor;
 
-use super::generated::omnia::vcs::types::Location;
+use super::generated::omnia::vcs::types::{Error, Location};
 
 /// The place a guest's `location` resolved to: an open directory beneath an
 /// authorized mount.
@@ -120,7 +120,9 @@ fn check_subpath(subpath: &str) -> anyhow::Result<()> {
 // root and refuses any escape, creating the missing directories first when
 // the operation is one that creates. `create_dir_all` reports a name held
 // by anything but a directory it can reach as `AlreadyExists`: a file, a
-// dangling symlink, or a symlink that leads out.
+// dangling symlink, or a symlink that leads out. A subpath nothing holds
+// is the typed `not-a-repository` for an operation that does not create,
+// carried the way a backend carries its own.
 fn open_beneath(root: &Dir, subpath: &str, create: bool) -> anyhow::Result<Dir> {
     if create {
         match root.create_dir_all(subpath) {
@@ -134,7 +136,13 @@ fn open_beneath(root: &Dir, subpath: &str, create: bool) -> anyhow::Result<Dir> 
             }
         }
     }
-    root.open_dir(subpath).with_context(|| format!("opening location subpath `{subpath}`"))
+    match root.open_dir(subpath) {
+        Ok(dir) => Ok(dir),
+        Err(error) if !create && error.kind() == io::ErrorKind::NotFound => {
+            Err(Error::NotARepository.into())
+        }
+        Err(error) => Err(error).with_context(|| format!("opening location subpath `{subpath}`")),
+    }
 }
 
 // subpath vetting and the opening rule are pure over a directory; the guest

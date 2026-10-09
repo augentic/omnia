@@ -8,13 +8,13 @@ Implements the `omnia:vcs@0.1.0` WIT package ([`wit/vcs.wit`](wit/vcs.wit)), thr
 
 | Interface | Operations | Purpose |
 | --------- | ---------- | ------- |
-| `store` | `resolve`, `head`, `commit`, `merge` | The commit graph: sealed snapshots, and the merge under a policy |
+| `store` | `resolve`, `descends`, `head`, `commit`, `merge`, `log` | The commit graph: sealed snapshots, whether one commit is in another's history, the merge under a policy, and the first-parent chain over a base |
 | `workspace` | `init`, `add`, `remove`, `pending` | Working copies laid beneath a mount, and what each holds past its head |
-| `transport` | `clone`, `fetch`, `label`, `push` | Remotes and labels |
+| `transport` | `clone`, `fetch`, `label`, `labelled`, `push` | Remotes and labels: a label is written and read back in one namespace, and a push never forces |
 
-Every operation names its repository or working copy as a `location`: a borrowed mount-root descriptor plus a plain relative subpath, the `workspace-grant` idiom of `omnia:model`. The host resolves it against the deployment's mount registry before the backend runs, so a backend works only beneath a mount the deployment authorised, and a mutation (`init`, `add`, `remove`, `commit`, `merge`, `clone`, `fetch`, `label`, `push`) beneath a read-only mount is refused as `error.other` before any backend runs. The backend receives a `Place`, an open directory handle beneath the mount that the host created for `init`, `add`, and `clone` where nothing stood and holds for as long as the backend runs, so a guest rearranging its tree meanwhile cannot redirect the operation; it never sees a descriptor, and the guest sees locations and never a path.
+Every operation names its repository or working copy as a `location`: a borrowed mount-root descriptor plus a plain relative subpath, the `workspace-grant` idiom of `omnia:model`. The host resolves it against the deployment's mount registry before the backend runs, so a backend works only beneath a mount the deployment authorised, and a mutation (`init`, `add`, `remove`, `commit`, `merge`, `clone`, `fetch`, `label`, `push`) beneath a read-only mount is refused as `error.other` before any backend runs. The backend receives a `Place`, an open directory handle beneath the mount that the host created for `init`, `add`, and `clone` where nothing stood and holds for as long as the backend runs, so a guest rearranging its tree meanwhile cannot redirect the operation; it never sees a descriptor, and the guest sees locations and never a path. A subpath that does not exist is `not-a-repository` for every other operation, before any backend runs.
 
-A typed `error` — `not-a-repository`, `exists`, `not-found`, `pending`, `access`, `other` — crosses the boundary as the backend returned it; any other backend failure reaches the guest as `other`.
+A typed `error` — `not-a-repository`, `exists`, `not-found`, `pending`, `access`, `diverged`, `other` — crosses the boundary as the backend returned it; any other backend failure reaches the guest as `other`.
 
 ## Backend
 
