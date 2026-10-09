@@ -39,7 +39,7 @@ pub use omnia_core::FutureResult;
 use omnia_core::{HasMounts, Host, Server, StoreView};
 use wasmtime::component::{Access, Accessor, HasData, Linker};
 
-pub use self::generated::omnia::vcs::store::{Merged, Rule, Strategy};
+pub use self::generated::omnia::vcs::store::{Entry, Merged, Rule, Strategy};
 pub use self::generated::omnia::vcs::transport::CloneOptions;
 pub use self::generated::omnia::vcs::types::Error;
 use self::generated::omnia::vcs::types::{Host as TypesHost, Location};
@@ -81,7 +81,7 @@ impl WasiVcs {
     ) -> Result<Place> {
         let mounts = access.data_mut().mounts();
         let descriptor = access.get().table.get(&location.root)?;
-        Ok(location::resolve(descriptor, &mounts, location, intent)?)
+        location::resolve(descriptor, &mounts, location, intent).map_err(Self::lower)
     }
 
     // The locations resolve inside the store access, where the borrowed
@@ -111,8 +111,9 @@ impl WasiVcs {
 /// resolved to. The backend never sees a descriptor and the guest never
 /// sees a path. A place for `init`, `clone`, or the working copy `add`
 /// lays down exists when the backend runs, empty where nothing stood
-/// before; every other place must already exist. A typed failure is
-/// returned as an [`Error`] inside the `anyhow` error
+/// before; every other place must already exist, and one that does not is
+/// the host's [`Error::NotARepository`] before the backend runs. A typed
+/// failure is returned as an [`Error`] inside the `anyhow` error
 /// (`Err(Error::NotFound(..).into())`) and reaches the guest as that
 /// variant; any other error reaches it as [`Error::Other`].
 ///
@@ -121,6 +122,10 @@ impl WasiVcs {
 pub trait WasiVcsCtx: Debug + Send + Sync + 'static {
     /// The commit `revision` names in the repository at `repo`.
     fn resolve(&self, repo: Place, revision: String) -> FutureResult<String>;
+
+    /// Whether `ancestor` is in `descendant`'s history, itself included, in
+    /// the repository at `repo`.
+    fn descends(&self, repo: Place, ancestor: String, descendant: String) -> FutureResult<bool>;
 
     /// The sealed commit the working copy at `at` sits on.
     fn head(&self, at: Place) -> FutureResult<String>;
@@ -133,6 +138,10 @@ pub trait WasiVcsCtx: Debug + Send + Sync + 'static {
     fn merge(
         &self, at: Place, revision: String, message: String, policy: Vec<Rule>,
     ) -> FutureResult<Merged>;
+
+    /// The first-parent chain from `revision` back to `base` in the
+    /// repository at `repo`, newest first, `base` left out.
+    fn log(&self, repo: Place, revision: String, base: String) -> FutureResult<Vec<Entry>>;
 
     /// A repository with no history at `at`.
     fn init(&self, at: Place) -> FutureResult<()>;
@@ -155,6 +164,10 @@ pub trait WasiVcsCtx: Debug + Send + Sync + 'static {
     /// Point `name` at `revision` in the repository at `repo`.
     fn label(&self, repo: Place, name: String, revision: String) -> FutureResult<()>;
 
+    /// The commit the label `name` points at in the repository at `repo`,
+    /// in the namespace `label` writes alone.
+    fn labelled(&self, repo: Place, name: String) -> FutureResult<String>;
+
     /// Send `label` and the commits it reaches to `remote`.
     fn push(&self, repo: Place, remote: String, label: String) -> FutureResult<()>;
 }
@@ -162,6 +175,10 @@ pub trait WasiVcsCtx: Debug + Send + Sync + 'static {
 impl WasiVcsCtx for Box<dyn WasiVcsCtx> {
     fn resolve(&self, repo: Place, revision: String) -> FutureResult<String> {
         (**self).resolve(repo, revision)
+    }
+
+    fn descends(&self, repo: Place, ancestor: String, descendant: String) -> FutureResult<bool> {
+        (**self).descends(repo, ancestor, descendant)
     }
 
     fn head(&self, at: Place) -> FutureResult<String> {
@@ -176,6 +193,10 @@ impl WasiVcsCtx for Box<dyn WasiVcsCtx> {
         &self, at: Place, revision: String, message: String, policy: Vec<Rule>,
     ) -> FutureResult<Merged> {
         (**self).merge(at, revision, message, policy)
+    }
+
+    fn log(&self, repo: Place, revision: String, base: String) -> FutureResult<Vec<Entry>> {
+        (**self).log(repo, revision, base)
     }
 
     fn init(&self, at: Place) -> FutureResult<()> {
@@ -204,6 +225,10 @@ impl WasiVcsCtx for Box<dyn WasiVcsCtx> {
 
     fn label(&self, repo: Place, name: String, revision: String) -> FutureResult<()> {
         (**self).label(repo, name, revision)
+    }
+
+    fn labelled(&self, repo: Place, name: String) -> FutureResult<String> {
+        (**self).labelled(repo, name)
     }
 
     fn push(&self, repo: Place, remote: String, label: String) -> FutureResult<()> {

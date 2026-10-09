@@ -1,11 +1,13 @@
 //! Every `omnia:vcs` operation through the SDK's `Vcs` trait: each path
 //! lends the `.` mount or a subpath beneath it, each answer is the scripted
 //! backend's, and a typed refusal and an untyped one lower to the SDK's
-//! `Error` as `not-found` and `other`.
+//! `Error` as its variant (`not-found`, `diverged`) and as `other`.
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_sdk::vcs::{Change, ChangeKind, CloneOptions, Error, Rule, Strategy, Vcs as _, WasiVcs};
+use omnia_sdk::vcs::{
+    Change, ChangeKind, CloneOptions, Entry, Error, Rule, Strategy, Vcs as _, WasiVcs,
+};
 use wasip3::filesystem::preopens;
 
 omnia_sdk::command!(scenario);
@@ -15,6 +17,8 @@ async fn scenario() {
 
     // store
     assert_eq!(WasiVcs.resolve(".", "main").await.expect("resolve"), "sha:main");
+    assert!(WasiVcs.descends(".", "sha:base", "sha:main").await.expect("descends"));
+    assert!(!WasiVcs.descends(".", "unrelated", "sha:main").await.expect("descends"));
     assert_eq!(WasiVcs.head("./work").await.expect("head"), "head-sha");
     assert_eq!(
         WasiVcs.commit("./work", "seal it").await.expect("commit"),
@@ -31,6 +35,19 @@ async fn scenario() {
         WasiVcs.merge("./work", "conflicting", "merge it", &[]).await.expect("conflicted merge");
     assert_eq!(conflicted.commit, None);
     assert_eq!(conflicted.conflicts, ["Cargo.lock"]);
+    assert_eq!(
+        WasiVcs.log(".", "emery/rev", "sha:base").await.expect("log"),
+        [
+            Entry {
+                id: "l2:emery/rev".to_owned(),
+                message: "second\n\nSlice: SLICE-002\n".to_owned(),
+            },
+            Entry {
+                id: "l1:emery/rev".to_owned(),
+                message: "first\n\nSlice: SLICE-001\n".to_owned(),
+            },
+        ]
+    );
 
     // workspace
     WasiVcs.init("./fresh").await.expect("init");
@@ -61,12 +78,18 @@ async fn scenario() {
         .expect("clone");
     WasiVcs.fetch("./clone", "origin").await.expect("fetch");
     WasiVcs.label("./clone", "emery/rev", "sha:main").await.expect("label");
+    assert_eq!(WasiVcs.labelled("./clone", "emery/rev").await.expect("labelled"), "lbl:emery/rev");
     WasiVcs.push("./clone", "origin", "emery/rev").await.expect("push");
 
     // a typed refusal crosses as its variant
     let missing = WasiVcs.resolve(".", "missing").await.expect_err("an unknown revision");
     assert_eq!(missing, Error::NotFound("missing".to_owned()));
     assert_eq!(missing.code(), "not-found");
+    let unlabelled = WasiVcs.labelled("./clone", "missing").await.expect_err("an unknown label");
+    assert_eq!(unlabelled, Error::NotFound("missing".to_owned()));
+    let moved = WasiVcs.push("./clone", "moved", "emery/rev").await.expect_err("a moved label");
+    assert_eq!(moved, Error::Diverged("emery/rev".to_owned()));
+    assert_eq!(moved.code(), "diverged");
 
     // an untyped backend failure lowers to `other`, its detail kept
     let offline = WasiVcs.push("./clone", "offline", "emery/rev").await.expect_err("no network");
