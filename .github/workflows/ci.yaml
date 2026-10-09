@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   ci:
-    uses: augentic/toolkit/.github/workflows/ci.yaml@v0.5.0
+    uses: augentic/toolkit/.github/workflows/ci.yaml@v0.5.1
     secrets: inherit
     with:
       targets: wasm32-wasip2

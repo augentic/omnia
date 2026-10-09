@@ -48,11 +48,12 @@ async fn run_guest(wasm: &str, mounts: Vec<Mount>) -> Recorder {
 // ------------------------------------------------------------------------
 
 // Records every call with the host paths the locations resolved to and
-// answers each from a fixed script: `resolve("missing")` and
-// `labelled("missing")` are a typed `not-found`, `push(.., "moved", ..)` a
-// typed `diverged`, `push(.., "offline", ..)` an untyped failure, a merge of
-// `conflicting` comes back in conflict, `descends` from `unrelated` is
-// false, and a log is two commits over its base.
+// answers each from a fixed script: `resolve("missing")`,
+// `labelled("missing")`, and `fetched(.., "missing")` are a typed
+// `not-found`, `push(.., "moved", ..)` a typed `diverged`, `push(..,
+// "offline", ..)` an untyped failure, a merge of `conflicting` comes back
+// in conflict, `descends` from `unrelated` is false, and a log is two
+// commits over its base.
 #[derive(Clone, Debug, Default)]
 struct Recorder {
     calls: Arc<Mutex<Vec<String>>>,
@@ -215,6 +216,17 @@ impl WasiVcsCtx for Recorder {
         .boxed()
     }
 
+    fn fetched(&self, repo: Place, remote: String, name: String) -> FutureResult<String> {
+        self.record(format!("fetched {} {remote} {name}", held(&repo)));
+        async move {
+            if name == "missing" {
+                return Err(Error::NotFound(name).into());
+            }
+            Ok(format!("rmt:{remote}:{name}"))
+        }
+        .boxed()
+    }
+
     fn push(&self, repo: Place, remote: String, label: String) -> FutureResult<()> {
         self.record(format!("push {} {remote} {label}", held(&repo)));
         async move {
@@ -268,9 +280,11 @@ async fn vcs_flow() {
             format!("fetch {} origin", under("clone")),
             format!("label {} emery/rev sha:main", under("clone")),
             format!("labelled {} emery/rev", under("clone")),
+            format!("fetched {} origin emery/rev", under("clone")),
             format!("push {} origin emery/rev", under("clone")),
             format!("resolve {root} missing"),
             format!("labelled {} missing", under("clone")),
+            format!("fetched {} origin missing", under("clone")),
             format!("push {} moved emery/rev", under("clone")),
             format!("push {} offline emery/rev", under("clone")),
         ]
