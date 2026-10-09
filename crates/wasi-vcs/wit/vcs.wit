@@ -80,7 +80,10 @@ interface store {
         message: string,
     }
 
-    /// A label, tag, or commit prefix to the commit it names.
+    /// A label, a tag, or a commit id, whole or a unique prefix, to the
+    /// commit it names. Which of a label and a tag of one spelling answers
+    /// is the backend's: `labelled` is the label, `fetched` a remote's. Any
+    /// other spelling a backend reads is that backend's alone.
     resolve: async func(repo: location, revision: string) -> result<string, error>;
 
     /// Whether `ancestor` is in `descendant`'s history, itself included. An
@@ -95,7 +98,8 @@ interface store {
     /// the whole chain from `revision`.
     log: async func(repo: location, revision: string, base: string) -> result<list<entry>, error>;
 
-    /// The sealed commit the working copy at `at` sits on.
+    /// The sealed commit the working copy at `at` sits on. A working copy
+    /// with no commit yet is `not-found`.
     head: async func(at: location) -> result<string, error>;
 
     /// Seals every pending change as one commit; none when there is nothing.
@@ -163,6 +167,13 @@ interface transport {
     /// a tag, a remote's label, or a commit of that spelling is never it. A
     /// label the repository lacks is `not-found`.
     labelled: async func(repo: location, name: string) -> result<string, error>;
+
+    /// The commit `remote`'s label `name` pointed at when the repository
+    /// last fetched from it, in the namespace `fetch` and `clone` write
+    /// alone: a label, tag, or commit of that spelling is never it. A
+    /// remote the repository lacks, or a label it has not fetched from it,
+    /// is `not-found` naming it.
+    fetched: async func(repo: location, remote: string, name: string) -> result<string, error>;
 
     /// Sends the label and the commits it reaches to `remote`. A remote whose
     /// label holds commits the pushed one does not is `diverged`; nothing is

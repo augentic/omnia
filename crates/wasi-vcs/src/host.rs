@@ -168,6 +168,11 @@ pub trait WasiVcsCtx: Debug + Send + Sync + 'static {
     /// in the namespace `label` writes alone.
     fn labelled(&self, repo: Place, name: String) -> FutureResult<String>;
 
+    /// The commit `remote`'s label `name` pointed at when the repository at
+    /// `repo` last fetched from it, in the namespace `fetch` and `clone`
+    /// write alone.
+    fn fetched(&self, repo: Place, remote: String, name: String) -> FutureResult<String>;
+
     /// Send `label` and the commits it reaches to `remote`.
     fn push(&self, repo: Place, remote: String, label: String) -> FutureResult<()>;
 }
@@ -229,6 +234,10 @@ impl WasiVcsCtx for Box<dyn WasiVcsCtx> {
 
     fn labelled(&self, repo: Place, name: String) -> FutureResult<String> {
         (**self).labelled(repo, name)
+    }
+
+    fn fetched(&self, repo: Place, remote: String, name: String) -> FutureResult<String> {
+        (**self).fetched(repo, remote, name)
     }
 
     fn push(&self, repo: Place, remote: String, label: String) -> FutureResult<()> {

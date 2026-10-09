@@ -49,6 +49,16 @@ where
         .await
     }
 
+    async fn fetched(
+        accessor: &Accessor<T, Self>, repo: Location, remote: String, name: String,
+    ) -> Result<String> {
+        Self::dispatch(accessor, |access| {
+            let repo = Self::locate(access, &repo, Intent::Read)?;
+            Ok(access.get().ctx.fetched(repo, remote, name))
+        })
+        .await
+    }
+
     async fn push(
         accessor: &Accessor<T, Self>, repo: Location, remote: String, label: String,
     ) -> Result<()> {

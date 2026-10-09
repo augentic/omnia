@@ -158,8 +158,8 @@ impl From<Error> for crate::Error {
 pub trait Vcs: Send + Sync {
     cfg_select! {
         not(target_arch = "wasm32") => {
-            /// The commit `revision` — a label, tag, or commit prefix — names in
-            /// the repository at `repo`.
+            /// The commit `revision` names in the repository at `repo`: a
+            /// label, a tag, or a commit id, whole or a unique prefix.
             fn resolve(
                 &self, repo: &str, revision: &str,
             ) -> impl Future<Output = Result<String, Error>> + Send;
@@ -170,7 +170,8 @@ pub trait Vcs: Send + Sync {
                 &self, repo: &str, ancestor: &str, descendant: &str,
             ) -> impl Future<Output = Result<bool, Error>> + Send;
 
-            /// The sealed commit the working copy at `at` sits on.
+            /// The sealed commit the working copy at `at` sits on; one with
+            /// no commit yet is [`Error::NotFound`].
             fn head(&self, at: &str) -> impl Future<Output = Result<String, Error>> + Send;
 
             /// Seals every pending change at `at` as one commit; `None` when
@@ -228,6 +229,14 @@ pub trait Vcs: Send + Sync {
                 &self, repo: &str, name: &str,
             ) -> impl Future<Output = Result<String, Error>> + Send;
 
+            /// The commit `remote`'s label `name` pointed at when the
+            /// repository at `repo` last fetched from it, in the namespace
+            /// [`fetch`](Self::fetch) and [`clone_repo`](Self::clone_repo)
+            /// write alone.
+            fn fetched(
+                &self, repo: &str, remote: &str, name: &str,
+            ) -> impl Future<Output = Result<String, Error>> + Send;
+
             /// Sends `label` and the commits it reaches to `remote`; nothing is
             /// forced.
             fn push(
@@ -235,8 +244,8 @@ pub trait Vcs: Send + Sync {
             ) -> impl Future<Output = Result<(), Error>> + Send;
         }
         _ => {
-            /// The commit `revision` — a label, tag, or commit prefix — names in
-            /// the repository at `repo`.
+            /// The commit `revision` names in the repository at `repo`: a
+            /// label, a tag, or a commit id, whole or a unique prefix.
             fn resolve(
                 &self, repo: &str, revision: &str,
             ) -> impl Future<Output = Result<String, Error>> + Send {
@@ -262,7 +271,8 @@ pub trait Vcs: Send + Sync {
                 }
             }
 
-            /// The sealed commit the working copy at `at` sits on.
+            /// The sealed commit the working copy at `at` sits on; one with
+            /// no commit yet is [`Error::NotFound`].
             fn head(&self, at: &str) -> impl Future<Output = Result<String, Error>> + Send {
                 let at = at.to_owned();
                 async move {
@@ -414,6 +424,21 @@ pub trait Vcs: Send + Sync {
                 }
             }
 
+            /// The commit `remote`'s label `name` pointed at when the
+            /// repository at `repo` last fetched from it, in the namespace
+            /// [`fetch`](Self::fetch) and [`clone_repo`](Self::clone_repo)
+            /// write alone.
+            fn fetched(
+                &self, repo: &str, remote: &str, name: &str,
+            ) -> impl Future<Output = Result<String, Error>> + Send {
+                let (repo, remote, name) = (repo.to_owned(), remote.to_owned(), name.to_owned());
+                async move {
+                    let directories = wire::preopens();
+                    let repo = wire::lend(&directories, &repo)?;
+                    Ok(omnia_wasi_vcs::transport::fetched(repo, remote, name).await?)
+                }
+            }
+
             /// Sends `label` and the commits it reaches to `remote`; nothing is
             /// forced.
             fn push(
@@ -501,6 +526,12 @@ delegate_deref!(Vcs {
 
     fn labelled(&self, repo: &str, name: &str) -> impl Future<Output = Result<String, Error>> + Send {
         (**self).labelled(repo, name)
+    }
+
+    fn fetched(
+        &self, repo: &str, remote: &str, name: &str,
+    ) -> impl Future<Output = Result<String, Error>> + Send {
+        (**self).fetched(repo, remote, name)
     }
 
     fn push(
