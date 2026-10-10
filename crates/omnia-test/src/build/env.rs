@@ -70,8 +70,11 @@ pub fn nested_build(root: &Path, target_dir: &Path) -> Command {
     sanitise(&mut command, env::vars_os().filter_map(|(key, _)| key.into_string().ok()));
     command.env("CARGO_TARGET_DIR", target_dir);
     // Wasmtime ignores guest DWARF unless asked for it; it would only inflate
-    // the fixture tree and the components the suites load.
+    // the fixture tree and the components the suites load. Size-optimised
+    // code is a third of the unoptimised bytes, and every suite pays the
+    // JIT of each byte on each boot, so the guests compile for size.
     command.env("CARGO_PROFILE_DEV_DEBUG", "0");
+    command.env("CARGO_PROFILE_DEV_OPT_LEVEL", "s");
     if deny_warnings {
         command.env("RUSTFLAGS", "-Dwarnings");
     }
