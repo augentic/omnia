@@ -1,0 +1,9 @@
+# The examples gate shells out to `cargo`, which serialises on the target
+# directory's lock, so its tests gain nothing from parallel slots and would
+# otherwise hold every slot for the minutes the guests take to build.
+[test-groups]
+examples = { max-threads = 1 }
+
+[[profile.default.overrides]]
+filter = "package(examples)"
+test-group = "examples"
