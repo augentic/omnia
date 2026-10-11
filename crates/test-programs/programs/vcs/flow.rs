@@ -79,6 +79,10 @@ async fn scenario() {
     WasiVcs.fetch("./clone", "origin").await.expect("fetch");
     WasiVcs.label("./clone", "emery/rev", "sha:main").await.expect("label");
     assert_eq!(WasiVcs.labelled("./clone", "emery/rev").await.expect("labelled"), "lbl:emery/rev");
+    assert_eq!(
+        WasiVcs.fetched("./clone", "origin", "emery/rev").await.expect("fetched"),
+        "rmt:origin:emery/rev"
+    );
     WasiVcs.push("./clone", "origin", "emery/rev").await.expect("push");
 
     // a typed refusal crosses as its variant
@@ -87,6 +91,9 @@ async fn scenario() {
     assert_eq!(missing.code(), "not-found");
     let unlabelled = WasiVcs.labelled("./clone", "missing").await.expect_err("an unknown label");
     assert_eq!(unlabelled, Error::NotFound("missing".to_owned()));
+    let unfetched =
+        WasiVcs.fetched("./clone", "origin", "missing").await.expect_err("an unfetched label");
+    assert_eq!(unfetched, Error::NotFound("missing".to_owned()));
     let moved = WasiVcs.push("./clone", "moved", "emery/rev").await.expect_err("a moved label");
     assert_eq!(moved, Error::Diverged("emery/rev".to_owned()));
     assert_eq!(moved.code(), "diverged");

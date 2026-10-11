@@ -49,17 +49,22 @@ Unreleased
   the target.
 - `omnia-wasi-vcs`: the `omnia:vcs` capability, version control over a
   guest's lent mounts. The WIT package carries three interfaces — `store`
-  (`resolve`, `descends`: whether one commit is in another's history, itself
-  included, `head`, `commit`, `merge` under a policy of glob rules, and
-  `log`: the first-parent chain from a revision back to a base, newest
-  first and the base left out, each `entry` a commit's id and whole
-  message, so a caller reads back the trailers it sealed over a base
-  without walking the sides a merge brought in), `workspace` (`init`,
+  (`resolve`: a label, a tag, or a commit id whole or by unique prefix,
+  any other spelling the backend's own, `descends`: whether one commit is
+  in another's history, itself included, `head`: the commit a working copy
+  sits on, `not-found` while it has none, `commit`, `merge` under a policy
+  of glob rules, and `log`: the first-parent chain from a revision back to
+  a base, newest first and the base left out, each `entry` a commit's id
+  and whole message, so a caller reads back the trailers it sealed over a
+  base without walking the sides a merge brought in), `workspace` (`init`,
   `add`, `remove`, `pending`), and `transport` (`clone`, `fetch`, `label`,
   `labelled`: the commit a label points at in the namespace `label` writes
   alone, so a tag, a remote's label, or a commit of that spelling is never
-  read back as one, and `push`, which never forces: a remote whose label
-  holds commits the pushed one does not is the typed `diverged`) — every
+  read back as one, `fetched`: the commit a remote's label pointed at when
+  the repository last fetched from it, in the namespace `fetch` and `clone`
+  write alone, so a guest never spells a remote's label in one backend's
+  grammar, and `push`, which never forces: a remote whose label holds
+  commits the pushed one does not is the typed `diverged`) — every
   function async, each naming a repository or working copy as a `location`:
   a borrowed mount-root descriptor plus a relative subpath. The host
   (`WasiVcs`, a backend behind `WasiVcsCtx`) resolves the location beneath
