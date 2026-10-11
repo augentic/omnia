@@ -7,9 +7,8 @@ How the Omnia repository tests *itself*. The binding rules are also in the repos
 - **End-to-end tests** are the primary tier for `wasi-*` host crates: a real guest component driven through omnia's own runtime against an inline scenario backend, pinning the whole boundary (guest bindings → linker → host binding → backend and back). The exemplar is `crates/wasi-model/tests/model.rs`.
 - **Unit tests** cover deterministic logic wherever it lives: parsers, codecs, filter/type translation, route matching, macro token expansion, guest-side library code. If a behavior is a pure function no guest boundary reaches (e.g. `Format::candidate` extraction, which backends drive directly), it is a unit test next to that logic.
 - **Live tests** (in the `omnia-backends` repo) are the acceptance tier for production backends: `#[ignore]`-gated, credential-gated, driving the backend's `WasiXxxCtx` against the real service.
-- **The examples gate** (`examples/tests/examples.rs`) builds the guests for `wasm32-wasip2` and runs `cargo run --example` from the workspace root for the run-to-completion examples, asserting exit status 0. Examples assume the default `target/` directory (wasmtime's stance; a redirected `CARGO_TARGET_DIR` is unsupported for this tier) — hermetic guest builds belong to the `test-programs` pipeline. The gate instantiates no guest of its own and asserts no behaviour — that lives in the e2e suites — so server examples are build-only. It is CI's tier: minutes per example, and never a local verification step.
 
-Guest-instantiating tests exist **only** through the shared pipeline below. Do not compile, deserialize, or instantiate a WASM guest ad hoc inside an individual test, and do not build or run an example to check that something works from a guest — an example is a demo, and a passing one confirms neither a behaviour nor a trait bound. That question is always answered by [adding a guest program](#adding-a-guest-program).
+Guest-instantiating tests exist **only** through the shared pipeline below. Do not compile, deserialize, or instantiate a WASM guest ad hoc inside an individual test, and do not build or run an example to check that something works from a guest. Examples are not a tier. They are demos a human runs by hand (`mise run example <name>`); CI compiles them under clippy, natively and for `wasm32-wasip2`, and nothing runs them, so a passing example confirms neither a behaviour nor a trait bound. That question is always answered by [adding a guest program](#adding-a-guest-program).
 
 ## Principles
 
@@ -66,11 +65,11 @@ The same inline pattern serves hosts whose default backend records nothing obser
 
 ```bash
 cargo nextest run -p <crate> --all-features       # the crate you changed: unit tests plus its e2e suite
-mise run test                                     # everything (`cargo nextest run --workspace --all-features --locked`), examples gate included
+mise run test                                     # everything (`cargo nextest run --workspace --all-features --locked`)
 cargo test --doc --all-features --workspace       # doc tests
 ```
 
-Verify locally per crate; the full run is CI's, because `examples` is a workspace member and its gate builds every example guest.
+Verify locally per crate; the full workspace run is CI's.
 
 `cargo-nextest` must be installed with `--locked` (`cargo install --locked cargo-nextest`). The `wasm32-wasip2` target must be installed (`rust-toolchain.toml` pins it); `test-programs`'s build script needs it to compile the guest programs.
 

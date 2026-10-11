@@ -8,8 +8,9 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result, anyhow};
-use omnia_core::CompileOptions;
 use wasmtime::{Config, Engine};
+
+use crate::CompileOptions;
 
 /// Compile the `wasm32-wasip2` component at `wasm` ahead of time.
 ///

@@ -100,7 +100,7 @@ Same layer as **Layers 1 + 2 (composition root + live-runtime SDK + WASI interfa
 
 ### Facade
 
-The `omnia` crate, the **composition root** and an embedder's only omnia dependency: it owns deployment assembly and process lifecycle, composes the optional crates — `omnia-link` (guest-to-guest dispatch, behind the `link` feature), `omnia-plugin` (the guest loader, behind the `loader` feature), and `omnia-cli` (the `run` grammar, a leaf crate behind the `cli` feature) — and re-exports the `omnia-core` live-runtime SDK and the `runtime!` macro under `omnia::…` paths.
+The `omnia` crate, the **composition root** and an embedder's only omnia dependency: it owns deployment assembly and process lifecycle, composes the optional crates — `omnia-link` (guest-to-guest dispatch, behind the `link` feature), `omnia-plugin` (the guest loader, behind the `loader` feature), `omnia-cli` (the `run` grammar, a leaf crate behind the `cli` feature), and `omnia-compile` (the ahead-of-time compiler, a leaf crate whose Cranelift backend the `jit` feature turns on) — and re-exports the `omnia-core` live-runtime SDK and the `runtime!` macro under `omnia::…` paths.
 
 ### Runtime contract
 

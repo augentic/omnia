@@ -1,0 +1,29 @@
+[package]
+name = "omnia-compile"
+description = "Ahead-of-time compiler for omnia guests: the compile-affecting settings and the artifact the runtime deserializes"
+readme = "README.md"
+authors.workspace = true
+categories.workspace = true
+edition.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = ["cranelift"]
+
+# Enables the Cranelift backend, and with it `compile`. Without it the crate
+# is `CompileOptions` alone: the settings a runtime applies to its engine so
+# that an artifact compiled elsewhere loads. omnia's `jit` feature forwards
+# here.
+cranelift = ["wasmtime/cranelift"]
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+anyhow.workspace = true
+wasmtime = { workspace = true, features = ["component-model-async"] }

@@ -18,8 +18,9 @@ workspace = true
 [features]
 default = ["jit"]
 
-# Enables just-in-time wasm to machine code compilation.
-jit = ["wasmtime/cranelift"]
+# Enables just-in-time wasm to machine code compilation: the Cranelift
+# backend `omnia-compile` carries, which `Component::new` over raw wasm needs.
+jit = ["omnia-compile/cranelift"]
 
 # Enables memory protection keys (MPK) support in the pooling allocator. MPK
 # only functions on Linux/x86_64; elsewhere it compiles but is inert
@@ -40,6 +41,7 @@ cap-std.workspace = true
 fromenv.workspace = true
 futures.workspace = true
 http.workspace = true
+omnia-compile.workspace = true
 opentelemetry = { workspace = true, features = ["metrics", "trace"] }
 opentelemetry-otlp = { workspace = true, features = ["grpc-tonic", "metrics", "trace"] }
 opentelemetry_sdk = { workspace = true, features = ["metrics", "trace"] }
@@ -50,6 +52,6 @@ tracing.workspace = true
 tracing-opentelemetry = { workspace = true, features = ["metrics"] }
 tracing-subscriber = { workspace = true, features = ["ansi", "smallvec"] }
 tokio = { workspace = true, features = ["fs", "io-util", "macros", "rt", "sync", "time"] }
-wasmtime = { workspace = true, features = ["runtime"] }
+wasmtime = { workspace = true, features = ["pooling-allocator", "runtime"] }
 wasmtime-wasi.workspace = true
 wasmtime-wasi-http.workspace = true

@@ -4,6 +4,15 @@ Unreleased
 
 ### Added
 
+- `omnia-compile`, the ahead-of-time compiler as a leaf crate over wasmtime
+  alone: `CompileOptions`, the compile-affecting settings, and `compile`,
+  behind its default `cranelift` feature. `omnia::compile` and
+  `omnia::CompileOptions` are unchanged as paths — the facade re-exports
+  them with `jit`, which now forwards to `omnia-compile/cranelift` — so an
+  embedder is untouched, and a build pipeline that pre-compiles a guest
+  depends on `omnia-compile` and links the compiler without the runtime.
+  `pooling-allocator` moved off the workspace `wasmtime` line onto the two
+  crates that drive the pool, `omnia-core` and `omnia`.
 - One tracing filter for the whole process, its level selected by verbosity
   flags and composed with `RUST_LOG`. A run's bare level is the flag, else
   the process `RUST_LOG`'s, else the mode's default — `info` for a command,

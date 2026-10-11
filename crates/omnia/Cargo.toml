@@ -43,7 +43,7 @@ link = ["dep:omnia-link"]
 # Enables just-in-time wasm to machine code compilation. Raw `.wasm` guests
 # and `omnia::compile` exist only with it; without it every guest, at boot or
 # at first use, is a pre-compiled `omnia compile` artifact.
-jit = ["omnia-core/jit", "omnia-cli?/jit"]
+jit = ["omnia-cli?/jit", "omnia-compile/cranelift", "omnia-core/jit"]
 
 # Enables memory protection keys (MPK) support in the pooling allocator. MPK
 # only functions on Linux/x86_64; elsewhere it compiles but is inert
@@ -61,6 +61,7 @@ gc = ["omnia-core/gc"]
 anyhow.workspace = true
 futures.workspace = true
 omnia-cli = { workspace = true, optional = true }
+omnia-compile.workspace = true
 omnia-core.workspace = true
 omnia-host-macros.workspace = true
 omnia-link = { workspace = true, optional = true }
@@ -69,7 +70,7 @@ serde.workspace = true
 tokio = { workspace = true, features = ["macros", "rt", "time"] }
 toml.workspace = true
 tracing.workspace = true
-wasmtime = { workspace = true, features = ["runtime"] }
+wasmtime = { workspace = true, features = ["pooling-allocator", "runtime"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 test-programs.workspace = true

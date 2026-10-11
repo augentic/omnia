@@ -31,6 +31,9 @@ audit-as-crates-io = false
 [policy.omnia-cli]
 audit-as-crates-io = false
 
+[policy.omnia-compile]
+audit-as-crates-io = false
+
 [policy.omnia-core]
 audit-as-crates-io = false
 
@@ -683,6 +686,10 @@ criteria = "safe-to-deploy"
 [[exemptions.potential_utf]]
 version = "0.1.6"
 criteria = "safe-to-deploy"
+
+[[exemptions.powerfmt]]
+version = "0.2.1"
+criteria = "safe-to-run"
 
 [[exemptions.ppv-lite86]]
 version = "0.2.21"

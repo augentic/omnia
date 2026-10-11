@@ -85,7 +85,7 @@ Initialization is idempotent: the first `build` in the process installs the subs
 
 ## Architecture
 
-`omnia` is the composition root: it owns deployment assembly, process lifecycle, and composition of the optional crates (`omnia-link` behind `link`, `omnia-plugin` behind `loader`, `omnia-cli` behind `cli`, the `runtime!` macro), and re-exports the `omnia-core` live-runtime SDK under one root — the paths embedders (and the macro's generated code) use never name the underlying crates, and neither should a deployment's `Cargo.toml`. Depend on `omnia-core` (or `omnia-plugin`) directly only when building a capability crate of your own. `omnia-cli` is a leaf grammar crate with no `omnia-*` dependencies.
+`omnia` is the composition root: it owns deployment assembly, process lifecycle, and composition of the optional crates (`omnia-link` behind `link`, `omnia-plugin` behind `loader`, `omnia-cli` behind `cli`, `omnia-compile`'s compiler behind `jit`, the `runtime!` macro), and re-exports the `omnia-core` live-runtime SDK under one root — the paths embedders (and the macro's generated code) use never name the underlying crates, and neither should a deployment's `Cargo.toml`. Depend on `omnia-core` (or `omnia-plugin`) directly only when building a capability crate of your own, and on `omnia-compile` only from a tool that pre-compiles a guest and never runs one. `omnia-cli` and `omnia-compile` are leaf crates with no `omnia-*` dependencies.
 
 See the [workspace documentation](https://github.com/augentic/omnia) for the full architecture guide and list of available WASI interface crates.
 
