@@ -17,15 +17,15 @@ Terminology (**runtime core**, **host-side**, **host-injected tools**, etc.) is 
 | Format check | `cargo +nightly fmt --all --check`                                                                              |
 | Format fix   | `cargo +nightly fmt --all`                                                                                      |
 | Test a crate | `cargo nextest run -p <crate> --all-features` (the local verification step)                                     |
-| Test (full)  | `mise run test` (`cargo nextest run --workspace --all-features`; includes the examples gate — CI's job)         |
+| Test (full)  | `mise run test` (`cargo nextest run --workspace --all-features`; CI's job)                                      |
 | Lint (full)  | `mise run lint` (clippy natively, then `--target wasm32-wasip2` over lib, bins and examples; CI's job)          |
 | Doc tests    | `cargo test --doc --all-features --workspace`                                                                   |
 | Task runner  | `mise run <task>` (`mise tasks` lists them; `mise.toml` includes the shared Rust tasks from `augentic/toolkit`) |
 
 ### Verifying a change
 
-- Run the suite of the crate you changed (`cargo nextest run -p <crate> --all-features`), `cargo clippy` (natively, and `--target wasm32-wasip2` for guest-side code), and `cargo +nightly fmt --all --check`. `mise run test` is the full run, examples gate included; leave it to CI.
-- **Never build or run examples to check a change.** Not `cargo build --example`, not `cargo build -p examples`, not `--examples --target wasm32-wasip2`, not `cargo run --example`, not the examples gate. Examples are demos for humans: the gate takes minutes per example and asserts nothing but exit 0, so an example that builds or runs confirms neither a behaviour nor a trait bound. An agent builds or runs an example only when the user explicitly asks for that.
+- Run the suite of the crate you changed (`cargo nextest run -p <crate> --all-features`), `cargo clippy` (natively, and `--target wasm32-wasip2` for guest-side code), and `cargo +nightly fmt --all --check`. `mise run test` is the full run; leave it to CI.
+- **Never build or run examples to check a change.** Not `cargo build --example`, not `cargo build -p examples`, not `--examples --target wasm32-wasip2`, not `cargo run --example`. Examples are demos for humans: nothing asserts what they do, so an example that builds or runs confirms neither a behaviour nor a trait bound, and a guest build takes minutes. An agent builds or runs an example only when the user explicitly asks for that.
 - Every question of the form "does this work from a real guest?" — a `wasi-*` host, `omnia-sdk`, `guest-macros`, a guest-side library, including compile-time properties such as an instrumented `async fn` satisfying axum's `Send` `Handler` bound — is answered by a `test-programs` guest:
   1. Write `crates/test-programs/programs/<capability>/<scenario>.rs`: `#![cfg(target_arch = "wasm32")]`, entered through `omnia_sdk::command!(scenario)`, asserting what the guest observes and panicking (trapping) on failure. On `wasm32` the crate already depends on what a guest needs (`axum`, `futures`, `omnia-wasi-*`, `tracing`, `wit-bindgen`, ...).
   2. Add `async fn <capability>_<scenario>()` to the suite that invokes `test_programs::foreach_<capability>!()` — `crates/wasi-<capability>/tests/<capability>.rs` for a `wasi-*` host; `command` is `crates/omnia-test/tests/command.rs`, `plugins` is `crates/omnia-plugin/tests/plugins.rs`, `link` is `crates/omnia/tests/link.rs`. It runs `test_programs::<CAPABILITY>_<SCENARIO>` through the suite's `run_guest` and asserts host-side effects; the macro fails to compile until program and test pair up.
@@ -53,7 +53,7 @@ The practical walk-through is [docs/guides/testing-policy.md](docs/guides/testin
 - **Guest-instantiating tests exist only through the `test-programs` pipeline.** Never compile, deserialize, or instantiate a WASM guest ad hoc inside an individual test.
 - **Consolidate, and drive triggers in-process.** One guest chains a whole flow (not one guest per WIT method), each outcome is asserted in exactly one place, only Omnia code is under test (never a wrapped library), and trigger hosts are exercised via `Deployment::boot` plus the trigger crate's public in-process handler rather than a server-mode boot; see the Principles section of the guide.
 - **Production backends** (the `omnia-backends` repo) are accepted by `#[ignore]`-gated live tests against the real service, not by mapping unit tests alone.
-- **Examples are gated by `examples/tests/examples.rs`**, which builds the guests for `wasm32-wasip2` and runs `cargo run --example` from the workspace root for the run-to-completion examples, asserting exit 0. Examples assume the default `target/` directory (wasmtime's stance; a redirected `CARGO_TARGET_DIR` is unsupported here) — hermetic guest builds belong to the `test-programs` pipeline. The gate instantiates no guest itself and asserts no behaviour (that lives in the e2e suites); server examples are build-only. It is CI's tier, never a local verification step and never a stand-in for a guest program (see [Verifying a change](#verifying-a-change)).
+- **Examples are not a test tier.** They are demos a human runs by hand (`mise run example <name>`). CI compiles them under clippy, natively and for `wasm32-wasip2`, and nothing runs them; behaviour lives in the e2e suites, never in an example (see [Verifying a change](#verifying-a-change)).
 - **Names identify, comments explain.** A test name is the scenario (`set_then_get`), not a restated expectation (`set_then_get_round_trips`).
 
 ### Gotchas
@@ -64,7 +64,7 @@ The practical walk-through is [docs/guides/testing-policy.md](docs/guides/testin
 - The `rust-toolchain.toml` pins the stable channel and auto-installs the `wasm32-wasip2` target plus `clippy`, `rust-src`, and `rustfmt` components.
 - `edition = "2024"` and `rust-version = "1.99"` are workspace settings; ensure the stable toolchain is at least 1.99.
 - Guest WASM examples compile to `wasm32-wasip2`; the binary name uses underscores (e.g., `http_wasm.wasm` not `http-wasm.wasm`).
-- `examples` is a workspace member, so `mise run test` and `cargo nextest run --all` run the examples gate, which builds every example guest for `wasm32-wasip2` at minutes per example. Verify per crate (`-p <crate>`).
+- `examples` is a workspace member, so a workspace-wide `cargo nextest run` compiles every example host and runs `examples/build.rs`, which builds the guests `cli-static` and `guest-link` embed. Verify per crate (`-p <crate>`).
 - The `[[example]]` list in `crates/test-programs/Cargo.toml` is generated by that crate's build script from `programs/`: a guest program is added by adding its file, and the list follows on the next build.
 
 ### Code comments
