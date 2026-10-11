@@ -9,8 +9,6 @@
 // `anyhow` and `futures` appear in the facade's public signatures, so
 // embedders reach them from here; `futures` stays unconditional because the
 // macro output uses it whether or not the loader surface is enabled.
-#[cfg(feature = "jit")]
-pub mod compile;
 mod deployment;
 mod entry;
 mod lifecycle;
@@ -19,6 +17,9 @@ pub use futures;
 #[cfg(feature = "cli")]
 #[doc(inline)]
 pub use omnia_cli::{Cli, Command, Parser};
+#[cfg(feature = "jit")]
+#[doc(inline)]
+pub use omnia_compile as compile;
 #[doc(inline)]
 pub use omnia_core::{
     AcquireError, Backend, ChainCtx, ChainPolicy, CliRoutes, CompileOptions, Digest, Dispatcher,

@@ -95,7 +95,7 @@ tracing-opentelemetry = { version = "0.34.0", default-features = false }
 tracing-subscriber = { version = "0.3.23", default-features = false, features = ["env-filter", "fmt"] }
 wasip3 = { version = "0.9.0", features = ["http-compat"] }
 wasm-pkg-client = "0.16.1"
-wasmtime = { version = "49.0.2", default-features = false, features = ["anyhow", "component-model-bytes", "parallel-compilation", "pooling-allocator"] }
+wasmtime = { version = "49.0.2", default-features = false, features = ["anyhow", "component-model-bytes", "parallel-compilation"] }
 wasmtime-wasi = { version = "49.0.2", default-features = false, features = ["p2", "p3"] }
 wasmtime-wasi-config = "49.0.2"
 wasmtime-wasi-http = { version = "49.0.2", default-features = false, features = ["p3"] }
@@ -105,6 +105,7 @@ x509-cert = { version = "0.3.0", default-features = false, features = ["std"] }
 # internally referenced crates
 omnia = { path = "crates/omnia", version = "0.37.0" }
 omnia-cli = { path = "crates/omnia-cli", version = "0.37.0" }
+omnia-compile = { path = "crates/omnia-compile", version = "0.37.0", default-features = false }
 omnia-core = { path = "crates/omnia-core", version = "0.37.0", default-features = false }
 omnia-guest-macros = { path = "crates/guest-macros", version = "0.37.0" }
 omnia-host-macros = { path = "crates/host-macros", version = "0.37.0" }

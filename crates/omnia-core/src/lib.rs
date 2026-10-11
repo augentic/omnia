@@ -18,6 +18,7 @@ mod store;
 pub mod telemetry;
 mod value;
 
+pub use omnia_compile::CompileOptions;
 #[doc(hidden)]
 pub use pastey;
 pub use tracing_subscriber::filter::LevelFilter;
@@ -34,7 +35,7 @@ pub use self::host::{
 };
 pub use self::invoke::{FreshCall, InvokeError, call_fresh};
 pub use self::mount::{MountRegistry, ResolvedPreopen};
-pub use self::options::{CompileOptions, RuntimeOptions};
+pub use self::options::RuntimeOptions;
 pub use self::registry::{
     CliRoutes, Guest, GuestId, HttpRoutes, PatternRoutes, Registry, RegistryParts, Resolver,
     Routes, TriggerRouter,

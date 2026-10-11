@@ -2298,6 +2298,7 @@ dependencies = [
  "anyhow",
  "futures",
  "omnia-cli",
+ "omnia-compile",
  "omnia-core",
  "omnia-host-macros",
  "omnia-link",
@@ -2319,6 +2320,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "omnia-compile"
+version = "0.37.0"
+dependencies = [
+ "anyhow",
+ "wasmtime",
+]
+
+[[package]]
 name = "omnia-core"
 version = "0.37.0"
 dependencies = [
@@ -2328,6 +2337,7 @@ dependencies = [
  "fromenv",
  "futures",
  "http",
+ "omnia-compile",
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",

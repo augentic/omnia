@@ -91,7 +91,7 @@ Layers 1 and 2 form the **runtime core** — domain-agnostic infrastructure that
 - **Telemetry**: `Telemetry`, the host's `tracing` subscriber — console logging with the OTLP span and metric exporters beneath it — and `telemetry::{flush, resource}` over the providers it publishes
 - **Admission seam**: `Runtime::admit_bytes` under a `Policy` (`Declared` for the deployment's own entries, `CallerNamed` for bytes a caller names) is the one body every admitter passes — the first-use seam `Runtime::guest`, `Runtime::register`, and the loader — so a declared name is bound by its entry alone wherever bytes arrive; `Runtime::acquire` fetches a package through the `RegistrySource` trait, which lives here; `Extensions` is where `omnia-plugin` installs the loader's grant, the runtime's mounts as path roots
 
-`omnia-cli` is a leaf grammar crate: clap plus argv-precedence over paths and strings, with no `omnia-*` dependencies. `omnia` materializes a `RunPlan` into a `Manifest` and drives the runtime. `compile` (with the `jit` feature) also lives in `omnia`.
+`omnia-cli` is a leaf grammar crate: clap plus argv-precedence over paths and strings, with no `omnia-*` dependencies. `omnia` materializes a `RunPlan` into a `Manifest` and drives the runtime. `omnia-compile` is a leaf over wasmtime alone: `CompileOptions`, the compile-affecting settings `omnia-core` applies to the runtime's engine so a pre-compiled artifact loads, and `compile`, the ahead-of-time compiler behind its `cranelift` feature, which omnia's `jit` feature forwards to and `omnia::compile` re-exports. A build pipeline that pre-compiles a guest depends on `omnia-compile` and links the compiler without the runtime.
 
 Key traits:
 
