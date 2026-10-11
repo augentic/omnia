@@ -16,12 +16,27 @@ use tokio_stream::wrappers::BroadcastStream;
 use tracing::instrument;
 
 use crate::host::WasiMessagingCtx;
-use crate::host::resource::{Client, FutureResult, Message, RequestOptions, Subscriptions};
+use crate::host::resource::{
+    Client, FutureResult, Handler, Message, RequestOptions, Subscriptions, dispatch,
+};
 
 /// Default implementation for `wasi:messaging`.
 #[derive(Clone, Debug)]
 pub struct MessagingDefault {
     sender: Sender<Message>,
+}
+
+impl MessagingDefault {
+    /// Every message published through this broker from now on.
+    ///
+    /// A broadcast receiver sees only what is sent after it subscribes, so
+    /// subscribe before the publisher runs. The stream ends when the last
+    /// clone of the broker is dropped.
+    pub fn subscribe(&self) -> Subscriptions {
+        tracing::debug!("subscribing to messages");
+        let stream = BroadcastStream::new(self.sender.subscribe());
+        Box::pin(stream.filter_map(|res| async move { res.ok() }))
+    }
 }
 
 impl Backend for MessagingDefault {
@@ -44,15 +59,10 @@ impl WasiMessagingCtx for MessagingDefault {
 }
 
 impl Client for MessagingDefault {
-    fn subscribe(&self) -> FutureResult<Subscriptions> {
-        tracing::debug!("subscribing to messages");
-        let stream = BroadcastStream::new(self.sender.subscribe());
-
-        async move {
-            let stream = stream.filter_map(|res| async move { res.ok() });
-            Ok(Box::pin(stream) as Subscriptions)
-        }
-        .boxed()
+    // subscribed as called, so a message sent before the loop is first
+    // polled still reaches the handler
+    fn consume(&self, handler: Arc<dyn Handler>) -> FutureResult<()> {
+        dispatch(self.subscribe(), handler).boxed()
     }
 
     fn send(&self, topic: String, mut message: Message) -> FutureResult<()> {
