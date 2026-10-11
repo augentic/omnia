@@ -76,12 +76,11 @@ where
         if routing.is_inert() {
             return Ok(None);
         }
-        let pool = usize::try_from(runtime.options().pool_max_instances).unwrap_or(usize::MAX);
         Ok(Some(Self {
             state: runtime.clone(),
             component: Arc::from(runtime.name()),
             routing: Arc::new(routing),
-            permits: Arc::new(Semaphore::new(pool.min(Semaphore::MAX_PERMITS))),
+            permits: Arc::new(Semaphore::new(runtime.options().pool_max_instances as usize)),
         }))
     }
 
