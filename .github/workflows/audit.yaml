@@ -20,6 +20,6 @@ permissions:
 
 jobs:
   audit:
-    uses: augentic/toolkit/.github/workflows/audit.yaml@v0.5.1
+    uses: augentic/toolkit/.github/workflows/audit.yaml@v0.6.0
     with:
       outdated: cap-fs-ext,cap-std,cap-primitives,thiserror
