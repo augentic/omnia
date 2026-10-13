@@ -1,4 +1,4 @@
-package omnia:model@0.1.0;
+package omnia:model@0.2.0;
 
 /// Models-API-style prompt completion.
 interface completion {
@@ -96,9 +96,33 @@ interface completion {
         subpath: string,
     }
 
+    /// What the worker a backend runs for this completion may reach beyond
+    /// its lend: the hosts its commands connect to, the trees it reads, and
+    /// the variables it carries. Spelled by the guest that knows the
+    /// toolchain the turn runs, never by the deployment; the host holds each
+    /// entry to its shape, and the backend lays what exists on its machine.
+    record worker-grant {
+        /// Host names the worker's commands may reach through the backend's
+        /// egress proxy: a name whole, or `*.suffix` for a domain and every
+        /// host beneath it. Never an IP literal, a port, a scheme, or a path.
+        egress: list<string>,
+        /// Directories the worker may read beside its lend and the system,
+        /// each `~/<path>` beneath the operator's home. `<path>` is a plain
+        /// relative path: `/`-separated, no segment empty, `.` or `..`, no
+        /// `\`, so never the home itself. One the machine lacks grants
+        /// nothing.
+        read: list<string>,
+        /// Environment variables set for the worker, each a name of the
+        /// shape `[A-Za-z_][A-Za-z0-9_]*` and a value whose leading `~/`
+        /// the backend expands to the operator's home.
+        env: list<tuple<string, string>>,
+    }
+
     /// Capabilities lent for this completion; drives host-injected tools.
     record grants {
         workspace: option<workspace-grant>,
+        /// Requires `workspace`: a worker reaches beyond a lend it has.
+        worker: option<worker-grant>,
     }
 
     /// One complete request.

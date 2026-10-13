@@ -6,11 +6,11 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::{Arc, Mutex};
 
 use omnia_sdk::model::{
-    CHECK_TOOL, Error, Format, Function, Model, Reply, Request, Tool, ToolCall,
+    CHECK_TOOL, Error, Format, Function, Model, Reply, Request, Tool, ToolCall, WorkerGrant,
 };
 use omnia_sdk::plugins::{self, Digest, Location, Plugin, Plugins};
 
-use crate::{Exchange, Script, Seen, SeenFormat};
+use crate::{Exchange, Script, Seen, SeenFormat, SeenWorker};
 
 /// One scripted completion turn: the tool calls fed to the handler, then
 /// the turn's result.
@@ -240,7 +240,28 @@ impl From<&Request> for Seen {
                 .collect(),
             temperature: request.generation.as_ref().and_then(|generation| generation.temperature),
             workspace: request.workspace.clone(),
+            worker: request.worker.as_ref().map(SeenWorker::from),
             check: request.check,
+        }
+    }
+}
+
+impl From<&WorkerGrant> for SeenWorker {
+    fn from(grant: &WorkerGrant) -> Self {
+        Self {
+            egress: grant.egress.clone(),
+            read: grant.read.clone(),
+            env: grant.env.clone(),
+        }
+    }
+}
+
+impl From<WorkerGrant> for SeenWorker {
+    fn from(grant: WorkerGrant) -> Self {
+        Self {
+            egress: grant.egress,
+            read: grant.read,
+            env: grant.env,
         }
     }
 }

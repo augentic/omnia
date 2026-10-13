@@ -32,6 +32,7 @@ async fn scenario() {
             root: &nested,
             subpath: String::new(),
         }),
+        worker: None,
     };
 
     let (results, results_rx) = wit_stream::new();

@@ -1,8 +1,10 @@
-//! `generation` and an MCP grant cross the boundary intact.
+//! `generation`, an MCP grant, and a worker grant cross the boundary intact.
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_sdk::model::{Effort, Generation, McpGrant, Model as _, Request, Tool, WasiModel};
+use omnia_sdk::model::{
+    Effort, Generation, McpGrant, Model as _, Request, Tool, WasiModel, WorkerGrant,
+};
 use test_programs::user;
 
 omnia_sdk::command!(scenario);
@@ -22,6 +24,14 @@ async fn scenario() {
                 .tools(vec![Tool::Mcp(
                     McpGrant::builder().name("docs").url("https://mcp.example").build(),
                 )])
+                .workspace(".")
+                .worker(
+                    WorkerGrant::builder()
+                        .egress(vec!["registry.npmjs.org".to_owned(), "*.cursor.sh".to_owned()])
+                        .read(vec!["~/.nvm/versions/node".to_owned()])
+                        .env(vec![("VOLTA_HOME".to_owned(), "~/.volta".to_owned())])
+                        .build(),
+                )
                 .build(),
         )
         .await

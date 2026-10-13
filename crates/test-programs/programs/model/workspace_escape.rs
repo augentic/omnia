@@ -22,6 +22,7 @@ async fn scenario() {
             root,
             subpath: "../escape".to_owned(),
         }),
+        worker: None,
     };
 
     let (results, results_rx) = wit_stream::new();

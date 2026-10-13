@@ -8,7 +8,13 @@ use test_programs::{raw_lookup, raw_request};
 omnia_sdk::command!(scenario);
 
 async fn scenario() {
-    let request = raw_request(vec![raw_lookup()], completion::Grants { workspace: None });
+    let request = raw_request(
+        vec![raw_lookup()],
+        completion::Grants {
+            workspace: None,
+            worker: None,
+        },
+    );
     let (mut results, results_rx) = wit_stream::new();
     let session = completion::create(request, results_rx).await.expect("session opens");
     let completion::Session { mut calls, reply } = session;
