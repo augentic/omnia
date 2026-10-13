@@ -58,14 +58,14 @@ futures-util = "0.3.34"
 http = "1.5.0"
 http-body = "1.1.0"
 http-body-util = "0.1.5"
-hyper = "1.11.1"
+hyper = "1.12.0"
 hyper-util = "0.1.21"
 insta = "1.49.0"
 moka = { version = "0.12.16", features = ["sync"] }
-opentelemetry = { version = "0.33.0", default-features = false }
-opentelemetry-otlp = { version = "0.33.0", default-features = false }
-opentelemetry-proto = "0.33.0"
-opentelemetry_sdk = { version = "0.33.0", default-features = false }
+opentelemetry = { version = "0.33.1", default-features = false }
+opentelemetry-otlp = { version = "0.33.1", default-features = false }
+opentelemetry-proto = "0.33.1"
+opentelemetry_sdk = { version = "0.33.1", default-features = false }
 parking_lot = "0.12.5"
 pastey = "0.2.3"
 prettyplease = "0.3.0"
@@ -76,19 +76,19 @@ rcgen = "0.14.10"
 regex = "1.13.1"
 reqwest = { version = "0.13.5", default-features = false }
 rustls = { version = "0.23.45", default-features = false, features = ["ring", "std"] }
-schemars = "1.2.2"
+schemars = "1.2.3"
 serde = { version = "1.0.229", features = ["derive"] }
-serde_json = "1.0.151"
+serde_json = "1.0.154"
 serde_urlencoded = "0.7.1"
-sha2 = "0.11.0"
-syn = { version = "3.0.6", features = ["full"] }
+sha2 = "0.11.1"
+syn = { version = "3.0.9", features = ["full"] }
 tempfile = "3.27.0"
 thiserror = "2.0.21"
-tokio = { version = "1.53.1", default-features = false }
+tokio = { version = "1.53.2", default-features = false }
 tokio-stream = { version = "0.1.19", features = ["sync"] }
 tokio-tungstenite = "0.30.0"
-tokio-util = { version = "0.7.19", features = ["codec"] }
-toml = { version = "1.1.6", default-features = false, features = ["parse", "serde", "std"] }
+tokio-util = { version = "0.7.20", features = ["codec"] }
+toml = { version = "1.1.8", default-features = false, features = ["parse", "serde", "std"] }
 tower = "0.5.3"
 tracing = "0.1.44"
 tracing-opentelemetry = { version = "0.34.0", default-features = false }
