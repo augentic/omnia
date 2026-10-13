@@ -84,8 +84,9 @@ pub struct WorkerGrant {
     #[builder(default)]
     pub egress: Vec<String>,
     /// Directories the worker may read beside its lend and the system, each
-    /// `~/<path>`: beneath the operator's home, never `~/` itself and never
-    /// holding `..`. One the machine lacks grants nothing.
+    /// `~/<path>` beneath the operator's home. `<path>` is a plain relative
+    /// path: `/`-separated, no segment empty, `.` or `..`, no `\`, so never
+    /// the home itself. One the machine lacks grants nothing.
     #[builder(default)]
     pub read: Vec<String>,
     /// Environment variables set for the worker, each a name of the shape

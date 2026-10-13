@@ -107,8 +107,10 @@ interface completion {
         /// host beneath it. Never an IP literal, a port, a scheme, or a path.
         egress: list<string>,
         /// Directories the worker may read beside its lend and the system,
-        /// each `~/<path>`: beneath the operator's home, never `~/` itself
-        /// and never holding `..`. One the machine lacks grants nothing.
+        /// each `~/<path>` beneath the operator's home. `<path>` is a plain
+        /// relative path: `/`-separated, no segment empty, `.` or `..`, no
+        /// `\`, so never the home itself. One the machine lacks grants
+        /// nothing.
         read: list<string>,
         /// Environment variables set for the worker, each a name of the
         /// shape `[A-Za-z_][A-Za-z0-9_]*` and a value whose leading `~/`

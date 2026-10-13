@@ -104,7 +104,15 @@ async fn scenario() {
         (".rustup", "must be spelled `~/<path>`"),
         ("~", "must be spelled `~/<path>`"),
         ("~/", "names the home itself"),
+        ("~/.", "names the home itself"),
+        ("~/./", "names the home itself"),
+        ("~//", "names the home itself"),
         ("~/tools/../..", "holds `..`"),
+        ("~/..", "holds `..`"),
+        ("~//etc", "is not a plain `/`-separated path"),
+        ("~/tools/", "is not a plain `/`-separated path"),
+        ("~/./tools", "is not a plain `/`-separated path"),
+        ("~/tools\\..\\..", "is not a plain `/`-separated path"),
     ] {
         let detail = worker_refused(read(entry)).await;
         assert!(detail.contains(what), "read root `{entry}`: {detail}");

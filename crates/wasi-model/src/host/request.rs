@@ -83,8 +83,8 @@ impl Request {
 
 impl WorkerGrant {
     /// Hold each entry to its shape: an egress entry a host name or
-    /// `*.suffix`, a read root `~/<path>` holding no `..`, an environment
-    /// variable a name.
+    /// `*.suffix`, a read root `~/` then a plain relative path, an
+    /// environment variable a name.
     ///
     /// # Errors
     ///
@@ -134,15 +134,21 @@ fn egress_host(entry: &str) -> Result<(), &'static str> {
     Ok(())
 }
 
+// `~/` then a plain relative path, the shape a workspace lend's subpath is
+// held to: `/`-separated, no segment empty, `.` or `..`, no `\`. Anything
+// looser names the home (`~/.`) or, once a backend joins it, leaves it (`~//etc`)
 fn read_root(entry: &str) -> Result<(), &'static str> {
     let Some(rest) = entry.strip_prefix("~/") else {
         return Err("must be spelled `~/<path>`");
     };
-    if rest.is_empty() {
+    if rest.split('/').all(|segment| segment.is_empty() || segment == ".") {
         return Err("names the home itself");
     }
     if rest.split('/').any(|segment| segment == "..") {
         return Err("holds `..`");
+    }
+    if rest.contains('\\') || rest.split('/').any(|segment| segment.is_empty() || segment == ".") {
+        return Err("is not a plain `/`-separated path");
     }
     Ok(())
 }
