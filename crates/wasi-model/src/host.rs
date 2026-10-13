@@ -46,7 +46,7 @@ pub use self::default_impl::ModelDefault;
 use self::generated::omnia::model::completion;
 pub use self::generated::omnia::model::completion::{
     Effort, Error, Format, Function, Generation, Grants, Mcp, Message, Reply, Request, Role,
-    Schema, Tool, Usage, WorkspaceGrant,
+    Schema, Tool, Usage, WorkerGrant, WorkspaceGrant,
 };
 pub use self::session::Limits;
 pub use self::tool_host::*;

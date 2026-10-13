@@ -236,6 +236,9 @@ pub struct Seen {
     pub temperature: Option<f32>,
     /// The workspace lent to the model, if any.
     pub workspace: Option<String>,
+    /// What the request granted the backend's worker beyond the lend, if
+    /// anything.
+    pub worker: Option<SeenWorker>,
     /// Whether the request asked the guest to `check` each candidate.
     pub check: bool,
 }
@@ -243,6 +246,17 @@ pub struct Seen {
 // The temperature is a sampling control copied from the request; NaN is
 // never a meaningful setting, so total equality holds.
 impl Eq for Seen {}
+
+/// The worker grant a recorded request carried, field for field.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SeenWorker {
+    /// The hosts the worker may reach through the backend's egress proxy.
+    pub egress: Vec<String>,
+    /// The `~/` roots the worker may read.
+    pub read: Vec<String>,
+    /// The variables set for the worker.
+    pub env: Vec<(String, String)>,
+}
 
 /// The output shape a recorded request asked for.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

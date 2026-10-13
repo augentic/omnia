@@ -13,7 +13,7 @@ use std::time::Duration;
 use futures::FutureExt as _;
 use omnia::{ExitStatus, Mount};
 use omnia_test::host::{Backends, Deployment, ScriptedModel, scratch};
-use omnia_test::{Exchange, SeenFormat};
+use omnia_test::{Exchange, SeenFormat, SeenWorker};
 use omnia_wasi_model::{
     Answer, FutureResult, Limits, ModelDefault, Request, ToolHost, Usage, WasiModel, WasiModelCtx,
 };
@@ -158,14 +158,26 @@ async fn model_echo_text() {
 
 #[tokio::test]
 async fn model_request_shape() {
-    let model =
-        run_scripted(test_programs::MODEL_REQUEST_SHAPE, vec![], ScriptedModel::answering(["hi"]))
-            .await;
+    let workspace = scratch();
+    let model = run_scripted(
+        test_programs::MODEL_REQUEST_SHAPE,
+        vec![workspace.mount(true)],
+        ScriptedModel::answering(["hi"]),
+    )
+    .await;
 
     let seen = model.seen();
     assert_eq!(seen.len(), 1);
     assert_eq!(seen[0].tools, ["docs"]);
     assert_eq!(seen[0].temperature, Some(0.25));
+    assert_eq!(
+        seen[0].worker,
+        Some(SeenWorker {
+            egress: vec!["registry.npmjs.org".to_owned(), "*.cursor.sh".to_owned()],
+            read: vec!["~/.nvm/versions/node".to_owned()],
+            env: vec![("VOLTA_HOME".to_owned(), "~/.volta".to_owned())],
+        })
+    );
 }
 
 #[tokio::test]
@@ -181,8 +193,15 @@ async fn model_echo_schema_rejected() {
 #[tokio::test]
 async fn model_invalid_request() {
     // Every request is refused before the backend runs; an empty script
-    // proves it is never reached.
-    run_scripted(test_programs::MODEL_INVALID_REQUEST, vec![], ScriptedModel::default()).await;
+    // proves it is never reached. The mount is the lend a worker grant's
+    // shape rules are checked beneath.
+    let workspace = scratch();
+    run_scripted(
+        test_programs::MODEL_INVALID_REQUEST,
+        vec![workspace.mount(true)],
+        ScriptedModel::default(),
+    )
+    .await;
 }
 
 #[tokio::test]

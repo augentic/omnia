@@ -19,7 +19,7 @@ use serde_json::Value;
 
 use super::{
     CHECK_TOOL, Error, Format, Function, Message, Model, Request, Role, SchemaFormat, Tool,
-    ToolCall,
+    ToolCall, WorkerGrant,
 };
 
 /// What a check found wrong with a candidate, one finding per line of the
@@ -107,6 +107,14 @@ impl<T: JsonSchema + DeserializeOwned + Send> Question<T> {
     #[must_use]
     pub fn workspace(mut self, lend: impl Into<String>) -> Self {
         self.request.workspace = Some(lend.into());
+        self
+    }
+
+    /// What the backend's worker may reach beyond the lend; see
+    /// [`Request::worker`].
+    #[must_use]
+    pub fn worker(mut self, grant: impl Into<WorkerGrant>) -> Self {
+        self.request.worker = Some(grant.into());
         self
     }
 

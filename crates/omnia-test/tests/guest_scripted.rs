@@ -7,10 +7,11 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use omnia_sdk::model::{
     Error, Format, Function, Message, Model, Request, Role, SchemaFormat, Tool, ToolCall,
+    WorkerGrant,
 };
 use omnia_sdk::plugins::{self, Digest, Location, Plugins};
 use omnia_test::guest::{Scripted, ScriptedLoader, function_tools};
-use omnia_test::{Exchange, SeenFormat};
+use omnia_test::{Exchange, SeenFormat, SeenWorker};
 
 fn user(content: &str) -> Request {
     Request::builder()
@@ -190,6 +191,7 @@ async fn seen() {
             Function::builder().name("lookup").description("d").parameters("{}").build(),
         )])
         .workspace(".")
+        .worker(WorkerGrant::builder().egress(vec!["registry.npmjs.org".to_owned()]).build())
         .build();
     model.complete(request).await.expect("reply");
 
@@ -205,6 +207,13 @@ async fn seen() {
     );
     assert_eq!(seen.tools, ["lookup"]);
     assert_eq!(seen.workspace.as_deref(), Some("."));
+    assert_eq!(
+        seen.worker,
+        Some(SeenWorker {
+            egress: vec!["registry.npmjs.org".to_owned()],
+            ..SeenWorker::default()
+        })
+    );
     assert_eq!(function_tools(&model.requests()[0])[0].name, "lookup");
 }
 

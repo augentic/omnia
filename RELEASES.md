@@ -99,6 +99,22 @@ Unreleased
   `code()` and a default taxonomy onto `omnia_sdk::Error` (`diverged` the
   request's, as `pending` and `exists` are); the transport `clone` is
   `Vcs::clone_repo`, so a `Clone` provider keeps its `clone`.
+- `grants.worker` on `omnia:model/completion`, now `omnia:model@0.2.0`:
+  what the worker a backend runs for one completion may reach beyond its
+  lend, spelled by the guest that knows the toolchain the turn runs rather
+  than by the deployment. A `worker-grant` carries `egress`, the host names
+  the worker's commands may connect to through the backend's proxy (a name
+  whole or `*.suffix`); `read`, the directories it may read beside the lend
+  and the system, each `~/<path>` beneath the operator's home; and `env`,
+  the variables set for it, a value's leading `~/` expanded by the backend.
+  The host holds each entry to its shape before any backend runs — an IP
+  literal, a port, a scheme, or a path in `egress`, a root not spelled
+  `~/<path>`, `~/` itself or one holding `..`, a name that is not an
+  environment variable's, and a grant with no `workspace` are each
+  `invalid-request` — and the backend lays what exists on its machine.
+  `omnia_sdk::model::WorkerGrant` mirrors it, `Request.worker` carries it,
+  `Question::worker` sets it, and `omnia_test::Seen.worker` records it as a
+  `SeenWorker` on both rungs.
 
 ### Changed
 

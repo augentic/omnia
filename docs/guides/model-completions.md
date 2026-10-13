@@ -123,6 +123,7 @@ Drives one bridge-managed Cursor agent per completion through [`cursor-sdk-bridg
 
 - Requires `cursor-sdk-bridge` on `PATH` and `CURSOR_API_KEY`.
 - The agent runs in the directory behind the guest's `grants.workspace` mount; without one, the completion still runs tools-only in a private empty directory with every built-in tool disabled.
+- The agent's bridge, and every command it runs, sits inside a kernel boundary around the lend; what it may reach beyond — the hosts, the `~/` toolchain roots, the variables — is the request's `grants.worker`, which requires a lend.
 - `Tool::Function` declarations become SDK custom tools: the agent's calls route back through the backend's loopback callback into the session (`ToolHost::call_tool`), so the guest's handler answers under the host's session limits.
 - `Tool::Mcp` grants pass inline as the agent's `mcp_servers`; nothing is written into the workspace.
 - A `check` request offers each agent answer to the guest and sends a rejection back into the same agent session as the next prompt.

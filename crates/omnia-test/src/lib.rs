@@ -25,4 +25,4 @@ pub mod guest;
 #[cfg(feature = "host")]
 pub mod host;
 
-pub use script::{Exchange, Script, Seen, SeenFormat};
+pub use script::{Exchange, Script, Seen, SeenFormat, SeenWorker};

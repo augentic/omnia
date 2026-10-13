@@ -64,6 +64,35 @@ pub struct Request {
     /// provider consumes directly. `None` lends nothing.
     #[builder(into)]
     pub workspace: Option<String>,
+    /// What the worker a backend runs for this completion may reach beyond
+    /// its lend, through `grants.worker`. Requires [`Request::workspace`]:
+    /// a worker reaches beyond a lend it has. `None` grants nothing beyond
+    /// the lend.
+    pub worker: Option<WorkerGrant>,
+}
+
+/// What a backend's worker may reach beyond its lend for one completion.
+///
+/// Spelled by the guest that knows the toolchain the turn runs, never by
+/// the deployment. The host holds each entry to its shape and the backend
+/// lays what exists on its machine.
+#[derive(Clone, Debug, Default, PartialEq, Eq, bon::Builder)]
+pub struct WorkerGrant {
+    /// Host names the worker's commands may reach through the backend's
+    /// egress proxy: a name whole, or `*.suffix` for a domain and every
+    /// host beneath it. Never an IP literal, a port, a scheme, or a path.
+    #[builder(default)]
+    pub egress: Vec<String>,
+    /// Directories the worker may read beside its lend and the system, each
+    /// `~/<path>`: beneath the operator's home, never `~/` itself and never
+    /// holding `..`. One the machine lacks grants nothing.
+    #[builder(default)]
+    pub read: Vec<String>,
+    /// Environment variables set for the worker, each a name of the shape
+    /// `[A-Za-z_][A-Za-z0-9_]*` and a value whose leading `~/` the backend
+    /// expands to the operator's home.
+    #[builder(default)]
+    pub env: Vec<(String, String)>,
 }
 
 /// One chat turn passed to the provider API.
@@ -342,7 +371,10 @@ pub trait Model: Send + Sync {
                         generation: request.generation.map(Into::into),
                         format: request.format.into(),
                         tools: request.tools.into_iter().map(Into::into).collect(),
-                        grants: completion::Grants { workspace },
+                        grants: completion::Grants {
+                            workspace,
+                            worker: request.worker.map(Into::into),
+                        },
                         check: request.check,
                     };
 
@@ -408,6 +440,7 @@ mod wire {
 
     use super::{
         Effort, Error, Format, Function, Generation, McpGrant, Message, Reply, Role, Tool, Usage,
+        WorkerGrant,
     };
 
     impl From<Message> for completion::Message {
@@ -481,6 +514,16 @@ mod wire {
                 Tool::Mcp(McpGrant { name, tools, url }) => {
                     Self::Mcp(completion::Mcp { name, tools, url })
                 }
+            }
+        }
+    }
+
+    impl From<WorkerGrant> for completion::WorkerGrant {
+        fn from(grant: WorkerGrant) -> Self {
+            Self {
+                egress: grant.egress,
+                read: grant.read,
+                env: grant.env,
             }
         }
     }

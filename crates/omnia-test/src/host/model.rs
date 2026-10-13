@@ -5,10 +5,10 @@ use std::sync::{Arc, Mutex};
 
 use futures::FutureExt as _;
 use omnia_wasi_model::{
-    Answer, Error, Format, FutureResult, Limits, Request, Tool, ToolHost, WasiModelCtx,
+    Answer, Error, Format, FutureResult, Limits, Request, Tool, ToolHost, WasiModelCtx, WorkerGrant,
 };
 
-use crate::{Exchange, Script, Seen, SeenFormat};
+use crate::{Exchange, Script, Seen, SeenFormat, SeenWorker};
 
 const CHECK_TOOL: &str = "check";
 
@@ -375,7 +375,18 @@ impl From<&Request> for Seen {
             temperature: request.generation.as_ref().and_then(|generation| generation.temperature),
             // the descriptor cannot cross into a plain record; the subpath is what the guest chose
             workspace: request.grants.workspace.as_ref().map(|grant| grant.subpath.clone()),
+            worker: request.grants.worker.as_ref().map(SeenWorker::from),
             check: request.check,
+        }
+    }
+}
+
+impl From<&WorkerGrant> for SeenWorker {
+    fn from(grant: &WorkerGrant) -> Self {
+        Self {
+            egress: grant.egress.clone(),
+            read: grant.read.clone(),
+            env: grant.env.clone(),
         }
     }
 }
