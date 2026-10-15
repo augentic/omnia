@@ -32,15 +32,9 @@
 //! ```
 
 use std::borrow::Cow;
-#[cfg(feature = "command")]
-use std::ffi::OsString;
 use std::fmt;
-#[cfg(target_arch = "wasm32")]
-use std::future::Future;
 use std::io::{ErrorKind, Write};
 
-#[cfg(feature = "command")]
-pub use clap_complete::Shell;
 use serde::{Serialize, Serializer};
 
 use crate::api::{Client, ErrorBody, Format, Handler, Metadata};
@@ -162,13 +156,6 @@ impl Response {
             stderr: stderr.into(),
             exit,
         }
-    }
-
-    /// A usage error rendered by clap, exiting [`USAGE_EXIT`].
-    #[cfg(feature = "command")]
-    #[must_use]
-    pub fn usage(error: &clap::Error) -> Self {
-        Self::failure(error.render().to_string(), USAGE_EXIT)
     }
 }
 
@@ -353,75 +340,90 @@ impl<P> fmt::Debug for Command<'_, P> {
     }
 }
 
-/// The outcome of parsing argv: the grammar, or one of clap's own complete
-/// responses.
-#[cfg(feature = "command")]
-#[derive(Debug)]
-pub enum Parsed<A> {
-    /// The parsed grammar.
-    App(A),
+cfg_select! {
+    feature = "command" => {
+        use std::ffi::OsString;
 
-    /// Help or version text destined for stdout with exit 0.
-    Display(String),
+        pub use clap_complete::Shell;
 
-    /// A usage error destined for stderr; see [`Response::usage`].
-    Usage(clap::Error),
-}
+        impl Response {
+            /// A usage error rendered by clap, exiting [`USAGE_EXIT`].
+            #[must_use]
+            pub fn usage(error: &clap::Error) -> Self {
+                Self::failure(error.render().to_string(), USAGE_EXIT)
+            }
+        }
 
-/// The runtime's verbosity flags, declared in a command's grammar by
-/// flattening.
-///
-/// The runtime reads `-v`/`--verbose` and `-q`/`--quiet` out of argv before
-/// the command runs and sets its `RUST_LOG` from them — each `-v` one level
-/// more detail, each `-q` one less, from the command's default of `info` — so
-/// the command never acts on these values. Declaring them keeps the parser
-/// accepting what the runtime already honoured, lists them in `--help` and
-/// completions, and refuses `-v` beside `-q` as a usage error (the runtime
-/// applies no level for that pair however argv splits it).
-///
-/// ```rust,ignore
-/// #[derive(clap::Parser)]
-/// struct App {
-///     #[command(flatten)]
-///     verbosity: omnia_sdk::api::command::Verbosity,
-///
-///     #[command(subcommand)]
-///     verb: Verb,
-/// }
-/// ```
-#[cfg(feature = "command")]
-#[derive(clap::Args, Clone, Copy, Debug, Default, Eq, PartialEq)]
-// A flattened struct's doc comment would otherwise become the parent command's `about` and
-// `long_about`; clearing both here leaves the grammar's own text in place.
-#[command(about = None, long_about = None)]
-pub struct Verbosity {
-    /// Show more detail, once per level.
-    #[arg(short, long, action = clap::ArgAction::Count, global = true)]
-    pub verbose: u8,
+        /// The outcome of parsing argv: the grammar, or one of clap's own complete
+        /// responses.
+        #[derive(Debug)]
+        pub enum Parsed<A> {
+            /// The parsed grammar.
+            App(A),
 
-    /// Show less detail, once per level.
-    #[arg(short, long, action = clap::ArgAction::Count, global = true, conflicts_with = "verbose")]
-    pub quiet: u8,
-}
+            /// Help or version text destined for stdout with exit 0.
+            Display(String),
 
-/// Parse argv into the grammar `A`, classifying clap's own outcomes.
-#[cfg(feature = "command")]
-#[must_use]
-pub fn parse<A: clap::Parser>(argv: impl IntoIterator<Item: Into<OsString> + Clone>) -> Parsed<A> {
-    match A::try_parse_from(argv) {
-        Ok(app) => Parsed::App(app),
-        Err(error) if error.use_stderr() => Parsed::Usage(error),
-        Err(display) => Parsed::Display(display.render().to_string()),
+            /// A usage error destined for stderr; see [`Response::usage`].
+            Usage(clap::Error),
+        }
+
+        /// The runtime's verbosity flags, declared in a command's grammar by
+        /// flattening.
+        ///
+        /// The runtime reads `-v`/`--verbose` and `-q`/`--quiet` out of argv before
+        /// the command runs and sets its `RUST_LOG` from them — each `-v` one level
+        /// more detail, each `-q` one less, from the command's default of `info` — so
+        /// the command never acts on these values. Declaring them keeps the parser
+        /// accepting what the runtime already honoured, lists them in `--help` and
+        /// completions, and refuses `-v` beside `-q` as a usage error (the runtime
+        /// applies no level for that pair however argv splits it).
+        ///
+        /// ```rust,ignore
+        /// #[derive(clap::Parser)]
+        /// struct App {
+        ///     #[command(flatten)]
+        ///     verbosity: omnia_sdk::api::command::Verbosity,
+        ///
+        ///     #[command(subcommand)]
+        ///     verb: Verb,
+        /// }
+        /// ```
+        #[derive(clap::Args, Clone, Copy, Debug, Default, Eq, PartialEq)]
+        // A flattened struct's doc comment would otherwise become the parent command's `about` and
+        // `long_about`; clearing both here leaves the grammar's own text in place.
+        #[command(about = None, long_about = None)]
+        pub struct Verbosity {
+            /// Show more detail, once per level.
+            #[arg(short, long, action = clap::ArgAction::Count, global = true)]
+            pub verbose: u8,
+
+            /// Show less detail, once per level.
+            #[arg(short, long, action = clap::ArgAction::Count, global = true, conflicts_with = "verbose")]
+            pub quiet: u8,
+        }
+
+        /// Parse argv into the grammar `A`, classifying clap's own outcomes.
+        #[must_use]
+        pub fn parse<A: clap::Parser>(
+            argv: impl IntoIterator<Item: Into<OsString> + Clone>,
+        ) -> Parsed<A> {
+            match A::try_parse_from(argv) {
+                Ok(app) => Parsed::App(app),
+                Err(error) if error.use_stderr() => Parsed::Usage(error),
+                Err(display) => Parsed::Display(display.render().to_string()),
+            }
+        }
+
+        /// A shell-completion script for the grammar `A` under the binary `name`.
+        #[must_use]
+        pub fn completions<A: clap::CommandFactory>(shell: Shell, name: &str) -> Response {
+            let mut out = Vec::new();
+            clap_complete::generate(shell, &mut A::command(), name, &mut out);
+            Response::success(out)
+        }
     }
-}
-
-/// A shell-completion script for the grammar `A` under the binary `name`.
-#[cfg(feature = "command")]
-#[must_use]
-pub fn completions<A: clap::CommandFactory>(shell: Shell, name: &str) -> Response {
-    let mut out = Vec::new();
-    clap_complete::generate(shell, &mut A::command(), name, &mut out);
-    Response::success(out)
+    _ => {}
 }
 
 /// Execute a guest command entry at the WASI CLI boundary.

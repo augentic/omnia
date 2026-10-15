@@ -17,8 +17,6 @@ pub use manifest::{
 };
 #[cfg(feature = "link")]
 use omnia_core::ChainPolicy;
-#[cfg(not(feature = "link"))]
-use omnia_core::NoLinks;
 #[cfg(feature = "loader")]
 use omnia_core::RegistrySource;
 use omnia_core::wasmtime::component::Linker;
@@ -268,7 +266,7 @@ impl DeploymentBuilder {
                 Arc::new(FirstArgSelector),
                 ChainPolicy::from(&options),
             )),
-            _ => Arc::new(NoLinks),
+            _ => Arc::new(omnia_core::NoLinks),
         };
 
         Ok(Deployment {
@@ -326,26 +324,29 @@ pub struct Deployment<T: WasiView + 'static> {
     stdio: Option<Stdio>,
 }
 
-#[cfg(feature = "loader")]
-#[derive(Default)]
-struct Loader {
-    // the package store's root; `None` keeps nothing fetched
-    store: Option<PathBuf>,
-    // `None` installs a `RegistryClient` over the store and the deployment's `registries`
-    registry: Option<Arc<dyn RegistrySource>>,
-}
-
-#[cfg(feature = "loader")]
-impl Loader {
-    fn registry(&self, config: Option<&str>) -> Result<Arc<dyn RegistrySource>> {
-        if let Some(registry) = &self.registry {
-            return Ok(Arc::clone(registry));
+cfg_select! {
+    feature = "loader" => {
+        #[derive(Default)]
+        struct Loader {
+            // the package store's root; `None` keeps nothing fetched
+            store: Option<PathBuf>,
+            // `None` installs a `RegistryClient` over the store and the deployment's `registries`
+            registry: Option<Arc<dyn RegistrySource>>,
         }
-        Ok(match &self.store {
-            Some(root) => Arc::new(RegistryClient::from_toml(config, FsStore::open(root))?),
-            None => Arc::new(RegistryClient::from_toml(config, NoStore)?),
-        })
+
+        impl Loader {
+            fn registry(&self, config: Option<&str>) -> Result<Arc<dyn RegistrySource>> {
+                if let Some(registry) = &self.registry {
+                    return Ok(Arc::clone(registry));
+                }
+                Ok(match &self.store {
+                    Some(root) => Arc::new(RegistryClient::from_toml(config, FsStore::open(root))?),
+                    None => Arc::new(RegistryClient::from_toml(config, NoStore)?),
+                })
+            }
+        }
     }
+    _ => {}
 }
 
 /// Store bound [`DeploymentBuilder::build`] requires; every deployment store
