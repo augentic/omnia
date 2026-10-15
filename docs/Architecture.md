@@ -138,10 +138,16 @@ Each interface crate provides guest bindings, a host implementation, and, with o
 Conditional compilation lets one crate serve both sides — guests get bindings on `wasm32`, hosts get the implementation on native:
 
 ```rust
-#[cfg(target_arch = "wasm32")]
-mod guest;
-#[cfg(not(target_arch = "wasm32"))]
-mod host;
+cfg_select! {
+    target_arch = "wasm32" => {
+        mod guest;
+        pub use guest::*;
+    }
+    _ => {
+        mod host;
+        pub use host::*;
+    }
+}
 ```
 
 Each crate's `wit/` directory holds the [WIT](https://component-model.bytecodealliance.org/design/wit.html) interface definitions, with standard WASI dependencies vendored under `wit/deps/`.
