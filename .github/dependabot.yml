@@ -8,3 +8,7 @@ updates:
       actions:
         patterns:
           - "*"
+    ignore:
+      # Dependabot only sees reusable-workflow `uses:` pins; the matching
+      # `?ref=` in mise.toml must move on the same tag (bump both by hand).
+      - dependency-name: "augentic/*"
