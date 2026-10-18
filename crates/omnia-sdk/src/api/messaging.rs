@@ -118,18 +118,27 @@ where
     }
 }
 
-/// An exact-topic messaging router.
-pub struct Router<P: Send + Sync + 'static> {
-    client: Client<P>,
+/// Exact-topic routes awaiting the client that dispatches them.
+///
+/// A module registers its topics on a `Routes` of its own and the guest
+/// merges each into its one [`Router`], as an `axum::Router` is merged
+/// before `with_state`. Two routes for one topic are refused when they
+/// meet, whether through [`route`](Self::route) or [`merge`](Self::merge).
+pub struct Routes<P: Send + Sync + 'static> {
     routes: BTreeMap<String, Arc<dyn ErasedRoute<P>>>,
 }
 
-impl<P: Send + Sync + 'static> Router<P> {
-    /// Create an empty router backed by a client.
+impl<P: Send + Sync + 'static> Default for Routes<P> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<P: Send + Sync + 'static> Routes<P> {
+    /// Create an empty set of routes.
     #[must_use]
-    pub fn new(client: Client<P>) -> Self {
+    pub fn new() -> Self {
         Self {
-            client,
             routes: BTreeMap::new(),
         }
     }
@@ -160,6 +169,64 @@ impl<P: Send + Sync + 'static> Router<P> {
         self
     }
 
+    /// Take every route of `other`.
+    ///
+    /// # Panics
+    ///
+    /// Panics when a topic of `other` is already registered.
+    #[must_use]
+    pub fn merge(mut self, other: Self) -> Self {
+        for (topic, route) in other.routes {
+            assert!(!self.routes.contains_key(&topic), "duplicate messaging topic `{topic}`");
+            self.routes.insert(topic, route);
+        }
+        self
+    }
+}
+
+/// An exact-topic messaging router.
+pub struct Router<P: Send + Sync + 'static> {
+    client: Client<P>,
+    routes: Routes<P>,
+}
+
+impl<P: Send + Sync + 'static> Router<P> {
+    /// Create an empty router backed by a client.
+    #[must_use]
+    pub fn new(client: Client<P>) -> Self {
+        Self {
+            client,
+            routes: Routes::new(),
+        }
+    }
+
+    /// Register one handler for one exact topic.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the topic is empty or already registered.
+    #[must_use]
+    pub fn route<F, I, D>(mut self, topic: impl Into<String>, consume: Consume<F, I, D>) -> Self
+    where
+        F: Handler<P, I>,
+        I: Send + 'static,
+        D: Fn(&Delivery) -> Result<I, DecodeError> + Send + Sync + 'static,
+    {
+        self.routes = self.routes.route(topic, consume);
+        self
+    }
+
+    /// Take every route of `routes`.
+    ///
+    /// # Panics
+    ///
+    /// Panics when a topic of `routes` is already registered.
+    #[must_use]
+    pub fn merge(mut self, routes: Routes<P>) -> Self {
+        self.routes = self.routes.merge(routes);
+        self
+    }
+
     /// Dispatch one delivery by exact topic.
     ///
     /// # Errors
@@ -168,6 +235,7 @@ impl<P: Send + Sync + 'static> Router<P> {
     pub async fn handle(&self, delivery: Delivery) -> Result<(), DeliveryError> {
         let topic = delivery.topic.as_deref().ok_or(DeliveryError::MissingTopic)?;
         let route = self
+            .routes
             .routes
             .get(topic)
             .ok_or_else(|| DeliveryError::UnhandledTopic(topic.to_owned()))?;

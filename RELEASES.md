@@ -115,6 +115,14 @@ Unreleased
   `omnia_sdk::model::WorkerGrant` mirrors it, `Request.worker` carries it,
   `Question::worker` sets it, and `omnia_test::Seen.worker` records it as a
   `SeenWorker` on both rungs.
+- `omnia_sdk::api::messaging::Routes`, exact-topic routes awaiting the
+  client that dispatches them, so a module owns its topics as it owns its
+  HTTP routes: `Routes::new`, `Routes::route` with the empty-topic and
+  duplicate-topic panics `Router::route` makes, and `Routes::merge`,
+  which refuses a topic the two sides both hold. `Router::merge(routes)`
+  takes a module's routes into the one router, as `axum::Router::merge`
+  takes a module's before `with_state`, and `Router::route` delegates to
+  it, so nothing published changes shape.
 
 ### Changed
 

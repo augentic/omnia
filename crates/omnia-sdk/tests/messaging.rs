@@ -3,7 +3,7 @@
 use std::future::{Ready, ready};
 
 use omnia_sdk::api::messaging::{
-    Delivery, DeliveryError, Router as MessagingRouter, consume, consume_with,
+    Delivery, DeliveryError, Router as MessagingRouter, Routes, consume, consume_with,
 };
 use omnia_sdk::api::{Client, Context, DecodeError};
 use serde::{Deserialize, Serialize};
@@ -77,6 +77,42 @@ fn messaging_duplicate_topic() {
     let _router = MessagingRouter::new(Client::new("messages", ()))
         .route("events", consume(echo))
         .route("events", consume(echo));
+}
+
+#[tokio::test]
+async fn messaging_merged_routes() {
+    let created = Routes::new().route("events.created", consume(echo));
+    let deleted = Routes::new().route("events.deleted", consume(echo));
+    let router = MessagingRouter::new(Client::new("messages", ()))
+        .merge(created.merge(deleted))
+        .route("events.updated", consume(echo));
+
+    for topic in ["events.created", "events.deleted", "events.updated"] {
+        router
+            .handle(delivery(Some(topic), br#"{"name":"message"}"#))
+            .await
+            .unwrap_or_else(|error| panic!("the merged route handles `{topic}`: {error}"));
+    }
+    assert_eq!(
+        router.handle(delivery(Some("events"), br#"{"name":"message"}"#)).await,
+        Err(DeliveryError::UnhandledTopic("events".to_string()))
+    );
+}
+
+#[test]
+#[should_panic(expected = "duplicate messaging topic `events`")]
+fn messaging_duplicate_topic_across_routes() {
+    let _routes = Routes::<()>::new()
+        .route("events", consume(echo))
+        .merge(Routes::new().route("events", consume(echo)));
+}
+
+#[test]
+#[should_panic(expected = "duplicate messaging topic `events`")]
+fn messaging_duplicate_topic_merged_into_router() {
+    let _router = MessagingRouter::new(Client::new("messages", ()))
+        .route("events", consume(echo))
+        .merge(Routes::new().route("events", consume(echo)));
 }
 
 #[derive(Debug)]
