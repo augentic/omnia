@@ -34,6 +34,12 @@ POOL_MEMORY_KEEP_RESIDENT=1048576   # keep 1 MiB resident per pooled memory
 
 `POOL_TABLE_KEEP_RESIDENT` and `POOL_ASYNC_STACK_KEEP_RESIDENT` are the same trade for tables and async stacks. Cost: resident memory scales with `POOL_MAX_UNUSED_WARM_SLOTS` × kept bytes.
 
+That cost is paid while the host is idle too. `POOL_IDLE_RELEASE_MS` gives the kept linear memory back to the OS once no instance has been live for that long (checked each `POOL_METRICS_INTERVAL_MS`), so a bursty service keeps warm slots through a burst and sheds them between bursts; the first requests after a quiet spell pay the cold-slot cost again:
+
+```bash
+POOL_IDLE_RELEASE_MS=60000          # release warm memory after a minute without a live instance
+```
+
 ### 2. Pool sizing
 
 The defaults (1000 instances/memories/tables/stacks, 100 warm slots) suit moderate concurrency. Raise `POOL_MAX_INSTANCES` and the `POOL_TOTAL_*` ceilings if occupancy gauges show saturation under your target load; raise `POOL_MAX_UNUSED_WARM_SLOTS` if your steady-state concurrency exceeds 100 and you can spend the memory.

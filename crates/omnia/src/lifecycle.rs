@@ -2,10 +2,10 @@
 
 use std::future::Future;
 use std::process::ExitCode;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, Result};
-use omnia_core::wasmtime::Engine;
+use omnia_core::wasmtime::{Engine, PoolingAllocatorMetrics};
 use omnia_core::{ExitStatus, LevelFilter, Runtime, StoreCtx};
 
 use crate::{Deployment, DeploymentBuilder};
@@ -152,8 +152,11 @@ where
     // background tasks hold engine clones; aborted after the drive so a
     // finished deployment releases its pooling reservation
     let epoch = drive_epoch(runtime.registry().engine().clone(), runtime.options().epoch_tick);
-    let pool =
-        sample_pool(runtime.registry().engine().clone(), runtime.options().pool_metrics_interval);
+    let pool = sample_pool(
+        runtime.registry().engine().clone(),
+        runtime.options().pool_metrics_interval,
+        runtime.options().pool_idle_release,
+    );
 
     tracing::info!(component = runtime.name(), "omnia ready");
 
@@ -193,13 +196,16 @@ fn drive_epoch(engine: Engine, tick: Duration) -> tokio::task::JoinHandle<()> {
     })
 }
 
-fn sample_pool(engine: Engine, interval: Duration) -> Option<tokio::task::JoinHandle<()>> {
+fn sample_pool(
+    engine: Engine, interval: Duration, idle_release: Duration,
+) -> Option<tokio::task::JoinHandle<()>> {
     if interval.is_zero() {
         return None;
     }
 
     let handle = tokio::spawn(async move {
         let mut ticker = tokio::time::interval(interval);
+        let mut idle = IdleRelease::new(idle_release);
         loop {
             ticker.tick().await;
 
@@ -217,7 +223,47 @@ fn sample_pool(engine: Engine, interval: Duration) -> Option<tokio::task::JoinHa
                 gauge.pool_unused_memory_bytes_resident =
                     metrics.unused_memory_bytes_resident() as u64,
             );
+
+            idle.observe(&engine, &metrics);
         }
     });
     Some(handle)
+}
+
+// gives warm slots' resident memory back to the OS once no instance has been
+// live for `after`, as seen at the sampling interval; `after` of zero is off
+struct IdleRelease {
+    after: Duration,
+    idle_since: Option<Instant>,
+}
+
+impl IdleRelease {
+    const fn new(after: Duration) -> Self {
+        Self {
+            after,
+            idle_since: None,
+        }
+    }
+
+    fn observe(&mut self, engine: &Engine, metrics: &PoolingAllocatorMetrics) {
+        if self.after.is_zero() {
+            return;
+        }
+        if metrics.component_instances() > 0 || metrics.core_instances() > 0 {
+            self.idle_since = None;
+            return;
+        }
+
+        let since = *self.idle_since.get_or_insert_with(Instant::now);
+        if since.elapsed() < self.after {
+            return;
+        }
+
+        // a release already made leaves nothing resident until the pool is busy again
+        if metrics.unused_memory_bytes_resident() == 0 {
+            return;
+        }
+        let bytes = engine.release_idle_pool_memory();
+        tracing::debug!(bytes, "released idle pool memory");
+    }
 }

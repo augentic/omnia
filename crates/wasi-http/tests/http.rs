@@ -10,6 +10,7 @@
 
 use std::convert::Infallible;
 use std::future::ready;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use base64ct::{Base64, Encoding};
@@ -26,6 +27,8 @@ use omnia_wasi_config::WasiConfig;
 use omnia_wasi_http::{HttpHandler, WasiHttp};
 use omnia_wasi_otel::WasiOtel;
 use rcgen::{CertificateParams, ExtendedKeyUsagePurpose, KeyPair, KeyUsagePurpose};
+use rustls::pki_types::PrivateKeyDer;
+use rustls::{ServerConfig, ServerConnection};
 use serde_json::{Value, json};
 use tokio::net::TcpListener;
 use wasmtime_wasi_http::io::TokioIo;
@@ -146,6 +149,64 @@ async fn http_outgoing_client_cert() {
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].path, "/mtls");
     assert!(hits[0].headers.get("client-cert").is_none(), "Client-Cert header stripped");
+}
+
+// a loopback TLS origin presenting a self-signed certificate no root trusts,
+// counting the handshakes it is offered; none completes, so it serves nothing
+#[derive(Clone, Debug, Default)]
+struct UntrustedOrigin {
+    handshakes: Arc<AtomicUsize>,
+}
+
+impl UntrustedOrigin {
+    // blocking rustls on its own thread, since the client walks away mid-handshake
+    fn serve() -> (Self, String) {
+        let key = KeyPair::generate().expect("key pair");
+        let params = CertificateParams::new(vec!["127.0.0.1".to_owned()]).expect("parameters");
+        let certificate = params.self_signed(&key).expect("certificate");
+        let provider = Arc::new(rustls::crypto::ring::default_provider());
+        let config = ServerConfig::builder_with_provider(provider)
+            .with_safe_default_protocol_versions()
+            .expect("protocol versions")
+            .with_no_client_auth()
+            .with_single_cert(
+                vec![certificate.der().clone()],
+                PrivateKeyDer::Pkcs8(key.serialize_der().into()),
+            )
+            .expect("server config");
+        let config = Arc::new(config);
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("binding loopback");
+        let addr = listener.local_addr().expect("listener address");
+        let origin = Self::default();
+
+        let accepting = origin.clone();
+        std::thread::spawn(move || {
+            for mut stream in listener.incoming().flatten() {
+                accepting.handshakes.fetch_add(1, Ordering::SeqCst);
+                let mut connection =
+                    ServerConnection::new(Arc::clone(&config)).expect("server connection");
+                let _ = connection.complete_io(&mut stream);
+            }
+        });
+
+        (origin, format!("https://{addr}"))
+    }
+
+    fn handshakes(&self) -> usize {
+        self.handshakes.load(Ordering::SeqCst)
+    }
+}
+
+#[tokio::test]
+async fn http_outgoing_tls() {
+    let (origin, url) = UntrustedOrigin::serve();
+    let backends = Backends::defaults().await.config([("ORIGIN", url)]);
+
+    run_guest(test_programs::HTTP_OUTGOING_TLS, backends).await;
+
+    // the code came out of a real handshake the origin saw, not a failure before one
+    assert_eq!(origin.handshakes(), 1);
 }
 
 #[tokio::test]

@@ -1,4 +1,6 @@
+use std::error::Error;
 use std::fmt::Display;
+use std::io;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
@@ -138,7 +140,7 @@ impl WasiHttpHooks for HttpHooks {
 
             // stream the outbound body rather than hold it whole in host memory
             let body = reqwest::Body::wrap_stream(
-                body.into_data_stream().map_err(|e| std::io::Error::other(e.to_string())),
+                body.into_data_stream().map_err(|e| io::Error::other(e.to_string())),
             );
 
             // make request
@@ -176,10 +178,43 @@ fn reqwest_err(e: &reqwest::Error) -> HttpError {
     if e.is_timeout() {
         HttpError::ConnectionTimeout
     } else if e.is_connect() {
-        HttpError::ConnectionRefused
+        connect_err(e)
     } else if e.is_request() {
         HttpError::HttpRequestUriInvalid
     } else {
         internal_err(e)
+    }
+}
+
+// wasmtime classifies a `Connect` or `Tls` io error by kind and message, so
+// the one ending reqwest's cause chain is rebuilt from those. hyper-rustls
+// nests a TLS handshake's io error inside a second one, which is how the two
+// phases are told apart. `io::Error::source` skips the error it wraps, so the
+// walk steps into an io error through `get_ref`.
+fn connect_err(e: &reqwest::Error) -> HttpError {
+    let mut io_errors = Vec::new();
+    let mut cause: Option<&(dyn Error + 'static)> = Some(e);
+    while let Some(err) = cause {
+        let Some(io) = err.downcast_ref::<io::Error>() else {
+            cause = err.source();
+            continue;
+        };
+        io_errors.push(io);
+        cause = io.get_ref().map(|inner| inner as &(dyn Error + 'static));
+    }
+
+    match io_errors.as_slice() {
+        [] => HttpError::ConnectionRefused,
+        [connect] => HttpError::Connect(io::Error::new(connect.kind(), connect.to_string())),
+        [.., handshake] => {
+            match handshake.get_ref().and_then(|inner| inner.downcast_ref::<rustls::Error>()) {
+                Some(rustls::Error::InvalidCertificate(_)) => HttpError::TlsCertificateError,
+                Some(rustls::Error::AlertReceived(alert)) => HttpError::TlsAlertReceived {
+                    alert_id: Some(u8::from(*alert)),
+                    alert_message: None,
+                },
+                _ => HttpError::Tls(io::Error::new(handshake.kind(), handshake.to_string())),
+            }
+        }
     }
 }

@@ -123,12 +123,39 @@ Unreleased
   takes a module's routes into the one router, as `axum::Router::merge`
   takes a module's before `with_state`, and `Router::route` delegates to
   it, so nothing published changes shape.
+- `POOL_IDLE_RELEASE_MS` (`RuntimeOptions::pool_idle_release`, default `0`,
+  off): once no instance has been live for that long, the memory
+  `POOL_MEMORY_KEEP_RESIDENT` keeps in warm slots is given back to the OS,
+  so a bursty service holds its warm slots through a burst and sheds them
+  between bursts. Idleness is observed by the pool-metrics sampler, so the
+  option requires a non-zero `POOL_METRICS_INTERVAL_MS` and fires with its
+  granularity; the release is logged at `debug` with the bytes freed.
 
 ### Changed
 
 - Upgraded `wasmtime` and the matching `wasmtime-wasi*` crates to 50.0.0.
   Pre-compiled `.bin` artifacts must be rebuilt with `omnia compile`, as a
   49-built artifact is rejected by the engine's version check at load.
+  Behaviour that reaches a guest or an operator through the upgrade:
+  - under `MAX_FUEL`, fuel is now charged for the host allocations of
+    records, variants, and enums as well as lists and strings; every
+    linked call crosses the `omnia-link` relay as such values, so a
+    deployment metering fuel sees link-heavy guests spend more of a budget
+    that held before;
+  - a `wasi:io` `output-stream.write` to stdout, stderr, or a file with
+    more bytes than its `check-write` permit now traps, as every other
+    stream already did; the standard library's stdio writes within the
+    permit, so only a guest driving the stream itself can see this;
+  - an outbound `wasi:http` response is held to its `content-length`,
+    forbidden headers are dropped from its trailers, and a response with
+    two `content-length` headers is refused.
+- The default outbound `wasi:http` client reports why a connection failed
+  rather than `connection-refused` for every failure: a name that does not
+  resolve is `dns-error`, an unreachable or timed-out host is
+  `destination-unavailable` or `connection-timeout`, a certificate no root
+  trusts is `tls-certificate-error`, and an alert from the origin is
+  `tls-alert-received` carrying its id; a refused socket is still
+  `connection-refused`.
 - `Format::candidate` reads the largest JSON value a reply wraps, where it
   read the last — a citation or a repeated fragment after the answer is no
   longer taken for it — and passes over a bracketed block that does not
