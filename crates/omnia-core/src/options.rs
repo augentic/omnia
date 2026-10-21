@@ -139,7 +139,7 @@ pub struct RuntimeOptions {
     /// Interval between pooling-occupancy metric samples; `0` disables (`POOL_METRICS_INTERVAL_MS`, default 5000ms).
     #[env(from = "POOL_METRICS_INTERVAL_MS", default = "5000", with = parse_millis)]
     pub pool_metrics_interval: Duration,
-    /// Idle time, observed at the metrics interval, after which unused warm pooled memory is released to the OS; `0` disables (`POOL_IDLE_RELEASE_MS`, default 0).
+    /// Idle time, measured from the last guest invocation, after which unused warm pooled memory is released to the OS; `0` disables (`POOL_IDLE_RELEASE_MS`, default 0).
     #[env(from = "POOL_IDLE_RELEASE_MS", default = "0", with = parse_millis)]
     pub pool_idle_release: Duration,
     /// Honour WebAssembly branch hints during compilation; compile-affecting (`BRANCH_HINTING`, default `false`).
@@ -276,11 +276,6 @@ impl RuntimeOptions {
             bail!("POOL_TOTAL_GC_HEAPS requires building omnia with the `gc` feature");
         }
 
-        // the metrics sampler is the only observer of an idle pool
-        if !self.pool_idle_release.is_zero() && self.pool_metrics_interval.is_zero() {
-            bail!("POOL_IDLE_RELEASE_MS requires a non-zero POOL_METRICS_INTERVAL_MS");
-        }
-
         if let Some(per_module) = self.pool_max_memories_per_module
             && per_module > self.pool_total_memories
         {
@@ -331,8 +326,6 @@ fn parse_enabled(value: &str) -> ParseResult<Enabled> {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
     use super::{CompileOptions, Enabled, RuntimeOptions, parse_enabled};
 
     // an artifact compiled under the defaults loads into a runtime whose
@@ -366,16 +359,6 @@ mod tests {
         let options = RuntimeOptions {
             pool_total_tables: 8,
             pool_max_tables_per_module: Some(16),
-            ..RuntimeOptions::load_env().expect("should load")
-        };
-        options.validate().unwrap_err();
-    }
-
-    #[test]
-    fn idle_release_without_sampler() {
-        let options = RuntimeOptions {
-            pool_idle_release: Duration::from_secs(60),
-            pool_metrics_interval: Duration::ZERO,
             ..RuntimeOptions::load_env().expect("should load")
         };
         options.validate().unwrap_err();

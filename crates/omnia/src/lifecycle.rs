@@ -5,8 +5,8 @@ use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, Result};
-use omnia_core::wasmtime::{Engine, PoolingAllocatorMetrics};
-use omnia_core::{ExitStatus, LevelFilter, Runtime, StoreCtx};
+use omnia_core::wasmtime::Engine;
+use omnia_core::{ExitStatus, LevelFilter, Runtime, StoreCtx, WeakRuntime};
 
 use crate::{Deployment, DeploymentBuilder};
 
@@ -151,12 +151,11 @@ where
 {
     // background tasks hold engine clones; aborted after the drive so a
     // finished deployment releases its pooling reservation
-    let epoch = drive_epoch(runtime.registry().engine().clone(), runtime.options().epoch_tick);
-    let pool = sample_pool(
-        runtime.registry().engine().clone(),
-        runtime.options().pool_metrics_interval,
-        runtime.options().pool_idle_release,
-    );
+    let engine = runtime.registry().engine();
+    let options = runtime.options();
+    let epoch = drive_epoch(engine.clone(), options.epoch_tick);
+    let metrics = sample_pool(engine.clone(), options.pool_metrics_interval);
+    let idle = release_idle_pool(runtime.downgrade(), options.pool_idle_release);
 
     tracing::info!(component = runtime.name(), "omnia ready");
 
@@ -174,8 +173,11 @@ where
     };
 
     epoch.abort();
-    if let Some(pool) = pool {
-        pool.abort();
+    if let Some(metrics) = metrics {
+        metrics.abort();
+    }
+    if let Some(idle) = idle {
+        idle.abort();
     }
 
     // the link-serve drain tasks hold runtime clones that would pin the engine
@@ -196,16 +198,13 @@ fn drive_epoch(engine: Engine, tick: Duration) -> tokio::task::JoinHandle<()> {
     })
 }
 
-fn sample_pool(
-    engine: Engine, interval: Duration, idle_release: Duration,
-) -> Option<tokio::task::JoinHandle<()>> {
+fn sample_pool(engine: Engine, interval: Duration) -> Option<tokio::task::JoinHandle<()>> {
     if interval.is_zero() {
         return None;
     }
 
     let handle = tokio::spawn(async move {
         let mut ticker = tokio::time::interval(interval);
-        let mut idle = IdleRelease::new(idle_release);
         loop {
             ticker.tick().await;
 
@@ -223,47 +222,166 @@ fn sample_pool(
                 gauge.pool_unused_memory_bytes_resident =
                     metrics.unused_memory_bytes_resident() as u64,
             );
-
-            idle.observe(&engine, &metrics);
         }
     });
     Some(handle)
 }
 
-// gives warm slots' resident memory back to the OS once no instance has been
-// live for `after`, as seen at the sampling interval; `after` of zero is off
+// holds no engine clone: the runtime is reached through the weak handle each
+// look, so the task ends with the deployment rather than pinning its pool
+fn release_idle_pool<B>(
+    runtime: WeakRuntime<B>, after: Duration,
+) -> Option<tokio::task::JoinHandle<()>>
+where
+    B: Clone + Send + Sync + 'static,
+{
+    if after.is_zero() {
+        return None;
+    }
+
+    let handle = tokio::spawn(async move {
+        let mut idle = IdleRelease::new(after);
+        let mut ticker = tokio::time::interval(idle.tick());
+        loop {
+            ticker.tick().await;
+
+            let Some(runtime) = runtime.upgrade() else {
+                break;
+            };
+            let engine = runtime.registry().engine();
+            let Some(metrics) = engine.pooling_allocator_metrics() else {
+                break;
+            };
+
+            // live first, then the count: a store built between the two reads
+            // changes the count, so no invocation falls between a look's reads
+            let live = metrics.component_instances() > 0 || metrics.core_instances() > 0;
+            if !idle.due(runtime.stores_built(), live, Instant::now()) {
+                continue;
+            }
+
+            // a release already made leaves nothing resident until the pool is busy again
+            if metrics.unused_memory_bytes_resident() == 0 {
+                continue;
+            }
+            let bytes = engine.release_idle_pool_memory();
+            tracing::debug!(bytes, "released idle pool memory");
+        }
+    });
+    Some(handle)
+}
+
+// when warm slots' resident memory goes back to the OS: once no guest has
+// been built or live for `after`, judged from the runtime's store count rather
+// than a live gauge alone, so an invocation that begins and ends between two
+// looks still counts as activity
 struct IdleRelease {
     after: Duration,
+    seen: u64,
     idle_since: Option<Instant>,
 }
 
 impl IdleRelease {
+    // the longest a look waits, so a release lands within this of `after`
+    const TICK: Duration = Duration::from_secs(1);
+
     const fn new(after: Duration) -> Self {
         Self {
             after,
+            seen: 0,
             idle_since: None,
         }
     }
 
-    fn observe(&mut self, engine: &Engine, metrics: &PoolingAllocatorMetrics) {
-        if self.after.is_zero() {
-            return;
-        }
-        if metrics.component_instances() > 0 || metrics.core_instances() > 0 {
+    fn tick(&self) -> Duration {
+        self.after.min(Self::TICK)
+    }
+
+    // whether the pool has now been idle for `after`: `built` is the runtime's
+    // store count, `live` whether any instance is allocated; a true answer
+    // ends the idle spell, so one spell releases once
+    fn due(&mut self, built: u64, live: bool, now: Instant) -> bool {
+        if live {
+            self.seen = built;
             self.idle_since = None;
-            return;
+            return false;
+        }
+        if built != self.seen {
+            self.seen = built;
+            self.idle_since = Some(now);
+            return false;
         }
 
-        let since = *self.idle_since.get_or_insert_with(Instant::now);
-        if since.elapsed() < self.after {
-            return;
+        let since = *self.idle_since.get_or_insert(now);
+        if now.duration_since(since) < self.after {
+            return false;
         }
+        self.idle_since = None;
+        true
+    }
+}
 
-        // a release already made leaves nothing resident until the pool is busy again
-        if metrics.unused_memory_bytes_resident() == 0 {
-            return;
-        }
-        let bytes = engine.release_idle_pool_memory();
-        tracing::debug!(bytes, "released idle pool memory");
+#[cfg(test)]
+mod tests {
+    use std::time::{Duration, Instant};
+
+    use super::IdleRelease;
+
+    const AFTER: Duration = Duration::from_secs(10);
+    // one tick short of `AFTER`
+    const ALMOST: Duration = Duration::from_millis(9_999);
+
+    #[test]
+    fn activity_between_ticks() {
+        let mut idle = IdleRelease::new(AFTER);
+        let start = Instant::now();
+        assert!(!idle.due(1, false, start));
+        assert!(!idle.due(1, false, start + AFTER / 2));
+
+        // a guest ran and finished between two looks, each of which saw no
+        // live instance: the spell restarts at the look that saw the count move
+        assert!(!idle.due(2, false, start + AFTER));
+        assert!(!idle.due(2, false, start + AFTER + ALMOST));
+        assert!(idle.due(2, false, start + 2 * AFTER));
+    }
+
+    #[test]
+    fn live_instance() {
+        let mut idle = IdleRelease::new(AFTER);
+        let start = Instant::now();
+        assert!(!idle.due(0, false, start));
+        assert!(!idle.due(0, true, start + AFTER / 2));
+
+        // idle begins at the first look after the instance is gone
+        assert!(!idle.due(0, false, start + AFTER));
+        assert!(!idle.due(0, false, start + AFTER + ALMOST));
+        assert!(idle.due(0, false, start + 2 * AFTER));
+    }
+
+    #[test]
+    fn idle_short_of_after() {
+        let mut idle = IdleRelease::new(AFTER);
+        let start = Instant::now();
+        assert!(!idle.due(0, false, start));
+        assert!(!idle.due(0, false, start + ALMOST));
+    }
+
+    #[test]
+    fn idle_past_after() {
+        let mut idle = IdleRelease::new(AFTER);
+        let start = Instant::now();
+        assert!(!idle.due(0, false, start));
+        assert!(idle.due(0, false, start + AFTER));
+
+        // the spell that released is over; the next waits `after` again
+        assert!(!idle.due(0, false, start + AFTER));
+        assert!(idle.due(0, false, start + 2 * AFTER));
+    }
+
+    #[test]
+    fn tick_within_after() {
+        assert_eq!(IdleRelease::new(AFTER).tick(), IdleRelease::TICK);
+        let short = Duration::from_millis(200);
+        assert_eq!(IdleRelease::new(short).tick(), short);
     }
 }

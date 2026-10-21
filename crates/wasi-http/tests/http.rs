@@ -30,7 +30,8 @@ use rcgen::{CertificateParams, ExtendedKeyUsagePurpose, KeyPair, KeyUsagePurpose
 use rustls::pki_types::PrivateKeyDer;
 use rustls::{ServerConfig, ServerConnection};
 use serde_json::{Value, json};
-use tokio::net::TcpListener;
+use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+use tokio::net::{TcpListener, TcpStream};
 use wasmtime_wasi_http::io::TokioIo;
 
 // Every guest program in `crates/test-programs` must have a matching test
@@ -159,8 +160,9 @@ struct UntrustedOrigin {
 }
 
 impl UntrustedOrigin {
-    // blocking rustls on its own thread, since the client walks away mid-handshake
-    fn serve() -> (Self, String) {
+    // each handshake blocks a worker thread, since the client walks away
+    // mid-handshake; the accept loop goes with the test runtime
+    async fn serve() -> (Self, String) {
         let key = KeyPair::generate().expect("key pair");
         let params = CertificateParams::new(vec!["127.0.0.1".to_owned()]).expect("parameters");
         let certificate = params.self_signed(&key).expect("certificate");
@@ -176,17 +178,21 @@ impl UntrustedOrigin {
             .expect("server config");
         let config = Arc::new(config);
 
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("binding loopback");
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("binding loopback");
         let addr = listener.local_addr().expect("listener address");
         let origin = Self::default();
 
         let accepting = origin.clone();
-        std::thread::spawn(move || {
-            for mut stream in listener.incoming().flatten() {
+        tokio::spawn(async move {
+            while let Ok((stream, _)) = listener.accept().await {
                 accepting.handshakes.fetch_add(1, Ordering::SeqCst);
-                let mut connection =
-                    ServerConnection::new(Arc::clone(&config)).expect("server connection");
-                let _ = connection.complete_io(&mut stream);
+                let config = Arc::clone(&config);
+                tokio::task::spawn_blocking(move || {
+                    let mut stream = stream.into_std().expect("std stream");
+                    stream.set_nonblocking(false).expect("blocking stream");
+                    let mut connection = ServerConnection::new(config).expect("server connection");
+                    let _ = connection.complete_io(&mut stream);
+                });
             }
         });
 
@@ -200,13 +206,73 @@ impl UntrustedOrigin {
 
 #[tokio::test]
 async fn http_outgoing_tls() {
-    let (origin, url) = UntrustedOrigin::serve();
+    let (origin, url) = UntrustedOrigin::serve().await;
     let backends = Backends::defaults().await.config([("ORIGIN", url)]);
 
     run_guest(test_programs::HTTP_OUTGOING_TLS, backends).await;
 
     // the code came out of a real handshake the origin saw, not a failure before one
     assert_eq!(origin.handshakes(), 1);
+}
+
+// a loopback origin that reads a request's head and then stalls: `/head` is
+// never answered, `/body` is answered with a body that stops short of its
+// declared length; either way the connection is held until the client hangs up
+#[derive(Clone, Debug, Default)]
+struct StallingOrigin {
+    accepted: Arc<AtomicUsize>,
+}
+
+impl StallingOrigin {
+    async fn serve() -> (Self, String) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("binding loopback");
+        let addr = listener.local_addr().expect("listener address");
+        let origin = Self::default();
+
+        let accepting = origin.clone();
+        tokio::spawn(async move {
+            while let Ok((stream, _)) = listener.accept().await {
+                accepting.accepted.fetch_add(1, Ordering::SeqCst);
+                tokio::spawn(Self::stall(stream));
+            }
+        });
+
+        (origin, format!("http://{addr}"))
+    }
+
+    async fn stall(mut stream: TcpStream) {
+        let mut head = Vec::new();
+        let mut chunk = [0u8; 1024];
+        while !head.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+            match stream.read(&mut chunk).await {
+                Ok(0) | Err(_) => return,
+                Ok(n) => head.extend_from_slice(&chunk[..n]),
+            }
+        }
+
+        if head.starts_with(b"GET /body ") {
+            let _ =
+                stream.write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 32\r\n\r\n12345678").await;
+        }
+
+        // the client hanging up is the only way out
+        while matches!(stream.read(&mut chunk).await, Ok(n) if n > 0) {}
+    }
+
+    fn accepted(&self) -> usize {
+        self.accepted.load(Ordering::SeqCst)
+    }
+}
+
+#[tokio::test]
+async fn http_outgoing_timeout() {
+    let (origin, url) = StallingOrigin::serve().await;
+    let backends = Backends::defaults().await.config([("ORIGIN", url)]);
+
+    run_guest(test_programs::HTTP_OUTGOING_TIMEOUT, backends).await;
+
+    // both timeouts fired on a connection the origin held, not before one was made
+    assert_eq!(origin.accepted(), 2);
 }
 
 #[tokio::test]

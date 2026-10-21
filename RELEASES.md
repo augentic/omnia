@@ -124,12 +124,14 @@ Unreleased
   takes a module's before `with_state`, and `Router::route` delegates to
   it, so nothing published changes shape.
 - `POOL_IDLE_RELEASE_MS` (`RuntimeOptions::pool_idle_release`, default `0`,
-  off): once no instance has been live for that long, the memory
+  off): once no guest has been invoked or live for that long, the memory
   `POOL_MEMORY_KEEP_RESIDENT` keeps in warm slots is given back to the OS,
   so a bursty service holds its warm slots through a burst and sheds them
-  between bursts. Idleness is observed by the pool-metrics sampler, so the
-  option requires a non-zero `POOL_METRICS_INTERVAL_MS` and fires with its
-  granularity; the release is logged at `debug` with the bytes freed.
+  between bursts. Idleness is measured from the last guest invocation
+  (`Runtime::stores_built`, one per store built), so a request that begins
+  and ends between two looks still counts as activity; the release lands
+  within about a second of the idle time elapsing and is logged at `debug`
+  with the bytes freed.
 
 ### Changed
 
@@ -155,7 +157,16 @@ Unreleased
   `destination-unavailable` or `connection-timeout`, a certificate no root
   trusts is `tls-certificate-error`, and an alert from the origin is
   `tls-alert-received` carrying its id; a refused socket is still
-  `connection-refused`.
+  `connection-refused`. Failures after the connect are told apart too: a
+  `first-byte-timeout` or `between-bytes-timeout` that elapses is
+  `connection-read-timeout`, where it read `connection-timeout`; a response
+  the origin cut short is `HTTP-response-incomplete` and any other protocol
+  fault `HTTP-protocol-error`, where both read `HTTP-request-URI-invalid`,
+  which now names only a request the client cannot form. A request that
+  sets a `connect-timeout` or `between-bytes-timeout` no longer builds a
+  client of its own: the between-bytes pace is kept on the response body
+  over the shared client's connections, and a client per distinct
+  `connect-timeout` is kept and reused.
 - `Format::candidate` reads the largest JSON value a reply wraps, where it
   read the last — a citation or a repeated fragment after the answer is no
   longer taken for it — and passes over a bracketed block that does not

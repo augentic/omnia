@@ -3,6 +3,7 @@
 mod command;
 
 use std::fmt;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
 
 use anyhow::Result;
@@ -107,10 +108,13 @@ struct RuntimeInner<B: 'static> {
     command_guest: Option<GuestId>,
     // for an embedder that installs the loader capability by hand
     registry_config: Option<String>,
-    // every store's `RUST_LOG`
-    rust_log: String,
+    // every store's environment, taken once at assembly
+    env: Arc<Vec<(String, String)>>,
     stdio: Option<Stdio>,
     extensions: Extensions,
+    // one per `build_store`, so an observer can tell a quiet pool from one
+    // whose guests finished between its looks
+    stores_built: AtomicU64,
 }
 
 /// [`Dispatcher`] over the runtime's shared state.
@@ -234,6 +238,12 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
     /// [`serve_links`](Self::serve_links) itself before dispatching.
     #[must_use]
     pub fn from_parts(parts: RuntimeParts<B>) -> Self {
+        // the environment as it stands; a non-UTF-8 pair cannot cross `wasi:cli`
+        let host = std::env::vars_os().filter_map(|(name, value)| {
+            Some((name.into_string().ok()?, value.into_string().ok()?))
+        });
+        let env = crate::store::guest_env(host, &parts.rust_log, crate::telemetry::ansi());
+
         Self::with_inner(Arc::new(RuntimeInner {
             name: parts.name,
             registry: parts.registry,
@@ -243,9 +253,10 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
             packages: parts.packages,
             command_guest: parts.command_guest,
             registry_config: parts.registry_config,
-            rust_log: parts.rust_log,
+            env: Arc::new(env),
             stdio: parts.stdio,
             extensions: Extensions::new(),
+            stores_built: AtomicU64::new(0),
         }))
     }
 
@@ -504,6 +515,15 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
         self.registry().options()
     }
 
+    /// How many guest stores this runtime has built: one per guest invocation.
+    ///
+    /// Monotonic, so a reader holding the last value it saw knows whether a
+    /// guest has run since, however briefly.
+    #[must_use]
+    pub fn stores_built(&self) -> u64 {
+        self.inner.stores_built.load(Ordering::Relaxed)
+    }
+
     /// Fresh per-guest store context at the root of a server chain
     /// ([`ChainCtx::server`]): what a trigger builds for the guest it serves.
     #[must_use]
@@ -514,18 +534,13 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
     /// Fresh per-guest store context at `chain`: a root for the command
     /// driver, the context a link dispatch derived for its callee.
     ///
-    /// The guest's environment is the host's with `RUST_LOG` set to the
-    /// deployment's tracing directives — the run's verbosity flag composed
-    /// with the process variable, decided once at build — and `NO_COLOR` set
-    /// when the console the guest shares does not colour its lines.
+    /// The guest's environment is the host's as it stood when the runtime
+    /// was assembled, with `RUST_LOG` set to the deployment's tracing
+    /// directives — the run's verbosity flag composed with the process
+    /// variable, decided once at build — and `NO_COLOR` set when the console
+    /// the guest shares does not colour its lines.
     #[must_use]
     pub fn store_in(&self, chain: ChainCtx) -> StoreCtx<B> {
-        // the environment as it stands; a non-UTF-8 pair cannot cross `wasi:cli`
-        let host = std::env::vars_os().filter_map(|(name, value)| {
-            Some((name.into_string().ok()?, value.into_string().ok()?))
-        });
-        let env = crate::store::guest_env(host, &self.inner.rust_log, crate::telemetry::ansi());
-
         StoreCtx {
             base: StoreBase::new(crate::StoreConfig {
                 options: self.options(),
@@ -533,7 +548,7 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
                 chain,
                 args: Some(Arc::clone(&self.inner.args)),
                 mounts: Some(Arc::clone(&self.inner.mounts)),
-                env: Some(Arc::new(env)),
+                env: Some(Arc::clone(&self.inner.env)),
                 stdio: self.inner.stdio.clone(),
                 extensions: self.inner.extensions.clone(),
             }),
@@ -550,6 +565,7 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
     /// unmetered.
     #[must_use]
     pub fn build_store(&self, data: StoreCtx<B>) -> Store<StoreCtx<B>> {
+        self.inner.stores_built.fetch_add(1, Ordering::Relaxed);
         let options = self.options();
         let mut store = Store::new(self.registry().engine(), data);
 
