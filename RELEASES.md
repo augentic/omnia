@@ -649,6 +649,54 @@ Unreleased
   `digest` pin on the entry or the load holds the stored bytes as it held
   the fetched ones.
 
+<!-- Release notes generated using configuration in .github/release.yaml at 03f924ff9c7eeb842970c526c4a9ac80e172d697 -->
+
+## What's Changed
+* Bump to 0.37.0 by @augentic-releases[bot] in https://github.com/augentic/omnia/pull/305
+* Set env vars in runtime! macro by @andrewweston in https://github.com/augentic/omnia/pull/306
+* Normalise CLI tracing flags by @andrewweston in https://github.com/augentic/omnia/pull/307
+* Simplify runtime! macro by @andrewweston in https://github.com/augentic/omnia/pull/309
+* Runtime macro by @andrewweston in https://github.com/augentic/omnia/pull/310
+* One guest loader for either artifact format by @andrewweston in https://github.com/augentic/omnia/pull/312
+* Refactor to make feature flag code additive only by @andrew-goldie in https://github.com/augentic/omnia/pull/313
+* Simplify telemetry by @andrew-goldie in https://github.com/augentic/omnia/pull/314
+* Restore "refactored" wasm loader functionality by @andrewweston in https://github.com/augentic/omnia/pull/315
+* Address issues with precompiled guests by @andrewweston in https://github.com/augentic/omnia/pull/316
+* Compose RUST_LOG with tracing level flags by @andrewweston in https://github.com/augentic/omnia/pull/317
+* Commenting by @andrewweston in https://github.com/augentic/omnia/pull/318
+* Normalise internal tracing for server and command modes by @andrewweston in https://github.com/augentic/omnia/pull/319
+* Fix omnia-cursor issue caused by wasmtime tracing by @andrewweston in https://github.com/augentic/omnia/pull/320
+* Mise by @andrew-goldie in https://github.com/augentic/omnia/pull/321
+* Mise by @andrew-goldie in https://github.com/augentic/omnia/pull/322
+* conform to more reusable mise and CI by @andrew-goldie in https://github.com/augentic/omnia/pull/323
+* Improve model answers by @andrewweston in https://github.com/augentic/omnia/pull/329
+* Adopt the shared conventions from augentic/toolkit v0.3.0 by @andrewweston in https://github.com/augentic/omnia/pull/338
+* Remove global lint allow override by @andrewweston in https://github.com/augentic/omnia/pull/339
+* Bump the shared conventions to augentic/toolkit v0.4.0 by @andrewweston in https://github.com/augentic/omnia/pull/340
+* Update conventions by @andrewweston in https://github.com/augentic/omnia/pull/341
+* Minor lint issues by @andrewweston in https://github.com/augentic/omnia/pull/342
+* Maintenance by @andrewweston in https://github.com/augentic/omnia/pull/343
+* Load plugins from registry by @andrewweston in https://github.com/augentic/omnia/pull/344
+* Add wasi-vcs by @andrewweston in https://github.com/augentic/omnia/pull/345
+* correctness fixes by @andrewweston in https://github.com/augentic/omnia/pull/346
+* Remove git grammar leakage by @andrewweston in https://github.com/augentic/omnia/pull/348
+* Improve test performance by @andrewweston in https://github.com/augentic/omnia/pull/349
+* Messaging handler seam by @karthik-phl in https://github.com/augentic/omnia/pull/347
+* Wasm compile crate by @andrewweston in https://github.com/augentic/omnia/pull/350
+* Bump toolkit version by @andrewweston in https://github.com/augentic/omnia/pull/351
+* add support for model worker grants by @andrewweston in https://github.com/augentic/omnia/pull/352
+* Replace multiple #[cfg(...)] with cfg_select! by @andrewweston in https://github.com/augentic/omnia/pull/372
+* Update dependencies by @andrewweston in https://github.com/augentic/omnia/pull/373
+* Remove Renovate config by @andrewweston in https://github.com/augentic/omnia/pull/374
+* Ignore augentic/toolkit in Dependabot by @andrewweston in https://github.com/augentic/omnia/pull/375
+* Simplify message routing by @andrewweston in https://github.com/augentic/omnia/pull/376
+* Upgrade wasmtime 50.0.0 by @andrewweston in https://github.com/augentic/omnia/pull/385
+
+## New Contributors
+* @dependabot[bot] made their first contribution in https://github.com/augentic/omnia/pull/324
+
+**Full Changelog**: https://github.com/augentic/omnia/compare/v0.36.0...v0.37.0
+
 ---
 
 Release notes for previous releases can be found on the respective release branches of the repository.
