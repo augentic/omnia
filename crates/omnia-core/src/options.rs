@@ -139,6 +139,9 @@ pub struct RuntimeOptions {
     /// Interval between pooling-occupancy metric samples; `0` disables (`POOL_METRICS_INTERVAL_MS`, default 5000ms).
     #[env(from = "POOL_METRICS_INTERVAL_MS", default = "5000", with = parse_millis)]
     pub pool_metrics_interval: Duration,
+    /// Idle time, measured from the last guest invocation, after which unused warm pooled memory is released to the OS; `0` disables (`POOL_IDLE_RELEASE_MS`, default 0).
+    #[env(from = "POOL_IDLE_RELEASE_MS", default = "0", with = parse_millis)]
+    pub pool_idle_release: Duration,
     /// Honour WebAssembly branch hints during compilation; compile-affecting (`BRANCH_HINTING`, default `false`).
     #[env(from = "BRANCH_HINTING", default = "false")]
     pub branch_hinting: bool,

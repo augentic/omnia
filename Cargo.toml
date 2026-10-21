@@ -66,7 +66,7 @@ opentelemetry = { version = "0.33.1", default-features = false }
 opentelemetry-otlp = { version = "0.33.1", default-features = false }
 opentelemetry-proto = "0.33.1"
 opentelemetry_sdk = { version = "0.33.1", default-features = false }
-parking_lot = "0.12.5"
+parking_lot = "0.13.0"
 pastey = "0.2.3"
 prettyplease = "0.3.0"
 proc-macro2 = "1.0.107"
@@ -75,7 +75,7 @@ rand = "0.10.3"
 rcgen = "0.14.10"
 regex = "1.13.1"
 reqwest = { version = "0.13.5", default-features = false }
-rustls = { version = "0.23.45", default-features = false, features = ["ring", "std"] }
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "std"] }
 schemars = "1.2.3"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
@@ -84,7 +84,7 @@ sha2 = "0.11.1"
 syn = { version = "3.0.9", features = ["full"] }
 tempfile = "3.27.0"
 thiserror = "2.0.21"
-tokio = { version = "1.53.2", default-features = false }
+tokio = { version = "1.54.0", default-features = false }
 tokio-stream = { version = "0.1.19", features = ["sync"] }
 tokio-tungstenite = "0.30.0"
 tokio-util = { version = "0.7.20", features = ["codec"] }
@@ -95,10 +95,12 @@ tracing-opentelemetry = { version = "0.34.0", default-features = false }
 tracing-subscriber = { version = "0.3.23", default-features = false, features = ["env-filter", "fmt"] }
 wasip3 = { version = "0.9.0", features = ["http-compat"] }
 wasm-pkg-client = "0.16.1"
-wasmtime = { version = "49.0.2", default-features = false, features = ["anyhow", "component-model-bytes", "parallel-compilation"] }
-wasmtime-wasi = { version = "49.0.2", default-features = false, features = ["p2", "p3"] }
-wasmtime-wasi-config = "49.0.2"
-wasmtime-wasi-http = { version = "49.0.2", default-features = false, features = ["p3"] }
+wasmtime = { version = "50.0.0", default-features = false, features = ["anyhow", "component-model-bytes", "parallel-compilation"] }
+wasmtime-wasi = { version = "50.0.0", default-features = false, features = ["p2", "p3"] }
+wasmtime-wasi-config = "50.0.0"
+wasmtime-wasi-http = { version = "50.0.0", default-features = false, features = ["p3"] }
+# pinned to the wit-bindgen `wasip3` depends on: a guest links both, and a
+# newer wit-bindgen's `spawn_local` panics over the older task context
 wit-bindgen = { version = "0.62.0", features = ["async-spawn"] }
 x509-cert = { version = "0.3.0", default-features = false, features = ["std"] }
 

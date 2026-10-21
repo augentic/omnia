@@ -123,9 +123,50 @@ Unreleased
   takes a module's routes into the one router, as `axum::Router::merge`
   takes a module's before `with_state`, and `Router::route` delegates to
   it, so nothing published changes shape.
+- `POOL_IDLE_RELEASE_MS` (`RuntimeOptions::pool_idle_release`, default `0`,
+  off): once no guest has been invoked or live for that long, the memory
+  `POOL_MEMORY_KEEP_RESIDENT` keeps in warm slots is given back to the OS,
+  so a bursty service holds its warm slots through a burst and sheds them
+  between bursts. Idleness is measured from the last guest invocation
+  (`Runtime::stores_built`, one per store built), so a request that begins
+  and ends between two looks still counts as activity; the release lands
+  within about a second of the idle time elapsing and is logged at `debug`
+  with the bytes freed.
 
 ### Changed
 
+- Upgraded `wasmtime` and the matching `wasmtime-wasi*` crates to 50.0.0.
+  Pre-compiled `.bin` artifacts must be rebuilt with `omnia compile`, as a
+  49-built artifact is rejected by the engine's version check at load.
+  Behaviour that reaches a guest or an operator through the upgrade:
+  - under `MAX_FUEL`, fuel is now charged for the host allocations of
+    records, variants, and enums as well as lists and strings; every
+    linked call crosses the `omnia-link` relay as such values, so a
+    deployment metering fuel sees link-heavy guests spend more of a budget
+    that held before;
+  - a `wasi:io` `output-stream.write` to stdout, stderr, or a file with
+    more bytes than its `check-write` permit now traps, as every other
+    stream already did; the standard library's stdio writes within the
+    permit, so only a guest driving the stream itself can see this;
+  - an outbound `wasi:http` response is held to its `content-length`,
+    forbidden headers are dropped from its trailers, and a response with
+    two `content-length` headers is refused.
+- The default outbound `wasi:http` client reports why a connection failed
+  rather than `connection-refused` for every failure: a name that does not
+  resolve is `dns-error`, an unreachable or timed-out host is
+  `destination-unavailable` or `connection-timeout`, a certificate no root
+  trusts is `tls-certificate-error`, and an alert from the origin is
+  `tls-alert-received` carrying its id; a refused socket is still
+  `connection-refused`. Failures after the connect are told apart too: a
+  `first-byte-timeout` or `between-bytes-timeout` that elapses is
+  `connection-read-timeout`, where it read `connection-timeout`; a response
+  the origin cut short is `HTTP-response-incomplete` and any other protocol
+  fault `HTTP-protocol-error`, where both read `HTTP-request-URI-invalid`,
+  which now names only a request the client cannot form. A request that
+  sets a `connect-timeout` or `between-bytes-timeout` no longer builds a
+  client of its own: the between-bytes pace is kept on the response body
+  over the shared client's connections, and a client per distinct
+  `connect-timeout` is kept and reused.
 - `Format::candidate` reads the largest JSON value a reply wraps, where it
   read the last — a citation or a repeated fragment after the answer is no
   longer taken for it — and passes over a bracketed block that does not
