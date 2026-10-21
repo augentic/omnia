@@ -126,6 +126,9 @@ Unreleased
 
 ### Changed
 
+- Upgraded `wasmtime` and the matching `wasmtime-wasi*` crates to 50.0.0.
+  Pre-compiled `.bin` artifacts must be rebuilt with `omnia compile`, as a
+  49-built artifact is rejected by the engine's version check at load.
 - `Format::candidate` reads the largest JSON value a reply wraps, where it
   read the last — a citation or a repeated fragment after the answer is no
   longer taken for it — and passes over a bracketed block that does not

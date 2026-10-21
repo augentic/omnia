@@ -12,8 +12,7 @@ mod generated {
         world: "imports",
         path: "wit",
         imports: {
-            "omnia:otel/resource.resource": tracing | trappable,
-            default: store | tracing | trappable,
+            default: tracing | trappable,
         },
         with: {
             "wasi:clocks": wasmtime_wasi::p2::bindings::clocks,

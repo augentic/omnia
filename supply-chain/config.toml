@@ -172,7 +172,7 @@ version = "3.10.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.cc]]
-version = "1.8.0"
+version = "1.9.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.cfg-if]]
@@ -228,7 +228,7 @@ version = "0.3.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.crc32fast]]
-version = "1.5.2"
+version = "1.5.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.crossbeam-channel]]
@@ -360,7 +360,7 @@ version = "2.5.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.find-msvc-tools]]
-version = "0.1.14"
+version = "0.1.15"
 criteria = "safe-to-deploy"
 
 [[exemptions.fixedbitset]]
@@ -779,6 +779,10 @@ criteria = "safe-to-run"
 version = "0.5.18"
 criteria = "safe-to-deploy"
 
+[[exemptions.redox_syscall]]
+version = "0.9.5"
+criteria = "safe-to-deploy"
+
 [[exemptions.ring]]
 version = "0.17.14"
 criteria = "safe-to-deploy"
@@ -1092,11 +1096,11 @@ version = "1.1.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.webpki-root-certs]]
-version = "1.0.9"
+version = "1.0.10"
 criteria = "safe-to-deploy"
 
 [[exemptions.webpki-roots]]
-version = "1.0.9"
+version = "0.26.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.writeable]]

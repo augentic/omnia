@@ -153,14 +153,6 @@ where
     }
 
     async fn events(&self) -> Result<Events> {
-        let store_data = self.state.store();
-        let mut store = self.state.build_store(store_data);
-
-        store
-            .run_concurrent(async |store| {
-                let client = store.with(|mut store| store.get().view().ctx.connect()).await?;
-                client.events().await
-            })
-            .await?
+        self.state.store().view().ctx.connect().await?.events().await
     }
 }
