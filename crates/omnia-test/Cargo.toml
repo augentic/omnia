@@ -28,11 +28,12 @@ guest = [
     "dep:http",
     "dep:http-body",
     "dep:http-body-util",
+    "dep:omnia-backend",
+    "omnia-backend/docstore",
+    "omnia-backend/model",
     "dep:omnia-sdk",
     "omnia-sdk/sql",
     "omnia-sdk/docstore",
-    "dep:omnia-wasi-docstore",
-    "dep:omnia-wasi-sql",
 ]
 # The component runtime harness: `Deployment`, `Backends`, `ScriptedModel`, `Scratch`.
 host = [
@@ -41,6 +42,9 @@ host = [
     "dep:omnia",
     "omnia/loader",
     "omnia/link",
+    "dep:omnia-backend",
+    "omnia-backend/keyvalue",
+    "omnia-backend/model",
     "dep:omnia-wasi-blobstore",
     "dep:omnia-wasi-config",
     "dep:omnia-wasi-docstore",
@@ -69,6 +73,7 @@ http = { workspace = true, optional = true }
 http-body = { workspace = true, optional = true }
 http-body-util = { workspace = true, optional = true }
 omnia = { workspace = true, optional = true }
+omnia-backend = { workspace = true, optional = true }
 omnia-sdk = { workspace = true, optional = true }
 omnia-wasi-blobstore = { workspace = true, optional = true }
 omnia-wasi-config = { workspace = true, optional = true }

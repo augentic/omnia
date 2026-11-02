@@ -1,21 +1,26 @@
 //! The `create` host binding and its reply pipeline.
 
-use std::fmt;
 use std::sync::Arc;
 
-use anyhow::anyhow;
-use futures::{FutureExt as _, future};
-use omnia_core::HasMounts;
+use anyhow::{Context as _, anyhow};
+use cap_std::fs::{Metadata, MetadataExt as _};
+use futures::FutureExt as _;
+use omnia_core::{HasMounts, MountRegistry};
 use wasmtime::component::{Accessor, FutureReader, StreamReader};
+use wasmtime_wasi::filesystem::Descriptor;
 
 use crate::host::generated::omnia::model::completion::{
-    Host, HostWithStore, Reply, Session, ToolResult,
+    Effort as WitEffort, Error as WitError, Format as WitFormat, Function as WitFunction,
+    Generation as WitGeneration, Host, HostWithStore, Mcp as WitMcp, Message as WitMessage,
+    Reply as WitReply, Request as WitRequest, Role as WitRole, Schema as WitSchema, Session,
+    Tool as WitTool, ToolResult as WitToolResult, Usage as WitUsage, WorkerGrant as WitWorkerGrant,
+    WorkspaceGrant,
 };
-use crate::host::session::{CallsProducer, ReplyTask, ResultsConsumer, SessionClose, ToolSession};
-use crate::host::tool_host::DirEntry;
-use crate::host::workspace::{self, Workspace};
+use crate::host::session::{CallsProducer, ReplyTask, ResultsConsumer};
 use crate::host::{
-    Error, FutureResult, Request, ToolHost, ToolOutcome, WasiModel, WasiModelCtxView,
+    BoundToolHost, Effort, Error, Format, Function, Generation, McpGrant, Message, Request, Role,
+    SchemaFormat, SessionClose, Tool, ToolHost, ToolSession, Usage, WasiModel, WasiModelView,
+    WorkerGrant, Workspace,
 };
 
 impl<T> HostWithStore<T> for WasiModel
@@ -23,20 +28,21 @@ where
     T: HasMounts,
 {
     fn create(
-        accessor: &Accessor<T, Self>, request: Request, mut results: StreamReader<ToolResult>,
-    ) -> impl Future<Output = Result<Session, Error>> {
+        accessor: &Accessor<T, Self>, wit_request: WitRequest,
+        mut results: StreamReader<WitToolResult>,
+    ) -> impl std::future::Future<Output = Result<Session, WitError>> {
         std::future::ready(accessor.with(|mut access| {
+            let (request, workspace_grant) = split_wit_request(wit_request);
             if let Err(error) = request.validate() {
                 results.close(&mut access)?;
-                return Err(error);
+                return Err(to_wit_error(error));
             }
 
-            // get workspace
-            let workspace = if let Some(grant) = request.grants.workspace.as_ref() {
+            let workspace = if let Some(grant) = workspace_grant.as_ref() {
                 let mounts = access.data_mut().mounts();
                 let descriptor = access.get().table.get(&grant.root)?;
 
-                match workspace::resolve(descriptor, &mounts, grant) {
+                match resolve_descriptor(descriptor, &mounts, grant) {
                     Ok(workspace) => Some(workspace),
                     Err(error) => {
                         results.close(&mut access)?;
@@ -47,42 +53,45 @@ where
                 None
             };
 
-            // call model backend with request and tool host "closure"
-            let limits = access.get().ctx.limits();
+            let limits = access.get().client.limits();
             let allowed = request.tool_names();
 
             let (session, calls_rx) = ToolSession::new(limits, allowed);
-            let tool_host: Arc<dyn ToolHost> = Arc::new(BoundToolHost {
-                session: Arc::clone(&session),
-                workspace,
-            });
-            let answer = access.get().ctx.complete(request, tool_host);
+            let tool_host: Arc<dyn ToolHost> =
+                Arc::new(BoundToolHost::new(Arc::clone(&session), workspace));
+            let answer = access.get().client.complete(request, tool_host);
 
             results.pipe(&mut access, ResultsConsumer::new(Arc::clone(&session)))?;
             let mut calls = StreamReader::new(&mut access, CallsProducer::new(calls_rx))?;
 
-            // extract reply from answer
             let close = SessionClose::new(Arc::clone(&session));
             let reply_task = ReplyTask::spawn(async move {
                 let _close = close;
                 match answer.await {
                     Ok(answer) => session.take_error().map_or_else(
                         || {
-                            Ok(Reply {
+                            Ok(WitReply {
                                 answer: answer.answer,
-                                usage: answer.usage,
+                                usage: answer.usage.map(to_wit_usage),
                             })
                         },
-                        Err,
+                        |e| Err(to_wit_error(e)),
                     ),
-                    // a typed `Error` is kept; anything else is a `backend` failure
-                    Err(error) => Err(session
-                        .take_error()
-                        .unwrap_or_else(|| error.downcast::<Error>().unwrap_or_else(Into::into))),
+                    Err(error) => {
+                        if let Some(session_err) = session.take_error() {
+                            return Err(to_wit_error(session_err));
+                        }
+                        match error.downcast::<Error>() {
+                            Ok(err) => Err(to_wit_error(err)),
+                            Err(error) => match error.downcast::<WitError>() {
+                                Ok(wit_err) => Err(wit_err),
+                                Err(other) => Err(WitError::from(other)),
+                            },
+                        }
+                    }
                 }
             });
 
-            // map the reply task to a future
             let reply_fut = reply_task.join().map(Ok::<_, wasmtime::Error>);
             let reply = match FutureReader::new(&mut access, reply_fut) {
                 Ok(reply) => reply,
@@ -97,63 +106,116 @@ where
     }
 }
 
-impl Host for WasiModelCtxView<'_> {
-    fn convert_error(&mut self, err: Error) -> wasmtime::Result<Error> {
+impl Host for WasiModelView<'_> {
+    fn convert_error(&mut self, err: WitError) -> wasmtime::Result<WitError> {
         Ok(err)
     }
 }
 
-// The bound tool host, built fresh per completion from the request's grants
-// and the session channels the `create` binding minted.
-struct BoundToolHost {
-    session: Arc<ToolSession>,
-    workspace: Option<Workspace>,
+fn resolve_descriptor(
+    descriptor: &Descriptor, registry: &MountRegistry, grant: &WorkspaceGrant,
+) -> anyhow::Result<Workspace> {
+    let Descriptor::Dir(dir) = descriptor else {
+        return Err(anyhow!("grants.workspace root must be a directory"));
+    };
+
+    let meta =
+        Metadata::from_file(&dir.dir).context("reading lent workspace directory metadata")?;
+    let entry = registry
+        .match_identity(meta.dev(), meta.ino())
+        .context("lent workspace root is not an authorized mount")?;
+    Workspace::from_mount(entry, &grant.subpath)
 }
 
-// Manual because the session and workspace internals (channels, capability
-// handles) carry no useful state to print; the lent path is the identity.
-impl fmt::Debug for BoundToolHost {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("BoundToolHost")
-            .field("workspace", &self.workspace.as_ref().map(Workspace::local_path))
-            .finish_non_exhaustive()
+fn split_wit_request(req: WitRequest) -> (Request, Option<WorkspaceGrant>) {
+    let workspace = req.grants.workspace.as_ref().map(|g| g.subpath.clone());
+    let grant = req.grants.workspace;
+    let request = Request {
+        model: req.model,
+        system: req.system,
+        messages: req
+            .messages
+            .into_iter()
+            .map(|WitMessage { role, content }| Message {
+                role: match role {
+                    WitRole::System => Role::System,
+                    WitRole::User => Role::User,
+                    WitRole::Assistant => Role::Assistant,
+                },
+                content,
+            })
+            .collect(),
+        generation: req.generation.map(
+            |WitGeneration {
+                 temperature,
+                 top_p,
+                 max_tokens,
+                 stop,
+                 seed,
+                 effort,
+             }| Generation {
+                temperature,
+                top_p,
+                max_tokens,
+                stop,
+                seed,
+                effort: effort.map(|e| match e {
+                    WitEffort::Minimal => Effort::Minimal,
+                    WitEffort::Low => Effort::Low,
+                    WitEffort::Medium => Effort::Medium,
+                    WitEffort::High => Effort::High,
+                }),
+            },
+        ),
+        format: match req.format {
+            WitFormat::Text => Format::Text,
+            WitFormat::Json => Format::Json,
+            WitFormat::Schema(WitSchema { name, schema }) => {
+                Format::Schema(SchemaFormat { name, schema })
+            }
+        },
+        tools: req
+            .tools
+            .into_iter()
+            .map(|t| match t {
+                WitTool::Function(WitFunction {
+                    name,
+                    description,
+                    parameters,
+                }) => Tool::Function(Function {
+                    name,
+                    description,
+                    parameters,
+                }),
+                WitTool::Mcp(WitMcp { name, tools, url }) => {
+                    Tool::Mcp(McpGrant { name, tools, url })
+                }
+            })
+            .collect(),
+        check: req.check,
+        workspace,
+        worker: req.grants.worker.map(|WitWorkerGrant { egress, read, env }| WorkerGrant {
+            egress,
+            read,
+            env,
+        }),
+    };
+    (request, grant)
+}
+
+const fn to_wit_usage(u: Usage) -> WitUsage {
+    WitUsage {
+        input_tokens: u.input_tokens,
+        output_tokens: u.output_tokens,
+        reasoning_tokens: u.reasoning_tokens,
     }
 }
 
-impl BoundToolHost {
-    // Run `op` against the lent workspace, or fail when none was granted.
-    fn with_workspace<R: Send + 'static>(
-        &self, op: &str, path: String, f: impl FnOnce(&Workspace, String) -> FutureResult<R>,
-    ) -> FutureResult<R> {
-        match &self.workspace {
-            Some(workspace) => f(workspace, path),
-            None => future::err(anyhow!("{op}(`{path}`) requires grants.workspace")).boxed(),
-        }
-    }
-}
-
-impl ToolHost for BoundToolHost {
-    fn call_tool(&self, name: String, arguments: String) -> FutureResult<ToolOutcome> {
-        Arc::clone(&self.session).call(name, arguments)
-    }
-
-    fn check(&self, candidate: String) -> FutureResult<Result<(), String>> {
-        Arc::clone(&self.session).check(candidate)
-    }
-
-    fn read(&self, path: String) -> FutureResult<Vec<u8>> {
-        self.with_workspace("read", path, Workspace::read)
-    }
-
-    fn list(&self, path: String) -> FutureResult<Vec<DirEntry>> {
-        self.with_workspace("list", path, Workspace::list)
-    }
-
-    fn write(&self, path: String, bytes: Vec<u8>) -> FutureResult<()> {
-        self.with_workspace("write", path, move |workspace, path| workspace.write(path, bytes))
-    }
-
-    fn local_path(&self) -> Option<&std::path::Path> {
-        self.workspace.as_ref().map(Workspace::local_path)
+fn to_wit_error(err: Error) -> WitError {
+    match err {
+        Error::InvalidRequest(d) => WitError::InvalidRequest(d),
+        Error::BudgetExhausted(d) => WitError::BudgetExhausted(d),
+        Error::ToolFailed(d) => WitError::ToolFailed(d),
+        Error::Backend(d) => WitError::Backend(d),
     }
 }

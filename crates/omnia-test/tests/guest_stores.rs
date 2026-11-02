@@ -12,7 +12,8 @@ use std::thread;
 use bytes::Bytes;
 use http::{Method, Request, Response};
 use http_body_util::Full;
-use omnia_sdk::document_store::{Document, Filter, QueryOptions, SortField};
+use omnia_sdk::docstore::{Document, Filter, QueryOptions, SortField};
+use omnia_sdk::sql::{DataType, Field, Row};
 use omnia_sdk::{
     BlobStore, BlobStoreExt, Broadcast, CasError, Config, DocumentStore, HttpRequest, Identity,
     Message, Publish, StateStore, TableStore,
@@ -20,7 +21,6 @@ use omnia_sdk::{
 use omnia_test::guest::{
     FixedIdentity, MapConfig, MatchedHttp, Memory, MemoryDocs, Namespaced, ScriptedTables, Sink,
 };
-use omnia_wasi_sql::{DataType, Field, Row};
 
 // every store double answers without yielding
 fn now<F: Future>(future: F) -> F::Output {

@@ -14,7 +14,7 @@ The native binary that loads guests and provides their capabilities. Usually gen
 
 ### Backend
 
-The implementation a WASI host delegates to — an in-tree default (`KeyValueDefault`, in-memory) or a production client from `omnia-backends` (`omnia_redis::Client`). Backends implement `omnia::Backend` and configure themselves from environment variables at startup.
+The implementation a WASI host delegates to — an in-tree default (`KeyValueDefault`, in-memory) or a production client from `omnia-backends` (`omnia_redis::Client`). Backends implement `omnia::Connect` and configure themselves from environment variables at startup.
 
 ### WIT
 

@@ -12,8 +12,8 @@ use anyhow::Result;
 use wasmtime::component::{Component, Linker};
 use wasmtime::{Engine, Store};
 
+use crate::FutureResult;
 use crate::chain::ChainCtx;
-use crate::host::FutureResult;
 use crate::registry::{Guest, GuestId};
 use crate::source::LoadedGuest;
 

@@ -13,11 +13,10 @@ use wasmtime::component::{Instance, InstancePre};
 use crate::artifact::component;
 use crate::digest::Digest;
 use crate::extensions::Extensions;
-use crate::mount::MountRegistry;
 use crate::registry::{Guest, GuestId, HttpRoutes, PublishError, TriggerRouter};
 use crate::source::{AcquireError, RegistrySource, Source, SourceSpec, Verified};
 use crate::store::{HasLimits, Stdio};
-use crate::{ChainCtx, Dispatcher, Registry, RuntimeOptions, StoreBase, StoreCtx};
+use crate::{ChainCtx, Dispatcher, MountRegistry, Registry, RuntimeOptions, StoreBase, StoreCtx};
 
 /// Guest exit code. [`code_u8`](Self::code_u8) and [`ExitCode`](std::process::ExitCode)
 /// keep only the low byte (POSIX semantics).

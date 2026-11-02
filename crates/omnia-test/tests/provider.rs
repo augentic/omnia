@@ -4,7 +4,7 @@
 
 use omnia_sdk::model::{Message, Model, Request, Role};
 use omnia_sdk::{BlobStore, Config, Identity, Publish, StateStore};
-use omnia_test::guest::{FixedIdentity, MapConfig, Provider, Scripted};
+use omnia_test::guest::{FixedIdentity, MapConfig, Provider, ScriptedModel};
 
 fn user(content: &str) -> Request {
     Request::builder()
@@ -20,7 +20,7 @@ async fn provider_seeds() {
     let provider = Provider::default()
         .config(MapConfig::default().with([("region", "eu")]))
         .identity(FixedIdentity::new("tok"))
-        .model(Scripted::answering(["hi"]));
+        .model(ScriptedModel::answering(["hi"]));
     provider.storage.insert_state("seen", b"1");
 
     assert_eq!(Config::get(&provider, "region").await.expect("config"), "eu");

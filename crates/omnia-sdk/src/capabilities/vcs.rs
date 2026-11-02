@@ -13,117 +13,9 @@
 
 use std::future::Future;
 
-/// How a merge resolves a conflict at a path a [`Rule`] matches, before the
-/// conflict is reported.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Strategy {
-    /// Both sides' lines kept, each once: declaration and import lists.
-    Union,
-    /// The working copy's side kept whole, for the caller to regenerate:
-    /// lockfiles.
-    Ours,
-    /// The merged-in side kept whole.
-    Theirs,
-}
-
-/// One merge rule: a glob over root-relative paths and the strategy for
-/// the paths it matches. The first rule that matches applies.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Rule {
-    /// The glob, over paths relative to the working copy's root.
-    pub paths: String,
-    /// How a conflict at a matching path is resolved.
-    pub strategy: Strategy,
-}
-
-/// The outcome of a merge: data, not an error.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Merged {
-    /// The merge commit, when the merge completed.
-    pub commit: Option<String>,
-    /// The paths in conflict no rule resolved, when it did not; the
-    /// working copy is back on its head.
-    pub conflicts: Vec<String>,
-}
-
-/// One entry of a [`Vcs::log`]: a sealed commit's id and its whole message.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Entry {
-    /// The commit's id.
-    pub id: String,
-    /// The whole message, the trailers a caller wrote into it included.
-    pub message: String,
-}
-
-/// What a working copy did to a path its head does not hold that way.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ChangeKind {
-    /// The path is new.
-    Added,
-    /// The path's content differs.
-    Modified,
-    /// The path is gone.
-    Deleted,
-}
-
-/// One pending change in a working copy.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Change {
-    /// The path, relative to the working copy's root.
-    pub path: String,
-    /// What the working copy did to it.
-    pub kind: ChangeKind,
-}
-
-/// Options for a clone.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct CloneOptions {
-    /// Clone only this many commits of history; `None` clones it whole.
-    pub depth: Option<u32>,
-}
-
-/// Typed version-control failure, mirroring the `omnia:vcs` error variant.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-pub enum Error {
-    /// The location holds no repository or working copy.
-    #[error("not a repository")]
-    NotARepository,
-    /// A working copy already exists at the location.
-    #[error("already exists: {0}")]
-    Exists(String),
-    /// A revision, remote, or label the repository does not know.
-    #[error("not found: {0}")]
-    NotFound(String),
-    /// A working copy holds pending changes where none may.
-    #[error("pending changes: {}", .0.join(", "))]
-    Pending(Vec<String>),
-    /// The remote refused, could not be reached, or wants credentials.
-    #[error("access: {0}")]
-    Access(String),
-    /// The remote's label holds commits the pushed one does not; nothing
-    /// was forced.
-    #[error("diverged: {0}")]
-    Diverged(String),
-    /// Any other failure, with the backend's detail.
-    #[error("{0}")]
-    Other(String),
-}
-
-impl Error {
-    /// The kebab-case wire discriminant, stable for callers to branch on.
-    #[must_use]
-    pub const fn code(&self) -> &'static str {
-        match self {
-            Self::NotARepository => "not-a-repository",
-            Self::Exists(_) => "exists",
-            Self::NotFound(_) => "not-found",
-            Self::Pending(_) => "pending",
-            Self::Access(_) => "access",
-            Self::Diverged(_) => "diverged",
-            Self::Other(_) => "other",
-        }
-    }
-}
+pub use omnia_backend::vcs::{
+    Change, ChangeKind, CloneOptions, Entry, Error, Merged, Rule, Strategy,
+};
 
 // The default taxonomy: what the repository lacks is `not_found`, a remote
 // that cannot be reached is the gateway's, a location, working copy, or
@@ -550,14 +442,14 @@ pub struct WasiVcs;
 #[cfg(target_arch = "wasm32")]
 impl Vcs for WasiVcs {}
 
-// the lend and the conversions between the records above and the bindings
+// the lend helper
 #[cfg(target_arch = "wasm32")]
 mod wire {
-    use omnia_wasi_vcs::{store, transport, types, workspace};
+    use omnia_wasi_vcs::types;
     use wasip3::filesystem::preopens;
     use wasip3::filesystem::types::Descriptor;
 
-    use super::{Change, ChangeKind, CloneOptions, Entry, Error, Merged, Rule, Strategy};
+    use super::Error;
     use crate::capabilities::lend::resolve_lend;
 
     // the lent root borrows a descriptor, so the preopens outlive the call
@@ -574,82 +466,6 @@ mod wire {
             root,
             subpath: subpath.to_owned(),
         })
-    }
-
-    impl From<Rule> for store::Rule {
-        fn from(rule: Rule) -> Self {
-            Self {
-                paths: rule.paths,
-                strategy: rule.strategy.into(),
-            }
-        }
-    }
-
-    impl From<Strategy> for store::Strategy {
-        fn from(strategy: Strategy) -> Self {
-            match strategy {
-                Strategy::Union => Self::Union,
-                Strategy::Ours => Self::Ours,
-                Strategy::Theirs => Self::Theirs,
-            }
-        }
-    }
-
-    impl From<store::Merged> for Merged {
-        fn from(merged: store::Merged) -> Self {
-            Self {
-                commit: merged.commit,
-                conflicts: merged.conflicts,
-            }
-        }
-    }
-
-    impl From<store::Entry> for Entry {
-        fn from(entry: store::Entry) -> Self {
-            Self {
-                id: entry.id,
-                message: entry.message,
-            }
-        }
-    }
-
-    impl From<workspace::Change> for Change {
-        fn from(change: workspace::Change) -> Self {
-            Self {
-                path: change.path,
-                kind: change.kind.into(),
-            }
-        }
-    }
-
-    impl From<workspace::ChangeKind> for ChangeKind {
-        fn from(kind: workspace::ChangeKind) -> Self {
-            match kind {
-                workspace::ChangeKind::Added => Self::Added,
-                workspace::ChangeKind::Modified => Self::Modified,
-                workspace::ChangeKind::Deleted => Self::Deleted,
-            }
-        }
-    }
-
-    impl From<CloneOptions> for transport::CloneOptions {
-        fn from(options: CloneOptions) -> Self {
-            Self { depth: options.depth }
-        }
-    }
-
-    impl From<types::Error> for Error {
-        fn from(error: types::Error) -> Self {
-            match error {
-                types::Error::NotARepository => Self::NotARepository,
-                types::Error::Exists(detail) => Self::Exists(detail),
-                types::Error::NotFound(detail) => Self::NotFound(detail),
-                types::Error::Pending(paths) => Self::Pending(paths),
-                types::Error::Access(detail) => Self::Access(detail),
-                types::Error::Diverged(label) => Self::Diverged(label),
-                types::Error::Other(detail) => Self::Other(detail),
-            }
-        }
     }
 }
 
@@ -683,11 +499,5 @@ mod tests {
                 }
             }
         }
-    }
-
-    #[test]
-    fn pending_lists_paths() {
-        let error = Error::Pending(vec!["src/a.rs".into(), "b.md".into()]);
-        assert_eq!(error.to_string(), "pending changes: src/a.rs, b.md");
     }
 }

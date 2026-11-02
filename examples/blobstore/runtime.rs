@@ -2,7 +2,7 @@
 
 cfg_select! {
     not(target_arch = "wasm32") => {
-        use omnia_wasi_blobstore::{BlobstoreDefault, WasiBlobstore};
+        use omnia_wasi_blobstore::{BlobStoreDefault, WasiBlobStore};
         use omnia_wasi_http::{HttpDefault, WasiHttp};
         use omnia_wasi_otel::{OtelDefault, WasiOtel};
 
@@ -10,7 +10,7 @@ cfg_select! {
             hosts: {
                 WasiHttp: HttpDefault,
                 WasiOtel: OtelDefault,
-                WasiBlobstore: BlobstoreDefault,
+                WasiBlobStore: BlobStoreDefault,
             }
         });
     }

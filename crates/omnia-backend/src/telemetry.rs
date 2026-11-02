@@ -333,7 +333,9 @@ fn rust_log() -> Option<String> {
 /// Decided once, for the console layer and for every guest's environment.
 /// `with_ansi` overrides the `fmt` default that honours `NO_COLOR` on a
 /// terminal, so the console reads the variable itself.
-pub(crate) fn ansi() -> bool {
+#[doc(hidden)]
+#[must_use]
+pub fn ansi() -> bool {
     colour(std::io::stderr().is_terminal(), env::var("NO_COLOR").ok().as_deref())
 }
 
@@ -879,11 +881,11 @@ mod tests {
             .with(tracing_opentelemetry::layer().with_tracer(tracer.tracer("test")));
 
         tracing::subscriber::with_default(subscriber, || {
-            let anchor = tracing::info_span!("cli-run");
+            let anchor = tracing::info_span!(target: "omnia_core", "cli-run");
             assert!(!anchor.is_disabled(), "the run's filter governs spans");
             let _entered = anchor.enter();
-            tracing::info!("guest loaded");
-            tracing::warn!("mount failed");
+            tracing::info!(target: "omnia_core", "guest loaded");
+            tracing::warn!(target: "omnia_core", "mount failed");
             tracing::info!(target: "omnia_cursor::model", "completion");
         });
 

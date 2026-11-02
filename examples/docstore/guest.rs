@@ -1,6 +1,6 @@
 //! # DocStore Wasm Guest (Default Backend)
 //!
-//! Demonstrates the `wasi:docstore` document store interface: CRUD on a
+//! Demonstrates the `omnia:docstore` document store interface: CRUD on a
 //! single `stops` collection plus one query endpoint showing filters
 //! (`contains`, `eq`, `gte`/`lte`), sorting, limits, and continuation-token
 //! pagination.
@@ -11,7 +11,7 @@ use anyhow::{Context, Result, anyhow};
 use axum::extract::{Path, Query};
 use axum::routing::get;
 use axum::{Json, Router};
-use omnia_sdk::document_store::{Document, Filter, QueryOptions, SortField};
+use omnia_sdk::docstore::{Document, Filter, QueryOptions, SortField};
 use omnia_sdk::{DocumentStore, HttpResult};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};

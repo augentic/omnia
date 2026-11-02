@@ -5,13 +5,13 @@ Proves the deterministic side of the `wasi-model` boundary: a guest calls `creat
 ## What it shows
 
 - `guest` ([`guest.rs`](guest.rs)) **imports** `omnia:model/completion` and exposes an async `run`. In its default scenario it builds a `json-schema` prompt, assembling the `system` / `messages` channels with the guest-side `Sections` builder (role / task / context), reads the preopen table via `wasi:filesystem/preopens` and lends the workspace named `.` through `grants.workspace`, then completes the request.
-- [`runtime.rs`](runtime.rs) binds the `WasiModel` host to the example-local `CannedVerdict` backend — an inline `WasiModelCtx` impl that answers every completion with one fixed schema answer.
+- [`runtime.rs`](runtime.rs) binds the `WasiModel` host to the example-local `CannedVerdict` backend — an inline `ModelClient` impl that answers every completion with one fixed schema answer.
 - [`omnia.toml`](omnia.toml)'s `[[mount]]` preopens the repo root as a read-only workspace named `.`. The host resolves the lent descriptor back to that mount by directory identity; the canned backend ignores it (it never runs tools).
 
 ```mermaid
 flowchart LR
   guest["guest.run<br/>(imports completion)"] -->|"create(request)"| bind["create binding"]
-  bind -->|"Request + ToolHost"| ctx["WasiModelCtx"]
+  bind -->|"Request + ToolHost"| ctx["ModelClient"]
   ctx --> canned["CannedVerdict<br/>fixed schema answer"]
   canned -->|"answer"| guest
 ```

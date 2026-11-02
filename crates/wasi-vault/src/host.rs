@@ -2,12 +2,10 @@
 //!
 //! This module implements the host-side logic for the WASI Vault service.
 
-mod default_impl;
 mod resource;
 mod vault_impl;
 
 mod generated {
-
     pub use self::omnia::vault::vault::Error;
     pub use super::LockerProxy;
 
@@ -27,18 +25,17 @@ mod generated {
 }
 
 use std::fmt::Debug;
-use std::sync::Arc;
 
+pub use omnia_backend::vault::{Locker, VaultClient, VaultDefault};
 pub use omnia_core::FutureResult;
 use omnia_core::{Host, Server, StoreView};
 use wasmtime::component::{HasData, Linker};
 
 use self::generated::omnia::vault::vault;
-pub use crate::host::default_impl::VaultDefault;
 use crate::host::generated::Error;
 pub use crate::host::resource::*;
 
-/// Result type for  vault operations.
+/// Result type for vault operations.
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Host-side service for `wasi:vault`.
@@ -46,7 +43,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub struct WasiVault;
 
 impl HasData for WasiVault {
-    type Data<'a> = WasiVaultCtxView<'a>;
+    type Data<'a> = WasiVaultView<'a>;
 }
 
 impl<T> Host<T> for WasiVault
@@ -59,15 +56,6 @@ where
 }
 
 impl<B> Server<B> for WasiVault {}
-
-/// A trait which provides internal WASI Vault context.
-///
-/// This is implemented by the resource-specific provider of Vault
-/// functionality.
-pub trait WasiVaultCtx: Debug + Send + Sync + 'static {
-    /// Open a locker.
-    fn open_locker(&self, identifier: String) -> FutureResult<Arc<dyn Locker>>;
-}
 
 omnia_core::host_error!(Error, Other);
 omnia_core::wasi_view!(Vault);

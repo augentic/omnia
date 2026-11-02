@@ -4,7 +4,7 @@ This crate provides the JSON document store interface for the Omnia runtime.
 
 ## Interface
 
-Implements the `wasi:docstore` WIT interface. Documents are stored as JSON bytes with a string primary key. Queries support filtering via a host-managed filter resource, sorting, pagination, and continuation tokens.
+Implements the `omnia:docstore` WIT interface. Documents are stored as JSON bytes with a string primary key. Queries support filtering via a host-managed filter resource, sorting, pagination, and continuation tokens.
 
 See the [`DocStore` Interface Reference](../../docs/reference/docstore.md) for the full WIT definition, SDK types, backend translator details, and host-enforced limits.
 

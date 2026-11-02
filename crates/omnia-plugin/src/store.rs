@@ -8,111 +8,14 @@
 //! operator's `cp`, or `wkg get <reference> -o <dir>/`.
 
 use std::fs::File;
-use std::io::Write as _;
+use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
-use std::str::FromStr;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::{fmt, io};
 
-use anyhow::{Context as _, Result, bail};
+use anyhow::{Context as _, Result};
 use futures::FutureExt as _;
 use futures::future::BoxFuture;
-use wasm_pkg_client::{PackageRef, Version};
-
-/// An exact package release: a `namespace:name@version` reference.
-///
-/// Filed in a store as `namespace_name@version.wasm` — the one spelling
-/// `wkg get <reference> -o <dir>/` writes, which a wasm-pkg label (`[a-z0-9]`
-/// words joined by `-`) and a semver leave invertible: a label holds neither
-/// `_` nor `@`, and a version holds no `_`.
-///
-/// # Examples
-///
-/// ```
-/// use omnia_plugin::Reference;
-///
-/// let reference: Reference = "acme:tool@1.2.3".parse()?;
-/// assert_eq!(reference.to_string(), "acme:tool@1.2.3");
-/// assert_eq!(reference.file_name(), "acme_tool@1.2.3.wasm");
-/// assert!("acme:tool".parse::<Reference>().is_err(), "an exact version is required");
-/// # anyhow::Ok(())
-/// ```
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Reference {
-    package: PackageRef,
-    version: Version,
-}
-
-impl Reference {
-    /// The package without its version.
-    #[must_use]
-    pub const fn package(&self) -> &PackageRef {
-        &self.package
-    }
-
-    /// The exact version.
-    #[must_use]
-    pub const fn version(&self) -> &Version {
-        &self.version
-    }
-
-    /// The file a store files this release as: `namespace_name@version.wasm`.
-    #[must_use]
-    pub fn file_name(&self) -> String {
-        format!("{}_{}@{}.wasm", self.package.namespace(), self.package.name(), self.version)
-    }
-}
-
-// exact `namespace:name@version` only; nothing resolves "latest"
-impl FromStr for Reference {
-    type Err = anyhow::Error;
-
-    fn from_str(reference: &str) -> Result<Self> {
-        let Some((name, version)) = reference.split_once('@') else {
-            bail!(
-                "registry package `{reference}` must pin an exact version \
-                 (`namespace:name@version`)"
-            )
-        };
-        let package = name.parse().with_context(|| {
-            format!("package `{reference}` is not a `namespace:name@version` reference")
-        })?;
-        let version = version.parse().with_context(|| {
-            format!("package `{reference}` does not pin an exact semver version")
-        })?;
-        Ok(Self { package, version })
-    }
-}
-
-impl fmt::Display for Reference {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}@{}", self.package, self.version)
-    }
-}
-
-/// Where acquired packages are kept, keyed by exact [`Reference`].
-///
-/// `get` answers with no network, and `put` persists a fetched release
-/// without replacing one already stored.
-pub trait PackageStore: Send + Sync + 'static {
-    /// The stored bytes of `reference`, if the store holds it.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the store cannot be read.
-    fn get<'a>(&'a self, reference: &'a Reference) -> BoxFuture<'a, Result<Option<Vec<u8>>>>;
-
-    /// Persist `bytes` as `reference`; a release already stored is left as it
-    /// was.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the store cannot persist them.
-    fn put<'a>(&'a self, reference: &'a Reference, bytes: &'a [u8]) -> BoxFuture<'a, Result<()>>;
-
-    /// Where the store would hold `reference`, as a refusal names it.
-    fn describe(&self, reference: &Reference) -> String;
-}
+pub use omnia_backend::plugins::{PackageStore, Reference};
 
 /// A store over one flat directory: `<root>/<namespace>_<name>@<version>.wasm`.
 ///

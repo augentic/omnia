@@ -8,20 +8,21 @@ mod dispatch;
 mod extensions;
 mod host;
 mod invoke;
-mod mount;
 mod options;
 mod registry;
 mod runtime;
 mod seam;
 mod source;
 mod store;
-pub mod telemetry;
 mod value;
 
+pub use omnia_backend::{
+    Connect, FromEnv, FutureResult, LevelFilter, Mount, MountRegistry, NoOptions, ResolvedPreopen,
+    Telemetry, telemetry,
+};
 pub use omnia_compile::CompileOptions;
 #[doc(hidden)]
 pub use pastey;
-pub use tracing_subscriber::filter::LevelFilter;
 #[doc(hidden)]
 pub use {anyhow, futures, tokio, wasmtime, wasmtime_wasi};
 
@@ -29,12 +30,8 @@ pub use self::chain::{ChainCtx, ChainPolicy};
 pub use self::digest::Digest;
 pub use self::dispatch::Dispatcher;
 pub use self::extensions::Extensions;
-pub use self::host::{
-    Backend, FromEnv, FutureResult, HasTable, Host, HostCtx, NoOptions, Provides, Proxy, Server,
-    get_cloned,
-};
+pub use self::host::{HasTable, Host, HostCtx, Provides, Proxy, Server, get_cloned};
 pub use self::invoke::{FreshCall, InvokeError, call_fresh};
-pub use self::mount::{MountRegistry, ResolvedPreopen};
 pub use self::options::RuntimeOptions;
 pub use self::registry::{
     CliRoutes, Guest, GuestId, HttpRoutes, PatternRoutes, Registry, RegistryParts, Resolver,
@@ -46,10 +43,9 @@ pub use self::runtime::{
 pub use self::seam::{LinkSeam, NoLinks, StoreFactory};
 pub use self::source::{AcquireError, LoadedGuest, RegistrySource, Source, SourceSpec, Verified};
 pub use self::store::{
-    HasChain, HasDispatcher, HasExtensions, HasLimits, HasMounts, HttpBorrow, HttpCtx, Stdio,
-    StoreBase, StoreConfig, StoreCtx, StoreView,
+    HasChain, HasDispatcher, HasExtensions, HasLimits, HasMounts, Stdio, StoreBase, StoreConfig,
+    StoreCtx, StoreView,
 };
-pub use self::telemetry::Telemetry;
 pub use self::value::handle_kind;
 
 /// Generates the standard host-error conversions every `omnia` WASI host
@@ -92,13 +88,13 @@ macro_rules! host_error {
 /// Generates the linker-facing view boilerplate every `omnia` WASI host crate
 /// repeats.
 ///
-/// Emits the `Wasi<Service>CtxView` borrowed `(ctx, table)` view plus the
+/// Emits the `Wasi<Service>View` borrowed `(client, table)` view plus the
 /// [`HostCtx`] impl on the `Wasi<Service>` host type, so the generic
 /// `omnia::StoreView` blanket serves the host's `add_to_linker` accessor
 /// with no per-host view or accessor trait.
 ///
 /// Pass the service stem (the part after `Wasi` in the host struct name). The
-/// `Wasi<Service>Ctx` trait, the `HasData` impl, the `bindgen!` block, and the
+/// `<Service>Client` trait, the `HasData` impl, the `bindgen!` block, and the
 /// `Host`/`Server` wiring stay hand-written; error conversions come from
 /// [`host_error!`].
 ///
@@ -111,28 +107,28 @@ macro_rules! host_error {
 macro_rules! wasi_view {
     ($name:ident $(,)?) => {
         $crate::pastey::paste! {
-            #[doc = concat!("Borrowed view over a [`", stringify!([<Wasi $name Ctx>]), "`] and the store's resource table.")]
-            pub struct [<Wasi $name CtxView>]<'a> {
-                #[doc = concat!("Mutable reference to the WASI ", stringify!($name), " context.")]
-                pub ctx: &'a mut dyn [<Wasi $name Ctx>],
+            #[doc = concat!("Borrowed view over a [`", stringify!([<$name Client>]), "`] and the store's resource table.")]
+            pub struct [<Wasi $name View>]<'a> {
+                #[doc = concat!("Mutable reference to the WASI ", stringify!($name), " client.")]
+                pub client: &'a mut dyn [<$name Client>],
                 /// Mutable reference to the table used to manage resources.
                 pub table: &'a mut $crate::wasmtime_wasi::ResourceTable,
             }
 
-            impl $crate::HasTable for [<Wasi $name CtxView>]<'_> {
+            impl $crate::HasTable for [<Wasi $name View>]<'_> {
                 fn table(&mut self) -> &mut $crate::wasmtime_wasi::ResourceTable {
                     self.table
                 }
             }
 
             impl $crate::HostCtx for [<Wasi $name>] {
-                type Borrow<'a> = &'a mut dyn [<Wasi $name Ctx>];
+                type Borrow<'a> = &'a mut dyn [<$name Client>];
 
                 fn view<'a>(
                     borrow: Self::Borrow<'a>,
                     table: &'a mut $crate::wasmtime_wasi::ResourceTable,
                 ) -> Self::Data<'a> {
-                    [<Wasi $name CtxView>] { ctx: borrow, table }
+                    [<Wasi $name View>] { client: borrow, table }
                 }
             }
         }

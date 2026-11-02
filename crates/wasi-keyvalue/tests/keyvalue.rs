@@ -8,7 +8,7 @@
 
 use omnia::ExitStatus;
 use omnia_test::host::{Backends, Deployment};
-use omnia_wasi_keyvalue::{WasiKeyValue, WasiKeyValueCtx as _};
+use omnia_wasi_keyvalue::{KeyValueClient as _, WasiKeyValue};
 
 // Every guest program in `crates/test-programs` must have a matching test
 // here; a new program without one fails to compile.
@@ -27,7 +27,7 @@ async fn run_guest(wasm: &str, backends: Backends) {
 async fn keyvalue_bucket() {
     let backends = Backends::defaults().await;
     let bucket = backends.keyvalue.open_bucket("bucket".to_owned()).await.expect("bucket");
-    bucket.set("counter".to_owned(), 37_i64.to_be_bytes().to_vec()).await.expect("seed");
+    bucket.set("counter".to_owned(), 37_i64.to_be_bytes().to_vec(), None).await.expect("seed");
 
     run_guest(test_programs::KEYVALUE_BUCKET, backends.clone()).await;
 

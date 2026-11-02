@@ -18,8 +18,8 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 use super::{
-    CHECK_TOOL, Error, Format, Function, Message, Model, Request, Role, SchemaFormat, Tool,
-    ToolCall, WorkerGrant,
+    CHECK_TOOL, Error, Format, Message, Model, Request, Role, SchemaFormat, Tool, ToolCall,
+    WorkerGrant,
 };
 
 /// What a check found wrong with a candidate, one finding per line of the
@@ -233,33 +233,6 @@ fn default_correction(previous: &str, findings: &[String]) -> String {
          complete answer that resolves every finding.",
         findings.join("\n")
     )
-}
-
-impl SchemaFormat {
-    /// `T`'s JSON Schema (draft 2020-12) under `name`.
-    #[must_use]
-    pub fn of<T: JsonSchema>(name: &str) -> Self {
-        Self {
-            name: name.to_owned(),
-            schema: schema_of::<T>(),
-        }
-    }
-}
-
-impl Function {
-    /// A function tool whose parameters are `T`'s JSON Schema.
-    #[must_use]
-    pub fn of<T: JsonSchema>(name: &str, description: &str) -> Self {
-        Self {
-            name: name.to_owned(),
-            description: description.to_owned(),
-            parameters: schema_of::<T>(),
-        }
-    }
-}
-
-fn schema_of<T: JsonSchema>() -> String {
-    schemars::schema_for!(T).to_value().to_string()
 }
 
 #[cfg(test)]

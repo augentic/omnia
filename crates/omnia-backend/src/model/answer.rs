@@ -4,7 +4,7 @@
 
 use serde_json::Value;
 
-use crate::host::generated::omnia::model::completion::{Format, Usage};
+use super::{Format, Usage};
 
 /// A backend's result: the answer text, optional usage, and transcript.
 ///
@@ -189,13 +189,12 @@ impl<'a> Iterator for Spans<'a> {
 // `candidate` and `instruction` are pure; backends drive them directly
 #[cfg(test)]
 mod tests {
-    use super::Format;
-    use crate::host::generated::omnia::model::completion::Schema;
+    use super::super::{Format, SchemaFormat};
 
     const PASS: &str = r#"{"verdict":"pass"}"#;
 
     fn verdict_schema() -> Format {
-        Format::Schema(Schema {
+        Format::Schema(SchemaFormat {
             name: "verdict".to_owned(),
             schema: r#"{"type":"object"}"#.to_owned(),
         })

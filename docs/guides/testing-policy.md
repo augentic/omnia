@@ -6,7 +6,7 @@ How the Omnia repository tests *itself*. The binding rules are also in the repos
 
 - **End-to-end tests** are the primary tier for `wasi-*` host crates: a real guest component driven through omnia's own runtime against an inline scenario backend, pinning the whole boundary (guest bindings → linker → host binding → backend and back). The exemplar is `crates/wasi-model/tests/model.rs`.
 - **Unit tests** cover deterministic logic wherever it lives: parsers, codecs, filter/type translation, route matching, macro token expansion, guest-side library code. If a behavior is a pure function no guest boundary reaches (e.g. `Format::candidate` extraction, which backends drive directly), it is a unit test next to that logic.
-- **Live tests** (in the `omnia-backends` repo) are the acceptance tier for production backends: `#[ignore]`-gated, credential-gated, driving the backend's `WasiXxxCtx` against the real service.
+- **Live tests** (in the `omnia-backends` repo) are the acceptance tier for production backends: `#[ignore]`-gated, credential-gated, driving the backend's `XxxClient` against the real service.
 
 Guest-instantiating tests exist **only** through the shared pipeline below. Do not compile, deserialize, or instantiate a WASM guest ad hoc inside an individual test, and do not build or run an example to check that something works from a guest. Examples are not a tier. They are demos a human runs by hand (`mise run example <name>`); CI compiles them under clippy, natively and for `wasm32-wasip2`, and nothing runs them, so a passing example confirms neither a behaviour nor a trait bound. That question is always answered by [adding a guest program](#adding-a-guest-program).
 
@@ -48,7 +48,7 @@ The pipeline is also how a change is *verified* when the question is "does this 
 
 ## Scenario backends
 
-The bundle a suite runs over is `omnia_test::host::Backends`: the in-memory default for every host, deterministic (no environment read, no socket opened), with each host swappable through a setter of its name (`model`, `keyvalue`, `blobstore`, `docstore`, `sql`, `vault`, `messaging`, `identity`, `otel`) for any backend implementing its `Wasi*Ctx` — the seam a production backend crate's own e2e suite runs its guests through. Most model scenarios script `ScriptedModel` — the answers, the tool calls and workspace steps each completion makes before answering, and the limits — and assert the recorded exchanges afterwards:
+The bundle a suite runs over is `omnia_test::host::Backends`: the in-memory default for every host, deterministic (no environment read, no socket opened), with each host swappable through a setter of its name (`model`, `keyvalue`, `blobstore`, `docstore`, `sql`, `vault`, `messaging`, `identity`, `otel`) for any backend implementing its `*Client` — the seam a production backend crate's own e2e suite runs its guests through. Most model scenarios script `ScriptedModel` — the answers, the tool calls and workspace steps each completion makes before answering, and the limits — and assert the recorded exchanges afterwards:
 
 ```rust,noplayground
 let model = ScriptedModel::answering(["42"]).calling(0, [("lookup", "{}")]);
@@ -57,9 +57,9 @@ model.assert_exhausted();
 assert_eq!(model.exchanges(), [Exchange { tool: "lookup".into(), arguments: "{}".into(), outcome: Ok("42".into()) }]);
 ```
 
-A behaviour a FIFO script cannot express — two tool calls in flight at once, a backend that ignores a hard failure — is a hand-written `WasiModelCtx` defined inline next to the test, with a comment saying why the script could not do it. The in-tree echo `ModelDefault` covers scenarios where the answer does not matter, or where its schema rejection is itself under test.
+A behaviour a FIFO script cannot express — two tool calls in flight at once, a backend that ignores a hard failure — is a hand-written `ModelClient` defined inline next to the test, with a comment saying why the script could not do it. The in-tree echo `ModelDefault` covers scenarios where the answer does not matter, or where its schema rejection is itself under test.
 
-The same inline pattern serves hosts whose default backend records nothing observable: `wasi-identity`, `wasi-websocket`, and `wasi-otel` each define a recording `WasiXxxCtx` next to their tests, wrapped in a local bundle providing that host plus `WasiOtel`, and assert the recorded calls after the run.
+The same inline pattern serves hosts whose default backend records nothing observable: `wasi-identity`, `wasi-websocket`, and `wasi-otel` each define a recording `XxxClient` next to their tests, wrapped in a local bundle providing that host plus `WasiOtel`, and assert the recorded calls after the run.
 
 ## Running
 

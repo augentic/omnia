@@ -292,3 +292,57 @@ pub struct Exchange {
     /// The answer; `Err` is the tool's model-visible failure text.
     pub outcome: Result<String, String>,
 }
+
+#[cfg(any(feature = "guest", feature = "host"))]
+impl From<&omnia_backend::model::Request> for Seen {
+    fn from(request: &omnia_backend::model::Request) -> Self {
+        use omnia_backend::model::{Format, Tool};
+
+        Self {
+            system: request.system.clone(),
+            messages: request.messages.iter().map(|message| message.content.clone()).collect(),
+            format: match &request.format {
+                Format::Text => SeenFormat::Text,
+                Format::Json => SeenFormat::Json,
+                Format::Schema(schema) => SeenFormat::Schema {
+                    name: schema.name.clone(),
+                    schema: schema.schema.clone(),
+                },
+            },
+            tools: request
+                .tools
+                .iter()
+                .map(|tool| match tool {
+                    Tool::Function(function) => function.name.clone(),
+                    Tool::Mcp(mcp) => mcp.name.clone(),
+                })
+                .collect(),
+            temperature: request.generation.as_ref().and_then(|generation| generation.temperature),
+            workspace: request.workspace.clone(),
+            worker: request.worker.as_ref().map(SeenWorker::from),
+            check: request.check,
+        }
+    }
+}
+
+#[cfg(any(feature = "guest", feature = "host"))]
+impl From<&omnia_backend::model::WorkerGrant> for SeenWorker {
+    fn from(grant: &omnia_backend::model::WorkerGrant) -> Self {
+        Self {
+            egress: grant.egress.clone(),
+            read: grant.read.clone(),
+            env: grant.env.clone(),
+        }
+    }
+}
+
+#[cfg(any(feature = "guest", feature = "host"))]
+impl From<omnia_backend::model::WorkerGrant> for SeenWorker {
+    fn from(grant: omnia_backend::model::WorkerGrant) -> Self {
+        Self {
+            egress: grant.egress,
+            read: grant.read,
+            env: grant.env,
+        }
+    }
+}

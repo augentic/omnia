@@ -28,6 +28,9 @@ url = "https://raw.githubusercontent.com/zcash/rust-ecosystem/main/supply-chain/
 [policy.omnia]
 audit-as-crates-io = false
 
+[policy.omnia-backend]
+audit-as-crates-io = false
+
 [policy.omnia-cli]
 audit-as-crates-io = false
 
@@ -179,10 +182,6 @@ criteria = "safe-to-deploy"
 version = "1.0.5"
 criteria = "safe-to-deploy"
 
-[[exemptions.chacha20]]
-version = "0.10.2"
-criteria = "safe-to-deploy"
-
 [[exemptions.chrono]]
 version = "0.4.45"
 criteria = "safe-to-deploy"
@@ -221,10 +220,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.cpufeatures]]
 version = "0.2.17"
-criteria = "safe-to-deploy"
-
-[[exemptions.cpufeatures]]
-version = "0.3.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.crc32fast]]
@@ -359,10 +354,6 @@ criteria = "safe-to-deploy"
 version = "2.5.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.find-msvc-tools]]
-version = "0.1.15"
-criteria = "safe-to-deploy"
-
 [[exemptions.fixedbitset]]
 version = "0.5.7"
 criteria = "safe-to-deploy"
@@ -427,10 +418,6 @@ criteria = "safe-to-deploy"
 version = "0.3.4"
 criteria = "safe-to-deploy"
 
-[[exemptions.getrandom]]
-version = "0.4.3"
-criteria = "safe-to-deploy"
-
 [[exemptions.getset]]
 version = "0.1.7"
 criteria = "safe-to-deploy"
@@ -438,6 +425,10 @@ criteria = "safe-to-deploy"
 [[exemptions.gimli]]
 version = "0.33.0"
 criteria = "safe-to-deploy"
+
+[[exemptions.glob]]
+version = "0.3.4"
+criteria = "safe-to-run"
 
 [[exemptions.hashbrown]]
 version = "0.14.2"
@@ -573,10 +564,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.log]]
 version = "0.4.34"
-criteria = "safe-to-deploy"
-
-[[exemptions.lru-slab]]
-version = "0.1.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.mach2]]
@@ -731,10 +718,6 @@ criteria = "safe-to-deploy"
 version = "0.11.19"
 criteria = "safe-to-deploy"
 
-[[exemptions.quinn-udp]]
-version = "0.5.16"
-criteria = "safe-to-deploy"
-
 [[exemptions.r-efi]]
 version = "5.3.0"
 criteria = "safe-to-deploy"
@@ -749,18 +732,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.rand]]
 version = "0.9.5"
-criteria = "safe-to-deploy"
-
-[[exemptions.rand]]
-version = "0.10.3"
-criteria = "safe-to-deploy"
-
-[[exemptions.rand_core]]
-version = "0.10.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.rand_pcg]]
-version = "0.10.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.rand_xorshift]]
@@ -915,10 +886,6 @@ criteria = "safe-to-deploy"
 version = "1.2.1"
 criteria = "safe-to-deploy"
 
-[[exemptions.sync_wrapper]]
-version = "1.0.2"
-criteria = "safe-to-deploy"
-
 [[exemptions.synstructure]]
 version = "0.14.0"
 criteria = "safe-to-deploy"
@@ -934,6 +901,10 @@ criteria = "safe-to-deploy"
 [[exemptions.tagptr]]
 version = "0.2.0"
 criteria = "safe-to-deploy"
+
+[[exemptions.target-tuple]]
+version = "1.0.2"
+criteria = "safe-to-run"
 
 [[exemptions.tempfile]]
 version = "3.3.0"
@@ -953,10 +924,6 @@ criteria = "safe-to-run"
 
 [[exemptions.tinystr]]
 version = "0.8.4"
-criteria = "safe-to-deploy"
-
-[[exemptions.tinyvec]]
-version = "1.13.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.tls_codec]]
@@ -999,10 +966,6 @@ criteria = "safe-to-deploy"
 version = "0.14.6"
 criteria = "safe-to-deploy"
 
-[[exemptions.tower-layer]]
-version = "0.3.3"
-criteria = "safe-to-deploy"
-
 [[exemptions.tower-service]]
 version = "0.3.3"
 criteria = "safe-to-deploy"
@@ -1023,6 +986,10 @@ criteria = "safe-to-deploy"
 version = "0.3.23"
 criteria = "safe-to-deploy"
 
+[[exemptions.trybuild]]
+version = "1.0.122"
+criteria = "safe-to-run"
+
 [[exemptions.tungstenite]]
 version = "0.30.0"
 criteria = "safe-to-deploy"
@@ -1033,10 +1000,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.unicase]]
 version = "2.10.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.untrusted]]
-version = "0.9.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.uuid]]
@@ -1051,10 +1014,6 @@ criteria = "safe-to-deploy"
 version = "2.5.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.want]]
-version = "0.3.2"
-criteria = "safe-to-deploy"
-
 [[exemptions.wasm-bindgen]]
 version = "0.2.129"
 criteria = "safe-to-deploy"
@@ -1063,15 +1022,7 @@ criteria = "safe-to-deploy"
 version = "0.4.79"
 criteria = "safe-to-deploy"
 
-[[exemptions.wasm-bindgen-macro]]
-version = "0.2.129"
-criteria = "safe-to-deploy"
-
 [[exemptions.wasm-bindgen-macro-support]]
-version = "0.2.129"
-criteria = "safe-to-deploy"
-
-[[exemptions.wasm-bindgen-shared]]
 version = "0.2.129"
 criteria = "safe-to-deploy"
 
@@ -1089,10 +1040,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.web-sys]]
 version = "0.3.106"
-criteria = "safe-to-deploy"
-
-[[exemptions.web-time]]
-version = "1.1.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.webpki-root-certs]]
@@ -1141,10 +1088,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.zerofrom-derive]]
 version = "0.1.8"
-criteria = "safe-to-deploy"
-
-[[exemptions.zeroize]]
-version = "1.9.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.zeroize_derive]]

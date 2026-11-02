@@ -5,12 +5,10 @@ use std::future::{Future, ready};
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::{Arc, Mutex};
 
-use omnia_sdk::model::{
-    CHECK_TOOL, Error, Format, Function, Model, Reply, Request, Tool, ToolCall, WorkerGrant,
-};
+use omnia_sdk::model::{CHECK_TOOL, Error, Function, Model, Reply, Request, Tool, ToolCall};
 use omnia_sdk::plugins::{self, Digest, Location, Plugin, Plugins};
 
-use crate::{Exchange, Script, Seen, SeenFormat, SeenWorker};
+use crate::{Exchange, Script, Seen};
 
 /// One scripted completion turn: the tool calls fed to the handler, then
 /// the turn's result.
@@ -37,7 +35,7 @@ impl Turn {
 /// Each turn is a success or a typed failure and may carry scripted tool
 /// calls: `complete_with` feeds them to the handler and records each
 /// exchange before the turn's result returns. A call past the script panics;
-/// [`Scripted::then`] opts into a fallback instead.
+/// [`ScriptedModel::then`] opts into a fallback instead.
 ///
 /// A request with `check` set plays the backend's loop: each scripted turn
 /// is one candidate, offered to the handler as the reserved `check` call and
@@ -47,10 +45,10 @@ impl Turn {
 ///
 /// ```
 /// use omnia_sdk::model::{Message, Model as _, Request, Role};
-/// use omnia_test::guest::Scripted;
+/// use omnia_test::guest::ScriptedModel;
 ///
 /// # tokio::runtime::Runtime::new().unwrap().block_on(async {
-/// let model = Scripted::answering(["four"]);
+/// let model = ScriptedModel::answering(["four"]);
 /// let request = Request::builder()
 ///     .messages(vec![Message {
 ///         role: Role::User,
@@ -63,18 +61,22 @@ impl Turn {
 /// # });
 /// ```
 #[derive(Clone, Debug)]
-pub struct Scripted {
+pub struct ScriptedModel {
     script: Script<Request, Turn>,
     exchanges: Arc<Mutex<Vec<Exchange>>>,
 }
 
-impl Default for Scripted {
+/// Deprecated alias for [`ScriptedModel`].
+#[deprecated(note = "use `ScriptedModel`")]
+pub type Scripted = ScriptedModel;
+
+impl Default for ScriptedModel {
     fn default() -> Self {
         Self::new([])
     }
 }
 
-impl Scripted {
+impl ScriptedModel {
     /// A script of ordered completion results.
     pub fn new(results: impl IntoIterator<Item = Result<Reply, Error>>) -> Self {
         Self {
@@ -157,7 +159,7 @@ impl Scripted {
 }
 
 // panics when the script is exhausted without a fallback
-impl Model for Scripted {
+impl Model for ScriptedModel {
     fn complete(&self, request: Request) -> impl Future<Output = Result<Reply, Error>> + Send {
         // a single-shot completion has no handler, so tool calls or a check are a harness bug
         assert!(!request.check, "a check requires complete_with");
@@ -213,55 +215,6 @@ impl Model for Scripted {
                     Err(_) => {}
                 }
             }
-        }
-    }
-}
-
-impl From<&Request> for Seen {
-    fn from(request: &Request) -> Self {
-        Self {
-            system: request.system.clone(),
-            messages: request.messages.iter().map(|message| message.content.clone()).collect(),
-            format: match &request.format {
-                Format::Text => SeenFormat::Text,
-                Format::Json => SeenFormat::Json,
-                Format::Schema(schema) => SeenFormat::Schema {
-                    name: schema.name.clone(),
-                    schema: schema.schema.clone(),
-                },
-            },
-            tools: request
-                .tools
-                .iter()
-                .map(|tool| match tool {
-                    Tool::Function(function) => function.name.clone(),
-                    Tool::Mcp(mcp) => mcp.name.clone(),
-                })
-                .collect(),
-            temperature: request.generation.as_ref().and_then(|generation| generation.temperature),
-            workspace: request.workspace.clone(),
-            worker: request.worker.as_ref().map(SeenWorker::from),
-            check: request.check,
-        }
-    }
-}
-
-impl From<&WorkerGrant> for SeenWorker {
-    fn from(grant: &WorkerGrant) -> Self {
-        Self {
-            egress: grant.egress.clone(),
-            read: grant.read.clone(),
-            env: grant.env.clone(),
-        }
-    }
-}
-
-impl From<WorkerGrant> for SeenWorker {
-    fn from(grant: WorkerGrant) -> Self {
-        Self {
-            egress: grant.egress,
-            read: grant.read,
-            env: grant.env,
         }
     }
 }

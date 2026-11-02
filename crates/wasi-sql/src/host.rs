@@ -2,8 +2,6 @@
 //!
 //! This module implements the host-side logic for the WASI SQL service.
 
-#[cfg(feature = "sqlite")]
-mod default_impl;
 mod readwrite_impl;
 mod resource;
 mod types_impl;
@@ -31,16 +29,15 @@ mod generated {
 }
 
 use std::fmt::Debug;
-use std::sync::Arc;
 
+#[cfg(feature = "sqlite")]
+pub use omnia_backend::sql::{ConnectOptions, SqlDefault};
+pub use omnia_backend::sql::{Connection, DataType, Field, Row, SqlClient};
 pub use omnia_core::FutureResult;
 use omnia_core::{Host, Server, StoreView};
 use wasmtime::component::{HasData, Linker};
 
 use self::generated::wasi::sql::{readwrite, types};
-#[cfg(feature = "sqlite")]
-pub use crate::host::default_impl::{ConnectOptions, SqlDefault};
-pub use crate::host::generated::wasi::sql::types::{DataType, Field, Row};
 pub use crate::host::resource::*;
 
 /// Host error backing the `wasi:sql` error resource.
@@ -66,7 +63,7 @@ omnia_core::host_error!(Error, Other);
 pub struct WasiSql;
 
 impl HasData for WasiSql {
-    type Data<'a> = WasiSqlCtxView<'a>;
+    type Data<'a> = WasiSqlView<'a>;
 }
 
 impl<T> Host<T> for WasiSql
@@ -80,14 +77,5 @@ where
 }
 
 impl<B> Server<B> for WasiSql {}
-
-/// A trait which provides internal WASI SQL context.
-///
-/// This is implemented by the resource-specific provider of SQL
-/// functionality. For example, `PostgreSQL`, `MySQL`, `SQLite`, etc.
-pub trait WasiSqlCtx: Debug + Send + Sync + 'static {
-    /// Open a connection to the database.
-    fn open(&self, name: String) -> FutureResult<Arc<dyn Connection>>;
-}
 
 omnia_core::wasi_view!(Sql);

@@ -54,7 +54,8 @@ The [`examples/`](examples/README.md) directory contains a complete working gues
 | Crate                                           | Description                                                                                |
 | ----------------------------------------------- | ------------------------------------------------------------------------------------------ |
 | [`omnia`](crates/omnia)                         | Composition root — assembly, lifecycle, optional-crate composition, and `runtime!` |
-| [`omnia-core`](crates/omnia-core)               | Live-runtime SDK — wasmtime engine, registry, dispatch, stores, and the tracing subscriber |
+| [`omnia-backend`](crates/omnia-backend)         | Engine-free service contracts (`*Client`), resource traits, value types, default implementations (`*Default`), `Connect`, `MountRegistry`, and `Telemetry` |
+| [`omnia-core`](crates/omnia-core)               | Live-runtime SDK — wasmtime engine, registry, dispatch, stores, and the capability-crate seam |
 | [`omnia-plugin`](crates/omnia-plugin)           | `omnia:plugins/loader` capability — loader host, the deployment's grant (declared guest names, read-only mount roots, registry routing), registry acquisition, and plugin stores; selected by omnia's `loader` feature |
 | [`omnia-cli`](crates/omnia-cli)                 | Leaf `run` grammar — clap plus argv-precedence; selected by omnia's `cli` feature |
 | [`omnia-compile`](crates/omnia-compile)         | Leaf ahead-of-time compiler — `CompileOptions` and `compile`, over wasmtime alone; its Cranelift backend is what omnia's `jit` feature turns on |

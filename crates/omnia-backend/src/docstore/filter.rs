@@ -1,28 +1,16 @@
-//! Pure JSON evaluation of [`FilterTree`](crate::host::resource::FilterTree)
-//! for the default in-memory backend.
-//!
-//! Semantics follow the backend-portable filter contract:
-//! - Field paths are dotted (`"a.b"` descends into nested objects); a missing
-//!   field reads as JSON `null`, so `is-null` matches absent fields and
-//!   `ne` matches documents lacking the field.
-//! - Ordering comparisons (`gt`/`gte`/`lt`/`lte`) only match when the stored
-//!   value and the target are of comparable types (numbers with numbers,
-//!   strings with strings); `eq`/`ne` treat incomparable types as unequal.
-//! - `binary` scalars never match JSON-derived values (JSON has no binary
-//!   type), mirroring the previous default backend.
+//! Pure JSON evaluation of [`Filter`](super::Filter) for the default in-memory backend.
 
 use std::cmp::Ordering;
 
 use serde_json::Value;
 
-use crate::host::generated::wasi::docstore::types::{ComparisonOp, ScalarValue, SortField};
-use crate::host::resource::FilterTree;
+use super::{ComparisonOp, Filter, ScalarValue, SortField};
 
 /// Evaluate `tree` against a JSON document body.
 #[must_use]
-pub fn matches(tree: &FilterTree, doc: &Value) -> bool {
+pub fn matches(tree: &Filter, doc: &Value) -> bool {
     match tree {
-        FilterTree::Compare { field, op, value } => {
+        Filter::Compare { field, op, value } => {
             let stored = lookup(doc, field);
             match op {
                 ComparisonOp::Eq => scalar_cmp(stored, value) == Some(Ordering::Equal),
@@ -37,28 +25,28 @@ pub fn matches(tree: &FilterTree, doc: &Value) -> bool {
                 }
             }
         }
-        FilterTree::InList { field, values } => {
+        Filter::InList { field, values } => {
             let stored = lookup(doc, field);
             values.iter().any(|v| scalar_cmp(stored, v) == Some(Ordering::Equal))
         }
-        FilterTree::NotInList { field, values } => {
+        Filter::NotInList { field, values } => {
             let stored = lookup(doc, field);
             values.iter().all(|v| scalar_cmp(stored, v) != Some(Ordering::Equal))
         }
-        FilterTree::IsNull(field) => lookup(doc, field).is_null(),
-        FilterTree::IsNotNull(field) => !lookup(doc, field).is_null(),
-        FilterTree::Contains { field, pattern } => {
+        Filter::IsNull(field) => lookup(doc, field).is_null(),
+        Filter::IsNotNull(field) => !lookup(doc, field).is_null(),
+        Filter::Contains { field, pattern } => {
             lookup(doc, field).as_str().is_some_and(|s| s.contains(pattern))
         }
-        FilterTree::StartsWith { field, pattern } => {
+        Filter::StartsWith { field, pattern } => {
             lookup(doc, field).as_str().is_some_and(|s| s.starts_with(pattern))
         }
-        FilterTree::EndsWith { field, pattern } => {
+        Filter::EndsWith { field, pattern } => {
             lookup(doc, field).as_str().is_some_and(|s| s.ends_with(pattern))
         }
-        FilterTree::And(children) => children.iter().all(|c| matches(c, doc)),
-        FilterTree::Or(children) => children.iter().any(|c| matches(c, doc)),
-        FilterTree::Not(inner) => !matches(inner, doc),
+        Filter::And(children) => children.iter().all(|c| matches(c, doc)),
+        Filter::Or(children) => children.iter().any(|c| matches(c, doc)),
+        Filter::Not(inner) => !matches(inner, doc),
     }
 }
 
@@ -97,7 +85,7 @@ fn lookup<'a>(doc: &'a Value, path: &str) -> &'a Value {
 fn scalar_cmp(stored: &Value, target: &ScalarValue) -> Option<Ordering> {
     match (stored, target) {
         (Value::Null, ScalarValue::Null) => Some(Ordering::Equal),
-        (Value::Bool(a), ScalarValue::Boolean(b)) => Some(a.cmp(b)),
+        (Value::Bool(a), ScalarValue::Bool(b)) => Some(a.cmp(b)),
         (Value::Number(n), _) => {
             let target = match target {
                 ScalarValue::Int32(i) => f64::from(*i),
@@ -146,8 +134,8 @@ mod tests {
 
     use super::*;
 
-    fn compare(field: &str, op: ComparisonOp, value: ScalarValue) -> FilterTree {
-        FilterTree::Compare {
+    fn compare(field: &str, op: ComparisonOp, value: ScalarValue) -> Filter {
+        Filter::Compare {
             field: field.to_string(),
             op,
             value,
@@ -162,9 +150,9 @@ mod tests {
             json!({"wb": 0, "zone_id": "z3"}),
             json!({"wb": 1, "zone_id": null}),
         ];
-        let filter = FilterTree::And(vec![
+        let filter = Filter::And(vec![
             compare("wb", ComparisonOp::Eq, ScalarValue::Int32(1)),
-            FilterTree::IsNotNull("zone_id".to_string()),
+            Filter::IsNotNull("zone_id".to_string()),
         ]);
         let matched = docs.iter().filter(|d| matches(&filter, d)).count();
         assert_eq!(matched, 2, "wb=1 AND zone_id IS NOT NULL");
@@ -189,18 +177,18 @@ mod tests {
     #[test]
     fn starts_with_and_ends_with() {
         let doc = json!({"name": "Northern Line"});
-        let starts = FilterTree::StartsWith {
+        let starts = Filter::StartsWith {
             field: "name".to_string(),
             pattern: "Northern".to_string(),
         };
-        let ends = FilterTree::EndsWith {
+        let ends = Filter::EndsWith {
             field: "name".to_string(),
             pattern: "Line".to_string(),
         };
         assert!(matches(&starts, &doc));
         assert!(matches(&ends, &doc));
         assert!(!matches(
-            &FilterTree::StartsWith {
+            &Filter::StartsWith {
                 field: "name".to_string(),
                 pattern: "Line".to_string(),
             },
@@ -210,7 +198,7 @@ mod tests {
 
     #[test]
     fn not_in_list() {
-        let filter = FilterTree::NotInList {
+        let filter = Filter::NotInList {
             field: "route_type".to_string(),
             values: vec![ScalarValue::Int32(1), ScalarValue::Int32(2)],
         };
@@ -221,7 +209,7 @@ mod tests {
 
     #[test]
     fn contains_substring() {
-        let filter = FilterTree::Contains {
+        let filter = Filter::Contains {
             field: "name".to_string(),
             pattern: "Station".to_string(),
         };
@@ -233,7 +221,7 @@ mod tests {
 
     #[test]
     fn in_list_membership() {
-        let filter = FilterTree::InList {
+        let filter = Filter::InList {
             field: "route_type".to_string(),
             values: vec![ScalarValue::Int32(2), ScalarValue::Int32(3)],
         };
@@ -244,7 +232,7 @@ mod tests {
 
     #[test]
     fn is_null() {
-        let filter = FilterTree::IsNull("parent".to_string());
+        let filter = Filter::IsNull("parent".to_string());
         assert!(matches(&filter, &json!({"parent": null})));
         assert!(matches(&filter, &json!({})), "absent field reads as null");
         assert!(!matches(&filter, &json!({"parent": "stop-1"})));
@@ -252,12 +240,12 @@ mod tests {
 
     #[test]
     fn or_across_fields() {
-        let filter = FilterTree::Or(vec![
-            FilterTree::Contains {
+        let filter = Filter::Or(vec![
+            Filter::Contains {
                 field: "short_name".to_string(),
                 pattern: "NEX".to_string(),
             },
-            FilterTree::Contains {
+            Filter::Contains {
                 field: "long_name".to_string(),
                 pattern: "Northern".to_string(),
             },
@@ -270,7 +258,7 @@ mod tests {
     #[test]
     fn not_of_and_conjunction() {
         // de morgan: everything but a document satisfying both conjuncts
-        let filter = FilterTree::Not(Box::new(FilterTree::And(vec![
+        let filter = Filter::Not(Box::new(Filter::And(vec![
             compare("agency", ComparisonOp::Eq, ScalarValue::Str("AT".into())),
             compare("route_type", ComparisonOp::Eq, ScalarValue::Int32(3)),
         ])));

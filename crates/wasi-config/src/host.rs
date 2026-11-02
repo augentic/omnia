@@ -2,34 +2,41 @@
 //!
 //! This module implements a host-side service for `wasi:config`.
 
-mod default_impl;
+mod generated {
+    #![allow(missing_docs, reason = "wasmtime bindgen output")]
+
+    pub use self::wasi::config::store::Error;
+
+    wasmtime::component::bindgen!({
+        world: "imports",
+        path: "wit",
+        imports: {
+            default: async | tracing | trappable,
+        },
+        trappable_error_type: {
+            "wasi:config/store.error" => Error,
+        },
+    });
+}
 
 use std::fmt::Debug;
 
-pub use default_impl::ConfigDefault;
-use omnia_core::{Host, HostCtx, Server, StoreView};
-use wasmtime::component::{HasData, Linker, ResourceTable};
-pub use wasmtime_wasi_config;
-use wasmtime_wasi_config::WasiConfigVariables;
+pub use omnia_backend::config::{ConfigClient, ConfigDefault};
+pub use omnia_core::FutureResult;
+use omnia_core::{Host, Server, StoreView};
+use wasmtime::component::{HasData, Linker};
+
+use self::generated::wasi::config::store::{self, Error, Host as StoreHost};
+
+/// Result type for config operations.
+pub type Result<T> = std::result::Result<T, Error>;
 
 /// Host-side service for `wasi:config`.
 #[derive(Debug)]
 pub struct WasiConfig;
 
 impl HasData for WasiConfig {
-    type Data<'a> = wasmtime_wasi_config::WasiConfig<'a>;
-}
-
-// hand-written rather than `wasi_view!`-generated: the view is a shared
-// borrow over the backend's variables, with no resource table involved
-impl HostCtx for WasiConfig {
-    type Borrow<'a> = &'a dyn WasiConfigCtx;
-
-    fn view<'a>(
-        borrow: Self::Borrow<'a>, _table: &'a mut ResourceTable,
-    ) -> wasmtime_wasi_config::WasiConfig<'a> {
-        wasmtime_wasi_config::WasiConfig::from(borrow.get_config())
-    }
+    type Data<'a> = WasiConfigView<'a>;
 }
 
 impl<T> Host<T> for WasiConfig
@@ -37,14 +44,25 @@ where
     T: StoreView<Self> + 'static,
 {
     fn add_to_linker(linker: &mut Linker<T>) -> anyhow::Result<()> {
-        Ok(wasmtime_wasi_config::add_to_linker(linker, T::view)?)
+        Ok(store::add_to_linker::<_, Self>(linker, T::view)?)
     }
 }
 
 impl<B> Server<B> for WasiConfig {}
 
-/// A trait which provides internal WASI Config context.
-pub trait WasiConfigCtx: Debug + Send + Sync + 'static {
-    /// Get the configuration variables.
-    fn get_config(&self) -> &WasiConfigVariables;
+impl StoreHost for WasiConfigView<'_> {
+    async fn get(&mut self, key: String) -> Result<Option<String>> {
+        Ok(self.client.get(key).await?)
+    }
+
+    async fn get_all(&mut self) -> Result<Vec<(String, String)>> {
+        Ok(self.client.get_all().await?)
+    }
+
+    fn convert_error(&mut self, err: Error) -> wasmtime::Result<Error> {
+        Ok(err)
+    }
 }
+
+omnia_core::host_error!(Error, Upstream);
+omnia_core::wasi_view!(Config);

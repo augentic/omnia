@@ -9,8 +9,8 @@ use anyhow::{Context as _, Result, bail};
 use futures::FutureExt as _;
 use wasmtime::component::{Val, types};
 
+use crate::FutureResult;
 use crate::chain::{ChainCtx, ChainPolicy};
-use crate::host::FutureResult;
 use crate::invoke::{FreshCall, call_fresh};
 use crate::registry::{Guest, GuestId};
 use crate::runtime::Runtime;

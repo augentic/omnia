@@ -9,13 +9,13 @@ cfg_select! {
     not(target_arch = "wasm32") => {
         use std::sync::Arc;
 
-        use omnia_wasi_model::{Answer, FutureResult, Request, ToolHost, WasiModel, WasiModelCtx};
+        use omnia_wasi_model::{Answer, FutureResult, ModelClient, Request, ToolHost, WasiModel};
         use omnia_wasi_otel::{OtelDefault, WasiOtel};
 
         #[derive(Clone, Copy, Debug)]
         struct CannedVerdict;
 
-        impl omnia::Backend for CannedVerdict {
+        impl omnia::Connect for CannedVerdict {
             type ConnectOptions = omnia::NoOptions;
 
             fn connect_with(
@@ -25,7 +25,7 @@ cfg_select! {
             }
         }
 
-        impl WasiModelCtx for CannedVerdict {
+        impl ModelClient for CannedVerdict {
             fn complete(
                 &self, _request: Request, _tool_host: Arc<dyn ToolHost>,
             ) -> FutureResult<Answer> {

@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use omnia_sdk::TableStore;
-use omnia_wasi_sql::{DataType, Row};
+use omnia_sdk::sql::{DataType, Row};
 
 /// A statement predicate over the SQL text and its bound parameters.
 pub type Predicate = Arc<dyn Fn(&str, &[DataType]) -> bool + Send + Sync>;
@@ -44,7 +44,7 @@ struct Inner {
 /// # tokio::runtime::Runtime::new().unwrap().block_on(async {
 /// let tables = ScriptedTables::default()
 ///     .on_exec(|sql, params| sql.starts_with("INSERT") && params.len() == 1, 1);
-/// let params = vec![omnia_wasi_sql::DataType::Str(Some("ann".into()))];
+/// let params = vec![omnia_sdk::sql::DataType::Str(Some("ann".into()))];
 /// assert_eq!(
 ///     tables.exec("db".into(), "INSERT INTO t VALUES (?)".into(), params).await.unwrap(),
 ///     1

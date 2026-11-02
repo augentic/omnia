@@ -85,7 +85,7 @@ Layers 1 and 2 form the **runtime core** — domain-agnostic infrastructure that
 `omnia-core` is the live-runtime SDK a capability crate targets. Depend on it directly only when building another capability crate. It provides:
 
 - **Runtime handle**: `Runtime<B>` over `StoreCtx<B>`, assembled from `RuntimeParts`; `Registry` holds pre-instantiated guests beside the declared sources not yet loaded, and `Runtime::guest` is the one seam every use resolves through — a declared guest loads there on its first use
-- **Core traits**: `Host`, `Server`, `Backend`
+- **Core traits**: `Host`, `Server`, `Connect` (re-exported from `omnia-backend`)
 - **Link seam**: the `LinkSeam` trait and `NoLinks` no-op the registry drives; guest→guest linking itself lives in `omnia-link` (`InProcessLinks`)
 - **Host→guest dispatch**: `Dispatcher`, a named-target call through `call_fresh` (the same primitive guest→guest links use)
 - **Telemetry**: `Telemetry`, the host's `tracing` subscriber — console logging with the OTLP span and metric exporters beneath it — and `telemetry::{flush, resource}` over the providers it publishes
@@ -108,7 +108,7 @@ pub trait Server<B>: Debug + Sync + Send {
 }
 
 /// Implemented by backends for connection management.
-pub trait Backend: Sized + Sync + Send {
+pub trait Connect: Sized + Sync + Send {
     type ConnectOptions: FromEnv;
     fn connect() -> impl Future<Output = Result<Self>>;   // from environment
     fn connect_with(options: Self::ConnectOptions) -> impl Future<Output = Result<Self>>;
@@ -124,9 +124,9 @@ Each interface crate provides guest bindings, a host implementation, and, with o
 | `wasi-http`      | `wasi:http`      | HTTP client/server (trigger)     | `HttpDefault` — hyper client, axum server |
 | `wasi-keyvalue`  | `wasi:keyvalue`  | Key-value storage                | `KeyValueDefault` — in-memory cache       |
 | `wasi-messaging` | `wasi:messaging` | Pub/sub messaging (trigger)      | `MessagingDefault` — in-process broadcast |
-| `wasi-blobstore` | `wasi:blobstore` | Object/blob storage              | `BlobstoreDefault` — in-memory            |
+| `wasi-blobstore` | `wasi:blobstore` | Object/blob storage              | `BlobStoreDefault` — in-memory            |
 | `wasi-sql`       | `wasi:sql`       | Parameterized SQL access         | `SqlDefault` — SQLite                     |
-| `wasi-docstore`  | Custom           | JSON document store with filters | `DocStoreDefault` — in-memory             |
+| `wasi-docstore`  | `omnia:docstore` | JSON document store with filters | `DocStoreDefault` — in-memory             |
 | `wasi-config`    | `wasi:config`    | Runtime configuration            | `ConfigDefault` — process environment     |
 | `wasi-vault`     | Custom           | Secrets management               | `VaultDefault` — in-memory                |
 | `wasi-identity`  | Custom           | Identity/OAuth tokens            | `IdentityDefault` — OAuth2 client flow    |
@@ -224,17 +224,18 @@ The consolidated list is in [Configuration](reference/configuration.md); individ
 omnia/
 ├── crates/
 │   ├── omnia/              # Composition root (assembly, lifecycle, optional crates, runtime!)
-│   ├── omnia-core/         # Live-runtime SDK (engine, registry, dispatch, stores, subscriber)
+│   ├── omnia-backend/      # Engine-free service contracts (*Client), resource traits, value types, *Default, Connect, MountRegistry, Telemetry
+│   ├── omnia-core/         # Live-runtime SDK (engine, registry, dispatch, stores)
 │   ├── omnia-link/         # Guest-to-guest dispatch (InProcessLinks; re-exported by omnia behind `link`)
 │   ├── omnia-sdk/          # Guest SDK (Handler/Client/Context, HTTP/messaging/command adapters, errors, capabilities, MCP)
-│   ├── guest-macros/       # #[instrument] proc macro
+│   ├── guest-macros/       # #[instrument] and #[derive(Provider)] proc macros
 │   ├── host-macros/        # runtime! proc-macro
 │   ├── omnia-plugin/       # Plugins capability (loader host + acquisition; re-exported by omnia)
 │   ├── omnia-cli/          # Leaf `run` grammar (selected by omnia's `cli` feature)
 │   └── wasi-*/             # WASI interface implementations
 │       ├── src/
 │       │   ├── guest.rs    # Guest bindings (wasm32)
-│       │   └── host/       # Host implementation + default backend (native)
+│       │   └── host/       # Host implementation (native)
 │       └── wit/            # WIT interface definitions
 ├── examples/               # One guest + runtime pair per capability
 │   └── <example>/
@@ -243,13 +244,13 @@ omnia/
 └── docs/                   # This documentation
 ```
 
-Production backends live in the sibling [`omnia-backends`](https://github.com/augentic/omnia-backends) repository, one crate per service, each implementing `Backend` plus the relevant `WasiXxxCtx` traits.
+Production backends live in the sibling [`omnia-backends`](https://github.com/augentic/omnia-backends) repository, one crate per service, each implementing `Connect` plus the relevant `XxxClient` traits from `omnia-backend`.
 
 ## Extending Omnia
 
-**Adding a WASI interface**: create `crates/wasi-<name>/` with the standard layout, define the WIT world in `wit/`, implement guest bindings in `src/guest.rs` and the host (including a zero-config default backend) in `src/host/`, and create an example. Unit-test deterministic logic (including the default backend against its `WasiXxxCtx`); do not add tests that compile or instantiate a WASM guest (see the [testing policy](guides/testing-policy.md)).
+**Adding a WASI interface**: create `crates/wasi-<name>/` with the standard layout, define the WIT world in `wit/`, add the `<Name>Client` trait and default in `omnia-backend`, implement guest bindings in `src/guest.rs` and the host in `src/host/`, and create an example. Unit-test deterministic logic (including the default backend against its `XxxClient`); do not add tests that compile or instantiate a WASM guest (see the [testing policy](guides/testing-policy.md)).
 
-**Adding a backend**: create a crate (usually in the `omnia-backends` repo), implement `Backend` with a `FromEnv`-derived `ConnectOptions`, implement the `WasiXxxCtx` trait(s) for the interfaces it serves, and add `#[ignore]`-gated live tests. No runtime-core changes are required — backends plug in through the `runtime!` host map.
+**Adding a backend**: create a crate (usually in the `omnia-backends` repo), implement `Connect` with a `FromEnv`-derived `ConnectOptions`, implement the `XxxClient` trait(s) for the interfaces it serves, and add `#[ignore]`-gated live tests. No runtime-core changes are required — backends plug in through the `runtime!` host map.
 
 ## Related Documentation
 

@@ -3,7 +3,7 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use omnia_sdk::model::{Error, Question, ToolCall, Tools};
-use omnia_test::guest::Scripted;
+use omnia_test::guest::ScriptedModel;
 use schemars::JsonSchema;
 use serde::Deserialize;
 
@@ -31,7 +31,7 @@ fn strict(verdict: &Verdict) -> Result<(), Vec<String>> {
 
 #[tokio::test]
 async fn accepted() {
-    let model = Scripted::answering([r#"{"verdict":"pass","findings":[]}"#]);
+    let model = ScriptedModel::answering([r#"{"verdict":"pass","findings":[]}"#]);
     let verdict = question().ask(&model, "judge this", None, strict).await.expect("a verdict");
     assert_eq!(verdict.verdict, "pass");
 
@@ -44,7 +44,7 @@ async fn accepted() {
 
 #[tokio::test]
 async fn corrected() {
-    let model = Scripted::answering([
+    let model = ScriptedModel::answering([
         r#"{"verdict":"fail","findings":["x"]}"#,
         r#"{"verdict":"pass","findings":[]}"#,
     ]);
@@ -62,7 +62,7 @@ async fn corrected() {
 
 #[tokio::test]
 async fn own_correction_template() {
-    let model = Scripted::answering([
+    let model = ScriptedModel::answering([
         r#"{"verdict":"fail","findings":[]}"#,
         r#"{"verdict":"pass","findings":[]}"#,
     ]);
@@ -76,7 +76,7 @@ async fn own_correction_template() {
 
 #[tokio::test]
 async fn exhausted() {
-    let model = Scripted::answering([r#"{"verdict":"fail","findings":[]}"#]);
+    let model = ScriptedModel::answering([r#"{"verdict":"fail","findings":[]}"#]);
     let error = question().ask(&model, "judge this", None, strict).await.expect_err("rejected");
     let Error::BudgetExhausted(correction) = error else {
         panic!("expected budget-exhausted, got {error:?}");
@@ -87,7 +87,7 @@ async fn exhausted() {
 #[tokio::test]
 async fn mismatch() {
     // The candidate is valid JSON of the wrong shape: schema and `T` disagree.
-    let model = Scripted::answering([r#"{"other":1}"#]);
+    let model = ScriptedModel::answering([r#"{"other":1}"#]);
     let error = question().ask(&model, "judge this", None, strict).await.expect_err("mismatch");
     let Error::InvalidRequest(detail) = error else {
         panic!("expected invalid-request, got {error:?}");
@@ -98,7 +98,7 @@ async fn mismatch() {
 
 #[tokio::test]
 async fn mismatch_then_accepted() {
-    let model = Scripted::answering([r#"{"other":1}"#, r#"{"verdict":"pass","findings":[]}"#]);
+    let model = ScriptedModel::answering([r#"{"other":1}"#, r#"{"verdict":"pass","findings":[]}"#]);
     let verdict = question().ask(&model, "judge this", None, strict).await.expect("a verdict");
     assert_eq!(verdict.verdict, "pass");
 }
@@ -106,7 +106,7 @@ async fn mismatch_then_accepted() {
 #[tokio::test]
 async fn unchecked_backend() {
     // A backend that ignores `check` returns a reply nothing accepted.
-    let model = Unchecked(Scripted::answering([r#"{"verdict":"pass","findings":[]}"#]));
+    let model = Unchecked(ScriptedModel::answering([r#"{"verdict":"pass","findings":[]}"#]));
     let error =
         question().ask(&model, "judge this", None, strict).await.expect_err("no accepted answer");
     let Error::Backend(detail) = error else {
@@ -129,7 +129,7 @@ async fn heedless_backend() {
 
 #[tokio::test]
 async fn other_tools() {
-    let model = Scripted::answering([r#"{"verdict":"pass","findings":[]}"#]).calling(
+    let model = ScriptedModel::answering([r#"{"verdict":"pass","findings":[]}"#]).calling(
         0,
         [ToolCall {
             id: "call-1".into(),
@@ -149,7 +149,7 @@ async fn other_tools() {
 
 #[tokio::test]
 async fn refuse_tool_call() {
-    let model = Scripted::answering([r#"{"verdict":"pass","findings":[]}"#]).calling(
+    let model = ScriptedModel::answering([r#"{"verdict":"pass","findings":[]}"#]).calling(
         0,
         [ToolCall {
             id: "call-1".into(),
@@ -163,7 +163,7 @@ async fn refuse_tool_call() {
 }
 
 // strips `check` before delegating: a backend ignoring the flag
-struct Unchecked(Scripted);
+struct Unchecked(ScriptedModel);
 
 impl omnia_sdk::Model for Unchecked {
     fn complete(

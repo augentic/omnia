@@ -3,10 +3,7 @@
 //! This module implements the host-side logic for the WASI Identity service.
 
 mod credentials_impl;
-#[cfg(feature = "oauth")]
-mod default_impl;
 mod resource;
-mod stub_impl;
 mod types_impl;
 
 mod generated {
@@ -29,17 +26,16 @@ mod generated {
 }
 
 use std::fmt::Debug;
-use std::sync::Arc;
 
+pub use omnia_backend::identity::{AccessToken, Identity, IdentityClient, IdentityStub};
+#[cfg(feature = "oauth")]
+pub use omnia_backend::identity::{ConnectOptions, IdentityDefault};
 pub use omnia_core::FutureResult;
 use omnia_core::{Host, Server, StoreView};
 use wasmtime::component::{HasData, Linker};
 
-#[cfg(feature = "oauth")]
-pub use self::default_impl::IdentityDefault;
 use self::generated::omnia::identity::credentials;
 pub use self::resource::*;
-pub use self::stub_impl::IdentityStub;
 use crate::host::generated::Error;
 
 /// Result type for identity operations.
@@ -50,7 +46,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub struct WasiIdentity;
 
 impl HasData for WasiIdentity {
-    type Data<'a> = WasiIdentityCtxView<'a>;
+    type Data<'a> = WasiIdentityView<'a>;
 }
 
 impl<T> Host<T> for WasiIdentity
@@ -63,15 +59,6 @@ where
 }
 
 impl<B> Server<B> for WasiIdentity {}
-
-/// A trait which provides internal WASI Identity context.
-///
-/// This is implemented by the resource-specific provider of Identity
-/// functionality.
-pub trait WasiIdentityCtx: Debug + Send + Sync + 'static {
-    /// Get the identity for the specified name.
-    fn get_identity(&self, name: String) -> FutureResult<Arc<dyn Identity>>;
-}
 
 omnia_core::host_error!(Error, InternalFailure);
 omnia_core::wasi_view!(Identity);

@@ -161,7 +161,7 @@ See the [workspace documentation](https://github.com/augentic/omnia) for the ful
 ## Cargo features
 
 - `sql` *(default)*: the `TableStore` capability over `wasi:sql`.
-- `docstore` *(default)*: the `DocumentStore` capability and the `document_store` re-exports.
+- `docstore` *(default)*: the `DocumentStore` capability and the `docstore` re-exports.
 - `http` *(default)*: the axum-backed `api::http` routing, the `mcp` server, and the `HttpError` / `HttpResult` root re-exports. The outbound `HttpRequest` capability and `Error::status()` need no feature.
 - `command`: the clap-backed parts of `api::command` (`parse`, `completions`, `Response::usage`, the `clap_complete::Shell` re-export, and the `clap::ValueEnum` derive on `api::Format`). The `Command` projector, `Response`, `Failure`, and `command!` need no feature.
 

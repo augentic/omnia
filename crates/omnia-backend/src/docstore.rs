@@ -1,9 +1,4 @@
-//! Target-neutral domain types for the `wasi:docstore` guest SDK.
-//!
-//! The guest builds queries with these ergonomic types, then the guest bindings
-//! bridge them across the WIT boundary. The host keeps its own `FilterTree`
-//! built from WIT-native leaf types (see `docs/reference/docstore.md`); the two
-//! representations sit on opposite sides of the WASM boundary by design.
+//! Target-neutral domain types and service contract for `omnia:docstore`.
 
 use std::ops::Not;
 
@@ -129,7 +124,7 @@ pub struct QueryOptions {
 }
 
 /// Stored document: identifier plus JSON body bytes.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Document {
     /// Primary key string.
     pub id: String,
@@ -316,6 +311,18 @@ impl Filter {
         !inner
     }
 
+    /// Maximum nesting depth of the filter tree.
+    #[must_use]
+    pub fn depth(&self) -> usize {
+        match self {
+            Self::And(children) | Self::Or(children) => {
+                1 + children.iter().map(Self::depth).max().unwrap_or(0)
+            }
+            Self::Not(inner) => 1 + inner.depth(),
+            _ => 1,
+        }
+    }
+
     /// Restrict `field` to a calendar date (UTC day) using range on timestamp strings.
     ///
     /// # Errors
@@ -347,6 +354,244 @@ fn next_iso_date(iso_date: &str) -> anyhow::Result<String> {
         .ok_or_else(|| anyhow::anyhow!("cannot compute next day for date: {iso_date}"))?;
     Ok(next.format("%Y-%m-%d").to_string())
 }
+
+#[cfg(not(target_arch = "wasm32"))]
+mod filter;
+
+#[cfg(not(target_arch = "wasm32"))]
+mod host {
+    use std::collections::btree_map::Entry;
+    use std::collections::{BTreeMap, HashMap};
+    use std::fmt::Debug;
+    use std::sync::{Arc, RwLock};
+
+    use anyhow::{Context, Result};
+    use futures::FutureExt as _;
+    use serde_json::Value;
+    use tracing::instrument;
+
+    use super::{Document, QueryOptions, QueryResult, filter};
+    use crate::{Connect, FutureResult, NoOptions};
+
+    const MAX_PAGE_SIZE: u64 = 1000;
+
+    /// Service contract for `omnia:docstore` backends.
+    pub trait DocStoreClient: Debug + Send + Sync + 'static {
+        /// Point read by primary id.
+        fn get(&self, collection: String, id: String) -> FutureResult<Option<Document>>;
+
+        /// Insert if absent.
+        fn insert(&self, collection: String, doc: Document) -> FutureResult<()>;
+
+        /// Upsert by id.
+        fn put(&self, collection: String, doc: Document) -> FutureResult<()>;
+
+        /// Delete by id; `Ok(true)` if a document was removed.
+        fn delete(&self, collection: String, id: String) -> FutureResult<bool>;
+
+        /// Filtered listing with sort and pagination.
+        fn query(&self, collection: String, options: QueryOptions) -> FutureResult<QueryResult>;
+    }
+
+    type Collections = HashMap<String, BTreeMap<String, Value>>;
+
+    /// Default in-memory implementation of [`DocStoreClient`].
+    #[derive(Clone, Default)]
+    pub struct DocStoreDefault {
+        collections: Arc<RwLock<Collections>>,
+    }
+
+    impl Debug for DocStoreDefault {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.debug_struct("DocStoreDefault").finish_non_exhaustive()
+        }
+    }
+
+    impl Connect for DocStoreDefault {
+        type ConnectOptions = NoOptions;
+
+        #[instrument]
+        async fn connect_with(options: Self::ConnectOptions) -> Result<Self> {
+            let _ = options;
+            tracing::debug!("initializing in-memory document store");
+            Ok(Self::default())
+        }
+    }
+
+    impl DocStoreDefault {
+        fn read(&self) -> std::sync::RwLockReadGuard<'_, Collections> {
+            self.collections.read().expect("docstore lock poisoned")
+        }
+
+        fn write(&self) -> std::sync::RwLockWriteGuard<'_, Collections> {
+            self.collections.write().expect("docstore lock poisoned")
+        }
+    }
+
+    impl DocStoreClient for DocStoreDefault {
+        fn get(&self, collection: String, id: String) -> FutureResult<Option<Document>> {
+            let store = self.clone();
+            async move {
+                let guard = store.read();
+                guard
+                    .get(&collection)
+                    .and_then(|col| col.get(&id))
+                    .map(|body| to_document(&id, body))
+                    .transpose()
+            }
+            .boxed()
+        }
+
+        fn insert(&self, collection: String, doc: Document) -> FutureResult<()> {
+            let store = self.clone();
+            async move {
+                let body = parse_body(&doc)?;
+                let inserted = match store.write().entry(collection).or_default().entry(doc.id) {
+                    Entry::Vacant(slot) => {
+                        slot.insert(body);
+                        true
+                    }
+                    Entry::Occupied(_) => false,
+                };
+                anyhow::ensure!(inserted, "document id already exists");
+                Ok(())
+            }
+            .boxed()
+        }
+
+        fn put(&self, collection: String, doc: Document) -> FutureResult<()> {
+            let store = self.clone();
+            async move {
+                let body = parse_body(&doc)?;
+                store.write().entry(collection).or_default().insert(doc.id, body);
+                Ok(())
+            }
+            .boxed()
+        }
+
+        fn delete(&self, collection: String, id: String) -> FutureResult<bool> {
+            let store = self.clone();
+            async move {
+                Ok(store.write().get_mut(&collection).is_some_and(|col| col.remove(&id).is_some()))
+            }
+            .boxed()
+        }
+
+        fn query(&self, collection: String, options: QueryOptions) -> FutureResult<QueryResult> {
+            let store = self.clone();
+            async move {
+                let limit = options.limit.map_or(MAX_PAGE_SIZE, u64::from).min(MAX_PAGE_SIZE);
+                anyhow::ensure!(limit > 0, "query limit must be at least 1");
+                let page_size = usize::try_from(limit).unwrap_or(usize::MAX);
+
+                let skip = parse_continuation(options.continuation.as_deref())?
+                    + u64::from(options.offset.unwrap_or(0));
+                let skip = usize::try_from(skip).unwrap_or(usize::MAX);
+
+                let mut rows: Vec<(String, Value)> = {
+                    let guard = store.read();
+                    guard.get(&collection).map_or_else(Vec::new, |col| {
+                        col.iter()
+                            .filter(|(_, body)| {
+                                options.filter.as_ref().is_none_or(|f| filter::matches(f, body))
+                            })
+                            .map(|(id, body)| (id.clone(), body.clone()))
+                            .collect()
+                    })
+                };
+
+                if !options.order_by.is_empty() {
+                    rows.sort_by(|a, b| {
+                        filter::compare_documents(&a.1, &b.1, &options.order_by)
+                            .then_with(|| a.0.cmp(&b.0))
+                    });
+                }
+
+                let (page, continuation) = paginate(rows, skip, page_size);
+                let documents = page
+                    .iter()
+                    .map(|(id, body)| to_document(id, body))
+                    .collect::<Result<Vec<_>>>()?;
+
+                Ok(QueryResult {
+                    documents,
+                    continuation,
+                })
+            }
+            .boxed()
+        }
+    }
+
+    fn paginate(
+        rows: Vec<(String, Value)>, skip: usize, page_size: usize,
+    ) -> (Vec<(String, Value)>, Option<String>) {
+        let total = rows.len();
+        let page: Vec<_> = rows.into_iter().skip(skip).take(page_size).collect();
+        let next = skip.saturating_add(page.len());
+        let continuation = (next < total).then(|| next.to_string());
+        (page, continuation)
+    }
+
+    fn parse_continuation(continuation: Option<&str>) -> Result<u64> {
+        continuation.map_or_else(
+            || Ok(0),
+            |s| s.parse().with_context(|| format!("invalid continuation token: {s:?}")),
+        )
+    }
+
+    fn parse_body(doc: &Document) -> Result<Value> {
+        serde_json::from_slice(&doc.data).context("invalid JSON in document body")
+    }
+
+    fn to_document(id: &str, body: &Value) -> Result<Document> {
+        Ok(Document {
+            id: id.to_owned(),
+            data: serde_json::to_vec(body).context("serialize JSON body")?,
+        })
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use serde_json::json;
+
+        use super::*;
+
+        fn rows(ids: &[&str]) -> Vec<(String, Value)> {
+            ids.iter().map(|id| ((*id).to_string(), json!({ "id": id }))).collect()
+        }
+
+        #[test]
+        fn paginate_walks_all_pages() {
+            let (page, cont) = paginate(rows(&["a", "b", "c", "d", "e"]), 0, 2);
+            assert_eq!(page.len(), 2);
+            assert_eq!(cont.as_deref(), Some("2"));
+
+            let (page, cont) = paginate(rows(&["a", "b", "c", "d", "e"]), 2, 2);
+            assert_eq!(page.len(), 2);
+            assert_eq!(cont.as_deref(), Some("4"));
+
+            let (page, cont) = paginate(rows(&["a", "b", "c", "d", "e"]), 4, 2);
+            assert_eq!(page.len(), 1);
+            assert_eq!(cont, None, "final partial page carries no continuation");
+        }
+
+        #[test]
+        fn paginate_exact_boundary() {
+            let (page, cont) = paginate(rows(&["a", "b"]), 0, 2);
+            assert_eq!(page.len(), 2);
+            assert_eq!(cont, None, "a full final page carries no continuation");
+        }
+
+        #[test]
+        fn continuation_rejects_junk() {
+            parse_continuation(Some("not-a-number")).expect_err("garbage token is rejected");
+            assert_eq!(parse_continuation(None).expect("empty token"), 0);
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub use self::host::{DocStoreClient, DocStoreDefault};
 
 #[cfg(test)]
 mod tests {

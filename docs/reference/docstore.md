@@ -1,6 +1,6 @@
 # DocStore Interface Reference
 
-Reference for the `wasi:docstore` interface (version `0.1.0`): the operations, the guest SDK types, the filter language and its host-enforced limits, and the backend matrix. The conceptual walk-through is in [Document Store](../guides/document-store.md); the authoritative WIT is [`crates/wasi-docstore/wit/docstore.wit`](../../crates/wasi-docstore/wit/docstore.wit).
+Reference for the `omnia:docstore` interface (version `0.1.0`): the operations, the guest SDK types, the filter language and its host-enforced limits, and the backend matrix. The conceptual walk-through is in [Document Store](../guides/document-store.md); the authoritative WIT is [`crates/wasi-docstore/wit/docstore.wit`](../../crates/wasi-docstore/wit/docstore.wit).
 
 - [Operations](#operations)
 - [Types](#types)
@@ -60,7 +60,7 @@ Guests normally call these through the `omnia_sdk::DocumentStore` trait (impleme
 
 ## Filters
 
-Filters reference fields *inside* the document JSON and compose into trees. On the guest side, build them with the `Filter` constructors from `omnia_sdk::document_store` (defined in [`crates/wasi-docstore/src/document_store.rs`](../../crates/wasi-docstore/src/document_store.rs)):
+Filters reference fields *inside* the document JSON and compose into trees. On the guest side, build them with the `Filter` constructors from `omnia_sdk::docstore` (defined in [`crates/omnia-backend/src/docstore.rs`](../../crates/omnia-backend/src/docstore.rs)):
 
 | Constructor | Predicate |
 | ----------- | --------- |

@@ -1,14 +1,12 @@
-//! A FIFO-scripted `WasiModelCtx` recording every request.
+//! A FIFO-scripted `ModelClient` recording every request.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use futures::FutureExt as _;
-use omnia_wasi_model::{
-    Answer, Error, Format, FutureResult, Limits, Request, Tool, ToolHost, WasiModelCtx, WorkerGrant,
-};
+use omnia_wasi_model::{Answer, Error, FutureResult, Limits, ModelClient, Request, ToolHost};
 
-use crate::{Exchange, Script, Seen, SeenFormat, SeenWorker};
+use crate::{Exchange, Script, Seen};
 
 const CHECK_TOOL: &str = "check";
 
@@ -314,7 +312,7 @@ impl ScriptedModel {
     }
 }
 
-impl WasiModelCtx for ScriptedModel {
+impl ModelClient for ScriptedModel {
     fn complete(&self, request: Request, tool_host: Arc<dyn ToolHost>) -> FutureResult<Answer> {
         self.lent.lock().expect("lent lock").push(tool_host.local_path().map(Path::to_path_buf));
         let this = self.clone();
@@ -348,45 +346,5 @@ impl WasiModelCtx for ScriptedModel {
 
     fn limits(&self) -> Limits {
         self.limits
-    }
-}
-
-impl From<&Request> for Seen {
-    fn from(request: &Request) -> Self {
-        Self {
-            system: request.system.clone(),
-            messages: request.messages.iter().map(|message| message.content.clone()).collect(),
-            format: match &request.format {
-                Format::Text => SeenFormat::Text,
-                Format::Json => SeenFormat::Json,
-                Format::Schema(schema) => SeenFormat::Schema {
-                    name: schema.name.clone(),
-                    schema: schema.schema.clone(),
-                },
-            },
-            tools: request
-                .tools
-                .iter()
-                .map(|tool| match tool {
-                    Tool::Function(function) => function.name.clone(),
-                    Tool::Mcp(mcp) => mcp.name.clone(),
-                })
-                .collect(),
-            temperature: request.generation.as_ref().and_then(|generation| generation.temperature),
-            // the descriptor cannot cross into a plain record; the subpath is what the guest chose
-            workspace: request.grants.workspace.as_ref().map(|grant| grant.subpath.clone()),
-            worker: request.grants.worker.as_ref().map(SeenWorker::from),
-            check: request.check,
-        }
-    }
-}
-
-impl From<&WorkerGrant> for SeenWorker {
-    fn from(grant: &WorkerGrant) -> Self {
-        Self {
-            egress: grant.egress.clone(),
-            read: grant.read.clone(),
-            env: grant.env.clone(),
-        }
     }
 }

@@ -23,7 +23,7 @@ The model backends (`genai`, `cursor`) are covered in [Model Completions and MCP
 
 ## Swapping a backend
 
-A backend is any type that implements `omnia::Backend` (connection management) plus the `WasiXxxCtx` context trait for its interface. In the `runtime!` macro, replace the default with the production client:
+A backend is any type that implements `omnia::Connect` (connection management) plus the `XxxClient` contract trait for its interface. In the `runtime!` macro, replace the default with the production client:
 
 ```rust
 use omnia_redis::Client as Redis;
@@ -69,7 +69,7 @@ Each crate's README in the `omnia-backends` repository documents its complete va
 
 ## Verifying against the real service
 
-Backend crates ship `#[ignore]`-gated **live tests** (`tests/live.rs`) that drive the backend's `WasiXxxCtx` implementation against the real service. They never run in CI; run them locally with the service up and credentials set:
+Backend crates ship `#[ignore]`-gated **live tests** (`tests/live.rs`) that drive the backend's `XxxClient` implementation against the real service. They never run in CI; run them locally with the service up and credentials set:
 
 ```bash
 # example: Redis

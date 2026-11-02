@@ -12,9 +12,9 @@ use std::sync::{Arc, Mutex};
 use futures::FutureExt as _;
 use omnia::{FutureResult, Provides};
 use omnia_test::host::Deployment;
-use omnia_wasi_otel::{OtelDefault, WasiOtel, WasiOtelCtx};
+use omnia_wasi_otel::{OtelClient, OtelDefault, WasiOtel};
 use omnia_wasi_websocket::{
-    Client, Event, Events, WasiWebSocket, WasiWebSocketCtx, WebSocketHandler,
+    Endpoint, Event, Events, WasiWebSocket, WebSocketClient, WebSocketHandler,
 };
 
 // Every guest program in `crates/test-programs` must have a matching test
@@ -28,13 +28,13 @@ struct Backends {
 }
 
 impl Provides<WasiWebSocket> for Backends {
-    fn borrow(&mut self) -> &mut dyn WasiWebSocketCtx {
+    fn borrow(&mut self) -> &mut dyn WebSocketClient {
         &mut self.websocket
     }
 }
 
 impl Provides<WasiOtel> for Backends {
-    fn borrow(&mut self) -> &mut dyn WasiOtelCtx {
+    fn borrow(&mut self) -> &mut dyn OtelClient {
         &mut self.otel
     }
 }
@@ -49,14 +49,14 @@ struct Recording {
     sent: Arc<Mutex<Vec<Sent>>>,
 }
 
-impl WasiWebSocketCtx for Recording {
-    fn connect(&self) -> FutureResult<Arc<dyn Client>> {
+impl WebSocketClient for Recording {
+    fn endpoint(&self) -> FutureResult<Arc<dyn Endpoint>> {
         let client = self.clone();
-        async move { Ok(Arc::new(client) as Arc<dyn Client>) }.boxed()
+        async move { Ok(Arc::new(client) as Arc<dyn Endpoint>) }.boxed()
     }
 }
 
-impl Client for Recording {
+impl Endpoint for Recording {
     fn events(&self) -> FutureResult<Events> {
         // events are handed to the handler directly; nothing arrives here
         async { Ok(Box::pin(futures::stream::empty()) as Events) }.boxed()

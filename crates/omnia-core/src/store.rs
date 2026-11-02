@@ -8,11 +8,9 @@
 use std::fmt;
 use std::sync::Arc;
 
-use wasmtime::component::HasData;
 use wasmtime::{StoreLimits, StoreLimitsBuilder};
 use wasmtime_wasi::cli::StdoutStream;
 use wasmtime_wasi::{FsPerms, ResourceTable, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
-use wasmtime_wasi_http::{WasiHttpCtxView, WasiHttpView};
 
 use crate::{ChainCtx, Dispatcher, Extensions, HostCtx, MountRegistry, Provides, RuntimeOptions};
 
@@ -226,42 +224,6 @@ pub trait StoreView<H: HostCtx>: Send {
 impl<H: HostCtx, B: Provides<H> + Send + 'static> StoreView<H> for StoreCtx<B> {
     fn view(&mut self) -> H::Data<'_> {
         H::view(self.backends.borrow(), &mut self.base.table)
-    }
-}
-
-/// The `wasi:http` slot of a backend bundle: split borrows on the backend's
-/// hooks and context into the linker-facing view.
-pub trait HttpBorrow: Send {
-    /// Borrow the `wasi:http` context as the linker-facing view, threading in
-    /// the store's [`ResourceTable`].
-    fn as_view<'a>(&'a mut self, table: &'a mut ResourceTable) -> WasiHttpCtxView<'a>;
-}
-
-/// The [`HostCtx`] carrier for `wasi:http`.
-///
-/// `wasi:http`'s view trait (`WasiHttpView`) is foreign — re-exported from
-/// `wasmtime-wasi-http` — so its blanket impl on `StoreCtx<B>` can only live
-/// here, where `StoreCtx` is local, against a carrier this crate can name.
-/// Every other host is its own carrier and blankets nothing: its
-/// `add_to_linker` rides [`StoreView`] directly.
-#[derive(Debug)]
-pub struct HttpCtx;
-
-impl HasData for HttpCtx {
-    type Data<'a> = WasiHttpCtxView<'a>;
-}
-
-impl HostCtx for HttpCtx {
-    type Borrow<'a> = &'a mut dyn HttpBorrow;
-
-    fn view<'a>(borrow: Self::Borrow<'a>, table: &'a mut ResourceTable) -> WasiHttpCtxView<'a> {
-        borrow.as_view(table)
-    }
-}
-
-impl<B: Provides<HttpCtx> + Send + 'static> WasiHttpView for StoreCtx<B> {
-    fn http(&mut self) -> WasiHttpCtxView<'_> {
-        <Self as StoreView<HttpCtx>>::view(self)
     }
 }
 

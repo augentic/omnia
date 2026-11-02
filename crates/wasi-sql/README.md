@@ -12,7 +12,7 @@ Implements the `wasi:sql` WIT interface.
 
 ## Cargo features
 
-- `sqlite` *(default)*: the bundled-SQLite default backend (`SqlDefault`). Disable it (`default-features = false`) when supplying your own `WasiSqlCtx` backend to skip compiling bundled `SQLite`.
+- `sqlite` *(default)*: the bundled-SQLite default backend (`SqlDefault`). Disable it (`default-features = false`) when supplying your own `SqlClient` backend to skip compiling bundled `SQLite`.
 
 ## Features
 

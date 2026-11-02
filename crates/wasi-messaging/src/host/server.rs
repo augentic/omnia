@@ -7,9 +7,9 @@ use omnia_core::{PatternRoutes, Runtime, StoreCtx, StoreView, TriggerRouter};
 use tokio::sync::Semaphore;
 use tracing::{Instrument, info_span, instrument};
 
-use crate::host::WasiMessaging;
 use crate::host::generated::MessagingRequestReplyIndices;
-use crate::host::resource::{Client, HandleError, Handler, Message};
+use crate::host::resource::from_wit_error;
+use crate::host::{Endpoint, HandleError, Handler, Message, WasiMessaging};
 
 #[instrument("messaging-server", skip(state))]
 pub async fn run<B>(state: &Runtime<B>) -> Result<()>
@@ -35,7 +35,7 @@ where
 /// In-process `wasi:messaging/incoming-handler` dispatcher: routes a message
 /// to a guest by topic, instantiates it, and invokes the export.
 ///
-/// The server hands one to the backend's [`Client::consume`] as the
+/// The server hands one to the backend's [`Endpoint::consume`] as the
 /// [`Handler`]; tests drive it directly with a constructed [`Message`],
 /// bypassing the broker.
 #[derive(Clone)]
@@ -162,11 +162,11 @@ where
             .map_err(|_elapsed| HandleError::TimedOut(timeout))?;
         let returned =
             called.flatten().map_err(|trap| HandleError::Trapped(format!("{trap:#}")))?;
-        returned.map_err(HandleError::Rejected)
+        returned.map_err(|e| HandleError::Rejected(from_wit_error(e)))
     }
 
-    async fn client(&self) -> Result<Arc<dyn Client>> {
-        self.state.store().view().ctx.connect().await
+    async fn client(&self) -> Result<Arc<dyn Endpoint>> {
+        self.state.store().view().client.endpoint().await
     }
 }
 

@@ -8,7 +8,7 @@
 
 use omnia::ExitStatus;
 use omnia_test::host::{Backends, Deployment};
-use omnia_wasi_docstore::{WasiDocStore, WasiDocStoreCtx as _};
+use omnia_wasi_docstore::{DocStoreClient as _, WasiDocStore};
 use serde_json::{Value, json};
 
 // Every guest program in `crates/test-programs` must have a matching test

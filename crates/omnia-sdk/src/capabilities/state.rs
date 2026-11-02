@@ -52,8 +52,9 @@ pub trait StateStore: Send + Sync {
             fn get(&self, key: &str) -> impl Future<Output = Result<Option<Vec<u8>>>> + Send {
                 use anyhow::Context;
                 async move {
-                    let bucket =
-                        omnia_wasi_keyvalue::cache::open("cache").await.context("opening cache")?;
+                    let bucket = omnia_wasi_keyvalue::cache::open(omnia_backend::keyvalue::BUCKET)
+                        .await
+                        .context("opening cache")?;
                     bucket.get(key).await.context("reading state from cache")
                 }
             }
@@ -64,8 +65,9 @@ pub trait StateStore: Send + Sync {
             ) -> impl Future<Output = Result<Option<Vec<u8>>>> + Send {
                 use anyhow::Context;
                 async move {
-                    let bucket =
-                        omnia_wasi_keyvalue::cache::open("cache").await.context("opening cache")?;
+                    let bucket = omnia_wasi_keyvalue::cache::open(omnia_backend::keyvalue::BUCKET)
+                        .await
+                        .context("opening cache")?;
                     bucket.set(key, value, ttl_secs).await.context("writing state to cache")
                 }
             }
@@ -74,8 +76,9 @@ pub trait StateStore: Send + Sync {
             fn delete(&self, key: &str) -> impl Future<Output = Result<()>> + Send {
                 use anyhow::Context;
                 async move {
-                    let bucket =
-                        omnia_wasi_keyvalue::cache::open("cache").await.context("opening cache")?;
+                    let bucket = omnia_wasi_keyvalue::cache::open(omnia_backend::keyvalue::BUCKET)
+                        .await
+                        .context("opening cache")?;
                     bucket.delete(key).await.context("deleting entry from cache")
                 }
             }
@@ -90,7 +93,7 @@ pub trait StateStore: Send + Sync {
                 use omnia_wasi_keyvalue::store;
 
                 async move {
-                    let bucket = store::open("cache".to_string())
+                    let bucket = store::open(omnia_backend::keyvalue::BUCKET.to_string())
                         .await
                         .map_err(|e| CasError::Store(format!("opening cache: {e:?}")))?;
                     let cas = Cas::new(&bucket, key.to_string())
@@ -126,7 +129,9 @@ pub trait StateStore: Send + Sync {
                 use omnia_wasi_keyvalue::{atomics, store};
 
                 async move {
-                    let bucket = store::open("cache".to_string()).await.context("opening cache")?;
+                    let bucket = store::open(omnia_backend::keyvalue::BUCKET.to_string())
+                        .await
+                        .context("opening cache")?;
                     atomics::increment(&bucket, key.to_string(), delta)
                         .await
                         .map_err(|e| anyhow::anyhow!("incrementing `{key}`: {e:?}"))

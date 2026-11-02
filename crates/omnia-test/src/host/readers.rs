@@ -1,16 +1,17 @@
 //! Reading state back through the bundle's host handles after a run.
 
-use omnia_wasi_blobstore::WasiBlobstoreCtx;
-use omnia_wasi_keyvalue::WasiKeyValueCtx;
+use omnia_backend::keyvalue::BUCKET;
+use omnia_wasi_blobstore::BlobStoreClient;
+use omnia_wasi_keyvalue::KeyValueClient;
 
-use super::{Backends, STATE_BUCKET};
+use super::Backends;
 
 impl<M, K, B, D, S, V, G, I, O, C> Backends<M, K, B, D, S, V, G, I, O, C>
 where
-    K: WasiKeyValueCtx,
-    B: WasiBlobstoreCtx,
+    K: KeyValueClient,
+    B: BlobStoreClient,
     // `&self` is held across the awaits below, so the rest of the bundle must
-    // be `Sync` for the futures to be `Send`; every `Wasi*Ctx` already is.
+    // be `Sync` for the futures to be `Send`; every `*Client` already is.
     M: Sync,
     D: Sync,
     S: Sync,
@@ -23,7 +24,7 @@ where
     /// One entry of the bucket the guest's `StateStore` writes, read through
     /// the keyvalue handle.
     pub async fn state(&self, key: &str) -> Option<Vec<u8>> {
-        let bucket = self.keyvalue.open_bucket(STATE_BUCKET.to_owned()).await.ok()?;
+        let bucket = self.keyvalue.open_bucket(BUCKET.to_owned()).await.ok()?;
         bucket.get(key.to_owned()).await.ok().flatten()
     }
 

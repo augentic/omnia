@@ -1,7 +1,7 @@
 //! Traits implemented by WASI host crates (`wasi-*`).
 //!
 //! Each host crate provides a `WasiXxx` type implementing [`Host`] (and usually
-//! [`Server`]) plus a default backend type implementing [`Backend`].
+//! [`Server`]) plus a default backend type implementing [`Connect`](crate::Connect).
 
 use std::fmt::Debug;
 use std::future::Future;
@@ -9,13 +9,9 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use anyhow::Result;
-use futures::future::BoxFuture;
 use wasmtime::component::{Accessor, HasData, Linker, Resource, ResourceTable, ResourceTableError};
 
 use crate::runtime::Runtime;
-
-/// Result type for asynchronous host operations.
-pub type FutureResult<T> = BoxFuture<'static, Result<T>>;
 
 /// Link a WASI host's generated bindings into the deployment linker.
 pub trait Host<T>: Debug + Sync + Send {
@@ -35,7 +31,7 @@ pub trait Host<T>: Debug + Sync + Send {
 /// The `runtime!` macro runs every linked host uniformly: a long-lived
 /// trigger server (e.g. `WasiHttp`, `WasiMessaging`, `WasiWebSocket`)
 /// overrides [`run`](Self::run) to loop on its transport until shutdown,
-/// while a capability host (e.g. `WasiKeyValue`, `WasiBlobstore`,
+/// while a capability host (e.g. `WasiKeyValue`, `WasiBlobStore`,
 /// `WasiOtel`) keeps the no-op default, which resolves immediately.
 pub trait Server<B>: Debug + Sync + Send {
     /// Start the service.
@@ -54,12 +50,6 @@ pub trait Server<B>: Debug + Sync + Send {
 /// [`HasData::Data`] view from that borrow plus the store's resource table.
 /// The `runtime!` macro never derives names from the host type — everything
 /// it needs rides these associated items.
-///
-/// Almost every host is its own carrier. The exception is a host whose
-/// linker-facing view trait is foreign — `wasi:http`'s `WasiHttpView` is
-/// owned by `wasmtime-wasi-http` — whose carrier must live in this crate so
-/// the foreign trait's `StoreCtx` blanket can name it (see
-/// [`HttpCtx`](crate::HttpCtx)).
 pub trait HostCtx: HasData {
     /// What this host borrows from the backend bundle.
     type Borrow<'a>;
@@ -77,44 +67,6 @@ pub trait HostCtx: HasData {
 pub trait Provides<H: HostCtx>: Send {
     /// Borrow what host `H` needs from the bundle.
     fn borrow(&mut self) -> H::Borrow<'_>;
-}
-
-/// Connect a host backend resource during runtime startup.
-pub trait Backend: Sized + Sync + Send {
-    /// The options used to connect to the backend.
-    type ConnectOptions: FromEnv;
-
-    /// Connect to the resource.
-    fn connect() -> impl Future<Output = Result<Self>> {
-        async { Self::connect_with(Self::ConnectOptions::load_env()?).await }
-    }
-
-    /// Connect with the specified options.
-    fn connect_with(options: Self::ConnectOptions) -> impl Future<Output = Result<Self>>;
-}
-
-/// Create backend connection options from environment variables.
-///
-/// The method is `load_env` (not `from_env`) so it never shadows — or is shadowed
-/// by — the builder-returning inherent `from_env` the `fromenv` derive emits
-/// on option structs.
-pub trait FromEnv: Sized {
-    /// Load connection options from environment variables.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if required environment variables are missing or invalid.
-    fn load_env() -> Result<Self>;
-}
-
-/// Connection options for a [`Backend`] that needs none.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct NoOptions;
-
-impl FromEnv for NoOptions {
-    fn load_env() -> Result<Self> {
-        Ok(Self)
-    }
 }
 
 /// Resource-table proxy over a shared backend handle.
@@ -144,9 +96,9 @@ impl<T: ?Sized> Deref for Proxy<T> {
     }
 }
 
-/// Access to the store's resource table from a WASI ctx view.
+/// Access to the store's resource table from a WASI view.
 ///
-/// Implemented by the `Wasi<Service>CtxView` types the [`wasi_view!`] macro
+/// Implemented by the `Wasi<Service>View` types the [`wasi_view!`] macro
 /// generates, enabling the generic [`get_cloned`] table lookup.
 ///
 /// [`wasi_view!`]: crate::wasi_view

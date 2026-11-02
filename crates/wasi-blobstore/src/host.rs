@@ -2,7 +2,6 @@
 
 mod blobstore_impl;
 mod container_impl;
-mod default_impl;
 mod resource;
 mod types_impl;
 
@@ -31,17 +30,17 @@ mod generated {
 }
 
 use std::fmt::Debug;
-use std::sync::Arc;
 
 pub use bytes::Bytes;
+pub use omnia_backend::blobstore::{
+    BlobStoreClient, BlobStoreDefault, Container, ContainerMetadata, ObjectMetadata,
+};
 pub use omnia_core::FutureResult;
 use omnia_core::{Host, Server, StoreView};
 pub use resource::*;
 use wasmtime::component::{HasData, Linker};
 use wasmtime_wasi::p2::pipe::MemoryOutputPipe;
 
-pub use self::default_impl::BlobstoreDefault;
-pub use self::generated::wasi::blobstore::container::{ContainerMetadata, ObjectMetadata};
 use self::generated::wasi::blobstore::{blobstore, container, types};
 
 /// Typed host error for `wasi:blobstore`, lowered to the WIT `error` string.
@@ -124,13 +123,17 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 /// Host-side service for `wasi:blobstore`.
 #[derive(Debug)]
-pub struct WasiBlobstore;
+pub struct WasiBlobStore;
 
-impl HasData for WasiBlobstore {
-    type Data<'a> = WasiBlobstoreCtxView<'a>;
+/// Deprecated alias for [`WasiBlobStore`].
+#[deprecated(note = "use `WasiBlobStore`")]
+pub type WasiBlobstore = WasiBlobStore;
+
+impl HasData for WasiBlobStore {
+    type Data<'a> = WasiBlobStoreView<'a>;
 }
 
-impl<T> Host<T> for WasiBlobstore
+impl<T> Host<T> for WasiBlobStore
 where
     T: StoreView<Self> + 'static,
 {
@@ -141,27 +144,9 @@ where
     }
 }
 
-impl<B> Server<B> for WasiBlobstore {}
+impl<B> Server<B> for WasiBlobStore {}
 
-/// A trait which provides internal WASI Blobstore context.
-///
-/// This is implemented by the resource-specific provider of Blobstore
-/// functionality. For example, an in-memory store, or a Redis-backed store.
-pub trait WasiBlobstoreCtx: Debug + Send + Sync + 'static {
-    /// Open a container.
-    fn create_container(&self, name: String) -> FutureResult<Arc<dyn Container>>;
-
-    /// Get a container.
-    fn get_container(&self, name: String) -> FutureResult<Arc<dyn Container>>;
-
-    /// Delete a container.
-    fn delete_container(&self, name: String) -> FutureResult<()>;
-
-    /// Check if a container exists.
-    fn container_exists(&self, name: String) -> FutureResult<bool>;
-}
-
-omnia_core::wasi_view!(Blobstore);
+omnia_core::wasi_view!(BlobStore);
 
 #[cfg(test)]
 mod tests {

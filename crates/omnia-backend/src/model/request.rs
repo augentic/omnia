@@ -3,17 +3,14 @@
 use std::fmt;
 use std::net::IpAddr;
 
-use crate::host::Error;
-use crate::host::generated::omnia::model::completion::{
-    Format, Mcp, Request, Role, Tool, WorkerGrant,
-};
+use super::{Error, Format, McpGrant, Request, Role, Tool, WorkerGrant};
 
 const RESERVED_TOOLS: &[&str] = &["read", "list", "write", "check"];
 
 impl Request {
     /// The request's MCP server grants, each carrying its own endpoint URL.
     #[must_use]
-    pub fn mcp_servers(&self) -> Vec<&Mcp> {
+    pub fn mcp_servers(&self) -> Vec<&McpGrant> {
         self.tools
             .iter()
             .filter_map(|tool| match tool {
@@ -24,6 +21,7 @@ impl Request {
     }
 
     /// The request's tool names, each carrying its own parameters schema.
+    #[must_use]
     pub fn tool_names(&self) -> Vec<String> {
         self.tools
             .iter()
@@ -38,7 +36,7 @@ impl Request {
     ///
     /// # Errors
     ///
-    /// Returns an `InvalidRequest` error if the request is invalid.
+    /// Returns an [`Error::InvalidRequest`] if the request is invalid.
     pub fn validate(&self) -> Result<(), Error> {
         for tool in &self.tools {
             let Tool::Function(function) = tool else {
@@ -68,8 +66,8 @@ impl Request {
             return Err(Error::InvalidRequest("format schema is not valid JSON".to_owned()));
         }
 
-        if let Some(worker) = &self.grants.worker {
-            if self.grants.workspace.is_none() {
+        if let Some(worker) = &self.worker {
+            if self.workspace.is_none() {
                 return Err(Error::InvalidRequest(
                     "a worker grant requires a workspace lend".to_owned(),
                 ));
@@ -187,8 +185,7 @@ impl fmt::Display for Role {
 
 #[cfg(test)]
 mod tests {
-    use super::{Format, Mcp, Request, Role, Tool};
-    use crate::host::{Function, Grants, Message};
+    use super::super::{Format, Function, McpGrant, Message, Request, Role, Tool};
 
     fn request(system: Option<&str>, messages: Vec<(Role, &str)>, tools: Vec<Tool>) -> Request {
         Request {
@@ -204,11 +201,9 @@ mod tests {
             generation: None,
             format: Format::Text,
             tools,
-            grants: Grants {
-                workspace: None,
-                worker: None,
-            },
             check: false,
+            workspace: None,
+            worker: None,
         }
     }
 
@@ -223,7 +218,7 @@ mod tests {
                     description: "lookup".to_owned(),
                     parameters: "{}".to_owned(),
                 }),
-                Tool::Mcp(Mcp {
+                Tool::Mcp(McpGrant {
                     name: "docs".to_owned(),
                     tools: vec!["search".to_owned()],
                     url: "https://mcp.example".to_owned(),

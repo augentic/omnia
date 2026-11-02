@@ -4,7 +4,7 @@ use std::future::Future;
 
 use anyhow::Result;
 
-use crate::document_store::{Document, QueryOptions, QueryResult};
+use crate::docstore::{Document, QueryOptions, QueryResult};
 
 /// Document storage (`wasi:docstore`).
 ///

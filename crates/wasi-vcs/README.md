@@ -21,7 +21,7 @@ A typed `error` — `not-a-repository`, `exists`, `not-found`, `pending`, `acces
 There is no default backend: nothing in memory stands for a repository. A deployment that names no `WasiVcs` row links no `omnia:vcs` import, and a guest that imports it fails to instantiate there.
 
 - **Production**: [`omnia-git`](https://github.com/augentic/omnia-backends/tree/main/crates/git) — the operator's `git` binary, one process per operation (see the [Production Backends guide](https://github.com/augentic/omnia/blob/main/docs/guides/production-backends.md)).
-- **Tests**: a scripted `WasiVcsCtx` of the suite's own, set with `omnia_test::host::Backends::vcs`; the bundle holds `NoVcs` in the slot until then, so a deployment linking `WasiVcs` over the defaults fails to link.
+- **Tests**: a scripted `VcsClient` of the suite's own, set with `omnia_test::host::Backends::vcs`; the bundle holds `NoVcs` in the slot until then, so a deployment linking `WasiVcs` over the defaults fails to link.
 
 ## Usage
 

@@ -3,10 +3,11 @@
 //! Procedural attributes for Omnia guests.
 
 mod otel;
+mod provider;
 
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{ItemFn, meta, parse_macro_input};
+use syn::{DeriveInput, ItemFn, meta, parse_macro_input};
 
 /// Instruments a function using the `[wasi_otel::instrument]` function.
 ///
@@ -36,4 +37,15 @@ pub fn instrument(args: TokenStream, item: TokenStream) -> TokenStream {
     };
 
     TokenStream::from(new_fn)
+}
+
+/// Derives `omnia_sdk` capability traits by delegating each named capability to
+/// the struct field annotated with `#[provider(Capability, ...)]`.
+#[proc_macro_derive(Provider, attributes(provider))]
+pub fn derive_provider(item: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(item as DeriveInput);
+    match provider::expand(&input) {
+        Ok(tokens) => TokenStream::from(tokens),
+        Err(err) => TokenStream::from(err.into_compile_error()),
+    }
 }

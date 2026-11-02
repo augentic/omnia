@@ -11,8 +11,8 @@ use omnia::wasmtime::component::Val;
 use omnia::{Digest, ExitStatus, GuestEntry, GuestId, Runtime, StoreCtx};
 use omnia_test::host::{Backends, Deployment, ScriptedModel, scratch};
 use omnia_test::{Exchange, SeenFormat};
-use omnia_wasi_blobstore::WasiBlobstoreCtx as _;
-use omnia_wasi_keyvalue::{Bucket, FutureResult, KeyValueDefault, WasiKeyValue, WasiKeyValueCtx};
+use omnia_wasi_blobstore::BlobStoreClient as _;
+use omnia_wasi_keyvalue::{Bucket, FutureResult, KeyValueClient, KeyValueDefault, WasiKeyValue};
 use omnia_wasi_model::WasiModel;
 use omnia_wasi_otel::WasiOtel;
 
@@ -232,7 +232,7 @@ struct RecordingKeyValue {
     opened: Arc<Mutex<Vec<String>>>,
 }
 
-impl WasiKeyValueCtx for RecordingKeyValue {
+impl KeyValueClient for RecordingKeyValue {
     fn open_bucket(&self, identifier: String) -> FutureResult<Arc<dyn Bucket>> {
         self.opened.lock().expect("opened buckets").push(identifier.clone());
         self.inner.open_bucket(identifier)
@@ -248,7 +248,7 @@ async fn swapped_keyvalue() {
     };
     // The guest's atomics start from a host-seeded counter.
     let bucket = recording.inner.open_bucket("bucket".to_owned()).await.expect("bucket");
-    bucket.set("counter".to_owned(), 37_i64.to_be_bytes().to_vec()).await.expect("seed");
+    bucket.set("counter".to_owned(), 37_i64.to_be_bytes().to_vec(), None).await.expect("seed");
 
     let backends = defaults.keyvalue(recording);
     let status = Deployment::new()
@@ -273,7 +273,7 @@ async fn swapped_keyvalue() {
 async fn host_handles() {
     let backends = Backends::defaults().await;
     let bucket = backends.keyvalue.open_bucket("cache".to_owned()).await.expect("bucket");
-    bucket.set("k".to_owned(), b"v".to_vec()).await.expect("set");
+    bucket.set("k".to_owned(), b"v".to_vec(), None).await.expect("set");
     assert_eq!(backends.state("k").await, Some(b"v".to_vec()));
     assert_eq!(backends.state("missing").await, None);
 

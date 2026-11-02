@@ -4,12 +4,12 @@ use crate::host::generated::wasi::messaging::types;
 pub use crate::host::generated::wasi::messaging::types::{
     Error, Host, HostClient, HostClientWithStore, HostMessage, HostMessageWithStore, Topic,
 };
-use crate::host::resource::{ClientProxy, Message};
-use crate::host::{Result, WasiMessaging, WasiMessagingCtxView};
+use crate::host::resource::{ClientProxy, Message, from_wit_metadata, to_wit_metadata};
+use crate::host::{Result, WasiMessaging, WasiMessagingView};
 
 impl<T> HostClientWithStore<T> for WasiMessaging {
     async fn connect(accessor: &Accessor<T, Self>, _name: String) -> Result<Resource<ClientProxy>> {
-        let client = accessor.with(|mut store| store.get().ctx.connect()).await?;
+        let client = accessor.with(|mut store| store.get().client.endpoint()).await?;
         let proxy = omnia_core::Proxy(client);
         Ok(accessor.with(|mut store| store.get().table.push(proxy))?)
     }
@@ -66,7 +66,7 @@ impl<T> HostMessageWithStore<T> for WasiMessaging {
         mut host: Access<'_, T, Self>, self_: Resource<Message>,
     ) -> wasmtime::Result<Option<types::Metadata>> {
         let message = host.get().table.get(&self_)?;
-        Ok(message.metadata.clone().map(Into::into))
+        Ok(message.metadata.clone().map(to_wit_metadata))
     }
 
     fn add_metadata(
@@ -80,7 +80,7 @@ impl<T> HostMessageWithStore<T> for WasiMessaging {
     fn set_metadata(
         mut host: Access<'_, T, Self>, self_: Resource<Message>, meta: types::Metadata,
     ) -> wasmtime::Result<()> {
-        host.get().table.get_mut(&self_)?.metadata = Some(meta.into());
+        host.get().table.get_mut(&self_)?.metadata = Some(from_wit_metadata(meta));
         Ok(())
     }
 
@@ -99,13 +99,13 @@ impl<T> HostMessageWithStore<T> for WasiMessaging {
     }
 }
 
-impl Host for WasiMessagingCtxView<'_> {
+impl Host for WasiMessagingView<'_> {
     fn convert_error(&mut self, err: Error) -> wasmtime::Result<Error> {
         Ok(err)
     }
 }
-impl HostClient for WasiMessagingCtxView<'_> {}
-impl HostMessage for WasiMessagingCtxView<'_> {}
+impl HostClient for WasiMessagingView<'_> {}
+impl HostMessage for WasiMessagingView<'_> {}
 
 pub fn get_client<T>(
     accessor: &Accessor<T, WasiMessaging>, self_: &Resource<ClientProxy>,

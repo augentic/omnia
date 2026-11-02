@@ -3,7 +3,7 @@
 use std::future::Future;
 
 use anyhow::Result;
-use omnia_wasi_sql::{DataType, Row};
+use omnia_backend::sql::{DataType, Row};
 
 /// Types that execute parameterized SQL against a named connection.
 ///
@@ -32,9 +32,10 @@ pub trait TableStore: Send + Sync {
             ) -> impl Future<Output = Result<Vec<Row>>> + Send {
                 async move {
                     let (conn, stmt) = prepare(conn_name, query, params).await?;
-                    omnia_wasi_sql::readwrite::query(&conn, &stmt)
+                    let rows = omnia_wasi_sql::readwrite::query(&conn, &stmt)
                         .await
-                        .map_err(|e| anyhow::anyhow!("query failed: {}", e.trace()))
+                        .map_err(|e| anyhow::anyhow!("query failed: {}", e.trace()))?;
+                    Ok(rows.into_iter().map(Into::into).collect())
                 }
             }
 
@@ -66,6 +67,7 @@ async fn prepare(
     let conn = Connection::open(conn_name)
         .await
         .map_err(|e| anyhow::anyhow!("failed to open connection: {}", e.trace()))?;
+    let params = params.into_iter().map(Into::into).collect();
     let stmt = Statement::prepare(query, params)
         .await
         .map_err(|e| anyhow::anyhow!("failed to prepare statement: {}", e.trace()))?;

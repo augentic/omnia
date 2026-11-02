@@ -6,13 +6,13 @@ use crate::host::generated::wasi::keyvalue::store::{
 };
 use crate::host::resource::BucketProxy;
 use crate::host::store::{Host, HostBucket};
-use crate::host::{Result, WasiKeyValue, WasiKeyValueCtxView};
+use crate::host::{Result, WasiKeyValue, WasiKeyValueView};
 
 impl<T> HostWithStore<T> for WasiKeyValue {
     async fn open(
         accessor: &Accessor<T, Self>, identifier: String,
     ) -> Result<Resource<BucketProxy>> {
-        let bucket = accessor.with(|mut store| store.get().ctx.open_bucket(identifier)).await?;
+        let bucket = accessor.with(|mut store| store.get().client.open_bucket(identifier)).await?;
         let proxy = omnia_core::Proxy(bucket);
         Ok(accessor.with(|mut store| store.get().table.push(proxy))?)
     }
@@ -31,7 +31,7 @@ impl<T> HostBucketWithStore<T> for WasiKeyValue {
         accessor: &Accessor<T, Self>, self_: Resource<BucketProxy>, key: String, value: Vec<u8>,
     ) -> Result<()> {
         let bucket = get_bucket(accessor, &self_)?;
-        bucket.set(key, value).await.context("issue setting value")?;
+        bucket.set(key, value, None).await.context("issue setting value")?;
         Ok(())
     }
 
@@ -66,13 +66,13 @@ impl<T> HostBucketWithStore<T> for WasiKeyValue {
     }
 }
 
-impl Host for WasiKeyValueCtxView<'_> {
+impl Host for WasiKeyValueView<'_> {
     fn convert_error(&mut self, err: Error) -> wasmtime::Result<Error> {
         Ok(err)
     }
 }
 
-impl HostBucket for WasiKeyValueCtxView<'_> {}
+impl HostBucket for WasiKeyValueView<'_> {}
 
 pub fn get_bucket<T>(
     accessor: &Accessor<T, WasiKeyValue>, self_: &Resource<BucketProxy>,

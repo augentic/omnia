@@ -148,7 +148,7 @@ One filter governs the host console and every guest: its bare level is a `-v`/`-
 
 ### `the default echo backend cannot satisfy format::schema`
 
-The runtime is serving `wasi-model` with the echo `ModelDefault`, which answers text/json completions with the prompt itself but cannot fabricate a value conforming to a guest-supplied JSON Schema. Bind a real backend (`omnia-genai`, `omnia-cursor`) in `runtime!`, or define an inline canned `WasiModelCtx` in tests (see [Testing Policy](guides/testing-policy.md#canned-model-backends)).
+The runtime is serving `wasi-model` with the echo `ModelDefault`, which answers text/json completions with the prompt itself but cannot fabricate a value conforming to a guest-supplied JSON Schema. Bind a real backend (`omnia-genai`, `omnia-cursor`) in `runtime!`, or define an inline canned `ModelClient` in tests (see [Testing Policy](guides/testing-policy.md#canned-model-backends)).
 
 ### `invalid-request` errors
 

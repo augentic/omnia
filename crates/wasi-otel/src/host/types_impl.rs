@@ -1,10 +1,10 @@
 use opentelemetry::{Array, Key, Value};
 use opentelemetry_sdk::Resource;
 
-use crate::host::WasiOtelCtxView;
+use crate::host::WasiOtelView;
 use crate::host::generated::omnia::otel::types;
 
-impl types::Host for WasiOtelCtxView<'_> {
+impl types::Host for WasiOtelView<'_> {
     fn convert_error(&mut self, err: types::Error) -> wasmtime::Result<types::Error> {
         tracing::error!("{err}");
         Ok(err)

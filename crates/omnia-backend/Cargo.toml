@@ -1,0 +1,141 @@
+[package]
+name = "omnia-backend"
+description = "Engine-free service contracts, value types, and default implementations for Omnia capabilities"
+readme = "README.md"
+authors.workspace = true
+categories.workspace = true
+edition.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = []
+
+# Enables the in-memory and process default implementations (`*Default`).
+defaults = []
+
+blobstore = ["dep:bytes", "dep:parking_lot", "dep:tracing"]
+config = ["dep:tracing"]
+docstore = ["dep:chrono", "dep:serde_json", "dep:tracing"]
+http = [
+    "dep:base64ct",
+    "dep:bytes",
+    "dep:fromenv",
+    "dep:http",
+    "dep:http-body",
+    "dep:http-body-util",
+    "dep:hyper",
+    "dep:reqwest",
+    "dep:rustls",
+    "dep:thiserror",
+    "dep:tokio",
+    "dep:tracing",
+    "dep:x509-cert",
+]
+identity = []
+keyvalue = ["dep:moka", "dep:tracing"]
+messaging = ["dep:thiserror", "dep:tokio", "dep:tokio-stream", "dep:tracing"]
+model = [
+    "dep:bon",
+    "dep:schemars",
+    "dep:serde",
+    "dep:serde_json",
+    "dep:thiserror",
+    "dep:tokio",
+    "dep:tracing",
+]
+otel = [
+    "dep:opentelemetry",
+    "dep:opentelemetry-otlp",
+    "dep:opentelemetry-proto",
+    "dep:opentelemetry_sdk",
+    "dep:tracing",
+    "dep:tracing-opentelemetry",
+    "dep:tracing-subscriber",
+]
+plugins = ["dep:wasm-pkg-common"]
+sql = []
+vault = ["dep:parking_lot", "dep:tracing"]
+vcs = ["dep:thiserror"]
+websocket = [
+    "dep:dashmap",
+    "dep:futures-channel",
+    "dep:futures-util",
+    "dep:tokio",
+    "dep:tokio-stream",
+    "dep:tokio-tungstenite",
+    "dep:tracing",
+]
+
+# Bundled SQLite default (`SqlDefault`).
+sqlite = [
+    "sql",
+    "defaults",
+    "dep:fromenv",
+    "dep:parking_lot",
+    "dep:rusqlite",
+    "dep:tokio",
+    "dep:tracing",
+]
+
+# OAuth2 client-credentials default (`IdentityDefault`).
+oauth = [
+    "identity",
+    "defaults",
+    "dep:fromenv",
+    "dep:oauth2",
+    "dep:tracing",
+]
+
+[dependencies]
+anyhow.workspace = true
+bon = { workspace = true, optional = true }
+chrono = { workspace = true, optional = true }
+schemars = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+thiserror = { workspace = true, optional = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+base64ct = { workspace = true, optional = true }
+bytes = { workspace = true, optional = true }
+cap-fs-ext.workspace = true
+cap-std.workspace = true
+dashmap = { workspace = true, optional = true }
+fromenv = { workspace = true, optional = true }
+futures.workspace = true
+futures-channel = { workspace = true, optional = true }
+futures-util = { workspace = true, optional = true }
+http = { workspace = true, optional = true }
+http-body = { workspace = true, optional = true }
+http-body-util = { workspace = true, optional = true }
+hyper = { workspace = true, optional = true }
+moka = { workspace = true, optional = true }
+oauth2 = { workspace = true, optional = true }
+opentelemetry = { workspace = true, features = ["metrics", "trace"], optional = true }
+opentelemetry-otlp = { workspace = true, features = ["grpc-tonic", "metrics", "trace"], optional = true }
+opentelemetry-proto = { workspace = true, optional = true }
+opentelemetry_sdk = { workspace = true, features = ["metrics", "trace"], optional = true }
+parking_lot = { workspace = true, optional = true }
+reqwest = { workspace = true, features = ["http2", "rustls-no-provider", "stream", "system-proxy"], optional = true }
+rusqlite = { workspace = true, optional = true }
+rustls = { workspace = true, optional = true }
+tokio = { workspace = true, features = ["macros", "net", "rt", "sync", "time"], optional = true }
+tokio-stream = { workspace = true, optional = true }
+tokio-tungstenite = { workspace = true, optional = true }
+tracing = { workspace = true, optional = true }
+tracing-opentelemetry = { workspace = true, features = ["metrics"], optional = true }
+tracing-subscriber = { workspace = true, features = ["ansi", "smallvec"], optional = true }
+wasm-pkg-common = { workspace = true, optional = true }
+x509-cert = { workspace = true, optional = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+rcgen.workspace = true
+tokio = { workspace = true, features = ["macros", "rt"] }
