@@ -4,7 +4,7 @@
 //!
 //! Each function exercises one row of the portable semantic contract over the
 //! `omnia_sdk` capability trait alone, panicking on any deviation. Use the
-//! [`conformance!`](crate::conformance) macro in a test module to require a
+//! [`conformance!`](crate::conformance!) macro in a test module to require a
 //! paired test for every scenario in the selected capabilities.
 
 use std::time::Duration;
