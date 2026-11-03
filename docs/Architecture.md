@@ -152,7 +152,7 @@ cfg_select! {
 
 Each crate's `wit/` directory holds the [WIT](https://component-model.bytecodealliance.org/design/wit.html) interface definitions, with standard WASI dependencies vendored under `wit/deps/`.
 
-### Guest SDK (`crates/omnia-sdk`, `crates/guest-macros`)
+### Guest SDK (`crates/sdk`, `crates/guest-macros`)
 
 `omnia-sdk` defines transport-neutral `Handler`, `Client`, and `Context` plus three transport adapters under `omnia_sdk::api`: the axum-backed HTTP router (`http`, behind the default `http` feature), the exact-topic messaging router (`messaging`), and the command façade (`command`: `parse` → `Command::call` → `Response`, with `command!` binding the `wasi:cli/run` export; clap-backed parts behind the `command` feature). Applications own their WASI exports and call the matching adapter. Failures share one vocabulary across transports: `Error` maps to an HTTP status and to an exit code (1/2/3/4; clap usage errors exit 64), and both HTTP and the command line emit the same `api::ErrorBody` discriminant. Every transport carrier (`x-request-id` headers, messaging metadata, `Metadata::from_env`) mints a request id when none arrives, and `Client::call` runs the handler in a span carrying it. The capability traits (`TableStore` behind the `sql` feature, `DocumentStore` behind `docstore`, both default), `WasiProvider`, and the MCP server module (`mcp::McpServer`, `mcp::router`) live in `omnia-sdk`; `guest-macros` provides `#[derive(Provider)]`, `#[capability]`, and the `#[instrument]` tracing attribute.
 
@@ -224,14 +224,14 @@ The consolidated list is in [Configuration](reference/configuration.md); individ
 omnia/
 ├── crates/
 │   ├── omnia/              # Composition root (assembly, lifecycle, optional crates, runtime!)
-│   ├── omnia-backend/      # Engine-free service contracts (*Client), resource traits, value types, Connect
-│   ├── omnia-core/         # Live-runtime SDK (engine, registry, dispatch, stores, MountRegistry, Telemetry)
-│   ├── omnia-link/         # Guest-to-guest dispatch (InProcessLinks; re-exported by omnia behind `link`)
-│   ├── omnia-sdk/          # Guest SDK (Handler/Client/Context, HTTP/messaging/command adapters, errors, capabilities, MCP)
+│   ├── backend/            # Engine-free service contracts (*Client), resource traits, value types, Connect
+│   ├── core/               # Live-runtime SDK (engine, registry, dispatch, stores, MountRegistry, Telemetry)
+│   ├── link/               # Guest-to-guest dispatch (InProcessLinks; re-exported by omnia behind `link`)
+│   ├── sdk/                # Guest SDK (Handler/Client/Context, HTTP/messaging/command adapters, errors, capabilities, MCP)
 │   ├── guest-macros/       # #[instrument] and #[derive(Provider)] proc macros
 │   ├── host-macros/        # runtime! proc-macro
-│   ├── omnia-plugin/       # Plugins capability (loader host + acquisition; re-exported by omnia)
-│   ├── omnia-cli/          # Leaf `run` grammar (selected by omnia's `cli` feature)
+│   ├── plugin/             # Plugins capability (loader host + acquisition; re-exported by omnia)
+│   ├── cli/                # Leaf `run` grammar (selected by omnia's `cli` feature)
 │   └── wasi-*/             # WASI interface implementations
 │       ├── src/
 │       │   ├── guest.rs    # Guest bindings (wasm32)

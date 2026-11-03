@@ -79,5 +79,5 @@ tower.workspace = true
 tracing-subscriber.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-omnia-test = { path = "../omnia-test", default-features = false, features = ["guest"] }
+omnia-test = { path = "../test", default-features = false, features = ["guest"] }
 trybuild.workspace = true

@@ -52,8 +52,8 @@ Every row of the portable contract is verified by a generic scenario function in
 
 ### Where the scenarios run
 
-1. **`WasiProvider`** (`crates/test-programs/programs/conformance/portable.rs`, driven by `conformance_portable` in `crates/omnia-test/tests/host.rs`) — the scenarios inside a real guest, through omnia's runtime, over every in-memory default. This is the run that holds the runtime to the contract.
-2. **`omnia_test::guest::Provider`** (`crates/omnia-test/tests/conformance.rs`) — the stateful scenarios over the handler-rung doubles, each test also asserting what reached its double, so a handler tested natively is tested against the contract the runtime keeps.
+1. **`WasiProvider`** (`crates/test-programs/programs/conformance/portable.rs`, driven by `conformance_portable` in `crates/test/tests/host.rs`) — the scenarios inside a real guest, through omnia's runtime, over every in-memory default. This is the run that holds the runtime to the contract.
+2. **`omnia_test::guest::Provider`** (`crates/test/tests/conformance.rs`) — the stateful scenarios over the handler-rung doubles, each test also asserting what reached its double, so a handler tested natively is tested against the contract the runtime keeps.
 
 A production backend can join through its crate's own suite: `omnia_test::host::Backends` takes the backend in place of a default, so the same guest runs over it behind a service-up gate.
 

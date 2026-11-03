@@ -118,5 +118,5 @@ fn main() {
 ## Examples to read
 
 - Handler rung: [`crates/tally-connector/tests/static.rs`](https://github.com/augentic/omnia-exemplar/blob/main/crates/tally-connector/tests/static.rs) in the exemplar — a `Config + Publish` handler run against `omnia_test::guest::Provider`, seeded config, published records asserted.
-- Component rung and the overlay: [`crates/omnia-test/tests/host.rs`](../../crates/omnia-test/tests/host.rs) — `runtime_overlay` and `overlay_mount` drive a `runtime!` module's `Hooks` through `Deployment::from(manifest())`.
+- Component rung and the overlay: [`crates/test/tests/host.rs`](../../crates/test/tests/host.rs) — `runtime_overlay` and `overlay_mount` drive a `runtime!` module's `Hooks` through `Deployment::from(manifest())`.
 - Fixture rung: [`crates/test-programs/build.rs`](../../crates/test-programs/build.rs), the build that feeds omnia's own e2e suites — in the guest package itself, which the `wasm32` no-op makes safe.

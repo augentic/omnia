@@ -48,7 +48,7 @@ wasip3.workspace = true
 # dependency above, only its server side is test-only.
 hyper = { workspace = true, features = ["http1", "server"] }
 omnia = { path = "../omnia" }
-omnia-test = { path = "../omnia-test", default-features = false, features = ["host"] }
+omnia-test = { path = "../test", default-features = false, features = ["host"] }
 omnia-wasi-config = { path = "../wasi-config" }
 omnia-wasi-otel = { path = "../wasi-otel" }
 # Mints the throwaway `Client-Cert` bundles the tests feed the validator, so

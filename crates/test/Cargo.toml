@@ -125,7 +125,7 @@ bytes.workspace = true
 http.workspace = true
 http-body-util.workspace = true
 omnia = { path = "../omnia" }
-omnia-sdk = { path = "../omnia-sdk", default-features = false }
+omnia-sdk = { path = "../sdk", default-features = false }
 omnia-wasi-blobstore = { path = "../wasi-blobstore" }
 omnia-wasi-config = { path = "../wasi-config" }
 omnia-wasi-keyvalue = { path = "../wasi-keyvalue" }

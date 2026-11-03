@@ -37,7 +37,7 @@ wit-bindgen.workspace = true
 cap-std.workspace = true
 futures.workspace = true
 omnia = { path = "../omnia" }
-omnia-test = { path = "../omnia-test", default-features = false, features = ["host"] }
+omnia-test = { path = "../test", default-features = false, features = ["host"] }
 parking_lot.workspace = true
 test-programs.workspace = true
 tokio = { workspace = true, features = ["macros", "rt"] }

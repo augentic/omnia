@@ -33,7 +33,7 @@ wit-bindgen.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 omnia = { path = "../omnia" }
-omnia-test = { path = "../omnia-test", default-features = false, features = ["host"] }
+omnia-test = { path = "../test", default-features = false, features = ["host"] }
 omnia-wasi-otel = { path = "../wasi-otel" }
 test-programs.workspace = true
 tokio = { workspace = true, features = ["macros", "rt"] }

@@ -109,16 +109,16 @@ x509-cert = { version = "0.3.0", default-features = false, features = ["std"] }
 
 # internally referenced crates
 omnia = { path = "crates/omnia", version = "0.38.0" }
-omnia-backend = { path = "crates/omnia-backend", version = "0.38.0", default-features = false }
-omnia-cli = { path = "crates/omnia-cli", version = "0.38.0" }
-omnia-compile = { path = "crates/omnia-compile", version = "0.38.0", default-features = false }
-omnia-core = { path = "crates/omnia-core", version = "0.38.0", default-features = false }
+omnia-backend = { path = "crates/backend", version = "0.38.0", default-features = false }
+omnia-cli = { path = "crates/cli", version = "0.38.0" }
+omnia-compile = { path = "crates/compile", version = "0.38.0", default-features = false }
+omnia-core = { path = "crates/core", version = "0.38.0", default-features = false }
 omnia-guest-macros = { path = "crates/guest-macros", version = "0.38.0" }
 omnia-host-macros = { path = "crates/host-macros", version = "0.38.0" }
-omnia-link = { path = "crates/omnia-link", version = "0.38.0" }
-omnia-plugin = { path = "crates/omnia-plugin", version = "0.38.0" }
-omnia-sdk = { path = "crates/omnia-sdk", version = "0.38.0", default-features = false }
-omnia-test = { path = "crates/omnia-test", version = "0.38.0", default-features = false }
+omnia-link = { path = "crates/link", version = "0.38.0" }
+omnia-plugin = { path = "crates/plugin", version = "0.38.0" }
+omnia-sdk = { path = "crates/sdk", version = "0.38.0", default-features = false }
+omnia-test = { path = "crates/test", version = "0.38.0", default-features = false }
 omnia-wasi-blobstore = { path = "crates/wasi-blobstore", version = "0.38.0" }
 omnia-wasi-config = { path = "crates/wasi-config", version = "0.38.0" }
 omnia-wasi-docstore = { path = "crates/wasi-docstore", version = "0.38.0" }

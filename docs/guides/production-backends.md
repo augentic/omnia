@@ -47,7 +47,7 @@ Add the backend crate to your host's `Cargo.toml`. Each `omnia-backends` release
 omnia-redis = "0.29"
 ```
 
-For development against unreleased omnia changes, the `omnia-backends` workspace patches all `omnia`/`omnia-wasi-*` crates via `[patch.crates-io]` — to the omnia git repository by default, or to a sibling checkout by switching those entries to `path = "../omnia/crates/<name>"`. Mirror whichever pattern fits if your host lives in a third workspace.
+For development against unreleased omnia changes, the `omnia-backends` workspace patches all `omnia`/`omnia-wasi-*` crates via `[patch.crates-io]` — to the omnia git repository by default, or to a sibling checkout by switching those entries to `path = "../omnia/crates/<dir>"`, where `<dir>` is the crate directory without its published prefix (`backend` for `omnia-backend`, `wasi-keyvalue` for `omnia-wasi-keyvalue`, and so on). Mirror whichever pattern fits if your host lives in a third workspace.
 
 ## Configuration
 
