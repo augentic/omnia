@@ -16,7 +16,7 @@
 //! - [`backend`] — `wasmtime`-free `*Client` doubles (`ScriptedModel` and
 //!   `ScriptedVcs`), the ones `Backends` swaps in and a backend crate's own
 //!   tests can use without the runtime.
-//! - [`conformance`] — one scenario per row of the capability contract, run
+//! - [`conformance`](mod@conformance) — one scenario per row of the capability contract, run
 //!   by the handler rung over `guest::Provider` and by the component rung
 //!   inside a guest over `WasiProvider`.
 //!

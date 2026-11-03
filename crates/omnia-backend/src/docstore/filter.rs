@@ -1,4 +1,4 @@
-//! Pure JSON evaluation of [`Filter`](super::Filter) and shared in-memory
+//! Pure JSON evaluation of [`Filter`] and shared in-memory
 //! collection storage for `DocStoreDefault` and `omnia_test::guest::MemoryDocs`.
 
 use std::cmp::Ordering;
