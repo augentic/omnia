@@ -15,6 +15,6 @@ export!(Partial);
 
 impl Guest for Partial {
     fn poke(message: String) -> String {
-        omnia_test::link::ops::ping("echoer", &message)
+        self::omnia_test::link::ops::ping("echoer", &message)
     }
 }

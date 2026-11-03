@@ -113,8 +113,37 @@ impl IntoResponse for Encoded {
 }
 
 /// Serve one WASI HTTP request through a finished [`axum::Router`].
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
 pub use omnia_wasi_http::serve;
+
+/// Wires a finished [`axum::Router`] as the guest's `wasi:http/incoming-handler` export.
+///
+/// Instrumented with an `http_guest_handle` span on `wasm32`; expands to nothing on native targets.
+#[macro_export]
+macro_rules! http {
+    ($router:expr) => {
+        #[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
+        const _: () = {
+            use $crate::omnia_wasi_otel;
+
+            struct HttpGuest;
+
+            $crate::wasip3::http::service::export!(HttpGuest);
+
+            impl $crate::wasip3::exports::http::handler::Guest for HttpGuest {
+                #[omnia_wasi_otel::instrument(name = "http_guest_handle", level = $crate::tracing::Level::INFO)]
+                async fn handle(
+                    request: $crate::wasip3::http::types::Request,
+                ) -> ::core::result::Result<
+                    $crate::wasip3::http::types::Response,
+                    $crate::wasip3::http::types::ErrorCode,
+                > {
+                    $crate::api::http::serve($router, request).await
+                }
+            }
+        };
+    };
+}
 
 /// A borrowed raw-request view handed to route decoders.
 #[derive(Debug)]

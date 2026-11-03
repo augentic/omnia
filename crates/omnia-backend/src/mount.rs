@@ -54,7 +54,7 @@ impl ResolvedPreopen {
 /// Holds the cap-std [`Dir`] for bounded `read`/`list`/`write` confined to the
 /// mount, plus the absolute `host_path` of the mount root. A lent descriptor is
 /// matched back to this entry by directory identity (`identity`).
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Mount {
     /// Guest-visible name returned by `preopens.get-directories()`.
     pub name: String,
@@ -76,7 +76,7 @@ pub struct Mount {
 /// A consuming host crate matches a lent `borrow<descriptor>` against this
 /// registry by directory identity, never trusting an OS path read out of the
 /// descriptor.
-#[derive(Clone, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct MountRegistry {
     entries: Vec<Mount>,
 }

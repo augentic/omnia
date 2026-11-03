@@ -3,14 +3,15 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_sdk::model::{Error, Question, WasiModel};
+use omnia_sdk::WasiProvider;
+use omnia_sdk::model::{Error, Question};
 use test_programs::Verdict;
 
 omnia_sdk::command!(scenario);
 
 async fn scenario() {
     let error = Question::<Verdict>::new("verdict")
-        .ask(&WasiModel, "judge this", None, Verdict::passing)
+        .ask(&WasiProvider, "judge this", None, Verdict::passing)
         .await
         .expect_err("the correction exceeds the cap");
     assert!(

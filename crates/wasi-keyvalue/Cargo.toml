@@ -18,7 +18,6 @@ workspace = true
 # dependencies shared across host and guest
 [dependencies]
 anyhow.workspace = true
-serde.workspace = true
 tracing.workspace = true
 
 # host dependencies
@@ -30,8 +29,6 @@ wasmtime-wasi.workspace = true
 
 # guest dependencies
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-chrono = { workspace = true, features = ["serde"] }
-serde_json.workspace = true
 wit-bindgen.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]

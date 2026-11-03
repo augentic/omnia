@@ -197,7 +197,7 @@ fn mint_request_id() -> String {
 // is unique per call but not a CSPRNG, and no native transport mints ids.
 fn random_u64_pair() -> (u64, u64) {
     cfg_select! {
-        target_arch = "wasm32" => {
+        all(target_arch = "wasm32", target_os = "wasi") => {
             use wasip3::random::random::get_random_u64;
 
             (get_random_u64(), get_random_u64())

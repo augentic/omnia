@@ -151,34 +151,22 @@ where
 
 Every fn of that shape is a `Handler<P, I>` through a blanket impl, as is any `Clone` closure of it — so a closure can carry configuration into a route. Implementing `Handler<P, I>` by hand on a local non-fn type is the escape hatch for the rare case a fn cannot express. A mis-shaped fn is reported by rustc's own diagnostics at the route or `Client::call` site. To unit-test a handler without a `Client`, build its context with `Context::new(owner, provider, metadata)`.
 
-For a guest that runs on the WASI-backed capability defaults, the provider is a unit struct with one empty impl per capability. The default method bodies exist on `wasm32` only, so the empty impls compile there and nowhere else; native handler tests run the same handlers against a test provider such as `omnia_test::guest::Provider` instead (see [Testing Omnia-Based Code](testing-omnia-code.md)). This is the form `examples/sql` and `examples/docstore` use:
+For a guest that runs on the WASI-backed capability defaults, `omnia_sdk::WasiProvider` is a zero-sized struct that implements every capability trait on `wasm32`. Native handler tests run the same handlers against `omnia_test::guest::Provider`, and native binaries run them against `omnia_native::Direct<T>` (see [Provider Portability](portability.md) and [Testing Omnia-Based Code](testing-omnia-code.md)):
 
 ```rust,noplayground
-/// Bare provider backed by the default WASI capability implementations.
-struct Provider;
-
-impl Config for Provider {}
-impl HttpRequest for Provider {}
-impl Identity for Provider {}
-impl Publish for Provider {}
-impl StateStore for Provider {}
-```
-
-Routers then map transport events onto handlers: HTTP routes are plain `axum::routing::MethodRouter`s registered on an `axum::Router` whose state is one provider-owning `Client`, and a messaging router maps exact topics. Your WASI export stays visible application code — it just hands the event to the router:
-
-```rust
-fn router() -> axum::Router {
+pub fn router<P>(provider: P) -> axum::Router
+where
+    P: Config + HttpRequest + Identity + Publish + StateStore + Clone + Send + Sync + 'static,
+{
     axum::Router::new()
         .route("/api/items", post(create_item))
-        .with_state(Client::new("acme-corp", MyProvider))
+        .with_state(Client::new("acme-corp", provider))
 }
 
-impl Guest for Http {
-    async fn handle(request: Request) -> Result<Response, ErrorCode> {
-        omnia_sdk::api::http::serve(router(), request).await
-    }
-}
+omnia_sdk::http!(router(omnia_sdk::WasiProvider));
 ```
+
+Routers map transport events onto handlers: HTTP routes are plain `axum::routing::MethodRouter`s registered on an `axum::Router` whose state is one provider-owning `Client`, and a messaging router maps exact topics. `omnia_sdk::http!(router(omnia_sdk::WasiProvider))` and `omnia_sdk::messaging!(messaging_router(omnia_sdk::WasiProvider))` expand to the `#[omnia_wasi_otel::instrument]`-scoped WASI exports on `wasm32` and to nothing on native targets.
 
 Messaging uses `api::messaging::Router` and `consume(create_item)`; topic matching is exact. A module that owns topics registers them on an `api::messaging::Routes` of its own, with no client, and the guest merges each into its one `Router` (`Router::merge`), as an `axum::Router` merges a module's routes before `with_state`; a topic registered twice panics where the two meet. The export remains visible application code and calls `api::messaging::handle`. Because the same handler fns register in any router, one guest can expose the same logic over HTTP, messaging, and a CLI without duplicating it.
 

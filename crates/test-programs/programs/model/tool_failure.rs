@@ -2,7 +2,8 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_sdk::model::{Model as _, Request, WasiModel};
+use omnia_sdk::WasiProvider;
+use omnia_sdk::model::{Model as _, Request};
 use test_programs::{lookup, user};
 
 omnia_sdk::command!(scenario);
@@ -10,7 +11,7 @@ omnia_sdk::command!(scenario);
 async fn scenario() {
     let request = Request::builder().messages(vec![user("hi")]).tools(vec![lookup()]).build();
 
-    let reply = WasiModel
+    let reply = WasiProvider
         .complete_with(request, |_call| async { Err::<String, _>("no data".to_owned()) })
         .await
         .expect("the model turns the failure into an answer");

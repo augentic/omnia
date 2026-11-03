@@ -7,7 +7,7 @@ use anyhow::Result;
 /// Sends events to WebSocket or other broadcast channels.
 pub trait Broadcast: Send + Sync {
     cfg_select! {
-        not(target_arch = "wasm32") => {
+        not(all(target_arch = "wasm32", target_os = "wasi")) => {
             /// Send an event to connected WebSocket clients.
             fn send(
                 &self, name: &str, data: &[u8], sockets: Option<Vec<String>>,

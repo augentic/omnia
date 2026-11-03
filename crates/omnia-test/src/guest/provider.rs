@@ -48,8 +48,8 @@ pub struct Provider {
     /// The `Broadcast` double.
     #[provider(Broadcast)]
     pub broadcast: Sink,
-    /// The `StateStore` / `BlobStore` double: one shared `Memory`.
-    #[provider(StateStore, BlobStore)]
+    /// The `StateStore` / `BlobStore` / `Vault` double: one shared `Memory`.
+    #[provider(StateStore, BlobStore, Vault)]
     pub storage: Memory,
     /// The `DocumentStore` double.
     #[provider(DocumentStore)]

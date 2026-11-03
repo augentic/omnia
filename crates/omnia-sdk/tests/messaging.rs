@@ -94,6 +94,10 @@ async fn messaging_merged_routes() {
             .unwrap_or_else(|error| panic!("the merged route handles `{topic}`: {error}"));
     }
     assert_eq!(
+        router.topics().collect::<Vec<_>>(),
+        ["events.created", "events.deleted", "events.updated"]
+    );
+    assert_eq!(
         router.handle(delivery(Some("events"), br#"{"name":"message"}"#)).await,
         Err(DeliveryError::UnhandledTopic("events".to_string()))
     );

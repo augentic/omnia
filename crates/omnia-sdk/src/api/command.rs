@@ -84,16 +84,19 @@ fn env_key(prefix: &str, name: &str) -> String {
 #[macro_export]
 macro_rules! command {
     ($entry:path) => {
-        struct CliGuest;
+        #[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
+        const _: () = {
+            struct CliGuest;
 
-        $crate::wasip3::cli::command::export!(CliGuest);
+            $crate::wasip3::cli::command::export!(CliGuest);
 
-        impl $crate::wasip3::exports::cli::run::Guest for CliGuest {
-            async fn run() -> ::core::result::Result<(), ()> {
-                $crate::api::command::execute_wasi($entry()).await;
-                Ok(())
+            impl $crate::wasip3::exports::cli::run::Guest for CliGuest {
+                async fn run() -> ::core::result::Result<(), ()> {
+                    $crate::api::command::execute_wasi($entry()).await;
+                    Ok(())
+                }
             }
-        }
+        };
     };
 }
 
@@ -430,7 +433,7 @@ cfg_select! {
 ///
 /// Initializes guest telemetry, awaits `entry`, and flushes telemetry and
 /// stdout.
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
 #[doc(hidden)]
 pub async fn execute_wasi<E: IntoExit>(entry: impl Future<Output = E>) {
     // `scope` exports telemetry before an `exit-with-code`, which never returns.

@@ -260,7 +260,6 @@ mod host {
         value.to_be_bytes().to_vec()
     }
 
-    // TTL expiry and CAS-preserves-TTL are tested here until A8 exposes `omnia:keyvalue/ttl` to guests.
     #[cfg(test)]
     mod tests {
         use std::time::Duration;

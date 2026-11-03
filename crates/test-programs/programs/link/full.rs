@@ -14,10 +14,10 @@ export!(Full);
 
 impl Guest for Full {
     fn poke(message: String) -> String {
-        omnia_test::link::ops::ping("echoer", &message)
+        self::omnia_test::link::ops::ping("echoer", &message)
     }
 
     async fn poke_async(message: String) -> String {
-        omnia_test::link::ops::ping_async("echoer".to_owned(), message).await
+        self::omnia_test::link::ops::ping_async("echoer".to_owned(), message).await
     }
 }

@@ -4,6 +4,7 @@ mod atomics_impl;
 mod batch_impl;
 mod resource;
 mod store_impl;
+mod ttl_impl;
 
 mod generated {
     pub use self::wasi::keyvalue::atomics::CasError;
@@ -35,6 +36,7 @@ pub use omnia_core::FutureResult;
 use omnia_core::{Host, Server, StoreView};
 use wasmtime::component::{HasData, Linker};
 
+use self::generated::omnia::keyvalue::ttl;
 use self::generated::wasi::keyvalue::store::Error;
 use self::generated::wasi::keyvalue::{atomics, batch, store};
 pub use self::resource::*;
@@ -57,7 +59,8 @@ where
     fn add_to_linker(linker: &mut Linker<T>) -> anyhow::Result<()> {
         store::add_to_linker::<_, Self>(linker, T::view)?;
         atomics::add_to_linker::<_, Self>(linker, T::view)?;
-        Ok(batch::add_to_linker::<_, Self>(linker, T::view)?)
+        batch::add_to_linker::<_, Self>(linker, T::view)?;
+        Ok(ttl::add_to_linker::<_, Self>(linker, T::view)?)
     }
 }
 

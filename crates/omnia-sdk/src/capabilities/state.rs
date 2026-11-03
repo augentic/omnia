@@ -1,8 +1,7 @@
 //! Key-value state capability.
 //!
-//! The atomics (`cas` / `increment`) act on raw bucket bytes. A TTL-less `set`
-//! stores raw bytes too, so those keys round-trip through `cas`; TTL-enveloped
-//! values (`set` with `ttl_secs`) are not CAS targets.
+//! Values are stored as raw bucket bytes; `set` with `ttl_secs` delegates
+//! expiry to the store implementation and `cas` preserves any remaining TTL.
 
 use std::future::Future;
 
@@ -24,51 +23,45 @@ pub enum CasError {
 /// Store and retrieve key-value state, optionally with a TTL.
 pub trait StateStore: Send + Sync {
     cfg_select! {
-        not(target_arch = "wasm32") => {
-            /// Retrieve a previously stored value from the state store.
-            fn get(&self, key: &str) -> impl Future<Output = Result<Option<Vec<u8>>>> + Send;
-
-            /// Store a value in the state store.
-            fn set(
-                &self, key: &str, value: &[u8], ttl_secs: Option<u64>,
-            ) -> impl Future<Output = Result<Option<Vec<u8>>>> + Send;
-
-            /// Delete a value from the state store.
-            fn delete(&self, key: &str) -> impl Future<Output = Result<()>> + Send;
-
-            /// One-shot compare-and-swap: replace the value at `key` only while the
-            /// stored value matches `expected` (`None` means "key absent"). A mismatch
-            /// fails with [`CasError::Conflict`]; there is no retry loop.
-            fn cas(
-                &self, key: &str, expected: Option<&[u8]>, value: &[u8],
-            ) -> impl Future<Output = Result<(), CasError>> + Send;
-
-            /// Atomically increment the integer at `key` by `delta` (absent starts at
-            /// zero), returning the new value.
-            fn increment(&self, key: &str, delta: i64) -> impl Future<Output = Result<i64>> + Send;
-        }
-        _ => {
+        all(target_arch = "wasm32", target_os = "wasi") => {
             /// Retrieve a previously stored value from the state store.
             fn get(&self, key: &str) -> impl Future<Output = Result<Option<Vec<u8>>>> + Send {
                 use anyhow::Context;
                 async move {
-                    let bucket = omnia_wasi_keyvalue::cache::open(omnia_backend::keyvalue::BUCKET)
-                        .await
-                        .context("opening cache")?;
-                    bucket.get(key).await.context("reading state from cache")
+                    let bucket = omnia_wasi_keyvalue::store::open(
+                        omnia_backend::keyvalue::BUCKET.to_string(),
+                    )
+                    .await
+                    .context("opening cache")?;
+                    bucket.get(key.to_string()).await.context("reading state from cache")
                 }
             }
 
             /// Store a value in the state store.
             fn set(
                 &self, key: &str, value: &[u8], ttl_secs: Option<u64>,
-            ) -> impl Future<Output = Result<Option<Vec<u8>>>> + Send {
+            ) -> impl Future<Output = Result<()>> + Send {
                 use anyhow::Context;
                 async move {
-                    let bucket = omnia_wasi_keyvalue::cache::open(omnia_backend::keyvalue::BUCKET)
+                    let bucket = omnia_wasi_keyvalue::store::open(
+                        omnia_backend::keyvalue::BUCKET.to_string(),
+                    )
+                    .await
+                    .context("opening cache")?;
+                    match ttl_secs {
+                        Some(secs) => omnia_wasi_keyvalue::ttl::set(
+                            &bucket,
+                            key.to_string(),
+                            value.to_vec(),
+                            secs,
+                        )
                         .await
-                        .context("opening cache")?;
-                    bucket.set(key, value, ttl_secs).await.context("writing state to cache")
+                        .context("writing state with ttl to cache"),
+                        None => bucket
+                            .set(key.to_string(), value.to_vec())
+                            .await
+                            .context("writing state to cache"),
+                    }
                 }
             }
 
@@ -76,10 +69,12 @@ pub trait StateStore: Send + Sync {
             fn delete(&self, key: &str) -> impl Future<Output = Result<()>> + Send {
                 use anyhow::Context;
                 async move {
-                    let bucket = omnia_wasi_keyvalue::cache::open(omnia_backend::keyvalue::BUCKET)
-                        .await
-                        .context("opening cache")?;
-                    bucket.delete(key).await.context("deleting entry from cache")
+                    let bucket = omnia_wasi_keyvalue::store::open(
+                        omnia_backend::keyvalue::BUCKET.to_string(),
+                    )
+                    .await
+                    .context("opening cache")?;
+                    bucket.delete(key.to_string()).await.context("deleting entry from cache")
                 }
             }
 
@@ -138,6 +133,29 @@ pub trait StateStore: Send + Sync {
                 }
             }
         }
+        _ => {
+            /// Retrieve a previously stored value from the state store.
+            fn get(&self, key: &str) -> impl Future<Output = Result<Option<Vec<u8>>>> + Send;
+
+            /// Store a value in the state store.
+            fn set(
+                &self, key: &str, value: &[u8], ttl_secs: Option<u64>,
+            ) -> impl Future<Output = Result<()>> + Send;
+
+            /// Delete a value from the state store.
+            fn delete(&self, key: &str) -> impl Future<Output = Result<()>> + Send;
+
+            /// One-shot compare-and-swap: replace the value at `key` only while the
+            /// stored value matches `expected` (`None` means "key absent"). A mismatch
+            /// fails with [`CasError::Conflict`]; there is no retry loop.
+            fn cas(
+                &self, key: &str, expected: Option<&[u8]>, value: &[u8],
+            ) -> impl Future<Output = Result<(), CasError>> + Send;
+
+            /// Atomically increment the integer at `key` by `delta` (absent starts at
+            /// zero), returning the new value.
+            fn increment(&self, key: &str, delta: i64) -> impl Future<Output = Result<i64>> + Send;
+        }
     }
 }
 
@@ -148,7 +166,7 @@ delegate_deref!(StateStore {
 
     fn set(
         &self, key: &str, value: &[u8], ttl_secs: Option<u64>,
-    ) -> impl Future<Output = Result<Option<Vec<u8>>>> + Send {
+    ) -> impl Future<Output = Result<()>> + Send {
         (**self).set(key, value, ttl_secs)
     }
 

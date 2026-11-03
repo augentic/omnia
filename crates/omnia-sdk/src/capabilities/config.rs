@@ -7,7 +7,7 @@ use anyhow::Result;
 /// Provides configuration values from the WASI guest to dependent crates.
 pub trait Config: Send + Sync {
     cfg_select! {
-        not(target_arch = "wasm32") => {
+        not(all(target_arch = "wasm32", target_os = "wasi")) => {
             /// Get configuration setting.
             fn get(&self, key: &str) -> impl Future<Output = Result<String>> + Send;
         }

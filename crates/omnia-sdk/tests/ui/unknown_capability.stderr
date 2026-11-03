@@ -1,4 +1,4 @@
-error: unknown capability `NotACapability`; expected one of: BlobStore, Broadcast, Config, DocumentStore, HttpRequest, Identity, Model, Plugins, Publish, StateStore, TableStore, Vcs
+error: unknown capability `NotACapability`; expected one of: BlobStore, Broadcast, Config, DocumentStore, HttpRequest, Identity, Model, Plugins, Publish, StateStore, TableStore, Vault, Vcs
  --> tests/ui/unknown_capability.rs:5:16
   |
 5 |     #[provider(NotACapability)]

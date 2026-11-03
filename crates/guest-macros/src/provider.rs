@@ -17,6 +17,7 @@ const CAPABILITIES: &[&str] = &[
     "Publish",
     "StateStore",
     "TableStore",
+    "Vault",
     "Vcs",
 ];
 

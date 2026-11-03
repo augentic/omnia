@@ -49,7 +49,7 @@ impl From<Error> for crate::Error {
 /// provider that is `Clone`.
 pub trait Vcs: Send + Sync {
     cfg_select! {
-        not(target_arch = "wasm32") => {
+        not(all(target_arch = "wasm32", target_os = "wasi")) => {
             /// The commit `revision` names in the repository at `repo`: a
             /// label, a tag, or a commit id, whole or a unique prefix.
             fn resolve(
@@ -433,17 +433,13 @@ delegate_deref!(Vcs {
     }
 });
 
-/// The WASI-backed provider a `wasm32` guest hands its wasm-free core; the
-/// default method bodies carry the whole delegation.
-#[cfg(target_arch = "wasm32")]
-#[derive(Clone, Copy, Debug)]
-pub struct WasiVcs;
-
-#[cfg(target_arch = "wasm32")]
-impl Vcs for WasiVcs {}
+/// Deprecated alias for [`WasiProvider`](crate::WasiProvider).
+#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
+#[deprecated(note = "use `omnia_sdk::WasiProvider`")]
+pub type WasiVcs = crate::WasiProvider;
 
 // the lend helper
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
 mod wire {
     use omnia_wasi_vcs::types;
     use wasip3::filesystem::preopens;

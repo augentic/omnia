@@ -10,7 +10,7 @@ use omnia_backend::sql::{DataType, Row};
 /// Default WASM implementations use the WASI SQL bindings to execute queries.
 pub trait TableStore: Send + Sync {
     cfg_select! {
-        not(target_arch = "wasm32") => {
+        not(all(target_arch = "wasm32", target_os = "wasi")) => {
             /// Executes a query and returns the result rows.
             fn query(
                 &self, conn_name: String, query: String, params: Vec<DataType>,
@@ -58,7 +58,7 @@ pub trait TableStore: Send + Sync {
     }
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
 async fn prepare(
     conn_name: String, query: String, params: Vec<DataType>,
 ) -> Result<(omnia_wasi_sql::types::Connection, omnia_wasi_sql::types::Statement)> {

@@ -19,10 +19,20 @@ workspace = true
 # No default: a consumer names the rung it uses, and a build-dependency line
 # that forgets `default-features = false` still pulls nothing but `std`.
 default = []
+# Cross-provider contract conformance scenarios and the `conformance!` macro.
+conformance = [
+    "dep:bytes",
+    "dep:http",
+    "dep:http-body-util",
+    "dep:omnia-sdk",
+    "omnia-sdk/sql",
+    "omnia-sdk/docstore",
+]
 # Native doubles for the `omnia_sdk` capability traits, plus the `Provider` that bundles them.
 # `omnia-sdk/sql` and `omnia-sdk/docstore` carry the `TableStore` and
 # `DocumentStore` traits the `ScriptedTables` and `MemoryDocs` doubles implement.
 guest = [
+    "conformance",
     "dep:anyhow",
     "dep:bytes",
     "dep:http",
@@ -31,12 +41,14 @@ guest = [
     "dep:omnia-backend",
     "omnia-backend/docstore",
     "omnia-backend/model",
+    "dep:omnia-native",
     "dep:omnia-sdk",
     "omnia-sdk/sql",
     "omnia-sdk/docstore",
 ]
 # The component runtime harness: `Deployment`, `Backends`, `ScriptedModel`, `Scratch`.
 host = [
+    "conformance",
     "dep:anyhow",
     "dep:futures",
     "dep:omnia",
@@ -74,6 +86,7 @@ http-body = { workspace = true, optional = true }
 http-body-util = { workspace = true, optional = true }
 omnia = { workspace = true, optional = true }
 omnia-backend = { workspace = true, optional = true }
+omnia-native = { workspace = true, optional = true }
 omnia-sdk = { workspace = true, optional = true }
 omnia-wasi-blobstore = { workspace = true, optional = true }
 omnia-wasi-config = { workspace = true, optional = true }
@@ -119,6 +132,10 @@ required-features = ["guest"]
 
 [[test]]
 name = "provider"
+required-features = ["guest"]
+
+[[test]]
+name = "conformance"
 required-features = ["guest"]
 
 [[test]]

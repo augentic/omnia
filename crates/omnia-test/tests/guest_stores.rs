@@ -43,11 +43,8 @@ fn doc(id: &str, json: &str) -> Document {
 #[test]
 fn state_set_get_delete() {
     let memory = Memory::default();
-    assert_eq!(now(StateStore::set(&memory, "k", b"v1", None)).expect("set"), None);
-    assert_eq!(
-        now(StateStore::set(&memory, "k", b"v2", Some(30))).expect("set"),
-        Some(b"v1".to_vec())
-    );
+    now(StateStore::set(&memory, "k", b"v1", None)).expect("set");
+    now(StateStore::set(&memory, "k", b"v2", Some(30))).expect("set");
     assert_eq!(now(StateStore::get(&memory, "k")).expect("get"), Some(b"v2".to_vec()));
     assert_eq!(memory.state("k"), Some(b"v2".to_vec()));
     now(StateStore::delete(&memory, "k")).expect("delete");

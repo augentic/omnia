@@ -2,7 +2,8 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_sdk::model::{Error, Format, Model as _, Request, SchemaFormat, WasiModel};
+use omnia_sdk::WasiProvider;
+use omnia_sdk::model::{Error, Format, Model as _, Request, SchemaFormat};
 use test_programs::{VERDICT_SCHEMA, user};
 
 omnia_sdk::command!(scenario);
@@ -15,7 +16,7 @@ async fn scenario() {
         ))
         .build();
 
-    let error = WasiModel.complete(request).await.expect_err("echo cannot satisfy a schema");
+    let error = WasiProvider.complete(request).await.expect_err("echo cannot satisfy a schema");
     assert!(
         matches!(error, Error::Backend(ref detail) if detail.contains("cannot satisfy format::schema")),
         "unexpected: {error:?}"

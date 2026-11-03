@@ -132,6 +132,12 @@ macro_rules! __delegate {
         }
     };
     (@methods Identity; $this:ident => $($target:tt)+) => {
+        fn token(
+            &$this, identity: &str, scopes: &[::std::string::String],
+        ) -> impl ::std::future::Future<Output = $crate::anyhow::Result<$crate::identity::AccessToken>> + ::core::marker::Send {
+            $crate::Identity::token(&$($target)+, identity, scopes)
+        }
+
         fn access_token(
             &$this, identity: ::std::string::String,
         ) -> impl ::std::future::Future<Output = $crate::anyhow::Result<::std::string::String>> + ::core::marker::Send {
@@ -178,7 +184,7 @@ macro_rules! __delegate {
 
         fn set(
             &$this, key: &str, value: &[u8], ttl_secs: ::core::option::Option<u64>,
-        ) -> impl ::std::future::Future<Output = $crate::anyhow::Result<::core::option::Option<::std::vec::Vec<u8>>>> + ::core::marker::Send {
+        ) -> impl ::std::future::Future<Output = $crate::anyhow::Result<()>> + ::core::marker::Send {
             $crate::StateStore::set(&$($target)+, key, value, ttl_secs)
         }
 
@@ -211,6 +217,37 @@ macro_rules! __delegate {
             &$this, conn_name: ::std::string::String, query: ::std::string::String, params: ::std::vec::Vec<$crate::sql::DataType>,
         ) -> impl ::std::future::Future<Output = $crate::anyhow::Result<u32>> + ::core::marker::Send {
             $crate::TableStore::exec(&$($target)+, conn_name, query, params)
+        }
+    };
+    (@methods Vault; $this:ident => $($target:tt)+) => {
+        fn get(
+            &$this, key: &str,
+        ) -> impl ::std::future::Future<Output = $crate::anyhow::Result<::core::option::Option<::std::vec::Vec<u8>>>> + ::core::marker::Send {
+            $crate::Vault::get(&$($target)+, key)
+        }
+
+        fn set(
+            &$this, key: &str, value: &[u8],
+        ) -> impl ::std::future::Future<Output = $crate::anyhow::Result<()>> + ::core::marker::Send {
+            $crate::Vault::set(&$($target)+, key, value)
+        }
+
+        fn delete(
+            &$this, key: &str,
+        ) -> impl ::std::future::Future<Output = $crate::anyhow::Result<()>> + ::core::marker::Send {
+            $crate::Vault::delete(&$($target)+, key)
+        }
+
+        fn exists(
+            &$this, key: &str,
+        ) -> impl ::std::future::Future<Output = $crate::anyhow::Result<bool>> + ::core::marker::Send {
+            $crate::Vault::exists(&$($target)+, key)
+        }
+
+        fn list_ids(
+            &$this,
+        ) -> impl ::std::future::Future<Output = $crate::anyhow::Result<::std::vec::Vec<::std::string::String>>> + ::core::marker::Send {
+            $crate::Vault::list_ids(&$($target)+)
         }
     };
     (@methods Vcs; $this:ident => $($target:tt)+) => {
@@ -348,6 +385,7 @@ pub mod plugins;
 mod state;
 #[cfg(feature = "sql")]
 mod table;
+mod vault;
 pub mod vcs;
 
 pub use blob::{BlobStore, BlobStoreExt, ContainerMetadata, ObjectMetadata};
@@ -356,20 +394,57 @@ pub use config::Config;
 #[cfg(feature = "docstore")]
 pub use document::DocumentStore;
 pub use http::HttpRequest;
-pub use identity::Identity;
+pub use identity::{AccessToken, Identity};
 pub use messaging::{Message, Publish};
 // Generic model wire names stay scoped to the model capability.
 pub use model::Model;
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
+#[expect(deprecated, reason = "re-exporting deprecated alias")]
 pub use model::WasiModel;
 // Loader request names stay scoped to the plugins capability.
 pub use plugins::Plugins;
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
+#[expect(deprecated, reason = "re-exporting deprecated alias")]
 pub use plugins::WasiPlugins;
 pub use state::{CasError, StateStore};
 #[cfg(feature = "sql")]
 pub use table::TableStore;
+pub use vault::Vault;
 // Version-control wire names stay scoped to the vcs capability.
 pub use vcs::Vcs;
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
+#[expect(deprecated, reason = "re-exporting deprecated alias")]
 pub use vcs::WasiVcs;
+
+/// Zero-sized WASI provider implementing every capability trait on `wasm32`.
+///
+/// Delegates to the WASI-backed default method bodies on `wasm32-wasip2`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct WasiProvider;
+
+#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
+impl BlobStore for WasiProvider {}
+#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
+impl Broadcast for WasiProvider {}
+#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
+impl Config for WasiProvider {}
+#[cfg(all(target_arch = "wasm32", target_os = "wasi", feature = "docstore"))]
+impl DocumentStore for WasiProvider {}
+#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
+impl HttpRequest for WasiProvider {}
+#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
+impl Identity for WasiProvider {}
+#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
+impl Model for WasiProvider {}
+#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
+impl Plugins for WasiProvider {}
+#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
+impl Publish for WasiProvider {}
+#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
+impl StateStore for WasiProvider {}
+#[cfg(all(target_arch = "wasm32", target_os = "wasi", feature = "sql"))]
+impl TableStore for WasiProvider {}
+#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
+impl Vault for WasiProvider {}
+#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
+impl Vcs for WasiProvider {}

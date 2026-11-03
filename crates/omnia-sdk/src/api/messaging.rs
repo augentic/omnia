@@ -227,6 +227,11 @@ impl<P: Send + Sync + 'static> Router<P> {
         self
     }
 
+    /// The exact topics registered on this router, in order.
+    pub fn topics(&self) -> impl Iterator<Item = &str> {
+        self.routes.routes.keys().map(String::as_str)
+    }
+
     /// Dispatch one delivery by exact topic.
     ///
     /// # Errors
@@ -252,7 +257,7 @@ impl<P: Send + Sync + 'static> Router<P> {
 /// # Errors
 ///
 /// Returns the WIT delivery failure.
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
 pub async fn handle<P: Send + Sync + 'static>(
     router: &Router<P>, message: omnia_wasi_messaging::types::Message,
 ) -> Result<(), omnia_wasi_messaging::types::Error> {
@@ -266,4 +271,34 @@ pub async fn handle<P: Send + Sync + 'static>(
         .handle(delivery)
         .await
         .map_err(|error| omnia_wasi_messaging::types::Error::Other(error.to_string()))
+}
+
+/// Wires a [`Router`] future as the guest's `wasi:messaging/incoming-handler` export.
+///
+/// Instrumented with a `messaging_guest_handle` span on `wasm32`; expands to nothing on native targets.
+#[macro_export]
+macro_rules! messaging {
+    ($router:expr) => {
+        #[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
+        const _: () = {
+            use $crate::omnia_wasi_otel;
+
+            struct MessagingGuest;
+
+            $crate::omnia_wasi_messaging::export!(
+                MessagingGuest with_types_in $crate::omnia_wasi_messaging
+            );
+
+            impl $crate::omnia_wasi_messaging::incoming_handler::Guest for MessagingGuest {
+                #[omnia_wasi_otel::instrument(name = "messaging_guest_handle")]
+                async fn handle(
+                    message: $crate::omnia_wasi_messaging::types::Message,
+                ) -> ::core::result::Result<(), $crate::omnia_wasi_messaging::types::Error>
+                {
+                    let router = $router.await;
+                    $crate::api::messaging::handle(&router, message).await
+                }
+            }
+        };
+    };
 }

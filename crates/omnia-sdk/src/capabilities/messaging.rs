@@ -28,7 +28,7 @@ impl Message {
 /// Publishes messages to a topic.
 pub trait Publish: Send + Sync {
     cfg_select! {
-        not(target_arch = "wasm32") => {
+        not(all(target_arch = "wasm32", target_os = "wasi")) => {
             /// Publish (send) a message to a topic.
             fn send(
                 &self, topic: &str, message: &Message,

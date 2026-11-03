@@ -35,7 +35,7 @@ pub use self::question::{Findings, Question, ToolFuture, Tools};
 /// are bare so hosts and tests supply their own provider.
 pub trait Model: Send + Sync {
     cfg_select! {
-        not(target_arch = "wasm32") => {
+        not(all(target_arch = "wasm32", target_os = "wasi")) => {
             /// Single-shot completion returning one reply. Any tool call the model
             /// issues fails back to it; declare tools (or set `check`) and answer
             /// them through [`Model::complete_with`] instead.
@@ -169,11 +169,7 @@ delegate_deref!(Model {
     }
 });
 
-/// The WASI-backed provider a `wasm32` guest hands its wasm-free core; the
-/// default method body carries the whole delegation.
-#[cfg(target_arch = "wasm32")]
-#[derive(Clone, Copy, Debug)]
-pub struct WasiModel;
-
-#[cfg(target_arch = "wasm32")]
-impl Model for WasiModel {}
+/// Deprecated alias for [`WasiProvider`](crate::WasiProvider).
+#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
+#[deprecated(note = "use `omnia_sdk::WasiProvider`")]
+pub type WasiModel = crate::WasiProvider;

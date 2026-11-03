@@ -11,7 +11,7 @@ use crate::docstore::{Document, QueryOptions, QueryResult};
 /// Default WASM implementations delegate to `wasi:docstore` via `omnia-wasi-docstore`.
 pub trait DocumentStore: Send + Sync {
     cfg_select! {
-        not(target_arch = "wasm32") => {
+        not(all(target_arch = "wasm32", target_os = "wasi")) => {
             /// Fetch a document by id.
             fn get(
                 &self, store: &str, id: &str,

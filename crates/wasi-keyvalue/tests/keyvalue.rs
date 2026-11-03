@@ -48,3 +48,16 @@ async fn keyvalue_bucket() {
     assert_eq!(bucket.get("b".to_owned()).await.expect("get"), Some(b"2".to_vec()));
     assert_eq!(bucket.get("cas".to_owned()).await.expect("get"), Some(b"retried".to_vec()));
 }
+
+#[tokio::test]
+async fn keyvalue_set_with_ttl_expires() {
+    let backends = Backends::defaults().await;
+
+    run_guest(test_programs::KEYVALUE_SET_WITH_TTL_EXPIRES, backends.clone()).await;
+
+    // Raw bytes landed without an envelope; the expired key is gone.
+    let bucket = backends.keyvalue.open_bucket("bucket".to_owned()).await.expect("bucket");
+    assert_eq!(bucket.get("ephemeral".to_owned()).await.expect("get"), None);
+    assert_eq!(bucket.get("live".to_owned()).await.expect("get"), Some(b"raw-bytes".to_vec()));
+    assert_eq!(bucket.keys().await.expect("keys"), ["live"]);
+}

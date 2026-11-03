@@ -6,7 +6,7 @@ use std::future::{Future, ready};
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Result, anyhow};
-use omnia_sdk::{Broadcast, Config, Identity, Message, Publish};
+use omnia_sdk::{AccessToken, Broadcast, Config, Identity, Message, Publish};
 
 /// One broadcast the code under test sent.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -159,8 +159,13 @@ impl FixedIdentity {
 }
 
 impl Identity for FixedIdentity {
-    fn access_token(&self, identity: String) -> impl Future<Output = Result<String>> + Send {
-        self.asked.lock().expect("asked lock").push(identity);
-        ready(Ok(self.token.clone()))
+    fn token(
+        &self, identity: &str, _scopes: &[String],
+    ) -> impl Future<Output = Result<AccessToken>> + Send {
+        self.asked.lock().expect("asked lock").push(identity.to_owned());
+        ready(Ok(AccessToken {
+            token: self.token.clone(),
+            expires_in: 3600,
+        }))
     }
 }

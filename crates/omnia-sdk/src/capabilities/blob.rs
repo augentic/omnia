@@ -11,7 +11,7 @@ pub use omnia_backend::blobstore::{ContainerMetadata, ObjectMetadata};
 /// `omnia-wasi-blobstore`.
 pub trait BlobStore: Send + Sync {
     cfg_select! {
-        not(target_arch = "wasm32") => {
+        not(all(target_arch = "wasm32", target_os = "wasi")) => {
             /// Retrieve an object's data from a container.
             fn get(
                 &self, container: &str, name: &str,
@@ -251,7 +251,7 @@ pub trait BlobStore: Send + Sync {
 /// `BlobStore` by a blanket impl.
 pub trait BlobStoreExt: BlobStore {
     cfg_select! {
-        not(target_arch = "wasm32") => {
+        not(all(target_arch = "wasm32", target_os = "wasi")) => {
             /// Check whether an object exists in a container.
             fn has(
                 &self, container: &str, name: &str,
@@ -291,7 +291,7 @@ pub trait BlobStoreExt: BlobStore {
             ) -> impl Future<Output = Result<()>> + Send {
                 async move {
                     let data = self.get(src_container, src_name).await?.ok_or_else(|| {
-                        anyhow::anyhow!("object not found: {src_container}/{src_name}")
+                        anyhow::anyhow!("source object not found: {src_container}/{src_name}")
                     })?;
                     self.put(dest_container, dest_name, &data).await
                 }
@@ -305,6 +305,9 @@ pub trait BlobStoreExt: BlobStore {
                 &self, src_container: &str, src_name: &str, dest_container: &str, dest_name: &str,
             ) -> impl Future<Output = Result<()>> + Send {
                 async move {
+                    if src_container == dest_container && src_name == dest_name {
+                        return Ok(());
+                    }
                     self.copy_object(src_container, src_name, dest_container, dest_name).await?;
                     self.delete(src_container, src_name).await
                 }
@@ -455,7 +458,7 @@ delegate_deref!(BlobStore {
     }
 });
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
 async fn open_container(container: &str) -> Result<omnia_wasi_blobstore::container::Container> {
     use anyhow::anyhow;
 

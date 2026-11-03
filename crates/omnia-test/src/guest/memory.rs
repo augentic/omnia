@@ -1,17 +1,30 @@
-//! In-memory `StateStore` + `BlobStore` with real atomics.
+//! In-memory `StateStore` + `BlobStore` + `Vault` with real atomics and TTL.
 
 use std::collections::BTreeMap;
 use std::future::{Future, ready};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow, bail};
-use omnia_sdk::{BlobStore, CasError, ContainerMetadata, ObjectMetadata, StateStore};
+use omnia_sdk::{BlobStore, CasError, ContainerMetadata, ObjectMetadata, StateStore, Vault};
 
 /// A state snapshot: key to raw bytes.
 pub type StateSnapshot = BTreeMap<String, Vec<u8>>;
 /// A blob snapshot: container to object name to bytes.
 pub type BlobSnapshot = BTreeMap<String, BTreeMap<String, Vec<u8>>>;
+
+#[derive(Clone, Debug)]
+struct StateEntry {
+    bytes: Vec<u8>,
+    expires_at: Option<Instant>,
+}
+
+impl StateEntry {
+    fn is_expired(&self, now: Instant) -> bool {
+        self.expires_at.is_some_and(|at| now >= at)
+    }
+}
 
 #[derive(Clone, Debug)]
 struct Object {
@@ -27,16 +40,17 @@ struct Container {
 
 #[derive(Debug, Default)]
 struct Inner {
-    state: Mutex<StateSnapshot>,
+    state: Mutex<BTreeMap<String, StateEntry>>,
     blobs: Mutex<BTreeMap<String, Container>>,
+    secrets: Mutex<BTreeMap<String, Vec<u8>>>,
     // Metadata timestamps come from this counter, not the wall clock, so
     // `*_info` reads are deterministic and ordered by creation.
     clock: AtomicU64,
 }
 
-/// In-memory state and blob storage; clones share one store.
+/// In-memory state, blob, and secret storage; clones share one store.
 ///
-/// Every method of both traits is real: `cas` and `increment` hold the
+/// Every method of all three traits is real: `cas` and `increment` hold the
 /// store's lock across their read-modify-write, `increment` uses the
 /// 8-byte big-endian encoding of the runtime's in-memory key-value default,
 /// and `get_range` clamps an inclusive `end` the way the blobstore default
@@ -62,12 +76,19 @@ pub struct Memory {
 }
 
 impl Memory {
-    fn lock_state(&self) -> MutexGuard<'_, StateSnapshot> {
-        self.inner.state.lock().expect("state lock")
+    fn lock_state(&self) -> MutexGuard<'_, BTreeMap<String, StateEntry>> {
+        let mut guard = self.inner.state.lock().expect("state lock");
+        let now = Instant::now();
+        guard.retain(|_, entry| !entry.is_expired(now));
+        guard
     }
 
     fn lock_blobs(&self) -> MutexGuard<'_, BTreeMap<String, Container>> {
         self.inner.blobs.lock().expect("blob lock")
+    }
+
+    fn lock_secrets(&self) -> MutexGuard<'_, BTreeMap<String, Vec<u8>>> {
+        self.inner.secrets.lock().expect("secrets lock")
     }
 
     fn tick(&self) -> u64 {
@@ -77,7 +98,7 @@ impl Memory {
     /// The state value at `key`.
     #[must_use]
     pub fn state(&self, key: &str) -> Option<Vec<u8>> {
-        self.lock_state().get(key).cloned()
+        self.lock_state().get(key).map(|entry| entry.bytes.clone())
     }
 
     /// The stored bytes of `name` in `container`.
@@ -97,7 +118,7 @@ impl Memory {
 
     /// Seeds a state entry.
     pub fn insert_state(&self, key: &str, bytes: &[u8]) {
-        drop(self.lock_state().insert(key.to_owned(), bytes.to_vec()));
+        self.set_state(key, bytes, None);
     }
 
     /// Seeds an object, creating its container.
@@ -143,6 +164,8 @@ impl Memory {
     /// A snapshot of both stores for byte-stability comparisons.
     #[must_use]
     pub fn snapshot(&self) -> (StateSnapshot, BlobSnapshot) {
+        let state =
+            self.lock_state().iter().map(|(k, entry)| (k.clone(), entry.bytes.clone())).collect();
         let blobs = self
             .lock_blobs()
             .iter()
@@ -152,13 +175,20 @@ impl Memory {
                 (name.clone(), objects)
             })
             .collect();
-        (self.lock_state().clone(), blobs)
+        (state, blobs)
     }
 
     // -- state ------------------------------------------------------------
 
-    fn set_state(&self, key: &str, value: &[u8]) -> Option<Vec<u8>> {
-        self.lock_state().insert(key.to_owned(), value.to_vec())
+    fn set_state(&self, key: &str, value: &[u8], ttl_secs: Option<u64>) {
+        let expires_at = ttl_secs.map(|secs| Instant::now() + Duration::from_secs(secs));
+        drop(self.lock_state().insert(
+            key.to_owned(),
+            StateEntry {
+                bytes: value.to_vec(),
+                expires_at,
+            },
+        ));
     }
 
     fn delete_state(&self, key: &str) {
@@ -167,9 +197,16 @@ impl Memory {
 
     fn cas_state(&self, key: &str, expected: Option<&[u8]>, value: &[u8]) -> Result<(), CasError> {
         let mut state = self.lock_state();
-        let observed = state.get(key).cloned();
+        let existing = state.get(key).cloned();
+        let observed = existing.as_ref().map(|entry| entry.bytes.clone());
         let swapped = if observed.as_deref() == expected {
-            drop(state.insert(key.to_owned(), value.to_vec()));
+            drop(state.insert(
+                key.to_owned(),
+                StateEntry {
+                    bytes: value.to_vec(),
+                    expires_at: existing.and_then(|entry| entry.expires_at),
+                },
+            ));
             Ok(())
         } else {
             Err(CasError::Conflict(observed))
@@ -180,10 +217,17 @@ impl Memory {
 
     fn increment_state(&self, key: &str, delta: i64) -> Result<i64> {
         let mut state = self.lock_state();
-        let incremented = add_i64(state.get(key).map(Vec::as_slice), delta)
+        let existing = state.get(key).cloned();
+        let incremented = add_i64(existing.as_ref().map(|entry| entry.bytes.as_slice()), delta)
             .with_context(|| format!("incrementing `{key}` by {delta}"));
         if let Ok(incremented) = incremented {
-            drop(state.insert(key.to_owned(), incremented.to_be_bytes().to_vec()));
+            drop(state.insert(
+                key.to_owned(),
+                StateEntry {
+                    bytes: incremented.to_be_bytes().to_vec(),
+                    expires_at: existing.and_then(|entry| entry.expires_at),
+                },
+            ));
         }
         drop(state);
         incremented
@@ -261,9 +305,10 @@ impl StateStore for Memory {
     }
 
     fn set(
-        &self, key: &str, value: &[u8], _ttl_secs: Option<u64>,
-    ) -> impl Future<Output = Result<Option<Vec<u8>>>> + Send {
-        ready(Ok(self.set_state(key, value)))
+        &self, key: &str, value: &[u8], ttl_secs: Option<u64>,
+    ) -> impl Future<Output = Result<()>> + Send {
+        self.set_state(key, value, ttl_secs);
+        ready(Ok(()))
     }
 
     fn delete(&self, key: &str) -> impl Future<Output = Result<()>> + Send {
@@ -338,6 +383,30 @@ impl BlobStore for Memory {
     }
 }
 
+impl Vault for Memory {
+    fn get(&self, key: &str) -> impl Future<Output = Result<Option<Vec<u8>>>> + Send {
+        ready(Ok(self.lock_secrets().get(key).cloned()))
+    }
+
+    fn set(&self, key: &str, value: &[u8]) -> impl Future<Output = Result<()>> + Send {
+        drop(self.lock_secrets().insert(key.to_owned(), value.to_vec()));
+        ready(Ok(()))
+    }
+
+    fn delete(&self, key: &str) -> impl Future<Output = Result<()>> + Send {
+        drop(self.lock_secrets().remove(key));
+        ready(Ok(()))
+    }
+
+    fn exists(&self, key: &str) -> impl Future<Output = Result<bool>> + Send {
+        ready(Ok(self.lock_secrets().contains_key(key)))
+    }
+
+    fn list_ids(&self) -> impl Future<Output = Result<Vec<String>>> + Send {
+        ready(Ok(self.lock_secrets().keys().cloned().collect()))
+    }
+}
+
 /// A prefixed view over one shared [`Memory`]: every key and container is
 /// scoped under a prefix, modelling a tenant- or project-keyed host binding.
 ///
@@ -390,9 +459,10 @@ impl StateStore for Namespaced {
     }
 
     fn set(
-        &self, key: &str, value: &[u8], _ttl_secs: Option<u64>,
-    ) -> impl Future<Output = Result<Option<Vec<u8>>>> + Send {
-        ready(Ok(self.inner.set_state(&self.scoped(key), value)))
+        &self, key: &str, value: &[u8], ttl_secs: Option<u64>,
+    ) -> impl Future<Output = Result<()>> + Send {
+        self.inner.set_state(&self.scoped(key), value, ttl_secs);
+        ready(Ok(()))
     }
 
     fn delete(&self, key: &str) -> impl Future<Output = Result<()>> + Send {

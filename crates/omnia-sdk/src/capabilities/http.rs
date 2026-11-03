@@ -12,7 +12,7 @@ use http_body::Body;
 /// Fetches data from an outbound HTTP source.
 pub trait HttpRequest: Send + Sync {
     cfg_select! {
-        not(target_arch = "wasm32") => {
+        not(all(target_arch = "wasm32", target_os = "wasi")) => {
             /// Make outbound HTTP request.
             fn fetch<T>(
                 &self, request: Request<T>,

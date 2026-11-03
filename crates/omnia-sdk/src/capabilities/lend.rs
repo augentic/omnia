@@ -11,7 +11,7 @@
 
 // The lent root borrows from the preopens and the subpath from the path, so
 // a caller may own the one and drop the other.
-#[cfg(any(target_arch = "wasm32", test))]
+#[cfg(any(all(target_arch = "wasm32", target_os = "wasi"), test))]
 pub fn resolve_lend<'d, 'p, D>(
     directories: &'d [(D, String)], path: &'p str,
 ) -> Option<(&'d D, &'p str)> {
@@ -21,7 +21,7 @@ pub fn resolve_lend<'d, 'p, D>(
         .max_by_key(|(_, subpath)| std::cmp::Reverse(subpath.len()))
 }
 
-#[cfg(any(target_arch = "wasm32", test))]
+#[cfg(any(all(target_arch = "wasm32", target_os = "wasi"), test))]
 fn lend_subpath<'a>(name: &str, path: &'a str) -> Option<&'a str> {
     if path == name {
         return Some("");

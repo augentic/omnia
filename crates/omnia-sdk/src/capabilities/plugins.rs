@@ -15,7 +15,7 @@ use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
 mod generated {
     #![allow(missing_docs, clippy::same_length_and_capacity, reason = "wit-bindgen output")]
 
@@ -245,7 +245,7 @@ impl From<Error> for crate::Error {
 /// `wasm32` the signature is bare so native suites script loads.
 pub trait Plugins: Send + Sync {
     cfg_select! {
-        not(target_arch = "wasm32") => {
+        not(all(target_arch = "wasm32", target_os = "wasi")) => {
             /// Ensure the guest `from` names is active and return its handle, held
             /// to `digest` when one is given; idempotent on (name, digest).
             ///
@@ -294,16 +294,12 @@ delegate_deref!(Plugins {
     }
 });
 
-/// The WASI-backed provider a `wasm32` guest hands its wasm-free core; the
-/// default method body carries the whole delegation.
-#[cfg(target_arch = "wasm32")]
-#[derive(Clone, Copy, Debug)]
-pub struct WasiPlugins;
+/// Deprecated alias for [`WasiProvider`](crate::WasiProvider).
+#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
+#[deprecated(note = "use `omnia_sdk::WasiProvider`")]
+pub type WasiPlugins = crate::WasiProvider;
 
-#[cfg(target_arch = "wasm32")]
-impl Plugins for WasiPlugins {}
-
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
 mod wire {
     use super::generated::omnia::plugins::loader;
     use super::{Error, Location};

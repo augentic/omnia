@@ -177,6 +177,8 @@ dependencies = [
  "http",
  "http-body",
  "http-body-util",
+ "hyper",
+ "hyper-util",
  "itoa",
  "matchit",
  "memchr",
@@ -188,6 +190,7 @@ dependencies = [
  "serde_path_to_error",
  "serde_urlencoded",
  "sync_wrapper",
+ "tokio",
  "tower",
  "tower-layer",
  "tower-service",
@@ -2439,6 +2442,39 @@ dependencies = [
 ]
 
 [[package]]
+name = "omnia-native"
+version = "0.38.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "bytes",
+ "futures",
+ "http",
+ "http-body",
+ "http-body-util",
+ "omnia",
+ "omnia-backend",
+ "omnia-sdk",
+ "omnia-test",
+ "omnia-wasi-blobstore",
+ "omnia-wasi-config",
+ "omnia-wasi-docstore",
+ "omnia-wasi-http",
+ "omnia-wasi-identity",
+ "omnia-wasi-keyvalue",
+ "omnia-wasi-messaging",
+ "omnia-wasi-model",
+ "omnia-wasi-otel",
+ "omnia-wasi-sql",
+ "omnia-wasi-vault",
+ "omnia-wasi-vcs",
+ "omnia-wasi-websocket",
+ "test-programs",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "omnia-plugin"
 version = "0.38.0"
 dependencies = [
@@ -2485,6 +2521,7 @@ dependencies = [
  "omnia-wasi-model",
  "omnia-wasi-otel",
  "omnia-wasi-sql",
+ "omnia-wasi-vault",
  "omnia-wasi-vcs",
  "omnia-wasi-websocket",
  "schemars",
@@ -2513,6 +2550,7 @@ dependencies = [
  "http-body-util",
  "omnia",
  "omnia-backend",
+ "omnia-native",
  "omnia-sdk",
  "omnia-wasi-blobstore",
  "omnia-wasi-config",
@@ -2640,13 +2678,10 @@ name = "omnia-wasi-keyvalue"
 version = "0.38.0"
 dependencies = [
  "anyhow",
- "chrono",
  "omnia",
  "omnia-backend",
  "omnia-core",
  "omnia-test",
- "serde",
- "serde_json",
  "test-programs",
  "tokio",
  "tracing",
