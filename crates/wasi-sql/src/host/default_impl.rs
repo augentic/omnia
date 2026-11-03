@@ -4,12 +4,11 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use futures::FutureExt as _;
+use omnia_backend::sql::{Connection, DataType, Field, Row, SqlClient};
+use omnia_core::{Connect, FromEnv, FutureResult};
 use rusqlite::types::ValueRef;
 use rusqlite::{Connection as SqliteConnection, params_from_iter};
 use tracing::instrument;
-
-use super::{Connection, DataType, Field, Row, SqlClient};
-use crate::{Connect, FutureResult};
 
 #[expect(missing_docs, reason = "`FromEnv` has no docs")]
 mod config {
@@ -25,7 +24,7 @@ mod config {
 }
 pub use config::ConnectOptions;
 
-impl crate::FromEnv for ConnectOptions {
+impl FromEnv for ConnectOptions {
     fn load_env() -> Result<Self> {
         Self::from_env().finalize().context("issue loading connection options")
     }

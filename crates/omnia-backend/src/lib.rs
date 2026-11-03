@@ -25,8 +25,6 @@ pub mod otel;
 pub mod plugins;
 #[cfg(feature = "sql")]
 pub mod sql;
-#[cfg(all(not(target_arch = "wasm32"), feature = "otel-default"))]
-pub mod telemetry;
 #[cfg(feature = "vault")]
 pub mod vault;
 #[cfg(feature = "vcs")]
@@ -34,65 +32,34 @@ pub mod vcs;
 #[cfg(feature = "websocket")]
 pub mod websocket;
 
-#[cfg(all(not(target_arch = "wasm32"), feature = "otel-default"))]
-pub use tracing_subscriber::filter::LevelFilter;
-
-#[cfg(all(not(target_arch = "wasm32"), feature = "blobstore-default"))]
-pub use self::blobstore::BlobStoreDefault;
 #[cfg(all(not(target_arch = "wasm32"), feature = "blobstore"))]
 pub use self::blobstore::{BlobStoreClient, Container};
 #[cfg(all(not(target_arch = "wasm32"), feature = "config"))]
 pub use self::config::ConfigClient;
-#[cfg(all(not(target_arch = "wasm32"), feature = "config-default"))]
-pub use self::config::ConfigDefault;
 #[cfg(not(target_arch = "wasm32"))]
 pub use self::connect::{Connect, FromEnv, FutureResult, NoOptions};
 #[cfg(all(not(target_arch = "wasm32"), feature = "docstore"))]
 pub use self::docstore::DocStoreClient;
-#[cfg(all(not(target_arch = "wasm32"), feature = "docstore-default"))]
-pub use self::docstore::DocStoreDefault;
 #[cfg(all(not(target_arch = "wasm32"), feature = "http"))]
 pub use self::http::HttpClient;
-#[cfg(all(not(target_arch = "wasm32"), feature = "http-default"))]
-pub use self::http::HttpDefault;
-#[cfg(all(not(target_arch = "wasm32"), feature = "oauth"))]
-pub use self::identity::IdentityDefault;
 #[cfg(all(not(target_arch = "wasm32"), feature = "identity"))]
-pub use self::identity::{Identity, IdentityClient, IdentityStub};
-#[cfg(all(not(target_arch = "wasm32"), feature = "keyvalue-default"))]
-pub use self::keyvalue::KeyValueDefault;
+pub use self::identity::{Identity, IdentityClient};
 #[cfg(all(not(target_arch = "wasm32"), feature = "keyvalue"))]
 pub use self::keyvalue::{Bucket, KeyValueClient};
-#[cfg(all(not(target_arch = "wasm32"), feature = "messaging-default"))]
-pub use self::messaging::MessagingDefault;
 #[cfg(all(not(target_arch = "wasm32"), feature = "messaging"))]
 pub use self::messaging::{Endpoint as MessagingEndpoint, Handler, MessagingClient};
-#[cfg(all(not(target_arch = "wasm32"), feature = "model-default"))]
-pub use self::model::ModelDefault;
 #[cfg(all(not(target_arch = "wasm32"), feature = "model"))]
-pub use self::model::{Answer, Limits, ModelClient, ToolHost, ToolSession, Workspace};
-#[cfg(not(target_arch = "wasm32"))]
-pub use self::mount::{Mount, MountRegistry, ResolvedPreopen};
+pub use self::model::{Answer, Limits, ModelClient, ToolHost};
 pub use self::mount::{check_subpath, lend};
 #[cfg(all(not(target_arch = "wasm32"), feature = "otel"))]
 pub use self::otel::OtelClient;
-#[cfg(all(not(target_arch = "wasm32"), feature = "otel-default"))]
-pub use self::otel::OtelDefault;
 #[cfg(all(not(target_arch = "wasm32"), feature = "plugins"))]
 pub use self::plugins::{PackageStore, Reference};
-#[cfg(all(not(target_arch = "wasm32"), feature = "sqlite"))]
-pub use self::sql::{ConnectOptions as SqlConnectOptions, SqlDefault};
 #[cfg(all(not(target_arch = "wasm32"), feature = "sql"))]
 pub use self::sql::{Connection, SqlClient};
-#[cfg(all(not(target_arch = "wasm32"), feature = "otel-default"))]
-pub use self::telemetry::Telemetry;
-#[cfg(all(not(target_arch = "wasm32"), feature = "vault-default"))]
-pub use self::vault::VaultDefault;
 #[cfg(all(not(target_arch = "wasm32"), feature = "vault"))]
 pub use self::vault::{Locker, VaultClient};
 #[cfg(all(not(target_arch = "wasm32"), feature = "vcs"))]
-pub use self::vcs::{Intent, Place, VcsClient};
-#[cfg(all(not(target_arch = "wasm32"), feature = "websocket-default"))]
-pub use self::websocket::WebSocketDefault;
+pub use self::vcs::{Place, VcsClient};
 #[cfg(all(not(target_arch = "wasm32"), feature = "websocket"))]
 pub use self::websocket::{Endpoint as WebSocketEndpoint, WebSocketClient};

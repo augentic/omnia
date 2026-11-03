@@ -49,6 +49,7 @@ pub fn expand(item_trait: &ItemTrait) -> Result<TokenStream> {
         #item_trait
 
         #[doc = #has_doc]
+        #[doc(hidden)]
         #vis trait #has_ident {
             #[doc = #accessor_doc]
             fn #accessor_ident(&self) -> &impl #trait_ident;

@@ -1,27 +1,8 @@
-//! Preopen mounts, lend path matching, and the mount registry.
-//!
-//! A deployment may mount node-local directories into a guest's WASI sandbox via
-//! `[[mount]]` so a guest can read or edit a mounted directory tree. Two
-//! host-side artefacts back that capability:
-//!
-//! - [`ResolvedPreopen`] — a mount resolved to an absolute host path plus
-//!   writability, applied per store when building the WASI context.
-//! - [`MountRegistry`] — the host-side source of truth that maps a lent
-//!   `wasi:filesystem` descriptor or a lend path back to its mount. It is
-//!   built once at startup (opening each directory and capturing its identity),
-//!   then shared read-only across every store. The registry — never the
-//!   descriptor — supplies the resolved handle: a cap-std `Dir` for bounded
-//!   operations and the absolute host path.
-
-#[cfg(not(target_arch = "wasm32"))]
-mod registry;
+//! Lend path matching and relative subpath validation.
 
 use std::path::{Component, Path};
 
 use anyhow::{Result, ensure};
-
-#[cfg(not(target_arch = "wasm32"))]
-pub use self::registry::{Mount, MountRegistry, ResolvedPreopen};
 
 /// Match a deployment-local lend `path` against `(root, name)` preopen pairs.
 ///
@@ -59,4 +40,31 @@ pub fn check_subpath(subpath: &str) -> Result<()> {
         && Path::new(subpath).components().all(|part| matches!(part, Component::Normal(_)));
     ensure!(plain, "subpath `{subpath}` is not a plain relative path");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::check_subpath;
+
+    #[test]
+    fn plain_subpath() {
+        check_subpath("docs").unwrap();
+        check_subpath("docs/guides").unwrap();
+        check_subpath(".emery/vcs/repos/abc").unwrap();
+    }
+
+    #[test]
+    fn complex_subpath() {
+        for subpath in ["/abs", "a\\b", "a//b", ".", "..", "a/../b", "./a", "a/"] {
+            check_subpath(subpath).unwrap_err();
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn drive_prefixed_subpath() {
+        for subpath in ["C:evil", "C:/evil"] {
+            check_subpath(subpath).unwrap_err();
+        }
+    }
 }

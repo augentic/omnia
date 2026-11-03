@@ -1,17 +1,10 @@
-//! WebSocket service contract, value types, and default implementation.
+//! WebSocket service contract and value types.
 
 #[cfg(not(target_arch = "wasm32"))]
 mod client;
-#[cfg(all(not(target_arch = "wasm32"), feature = "websocket-default"))]
-mod default;
 
 #[cfg(not(target_arch = "wasm32"))]
-#[expect(deprecated, reason = "re-exporting the deprecated alias")]
-pub use self::client::Client;
-#[cfg(not(target_arch = "wasm32"))]
 pub use self::client::{Endpoint, Events, WebSocketClient};
-#[cfg(all(not(target_arch = "wasm32"), feature = "websocket-default"))]
-pub use self::default::{ConnectOptions, WebSocketDefault};
 
 /// A WebSocket event crossing the boundary.
 ///

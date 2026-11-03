@@ -6,8 +6,7 @@
 //!   against one double per `omnia_sdk` capability, bundled by
 //!   `guest::Provider` or handed to a hand-written provider directly.
 //! - **Backend rung** ([`backend`]) — `wasmtime`-free `*Client` doubles
-//!   (`ScriptedModel` and `ScriptedVcs`) for driving `omnia_native::Direct`
-//!   and the component runtime harness.
+//!   (`ScriptedModel` and `ScriptedVcs`) for the component runtime harness.
 //! - **Component rung** ([`host`]) — the compiled `wasm32-wasip2` component
 //!   driven through omnia's own runtime over `Backends`, the twelve in-memory
 //!   defaults with the model swapped for a `ScriptedModel`.

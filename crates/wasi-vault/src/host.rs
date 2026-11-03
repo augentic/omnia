@@ -2,6 +2,7 @@
 //!
 //! This module implements the host-side logic for the WASI Vault service.
 
+mod default_impl;
 mod resource;
 mod vault_impl;
 
@@ -26,7 +27,8 @@ mod generated {
 
 use std::fmt::Debug;
 
-pub use omnia_backend::vault::{Locker, VaultClient, VaultDefault};
+pub use default_impl::VaultDefault;
+pub use omnia_backend::vault::{Locker, VaultClient};
 pub use omnia_core::FutureResult;
 use omnia_core::{Host, Server, StoreView};
 use wasmtime::component::{HasData, Linker};

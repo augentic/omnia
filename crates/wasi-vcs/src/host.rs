@@ -36,8 +36,7 @@ mod generated {
 use std::fmt::Debug;
 
 pub use omnia_backend::vcs::{
-    Change, ChangeKind, CloneOptions, Entry, Error, Intent, Merged, Place, Rule, Strategy,
-    VcsClient,
+    Change, ChangeKind, CloneOptions, Entry, Error, Merged, Place, Rule, Strategy, VcsClient,
 };
 pub use omnia_core::FutureResult;
 use omnia_core::{HasMounts, Host, Server, StoreView};
@@ -46,6 +45,7 @@ use wasmtime::component::{Access, Accessor, HasData, Linker};
 pub use self::generated::omnia::vcs::types::Error as WitError;
 use self::generated::omnia::vcs::types::{Host as TypesHost, Location};
 use self::generated::omnia::vcs::{store, transport, types, workspace};
+use self::location::Intent;
 
 /// Result type for VCS operations.
 pub type Result<T> = std::result::Result<T, WitError>;

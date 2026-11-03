@@ -1,6 +1,5 @@
 //! Shared provider conformance scenarios across `omnia_test::guest::Provider`,
-//! `omnia_native::Direct`, `omnia_sdk::WasiProvider`, production backends, and
-//! `omnia_dapr::Dapr`.
+//! `omnia_sdk::WasiProvider`, and `omnia_dapr::Dapr`.
 //!
 //! Each function exercises one row of the portable semantic contract over the
 //! `omnia_sdk` capability trait alone, panicking on any deviation. Use the

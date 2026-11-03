@@ -3,6 +3,7 @@
 //! This module implements a runtime server for websocket
 
 mod client_impl;
+mod default_impl;
 mod resource;
 mod server;
 mod types_impl;
@@ -34,11 +35,8 @@ mod generated {
 
 use std::fmt::Debug;
 
-#[expect(deprecated, reason = "re-exporting the deprecated alias")]
-pub use omnia_backend::websocket::Client;
-pub use omnia_backend::websocket::{
-    ConnectOptions, Endpoint, Event, Events, WebSocketClient, WebSocketDefault,
-};
+pub use default_impl::{ConnectOptions, WebSocketDefault};
+pub use omnia_backend::websocket::{Endpoint, Event, Events, WebSocketClient};
 pub use omnia_core::FutureResult;
 use omnia_core::{Host, Runtime, Server, StoreCtx, StoreView};
 use wasmtime::component::{HasData, Linker};

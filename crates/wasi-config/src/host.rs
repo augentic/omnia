@@ -2,6 +2,8 @@
 //!
 //! This module implements a host-side service for `wasi:config`.
 
+mod default_impl;
+
 mod generated {
     #![allow(missing_docs, reason = "wasmtime bindgen output")]
 
@@ -21,7 +23,8 @@ mod generated {
 
 use std::fmt::Debug;
 
-pub use omnia_backend::config::{ConfigClient, ConfigDefault};
+pub use default_impl::ConfigDefault;
+pub use omnia_backend::config::ConfigClient;
 pub use omnia_core::FutureResult;
 use omnia_core::{Host, Server, StoreView};
 use wasmtime::component::{HasData, Linker};

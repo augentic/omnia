@@ -4,10 +4,9 @@ use std::sync::Arc;
 
 use anyhow::{Result, anyhow};
 use futures::FutureExt as _;
+use omnia_backend::model::{Answer, Error, Format, ModelClient, Request, ToolHost};
+use omnia_core::{Connect, FutureResult, NoOptions};
 use serde_json::json;
-
-use super::{Answer, Error, Format, ModelClient, Request, ToolHost};
-use crate::{Connect, FutureResult, NoOptions};
 
 /// Echo default implementation of [`ModelClient`].
 #[derive(Clone, Copy, Debug, Default)]

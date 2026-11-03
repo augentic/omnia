@@ -6,10 +6,9 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use futures::FutureExt as _;
+use omnia_backend::vault::{Locker, VaultClient};
+use omnia_core::{Connect, FutureResult, NoOptions};
 use tracing::instrument;
-
-use super::{Locker, VaultClient};
-use crate::{Connect, FutureResult, NoOptions};
 
 type Store = Arc<parking_lot::RwLock<HashMap<String, HashMap<String, Vec<u8>>>>>;
 

@@ -1,14 +1,10 @@
-//! Relational SQL service contract, value types, and default implementation.
+//! Relational SQL service contract and value types.
 
 #[cfg(not(target_arch = "wasm32"))]
 mod client;
-#[cfg(all(not(target_arch = "wasm32"), feature = "sqlite"))]
-mod sqlite;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use self::client::{Connection, SqlClient};
-#[cfg(all(not(target_arch = "wasm32"), feature = "sqlite"))]
-pub use self::sqlite::{ConnectOptions, SqlDefault};
 
 /// Common SQL scalar values, mirroring `wasi:sql/types.data-type`.
 #[derive(Clone, Debug, PartialEq)]

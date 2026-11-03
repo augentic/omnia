@@ -151,7 +151,7 @@ where
 
 Every fn of that shape is a `Handler<P, I>` through a blanket impl, as is any `Clone` closure of it — so a closure can carry configuration into a route. Implementing `Handler<P, I>` by hand on a local non-fn type is the escape hatch for the rare case a fn cannot express. A mis-shaped fn is reported by rustc's own diagnostics at the route or `Client::call` site. To unit-test a handler without a `Client`, build its context with `Context::new(owner, provider, metadata)`.
 
-For a guest that runs on the WASI-backed capability defaults, `omnia_sdk::WasiProvider` is a zero-sized struct that implements every capability trait on `wasm32`. Native handler tests run the same handlers against `omnia_test::guest::Provider`, and native binaries run them against `omnia_native::Direct<T>` (see [Provider Portability](portability.md) and [Testing Omnia-Based Code](testing-omnia-code.md)):
+For a guest that runs on the WASI-backed capability defaults, `omnia_sdk::WasiProvider` is a zero-sized struct that implements every capability trait on `wasm32`. Native handler tests run the same handlers against `omnia_test::guest::Provider` (see [Provider Portability](portability.md) and [Testing Omnia-Based Code](testing-omnia-code.md)):
 
 ```rust,noplayground
 pub fn router<P>(provider: P) -> axum::Router

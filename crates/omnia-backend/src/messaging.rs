@@ -1,9 +1,7 @@
-//! Messaging service contract, value types, and default implementation.
+//! Messaging service contract and value types.
 
 #[cfg(not(target_arch = "wasm32"))]
 mod client;
-#[cfg(all(not(target_arch = "wasm32"), feature = "messaging-default"))]
-mod default;
 
 use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
@@ -11,8 +9,6 @@ use std::time::Duration;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use self::client::{Endpoint, HandleError, Handler, MessagingClient, Subscriptions, dispatch};
-#[cfg(all(not(target_arch = "wasm32"), feature = "messaging-default"))]
-pub use self::default::MessagingDefault;
 
 /// Typed messaging failure, mirroring the `wasi:messaging/types` error variant.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]

@@ -8,21 +8,21 @@ mod dispatch;
 mod extensions;
 mod host;
 mod invoke;
+mod mount;
 mod options;
 mod registry;
 mod runtime;
 mod seam;
 mod source;
 mod store;
+pub mod telemetry;
 mod value;
 
-pub use omnia_backend::{
-    Connect, FromEnv, FutureResult, LevelFilter, Mount, MountRegistry, NoOptions, ResolvedPreopen,
-    Telemetry, telemetry,
-};
+pub use omnia_backend::{Connect, FromEnv, FutureResult, NoOptions};
 pub use omnia_compile::CompileOptions;
 #[doc(hidden)]
 pub use pastey;
+pub use tracing_subscriber::filter::LevelFilter;
 #[doc(hidden)]
 pub use {anyhow, futures, tokio, wasmtime, wasmtime_wasi};
 
@@ -32,6 +32,7 @@ pub use self::dispatch::Dispatcher;
 pub use self::extensions::Extensions;
 pub use self::host::{HasTable, Host, HostCtx, Provides, Proxy, Server, get_cloned};
 pub use self::invoke::{FreshCall, InvokeError, call_fresh};
+pub use self::mount::{Mount, MountRegistry, ResolvedPreopen};
 pub use self::options::RuntimeOptions;
 pub use self::registry::{
     CliRoutes, Guest, GuestId, HttpRoutes, PatternRoutes, Registry, RegistryParts, Resolver,
@@ -46,6 +47,7 @@ pub use self::store::{
     HasChain, HasDispatcher, HasExtensions, HasLimits, HasMounts, Stdio, StoreBase, StoreConfig,
     StoreCtx, StoreView,
 };
+pub use self::telemetry::Telemetry;
 pub use self::value::handle_kind;
 
 /// Generates the standard host-error conversions every `omnia` WASI host

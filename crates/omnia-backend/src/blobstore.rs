@@ -1,14 +1,10 @@
-//! Binary large object storage service contract, value types, and default implementation.
+//! Binary large object storage service contract and value types.
 
 #[cfg(not(target_arch = "wasm32"))]
 mod client;
-#[cfg(all(not(target_arch = "wasm32"), feature = "blobstore-default"))]
-mod default;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use self::client::{BlobStoreClient, Container};
-#[cfg(all(not(target_arch = "wasm32"), feature = "blobstore-default"))]
-pub use self::default::BlobStoreDefault;
 
 /// Metadata for a blobstore container.
 ///

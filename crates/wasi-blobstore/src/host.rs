@@ -2,6 +2,7 @@
 
 mod blobstore_impl;
 mod container_impl;
+mod default_impl;
 mod resource;
 mod types_impl;
 
@@ -32,9 +33,8 @@ mod generated {
 use std::fmt::Debug;
 
 pub use bytes::Bytes;
-pub use omnia_backend::blobstore::{
-    BlobStoreClient, BlobStoreDefault, Container, ContainerMetadata, ObjectMetadata,
-};
+pub use default_impl::BlobStoreDefault;
+pub use omnia_backend::blobstore::{BlobStoreClient, Container, ContainerMetadata, ObjectMetadata};
 pub use omnia_core::FutureResult;
 use omnia_core::{Host, Server, StoreView};
 pub use resource::*;

@@ -1,9 +1,9 @@
 //! Provider capabilities: the host services a guest's provider can call.
 //!
 //! Each capability is a target-neutral trait implemented by [`WasiProvider`] on
-//! `wasm32` (delegating to the matching `omnia-wasi-*` binding), by
-//! `omnia_native::Direct` in-process, and by `omnia_test::guest` doubles in
-//! tests.
+//! `wasm32` (delegating to the matching `omnia-wasi-*` binding), by decorator
+//! or sidecar providers such as `omnia_dapr::Dapr`, and by `omnia_test::guest`
+//! doubles in tests.
 //!
 //! Every capability has a companion `Has<Capability>` accessor trait (emitted
 //! by `#[omnia_guest_macros::capability]`) with a blanket forwarding impl and
@@ -27,24 +27,52 @@ mod table;
 mod vault;
 pub mod vcs;
 
-pub use blob::{BlobStore, ContainerMetadata, HasBlobStore, ObjectMetadata};
-pub use broadcast::{Broadcast, HasBroadcast};
-pub use config::{Config, HasConfig};
+#[doc(hidden)]
+pub use blob::HasBlobStore;
+pub use blob::{BlobStore, ContainerMetadata, ObjectMetadata};
+pub use broadcast::Broadcast;
+#[doc(hidden)]
+pub use broadcast::HasBroadcast;
+pub use config::Config;
+#[doc(hidden)]
+pub use config::HasConfig;
 #[cfg(feature = "docstore")]
-pub use document::{DocumentStore, HasDocumentStore};
-pub use http::{HasHttpRequest, HttpRequest};
-pub use identity::{AccessToken, HasIdentity, Identity};
-pub use messaging::{HasPublish, Message, Publish};
+pub use document::DocumentStore;
+#[cfg(feature = "docstore")]
+#[doc(hidden)]
+pub use document::HasDocumentStore;
+#[doc(hidden)]
+pub use http::HasHttpRequest;
+pub use http::HttpRequest;
+#[doc(hidden)]
+pub use identity::HasIdentity;
+pub use identity::{AccessToken, Identity};
+#[doc(hidden)]
+pub use messaging::HasPublish;
+pub use messaging::{Message, Publish};
+#[doc(hidden)]
+pub use model::HasModel;
 // Generic model wire names stay scoped to the model capability.
-pub use model::{HasModel, Model};
+pub use model::Model;
+#[doc(hidden)]
+pub use plugins::HasPlugins;
 // Loader request names stay scoped to the plugins capability.
-pub use plugins::{HasPlugins, Plugins};
-pub use state::{CasError, HasStateStore, StateStore};
+pub use plugins::Plugins;
+#[doc(hidden)]
+pub use state::HasStateStore;
+pub use state::{CasError, StateStore};
 #[cfg(feature = "sql")]
-pub use table::{HasTableStore, TableStore};
-pub use vault::{HasVault, Vault};
+#[doc(hidden)]
+pub use table::HasTableStore;
+#[cfg(feature = "sql")]
+pub use table::TableStore;
+#[doc(hidden)]
+pub use vault::HasVault;
+pub use vault::Vault;
+#[doc(hidden)]
+pub use vcs::HasVcs;
 // Version-control wire names stay scoped to the vcs capability.
-pub use vcs::{HasVcs, Vcs};
+pub use vcs::Vcs;
 
 /// Zero-sized WASI provider implementing every capability trait on `wasm32`.
 ///

@@ -9,10 +9,9 @@ use anyhow::{Context as _, Result};
 use futures::FutureExt as _;
 use moka::Expiry;
 use moka::sync::Cache;
+use omnia_backend::keyvalue::{Bucket, KeyValueClient, add_i64};
+use omnia_core::{Connect, FutureResult, NoOptions};
 use tracing::instrument;
-
-use super::{Bucket, KeyValueClient, add_i64};
-use crate::{Connect, FutureResult, NoOptions};
 
 #[derive(Clone, Debug)]
 struct Entry {

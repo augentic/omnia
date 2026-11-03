@@ -5,12 +5,13 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use futures::{FutureExt as _, StreamExt as _};
+use omnia_backend::messaging::{
+    Endpoint, Handler, Message, MessagingClient, RequestOptions, Subscriptions, dispatch,
+};
+use omnia_core::{Connect, FutureResult, NoOptions};
 use tokio::sync::broadcast::{self, Sender};
 use tokio_stream::wrappers::BroadcastStream;
 use tracing::instrument;
-
-use super::{Endpoint, Handler, Message, MessagingClient, RequestOptions, Subscriptions, dispatch};
-use crate::{Connect, FutureResult, NoOptions};
 
 /// Default in-process broadcast implementation of [`MessagingClient`].
 #[derive(Clone, Debug)]
@@ -74,11 +75,9 @@ impl Endpoint for MessagingDefault {
             message.topic = topic;
             let _ = sender.send(message);
 
-            Ok(Message {
-                topic: "response".to_string(),
-                payload: b"ACK".to_vec(),
-                ..Message::default()
-            })
+            let mut resp = Message::new(b"ACK".to_vec());
+            resp.topic = "response".to_string();
+            Ok(resp)
         }
         .boxed()
     }

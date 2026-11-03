@@ -1,3 +1,4 @@
+mod default_impl;
 mod metrics_impl;
 mod resource_impl;
 mod tracing_impl;
@@ -23,7 +24,8 @@ mod generated {
 
 use std::fmt::Debug;
 
-pub use omnia_backend::otel::{OtelClient, OtelDefault};
+pub use default_impl::OtelDefault;
+pub use omnia_backend::otel::OtelClient;
 pub use omnia_core::FutureResult;
 use omnia_core::{Host, Server, StoreView};
 use wasmtime::component::{HasData, Linker};

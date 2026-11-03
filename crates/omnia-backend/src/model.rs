@@ -3,13 +3,7 @@
 mod answer;
 #[cfg(not(target_arch = "wasm32"))]
 mod client;
-#[cfg(all(not(target_arch = "wasm32"), feature = "model-default"))]
-mod default;
 mod request;
-#[cfg(not(target_arch = "wasm32"))]
-mod session;
-#[cfg(not(target_arch = "wasm32"))]
-mod workspace;
 
 use std::time::Duration;
 
@@ -19,13 +13,7 @@ use serde::de::DeserializeOwned;
 
 pub use self::answer::{Answer, ToolTurn, Transcript};
 #[cfg(not(target_arch = "wasm32"))]
-pub use self::client::ModelClient;
-#[cfg(all(not(target_arch = "wasm32"), feature = "model-default"))]
-pub use self::default::ModelDefault;
-#[cfg(not(target_arch = "wasm32"))]
-pub use self::session::{ToolHost, ToolSession};
-#[cfg(not(target_arch = "wasm32"))]
-pub use self::workspace::Workspace;
+pub use self::client::{ModelClient, ToolHost};
 
 const MAX_RESULT_BYTES: usize = 1024 * 1024;
 

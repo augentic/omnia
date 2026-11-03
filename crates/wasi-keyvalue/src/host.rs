@@ -2,6 +2,7 @@
 
 mod atomics_impl;
 mod batch_impl;
+mod default_impl;
 mod resource;
 mod store_impl;
 mod ttl_impl;
@@ -31,7 +32,8 @@ mod generated {
 
 use std::fmt::Debug;
 
-pub use omnia_backend::keyvalue::{Bucket, KeyValueClient, KeyValueDefault};
+pub use default_impl::KeyValueDefault;
+pub use omnia_backend::keyvalue::{Bucket, KeyValueClient};
 pub use omnia_core::FutureResult;
 use omnia_core::{Host, Server, StoreView};
 use wasmtime::component::{HasData, Linker};

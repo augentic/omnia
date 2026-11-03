@@ -2,6 +2,8 @@
 //!
 //! This module implements the host-side logic for the WASI SQL service.
 
+#[cfg(feature = "sqlite")]
+mod default_impl;
 mod readwrite_impl;
 mod resource;
 mod types_impl;
@@ -31,7 +33,7 @@ mod generated {
 use std::fmt::Debug;
 
 #[cfg(feature = "sqlite")]
-pub use omnia_backend::sql::{ConnectOptions, SqlDefault};
+pub use default_impl::{ConnectOptions, SqlDefault};
 pub use omnia_backend::sql::{Connection, DataType, Field, Row, SqlClient};
 pub use omnia_core::FutureResult;
 use omnia_core::{Host, Server, StoreView};

@@ -1,7 +1,8 @@
-//! Default reqwest-backed implementation of [`HttpClient`].
+//! Default reqwest-backed implementation of [`HttpClient`] and [`HttpBorrow`].
 
 use std::error::Error as StdError;
 use std::fmt::{Debug, Display};
+use std::future::Future;
 use std::io;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
@@ -16,11 +17,18 @@ use futures::{FutureExt as _, TryStreamExt as _};
 use http::{Request, Response};
 use http_body::{Body as HttpBody, Frame, SizeHint};
 use http_body_util::BodyExt as _;
+use omnia_backend::http::{
+    Body, Error as ClientError, HttpClient, RequestOptions as ClientRequestOptions,
+};
+use omnia_core::{Connect, FromEnv};
 use tokio::time::Sleep;
 use tracing::instrument;
+use wasmtime::component::ResourceTable;
+use wasmtime_wasi_http::{
+    Error as WasiError, RequestOptions, WasiBody, WasiHttpCtx, WasiHttpCtxView, WasiHttpHooks,
+};
 
-use super::{Body, Error, HttpClient, RequestOptions, client_cert};
-use crate::Connect;
+use super::{HttpBorrow, client_cert};
 
 #[expect(missing_docs, reason = "`FromEnv` has no docs")]
 mod config {
@@ -36,7 +44,7 @@ mod config {
 }
 pub use config::ConnectOptions;
 
-impl crate::FromEnv for ConnectOptions {
+impl FromEnv for ConnectOptions {
     fn load_env() -> anyhow::Result<Self> {
         Self::from_env().finalize().context("issue loading connection options")
     }
@@ -51,10 +59,26 @@ fn ensure_crypto_provider() {
     }
 }
 
-/// Default reqwest-backed implementation of [`HttpClient`].
+#[derive(Debug, Clone)]
+struct HttpHooks {
+    clients: Clients,
+}
+
+/// Default reqwest-backed implementation of [`HttpClient`] and `wasi:http`.
 #[derive(Debug, Clone)]
 pub struct HttpDefault {
-    clients: Clients,
+    hooks: HttpHooks,
+    ctx: WasiHttpCtx,
+}
+
+impl HttpBorrow for HttpDefault {
+    fn as_view<'a>(&'a mut self, table: &'a mut ResourceTable) -> WasiHttpCtxView<'a> {
+        WasiHttpCtxView {
+            hooks: &mut self.hooks,
+            ctx: &mut self.ctx,
+            table,
+        }
+    }
 }
 
 impl Connect for HttpDefault {
@@ -65,14 +89,25 @@ impl Connect for HttpDefault {
         ensure_crypto_provider();
         let clients = Clients::new(Duration::from_secs(options.connect_timeout))
             .context("building HTTP client")?;
-        Ok(Self { clients })
+        Ok(Self {
+            hooks: HttpHooks { clients },
+            ctx: WasiHttpCtx::default(),
+        })
     }
 }
 
 impl HttpClient for HttpDefault {
     fn fetch(
-        &self, request: Request<Body>, options: Option<RequestOptions>,
-    ) -> BoxFuture<'static, Result<Response<Body>, Error>> {
+        &self, request: Request<Body>, options: Option<ClientRequestOptions>,
+    ) -> BoxFuture<'static, Result<Response<Body>, ClientError>> {
+        self.hooks.fetch(request, options)
+    }
+}
+
+impl HttpHooks {
+    fn fetch(
+        &self, request: Request<Body>, options: Option<ClientRequestOptions>,
+    ) -> BoxFuture<'static, Result<Response<Body>, ClientError>> {
         let clients = self.clients.clone();
         let opt_connect = options.and_then(|o| o.connect_timeout);
         let opt_first_byte = options.and_then(|o| o.first_byte_timeout);
@@ -106,7 +141,7 @@ impl HttpClient for HttpDefault {
                         opt_connect.unwrap_or(clients.connect_timeout).saturating_add(first_byte);
                     match tokio::time::timeout(budget, send).await {
                         Ok(result) => result.map_err(|e| reqwest_err(&e))?,
-                        Err(_elapsed) => return Err(Error::ConnectionReadTimeout),
+                        Err(_elapsed) => return Err(ClientError::ConnectionReadTimeout),
                     }
                 }
                 None => send.await.map_err(|e| reqwest_err(&e))?,
@@ -122,6 +157,62 @@ impl HttpClient for HttpDefault {
             Ok(Response::from_parts(parts, body))
         }
         .boxed()
+    }
+}
+
+impl WasiHttpHooks for HttpHooks {
+    fn set_host_header(&mut self) -> bool {
+        false
+    }
+
+    fn send_request(
+        &mut self, request: Request<WasiBody>, options: Option<RequestOptions>,
+        fut: Box<dyn Future<Output = Result<(), WasiError>> + Send>,
+    ) -> Box<
+        dyn Future<
+                Output = Result<
+                    (Response<WasiBody>, Box<dyn Future<Output = Result<(), WasiError>> + Send>),
+                    WasiError,
+                >,
+            > + Send,
+    > {
+        let options = options.map(|o| ClientRequestOptions {
+            connect_timeout: o.connect_timeout,
+            first_byte_timeout: o.first_byte_timeout,
+            between_bytes_timeout: o.between_bytes_timeout,
+        });
+        let request = request.map(|body| {
+            body.map_err(|e| ClientError::InternalError(Some(e.to_string()))).boxed_unsync()
+        });
+        let pending = self.fetch(request, options);
+        Box::new(async move {
+            let response = pending.await.map_err(to_wasi_error)?;
+            let response = response.map(|body| body.map_err(to_wasi_error).boxed_unsync());
+            Ok((response, fut))
+        })
+    }
+}
+
+fn to_wasi_error(err: ClientError) -> WasiError {
+    match err {
+        ClientError::Connect(io) => WasiError::Connect(io),
+        ClientError::Tls(io) => WasiError::Tls(io),
+        ClientError::ConnectionRefused => WasiError::ConnectionRefused,
+        ClientError::ConnectionTimeout => WasiError::ConnectionTimeout,
+        ClientError::ConnectionReadTimeout => WasiError::ConnectionReadTimeout,
+        ClientError::TlsCertificateError => WasiError::TlsCertificateError,
+        ClientError::TlsAlertReceived {
+            alert_id,
+            alert_message,
+        } => WasiError::TlsAlertReceived {
+            alert_id,
+            alert_message,
+        },
+        ClientError::HttpRequestUriInvalid => WasiError::HttpRequestUriInvalid,
+        ClientError::HttpResponseIncomplete => WasiError::HttpResponseIncomplete,
+        ClientError::HttpProtocolError => WasiError::HttpProtocolError,
+        ClientError::InternalError(msg) => WasiError::InternalError(msg),
+        _ => WasiError::InternalError(Some(err.to_string())),
     }
 }
 
@@ -190,11 +281,11 @@ impl Paced {
 
 impl HttpBody for Paced {
     type Data = Bytes;
-    type Error = Error;
+    type Error = ClientError;
 
     fn poll_frame(
         self: Pin<&mut Self>, cx: &mut task::Context<'_>,
-    ) -> Poll<Option<Result<Frame<Bytes>, Error>>> {
+    ) -> Poll<Option<Result<Frame<Bytes>, ClientError>>> {
         let this = self.get_mut();
         match Pin::new(&mut this.inner).poll_frame(cx) {
             Poll::Ready(frame) => {
@@ -203,7 +294,7 @@ impl HttpBody for Paced {
             }
             Poll::Pending => {
                 ready!(this.deadline.as_mut().poll(cx));
-                Poll::Ready(Some(Err(Error::ConnectionReadTimeout)))
+                Poll::Ready(Some(Err(ClientError::ConnectionReadTimeout)))
             }
         }
     }
@@ -217,27 +308,27 @@ impl HttpBody for Paced {
     }
 }
 
-fn internal_err(e: impl Display) -> Error {
-    Error::InternalError(Some(e.to_string()))
+fn internal_err(e: impl Display) -> ClientError {
+    ClientError::InternalError(Some(e.to_string()))
 }
 
-fn reqwest_err(e: &reqwest::Error) -> Error {
+fn reqwest_err(e: &reqwest::Error) -> ClientError {
     if e.is_timeout() {
         return if e.is_connect() {
-            Error::ConnectionTimeout
+            ClientError::ConnectionTimeout
         } else {
-            Error::ConnectionReadTimeout
+            ClientError::ConnectionReadTimeout
         };
     }
     if e.is_connect() {
-        return cause::<io::Error>(e).map_or(Error::ConnectionRefused, connect_err);
+        return cause::<io::Error>(e).map_or(ClientError::ConnectionRefused, connect_err);
     }
     if e.is_builder() {
-        return Error::HttpRequestUriInvalid;
+        return ClientError::HttpRequestUriInvalid;
     }
     match cause::<hyper::Error>(e) {
-        Some(hyper) if hyper.is_incomplete_message() => Error::HttpResponseIncomplete,
-        Some(_) => Error::HttpProtocolError,
+        Some(hyper) if hyper.is_incomplete_message() => ClientError::HttpResponseIncomplete,
+        Some(_) => ClientError::HttpProtocolError,
         None => internal_err(e),
     }
 }
@@ -253,17 +344,17 @@ fn cause<'a, T: StdError + 'static>(e: &'a (dyn StdError + 'static)) -> Option<&
     None
 }
 
-fn connect_err(io: &io::Error) -> Error {
+fn connect_err(io: &io::Error) -> ClientError {
     let Some(handshake) = io.get_ref().and_then(|inner| inner.downcast_ref::<io::Error>()) else {
-        return Error::Connect(io_copy(io));
+        return ClientError::Connect(io_copy(io));
     };
     match handshake.get_ref().and_then(|inner| inner.downcast_ref::<rustls::Error>()) {
-        Some(rustls::Error::InvalidCertificate(_)) => Error::TlsCertificateError,
-        Some(rustls::Error::AlertReceived(alert)) => Error::TlsAlertReceived {
+        Some(rustls::Error::InvalidCertificate(_)) => ClientError::TlsCertificateError,
+        Some(rustls::Error::AlertReceived(alert)) => ClientError::TlsAlertReceived {
             alert_id: Some(u8::from(*alert)),
             alert_message: None,
         },
-        _ => Error::Tls(io_copy(handshake)),
+        _ => ClientError::Tls(io_copy(handshake)),
     }
 }
 

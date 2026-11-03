@@ -49,13 +49,14 @@ guest = [
     "dep:http-body",
     "dep:http-body-util",
     "dep:omnia-backend",
-    "omnia-backend/docstore-default",
+    "omnia-backend/docstore",
     "omnia-backend/keyvalue",
     "omnia-backend/model",
     "omnia-backend/vcs",
     "dep:omnia-sdk",
     "omnia-sdk/sql",
     "omnia-sdk/docstore",
+    "dep:serde_json",
 ]
 # The component runtime harness: `Deployment`, `Backends`, `ScriptedModel`, `ScriptedVcs`, `Scratch`.
 host = [
@@ -113,6 +114,7 @@ omnia-wasi-sql = { workspace = true, optional = true }
 omnia-wasi-vault = { workspace = true, optional = true }
 omnia-wasi-vcs = { workspace = true, optional = true }
 omnia-wasi-websocket = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
 tempfile = { workspace = true, optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

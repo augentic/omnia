@@ -1,16 +1,12 @@
-//! Key-value storage service contract, constants, and default implementation.
+//! Key-value storage service contract and constants.
 
 #[cfg(not(target_arch = "wasm32"))]
 mod client;
-#[cfg(all(not(target_arch = "wasm32"), feature = "keyvalue-default"))]
-mod default;
 
 use anyhow::{Context as _, Result, anyhow};
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use self::client::{Bucket, KeyValueClient};
-#[cfg(all(not(target_arch = "wasm32"), feature = "keyvalue-default"))]
-pub use self::default::KeyValueDefault;
 
 /// The bucket `StateStore` opens.
 pub const BUCKET: &str = "cache";

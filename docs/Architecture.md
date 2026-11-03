@@ -224,8 +224,8 @@ The consolidated list is in [Configuration](reference/configuration.md); individ
 omnia/
 ├── crates/
 │   ├── omnia/              # Composition root (assembly, lifecycle, optional crates, runtime!)
-│   ├── omnia-backend/      # Engine-free service contracts (*Client), resource traits, value types, *Default, Connect, MountRegistry, Telemetry
-│   ├── omnia-core/         # Live-runtime SDK (engine, registry, dispatch, stores)
+│   ├── omnia-backend/      # Engine-free service contracts (*Client), resource traits, value types, Connect
+│   ├── omnia-core/         # Live-runtime SDK (engine, registry, dispatch, stores, MountRegistry, Telemetry)
 │   ├── omnia-link/         # Guest-to-guest dispatch (InProcessLinks; re-exported by omnia behind `link`)
 │   ├── omnia-sdk/          # Guest SDK (Handler/Client/Context, HTTP/messaging/command adapters, errors, capabilities, MCP)
 │   ├── guest-macros/       # #[instrument] and #[derive(Provider)] proc macros
@@ -248,7 +248,7 @@ Production backends live in the sibling [`omnia-backends`](https://github.com/au
 
 ## Extending Omnia
 
-**Adding a WASI interface**: create `crates/wasi-<name>/` with the standard layout, define the WIT world in `wit/`, add the `<Name>Client` trait and default in `omnia-backend`, implement guest bindings in `src/guest.rs` and the host in `src/host/`, and create an example. Unit-test deterministic logic (including the default backend against its `XxxClient`); do not add tests that compile or instantiate a WASM guest (see the [testing policy](guides/testing-policy.md)).
+**Adding a WASI interface**: create `crates/wasi-<name>/` with the standard layout, define the WIT world in `wit/`, add the `<Name>Client` trait in `omnia-backend`, implement guest bindings in `src/guest.rs` and the host (plus `<Name>Default`) in `src/host/`, and create an example. Unit-test deterministic logic (including the default backend against its `XxxClient`); do not add tests that compile or instantiate a WASM guest (see the [testing policy](guides/testing-policy.md)).
 
 **Adding a backend**: create a crate (usually in the `omnia-backends` repo), implement `Connect` with a `FromEnv`-derived `ConnectOptions`, implement the `XxxClient` trait(s) for the interfaces it serves, and add `#[ignore]`-gated live tests. No runtime-core changes are required — backends plug in through the `runtime!` host map.
 

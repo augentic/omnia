@@ -1,5 +1,6 @@
 //! # WASI `DocStore` Service
 
+mod default_impl;
 mod resource;
 mod store_impl;
 mod types_impl;
@@ -27,9 +28,10 @@ mod generated {
 
 use std::fmt::Debug;
 
+pub use default_impl::DocStoreDefault;
 pub use omnia_backend::docstore::{
-    ComparisonOp, DocStoreClient, DocStoreDefault, Document, Filter, QueryOptions, QueryResult,
-    ScalarValue, SortField,
+    ComparisonOp, DocStoreClient, Document, Filter, QueryOptions, QueryResult, ScalarValue,
+    SortField,
 };
 pub use omnia_core::FutureResult;
 use omnia_core::{Host, Server, StoreView};

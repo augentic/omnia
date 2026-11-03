@@ -3,7 +3,10 @@
 //! This module implements the host-side logic for the WASI Identity service.
 
 mod credentials_impl;
+#[cfg(feature = "oauth")]
+mod default_impl;
 mod resource;
+mod stub_impl;
 mod types_impl;
 
 mod generated {
@@ -27,11 +30,12 @@ mod generated {
 
 use std::fmt::Debug;
 
-pub use omnia_backend::identity::{AccessToken, Identity, IdentityClient, IdentityStub};
 #[cfg(feature = "oauth")]
-pub use omnia_backend::identity::{ConnectOptions, IdentityDefault};
+pub use default_impl::{ConnectOptions, IdentityDefault};
+pub use omnia_backend::identity::{AccessToken, Identity, IdentityClient};
 pub use omnia_core::FutureResult;
 use omnia_core::{Host, Server, StoreView};
+pub use stub_impl::IdentityStub;
 use wasmtime::component::{HasData, Linker};
 
 use self::generated::omnia::identity::credentials;

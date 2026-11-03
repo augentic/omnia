@@ -6,7 +6,9 @@
 //! session channels it mints for the completion.
 
 mod completion_impl;
+mod default_impl;
 mod session;
+mod workspace;
 
 mod generated {
     #![allow(missing_docs, reason = "wasmtime bindgen output")]
@@ -31,10 +33,11 @@ mod generated {
 
 use std::fmt::Debug;
 
+pub use default_impl::ModelDefault;
 pub use omnia_backend::model::{
     Answer, DirEntry, Effort, Error, Format, Function, Generation, Limits, Mcp, McpGrant, Message,
-    ModelClient, ModelDefault, Reply, Request, Role, Schema, SchemaFormat, Tool, ToolCall,
-    ToolHost, ToolOutcome, ToolSession, ToolTurn, Transcript, Usage, WorkerGrant, Workspace,
+    ModelClient, Reply, Request, Role, Schema, SchemaFormat, Tool, ToolCall, ToolHost, ToolOutcome,
+    ToolTurn, Transcript, Usage, WorkerGrant,
 };
 pub use omnia_core::FutureResult;
 use omnia_core::{HasMounts, Host, Server, StoreView};

@@ -8,7 +8,7 @@ mod place;
 #[cfg(not(target_arch = "wasm32"))]
 pub use self::client::VcsClient;
 #[cfg(not(target_arch = "wasm32"))]
-pub use self::place::{Intent, Place};
+pub use self::place::Place;
 
 /// How a merge resolves a conflict at a path a [`Rule`] matches, before the
 /// conflict is reported.

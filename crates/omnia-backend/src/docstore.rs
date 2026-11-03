@@ -2,17 +2,13 @@
 
 #[cfg(not(target_arch = "wasm32"))]
 mod client;
-#[cfg(all(not(target_arch = "wasm32"), feature = "docstore-default"))]
-mod default;
-#[cfg(all(not(target_arch = "wasm32"), feature = "docstore-default"))]
-mod filter;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod filter;
 
 use std::ops::Not;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use self::client::DocStoreClient;
-#[cfg(all(not(target_arch = "wasm32"), feature = "docstore-default"))]
-pub use self::default::DocStoreDefault;
 
 /// Scalar values for filter comparisons.
 #[derive(Debug, Clone, PartialEq)]

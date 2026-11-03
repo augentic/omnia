@@ -18,8 +18,10 @@ workspace = true
 # host dependencies
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 anyhow.workspace = true
-omnia-backend = { workspace = true, features = ["vault-default"] }
+futures.workspace = true
+omnia-backend = { workspace = true, features = ["vault"] }
 omnia-core.workspace = true
+parking_lot.workspace = true
 tracing.workspace = true
 wasmtime.workspace = true
 wasmtime-wasi.workspace = true

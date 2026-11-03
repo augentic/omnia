@@ -18,10 +18,15 @@ workspace = true
 # host dependencies
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 anyhow.workspace = true
+dashmap.workspace = true
 futures.workspace = true
-omnia-backend = { workspace = true, features = ["websocket-default"] }
+futures-channel.workspace = true
+futures-util.workspace = true
+omnia-backend = { workspace = true, features = ["websocket"] }
 omnia-core.workspace = true
-tokio = { workspace = true, features = ["sync", "time"] }
+tokio = { workspace = true, features = ["net", "rt", "sync", "time"] }
+tokio-stream.workspace = true
+tokio-tungstenite.workspace = true
 tracing.workspace = true
 wasmtime.workspace = true
 wasmtime-wasi.workspace = true

@@ -1,14 +1,10 @@
-//! Identity and authentication service contract, value types, and default implementations.
+//! Identity and authentication service contract and value types.
 
 #[cfg(not(target_arch = "wasm32"))]
 mod client;
-#[cfg(all(not(target_arch = "wasm32"), feature = "oauth"))]
-mod oauth;
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use self::client::{Identity, IdentityClient, IdentityStub};
-#[cfg(all(not(target_arch = "wasm32"), feature = "oauth"))]
-pub use self::oauth::{ConnectOptions, IdentityDefault};
+pub use self::client::{Identity, IdentityClient};
 
 /// An `OAuth` 2.0 access token along with its expiration time.
 ///

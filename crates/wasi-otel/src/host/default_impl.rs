@@ -2,12 +2,11 @@
 
 use anyhow::Result;
 use futures::FutureExt as _;
+use omnia_backend::otel::OtelClient;
+use omnia_core::{Connect, FutureResult, NoOptions};
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
 use tracing::instrument;
-
-use super::OtelClient;
-use crate::{Connect, FutureResult, NoOptions};
 
 /// Default no-op implementation of [`OtelClient`].
 #[derive(Debug, Clone, Default)]

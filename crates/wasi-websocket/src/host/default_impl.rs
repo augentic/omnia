@@ -9,15 +9,14 @@ use futures::FutureExt as _;
 use futures_channel::mpsc;
 use futures_util::stream::TryStreamExt;
 use futures_util::{StreamExt, future, pin_mut};
+use omnia_backend::websocket::{Endpoint, Event, Events, WebSocketClient};
+use omnia_core::{Connect, FromEnv, FutureResult};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::broadcast::{self, Sender};
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 use tokio_tungstenite::{WebSocketStream, accept_async};
 use tracing::instrument;
-
-use super::{Endpoint, Event, Events, WebSocketClient};
-use crate::{Connect, FromEnv, FutureResult};
 
 const MAX_CONNECTIONS: usize = 1024;
 const BROADCAST_CAPACITY: usize = 256;
@@ -222,11 +221,8 @@ impl WebSocketDefault {
     }
 
     fn send_to_guest(&self, socket_addr: String, data: Vec<u8>) {
-        let event = Event {
-            socket_addr: Some(socket_addr),
-            data,
-            route: None,
-        };
+        let mut event = Event::new(data);
+        event.socket_addr = Some(socket_addr);
         if let Err(e) = self.event_tx.send(event) {
             tracing::warn!("issue sending WebSocket event: {e}");
         }

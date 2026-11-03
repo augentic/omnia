@@ -14,10 +14,9 @@ use oauth2::{
     ClientId, ClientSecret, EmptyExtraTokenFields, Scope, StandardTokenResponse,
     TokenResponse as _, TokenUrl,
 };
+use omnia_backend::identity::{AccessToken, Identity, IdentityClient};
+use omnia_core::{Connect, FromEnv, FutureResult};
 use tracing::instrument;
-
-use super::{AccessToken, Identity, IdentityClient};
-use crate::{Connect, FutureResult};
 
 type TokenResponse = StandardTokenResponse<EmptyExtraTokenFields, BasicTokenType>;
 
@@ -51,7 +50,7 @@ impl fmt::Debug for ConnectOptions {
     }
 }
 
-impl crate::FromEnv for ConnectOptions {
+impl FromEnv for ConnectOptions {
     fn load_env() -> Result<Self> {
         Self::from_env().finalize().context("issue loading connection options")
     }
@@ -81,15 +80,13 @@ impl IdentityClient for IdentityDefault {
     }
 }
 
-impl From<TokenResponse> for AccessToken {
-    fn from(token_resp: TokenResponse) -> Self {
-        let token = token_resp.access_token().secret().clone();
-        let expires_in = token_resp.expires_in().unwrap_or(Duration::from_hours(1));
+fn into_access_token(token_resp: &TokenResponse) -> AccessToken {
+    let token = token_resp.access_token().secret().clone();
+    let expires_in = token_resp.expires_in().unwrap_or(Duration::from_hours(1));
 
-        Self {
-            token,
-            expires_in: expires_in.as_secs(),
-        }
+    AccessToken {
+        token,
+        expires_in: expires_in.as_secs(),
     }
 }
 
@@ -158,7 +155,7 @@ impl TokenManager {
         }
 
         let token_resp = token_req.request_async(&http_client).await?;
-        let access_token = AccessToken::from(token_resp);
+        let access_token = into_access_token(&token_resp);
 
         let mut cache = self.cache.lock().await;
         let entry = cache.entry(key).or_insert_with(|| CachedToken::new(access_token.clone()));

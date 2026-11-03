@@ -1,6 +1,6 @@
 //! Sandboxed conformance guest: runs every portable scenario in
 //! `omnia_test::conformance` through `omnia_sdk::WasiProvider`, then exchanges
-//! keys and atomic counters with `Direct<KeyValueDefault>` on a shared bucket.
+//! keys and atomic counters with the host on a shared bucket.
 
 #![cfg(target_arch = "wasm32")]
 

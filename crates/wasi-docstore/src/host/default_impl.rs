@@ -7,11 +7,10 @@ use std::sync::{Arc, RwLock};
 
 use anyhow::{Context, Result};
 use futures::FutureExt as _;
+use omnia_backend::docstore::{DocStoreClient, Document, QueryOptions, QueryResult, filter};
+use omnia_core::{Connect, FutureResult, NoOptions};
 use serde_json::Value;
 use tracing::instrument;
-
-use super::{DocStoreClient, Document, QueryOptions, QueryResult, filter};
-use crate::{Connect, FutureResult, NoOptions};
 
 const MAX_PAGE_SIZE: u64 = 1000;
 

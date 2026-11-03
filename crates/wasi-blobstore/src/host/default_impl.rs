@@ -8,11 +8,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{Result, anyhow};
 use bytes::Bytes;
 use futures::FutureExt as _;
+use omnia_backend::blobstore::{BlobStoreClient, Container, ContainerMetadata, ObjectMetadata};
+use omnia_core::{Connect, FutureResult, NoOptions};
 use parking_lot::RwLock;
 use tracing::instrument;
-
-use super::{BlobStoreClient, Container, ContainerMetadata, ObjectMetadata};
-use crate::{Connect, FutureResult, NoOptions};
 
 /// Default in-memory implementation of [`BlobStoreClient`].
 #[derive(Debug, Clone, Default)]

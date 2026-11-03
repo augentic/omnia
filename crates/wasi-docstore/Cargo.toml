@@ -22,8 +22,9 @@ omnia-backend = { workspace = true, features = ["docstore"] }
 
 # host dependencies
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-omnia-backend = { workspace = true, features = ["docstore-default"] }
+futures.workspace = true
 omnia-core.workspace = true
+serde_json.workspace = true
 tracing.workspace = true
 wasmtime.workspace = true
 wasmtime-wasi.workspace = true

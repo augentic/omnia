@@ -2,12 +2,9 @@
 
 use std::sync::Arc;
 
-use anyhow::{Context as _, anyhow};
-use cap_std::fs::{Metadata, MetadataExt as _};
 use futures::FutureExt as _;
-use omnia_core::{HasMounts, MountRegistry};
+use omnia_core::HasMounts;
 use wasmtime::component::{Accessor, FutureReader, StreamReader};
-use wasmtime_wasi::filesystem::Descriptor;
 
 use crate::host::generated::omnia::model::completion::{
     Effort as WitEffort, Error as WitError, Format as WitFormat, Function as WitFunction,
@@ -16,10 +13,11 @@ use crate::host::generated::omnia::model::completion::{
     Tool as WitTool, ToolResult as WitToolResult, Usage as WitUsage, WorkerGrant as WitWorkerGrant,
     WorkspaceGrant,
 };
-use crate::host::session::{CallsProducer, ReplyTask, ResultsConsumer};
+use crate::host::session::{CallsProducer, ReplyTask, ResultsConsumer, ToolSession};
+use crate::host::workspace::Workspace;
 use crate::host::{
     Effort, Error, Format, Function, Generation, McpGrant, Message, Request, Role, SchemaFormat,
-    Tool, ToolSession, Usage, WasiModel, WasiModelView, WorkerGrant, Workspace,
+    Tool, Usage, WasiModel, WasiModelView, WorkerGrant,
 };
 
 impl<T> HostWithStore<T> for WasiModel
@@ -41,7 +39,7 @@ where
                 let mounts = access.data_mut().mounts();
                 let descriptor = access.get().table.get(&grant.root)?;
 
-                match resolve_descriptor(descriptor, &mounts, grant) {
+                match Workspace::resolve(descriptor, &mounts, grant) {
                     Ok(workspace) => Some(workspace),
                     Err(error) => {
                         results.close(&mut access)?;
@@ -90,21 +88,6 @@ impl Host for WasiModelView<'_> {
     fn convert_error(&mut self, err: WitError) -> wasmtime::Result<WitError> {
         Ok(err)
     }
-}
-
-fn resolve_descriptor(
-    descriptor: &Descriptor, registry: &MountRegistry, grant: &WorkspaceGrant,
-) -> anyhow::Result<Workspace> {
-    let Descriptor::Dir(dir) = descriptor else {
-        return Err(anyhow!("grants.workspace root must be a directory"));
-    };
-
-    let meta =
-        Metadata::from_file(&dir.dir).context("reading lent workspace directory metadata")?;
-    let entry = registry
-        .match_identity(meta.dev(), meta.ino())
-        .context("lent workspace root is not an authorized mount")?;
-    Workspace::from_mount(entry, &grant.subpath)
 }
 
 fn split_wit_request(req: WitRequest) -> (Request, Option<WorkspaceGrant>) {

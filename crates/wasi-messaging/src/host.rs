@@ -1,3 +1,4 @@
+mod default_impl;
 mod producer_impl;
 mod request_reply_impl;
 mod resource;
@@ -33,9 +34,10 @@ mod generated {
 
 use std::fmt::Debug;
 
+pub use default_impl::MessagingDefault;
 pub use omnia_backend::messaging::{
-    Endpoint, Error, HandleError, Handler, Message, MessagingClient, MessagingDefault, Metadata,
-    Reply, RequestOptions, Subscriptions, dispatch,
+    Endpoint, Error, HandleError, Handler, Message, MessagingClient, Metadata, Reply,
+    RequestOptions, Subscriptions, dispatch,
 };
 pub use omnia_core::FutureResult;
 use omnia_core::{Host, Runtime, Server, StoreCtx, StoreView};

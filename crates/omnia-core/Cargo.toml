@@ -36,15 +36,22 @@ gc = ["wasmtime/gc", "wasmtime/gc-copying"]
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 anyhow.workspace = true
+cap-fs-ext.workspace = true
+cap-std.workspace = true
 fromenv.workspace = true
 futures.workspace = true
 http.workspace = true
-omnia-backend = { workspace = true, features = ["otel-default"] }
+omnia-backend.workspace = true
 omnia-compile.workspace = true
+opentelemetry = { workspace = true, features = ["metrics", "trace"] }
+opentelemetry-otlp = { workspace = true, features = ["grpc-tonic", "metrics", "trace"] }
+opentelemetry_sdk = { workspace = true, features = ["metrics", "trace"] }
 pastey.workspace = true
 serde.workspace = true
 sha2.workspace = true
 tracing.workspace = true
+tracing-opentelemetry = { workspace = true, features = ["metrics"] }
+tracing-subscriber = { workspace = true, features = ["ansi", "smallvec"] }
 tokio = { workspace = true, features = ["fs", "io-util", "macros", "rt", "sync", "time"] }
 wasmtime = { workspace = true, features = ["pooling-allocator", "runtime"] }
 wasmtime-wasi.workspace = true

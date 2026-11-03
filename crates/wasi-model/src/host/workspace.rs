@@ -5,12 +5,15 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context as _, anyhow, ensure};
-use cap_std::fs::Dir;
+use cap_std::fs::{Dir, Metadata, MetadataExt as _};
 use futures::{FutureExt as _, future};
+use omnia_backend::model::DirEntry;
+use omnia_backend::{FutureResult, check_subpath};
+use omnia_core::{Mount, MountRegistry};
 use tokio::task::spawn_blocking;
+use wasmtime_wasi::filesystem::Descriptor;
 
-use super::{DirEntry, Error};
-use crate::{FutureResult, Mount, MountRegistry, check_subpath};
+use crate::host::WorkspaceGrant;
 
 const MAX_READ_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_WRITE_BYTES: usize = 4 * 1024 * 1024;
@@ -34,12 +37,6 @@ impl std::fmt::Debug for Workspace {
 }
 
 impl Workspace {
-    /// Resolve `subpath` beneath an already-matched [`Mount`].
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if `subpath` is not a plain relative path or cannot be
-    /// opened as a directory beneath `mount`.
     pub fn from_mount(mount: &Mount, subpath: &str) -> anyhow::Result<Self> {
         if subpath.is_empty() {
             return Ok(Self {
@@ -62,33 +59,26 @@ impl Workspace {
         })
     }
 
-    /// Resolve a deployment-local lend `path` against `registry`.
-    ///
-    /// Returns the confined [`Workspace`] and the matched mount-relative `subpath`.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::InvalidRequest`] if `path` matches no registered mount
-    /// or [`Error::Backend`] if the subpath cannot be opened beneath the
-    /// matched mount.
-    pub fn resolve_path<'a>(
-        registry: &MountRegistry, path: &'a str,
-    ) -> Result<(Self, &'a str), Error> {
-        let (mount, subpath) = registry.match_path(path).ok_or_else(|| {
-            Error::InvalidRequest(format!("workspace lend `{path}` matches no preopen"))
-        })?;
-        let workspace =
-            Self::from_mount(mount, subpath).map_err(|e| Error::Backend(format!("{e:#}")))?;
-        Ok((workspace, subpath))
+    pub fn resolve(
+        descriptor: &Descriptor, registry: &MountRegistry, grant: &WorkspaceGrant,
+    ) -> anyhow::Result<Self> {
+        let Descriptor::Dir(dir) = descriptor else {
+            return Err(anyhow!("grants.workspace root must be a directory"));
+        };
+
+        let meta =
+            Metadata::from_file(&dir.dir).context("reading lent workspace directory metadata")?;
+        let entry = registry
+            .match_identity(meta.dev(), meta.ino())
+            .context("lent workspace root is not an authorized mount")?;
+        Self::from_mount(entry, &grant.subpath)
     }
 
-    /// The absolute host path of the workspace when it resolved.
     #[must_use]
     pub fn local_path(&self) -> &Path {
         &self.local_path
     }
 
-    /// Bounded read of `path` inside the workspace.
     pub fn read(&self, path: String) -> FutureResult<Vec<u8>> {
         self.with_dir(move |dir| {
             let file = dir.open(&path).context("opening path in workspace")?;
@@ -105,7 +95,6 @@ impl Workspace {
         })
     }
 
-    /// Bounded directory listing of `path` inside the workspace.
     pub fn list(&self, path: String) -> FutureResult<Vec<DirEntry>> {
         self.with_dir(move |dir| {
             let read_dir = if path.is_empty() || path == "." {
@@ -129,7 +118,6 @@ impl Workspace {
         })
     }
 
-    /// Bounded write of `bytes` to `path` inside a writable workspace.
     pub fn write(&self, path: String, bytes: Vec<u8>) -> FutureResult<()> {
         if !self.writable {
             return future::err(anyhow!("workspace is read-only")).boxed();
@@ -163,9 +151,9 @@ mod tests {
 
     use cap_std::ambient_authority;
     use cap_std::fs::Dir;
+    use omnia_backend::check_subpath;
 
     use super::{MAX_LIST_ENTRIES, MAX_READ_BYTES, MAX_WRITE_BYTES, Workspace};
-    use crate::check_subpath;
 
     fn temp_dir(label: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("omnia-ws-{label}-{}", std::process::id()));

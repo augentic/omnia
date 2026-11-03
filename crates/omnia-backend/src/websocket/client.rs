@@ -26,7 +26,3 @@ pub trait Endpoint: Debug + Send + Sync + 'static {
     /// Send an event to connected WebSocket clients, optionally filtered by sockets.
     fn send(&self, event: Event, sockets: Option<Vec<String>>) -> FutureResult<()>;
 }
-
-/// Deprecated alias for [`Endpoint`].
-#[deprecated(note = "use `Endpoint`")]
-pub type Client = dyn Endpoint;

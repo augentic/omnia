@@ -1,4 +1,25 @@
-//! Host-side [`MountRegistry`], [`Mount`], and [`ResolvedPreopen`].
+//! # Preopen mounts and the mount registry
+//!
+//! A deployment may mount node-local directories into a guest's WASI sandbox via
+//! `[[mount]]` so a guest can read or edit a mounted directory tree. Two
+//! host-side artefacts back that capability:
+//!
+//! - [`ResolvedPreopen`] — a mount resolved to an absolute host path plus
+//!   writability, applied per store via [`WasiCtxBuilder::preopened_dir`].
+//! - [`MountRegistry`] — the host-side source of truth that maps a lent
+//!   `wasi:filesystem` descriptor back to its mount by directory identity. It is
+//!   built once at startup (opening each directory and capturing its identity),
+//!   then shared read-only across every store. The registry — never the
+//!   descriptor — supplies the resolved handle: a cap-std [`Dir`] for bounded
+//!   operations and the absolute host path.
+//!
+//! A `wasi:filesystem` `Descriptor` is path-less by design (cap-std exposes no
+//! API to recover a host path from a `Dir`), so the absolute path *must* come
+//! from this registry, keyed by descriptor identity. Resolving a guest-lent
+//! `borrow<descriptor>` into a usable handle is the job of the host crate that
+//! defines that grant (e.g. `wasi-model`'s workspace tools), not of this crate.
+//!
+//! [`WasiCtxBuilder::preopened_dir`]: wasmtime_wasi::WasiCtxBuilder::preopened_dir
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -9,13 +30,11 @@ use cap_fs_ext::MetadataExt as _;
 use cap_std::ambient_authority;
 use cap_std::fs::Dir;
 
-use super::lend;
-
 /// A preopen mount resolved to an absolute host path and writability, ready
 /// to be opened into the guest sandbox and recorded in the [`MountRegistry`].
 ///
 /// Writability maps to WASI filesystem permissions only at the preopen call
-/// site, keeping engine types out of the mount API.
+/// site, keeping wasmtime types out of the mount API.
 #[derive(Clone, Debug)]
 pub struct ResolvedPreopen {
     /// Guest-visible name returned by `preopens.get-directories()`.
@@ -61,10 +80,10 @@ pub struct Mount {
 /// The host-side registry of authorized mounts.
 ///
 /// Built once at startup from the resolved preopens (opening each directory and
-/// capturing its identity); cheaply cloned across stores and providers via its
-/// internal `Arc`. A consuming host crate matches a lent `borrow<descriptor>`
-/// against this registry by directory identity, never trusting an OS path read
-/// out of the descriptor.
+/// capturing its identity); cheaply cloned across stores via its internal
+/// `Arc`. A consuming host crate matches a lent `borrow<descriptor>` against
+/// this registry by directory identity, never trusting an OS path read out of
+/// the descriptor.
 #[derive(Clone, Debug, Default)]
 pub struct MountRegistry {
     entries: Option<Arc<[Mount]>>,
@@ -124,15 +143,6 @@ impl MountRegistry {
     #[must_use]
     pub fn match_identity(&self, dev: u64, ino: u64) -> Option<&Mount> {
         self.entries().iter().find(|entry| entry.identity == (dev, ino))
-    }
-
-    /// Match a deployment-local lend `path` (`"."`, `"./sub"`, `"/mount/sub"`)
-    /// against the registered mounts by the longest guest-visible name that
-    /// equals `path` or prefixes it at a `/` boundary, returning the matched
-    /// [`Mount`] and the remaining subpath (`""` for the mount root itself).
-    #[must_use]
-    pub fn match_path<'a>(&self, path: &'a str) -> Option<(&Mount, &'a str)> {
-        lend(self.entries().iter().map(|mount| (mount, mount.name.as_str())), path)
     }
 
     /// The writable mount `path` lies at or beneath, if any — told by
@@ -206,11 +216,6 @@ mod tests {
     use cap_std::fs::Dir;
 
     use super::{MountRegistry, ResolvedPreopen};
-    #[cfg(all(feature = "model", feature = "vcs"))]
-    use crate::{
-        model::Workspace,
-        vcs::{Intent, Place},
-    };
 
     fn temp_root(label: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("omnia-reg-{label}-{}", std::process::id()));
@@ -331,39 +336,5 @@ mod tests {
         .expect("the discarded entry's bad path is never opened");
 
         assert_eq!(registry.entries()[0].host_path, cli_root);
-    }
-
-    #[cfg(all(feature = "model", feature = "vcs"))]
-    #[test]
-    fn match_path_and_confinement() {
-        let project = temp_root("path-project");
-        let work = temp_root("path-work");
-        std::fs::create_dir_all(project.join("sub")).expect("creating sub");
-        std::fs::create_dir_all(work.join("ws-1").join("nested")).expect("creating ws-1/nested");
-        let registry = MountRegistry::open(vec![
-            ResolvedPreopen::new(".".to_owned(), project.clone(), false),
-            ResolvedPreopen::new("/workspaces".to_owned(), work.clone(), true),
-        ])
-        .expect("opening registry");
-
-        assert_eq!(registry.match_path(".").map(|(m, s)| (m.name.as_str(), s)), Some((".", "")));
-        assert_eq!(
-            registry.match_path("./sub").map(|(m, s)| (m.name.as_str(), s)),
-            Some((".", "sub"))
-        );
-        assert_eq!(
-            registry.match_path("/workspaces/ws-1/nested").map(|(m, s)| (m.name.as_str(), s)),
-            Some(("/workspaces", "ws-1/nested"))
-        );
-        assert!(registry.match_path("/elsewhere").is_none());
-
-        let (ws, subpath) =
-            Workspace::resolve_path(&registry, "/workspaces/ws-1/nested").expect("workspace");
-        assert_eq!(subpath, "ws-1/nested");
-        assert_eq!(ws.local_path(), work.join("ws-1").join("nested"));
-        let place = Place::resolve_path(&registry, "./sub", Intent::Read).expect("place");
-        assert_eq!(place.path(), project.join("sub"));
-        Place::resolve_path(&registry, "./sub", Intent::Mutate)
-            .expect_err("read-only mount refuses mutation");
     }
 }

@@ -21,8 +21,9 @@ tracing.workspace = true
 
 # host dependencies
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+futures.workspace = true
 hex = "0.4.3"
-omnia-backend = { workspace = true, features = ["otel-default"] }
+omnia-backend = { workspace = true, features = ["otel"] }
 omnia-core.workspace = true
 opentelemetry = { workspace = true, features = ["trace"] }
 opentelemetry-proto.workspace = true
