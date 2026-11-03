@@ -11,7 +11,7 @@ use axum::Router;
 use axum::routing::get;
 use omnia::wasmtime::component::Val;
 use omnia::{Digest, ExitStatus, GuestEntry, GuestId, Runtime, StoreCtx};
-use omnia_backend::keyvalue;
+use omnia_backend::keyvalue::BUCKET;
 use omnia_test::host::{Backends, Deployment, ScriptedModel, ScriptedVcs, scratch};
 use omnia_test::{Exchange, SeenFormat};
 use omnia_wasi_blobstore::{BlobStoreClient as _, BlobStoreDefault, WasiBlobStore};
@@ -287,7 +287,7 @@ async fn swapped_keyvalue() {
 #[tokio::test]
 async fn host_handles() {
     let backends = Backends::defaults().await;
-    let bucket = backends.keyvalue.open_bucket("cache".to_owned()).await.expect("bucket");
+    let bucket = backends.keyvalue.open_bucket(BUCKET.to_owned()).await.expect("bucket");
     bucket.set("k".to_owned(), b"v".to_vec(), None).await.expect("set");
     assert_eq!(backends.state("k").await, Some(b"v".to_vec()));
     assert_eq!(backends.state("missing").await, None);
@@ -332,9 +332,8 @@ async fn serve_origin() -> String {
     format!("http://{addr}")
 }
 
-// Runs the same conformance scenarios inside a real WASI guest over `WasiProvider`,
-// and verifies byte-for-byte interoperability on one shared `KeyValueDefault`
-// bucket.
+// The conformance scenarios the handler rung runs over `guest::Provider`,
+// inside a real WASI guest over `WasiProvider` and every default host.
 #[tokio::test]
 async fn conformance_portable() {
     let url = serve_origin().await;
@@ -343,23 +342,8 @@ async fn conformance_portable() {
 
     let backends = Backends::defaults()
         .await
-        .config([
-            ("CONFORMANCE_KEY", "conformance-val".to_owned()),
-            ("CONFORMANCE_ORIGIN", url),
-            ("CONFORMANCE_SHARED_BUCKET", "1".to_owned()),
-        ])
+        .config([("CONFORMANCE_KEY", "conformance-val".to_owned()), ("CONFORMANCE_ORIGIN", url)])
         .vcs(vcs.clone());
-
-    let bucket = backends
-        .keyvalue
-        .open_bucket(keyvalue::BUCKET.to_owned())
-        .await
-        .expect("open shared bucket");
-    bucket
-        .set("shared/from-direct".to_owned(), b"written-by-direct".to_vec(), None)
-        .await
-        .expect("seed shared key");
-    assert_eq!(bucket.increment("shared/counter".to_owned(), 10).await.expect("increment"), 10);
 
     let status = Deployment::new()
         .guest("conformance", test_programs::CONFORMANCE_PORTABLE)
@@ -384,12 +368,6 @@ async fn conformance_portable() {
         .expect("conformance guest runs");
     assert_eq!(status, ExitStatus::SUCCESS);
     vcs.assert_exhausted();
-
-    assert_eq!(
-        bucket.get("shared/from-wasi".to_owned()).await.expect("reads wasi key"),
-        Some(b"written-by-wasi".to_vec())
-    );
-    assert_eq!(bucket.increment("shared/counter".to_owned(), 0).await.expect("reads counter"), 15);
 }
 
 async fn call<B>(runtime: &Runtime<B>, guest: &str, func: &str, message: &str) -> Result<String>

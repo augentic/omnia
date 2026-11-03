@@ -8,8 +8,6 @@ pub mod config;
 mod connect;
 #[cfg(feature = "docstore")]
 pub mod docstore;
-#[cfg(feature = "http")]
-pub mod http;
 #[cfg(feature = "identity")]
 pub mod identity;
 #[cfg(feature = "keyvalue")]
@@ -40,8 +38,6 @@ pub use self::config::ConfigClient;
 pub use self::connect::{Connect, FromEnv, FutureResult, NoOptions};
 #[cfg(all(not(target_arch = "wasm32"), feature = "docstore"))]
 pub use self::docstore::DocStoreClient;
-#[cfg(all(not(target_arch = "wasm32"), feature = "http"))]
-pub use self::http::HttpClient;
 #[cfg(all(not(target_arch = "wasm32"), feature = "identity"))]
 pub use self::identity::{Identity, IdentityClient};
 #[cfg(all(not(target_arch = "wasm32"), feature = "keyvalue"))]

@@ -10,9 +10,6 @@ use std::fmt::Debug;
 
 use anyhow::Result;
 pub use default_impl::{ConnectOptions, HttpDefault};
-pub use omnia_backend::http::{
-    Body, Error as ClientError, HttpClient, RequestOptions as ClientRequestOptions,
-};
 use omnia_core::{Host, HostCtx, Runtime, Server, StoreCtx, StoreView};
 pub use server::{HttpHandler, OutgoingBody};
 use wasmtime::component::{HasData, Linker, ResourceTable};

@@ -51,10 +51,9 @@ pub struct Request {
     pub check: bool,
     /// Deployment-local path of the directory to lend through
     /// `grants.workspace`, giving the backend (and any spawned agent) that
-    /// directory. The provider resolves the path against its authorized mounts
-    /// (preopens on `wasm32`, `Direct::with_mounts` natively) — `"."` lends the
-    /// shared project mount, `"/mount/sub"` lends a subdirectory of `/mount` —
-    /// while test doubles observe the raw string. `None` lends nothing.
+    /// directory. The path must sit on (or beneath) a preopen: `"."` lends
+    /// the shared project mount, `"/mount/sub"` lends a subdirectory of
+    /// `/mount`. Test doubles observe the raw string. `None` lends nothing.
     #[builder(into)]
     pub workspace: Option<String>,
     /// What the worker a backend runs for this completion may reach beyond

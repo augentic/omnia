@@ -21,12 +21,6 @@ default = []
 blobstore = ["dep:bytes"]
 config = []
 docstore = ["dep:chrono", "dep:serde_json"]
-http = [
-    "dep:bytes",
-    "dep:http",
-    "dep:http-body-util",
-    "dep:thiserror",
-]
 identity = []
 keyvalue = []
 messaging = ["dep:thiserror", "dep:tokio"]
@@ -57,8 +51,6 @@ thiserror = { workspace = true, optional = true }
 bytes = { workspace = true, optional = true }
 cap-std = { workspace = true, optional = true }
 futures.workspace = true
-http = { workspace = true, optional = true }
-http-body-util = { workspace = true, optional = true }
 opentelemetry-proto = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["macros", "rt", "sync"], optional = true }
 wasm-pkg-common = { workspace = true, optional = true }

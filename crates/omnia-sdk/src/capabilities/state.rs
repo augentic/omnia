@@ -47,50 +47,47 @@ pub trait StateStore: Send + Sync {
 }
 
 #[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
+async fn open_bucket() -> Result<omnia_wasi_keyvalue::store::Bucket> {
+    use anyhow::Context as _;
+
+    omnia_wasi_keyvalue::store::open(omnia_backend::keyvalue::BUCKET.to_string())
+        .await
+        .with_context(|| format!("opening bucket `{}`", omnia_backend::keyvalue::BUCKET))
+}
+
+#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
 impl StateStore for crate::WasiProvider {
     async fn get(&self, key: &str) -> Result<Option<Vec<u8>>> {
-        use anyhow::Context;
+        use anyhow::Context as _;
 
-        let bucket = omnia_wasi_keyvalue::store::open(omnia_backend::keyvalue::BUCKET.to_string())
-            .await
-            .context("opening cache")?;
-        bucket.get(key.to_string()).await.context("reading state from cache")
+        let bucket = open_bucket().await?;
+        bucket.get(key.to_string()).await.with_context(|| format!("reading `{key}`"))
     }
 
     async fn set(&self, key: &str, value: &[u8], ttl_secs: Option<u64>) -> Result<()> {
-        use anyhow::Context;
+        use anyhow::Context as _;
 
-        let bucket = omnia_wasi_keyvalue::store::open(omnia_backend::keyvalue::BUCKET.to_string())
-            .await
-            .context("opening cache")?;
+        let bucket = open_bucket().await?;
         match ttl_secs {
             Some(secs) => {
-                omnia_wasi_keyvalue::ttl::set(&bucket, key.to_string(), value.to_vec(), secs)
-                    .await
-                    .context("writing state with ttl to cache")
+                omnia_wasi_keyvalue::ttl::set(&bucket, key.to_string(), value.to_vec(), secs).await
             }
-            None => {
-                bucket.set(key.to_string(), value.to_vec()).await.context("writing state to cache")
-            }
+            None => bucket.set(key.to_string(), value.to_vec()).await,
         }
+        .with_context(|| format!("writing `{key}`"))
     }
 
     async fn delete(&self, key: &str) -> Result<()> {
-        use anyhow::Context;
+        use anyhow::Context as _;
 
-        let bucket = omnia_wasi_keyvalue::store::open(omnia_backend::keyvalue::BUCKET.to_string())
-            .await
-            .context("opening cache")?;
-        bucket.delete(key.to_string()).await.context("deleting entry from cache")
+        let bucket = open_bucket().await?;
+        bucket.delete(key.to_string()).await.with_context(|| format!("deleting `{key}`"))
     }
 
     async fn cas(&self, key: &str, expected: Option<&[u8]>, value: &[u8]) -> Result<(), CasError> {
         use omnia_wasi_keyvalue::atomics::{self, Cas};
-        use omnia_wasi_keyvalue::store;
 
-        let bucket = store::open(omnia_backend::keyvalue::BUCKET.to_string())
-            .await
-            .map_err(|e| CasError::Store(format!("opening cache: {e:?}")))?;
+        let bucket = open_bucket().await.map_err(|e| CasError::Store(format!("{e:#}")))?;
         let cas = Cas::new(&bucket, key.to_string())
             .await
             .map_err(|e| CasError::Store(format!("creating cas handle: {e:?}")))?;
@@ -118,12 +115,9 @@ impl StateStore for crate::WasiProvider {
     }
 
     async fn increment(&self, key: &str, delta: i64) -> Result<i64> {
-        use anyhow::Context;
-        use omnia_wasi_keyvalue::{atomics, store};
+        use omnia_wasi_keyvalue::atomics;
 
-        let bucket = store::open(omnia_backend::keyvalue::BUCKET.to_string())
-            .await
-            .context("opening cache")?;
+        let bucket = open_bucket().await?;
         atomics::increment(&bucket, key.to_string(), delta)
             .await
             .map_err(|e| anyhow::anyhow!("incrementing `{key}`: {e:?}"))

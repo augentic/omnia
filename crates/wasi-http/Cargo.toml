@@ -29,7 +29,6 @@ fromenv.workspace = true
 futures.workspace = true
 http-body-util.workspace = true
 hyper.workspace = true
-omnia-backend = { workspace = true, features = ["http"] }
 omnia-core.workspace = true
 reqwest = { workspace = true, features = ["http2", "rustls-no-provider", "stream", "system-proxy"] }
 rustls.workspace = true

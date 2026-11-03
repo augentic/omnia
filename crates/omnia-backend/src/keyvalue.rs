@@ -9,7 +9,9 @@ use anyhow::{Context as _, Result, anyhow};
 pub use self::client::{Bucket, KeyValueClient};
 
 /// The bucket `StateStore` opens.
-pub const BUCKET: &str = "cache";
+///
+/// A value written without a TTL stays until deleted, on every backend.
+pub const BUCKET: &str = "state";
 
 /// Add `delta` to an 8-byte big-endian signed integer (`None` starts at zero).
 ///
