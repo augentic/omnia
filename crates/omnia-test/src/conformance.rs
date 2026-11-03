@@ -423,7 +423,7 @@ async fn sleep(duration: Duration) {
 
 /// Asserts that the invoking test module defines a test for every conformance scenario.
 ///
-/// Covers the selected capabilities, or all 12 portable capabilities when invoked with no arguments.
+/// Covers the selected capabilities, or all 11 portable capabilities (12 scenarios) when invoked with no arguments.
 ///
 /// # Examples
 ///

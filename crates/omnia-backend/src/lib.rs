@@ -12,7 +12,7 @@ pub mod docstore;
 pub mod identity;
 #[cfg(feature = "keyvalue")]
 pub mod keyvalue;
-#[cfg(all(not(target_arch = "wasm32"), feature = "messaging"))]
+#[cfg(feature = "messaging")]
 pub mod messaging;
 #[cfg(feature = "model")]
 pub mod model;
@@ -27,7 +27,7 @@ pub mod sql;
 pub mod vault;
 #[cfg(feature = "vcs")]
 pub mod vcs;
-#[cfg(all(not(target_arch = "wasm32"), feature = "websocket"))]
+#[cfg(feature = "websocket")]
 pub mod websocket;
 
 #[cfg(all(not(target_arch = "wasm32"), feature = "blobstore"))]
