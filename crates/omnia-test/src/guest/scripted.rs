@@ -66,10 +66,6 @@ pub struct ScriptedModel {
     exchanges: Arc<Mutex<Vec<Exchange>>>,
 }
 
-/// Deprecated alias for [`ScriptedModel`].
-#[deprecated(note = "use `ScriptedModel`")]
-pub type Scripted = ScriptedModel;
-
 impl Default for ScriptedModel {
     fn default() -> Self {
         Self::new([])

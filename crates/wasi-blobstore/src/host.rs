@@ -125,10 +125,6 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[derive(Debug)]
 pub struct WasiBlobStore;
 
-/// Deprecated alias for [`WasiBlobStore`].
-#[deprecated(note = "use `WasiBlobStore`")]
-pub type WasiBlobstore = WasiBlobStore;
-
 impl HasData for WasiBlobStore {
     type Data<'a> = WasiBlobStoreView<'a>;
 }

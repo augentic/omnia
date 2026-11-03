@@ -42,11 +42,9 @@ omnia-backend = { workspace = true, default-features = false, features = [
     "blobstore",
     "identity",
     "keyvalue",
-    "messaging",
     "model",
     "vault",
     "vcs",
-    "websocket",
 ] }
 omnia-guest-macros.workspace = true
 schemars.workspace = true

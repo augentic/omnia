@@ -28,6 +28,16 @@ pub struct PublicWithPrivateField {
     config: PrivateConfig,
 }
 
+/// Public generic provider combining a generic field with a private concrete
+/// field without emitting a `private_bounds` predicate on the private field.
+#[derive(Clone, Default, Provider)]
+pub struct GenericWithPrivateField<S> {
+    #[provider(Config)]
+    config: PrivateConfig,
+    #[provider(StateStore)]
+    storage: S,
+}
+
 #[tokio::test]
 async fn generic_and_multi_capability() {
     let provider = Generic {
@@ -47,6 +57,16 @@ async fn generic_and_multi_capability() {
         },
     };
     assert_eq!(Config::get(&pub_provider, "p").await.expect("private field config"), "ok");
+
+    let mixed = GenericWithPrivateField {
+        config: PrivateConfig {
+            inner: MapConfig::default().with([("m", "mixed-ok")]),
+        },
+        storage: Memory::default(),
+    };
+    mixed.storage.insert_state("ms", b"9");
+    assert_eq!(Config::get(&mixed, "m").await.expect("mixed config"), "mixed-ok");
+    assert_eq!(StateStore::get(&mixed, "ms").await.expect("mixed state"), Some(b"9".to_vec()));
 }
 
 #[test]

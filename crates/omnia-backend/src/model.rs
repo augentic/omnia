@@ -1,20 +1,26 @@
 //! Prompt-completion (model) service contract and value types.
 
+#[cfg(not(target_arch = "wasm32"))]
 mod answer;
 #[cfg(not(target_arch = "wasm32"))]
 mod client;
+#[cfg(not(target_arch = "wasm32"))]
 mod request;
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::Duration;
 
 use schemars::JsonSchema;
+#[cfg(not(target_arch = "wasm32"))]
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use self::answer::{Answer, ToolTurn, Transcript};
 #[cfg(not(target_arch = "wasm32"))]
 pub use self::client::{ModelClient, ToolHost};
 
+#[cfg(not(target_arch = "wasm32"))]
 const MAX_RESULT_BYTES: usize = 1024 * 1024;
 
 /// The reserved tool name a `check` candidate arrives under.
@@ -314,6 +320,7 @@ fn schema_of<T: JsonSchema>() -> String {
 }
 
 /// Session bounds enforced per completion, regardless of backend.
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone, Copy, Debug)]
 pub struct Limits {
     /// Tool calls one completion may issue before `budget-exhausted`.
@@ -325,6 +332,7 @@ pub struct Limits {
     pub tool_timeout: Duration,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Default for Limits {
     fn default() -> Self {
         Self {
@@ -336,10 +344,12 @@ impl Default for Limits {
 }
 
 /// A function tool's model-visible output or failure text.
+#[cfg(not(target_arch = "wasm32"))]
 pub type ToolOutcome = Result<String, String>;
 
 /// One bounded directory entry returned by `ToolHost::list`; backends
 /// serialise the listing for the model.
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone, Debug, Serialize)]
 pub struct DirEntry {
     /// Entry name (never an OS path).

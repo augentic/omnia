@@ -1,9 +1,9 @@
 //! Provider capabilities: the host services a guest's provider can call.
 //!
 //! Each capability is a target-neutral trait implemented by [`WasiProvider`] on
-//! `wasm32` (delegating to the matching `omnia-wasi-*` binding), by decorator
-//! or sidecar providers such as `omnia_dapr::Dapr`, and by `omnia_test::guest`
-//! doubles in tests.
+//! `wasm32` (delegating to the matching `omnia-wasi-*` binding), by
+//! `omnia_test::guest` doubles in native handler tests, and by capability
+//! decorators composed via `#[derive(Provider)]`.
 //!
 //! Every capability has a companion `Has<Capability>` accessor trait (emitted
 //! by `#[omnia_guest_macros::capability]`) with a blanket forwarding impl and

@@ -1,16 +1,18 @@
-//! The scripted pair at the handler rung: `ScriptedModel` as a `Model`,
-//! `ScriptedLoader` as a `Plugins` loader.
+//! The scripted doubles at the handler rung: `ScriptedModel` as a `Model`,
+//! `ScriptedLoader` as a `Plugins` loader, and `ScriptedVcs` as a `Vcs`.
 
 #![cfg(not(target_arch = "wasm32"))]
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::path::Path;
 
 use omnia_sdk::model::{
     Error, Format, Function, Message, Model, Request, Role, SchemaFormat, Tool, ToolCall,
     WorkerGrant,
 };
 use omnia_sdk::plugins::{self, Digest, Location, Plugins};
-use omnia_test::guest::{ScriptedLoader, ScriptedModel, function_tools};
+use omnia_sdk::vcs::{self, Vcs};
+use omnia_test::guest::{ScriptedLoader, ScriptedModel, ScriptedVcs, VcsTurn, function_tools};
 use omnia_test::{Exchange, SeenFormat, SeenWorker};
 
 fn user(content: &str) -> Request {
@@ -305,5 +307,33 @@ async fn loader_scripted_refusal_wins() {
     assert_eq!(
         loader.load(&declared("tool"), None).await,
         Err(plugins::Error::Unavailable("registry down".into()))
+    );
+}
+
+#[tokio::test]
+async fn vcs_turns_and_seen() {
+    let vcs = ScriptedVcs::new([
+        Ok(VcsTurn::Revision("sha:main".to_owned())),
+        Ok(VcsTurn::Commit(Some("sha:c1".to_owned()))),
+        Err(vcs::Error::NotFound("missing".to_owned())),
+    ]);
+    assert_eq!(vcs.resolve(".", "main").await.expect("resolve"), "sha:main");
+    assert_eq!(vcs.commit("./work", "feat").await.expect("commit"), Some("sha:c1".to_owned()));
+    assert_eq!(vcs.head("./work").await, Err(vcs::Error::NotFound("missing".to_owned())));
+    vcs.assert_exhausted();
+
+    let seen = vcs.seen();
+    assert_eq!(seen.len(), 3);
+    assert_eq!(
+        (seen[0].op, seen[0].path.as_path(), &seen[0].args[..]),
+        ("resolve", Path::new("."), &["main".to_owned()][..])
+    );
+    assert_eq!(
+        (seen[1].op, seen[1].path.as_path(), &seen[1].args[..]),
+        ("commit", Path::new("./work"), &["feat".to_owned()][..])
+    );
+    assert_eq!(
+        (seen[2].op, seen[2].path.as_path(), &seen[2].args[..]),
+        ("head", Path::new("./work"), &[][..])
     );
 }

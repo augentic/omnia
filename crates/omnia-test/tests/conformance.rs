@@ -1,20 +1,17 @@
-//! Conformance suite for `omnia_test::guest::Provider`.
+//! Conformance suite for the stateful doubles on `omnia_test::guest::Provider`.
 
 #![cfg(not(target_arch = "wasm32"))]
 
-use std::path::Path;
-
 use bytes::Bytes;
 use http::{HeaderValue, Method, Response};
-use omnia_sdk::sql::{DataType, Field, Row};
-use omnia_sdk::vcs;
 use omnia_test::conformance;
 use omnia_test::guest::{
-    Broadcasted, FixedIdentity, MapConfig, MatchedHttp, Provider, ScriptedModel, ScriptedTables,
-    ScriptedVcs, VcsTurn,
+    Broadcasted, FixedIdentity, MapConfig, MatchedHttp, Provider, ScriptedModel,
 };
 
-omnia_test::conformance!();
+omnia_test::conformance!(
+    state, docstore, blobstore, publish, config, identity, vault, http, broadcast, model
+);
 
 #[tokio::test]
 async fn state_get_set_delete() {
@@ -34,29 +31,6 @@ async fn state_cas() {
 #[tokio::test]
 async fn state_increment() {
     conformance::state_increment(&Provider::default()).await;
-}
-
-#[tokio::test]
-async fn table_query_exec() {
-    let row = Row {
-        index: "0".to_owned(),
-        fields: vec![
-            Field {
-                name: "id".to_owned(),
-                value: DataType::Int64(Some(1)),
-            },
-            Field {
-                name: "label".to_owned(),
-                value: DataType::Str(Some("alpha".to_owned())),
-            },
-        ],
-    };
-    let tables = ScriptedTables::default()
-        .on_exec(|sql, _| sql.starts_with("CREATE TABLE"), 0)
-        .on_exec(|sql, params| sql.starts_with("INSERT INTO") && params.len() == 2, 1)
-        .on_query(|sql, params| sql.starts_with("SELECT") && params.len() == 1, vec![row]);
-    let provider = Provider::default().tables(tables);
-    conformance::table_query_exec(&provider).await;
 }
 
 #[tokio::test]
@@ -143,21 +117,4 @@ async fn model_complete() {
         (&["conformance".to_owned()][..], false)
     );
     assert_eq!((seen[1].messages.as_slice(), seen[1].check), (&["checked".to_owned()][..], true));
-}
-
-#[tokio::test]
-async fn vcs_flow() {
-    let vcs = ScriptedVcs::new([
-        Err(vcs::Error::Other("location `/unmounted` matches no preopen".to_owned())),
-        Ok(VcsTurn::Revision("sha:main".to_owned())),
-    ]);
-    let provider = Provider::default().vcs(vcs);
-    conformance::vcs_flow(&provider).await;
-    provider.vcs.assert_exhausted();
-
-    let seen = provider.vcs.seen();
-    assert_eq!(seen.len(), 2);
-    assert_eq!((seen[0].op, seen[0].path.as_path()), ("head", Path::new("/unmounted")));
-    assert_eq!((seen[1].op, seen[1].path.as_path()), ("resolve", Path::new(".")));
-    assert_eq!(seen[1].args, ["main"]);
 }

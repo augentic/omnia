@@ -1,7 +1,9 @@
 //! Lend path matching and relative subpath validation.
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::{Component, Path};
 
+#[cfg(not(target_arch = "wasm32"))]
 use anyhow::{Result, ensure};
 
 /// Match a deployment-local lend `path` against `(root, name)` preopen pairs.
@@ -33,6 +35,7 @@ fn lend_subpath<'a>(name: &str, path: &'a str) -> Option<&'a str> {
 /// # Errors
 ///
 /// Returns an error if `subpath` is not a plain relative path.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn check_subpath(subpath: &str) -> Result<()> {
     let plain = !subpath.starts_with('/')
         && !subpath.contains('\\')

@@ -1,10 +1,160 @@
-//! Pure JSON evaluation of [`Filter`](super::Filter) for the default in-memory backend.
+//! Pure JSON evaluation of [`Filter`](super::Filter) and shared in-memory
+//! collection storage for `DocStoreDefault` and `omnia_test::guest::MemoryDocs`.
 
 use std::cmp::Ordering;
+use std::collections::btree_map::Entry;
+use std::collections::{BTreeMap, HashMap};
+use std::fmt::Debug;
+use std::sync::{Arc, RwLock};
 
+use anyhow::{Context as _, Result};
 use serde_json::Value;
 
-use super::{ComparisonOp, Filter, ScalarValue, SortField};
+use super::{ComparisonOp, Document, Filter, QueryOptions, QueryResult, ScalarValue, SortField};
+
+const MAX_PAGE_SIZE: u64 = 1000;
+
+type Collections = HashMap<String, BTreeMap<String, Value>>;
+
+/// Shared in-memory document collection store with [`Filter`] evaluation,
+/// sorting, and offset/continuation pagination.
+#[derive(Clone, Default)]
+pub struct MemoryStore {
+    collections: Arc<RwLock<Collections>>,
+}
+
+impl Debug for MemoryStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MemoryStore").finish_non_exhaustive()
+    }
+}
+
+impl MemoryStore {
+    fn read(&self) -> std::sync::RwLockReadGuard<'_, Collections> {
+        self.collections.read().expect("docstore lock poisoned")
+    }
+
+    fn write(&self) -> std::sync::RwLockWriteGuard<'_, Collections> {
+        self.collections.write().expect("docstore lock poisoned")
+    }
+
+    /// Point read by primary id.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the stored JSON body cannot be serialized.
+    pub fn get(&self, collection: &str, id: &str) -> Result<Option<Document>> {
+        self.read()
+            .get(collection)
+            .and_then(|col| col.get(id))
+            .map(|body| to_document(id, body))
+            .transpose()
+    }
+
+    /// Insert a new document; fails if `doc.id` already exists in `collection`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `doc.data` is not valid JSON or `doc.id` already exists.
+    pub fn insert(&self, collection: &str, doc: &Document) -> Result<()> {
+        let body = parse_body(doc)?;
+        let inserted =
+            match self.write().entry(collection.to_owned()).or_default().entry(doc.id.clone()) {
+                Entry::Vacant(slot) => {
+                    slot.insert(body);
+                    true
+                }
+                Entry::Occupied(_) => false,
+            };
+        anyhow::ensure!(inserted, "document id already exists");
+        Ok(())
+    }
+
+    /// Upsert a document by id.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `doc.data` is not valid JSON.
+    pub fn put(&self, collection: &str, doc: &Document) -> Result<()> {
+        let body = parse_body(doc)?;
+        self.write().entry(collection.to_owned()).or_default().insert(doc.id.clone(), body);
+        Ok(())
+    }
+
+    /// Delete a document by id; returns `true` if a document was removed.
+    #[must_use]
+    pub fn delete(&self, collection: &str, id: &str) -> bool {
+        self.write().get_mut(collection).is_some_and(|col| col.remove(id).is_some())
+    }
+
+    /// Query documents in `collection` with filtering, sorting, and pagination.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `options.limit` is zero or `options.continuation` is malformed.
+    pub fn query(&self, collection: &str, options: &QueryOptions) -> Result<QueryResult> {
+        let limit = options.limit.map_or(MAX_PAGE_SIZE, u64::from).min(MAX_PAGE_SIZE);
+        anyhow::ensure!(limit > 0, "query limit must be at least 1");
+        let page_size = usize::try_from(limit).unwrap_or(usize::MAX);
+
+        let skip = parse_continuation(options.continuation.as_deref())?
+            .saturating_add(u64::from(options.offset.unwrap_or(0)));
+        let skip = usize::try_from(skip).unwrap_or(usize::MAX);
+
+        let mut rows: Vec<(String, Value)> = {
+            let guard = self.read();
+            guard.get(collection).map_or_else(Vec::new, |col| {
+                col.iter()
+                    .filter(|(_, body)| options.filter.as_ref().is_none_or(|f| matches(f, body)))
+                    .map(|(id, body)| (id.clone(), body.clone()))
+                    .collect()
+            })
+        };
+
+        if !options.order_by.is_empty() {
+            rows.sort_by(|a, b| {
+                compare_documents(&a.1, &b.1, &options.order_by).then_with(|| a.0.cmp(&b.0))
+            });
+        }
+
+        let (page, continuation) = paginate(rows, skip, page_size);
+        let documents =
+            page.iter().map(|(id, body)| to_document(id, body)).collect::<Result<Vec<_>>>()?;
+
+        Ok(QueryResult {
+            documents,
+            continuation,
+        })
+    }
+}
+
+fn paginate(
+    rows: Vec<(String, Value)>, skip: usize, page_size: usize,
+) -> (Vec<(String, Value)>, Option<String>) {
+    let total = rows.len();
+    let page: Vec<_> = rows.into_iter().skip(skip).take(page_size).collect();
+    let next = skip.saturating_add(page.len());
+    let continuation = (next < total).then(|| next.to_string());
+    (page, continuation)
+}
+
+fn parse_continuation(continuation: Option<&str>) -> Result<u64> {
+    continuation.map_or_else(
+        || Ok(0),
+        |s| s.parse().with_context(|| format!("invalid continuation token: {s:?}")),
+    )
+}
+
+fn parse_body(doc: &Document) -> Result<Value> {
+    serde_json::from_slice(&doc.data).context("invalid JSON in document body")
+}
+
+fn to_document(id: &str, body: &Value) -> Result<Document> {
+    Ok(Document {
+        id: id.to_owned(),
+        data: serde_json::to_vec(body).context("serialize JSON body")?,
+    })
+}
 
 /// Evaluate `tree` against a JSON document body.
 #[must_use]
@@ -307,5 +457,37 @@ mod tests {
 
         assert_eq!(compare_documents(&null, &number, &order), Ordering::Less);
         assert_eq!(compare_documents(&number, &string, &order), Ordering::Less);
+    }
+
+    fn rows(ids: &[&str]) -> Vec<(String, Value)> {
+        ids.iter().map(|id| ((*id).to_string(), json!({ "id": id }))).collect()
+    }
+
+    #[test]
+    fn paginate_walks_all_pages() {
+        let (page, cont) = paginate(rows(&["a", "b", "c", "d", "e"]), 0, 2);
+        assert_eq!(page.len(), 2);
+        assert_eq!(cont.as_deref(), Some("2"));
+
+        let (page, cont) = paginate(rows(&["a", "b", "c", "d", "e"]), 2, 2);
+        assert_eq!(page.len(), 2);
+        assert_eq!(cont.as_deref(), Some("4"));
+
+        let (page, cont) = paginate(rows(&["a", "b", "c", "d", "e"]), 4, 2);
+        assert_eq!(page.len(), 1);
+        assert_eq!(cont, None, "final partial page carries no continuation");
+    }
+
+    #[test]
+    fn paginate_exact_boundary() {
+        let (page, cont) = paginate(rows(&["a", "b"]), 0, 2);
+        assert_eq!(page.len(), 2);
+        assert_eq!(cont, None, "a full final page carries no continuation");
+    }
+
+    #[test]
+    fn continuation_rejects_junk() {
+        parse_continuation(Some("not-a-number")).expect_err("garbage token is rejected");
+        assert_eq!(parse_continuation(None).expect("empty token"), 0);
     }
 }

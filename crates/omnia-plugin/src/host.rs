@@ -32,7 +32,7 @@ use crate::source::Location;
 pub struct WasiPlugins;
 
 impl HasData for WasiPlugins {
-    type Data<'a> = WasiPluginsCtxView;
+    type Data<'a> = WasiPluginsView;
 }
 
 impl<T> Host<T> for WasiPlugins
@@ -40,7 +40,7 @@ where
     T: HasExtensions + 'static,
 {
     fn add_to_linker(linker: &mut Linker<T>) -> anyhow::Result<()> {
-        Ok(loader::add_to_linker::<_, Self>(linker, |store| WasiPluginsCtxView {
+        Ok(loader::add_to_linker::<_, Self>(linker, |store| WasiPluginsView {
             plugins: store.extensions().get::<Plugins>(),
         })?)
     }
@@ -49,7 +49,7 @@ where
 impl<B> Server<B> for WasiPlugins {}
 
 /// View over the store's plugin-load capability.
-pub struct WasiPluginsCtxView {
+pub struct WasiPluginsView {
     /// The runtime's plugin-load capability; `None` when the deployment
     /// installed no [`Plugins`] extension, where every load refuses.
     pub plugins: Option<Arc<Plugins>>,
@@ -98,7 +98,7 @@ impl<T> loader::HostWithStore<T> for WasiPlugins {
     }
 }
 
-impl loader::Host for WasiPluginsCtxView {
+impl loader::Host for WasiPluginsView {
     fn convert_error(&mut self, err: Error) -> wasmtime::Result<Error> {
         tracing::debug!("plugin load refused: {err}");
         Ok(err)

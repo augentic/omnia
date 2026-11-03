@@ -18,8 +18,6 @@ pub use docs::MemoryDocs;
 pub use http::{MatchedHttp, Recorded};
 pub use memory::{BlobSnapshot, Memory, Namespaced, StateSnapshot};
 pub use provider::Provider;
-#[expect(deprecated, reason = "re-exporting the deprecated alias")]
-pub use scripted::Scripted;
 pub use scripted::{ScriptedLoader, ScriptedModel, Turn, function_tools};
 pub use sink::{Broadcasted, FixedIdentity, MapConfig, Sink};
 pub use tables::{Predicate, ScriptedTables, Statement};

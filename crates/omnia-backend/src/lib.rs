@@ -12,7 +12,7 @@ pub mod docstore;
 pub mod identity;
 #[cfg(feature = "keyvalue")]
 pub mod keyvalue;
-#[cfg(feature = "messaging")]
+#[cfg(all(not(target_arch = "wasm32"), feature = "messaging"))]
 pub mod messaging;
 #[cfg(feature = "model")]
 pub mod model;
@@ -27,7 +27,7 @@ pub mod sql;
 pub mod vault;
 #[cfg(feature = "vcs")]
 pub mod vcs;
-#[cfg(feature = "websocket")]
+#[cfg(all(not(target_arch = "wasm32"), feature = "websocket"))]
 pub mod websocket;
 
 #[cfg(all(not(target_arch = "wasm32"), feature = "blobstore"))]
@@ -46,7 +46,9 @@ pub use self::keyvalue::{Bucket, KeyValueClient};
 pub use self::messaging::{Endpoint as MessagingEndpoint, Handler, MessagingClient};
 #[cfg(all(not(target_arch = "wasm32"), feature = "model"))]
 pub use self::model::{Answer, Limits, ModelClient, ToolHost};
-pub use self::mount::{check_subpath, lend};
+#[cfg(not(target_arch = "wasm32"))]
+pub use self::mount::check_subpath;
+pub use self::mount::lend;
 #[cfg(all(not(target_arch = "wasm32"), feature = "otel"))]
 pub use self::otel::OtelClient;
 #[cfg(all(not(target_arch = "wasm32"), feature = "plugins"))]

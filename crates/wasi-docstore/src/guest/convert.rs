@@ -1,6 +1,6 @@
-//! Convert between [`crate::document_store`] types and generated WIT types.
+//! Convert between [`crate::docstore`] types and generated WIT types.
 
-use crate::document_store as sdk;
+use crate::docstore as sdk;
 use crate::guest::generated::omnia::docstore::types::{
     ComparisonOp as WitComparisonOp, Document as WitDocument, Filter as WitFilterHandle,
     QueryOptions as WitQueryOptions, QueryResult as WitQueryResult, ScalarValue as WitScalarValue,

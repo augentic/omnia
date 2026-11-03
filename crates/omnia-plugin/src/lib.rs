@@ -48,7 +48,7 @@ mod source;
 mod store;
 
 pub use self::error::LoadError;
-pub use self::host::{WasiPlugins, WasiPluginsCtxView};
+pub use self::host::{WasiPlugins, WasiPluginsView};
 pub use self::loader::{Plugin, PluginLoader, Plugins};
 pub use self::registry::RegistryClient;
 pub use self::source::{Location, RegistrySource};

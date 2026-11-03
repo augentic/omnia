@@ -30,11 +30,6 @@ pub mod keyvalue {
     pub use omnia_backend::keyvalue::BUCKET;
 }
 
-/// Messaging wire value types.
-pub mod messaging {
-    pub use omnia_backend::messaging::{Error, Message, Metadata, Reply, RequestOptions};
-}
-
 /// SQL table value types.
 #[cfg(feature = "sql")]
 pub mod sql {
@@ -44,11 +39,6 @@ pub mod sql {
 /// Secret vault wire constants.
 pub mod vault {
     pub use omnia_backend::vault::LOCKER;
-}
-
-/// WebSocket event value type.
-pub mod websocket {
-    pub use omnia_backend::websocket::Event;
 }
 
 #[cfg(feature = "http")]

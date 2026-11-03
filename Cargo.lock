@@ -2513,7 +2513,6 @@ dependencies = [
  "omnia-wasi-vault",
  "omnia-wasi-vcs",
  "omnia-wasi-websocket",
- "serde_json",
  "tempfile",
  "test-programs",
  "tokio",

@@ -13,7 +13,6 @@ mod generated {
 }
 
 pub use self::generated::wasi::sql::*;
-pub use crate::types::{DataType, Field, Row};
 
 impl From<omnia_backend::sql::DataType> for types::DataType {
     fn from(value: omnia_backend::sql::DataType) -> Self {

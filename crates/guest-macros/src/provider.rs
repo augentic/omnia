@@ -1,7 +1,7 @@
 //! `#[derive(Provider)]` expansion.
 
-use proc_macro2::TokenStream;
-use quote::{format_ident, quote};
+use proc_macro2::{TokenStream, TokenTree};
+use quote::{ToTokens, format_ident, quote};
 use syn::punctuated::Punctuated;
 use syn::{Data, DeriveInput, Error, Field, Fields, Ident, Result, Token, Type};
 
@@ -56,16 +56,17 @@ pub fn expand(input: &DeriveInput) -> Result<TokenStream> {
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
     let existing_predicates =
         where_clause.map(|wc| wc.predicates.iter().collect::<Vec<_>>()).unwrap_or_default();
-    let has_type_params = !input.generics.params.is_empty();
+    let type_params: Vec<&Ident> = input.generics.type_params().map(|param| &param.ident).collect();
 
     let impls = assigned.into_iter().map(|(cap, field_ident, field_ty)| {
         let has_cap = format_ident!("Has{cap}", span = cap.span());
         let accessor = Ident::new(&to_snake_case(&cap.to_string()), cap.span());
-        let generic_bound = has_type_params.then(|| {
-            quote! {
-                #field_ty: ::omnia_sdk::#cap,
-            }
-        });
+        let generic_bound =
+            mentions_type_param(field_ty.to_token_stream(), &type_params).then(|| {
+                quote! {
+                    #field_ty: ::omnia_sdk::#cap,
+                }
+            });
         quote! {
             impl #impl_generics ::omnia_sdk::#has_cap for #struct_name #ty_generics
             where
@@ -81,6 +82,14 @@ pub fn expand(input: &DeriveInput) -> Result<TokenStream> {
 
     Ok(quote! {
         #(#impls)*
+    })
+}
+
+fn mentions_type_param(tokens: TokenStream, params: &[&Ident]) -> bool {
+    tokens.into_iter().any(|tree| match tree {
+        TokenTree::Ident(ident) => params.contains(&&ident),
+        TokenTree::Group(group) => mentions_type_param(group.stream(), params),
+        TokenTree::Punct(_) | TokenTree::Literal(_) => false,
     })
 }
 

@@ -42,7 +42,7 @@ pub use omnia_link::{FirstArgSelector, GuestSelector, InProcessLinks, is_host};
 #[doc(inline)]
 pub use omnia_plugin::{
     FsStore, LoadError, Location, NoStore, PackageStore, Plugin, PluginLoader, Plugins, Reference,
-    RegistryClient, WasiPlugins, WasiPluginsCtxView,
+    RegistryClient, WasiPlugins, WasiPluginsView,
 };
 
 pub use self::deployment::{

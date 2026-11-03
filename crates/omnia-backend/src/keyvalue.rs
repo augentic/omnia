@@ -3,6 +3,7 @@
 #[cfg(not(target_arch = "wasm32"))]
 mod client;
 
+#[cfg(not(target_arch = "wasm32"))]
 use anyhow::{Context as _, Result, anyhow};
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -19,6 +20,7 @@ pub const BUCKET: &str = "state";
 ///
 /// Returns an error if `current` is `Some` and not 8 bytes, or if adding
 /// `delta` overflows `i64`.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn add_i64(current: Option<&[u8]>, delta: i64) -> Result<i64> {
     let base = match current {
         None => 0,

@@ -83,7 +83,7 @@ async fn main() -> Response {
         Parsed::Display(text) => return Response::success(text),
         Parsed::Usage(error) => return Response::usage(&error),
     };
-    let client = Client::new("my-org", MyProvider);
+    let client = Client::new("my-org", omnia_sdk::WasiProvider);
     let metadata = Metadata::from_env("APP");
     let command = Command::new(&client, &metadata, app.format);
     match app.verb {
