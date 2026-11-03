@@ -1,9 +1,9 @@
 //! `#[derive(Provider)]` expansion.
 
 use proc_macro2::TokenStream;
-use quote::quote;
+use quote::{format_ident, quote};
 use syn::punctuated::Punctuated;
-use syn::{Data, DeriveInput, Error, Fields, Ident, Result, Token, Type};
+use syn::{Data, DeriveInput, Error, Field, Fields, Ident, Result, Token, Type};
 
 const CAPABILITIES: &[&str] = &[
     "BlobStore",
@@ -21,6 +21,21 @@ const CAPABILITIES: &[&str] = &[
     "Vcs",
 ];
 
+pub fn to_snake_case(name: &str) -> String {
+    let mut snake = String::with_capacity(name.len() + 4);
+    for (i, ch) in name.chars().enumerate() {
+        if ch.is_ascii_uppercase() {
+            if i > 0 {
+                snake.push('_');
+            }
+            snake.push(ch.to_ascii_lowercase());
+        } else {
+            snake.push(ch);
+        }
+    }
+    snake
+}
+
 pub fn expand(input: &DeriveInput) -> Result<TokenStream> {
     let Data::Struct(data) = &input.data else {
         return Err(Error::new_spanned(
@@ -35,6 +50,41 @@ pub fn expand(input: &DeriveInput) -> Result<TokenStream> {
         ));
     };
 
+    let assigned = parse_fields(&fields.named)?;
+
+    let struct_name = &input.ident;
+    let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
+    let existing_predicates =
+        where_clause.map(|wc| wc.predicates.iter().collect::<Vec<_>>()).unwrap_or_default();
+    let has_type_params = !input.generics.params.is_empty();
+
+    let impls = assigned.into_iter().map(|(cap, field_ident, field_ty)| {
+        let has_cap = format_ident!("Has{cap}", span = cap.span());
+        let accessor = Ident::new(&to_snake_case(&cap.to_string()), cap.span());
+        let generic_bound = has_type_params.then(|| {
+            quote! {
+                #field_ty: ::omnia_sdk::#cap,
+            }
+        });
+        quote! {
+            impl #impl_generics ::omnia_sdk::#has_cap for #struct_name #ty_generics
+            where
+                #generic_bound
+                #(#existing_predicates,)*
+            {
+                fn #accessor(&self) -> &impl ::omnia_sdk::#cap {
+                    &self.#field_ident
+                }
+            }
+        }
+    });
+
+    Ok(quote! {
+        #(#impls)*
+    })
+}
+
+fn parse_fields(fields: &Punctuated<Field, Token![,]>) -> Result<Vec<(Ident, &Ident, &Type)>> {
     let mut assigned: Vec<(Ident, &Ident, &Type)> = Vec::new();
     let mut errors: Option<Error> = None;
     let mut push_err = |err: Error| match &mut errors {
@@ -42,7 +92,7 @@ pub fn expand(input: &DeriveInput) -> Result<TokenStream> {
         None => errors = Some(err),
     };
 
-    for field in &fields.named {
+    for field in fields {
         let Some(field_ident) = &field.ident else {
             continue;
         };
@@ -102,26 +152,5 @@ pub fn expand(input: &DeriveInput) -> Result<TokenStream> {
     if let Some(err) = errors {
         return Err(err);
     }
-
-    let struct_name = &input.ident;
-    let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
-    let existing_predicates =
-        where_clause.map(|wc| wc.predicates.iter().collect::<Vec<_>>()).unwrap_or_default();
-
-    let impls = assigned.into_iter().map(|(cap, field_ident, field_ty)| {
-        quote! {
-            impl #impl_generics ::omnia_sdk::#cap for #struct_name #ty_generics
-            where
-                Self: ::core::marker::Send + ::core::marker::Sync,
-                #field_ty: ::omnia_sdk::#cap,
-                #(#existing_predicates,)*
-            {
-                ::omnia_sdk::__delegate!(@field #cap; self, #field_ident);
-            }
-        }
-    });
-
-    Ok(quote! {
-        #(#impls)*
-    })
+    Ok(assigned)
 }

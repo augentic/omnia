@@ -12,7 +12,8 @@ use std::time::Duration;
 
 use futures::FutureExt as _;
 use omnia::{ExitStatus, Mount};
-use omnia_test::host::{Backends, Deployment, ScriptedModel, scratch};
+use omnia_test::backend::ScriptedModel;
+use omnia_test::host::{Backends, Deployment, scratch};
 use omnia_test::{Exchange, SeenFormat, SeenWorker};
 use omnia_wasi_model::{
     Answer, FutureResult, Limits, ModelClient, ModelDefault, Request, ToolHost, Usage, WasiModel,

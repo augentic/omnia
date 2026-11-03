@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow, bail};
+use omnia_backend::keyvalue::add_i64;
 use omnia_sdk::{BlobStore, CasError, ContainerMetadata, ObjectMetadata, StateStore, Vault};
 
 /// A state snapshot: key to raw bytes.
@@ -55,7 +56,7 @@ struct Inner {
 /// 8-byte big-endian encoding of the runtime's in-memory key-value default,
 /// and `get_range` clamps an inclusive `end` the way the blobstore default
 /// does. Reads on a container that was never created see it as empty;
-/// writes create it. The derived `BlobStoreExt` operations (`has`, `clear`,
+/// writes create it. The derived `BlobStore` operations (`has`, `clear`,
 /// `copy_object`, ...) compose these primitives.
 ///
 /// ```
@@ -101,6 +102,12 @@ impl Memory {
         self.lock_state().get(key).map(|entry| entry.bytes.clone())
     }
 
+    /// The secret value at `key`.
+    #[must_use]
+    pub fn secret(&self, key: &str) -> Option<Vec<u8>> {
+        self.lock_secrets().get(key).cloned()
+    }
+
     /// The stored bytes of `name` in `container`.
     #[must_use]
     pub fn object(&self, container: &str, name: &str) -> Option<Vec<u8>> {
@@ -119,6 +126,11 @@ impl Memory {
     /// Seeds a state entry.
     pub fn insert_state(&self, key: &str, bytes: &[u8]) {
         self.set_state(key, bytes, None);
+    }
+
+    /// Seeds a secret entry.
+    pub fn insert_secret(&self, key: &str, bytes: &[u8]) {
+        drop(self.lock_secrets().insert(key.to_owned(), bytes.to_vec()));
     }
 
     /// Seeds an object, creating its container.
@@ -155,10 +167,12 @@ impl Memory {
         self.lock_blobs().contains_key(name)
     }
 
-    /// Whether neither state nor any object is stored.
+    /// Whether no state, secret, or object is stored.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.lock_state().is_empty() && self.lock_blobs().values().all(|c| c.objects.is_empty())
+        self.lock_state().is_empty()
+            && self.lock_secrets().is_empty()
+            && self.lock_blobs().values().all(|c| c.objects.is_empty())
     }
 
     /// A snapshot of both stores for byte-stability comparisons.
@@ -286,19 +300,6 @@ impl Memory {
     }
 }
 
-fn add_i64(current: Option<&[u8]>, delta: i64) -> Result<i64> {
-    let base = match current {
-        None => 0,
-        Some(value) => {
-            let bytes: [u8; 8] = value.try_into().map_err(|_len| {
-                anyhow!("value is {} bytes, not an 8-byte big-endian integer", value.len())
-            })?;
-            i64::from_be_bytes(bytes)
-        }
-    };
-    base.checked_add(delta).context("adding delta overflows i64")
-}
-
 impl StateStore for Memory {
     fn get(&self, key: &str) -> impl Future<Output = Result<Option<Vec<u8>>>> + Send {
         ready(Ok(self.state(key)))
@@ -385,11 +386,11 @@ impl BlobStore for Memory {
 
 impl Vault for Memory {
     fn get(&self, key: &str) -> impl Future<Output = Result<Option<Vec<u8>>>> + Send {
-        ready(Ok(self.lock_secrets().get(key).cloned()))
+        ready(Ok(self.secret(key)))
     }
 
     fn set(&self, key: &str, value: &[u8]) -> impl Future<Output = Result<()>> + Send {
-        drop(self.lock_secrets().insert(key.to_owned(), value.to_vec()));
+        self.insert_secret(key, value);
         ready(Ok(()))
     }
 
@@ -407,8 +408,9 @@ impl Vault for Memory {
     }
 }
 
-/// A prefixed view over one shared [`Memory`]: every key and container is
-/// scoped under a prefix, modelling a tenant- or project-keyed host binding.
+/// A prefixed view over one shared [`Memory`]: every key, secret, and
+/// container is scoped under a prefix, modelling a tenant- or project-keyed
+/// host binding.
 ///
 /// ```
 /// use omnia_sdk::StateStore as _;
@@ -544,5 +546,36 @@ impl BlobStore for Namespaced {
                 ..info
             });
         ready(info)
+    }
+}
+
+impl Vault for Namespaced {
+    fn get(&self, key: &str) -> impl Future<Output = Result<Option<Vec<u8>>>> + Send {
+        ready(Ok(self.inner.secret(&self.scoped(key))))
+    }
+
+    fn set(&self, key: &str, value: &[u8]) -> impl Future<Output = Result<()>> + Send {
+        self.inner.insert_secret(&self.scoped(key), value);
+        ready(Ok(()))
+    }
+
+    fn delete(&self, key: &str) -> impl Future<Output = Result<()>> + Send {
+        drop(self.inner.lock_secrets().remove(&self.scoped(key)));
+        ready(Ok(()))
+    }
+
+    fn exists(&self, key: &str) -> impl Future<Output = Result<bool>> + Send {
+        ready(Ok(self.inner.lock_secrets().contains_key(&self.scoped(key))))
+    }
+
+    fn list_ids(&self) -> impl Future<Output = Result<Vec<String>>> + Send {
+        let prefix = format!("{}/", self.prefix);
+        let ids: Vec<String> = self
+            .inner
+            .lock_secrets()
+            .keys()
+            .filter_map(|key| key.strip_prefix(&prefix).map(str::to_owned))
+            .collect();
+        ready(Ok(ids))
     }
 }

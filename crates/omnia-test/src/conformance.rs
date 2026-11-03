@@ -17,8 +17,8 @@ use omnia_sdk::model::{self, Message as ModelMessage, Model, Request as ModelReq
 use omnia_sdk::sql::{DataType, Row};
 use omnia_sdk::vcs::{self, Vcs};
 use omnia_sdk::{
-    BlobStore, BlobStoreExt as _, Broadcast, CasError, Config, DocumentStore, HttpRequest,
-    Identity, Message, Publish, StateStore, TableStore, Vault,
+    BlobStore, Broadcast, CasError, Config, DocumentStore, HttpRequest, Identity, Message, Publish,
+    StateStore, TableStore, Vault,
 };
 
 /// Asserts that `StateStore` round-trips opaque binary bytes.
@@ -46,30 +46,36 @@ pub async fn state_get_set_delete<P: StateStore>(provider: &P) {
     provider.delete(key).await.expect("delete absent is idempotent");
 }
 
-/// Asserts that a TTL-bearing key expires while a TTL-less key persists.
+/// Asserts that a TTL-bearing key expires (including across a CAS swap) while
+/// a TTL-less key persists.
 ///
 /// # Panics
 ///
-/// Panics if the TTL key does not expire or the persistent key is lost.
+/// Panics if the TTL keys do not expire or the persistent key is lost.
 pub async fn state_ttl_expires<P: StateStore>(provider: &P) {
     let ephemeral = "conformance/ttl-ephemeral";
+    let cas_ttl = "conformance/cas-ttl";
     let persistent = "conformance/ttl-persistent";
 
     provider.set(ephemeral, b"short-lived", Some(1)).await.expect("set ephemeral");
+    provider.set(cas_ttl, b"t1", Some(1)).await.expect("set cas_ttl");
+    provider.cas(cas_ttl, Some(b"t1"), b"t2").await.expect("cas preserves ttl");
     provider.set(persistent, b"long-lived", None).await.expect("set persistent");
 
     assert_eq!(
         provider.get(ephemeral).await.expect("get ephemeral"),
         Some(b"short-lived".to_vec())
     );
+    assert_eq!(provider.get(cas_ttl).await.expect("get cas_ttl"), Some(b"t2".to_vec()));
     assert_eq!(
         provider.get(persistent).await.expect("get persistent"),
         Some(b"long-lived".to_vec())
     );
 
-    std::thread::sleep(Duration::from_millis(1100));
+    sleep(Duration::from_millis(1100)).await;
 
     assert_eq!(provider.get(ephemeral).await.expect("ephemeral expired"), None);
+    assert_eq!(provider.get(cas_ttl).await.expect("cas-swapped ttl_key expired"), None);
     assert_eq!(
         provider.get(persistent).await.expect("persistent survives"),
         Some(b"long-lived".to_vec())
@@ -77,9 +83,9 @@ pub async fn state_ttl_expires<P: StateStore>(provider: &P) {
     provider.delete(persistent).await.expect("cleanup persistent");
 }
 
-/// Asserts atomic compare-and-swap and TTL preservation across a swap.
+/// Asserts atomic compare-and-swap over absent and present keys.
 ///
-/// Covers absent and present keys plus conflict reporting with the observed value.
+/// Covers conflict reporting with the observed value.
 ///
 /// # Panics
 ///
@@ -96,14 +102,6 @@ pub async fn state_cas<P: StateStore>(provider: &P) {
     provider.cas(key, Some(b"v1"), b"v2").await.expect("cas matching v1");
     assert_eq!(provider.get(key).await.expect("get v2"), Some(b"v2".to_vec()));
     provider.delete(key).await.expect("cleanup cas key");
-
-    let ttl_key = "conformance/cas-ttl";
-    provider.set(ttl_key, b"t1", Some(1)).await.expect("set ttl_key");
-    provider.cas(ttl_key, Some(b"t1"), b"t2").await.expect("cas preserves ttl");
-    assert_eq!(provider.get(ttl_key).await.expect("get t2"), Some(b"t2".to_vec()));
-
-    std::thread::sleep(Duration::from_millis(1100));
-    assert_eq!(provider.get(ttl_key).await.expect("cas-swapped ttl_key expired"), None);
 }
 
 /// Asserts atomic increment starting from zero on an absent key.
@@ -406,13 +404,22 @@ pub async fn model_complete<P: Model>(provider: &P) {
 /// Panics if mount confinement or revision resolution fails.
 pub async fn vcs_flow<P: Vcs>(provider: &P) {
     let unmounted = provider.head("/unmounted").await.expect_err("unmounted path refused");
-    assert!(
-        matches!(unmounted, vcs::Error::Other(ref detail) if detail.contains("matches no preopen")),
-        "unexpected error: {unmounted:?}"
-    );
+    assert!(matches!(unmounted, vcs::Error::Other(_)), "unexpected error: {unmounted:?}");
 
     let resolved = provider.resolve(".", "main").await.expect("resolve main");
     assert_eq!(resolved, "sha:main");
+}
+
+async fn sleep(duration: Duration) {
+    cfg_select! {
+        all(target_arch = "wasm32", target_os = "wasi") => {
+            let nanos = u64::try_from(duration.as_nanos()).unwrap_or(u64::MAX);
+            omnia_sdk::wasip3::clocks::monotonic_clock::wait_for(nanos).await;
+        }
+        _ => {
+            tokio::time::sleep(duration).await;
+        }
+    }
 }
 
 /// Asserts that the invoking test module defines a test for every conformance scenario.

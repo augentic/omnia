@@ -15,6 +15,12 @@ version.workspace = true
 [lints]
 workspace = true
 
+[features]
+default = ["telemetry"]
+
+# Enables `Serve::telemetry` and process OpenTelemetry initialization/flushing.
+telemetry = ["omnia-backend/otel-default"]
+
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 anyhow.workspace = true
 axum = { workspace = true, features = ["http1", "tokio"] }
@@ -32,7 +38,6 @@ omnia-backend = { workspace = true, default-features = false, features = [
     "keyvalue",
     "messaging",
     "model",
-    "otel",
     "sql",
     "vault",
     "vcs",
@@ -43,29 +48,15 @@ omnia-sdk = { workspace = true, default-features = false, features = [
     "http",
     "sql",
 ] }
-tokio = { workspace = true, features = ["net", "rt", "sync"] }
+tokio = { workspace = true, features = ["net", "rt", "signal", "sync"] }
 tracing.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-omnia = { path = "../omnia" }
 omnia-backend = { workspace = true, default-features = false, features = [
     "defaults",
     "oauth",
     "sqlite",
 ] }
-omnia-test = { path = "../omnia-test", default-features = false, features = ["host"] }
-omnia-wasi-blobstore = { path = "../wasi-blobstore" }
-omnia-wasi-config = { path = "../wasi-config" }
-omnia-wasi-docstore = { path = "../wasi-docstore" }
-omnia-wasi-http = { path = "../wasi-http" }
-omnia-wasi-identity = { path = "../wasi-identity" }
-omnia-wasi-keyvalue = { path = "../wasi-keyvalue" }
-omnia-wasi-messaging = { path = "../wasi-messaging" }
-omnia-wasi-model = { path = "../wasi-model" }
-omnia-wasi-otel = { path = "../wasi-otel" }
-omnia-wasi-sql = { path = "../wasi-sql" }
-omnia-wasi-vault = { path = "../wasi-vault" }
-omnia-wasi-vcs = { path = "../wasi-vcs" }
-omnia-wasi-websocket = { path = "../wasi-websocket" }
-test-programs.workspace = true
+omnia-test = { path = "../omnia-test", default-features = false, features = ["backend", "conformance"] }
+tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

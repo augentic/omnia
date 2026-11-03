@@ -93,10 +93,7 @@ impl WasiVcs {
     }
 
     fn lower(error: anyhow::Error) -> WitError {
-        match error.downcast::<Error>() {
-            Ok(typed) => to_wit_error(typed),
-            Err(error) => error.downcast::<WitError>().unwrap_or_else(Into::into),
-        }
+        to_wit_error(Error::from(error))
     }
 }
 

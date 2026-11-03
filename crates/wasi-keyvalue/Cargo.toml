@@ -22,7 +22,7 @@ tracing.workspace = true
 
 # host dependencies
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-omnia-backend = { workspace = true, features = ["keyvalue"] }
+omnia-backend = { workspace = true, features = ["keyvalue-default"] }
 omnia-core.workspace = true
 wasmtime.workspace = true
 wasmtime-wasi.workspace = true

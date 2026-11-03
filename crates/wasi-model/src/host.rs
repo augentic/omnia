@@ -32,10 +32,9 @@ mod generated {
 use std::fmt::Debug;
 
 pub use omnia_backend::model::{
-    Answer, BoundToolHost, DirEntry, Effort, Error, Format, Function, Generation, Limits, Mcp,
-    McpGrant, Message, ModelClient, ModelDefault, Reply, Request, Role, Schema, SchemaFormat,
-    SessionClose, Tool, ToolCall, ToolHost, ToolOutcome, ToolSession, ToolTurn, Transcript, Usage,
-    WorkerGrant, Workspace,
+    Answer, DirEntry, Effort, Error, Format, Function, Generation, Limits, Mcp, McpGrant, Message,
+    ModelClient, ModelDefault, Reply, Request, Role, Schema, SchemaFormat, Tool, ToolCall,
+    ToolHost, ToolOutcome, ToolSession, ToolTurn, Transcript, Usage, WorkerGrant, Workspace,
 };
 pub use omnia_core::FutureResult;
 use omnia_core::{HasMounts, Host, Server, StoreView};

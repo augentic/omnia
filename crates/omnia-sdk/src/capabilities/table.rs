@@ -7,54 +7,46 @@ use omnia_backend::sql::{DataType, Row};
 
 /// Types that execute parameterized SQL against a named connection.
 ///
-/// Default WASM implementations use the WASI SQL bindings to execute queries.
+/// [`WasiProvider`](crate::WasiProvider) uses the WASI SQL bindings to execute
+/// queries.
+#[omnia_guest_macros::capability]
 pub trait TableStore: Send + Sync {
-    cfg_select! {
-        not(all(target_arch = "wasm32", target_os = "wasi")) => {
-            /// Executes a query and returns the result rows.
-            fn query(
-                &self, conn_name: String, query: String, params: Vec<DataType>,
-            ) -> impl Future<Output = Result<Vec<Row>>> + Send;
+    /// Executes a query and returns the result rows.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the connection fails, statement preparation fails, or query execution fails.
+    fn query(
+        &self, conn_name: String, query: String, params: Vec<DataType>,
+    ) -> impl Future<Output = Result<Vec<Row>>> + Send;
 
-            /// Executes a statement and returns the number of affected rows.
-            fn exec(
-                &self, conn_name: String, query: String, params: Vec<DataType>,
-            ) -> impl Future<Output = Result<u32>> + Send;
-        }
-        _ => {
-            /// Executes a query and returns the result rows.
-            ///
-            /// # Errors
-            ///
-            /// Returns an error if the connection fails, statement preparation fails, or query execution fails.
-            fn query(
-                &self, conn_name: String, query: String, params: Vec<DataType>,
-            ) -> impl Future<Output = Result<Vec<Row>>> + Send {
-                async move {
-                    let (conn, stmt) = prepare(conn_name, query, params).await?;
-                    let rows = omnia_wasi_sql::readwrite::query(&conn, &stmt)
-                        .await
-                        .map_err(|e| anyhow::anyhow!("query failed: {}", e.trace()))?;
-                    Ok(rows.into_iter().map(Into::into).collect())
-                }
-            }
+    /// Executes a statement and returns the number of affected rows.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the connection fails, statement preparation fails, or execution fails.
+    fn exec(
+        &self, conn_name: String, query: String, params: Vec<DataType>,
+    ) -> impl Future<Output = Result<u32>> + Send;
+}
 
-            /// Executes a statement and returns the number of affected rows.
-            ///
-            /// # Errors
-            ///
-            /// Returns an error if the connection fails, statement preparation fails, or execution fails.
-            fn exec(
-                &self, conn_name: String, query: String, params: Vec<DataType>,
-            ) -> impl Future<Output = Result<u32>> + Send {
-                async move {
-                    let (conn, stmt) = prepare(conn_name, query, params).await?;
-                    omnia_wasi_sql::readwrite::exec(&conn, &stmt)
-                        .await
-                        .map_err(|e| anyhow::anyhow!("exec failed: {}", e.trace()))
-                }
-            }
-        }
+#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
+impl TableStore for crate::WasiProvider {
+    async fn query(
+        &self, conn_name: String, query: String, params: Vec<DataType>,
+    ) -> Result<Vec<Row>> {
+        let (conn, stmt) = prepare(conn_name, query, params).await?;
+        let rows = omnia_wasi_sql::readwrite::query(&conn, &stmt)
+            .await
+            .map_err(|e| anyhow::anyhow!("query failed: {}", e.trace()))?;
+        Ok(rows.into_iter().map(Into::into).collect())
+    }
+
+    async fn exec(&self, conn_name: String, query: String, params: Vec<DataType>) -> Result<u32> {
+        let (conn, stmt) = prepare(conn_name, query, params).await?;
+        omnia_wasi_sql::readwrite::exec(&conn, &stmt)
+            .await
+            .map_err(|e| anyhow::anyhow!("exec failed: {}", e.trace()))
     }
 }
 
@@ -73,17 +65,3 @@ async fn prepare(
         .map_err(|e| anyhow::anyhow!("failed to prepare statement: {}", e.trace()))?;
     Ok((conn, stmt))
 }
-
-delegate_deref!(TableStore {
-    fn query(
-        &self, conn_name: String, query: String, params: Vec<DataType>,
-    ) -> impl Future<Output = Result<Vec<Row>>> + Send {
-        (**self).query(conn_name, query, params)
-    }
-
-    fn exec(
-        &self, conn_name: String, query: String, params: Vec<DataType>,
-    ) -> impl Future<Output = Result<u32>> + Send {
-        (**self).exec(conn_name, query, params)
-    }
-});

@@ -30,14 +30,10 @@ The target gate on the dev line is the canonical shape for a guest crate: handle
 
 ## Handler rung: `omnia_test::guest::Provider`
 
-A guest declares its production provider as one struct with an empty impl per capability it needs; on `wasm32` each impl picks up the WASI-backed default bodies.
+A guest wires its routers to `omnia_sdk::WasiProvider`, which implements every capability trait over the WASI bindings on `wasm32`:
 
 ```rust,ignore
-/// The connector's capabilities, on the WASI defaults.
-struct Provider;
-
-impl Config for Provider {}
-impl Publish for Provider {}
+omnia_sdk::http!(router(omnia_sdk::WasiProvider));
 ```
 
 A test runs the same handler against `omnia_test::guest::Provider`, which implements every capability trait over one `pub` field per double, each seeded through a consuming builder of the same name:
@@ -59,7 +55,7 @@ async fn device_site_header() {
 }
 ```
 
-The handler's own bounds pick out the capabilities it touches, so a test seeds only those fields and leaves the rest at their defaults. `StateStore` and `BlobStore` share one `storage` field — one `Memory` serves both, the shape a production provider's single storage backend has. The full field/double table is on the struct's rustdoc: `MapConfig`, `MatchedHttp`, `FixedIdentity`, `Sink` (for `Publish` and `Broadcast`), `Memory`, `MemoryDocs`, `ScriptedTables`, `ScriptedModel` (for `Model`), `ScriptedLoader` (for `Plugins`).
+The handler's own bounds pick out the capabilities it touches, so a test seeds only those fields and leaves the rest at their defaults. `StateStore`, `BlobStore`, and `Vault` share one `storage` field — one `Memory` serves all three, the shape a production provider's storage backend has. The full field/double table is on the struct's rustdoc: `MapConfig`, `MatchedHttp`, `FixedIdentity`, `Sink` (for `Publish` and `Broadcast`), `Memory`, `MemoryDocs`, `ScriptedTables`, `ScriptedModel` (for `Model`), `ScriptedLoader` (for `Plugins`), and `ScriptedVcs` (for `Vcs`).
 
 Every capability trait is also implemented for `Arc<T>`, `&T`, and `Box<T>`, so a handler bounded on `P: StateStore` accepts `Arc<Memory>` directly.
 

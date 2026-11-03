@@ -1,17 +1,14 @@
-//! In-memory `DocumentStore` over `Direct<DocStoreDefault>`.
-
-use std::future::Future;
+//! In-memory `DocumentStore` over `DocStoreDefault`.
 
 use anyhow::Result;
-use omnia_backend::docstore::DocStoreDefault;
-use omnia_native::Direct;
+use omnia_backend::docstore::{DocStoreClient as _, DocStoreDefault};
 use omnia_sdk::DocumentStore;
 use omnia_sdk::docstore::{Document, QueryOptions, QueryResult};
 
 /// In-memory documents with the production default's filter, sort, and
 /// pagination semantics; clones share one store.
 ///
-/// Wraps [`Direct<DocStoreDefault>`], so a query behaves
+/// Wraps [`DocStoreDefault`], so a query behaves
 /// exactly as it would through the runtime's in-memory backend.
 ///
 /// ```
@@ -38,14 +35,14 @@ use omnia_sdk::docstore::{Document, QueryOptions, QueryResult};
 /// ```
 #[derive(Clone, Debug, Default)]
 pub struct MemoryDocs {
-    store: Direct<DocStoreDefault>,
+    backend: DocStoreDefault,
 }
 
 impl MemoryDocs {
     /// The wrapped host backend, for scenarios that also run the runtime.
     #[must_use]
     pub const fn backend(&self) -> &DocStoreDefault {
-        &self.store.client
+        &self.backend
     }
 
     /// Every document in `store`, following continuations to the end.
@@ -58,7 +55,6 @@ impl MemoryDocs {
         let mut continuation = None;
         loop {
             let page = self
-                .store
                 .query(
                     store,
                     QueryOptions {
@@ -77,25 +73,23 @@ impl MemoryDocs {
 }
 
 impl DocumentStore for MemoryDocs {
-    fn get(&self, store: &str, id: &str) -> impl Future<Output = Result<Option<Document>>> + Send {
-        self.store.get(store, id)
+    async fn get(&self, store: &str, id: &str) -> Result<Option<Document>> {
+        self.backend.get(store.to_owned(), id.to_owned()).await
     }
 
-    fn insert(&self, store: &str, doc: &Document) -> impl Future<Output = Result<()>> + Send {
-        self.store.insert(store, doc)
+    async fn insert(&self, store: &str, doc: &Document) -> Result<()> {
+        self.backend.insert(store.to_owned(), doc.clone()).await
     }
 
-    fn put(&self, store: &str, doc: &Document) -> impl Future<Output = Result<()>> + Send {
-        self.store.put(store, doc)
+    async fn put(&self, store: &str, doc: &Document) -> Result<()> {
+        self.backend.put(store.to_owned(), doc.clone()).await
     }
 
-    fn delete(&self, store: &str, id: &str) -> impl Future<Output = Result<bool>> + Send {
-        self.store.delete(store, id)
+    async fn delete(&self, store: &str, id: &str) -> Result<bool> {
+        self.backend.delete(store.to_owned(), id.to_owned()).await
     }
 
-    fn query(
-        &self, store: &str, options: QueryOptions,
-    ) -> impl Future<Output = Result<QueryResult>> + Send {
-        self.store.query(store, options)
+    async fn query(&self, store: &str, options: QueryOptions) -> Result<QueryResult> {
+        self.backend.query(store.to_owned(), options).await
     }
 }

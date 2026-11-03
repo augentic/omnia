@@ -116,11 +116,13 @@ The guest crate exposes trait-based abstractions for host capabilities. When com
 | `TableStore` | Execute parameterized SQL queries and statements over `wasi:sql`. |
 | `Broadcast` | Send events over WebSocket channels. |
 | `Plugins` | Request guest loads through `omnia:plugins/loader`: name a `Location` — one of the deployment's declared guests, a component path beneath one of its read-only mounts, or a registry package — with an optional `Digest` pin, and receive a typed `Plugin` handle once it is active. The `plugins` module carries the `Location` and `Digest` types and typed refusals convertible into `Error`. |
-| `BlobStore` / `BlobStoreExt` | Object storage. `BlobStore` is the ten primitives an implementor writes; `BlobStoreExt` (`has`, `delete_objects`, `clear`, `copy_object`, `move_object`) is derived for every `BlobStore` — one host call each on `wasm32`, composed from the primitives natively. |
+| `BlobStore` | Object storage: the ten primitives an implementor writes plus five derived operations (`has`, `delete_objects`, `clear`, `copy_object`, `move_object`) — one host call each on `WasiProvider`, composed from the primitives by default. |
 | `DocumentStore` | Document CRUD and filtered queries. |
+| `Vault` | Read, write, delete, check, and list secrets in the vault locker. |
+| `Vcs` | Version-control operations over lent repository and working-copy mounts. |
 | `Model` | Prompt completions, with tool calls answered by a guest closure. A request with `check` set has the guest judge each candidate answer (`Ok` accepts, `Err(text)` is the correction the backend sends back to the model); `model::Question<T>` runs that exchange for a `Deserialize + JsonSchema` answer type and returns the accepted `T`. |
 
-Every trait is also implemented for `Arc<T>`, `&T`, and `Box<T>` where `T` implements it, so a capability may sit behind a shared handle and still satisfy a `P: Capability` bound.
+Every trait is annotated with `#[omnia_guest_macros::capability]`, which emits a companion `Has<Capability>` accessor trait with a blanket forwarding impl and implementations for `Arc<T>`, `&T`, and `Box<T>` where `T` implements the capability. `#[derive(omnia_sdk::Provider)]` implements those `Has*` traits for each `#[provider(...)]`-annotated field.
 
 ### Example: Using Capabilities
 

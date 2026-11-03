@@ -1,17 +1,15 @@
-//! Conformance suite for `omnia_test::guest::Provider` (and a scripted `Vcs`
-//! double).
+//! Conformance suite for `omnia_test::guest::Provider`.
 
 #![cfg(not(target_arch = "wasm32"))]
-
-use std::future::{Future, ready};
 
 use bytes::Bytes;
 use http::{Method, Response};
 use omnia_sdk::sql::{DataType, Field, Row};
-use omnia_sdk::vcs::{self, Change, CloneOptions, Entry, Merged, Rule, Vcs};
+use omnia_sdk::vcs;
 use omnia_test::conformance;
 use omnia_test::guest::{
-    FixedIdentity, MapConfig, MatchedHttp, Provider, ScriptedModel, ScriptedTables,
+    FixedIdentity, MapConfig, MatchedHttp, Provider, ScriptedModel, ScriptedTables, ScriptedVcs,
+    VcsTurn,
 };
 
 omnia_test::conformance!();
@@ -119,107 +117,13 @@ async fn model_complete() {
     provider.model.assert_exhausted();
 }
 
-struct StubVcs;
-
-impl Vcs for StubVcs {
-    fn resolve(
-        &self, repo: &str, _revision: &str,
-    ) -> impl Future<Output = Result<String, vcs::Error>> + Send {
-        ready(if repo == "." {
-            Ok("sha:main".to_owned())
-        } else {
-            Err(vcs::Error::Other(format!("location `{repo}` matches no preopen")))
-        })
-    }
-
-    fn descends(
-        &self, _repo: &str, _ancestor: &str, _descendant: &str,
-    ) -> impl Future<Output = Result<bool, vcs::Error>> + Send {
-        ready(Ok(true))
-    }
-
-    fn head(&self, at: &str) -> impl Future<Output = Result<String, vcs::Error>> + Send {
-        ready(if at == "." {
-            Ok("sha:head".to_owned())
-        } else {
-            Err(vcs::Error::Other(format!("location `{at}` matches no preopen")))
-        })
-    }
-
-    fn commit(
-        &self, _at: &str, _message: &str,
-    ) -> impl Future<Output = Result<Option<String>, vcs::Error>> + Send {
-        ready(Ok(None))
-    }
-
-    fn merge(
-        &self, _at: &str, _revision: &str, _message: &str, _policy: &[Rule],
-    ) -> impl Future<Output = Result<Merged, vcs::Error>> + Send {
-        ready(Ok(Merged::default()))
-    }
-
-    fn log(
-        &self, _repo: &str, _revision: &str, _base: &str,
-    ) -> impl Future<Output = Result<Vec<Entry>, vcs::Error>> + Send {
-        ready(Ok(vec![]))
-    }
-
-    fn init(&self, _at: &str) -> impl Future<Output = Result<(), vcs::Error>> + Send {
-        ready(Ok(()))
-    }
-
-    fn add(
-        &self, _repo: &str, _at: &str, _revision: &str,
-    ) -> impl Future<Output = Result<(), vcs::Error>> + Send {
-        ready(Ok(()))
-    }
-
-    fn remove(&self, _at: &str) -> impl Future<Output = Result<(), vcs::Error>> + Send {
-        ready(Ok(()))
-    }
-
-    fn pending(&self, _at: &str) -> impl Future<Output = Result<Vec<Change>, vcs::Error>> + Send {
-        ready(Ok(vec![]))
-    }
-
-    fn clone_repo(
-        &self, _url: &str, _at: &str, _options: CloneOptions,
-    ) -> impl Future<Output = Result<(), vcs::Error>> + Send {
-        ready(Ok(()))
-    }
-
-    fn fetch(
-        &self, _repo: &str, _remote: &str,
-    ) -> impl Future<Output = Result<(), vcs::Error>> + Send {
-        ready(Ok(()))
-    }
-
-    fn label(
-        &self, _repo: &str, _name: &str, _revision: &str,
-    ) -> impl Future<Output = Result<(), vcs::Error>> + Send {
-        ready(Ok(()))
-    }
-
-    fn labelled(
-        &self, _repo: &str, _name: &str,
-    ) -> impl Future<Output = Result<String, vcs::Error>> + Send {
-        ready(Ok(String::new()))
-    }
-
-    fn fetched(
-        &self, _repo: &str, _remote: &str, _name: &str,
-    ) -> impl Future<Output = Result<String, vcs::Error>> + Send {
-        ready(Ok(String::new()))
-    }
-
-    fn push(
-        &self, _repo: &str, _remote: &str, _label: &str,
-    ) -> impl Future<Output = Result<(), vcs::Error>> + Send {
-        ready(Ok(()))
-    }
-}
-
 #[tokio::test]
 async fn vcs_flow() {
-    conformance::vcs_flow(&StubVcs).await;
+    let vcs = ScriptedVcs::new([
+        Err(vcs::Error::Other("location `/unmounted` matches no preopen".to_owned())),
+        Ok(VcsTurn::Revision("sha:main".to_owned())),
+    ]);
+    let provider = Provider::default().vcs(vcs);
+    conformance::vcs_flow(&provider).await;
+    provider.vcs.assert_exhausted();
 }

@@ -241,63 +241,36 @@ impl From<Error> for crate::Error {
 
 /// Plugin loading (Omnia Plugins).
 ///
-/// The default WASM implementation delegates to `omnia:plugins/loader`; off
-/// `wasm32` the signature is bare so native suites script loads.
+/// [`WasiProvider`](crate::WasiProvider) delegates to `omnia:plugins/loader`.
+#[omnia_guest_macros::capability]
 pub trait Plugins: Send + Sync {
-    cfg_select! {
-        not(all(target_arch = "wasm32", target_os = "wasi")) => {
-            /// Ensure the guest `from` names is active and return its handle, held
-            /// to `digest` when one is given; idempotent on (name, digest).
-            ///
-            /// # Errors
-            ///
-            /// Returns the loader's typed refusal ([`Error`]) when the deployment's
-            /// grant does not serve the location, or the host cannot acquire,
-            /// verify, validate, or register the bytes.
-            fn load(
-                &self, from: &Location, digest: Option<&Digest>,
-            ) -> impl Future<Output = Result<Plugin, Error>> + Send;
-        }
-        _ => {
-            /// Ensure the guest `from` names is active and return its handle, held
-            /// to `digest` when one is given; idempotent on (name, digest).
-            ///
-            /// # Errors
-            ///
-            /// Returns the loader's typed refusal ([`Error`]) when the deployment's
-            /// grant does not serve the location, or the host cannot acquire,
-            /// verify, validate, or register the bytes.
-            fn load(
-                &self, from: &Location, digest: Option<&Digest>,
-            ) -> impl Future<Output = Result<Plugin, Error>> + Send {
-                use generated::omnia::plugins::loader;
-
-                let from = loader::Location::from(from);
-                let digest = digest.map(ToString::to_string);
-                async move {
-                    let loaded = loader::load(from, digest).await?;
-                    let digest = loaded.digest.parse().map_err(|error: Error| {
-                        Error::Internal(format!("host reported a malformed digest: {error}"))
-                    })?;
-                    Ok(Plugin::new(loaded.id, digest, loaded.exports))
-                }
-            }
-        }
-    }
-}
-
-delegate_deref!(Plugins {
+    /// Ensure the guest `from` names is active and return its handle, held
+    /// to `digest` when one is given; idempotent on (name, digest).
+    ///
+    /// # Errors
+    ///
+    /// Returns the loader's typed refusal ([`Error`]) when the deployment's
+    /// grant does not serve the location, or the host cannot acquire,
+    /// verify, validate, or register the bytes.
     fn load(
         &self, from: &Location, digest: Option<&Digest>,
-    ) -> impl Future<Output = Result<Plugin, Error>> + Send {
-        (**self).load(from, digest)
-    }
-});
+    ) -> impl Future<Output = Result<Plugin, Error>> + Send;
+}
 
-/// Deprecated alias for [`WasiProvider`](crate::WasiProvider).
 #[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
-#[deprecated(note = "use `omnia_sdk::WasiProvider`")]
-pub type WasiPlugins = crate::WasiProvider;
+impl Plugins for crate::WasiProvider {
+    async fn load(&self, from: &Location, digest: Option<&Digest>) -> Result<Plugin, Error> {
+        use generated::omnia::plugins::loader;
+
+        let from = loader::Location::from(from);
+        let digest = digest.map(ToString::to_string);
+        let loaded = loader::load(from, digest).await?;
+        let digest = loaded.digest.parse().map_err(|error: Error| {
+            Error::Internal(format!("host reported a malformed digest: {error}"))
+        })?;
+        Ok(Plugin::new(loaded.id, digest, loaded.exports))
+    }
+}
 
 #[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
 mod wire {

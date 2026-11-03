@@ -25,6 +25,25 @@ pub struct Delivery {
     pub metadata: Vec<(String, String)>,
 }
 
+impl From<omnia_backend::messaging::Message> for Delivery {
+    fn from(message: omnia_backend::messaging::Message) -> Self {
+        let content_type = message.metadata.as_ref().and_then(|md| {
+            md.inner
+                .iter()
+                .find(|(key, _)| key.eq_ignore_ascii_case("content-type"))
+                .map(|(_, value)| value.clone())
+        });
+        let metadata =
+            message.metadata.map(|md| md.inner.into_iter().collect()).unwrap_or_default();
+        Self {
+            topic: (!message.topic.is_empty()).then_some(message.topic),
+            payload: message.payload,
+            content_type,
+            metadata,
+        }
+    }
+}
+
 /// A delivery failure projected onto the current WIT error result.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DeliveryError {

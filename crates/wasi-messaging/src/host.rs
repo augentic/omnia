@@ -33,8 +33,6 @@ mod generated {
 
 use std::fmt::Debug;
 
-#[expect(deprecated, reason = "re-exporting the deprecated alias")]
-pub use omnia_backend::messaging::Client;
 pub use omnia_backend::messaging::{
     Endpoint, Error, HandleError, Handler, Message, MessagingClient, MessagingDefault, Metadata,
     Reply, RequestOptions, Subscriptions, dispatch,

@@ -18,9 +18,8 @@ use crate::host::generated::omnia::model::completion::{
 };
 use crate::host::session::{CallsProducer, ReplyTask, ResultsConsumer};
 use crate::host::{
-    BoundToolHost, Effort, Error, Format, Function, Generation, McpGrant, Message, Request, Role,
-    SchemaFormat, SessionClose, Tool, ToolHost, ToolSession, Usage, WasiModel, WasiModelView,
-    WorkerGrant, Workspace,
+    Effort, Error, Format, Function, Generation, McpGrant, Message, Request, Role, SchemaFormat,
+    Tool, ToolSession, Usage, WasiModel, WasiModelView, WorkerGrant, Workspace,
 };
 
 impl<T> HostWithStore<T> for WasiModel
@@ -56,40 +55,21 @@ where
             let limits = access.get().client.limits();
             let allowed = request.tool_names();
 
-            let (session, calls_rx) = ToolSession::new(limits, allowed);
-            let tool_host: Arc<dyn ToolHost> =
-                Arc::new(BoundToolHost::new(Arc::clone(&session), workspace));
+            let (session, calls_rx, tool_host) = ToolSession::open(limits, allowed, workspace);
             let answer = access.get().client.complete(request, tool_host);
 
             results.pipe(&mut access, ResultsConsumer::new(Arc::clone(&session)))?;
             let mut calls = StreamReader::new(&mut access, CallsProducer::new(calls_rx))?;
 
-            let close = SessionClose::new(Arc::clone(&session));
             let reply_task = ReplyTask::spawn(async move {
-                let _close = close;
-                match answer.await {
-                    Ok(answer) => session.take_error().map_or_else(
-                        || {
-                            Ok(WitReply {
-                                answer: answer.answer,
-                                usage: answer.usage.map(to_wit_usage),
-                            })
-                        },
-                        |e| Err(to_wit_error(e)),
-                    ),
-                    Err(error) => {
-                        if let Some(session_err) = session.take_error() {
-                            return Err(to_wit_error(session_err));
-                        }
-                        match error.downcast::<Error>() {
-                            Ok(err) => Err(to_wit_error(err)),
-                            Err(error) => match error.downcast::<WitError>() {
-                                Ok(wit_err) => Err(wit_err),
-                                Err(other) => Err(WitError::from(other)),
-                            },
-                        }
-                    }
-                }
+                session
+                    .finish(answer)
+                    .await
+                    .map(|reply| WitReply {
+                        answer: reply.answer,
+                        usage: reply.usage.map(to_wit_usage),
+                    })
+                    .map_err(to_wit_error)
             });
 
             let reply_fut = reply_task.join().map(Ok::<_, wasmtime::Error>);

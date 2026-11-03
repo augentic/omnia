@@ -9,8 +9,8 @@ use cap_std::fs::Dir;
 use futures::{FutureExt as _, future};
 use tokio::task::spawn_blocking;
 
-use super::DirEntry;
-use crate::{FutureResult, Mount, MountRegistry};
+use super::{DirEntry, Error};
+use crate::{FutureResult, Mount, MountRegistry, check_subpath};
 
 const MAX_READ_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_WRITE_BYTES: usize = 4 * 1024 * 1024;
@@ -49,7 +49,7 @@ impl Workspace {
             });
         }
 
-        check_subpath(subpath)?;
+        check_subpath(subpath).context("grants.workspace")?;
         let dir = mount
             .dir
             .open_dir(subpath)
@@ -64,15 +64,22 @@ impl Workspace {
 
     /// Resolve a deployment-local lend `path` against `registry`.
     ///
+    /// Returns the confined [`Workspace`] and the matched mount-relative `subpath`.
+    ///
     /// # Errors
     ///
-    /// Returns an error if `path` matches no registered mount or the subpath
-    /// cannot be opened beneath the matched mount.
-    pub fn resolve_path(registry: &MountRegistry, path: &str) -> anyhow::Result<Self> {
-        let (mount, subpath) = registry
-            .match_path(path)
-            .ok_or_else(|| anyhow!("workspace lend `{path}` matches no preopen"))?;
-        Self::from_mount(mount, subpath)
+    /// Returns [`Error::InvalidRequest`] if `path` matches no registered mount
+    /// or [`Error::Backend`] if the subpath cannot be opened beneath the
+    /// matched mount.
+    pub fn resolve_path<'a>(
+        registry: &MountRegistry, path: &'a str,
+    ) -> Result<(Self, &'a str), Error> {
+        let (mount, subpath) = registry.match_path(path).ok_or_else(|| {
+            Error::InvalidRequest(format!("workspace lend `{path}` matches no preopen"))
+        })?;
+        let workspace =
+            Self::from_mount(mount, subpath).map_err(|e| Error::Backend(format!("{e:#}")))?;
+        Ok((workspace, subpath))
     }
 
     /// The absolute host path of the workspace when it resolved.
@@ -150,14 +157,6 @@ impl Workspace {
     }
 }
 
-fn check_subpath(subpath: &str) -> anyhow::Result<()> {
-    let plain = !subpath.starts_with('/')
-        && !subpath.contains('\\')
-        && subpath.split('/').all(|part| !part.is_empty() && part != "." && part != "..");
-    ensure!(plain, "grants.workspace subpath `{subpath}` is not a plain relative path");
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -165,7 +164,8 @@ mod tests {
     use cap_std::ambient_authority;
     use cap_std::fs::Dir;
 
-    use super::{MAX_LIST_ENTRIES, MAX_READ_BYTES, MAX_WRITE_BYTES, Workspace, check_subpath};
+    use super::{MAX_LIST_ENTRIES, MAX_READ_BYTES, MAX_WRITE_BYTES, Workspace};
+    use crate::check_subpath;
 
     fn temp_dir(label: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("omnia-ws-{label}-{}", std::process::id()));

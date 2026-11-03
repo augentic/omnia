@@ -293,7 +293,7 @@ pub struct Exchange {
     pub outcome: Result<String, String>,
 }
 
-#[cfg(any(feature = "guest", feature = "host"))]
+#[cfg(feature = "backend")]
 impl From<&omnia_backend::model::Request> for Seen {
     fn from(request: &omnia_backend::model::Request) -> Self {
         use omnia_backend::model::{Format, Tool};
@@ -325,7 +325,7 @@ impl From<&omnia_backend::model::Request> for Seen {
     }
 }
 
-#[cfg(any(feature = "guest", feature = "host"))]
+#[cfg(feature = "backend")]
 impl From<&omnia_backend::model::WorkerGrant> for SeenWorker {
     fn from(grant: &omnia_backend::model::WorkerGrant) -> Self {
         Self {
@@ -336,7 +336,7 @@ impl From<&omnia_backend::model::WorkerGrant> for SeenWorker {
     }
 }
 
-#[cfg(any(feature = "guest", feature = "host"))]
+#[cfg(feature = "backend")]
 impl From<omnia_backend::model::WorkerGrant> for SeenWorker {
     fn from(grant: omnia_backend::model::WorkerGrant) -> Self {
         Self {

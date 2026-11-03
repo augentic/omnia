@@ -27,7 +27,7 @@ tracing.workspace = true
 futures.workspace = true
 http-body-util.workspace = true
 hyper.workspace = true
-omnia-backend = { workspace = true, features = ["http"] }
+omnia-backend = { workspace = true, features = ["http-default"] }
 omnia-core.workspace = true
 tokio = { workspace = true, features = ["net", "rt", "sync", "time"] }
 wasmtime = { workspace = true, features = ["component-model-async"] }

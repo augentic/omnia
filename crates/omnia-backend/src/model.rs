@@ -1,6 +1,10 @@
 //! Prompt-completion (model) service contract and value types.
 
 mod answer;
+#[cfg(not(target_arch = "wasm32"))]
+mod client;
+#[cfg(all(not(target_arch = "wasm32"), feature = "model-default"))]
+mod default;
 mod request;
 #[cfg(not(target_arch = "wasm32"))]
 mod session;
@@ -15,7 +19,11 @@ use serde::de::DeserializeOwned;
 
 pub use self::answer::{Answer, ToolTurn, Transcript};
 #[cfg(not(target_arch = "wasm32"))]
-pub use self::session::{BoundToolHost, SessionClose, ToolHost, ToolSession};
+pub use self::client::ModelClient;
+#[cfg(all(not(target_arch = "wasm32"), feature = "model-default"))]
+pub use self::default::ModelDefault;
+#[cfg(not(target_arch = "wasm32"))]
+pub use self::session::{ToolHost, ToolSession};
 #[cfg(not(target_arch = "wasm32"))]
 pub use self::workspace::Workspace;
 
@@ -55,10 +63,10 @@ pub struct Request {
     pub check: bool,
     /// Deployment-local path of the directory to lend through
     /// `grants.workspace`, giving the backend (and any spawned agent) that
-    /// directory. On `wasm32` the path must sit on (or beneath) a preopen —
-    /// `"."` lends the shared project mount, `"/mount/sub"` lends a
-    /// subdirectory of `/mount`. Off `wasm32` it is a host path the
-    /// provider consumes directly. `None` lends nothing.
+    /// directory. The provider resolves the path against its authorized mounts
+    /// (preopens on `wasm32`, `Direct::with_mounts` natively) — `"."` lends the
+    /// shared project mount, `"/mount/sub"` lends a subdirectory of `/mount` —
+    /// while test doubles observe the raw string. `None` lends nothing.
     #[builder(into)]
     pub workspace: Option<String>,
     /// What the worker a backend runs for this completion may reach beyond
@@ -261,6 +269,12 @@ pub enum Error {
     Backend(String),
 }
 
+impl From<anyhow::Error> for Error {
+    fn from(error: anyhow::Error) -> Self {
+        error.downcast().unwrap_or_else(|other| Self::Backend(format!("{other:#}")))
+    }
+}
+
 /// One tool invocation the model asked the guest to run.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ToolCall {
@@ -346,84 +360,3 @@ pub struct DirEntry {
     /// Whether the entry is a directory.
     pub is_directory: bool,
 }
-
-#[cfg(not(target_arch = "wasm32"))]
-mod host {
-    use std::fmt::Debug;
-    use std::sync::Arc;
-
-    use anyhow::{Result, anyhow};
-    use futures::FutureExt as _;
-    use serde_json::json;
-
-    use super::{Answer, Error, Format, Limits, Request, ToolHost};
-    use crate::{Connect, FutureResult, NoOptions};
-
-    /// Service contract for `omnia:model` backends.
-    pub trait ModelClient: Debug + Send + Sync + 'static {
-        /// Evaluate `request` with `tool_host` for in-process tool and workspace calls.
-        fn complete(&self, request: Request, tool_host: Arc<dyn ToolHost>) -> FutureResult<Answer>;
-
-        /// Session bounds the host enforces for this backend's completions.
-        fn limits(&self) -> Limits {
-            Limits::default()
-        }
-    }
-
-    impl ModelClient for Box<dyn ModelClient> {
-        fn complete(&self, request: Request, tool_host: Arc<dyn ToolHost>) -> FutureResult<Answer> {
-            (**self).complete(request, tool_host)
-        }
-
-        fn limits(&self) -> Limits {
-            (**self).limits()
-        }
-    }
-
-    /// Echo default implementation of [`ModelClient`].
-    #[derive(Clone, Copy, Debug, Default)]
-    pub struct ModelDefault;
-
-    impl Connect for ModelDefault {
-        type ConnectOptions = NoOptions;
-
-        fn connect_with(
-            _options: Self::ConnectOptions,
-        ) -> impl std::future::Future<Output = Result<Self>> {
-            std::future::ready(Ok(Self))
-        }
-    }
-
-    impl ModelClient for ModelDefault {
-        fn complete(&self, request: Request, tool_host: Arc<dyn ToolHost>) -> FutureResult<Answer> {
-            let answer = echo(&request);
-            let check = request.check;
-            async move {
-                let answer = answer?;
-                if check {
-                    tool_host
-                        .check(answer.clone())
-                        .await?
-                        .map_err(|correction| anyhow!(Error::BudgetExhausted(correction)))?;
-                }
-                Ok(Answer::from(answer))
-            }
-            .boxed()
-        }
-    }
-
-    fn echo(request: &Request) -> Result<String> {
-        let prompt =
-            request.messages.last().map(|message| message.content.clone()).unwrap_or_default();
-        match &request.format {
-            Format::Text => Ok(prompt),
-            Format::Json => Ok(json!({ "echo": prompt }).to_string()),
-            Format::Schema(_) => Err(anyhow!(
-                "the default echo backend cannot satisfy format::schema: bind a real model backend"
-            )),
-        }
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub use self::host::{ModelClient, ModelDefault};

@@ -2452,24 +2452,10 @@ dependencies = [
  "http",
  "http-body",
  "http-body-util",
- "omnia",
  "omnia-backend",
  "omnia-sdk",
  "omnia-test",
- "omnia-wasi-blobstore",
- "omnia-wasi-config",
- "omnia-wasi-docstore",
- "omnia-wasi-http",
- "omnia-wasi-identity",
- "omnia-wasi-keyvalue",
- "omnia-wasi-messaging",
- "omnia-wasi-model",
- "omnia-wasi-otel",
- "omnia-wasi-sql",
- "omnia-wasi-vault",
- "omnia-wasi-vcs",
- "omnia-wasi-websocket",
- "test-programs",
+ "tempfile",
  "tokio",
  "tracing",
 ]
@@ -2543,6 +2529,7 @@ name = "omnia-test"
 version = "0.38.0"
 dependencies = [
  "anyhow",
+ "axum",
  "bytes",
  "futures",
  "http",
@@ -2550,7 +2537,6 @@ dependencies = [
  "http-body-util",
  "omnia",
  "omnia-backend",
- "omnia-native",
  "omnia-sdk",
  "omnia-wasi-blobstore",
  "omnia-wasi-config",
@@ -3925,6 +3911,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 
 [[package]]
+name = "signal-hook-registry"
+version = "1.4.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c4db69cba1110affc0e9f7bcd48bbf87b3f4fc7c61fc9155afd4c469eb3d6c1b"
+dependencies = [
+ "errno",
+ "libc",
+]
+
+[[package]]
 name = "signature"
 version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4324,6 +4320,7 @@ dependencies = [
  "libc",
  "mio",
  "pin-project-lite",
+ "signal-hook-registry",
  "socket2",
  "tokio-macros",
  "windows-sys 0.61.2",

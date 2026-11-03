@@ -224,7 +224,7 @@ impl DeploymentBuilder {
         }
 
         // open every preopen once, so a misconfigured mount fails at startup
-        let mounts = Arc::new(MountRegistry::open(manifest.preopens())?);
+        let mounts = MountRegistry::open(manifest.preopens())?;
 
         // W^X: a store a guest could write through a mount loads nothing
         #[cfg(feature = "loader")]
@@ -310,7 +310,7 @@ pub struct Deployment<T: WasiView + 'static> {
     routes: Routes,
     // `NoLinks` unless the `link` feature is on
     seam: Arc<dyn LinkSeam<T>>,
-    mounts: Arc<MountRegistry>,
+    mounts: MountRegistry,
     args: Arc<Vec<String>>,
     mode: Mode,
     allow_empty: bool,
@@ -408,8 +408,8 @@ impl<T: WasiView> Deployment<T> {
 
     /// The mount registry built from the deployment's preopens.
     #[must_use]
-    pub fn mounts(&self) -> Arc<MountRegistry> {
-        Arc::clone(&self.mounts)
+    pub fn mounts(&self) -> MountRegistry {
+        self.mounts.clone()
     }
 
     /// Deployment drive mode.
@@ -485,7 +485,7 @@ impl<B: Clone + Send + Sync + 'static> Deployment<StoreCtx<B>> {
         let runtime = Runtime::from_parts(RuntimeParts {
             name: Arc::from(deployment.name.as_str()),
             args: deployment.args.to_vec(),
-            mounts: Arc::clone(&deployment.mounts),
+            mounts: deployment.mounts.clone(),
             packages: cfg_select! {
                 feature = "loader" => Some(registry),
                 _ => None,

@@ -2,17 +2,15 @@
 
 use crate::guest::{
     FixedIdentity, MapConfig, MatchedHttp, Memory, MemoryDocs, ScriptedLoader, ScriptedModel,
-    ScriptedTables, Sink,
+    ScriptedTables, ScriptedVcs, Sink,
 };
 
 /// A provider holding one default double per capability.
 ///
 /// Each capability impl delegates to the `pub` field named for it, seeded
-/// through a consuming builder of the same name. `StateStore` and `BlobStore`
-/// share the one `storage` field, as one [`Memory`] serves both — the shape a
-/// production provider's single storage backend has. No `Vcs` double ships:
-/// a handler over version control scripts its own provider, since a
-/// repository is a tree on disk and no in-memory value stands for one.
+/// through a consuming builder of the same name. `StateStore`, `BlobStore`,
+/// and `Vault` share the one `storage` field, as one [`Memory`] serves all
+/// three — the shape a production provider's storage backend has.
 ///
 /// ```rust
 /// use omnia_sdk::model::{Model as _, Request};
@@ -63,6 +61,9 @@ pub struct Provider {
     /// The `Plugins` double.
     #[provider(Plugins)]
     pub plugins: ScriptedLoader,
+    /// The `Vcs` double.
+    #[provider(Vcs)]
+    pub vcs: ScriptedVcs,
 }
 
 impl Provider {
@@ -133,6 +134,13 @@ impl Provider {
     #[must_use]
     pub fn plugins(mut self, plugins: ScriptedLoader) -> Self {
         self.plugins = plugins;
+        self
+    }
+
+    /// Replaces the `vcs` double.
+    #[must_use]
+    pub fn vcs(mut self, vcs: ScriptedVcs) -> Self {
+        self.vcs = vcs;
         self
     }
 }

@@ -19,7 +19,7 @@ workspace = true
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 anyhow.workspace = true
 bytes.workspace = true
-omnia-backend = { workspace = true, features = ["blobstore"] }
+omnia-backend = { workspace = true, features = ["blobstore-default"] }
 omnia-core.workspace = true
 tracing.workspace = true
 wasmtime.workspace = true

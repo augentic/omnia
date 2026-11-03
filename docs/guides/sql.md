@@ -44,17 +44,16 @@ The pool name (`"db"` here) is what the backend resolves: the SQLite default ign
 
 ## The `TableStore` capability
 
-`omnia_sdk::TableStore` wraps the open/prepare/execute sequence behind two methods: `query` returns rows, `exec` returns the affected-row count. Both take the pool name, the SQL text, and the `$n` parameters as `DataType` values. On `wasm32` the default method bodies call the WASI bindings, so a guest provider is a unit struct with an empty impl:
+`omnia_sdk::TableStore` wraps the open/prepare/execute sequence behind two methods: `query` returns rows, `exec` returns the affected-row count. Both take the pool name, the SQL text, and the `$n` parameters as `DataType` values. On `wasm32`, `omnia_sdk::WasiProvider` implements `TableStore` over the WASI bindings:
 
-```rust
-struct Provider;
-impl TableStore for Provider {}
+```rust,noplayground
+use omnia_sdk::{TableStore, WasiProvider};
 ```
 
 Insert with bound parameters — `DataType::Str(None)` binds a NULL:
 
 ```rust,noplayground
-Provider
+WasiProvider
     .exec(
         "db".to_string(),
         "INSERT INTO agency (agency_id, name, url, timezone, created_at) \
@@ -75,7 +74,7 @@ Provider
 Delete, checking the affected-row count for a not-found result:
 
 ```rust,noplayground
-let rows_affected = Provider
+let rows_affected = WasiProvider
     .exec(
         "db".to_string(),
         "DELETE FROM agency WHERE agency_id = $1".to_string(),
@@ -94,7 +93,7 @@ if rows_affected == 0 {
 `query` returns `Vec<Row>`; each `Row` carries `fields`, a list of `Field { name, value }` in column order. Look columns up by name and match on the `DataType` variant:
 
 ```rust,noplayground
-let rows = Provider
+let rows = WasiProvider
     .query(
         "db".to_string(),
         "SELECT agency_id, name, url, timezone, created_at FROM agency ORDER BY created_at DESC"

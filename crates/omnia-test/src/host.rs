@@ -4,11 +4,11 @@
 
 mod backends;
 mod deployment;
-mod model;
 mod readers;
 mod scratch;
 
 pub use backends::{Backends, NoVcs};
 pub use deployment::{Captured, Deployment, Run};
-pub use model::{Completion, ScriptedModel, Step};
 pub use scratch::{Scratch, scratch};
+
+pub use crate::backend::{Completion, ScriptedModel, ScriptedVcs, SeenVcs, Step, VcsTurn};

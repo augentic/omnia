@@ -2,12 +2,13 @@
 
 //! Procedural attributes for Omnia guests.
 
+mod capability;
 mod otel;
 mod provider;
 
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{DeriveInput, ItemFn, meta, parse_macro_input};
+use syn::{DeriveInput, ItemFn, ItemTrait, meta, parse_macro_input};
 
 /// Instruments a function using the `[wasi_otel::instrument]` function.
 ///
@@ -37,6 +38,17 @@ pub fn instrument(args: TokenStream, item: TokenStream) -> TokenStream {
     };
 
     TokenStream::from(new_fn)
+}
+
+/// Emits the `Has<Cap>` accessor trait, blanket forwarding impl, and pointer
+/// impls (`Arc<P>`, `&P`, `Box<P>`) for an `omnia_sdk` capability trait.
+#[proc_macro_attribute]
+pub fn capability(_args: TokenStream, item: TokenStream) -> TokenStream {
+    let item_trait = parse_macro_input!(item as ItemTrait);
+    match capability::expand(&item_trait) {
+        Ok(tokens) => TokenStream::from(tokens),
+        Err(err) => TokenStream::from(err.into_compile_error()),
+    }
 }
 
 /// Derives `omnia_sdk` capability traits by delegating each named capability to

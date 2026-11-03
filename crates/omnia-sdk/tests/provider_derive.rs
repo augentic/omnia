@@ -1,6 +1,7 @@
 //! `#[derive(Provider)]` delegation and compile-fail diagnostics.
 
 #![cfg(not(target_arch = "wasm32"))]
+#![deny(private_bounds, private_interfaces)]
 
 use omnia_sdk::{BlobStore, Config, Provider, StateStore};
 use omnia_test::guest::{MapConfig, Memory};
@@ -11,6 +12,20 @@ struct Generic<C, S> {
     config: C,
     #[provider(StateStore, BlobStore)]
     storage: S,
+}
+
+#[derive(Clone, Default, Provider)]
+struct PrivateConfig {
+    #[provider(Config)]
+    inner: MapConfig,
+}
+
+/// Public provider delegating to a private field type without triggering
+/// `private_bounds`.
+#[derive(Clone, Default, Provider)]
+pub struct PublicWithPrivateField {
+    #[provider(Config)]
+    config: PrivateConfig,
 }
 
 #[tokio::test]
@@ -25,6 +40,13 @@ async fn generic_and_multi_capability() {
     assert_eq!(Config::get(&provider, "k").await.expect("config"), "v");
     assert_eq!(StateStore::get(&provider, "s").await.expect("state"), Some(b"1".to_vec()));
     assert_eq!(BlobStore::get(&provider, "b", "o").await.expect("blob"), Some(b"2".to_vec()));
+
+    let pub_provider = PublicWithPrivateField {
+        config: PrivateConfig {
+            inner: MapConfig::default().with([("p", "ok")]),
+        },
+    };
+    assert_eq!(Config::get(&pub_provider, "p").await.expect("private field config"), "ok");
 }
 
 #[test]

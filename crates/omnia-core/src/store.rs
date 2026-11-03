@@ -75,9 +75,8 @@ pub struct StoreConfig<'a> {
     /// Guest argv (`args[0]` is the program name); `None` for reactor
     /// deployments that do not model a CLI invocation.
     pub args: Option<Arc<Vec<String>>>,
-    /// Mount registry preopened into the guest sandbox; `None` for
-    /// deployments without `[[mount]]`s.
-    pub mounts: Option<Arc<MountRegistry>>,
+    /// Mount registry preopened into the guest sandbox.
+    pub mounts: MountRegistry,
     /// Complete guest environment replacing host inheritance; `None` inherits
     /// the host env.
     pub env: Option<Arc<Vec<(String, String)>>>,
@@ -113,7 +112,7 @@ pub struct StoreBase {
     /// [`wasi`](Self::wasi). A consuming host crate reads it to match a lent
     /// `descriptor` back to its mount by directory identity. Empty unless the
     /// deployment configures `[[mount]]`s.
-    pub mounts: Arc<MountRegistry>,
+    pub mounts: MountRegistry,
     /// Handle to the runtime's installed extensions, the state slot a
     /// capability crate's host binding reaches for. Empty in hand-built
     /// store contexts.
@@ -131,7 +130,7 @@ impl StoreBase {
     /// linear-memory growth.
     #[must_use]
     pub fn new(config: StoreConfig<'_>) -> Self {
-        let mounts = config.mounts.unwrap_or_default();
+        let mounts = config.mounts;
 
         let mut wasi_builder = WasiCtxBuilder::new();
         match &config.env {
@@ -233,12 +232,12 @@ impl<H: HostCtx, B: Provides<H> + Send + 'static> StoreView<H> for StoreCtx<B> {
 /// store's authorized mounts without carrying the registry on its own view.
 pub trait HasMounts: Send {
     /// Clone a handle to the store's mount registry.
-    fn mounts(&self) -> Arc<MountRegistry>;
+    fn mounts(&self) -> MountRegistry;
 }
 
 impl<B: Send + 'static> HasMounts for StoreCtx<B> {
-    fn mounts(&self) -> Arc<MountRegistry> {
-        Arc::clone(&self.base.mounts)
+    fn mounts(&self) -> MountRegistry {
+        self.base.mounts.clone()
     }
 }
 

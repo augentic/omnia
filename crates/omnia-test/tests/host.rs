@@ -7,14 +7,29 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Context as _, Result, bail};
+use axum::Router;
+use axum::routing::get;
 use omnia::wasmtime::component::Val;
 use omnia::{Digest, ExitStatus, GuestEntry, GuestId, Runtime, StoreCtx};
-use omnia_test::host::{Backends, Deployment, ScriptedModel, scratch};
+use omnia_backend::keyvalue;
+use omnia_test::host::{Backends, Deployment, ScriptedModel, ScriptedVcs, scratch};
 use omnia_test::{Exchange, SeenFormat};
-use omnia_wasi_blobstore::BlobStoreClient as _;
+use omnia_wasi_blobstore::{BlobStoreClient as _, BlobStoreDefault, WasiBlobStore};
+use omnia_wasi_config::WasiConfig;
+use omnia_wasi_docstore::{DocStoreDefault, WasiDocStore};
+use omnia_wasi_http::WasiHttp;
+use omnia_wasi_identity::{IdentityStub, WasiIdentity};
 use omnia_wasi_keyvalue::{Bucket, FutureResult, KeyValueClient, KeyValueDefault, WasiKeyValue};
-use omnia_wasi_model::WasiModel;
-use omnia_wasi_otel::WasiOtel;
+use omnia_wasi_messaging::{MessagingDefault, WasiMessaging};
+use omnia_wasi_model::{ModelDefault, WasiModel};
+use omnia_wasi_otel::{OtelDefault, WasiOtel};
+use omnia_wasi_sql::{SqlDefault, WasiSql};
+use omnia_wasi_vault::{VaultDefault, WasiVault};
+use omnia_wasi_vcs::WasiVcs;
+use omnia_wasi_websocket::WasiWebSocket;
+use tokio::net::TcpListener;
+
+test_programs::foreach_conformance!();
 
 // A production `runtime!` as an embedder would write it: the compiled-in
 // hosts, connected from the environment under `main`. The macro embeds a
@@ -292,6 +307,89 @@ fn scratch_mounts() {
     assert_eq!((mount.name.as_str(), mount.writable), (".", true));
     assert_eq!(scratch.mount_as("project", false).name, "project");
     assert_eq!(mount.path, scratch.path());
+}
+
+type WasiBackends = Backends<
+    ModelDefault,
+    KeyValueDefault,
+    BlobStoreDefault,
+    DocStoreDefault,
+    SqlDefault,
+    VaultDefault,
+    MessagingDefault,
+    IdentityStub,
+    OtelDefault,
+    ScriptedVcs,
+>;
+
+async fn serve_origin() -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind loopback");
+    let addr = listener.local_addr().expect("local addr");
+    let app = Router::new().route("/conformance", get(|| async { "conformance-ok" }));
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    format!("http://{addr}")
+}
+
+// Runs the same conformance scenarios inside a real WASI guest over `WasiProvider`,
+// and verifies byte-for-byte interoperability on one shared `KeyValueDefault`
+// bucket.
+#[tokio::test]
+async fn conformance_portable() {
+    let url = serve_origin().await;
+    let scratch = scratch();
+    let vcs = ScriptedVcs::resolving(["sha:main"]);
+
+    let backends = Backends::defaults()
+        .await
+        .config([
+            ("CONFORMANCE_KEY", "conformance-val".to_owned()),
+            ("CONFORMANCE_ORIGIN", url),
+            ("CONFORMANCE_SHARED_BUCKET", "1".to_owned()),
+        ])
+        .vcs(vcs.clone());
+
+    let bucket = backends
+        .keyvalue
+        .open_bucket(keyvalue::BUCKET.to_owned())
+        .await
+        .expect("open shared bucket");
+    bucket
+        .set("shared/from-direct".to_owned(), b"written-by-direct".to_vec(), None)
+        .await
+        .expect("seed shared key");
+    assert_eq!(bucket.increment("shared/counter".to_owned(), 10).await.expect("increment"), 10);
+
+    let status = Deployment::new()
+        .guest("conformance", test_programs::CONFORMANCE_PORTABLE)
+        .mount(scratch.mount(false))
+        .run(backends, |deployment| {
+            deployment.host::<WasiBlobStore, WasiBackends>()?;
+            deployment.host::<WasiConfig, WasiBackends>()?;
+            deployment.host::<WasiDocStore, WasiBackends>()?;
+            deployment.host::<WasiHttp, WasiBackends>()?;
+            deployment.host::<WasiIdentity, WasiBackends>()?;
+            deployment.host::<WasiKeyValue, WasiBackends>()?;
+            deployment.host::<WasiMessaging, WasiBackends>()?;
+            deployment.host::<WasiModel, WasiBackends>()?;
+            deployment.host::<WasiOtel, WasiBackends>()?;
+            deployment.host::<WasiSql, WasiBackends>()?;
+            deployment.host::<WasiVault, WasiBackends>()?;
+            deployment.host::<WasiVcs, WasiBackends>()?;
+            deployment.host::<WasiWebSocket, WasiBackends>()?;
+            Ok(())
+        })
+        .await
+        .expect("conformance guest runs");
+    assert_eq!(status, ExitStatus::SUCCESS);
+    vcs.assert_exhausted();
+
+    assert_eq!(
+        bucket.get("shared/from-wasi".to_owned()).await.expect("reads wasi key"),
+        Some(b"written-by-wasi".to_vec())
+    );
+    assert_eq!(bucket.increment("shared/counter".to_owned(), 0).await.expect("reads counter"), 15);
 }
 
 async fn call<B>(runtime: &Runtime<B>, guest: &str, func: &str, message: &str) -> Result<String>

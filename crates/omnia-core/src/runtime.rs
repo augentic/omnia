@@ -62,7 +62,7 @@ pub struct RuntimeParts<B: 'static> {
     pub args: Vec<String>,
     /// Mount registry opened from the deployment's preopens — the WASI
     /// preopens of every store.
-    pub mounts: Arc<MountRegistry>,
+    pub mounts: MountRegistry,
     /// Connected backend bundle.
     pub backends: B,
     /// How a declared package source is acquired at first use. `None` when
@@ -100,7 +100,7 @@ struct RuntimeInner<B: 'static> {
     name: Arc<str>,
     registry: Arc<Registry<StoreCtx<B>>>,
     args: Arc<Vec<String>>,
-    mounts: Arc<MountRegistry>,
+    mounts: MountRegistry,
     backends: B,
     packages: Option<Arc<dyn RegistrySource>>,
     // absent, command mode routes to the sole static `wasi:cli/run` exporter
@@ -546,7 +546,7 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
                 dispatcher: Arc::clone(&self.dispatcher),
                 chain,
                 args: Some(Arc::clone(&self.inner.args)),
-                mounts: Some(Arc::clone(&self.inner.mounts)),
+                mounts: self.inner.mounts.clone(),
                 env: Some(Arc::clone(&self.inner.env)),
                 stdio: self.inner.stdio.clone(),
                 extensions: self.inner.extensions.clone(),

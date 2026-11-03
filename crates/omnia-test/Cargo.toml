@@ -27,11 +27,21 @@ conformance = [
     "dep:omnia-sdk",
     "omnia-sdk/sql",
     "omnia-sdk/docstore",
+    "dep:tokio",
+]
+# Wasmtime-free `*Client` doubles (`ScriptedModel`, `ScriptedVcs`).
+backend = [
+    "dep:anyhow",
+    "dep:futures",
+    "dep:omnia-backend",
+    "omnia-backend/model",
+    "omnia-backend/vcs",
 ]
 # Native doubles for the `omnia_sdk` capability traits, plus the `Provider` that bundles them.
 # `omnia-sdk/sql` and `omnia-sdk/docstore` carry the `TableStore` and
 # `DocumentStore` traits the `ScriptedTables` and `MemoryDocs` doubles implement.
 guest = [
+    "backend",
     "conformance",
     "dep:anyhow",
     "dep:bytes",
@@ -39,15 +49,17 @@ guest = [
     "dep:http-body",
     "dep:http-body-util",
     "dep:omnia-backend",
-    "omnia-backend/docstore",
+    "omnia-backend/docstore-default",
+    "omnia-backend/keyvalue",
     "omnia-backend/model",
-    "dep:omnia-native",
+    "omnia-backend/vcs",
     "dep:omnia-sdk",
     "omnia-sdk/sql",
     "omnia-sdk/docstore",
 ]
-# The component runtime harness: `Deployment`, `Backends`, `ScriptedModel`, `Scratch`.
+# The component runtime harness: `Deployment`, `Backends`, `ScriptedModel`, `ScriptedVcs`, `Scratch`.
 host = [
+    "backend",
     "conformance",
     "dep:anyhow",
     "dep:futures",
@@ -57,6 +69,7 @@ host = [
     "dep:omnia-backend",
     "omnia-backend/keyvalue",
     "omnia-backend/model",
+    "omnia-backend/vcs",
     "dep:omnia-wasi-blobstore",
     "dep:omnia-wasi-config",
     "dep:omnia-wasi-docstore",
@@ -86,7 +99,6 @@ http-body = { workspace = true, optional = true }
 http-body-util = { workspace = true, optional = true }
 omnia = { workspace = true, optional = true }
 omnia-backend = { workspace = true, optional = true }
-omnia-native = { workspace = true, optional = true }
 omnia-sdk = { workspace = true, optional = true }
 omnia-wasi-blobstore = { workspace = true, optional = true }
 omnia-wasi-config = { workspace = true, optional = true }
@@ -103,8 +115,12 @@ omnia-wasi-vcs = { workspace = true, optional = true }
 omnia-wasi-websocket = { workspace = true, optional = true }
 tempfile = { workspace = true, optional = true }
 
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { workspace = true, features = ["time"], optional = true }
+
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 anyhow.workspace = true
+axum = { workspace = true, features = ["http1", "tokio"] }
 bytes.workspace = true
 http.workspace = true
 http-body-util.workspace = true
@@ -117,7 +133,7 @@ omnia-wasi-model = { path = "../wasi-model" }
 omnia-wasi-otel = { path = "../wasi-otel" }
 omnia-wasi-sql = { path = "../wasi-sql" }
 test-programs.workspace = true
-tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread"] }
 
 [[test]]
 name = "script"

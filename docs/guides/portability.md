@@ -19,7 +19,7 @@ The SDK defines thirteen capability traits. Twelve are portable across `WasiProv
 | `Model`, `Vcs` | Portable (`WasiProvider`, `Direct<T>`, test doubles) | `ToolSession` budgets and `cap-std` `Workspace` / `Place` confinement live in `omnia-backend`, so `Direct::with_mounts` enforces the same mount and session rules as the WASI host |
 | `Plugins` | Engine-only (`WasiProvider`, test doubles) | Loading and instantiating a `.wasm` component requires the `wasmtime` engine (`omnia-plugin`) |
 
-> **Count map.** The SDK has thirteen capability traits (the twelve portable traits plus engine-only `Plugins`). `omnia-backend` has thirteen `*Client` traits (counterparts to the twelve portable capabilities plus host-only `OtelClient`, which has no handler trait; `Plugins` maps to `omnia_backend::plugins::PackageStore`).
+> **Count map.** The SDK has thirteen capability traits (the twelve portable traits plus engine-only `Plugins`), each paired with a `Has<Capability>` delegation trait. `omnia-backend` has thirteen `*Client` traits (counterparts to the twelve portable capabilities plus host-only `OtelClient`, which has no handler trait; `Plugins` maps to `omnia_backend::plugins::PackageStore`).
 
 ---
 
@@ -35,7 +35,7 @@ Every row of the portable contract is verified by a generic scenario function in
 | `StateStore` increment | Atomic signed delta on an 8-byte big-endian `i64`; an absent key starts at zero | `wasi:keyvalue/atomics` `increment` | Redis `INCRBY` script; `KeyValueDefault` per-key lock | **Deviation:** bounded CAS retry loop over 8-byte big-endian `i64` (fails under sustained contention) | `conformance::state_increment` |
 | `TableStore` query / exec | Parameterized SQL (`$1`, `$2`, ...) over a named connection opened per call | `wasi:sql/readwrite` | `omnia-postgres` pool; `SqlDefault` (`SQLite`) | No building block (`Direct` slot) | `conformance::table_query_exec` |
 | `DocumentStore` | `get`, create-only `insert`, `put` upsert, `delete` -> `bool`, `query` with `Filter`, `order_by`, `limit`, `offset`, `continuation` | `omnia:docstore/store` | `DocStoreDefault` supports full `Filter`; **Deviation:** `omnia-azure-table` rejects `Contains` / `StartsWith` / `EndsWith` (OData has no string functions) | No building block (`Direct` slot) | `conformance::docstore_crud_query` |
-| `BlobStore` | Opaque bytes in are bytes out; missing object is `Ok(None)` on `get`; inclusive `get_range`, metadata, container ops, `BlobStoreExt` | `wasi:blobstore` | `omnia-azure-blob` (404 -> `Ok(None)`), `omnia-nats`, `omnia-mongodb` (`bson::Binary`), `omnia-filesystem`, `BlobStoreDefault` | **Deviation:** output bindings serve `get`, `put`, `delete`, `list` only; range, metadata, and container ops return `Unsupported` | `conformance::blobstore_objects` |
+| `BlobStore` | Opaque bytes in are bytes out; missing object is `Ok(None)` on `get`; inclusive `get_range`, metadata, container ops, derived ops (`has`, `delete_objects`, `clear`, `copy_object`, `move_object`) | `wasi:blobstore` | `omnia-azure-blob` (404 -> `Ok(None)`), `omnia-nats`, `omnia-mongodb` (`bson::Binary`), `omnia-filesystem`, `BlobStoreDefault` | **Deviation:** output bindings serve `get`, `put`, `delete`, `list` only; range, metadata, and container ops return `Unsupported` | `conformance::blobstore_objects` |
 | `Publish` | At-least-once delivery to the exact topic with headers preserved | `wasi:messaging/producer` | `omnia-kafka`, `omnia-nats`, `MessagingDefault` | Pub/Sub API (`/v1.0/publish/{pubsub}/{topic}`); headers map to `metadata.*` query params | `conformance::publish_send` |
 | `Config` | `get(key)` returns the string value, or an error when absent | `wasi:config/store` | `ConfigDefault` (process environment or seeded map) | Configuration API (`/v1.0/configuration/{store}`), with optional process-env override | `conformance::config_get` |
 | `Identity` | `token(identity, scopes)` returns `AccessToken { token, expires_in }`; `access_token(identity)` is a defaulted convenience | `omnia:identity/credentials` | `omnia-azure-id`; `IdentityDefault` (`OAuth2`); `IdentityStub` | No building block (`Direct` slot; Dapr Secrets returns static secrets, not tokens) | `conformance::identity_token` |
@@ -49,9 +49,9 @@ Every row of the portable contract is verified by a generic scenario function in
 
 The same `omnia_test::conformance` scenarios run across five configurations:
 
-1. **`omnia_test::guest::Provider`** (`crates/omnia-test/tests/conformance.rs`) — verifies that the handler-rung doubles honour the contract handlers are tested against.
-2. **`Direct<*Default>`** (`crates/omnia-native/tests/conformance.rs`) — verifies the in-process bridge over every in-memory and process default.
-3. **`WasiProvider`** (`crates/test-programs/programs/conformance/portable.rs` driven in `crates/omnia-native/tests/conformance.rs`) — verifies the sandboxed WASI boundary and proves byte-for-byte interoperability between `WasiProvider` and `Direct<KeyValueDefault>` on one shared `KeyValueDefault` instance.
+1. **`omnia_test::guest::Provider`** (`crates/omnia-test/tests/conformance.rs`) — verifies that the handler-rung doubles (including `guest::ScriptedVcs`) honour the contract handlers are tested against.
+2. **`Direct<*Default>`** (`crates/omnia-native/tests/conformance.rs`) — verifies the in-process bridge over every in-memory and process default (plus `backend::ScriptedVcs`).
+3. **`WasiProvider`** (`crates/test-programs/programs/conformance/portable.rs` driven in `crates/omnia-test/tests/host.rs`) — verifies the sandboxed WASI boundary and proves byte-for-byte interoperability on one shared `KeyValueDefault` instance.
 4. **`Direct<production>`** (`omnia-backends` `tests/conformance.rs`, `#[ignore]`-gated on live service credentials) — verifies production backends and pins documented deviations.
 5. **`Dapr<Direct<HttpDefault>>`** (`omnia-dapr` `tests/conformance.rs` over the fake sidecar) — verifies the Dapr HTTP protocol mapping.
 
@@ -91,7 +91,7 @@ omnia_sdk::http!(router(Cached::default()));
 
 ### 2. Native binary (`omnia_native::Direct` and `Serve`)
 
-A native entrypoint connects the service clients it needs, wraps each in `Direct::new` (or `Direct::with_mounts` when lending directories to `Model` or `Vcs`), and drives the routers with `omnia_native::Serve`:
+A native entrypoint connects the service clients it needs, wraps each in `Direct::new` (or `Direct::with_mounts(client, mounts)` when lending directories to `Model` or `Vcs`), and drives the routers with `omnia_native::Serve` (which supports multiple HTTP listeners and messaging consumers, graceful shutdown via `Serve::shutdown`, and telemetry flushing):
 
 ```rust,ignore
 use omnia_backend::{ConfigDefault, Connect as _, HttpDefault, WebSocketDefault};
@@ -177,10 +177,11 @@ Each symbol prefix in the workspace names one layer:
 
 - **`Wasi*` (`WasiKeyValue`, `WasiBlobStore`, `WasiSql`, ...)** — `wasmtime` linker hosts in `omnia-wasi-*` and `omnia-plugin`. Never referenced by guest or native handler code.
 - **`Wasi*View<'a>`** — borrowed `(client, table)` store views generated by `omnia_core::wasi_view!`.
-- **`WasiProvider`** — the single zero-sized guest provider in `omnia-sdk` implementing every capability trait on `wasm32` (`WasiModel`, `WasiVcs`, and `WasiPlugins` in `omnia-sdk` are deprecated aliases for `WasiProvider`).
+- **`WasiProvider`** — the single zero-sized guest provider in `omnia-sdk` implementing every capability trait on `wasm32`.
+- **`Has*` (`HasStateStore`, `HasBlobStore`, `HasConfig`, ...)** — accessor traits emitted by `#[omnia_guest_macros::capability]` with a blanket forwarding impl and pointer impls (`Arc<P>`, `&P`, `Box<P>`), implemented by `#[derive(omnia_sdk::Provider)]`.
 - **`*Client` (`KeyValueClient`, `SqlClient`, ...)** — engine-free service contracts in `omnia-backend`.
-- **`*Default` (`KeyValueDefault`, `SqlDefault`, ...)** — in-memory or process default implementations in `omnia-backend`.
-- **`Direct::new(client)` / `Direct::with_mounts(client, mounts)`** — associated constructors on `omnia_native::Direct<T>`.
+- **`*Default` (`KeyValueDefault`, `SqlDefault`, ...)** — in-memory or process default implementations in `omnia-backend` behind `<cap>-default` / `defaults`.
+- **`Direct::new(client)` / `Direct::with_mounts(client, mounts)`** — `const` constructors on `omnia_native::Direct<T>` taking `MountRegistry` by value.
 - **Wire constants (`omnia_backend::keyvalue::BUCKET`, `omnia_backend::vault::LOCKER`)** — defined once in `omnia-backend`, re-exported by `omnia-sdk` and `omnia-native`, and shared by `WasiProvider`, `Direct<T>`, and the test harness so keys and secrets land in the same bucket and locker across every deployment mode.
 - **SDK capability trait names (`StateStore`, `DocumentStore`, `TableStore`, `HttpRequest`, `Publish`, ...)** — kept distinct from Dapr building-block names so handler UFCS never collides with `axum::extract::State`, `docstore::Document`, `sea_query::Table`, or the `http` crate.
 

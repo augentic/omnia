@@ -12,6 +12,7 @@ mod provider;
 mod scripted;
 mod sink;
 mod tables;
+mod vcs;
 
 pub use docs::MemoryDocs;
 pub use http::{MatchedHttp, Recorded};
@@ -22,3 +23,6 @@ pub use scripted::Scripted;
 pub use scripted::{ScriptedLoader, ScriptedModel, Turn, function_tools};
 pub use sink::{Broadcasted, FixedIdentity, MapConfig, Sink};
 pub use tables::{Predicate, ScriptedTables, Statement};
+pub use vcs::ScriptedVcs;
+
+pub use crate::backend::{SeenVcs, VcsTurn};

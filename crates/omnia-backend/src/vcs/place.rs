@@ -1,6 +1,6 @@
 //! Location confinement for `omnia:vcs`.
 
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::{fmt, io};
 
@@ -8,7 +8,7 @@ use anyhow::{Context as _, anyhow, bail, ensure};
 use cap_std::fs::Dir;
 
 use super::Error;
-use crate::{Mount, MountRegistry};
+use crate::{Mount, MountRegistry, check_subpath};
 
 /// The place a `location` resolved to: an open directory beneath an authorized mount.
 #[derive(Clone)]
@@ -38,7 +38,7 @@ impl Place {
                 path: mount.host_path.clone(),
             });
         }
-        check_subpath(subpath)?;
+        check_subpath(subpath).context("location")?;
         let dir = open_beneath(&mount.dir, subpath, intent == Intent::Create)?;
         Ok(Self {
             dir: Arc::new(dir),
@@ -90,15 +90,6 @@ pub enum Intent {
     Create,
 }
 
-fn check_subpath(subpath: &str) -> anyhow::Result<()> {
-    let plain = !subpath.starts_with('/')
-        && !subpath.contains('\\')
-        && subpath.split('/').all(|part| !part.is_empty() && part != "." && part != "..")
-        && Path::new(subpath).components().all(|part| matches!(part, Component::Normal(_)));
-    ensure!(plain, "location subpath `{subpath}` is not a plain relative path");
-    Ok(())
-}
-
 fn open_beneath(root: &Dir, subpath: &str, create: bool) -> anyhow::Result<Dir> {
     if create {
         match root.create_dir_all(subpath) {
@@ -128,7 +119,8 @@ mod tests {
     use cap_std::ambient_authority;
     use cap_std::fs::Dir;
 
-    use super::{check_subpath, open_beneath};
+    use super::open_beneath;
+    use crate::check_subpath;
 
     fn temp_dir(label: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("omnia-vcs-{label}-{}", std::process::id()));

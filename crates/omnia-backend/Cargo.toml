@@ -18,30 +18,49 @@ workspace = true
 [features]
 default = []
 
-# Enables the in-memory and process default implementations (`*Default`).
-defaults = []
+# Enables all in-memory and process default implementations (`*Default`).
+defaults = [
+    "blobstore-default",
+    "config-default",
+    "docstore-default",
+    "http-default",
+    "keyvalue-default",
+    "messaging-default",
+    "model-default",
+    "otel-default",
+    "vault-default",
+    "websocket-default",
+]
 
-blobstore = ["dep:bytes", "dep:parking_lot", "dep:tracing"]
-config = ["dep:tracing"]
-docstore = ["dep:chrono", "dep:serde_json", "dep:tracing"]
+blobstore = ["dep:bytes"]
+blobstore-default = ["blobstore", "dep:parking_lot", "dep:tracing"]
+config = []
+config-default = ["config", "dep:tracing"]
+docstore = ["dep:chrono"]
+docstore-default = ["docstore", "dep:serde_json", "dep:tracing"]
 http = [
-    "dep:base64ct",
     "dep:bytes",
-    "dep:fromenv",
     "dep:http",
     "dep:http-body",
     "dep:http-body-util",
+    "dep:thiserror",
+]
+http-default = [
+    "http",
+    "dep:base64ct",
+    "dep:fromenv",
     "dep:hyper",
     "dep:reqwest",
     "dep:rustls",
-    "dep:thiserror",
     "dep:tokio",
     "dep:tracing",
     "dep:x509-cert",
 ]
 identity = []
-keyvalue = ["dep:moka", "dep:tracing"]
-messaging = ["dep:thiserror", "dep:tokio", "dep:tokio-stream", "dep:tracing"]
+keyvalue = []
+keyvalue-default = ["keyvalue", "dep:moka", "dep:tracing"]
+messaging = ["dep:thiserror", "dep:tokio"]
+messaging-default = ["messaging", "dep:tokio-stream", "dep:tracing"]
 model = [
     "dep:bon",
     "dep:schemars",
@@ -51,10 +70,12 @@ model = [
     "dep:tokio",
     "dep:tracing",
 ]
-otel = [
+model-default = ["model"]
+otel = ["dep:opentelemetry-proto"]
+otel-default = [
+    "otel",
     "dep:opentelemetry",
     "dep:opentelemetry-otlp",
-    "dep:opentelemetry-proto",
     "dep:opentelemetry_sdk",
     "dep:tracing",
     "dep:tracing-opentelemetry",
@@ -62,9 +83,12 @@ otel = [
 ]
 plugins = ["dep:wasm-pkg-common"]
 sql = []
-vault = ["dep:parking_lot", "dep:tracing"]
+vault = []
+vault-default = ["vault", "dep:parking_lot", "dep:tracing"]
 vcs = ["dep:thiserror"]
-websocket = [
+websocket = []
+websocket-default = [
+    "websocket",
     "dep:dashmap",
     "dep:futures-channel",
     "dep:futures-util",
@@ -77,7 +101,6 @@ websocket = [
 # Bundled SQLite default (`SqlDefault`).
 sqlite = [
     "sql",
-    "defaults",
     "dep:fromenv",
     "dep:parking_lot",
     "dep:rusqlite",
@@ -88,7 +111,6 @@ sqlite = [
 # OAuth2 client-credentials default (`IdentityDefault`).
 oauth = [
     "identity",
-    "defaults",
     "dep:fromenv",
     "dep:oauth2",
     "dep:tracing",

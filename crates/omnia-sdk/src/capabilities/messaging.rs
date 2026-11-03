@@ -26,42 +26,26 @@ impl Message {
 }
 
 /// Publishes messages to a topic.
+#[omnia_guest_macros::capability]
 pub trait Publish: Send + Sync {
-    cfg_select! {
-        not(all(target_arch = "wasm32", target_os = "wasi")) => {
-            /// Publish (send) a message to a topic.
-            fn send(
-                &self, topic: &str, message: &Message,
-            ) -> impl Future<Output = Result<()>> + Send;
-        }
-        _ => {
-            /// Publish (send) a message to a topic.
-            fn send(
-                &self, topic: &str, message: &Message,
-            ) -> impl Future<Output = Result<()>> + Send {
-                use anyhow::Context;
-                use omnia_wasi_messaging::producer;
-                use omnia_wasi_messaging::types::{self as wasi, Client};
-
-                async move {
-                    let client = Client::connect("host".to_string())
-                        .await
-                        .context("connecting to broker")?;
-                    let msg = wasi::Message::new(&message.payload);
-                    message.headers.iter().for_each(|(k, v)| {
-                        msg.add_metadata(k, v);
-                    });
-                    producer::send(&client, topic.to_string(), msg)
-                        .await
-                        .with_context(|| format!("sending message to {topic}"))
-                }
-            }
-        }
-    }
+    /// Publish (send) a message to a topic.
+    fn send(&self, topic: &str, message: &Message) -> impl Future<Output = Result<()>> + Send;
 }
 
-delegate_deref!(Publish {
-    fn send(&self, topic: &str, message: &Message) -> impl Future<Output = Result<()>> + Send {
-        (**self).send(topic, message)
+#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
+impl Publish for crate::WasiProvider {
+    async fn send(&self, topic: &str, message: &Message) -> Result<()> {
+        use anyhow::Context;
+        use omnia_wasi_messaging::producer;
+        use omnia_wasi_messaging::types::{self as wasi, Client};
+
+        let client = Client::connect("host".to_string()).await.context("connecting to broker")?;
+        let msg = wasi::Message::new(&message.payload);
+        message.headers.iter().for_each(|(k, v)| {
+            msg.add_metadata(k, v);
+        });
+        producer::send(&client, topic.to_string(), msg)
+            .await
+            .with_context(|| format!("sending message to {topic}"))
     }
-});
+}

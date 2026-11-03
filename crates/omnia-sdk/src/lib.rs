@@ -6,21 +6,54 @@ mod error;
 #[cfg(feature = "http")]
 pub mod mcp;
 
-/// Document store types and helpers (deprecated alias for [`docstore`]).
+/// Blobstore metadata value types.
+pub mod blobstore {
+    pub use omnia_backend::blobstore::{ContainerMetadata, ObjectMetadata};
+}
+
+/// Document store value types and filter builders.
 #[cfg(feature = "docstore")]
-#[deprecated(note = "use `omnia_sdk::docstore`")]
-pub mod document_store {
-    pub use omnia_backend::docstore::*;
+pub mod docstore {
+    pub use omnia_backend::docstore::{
+        ComparisonOp, Document, Filter, QueryOptions, QueryResult, ScalarValue, SortField,
+        Timestamp,
+    };
+}
+
+/// Identity access-token value type.
+pub mod identity {
+    pub use omnia_backend::identity::AccessToken;
+}
+
+/// Key-value wire constants.
+pub mod keyvalue {
+    pub use omnia_backend::keyvalue::BUCKET;
+}
+
+/// Messaging wire value types.
+pub mod messaging {
+    pub use omnia_backend::messaging::{Error, Message, Metadata, Reply, RequestOptions};
+}
+
+/// SQL table value types.
+#[cfg(feature = "sql")]
+pub mod sql {
+    pub use omnia_backend::sql::{DataType, Field, Row};
+}
+
+/// Secret vault wire constants.
+pub mod vault {
+    pub use omnia_backend::vault::LOCKER;
+}
+
+/// WebSocket event value type.
+pub mod websocket {
+    pub use omnia_backend::websocket::Event;
 }
 
 #[cfg(feature = "http")]
 #[doc(hidden)]
 pub use axum;
-#[cfg(feature = "docstore")]
-pub use omnia_backend::docstore;
-#[cfg(feature = "sql")]
-pub use omnia_backend::sql;
-pub use omnia_backend::{blobstore, identity, keyvalue, messaging, vault, websocket};
 pub use omnia_guest_macros::Provider;
 #[doc(hidden)]
 pub mod http {

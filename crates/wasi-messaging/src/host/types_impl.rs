@@ -39,7 +39,12 @@ impl<T> HostMessageWithStore<T> for WasiMessaging {
         mut host: Access<'_, T, Self>, self_: Resource<Message>,
     ) -> wasmtime::Result<Option<String>> {
         let message = host.get().table.get(&self_)?;
-        Ok(message.metadata.as_ref().and_then(|md| md.get("content-type").cloned()))
+        Ok(message.metadata.as_ref().and_then(|md| {
+            md.inner
+                .iter()
+                .find(|(key, _)| key.eq_ignore_ascii_case("content-type"))
+                .map(|(_, value)| value.clone())
+        }))
     }
 
     fn set_content_type(

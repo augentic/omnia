@@ -8,7 +8,7 @@ use anyhow::anyhow;
 use futures::{FutureExt as _, future};
 use tokio::sync::{mpsc, oneshot};
 
-use super::{CHECK_TOOL, DirEntry, Error, Limits, ToolCall, ToolOutcome, Workspace};
+use super::{Answer, CHECK_TOOL, DirEntry, Error, Limits, Reply, ToolCall, ToolOutcome, Workspace};
 use crate::FutureResult;
 
 const CALL_QUEUE: usize = 8;
@@ -98,9 +98,50 @@ impl ToolSession {
         (Arc::new(state), calls_rx)
     }
 
+    /// Open a completion session bound to `workspace` and return the session,
+    /// its tool-call stream, and the [`ToolHost`] handed to the backend.
+    #[must_use]
+    pub fn open(
+        limits: Limits, allowed: Vec<String>, workspace: Option<Workspace>,
+    ) -> (Arc<Self>, mpsc::Receiver<ToolCall>, Arc<dyn ToolHost>) {
+        let (session, calls_rx) = Self::new(limits, allowed);
+        let tool_host: Arc<dyn ToolHost> =
+            Arc::new(BoundToolHost::new(Arc::clone(&session), workspace));
+        (session, calls_rx, tool_host)
+    }
+
     /// Take the typed failure host enforcement recorded, if any.
     pub fn take_error(&self) -> Option<Error> {
         self.lock().error.take()
+    }
+
+    /// Await `answer` under a session-close guard and resolve the final [`Reply`].
+    ///
+    /// Gives precedence to any typed [`Error`] recorded by session enforcement.
+    ///
+    /// # Errors
+    ///
+    /// Returns the session's recorded [`Error`] if enforcement tripped, or the
+    /// backend's failure mapped into [`Error`].
+    pub async fn finish(self: Arc<Self>, answer: FutureResult<Answer>) -> Result<Reply, Error> {
+        let _close = SessionClose::new(Arc::clone(&self));
+        match answer.await {
+            Ok(answer) => self.take_error().map_or_else(
+                || {
+                    Ok(Reply {
+                        answer: answer.answer,
+                        usage: answer.usage,
+                    })
+                },
+                Err,
+            ),
+            Err(error) => {
+                if let Some(session_err) = self.take_error() {
+                    return Err(session_err);
+                }
+                Err(Error::from(error))
+            }
+        }
     }
 
     /// Run one declared function tool through the session; see [`ToolHost::call_tool`].
@@ -244,15 +285,12 @@ impl ToolSession {
     }
 }
 
-/// Ends a [`ToolSession`] when dropped.
-pub struct SessionClose {
+struct SessionClose {
     state: Arc<ToolSession>,
 }
 
 impl SessionClose {
-    /// Guard that shuts `state` down when dropped.
-    #[must_use]
-    pub const fn new(state: Arc<ToolSession>) -> Self {
+    const fn new(state: Arc<ToolSession>) -> Self {
         Self { state }
     }
 }
@@ -263,16 +301,13 @@ impl Drop for SessionClose {
     }
 }
 
-/// A [`ToolHost`] bound to a [`ToolSession`] and an optional [`Workspace`].
-pub struct BoundToolHost {
+struct BoundToolHost {
     session: Arc<ToolSession>,
     workspace: Option<Workspace>,
 }
 
 impl BoundToolHost {
-    /// Pair `session` with `workspace` into a [`ToolHost`].
-    #[must_use]
-    pub const fn new(session: Arc<ToolSession>, workspace: Option<Workspace>) -> Self {
+    const fn new(session: Arc<ToolSession>, workspace: Option<Workspace>) -> Self {
         Self { session, workspace }
     }
 

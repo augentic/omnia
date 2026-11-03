@@ -15,8 +15,8 @@ use http_body_util::Full;
 use omnia_sdk::docstore::{Document, Filter, QueryOptions, SortField};
 use omnia_sdk::sql::{DataType, Field, Row};
 use omnia_sdk::{
-    BlobStore, BlobStoreExt, Broadcast, CasError, Config, DocumentStore, HttpRequest, Identity,
-    Message, Publish, StateStore, TableStore,
+    BlobStore, Broadcast, CasError, Config, DocumentStore, HttpRequest, Identity, Message, Publish,
+    StateStore, TableStore, Vault,
 };
 use omnia_test::guest::{
     FixedIdentity, MapConfig, MatchedHttp, Memory, MemoryDocs, Namespaced, ScriptedTables, Sink,
@@ -172,9 +172,14 @@ fn namespaced() {
     let beta = Namespaced::new("beta", memory.clone());
     now(StateStore::set(&alpha, "k", b"a", None)).expect("set");
     now(beta.put("c", "o", b"b")).expect("put");
+    now(Vault::set(&alpha, "sec", b"s1")).expect("set secret");
 
     assert_eq!(now(StateStore::get(&beta, "k")).expect("get"), None);
+    assert_eq!(now(Vault::get(&beta, "sec")).expect("get secret"), None);
+    assert_eq!(now(Vault::list_ids(&alpha)).expect("list secrets"), ["sec"]);
+    assert_eq!(now(Vault::list_ids(&beta)).expect("list secrets"), Vec::<String>::new());
     assert_eq!(memory.state("alpha/k"), Some(b"a".to_vec()));
+    assert_eq!(memory.secret("alpha/sec"), Some(b"s1".to_vec()));
     assert_eq!(memory.object("beta/c", "o"), Some(b"b".to_vec()));
     assert_eq!(now(beta.object_info("c", "o")).expect("info").container, "c");
     assert_eq!(now(beta.container_info("c")).expect("info").name, "c");
