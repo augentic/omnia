@@ -1,17 +1,24 @@
 #![doc = include_str!("../README.md")]
 //!
-//! # The three rungs
+//! # The rungs
 //!
 //! - **Handler rung** ([`guest`]) — a handler's own logic, compiled natively,
 //!   against one double per `omnia_sdk` capability, bundled by
 //!   `guest::Provider` or handed to a hand-written provider directly.
-//! - **Backend rung** ([`backend`]) — `wasmtime`-free `*Client` doubles
-//!   (`ScriptedModel` and `ScriptedVcs`) for the component runtime harness.
 //! - **Component rung** ([`host`]) — the compiled `wasm32-wasip2` component
-//!   driven through omnia's own runtime over `Backends`, the twelve in-memory
+//!   driven through omnia's own runtime over `Backends`, the in-memory
 //!   defaults with the model swapped for a `ScriptedModel`.
 //! - **Fixture rung** ([`build`]) — the nested cargo build a consumer's
 //!   `build.rs` runs to produce those components and the `gen.rs` naming them.
+//!
+//! Two modules serve the rungs rather than being one:
+//!
+//! - [`backend`] — `wasmtime`-free `*Client` doubles (`ScriptedModel` and
+//!   `ScriptedVcs`), the ones `Backends` swaps in and a backend crate's own
+//!   tests can use without the runtime.
+//! - [`conformance`] — one scenario per row of the capability contract, run
+//!   by the handler rung over `guest::Provider` and by the component rung
+//!   inside a guest over `WasiProvider`.
 //!
 //! [`Script`] underlies the scripted doubles: a shared FIFO of turns that
 //! records the requests consuming them and fails the test when turns are

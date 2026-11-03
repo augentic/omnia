@@ -2,14 +2,16 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
+use std::path::Path;
+
 use bytes::Bytes;
-use http::{Method, Response};
+use http::{HeaderValue, Method, Response};
 use omnia_sdk::sql::{DataType, Field, Row};
 use omnia_sdk::vcs;
 use omnia_test::conformance;
 use omnia_test::guest::{
-    FixedIdentity, MapConfig, MatchedHttp, Provider, ScriptedModel, ScriptedTables, ScriptedVcs,
-    VcsTurn,
+    Broadcasted, FixedIdentity, MapConfig, MatchedHttp, Provider, ScriptedModel, ScriptedTables,
+    ScriptedVcs, VcsTurn,
 };
 
 omnia_test::conformance!();
@@ -71,7 +73,13 @@ async fn blobstore_objects() {
 async fn publish_send() {
     let provider = Provider::default();
     conformance::publish_send(&provider).await;
-    assert_eq!(provider.publish.sent().len(), 1);
+    let sent = provider.publish.sent();
+    let [(topic, message)] = sent.as_slice() else {
+        panic!("one message published, not {}", sent.len());
+    };
+    assert_eq!(topic, "conformance.events");
+    assert_eq!(message.payload, b"conformance-event");
+    assert_eq!(message.headers.get("x-trace").map(String::as_str), Some("1"));
 }
 
 #[tokio::test]
@@ -101,13 +109,25 @@ async fn http_fetch() {
     );
     let provider = Provider::default().http(http);
     conformance::http_fetch(&provider, "http://origin.test").await;
+
+    let requests = provider.http.requests();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].uri.path(), "/conformance");
+    assert_eq!(requests[0].headers.get("x-probe").map(HeaderValue::as_bytes), Some(&b"1"[..]));
 }
 
 #[tokio::test]
 async fn broadcast_send() {
     let provider = Provider::default();
     conformance::broadcast_send(&provider).await;
-    assert_eq!(provider.broadcast.broadcasts().len(), 1);
+    assert_eq!(
+        provider.broadcast.broadcasts(),
+        [Broadcasted {
+            name: "conformance".to_owned(),
+            data: b"ping".to_vec(),
+            sockets: None,
+        }]
+    );
 }
 
 #[tokio::test]
@@ -115,6 +135,14 @@ async fn model_complete() {
     let provider = Provider::default().model(ScriptedModel::answering(["conformance", "checked"]));
     conformance::model_complete(&provider).await;
     provider.model.assert_exhausted();
+
+    let seen = provider.model.seen();
+    assert_eq!(seen.len(), 2);
+    assert_eq!(
+        (seen[0].messages.as_slice(), seen[0].check),
+        (&["conformance".to_owned()][..], false)
+    );
+    assert_eq!((seen[1].messages.as_slice(), seen[1].check), (&["checked".to_owned()][..], true));
 }
 
 #[tokio::test]
@@ -126,4 +154,10 @@ async fn vcs_flow() {
     let provider = Provider::default().vcs(vcs);
     conformance::vcs_flow(&provider).await;
     provider.vcs.assert_exhausted();
+
+    let seen = provider.vcs.seen();
+    assert_eq!(seen.len(), 2);
+    assert_eq!((seen[0].op, seen[0].path.as_path()), ("head", Path::new("/unmounted")));
+    assert_eq!((seen[1].op, seen[1].path.as_path()), ("resolve", Path::new(".")));
+    assert_eq!(seen[1].args, ["main"]);
 }

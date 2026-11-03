@@ -4,12 +4,12 @@ Shared traits, error types, and abstractions for building WASI guest components.
 
 ## Quick Start
 
-A handler is an `async fn(I, Context<P>) -> Result<O, E>`. Write one, then register it with an explicit transport router.
+A handler is an `async fn(I, Context<P>) -> Result<O, E>`, generic over the provider `P` that serves its capabilities. Write one, then register it with an explicit transport router.
 
 ```rust,ignore
 use omnia_sdk::api::http::post;
 use omnia_sdk::api::{Client, Context};
-use omnia_sdk::Error;
+use omnia_sdk::{Error, StateStore};
 use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize)]
@@ -23,48 +23,42 @@ struct ItemResponse {
     name: String,
 }
 
-struct MyProvider;
-
-async fn create_item(
-    input: CreateItem, context: Context<MyProvider>,
+async fn create_item<P: StateStore>(
+    input: CreateItem, context: Context<P>,
 ) -> Result<ItemResponse, Error> {
-    Ok(ItemResponse {
-        id: format!("{}-123", context.owner()),
-        name: input.name,
-    })
+    let id = format!("{}-123", context.owner());
+    context.provider().set(&id, input.name.as_bytes(), None).await?;
+    Ok(ItemResponse { id, name: input.name })
 }
 
-fn router() -> axum::Router {
+pub fn router<P: StateStore + Send + Sync + 'static>(provider: P) -> axum::Router {
     axum::Router::new()
         .route("/items", post(create_item))
-        .with_state(Client::new("my-org", MyProvider))
+        .with_state(Client::new("my-org", provider))
 }
 ```
 
 Every fn of that shape (and every `Clone` closure of it, so a closure can carry configuration) is a `Handler<P, I>` through a blanket impl; implementing the trait by hand on a local non-fn type is the escape hatch, not the norm. Name the fn for the operation (`create_item`) and keep the input DTO's noun (`CreateItem`).
 
-`Client` owns the provider and builds the owned `Context` (`owner()`, `provider()`, public `metadata`) each call receives; `Context::new(owner, provider, metadata)` builds one directly for unit-testing a handler without a `Client`. The application owns its WASI export explicitly:
+`Client` owns the provider and builds the owned `Context` (`owner()`, `provider()`, public `metadata`) each call receives; `Context::new(owner, provider, metadata)` builds one directly for unit-testing a handler without a `Client`. The guest's root crate binds the router to the WASI export over `WasiProvider`, the zero-sized provider that serves every capability through the WASI host:
 
 ```rust,ignore
-struct Http;
-wasip3::http::service::export!(Http);
-
-impl wasip3::exports::http::handler::Guest for Http {
-    async fn handle(request: Request) -> Result<Response, ErrorCode> {
-        omnia_sdk::api::http::serve(router(), request).await
-    }
-}
+omnia_sdk::http!(router(omnia_sdk::WasiProvider));
 ```
 
-Omnia creates one WASI component instance per HTTP request. Construct the `axum::Router` with one provider-owning `Client` as its state inside each `handle` call; Axum's route-state clones share that client's `Arc<P>` only for that request. Durable application state belongs in host-side capabilities, not guest statics.
+`http!` expands to the `wasi:http` handler export on `wasm32-wasip2` and to nothing on native targets, so the same crate's handler tests run natively over `omnia_test::guest::Provider`. Omnia creates one WASI component instance per HTTP request; the router expression runs inside each `handle` call, and Axum's route-state clones share that client's `Arc<P>` only for that request. Durable application state belongs in host-side capabilities, not guest statics.
 
-Messaging routes use the same handlers with exact topic registration:
+Messaging routes use the same handlers with exact topic registration, bound by `messaging!` the same way:
 
 ```rust,ignore
 use omnia_sdk::api::messaging::{Router, consume};
 
-let router = Router::new(Client::new("my-org", MyProvider))
-    .route("items.created", consume(create_item));
+pub async fn messaging_router<P: StateStore + Send + Sync + 'static>(provider: P) -> Router<P> {
+    Router::new(Client::new("my-org", provider))
+        .route("items.created", consume(create_item))
+}
+
+omnia_sdk::messaging!(messaging_router(omnia_sdk::WasiProvider));
 ```
 
 `consume` decodes JSON and acknowledges successful output.
@@ -104,7 +98,7 @@ The runtime's verbosity flags — `-v`/`--verbose` and `-q`/`--quiet`, each repe
 
 ## Capabilities
 
-The guest crate exposes trait-based abstractions for host capabilities. When compiled to `wasm32`, these delegate to WASI host calls.
+The guest crate exposes trait-based abstractions for host capabilities. `WasiProvider` implements every one of them on `wasm32` by calling the WASI host; a handler bounds its `P` on the traits it uses and never names the provider.
 
 | Trait | Purpose |
 | ----- | ------- |
