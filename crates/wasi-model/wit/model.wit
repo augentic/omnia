@@ -2,7 +2,7 @@ package omnia:model@0.2.0;
 
 /// Models-API-style prompt completion.
 interface completion {
-    use wasi:filesystem/types@0.3.0.{descriptor};
+    use wasi:filesystem/types@0.3.2.{descriptor};
 
     /// A JSON document.
     type json = string;

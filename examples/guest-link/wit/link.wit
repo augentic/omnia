@@ -27,7 +27,7 @@ interface echo {
 /// reachable *only* through host-mediated dispatch. The clock import backs
 /// `echo-slow`'s pending await.
 world responder {
-    import wasi:clocks/monotonic-clock@0.3.0;
+    import wasi:clocks/monotonic-clock@0.3.2;
     export echo;
 }
 

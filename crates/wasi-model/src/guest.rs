@@ -7,9 +7,9 @@ mod generated {
         world: "model",
         path: "wit",
         with: {
-            "wasi:filesystem/types@0.3.0": wasip3::filesystem::types,
-            "wasi:clocks/system-clock@0.3.0": wasip3::clocks::system_clock,
-            "wasi:clocks/types@0.3.0": wasip3::clocks::types,
+            "wasi:filesystem/types@0.3.2": wasip3::filesystem::types,
+            "wasi:clocks/system-clock@0.3.2": wasip3::clocks::system_clock,
+            "wasi:clocks/types@0.3.2": wasip3::clocks::types,
         },
     });
 }
