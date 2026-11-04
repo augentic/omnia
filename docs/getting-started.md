@@ -19,20 +19,23 @@ cargo build --example http-wasm --target wasm32-wasip2
 
 This produces `target/wasm32-wasip2/debug/examples/http_wasm.wasm` (note: the file name uses underscores).
 
-The guest itself is ordinary Rust. It exports a WASI HTTP handler and uses [Axum](https://github.com/tokio-rs/axum) for routing, exactly as you would in a native web service:
+The guest itself is ordinary Rust. In an Omnia service, you write transport-neutral `async fn(I, Context<P>) -> Result<O, Error>` handlers on an [Axum](https://github.com/tokio-rs/axum) `Router` and export the WASI HTTP interface with `omnia_sdk::http!` over `omnia_sdk::WasiProvider`:
 
 ```rust,noplayground
-struct HttpGuest;
-wasip3::http::service::export!(HttpGuest);
-
-impl Guest for HttpGuest {
-    #[omnia_wasi_otel::instrument(name = "http_guest_handle", level = Level::DEBUG)]
-    async fn handle(request: Request) -> Result<Response, ErrorCode> {
-        let router = Router::new().route("/", get(echo_get)).route("/", post(echo_post));
-        omnia_wasi_http::serve(router, request).await
-    }
+pub fn router<P>(provider: P) -> Router
+where
+    P: Clone + Send + Sync + 'static,
+{
+    Router::new()
+        .route("/", get(echo_get))
+        .route("/", post(echo_post))
+        .with_state(Client::new("my-guest", provider))
 }
+
+omnia_sdk::http!(router(WasiProvider));
 ```
+
+On `wasm32`, `omnia_sdk::http!` expands to the raw WASI `wasip3::http::service::export!` implementation and serves each request through `omnia_wasi_http::serve` inside an `http_guest_handle` OpenTelemetry span (the standalone `examples/http/guest.rs` writes that expansion out explicitly so you can see the underlying WASI boundary).
 
 ## Step 2: Run it in a host
 
@@ -71,7 +74,20 @@ Each entry pairs a **WASI host** (the interface guests see, e.g. `WasiKeyValue`)
 
 ## Step 4: Use a stateful capability
 
-The `keyvalue` example adds storage. Its guest opens a bucket and reads/writes keys through the standard `wasi:keyvalue` interface:
+In application handlers, capabilities are traits on `context.provider()` (implemented by `WasiProvider` in the guest and by `omnia_test::guest::Provider` in native tests), such as `StateStore` for key-value storage:
+
+```rust,noplayground
+async fn store_item<P: StateStore>(
+    input: ItemInput, context: Context<P>,
+) -> Result<ItemReply, Error> {
+    context.provider().set("my_key", input.body.as_bytes(), None).await?;
+    let res = context.provider().get("my_key").await?;
+    tracing::debug!("found val: {res:?}");
+    // ...
+}
+```
+
+Under the hood, `WasiProvider` delegates to the standard `wasi:keyvalue` interface, which the standalone `keyvalue` example (`examples/keyvalue/guest.rs`) calls directly to demonstrate the raw WIT binding:
 
 ```rust,noplayground
 async fn handler(body: Bytes) -> HttpResult<Json<Value>> {

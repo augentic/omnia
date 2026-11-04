@@ -3,132 +3,53 @@
 A guest is your application logic compiled to a WebAssembly component. This guide is an **overview**: it shows each guest-side pattern once and links to the deep dive. Choose your path:
 
 - [Project setup](#project-setup) — the crate shape every guest shares
-- [HTTP handlers](#http-handlers) — serve requests with Axum
-- [Using WASI capabilities](#using-wasi-capabilities) — storage, messaging, SQL, models, and the rest
-- [Handling incoming messages](#handling-incoming-messages) — the messaging trigger
 - [The handler contract](#the-handler-contract) — Handler + Client + Context behind typed HTTP/messaging routing and CLI dispatch
+- [HTTP handlers](#http-handlers) — serve requests with Axum and `omnia_sdk::http!`
+- [Using WASI capabilities](#using-wasi-capabilities) — storage, messaging, SQL, models, and the rest via `WasiProvider`
+- [Handling incoming messages](#handling-incoming-messages) — the messaging trigger and `omnia_sdk::messaging!`
 - [Command-mode guests](#command-mode-guests) — run-once jobs and CLIs
 - [Tracing](#tracing) — spans and logs from inside the sandbox
 - [Serving MCP tools](#serving-mcp-tools) — expose tools to AI agents
 
-Every pattern here is drawn from a runnable pair in [`examples/`](../../examples/).
+Every pattern here is drawn from [`omnia-exemplar`](https://github.com/augentic/omnia-exemplar) and the runnable pairs in [`examples/`](../../examples/).
 
 ## Project setup
 
-A guest is a `cdylib` crate targeting `wasm32-wasip2`. Guest code is guarded with `#[cfg(target_arch = "wasm32")]` so the same workspace also compiles for the host triple:
-
-```rust
-#![cfg(target_arch = "wasm32")]
-```
+A guest is a library crate with `crate-type = ["cdylib", "rlib"]`: `cdylib` produces the WebAssembly component on `wasm32-wasip2`, and `rlib` lets native integration tests link your routers and handlers against `omnia_test::guest::Provider` doubles.
 
 Typical guest dependencies:
 
-- `wasip3` — WASI Preview 3 bindings (exports, HTTP types, CLI, filesystem preopens)
-- `omnia-sdk` — guest SDK: the handler contract, HTTP/messaging routers and the command façade, error types, capability traits, MCP support
-- `omnia-wasi-*` — the guest side of each capability you use (`omnia-wasi-keyvalue`, `omnia-wasi-messaging`, ...). These crates compile to guest bindings on `wasm32` and to the host implementation on native, so hosts and guests share one dependency name.
+- `omnia-sdk` — the guest SDK: the handler contract, `WasiProvider`, HTTP/messaging routers and the command façade, `omnia_sdk::http!` / `messaging!` / `command!` export macros, error types, capability traits, and MCP support
+- `axum`, `serde`, `serde_json` — routing and typed request/response serialization
 
-A minimal HTTP guest crate looks like this (align `wasip3`/`wit-bindgen` with the versions the omnia workspace pins — a mismatch causes executor deadlocks, see [Troubleshooting](../troubleshooting.md#outbound-http-or-spawned-work-inside-a-handler-deadlocks)):
+A minimal HTTP guest `Cargo.toml` looks like this:
 
 ```toml
 [package]
 name = "my-guest"
+version = "0.1.0"
 edition = "2024"
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-anyhow = "1"
 axum = { version = "0.8", default-features = false, features = ["json"] }
-omnia-sdk = "0.36"
-omnia-wasi-http = "0.36"
+omnia-sdk = "0.38"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-wasip3 = { version = "0.7", features = ["http-compat"] }
-wit-bindgen = { version = "0.60", features = ["async-spawn"] }
 ```
 
-Build with:
+`omnia-sdk` re-exports `wasip3`, `wit-bindgen`, and the `omnia-wasi-*` guest bindings internally for its `http!`, `messaging!`, and `command!` macros on `wasm32`, so you do not need to list `wasip3` or `wit-bindgen` in `Cargo.toml` or gate your crate with `#![cfg(target_arch = "wasm32")]`. (If you write a raw WASI export or call `omnia-wasi-*` modules directly as the standalone `examples/` do, gate wasm-only modules with `#![cfg(target_arch = "wasm32")]` and align `wasip3`/`wit-bindgen` with the versions the omnia workspace pins — see [Troubleshooting](../troubleshooting.md#outbound-http-or-spawned-work-inside-a-handler-deadlocks).)
+
+Build a guest with:
 
 ```bash
+cargo build -p my-guest --target wasm32-wasip2
+# or for an in-repo example:
 cargo build --example <name>-wasm --target wasm32-wasip2
 # output: target/wasm32-wasip2/debug/examples/<name>_wasm.wasm  (underscores)
 ```
-
-## HTTP handlers
-
-Export the WASI HTTP handler and hand routing to [Axum](https://github.com/tokio-rs/axum) via `omnia_wasi_http::serve`:
-
-```rust,noplayground
-struct HttpGuest;
-wasip3::http::service::export!(HttpGuest);
-
-impl Guest for HttpGuest {
-    #[omnia_wasi_otel::instrument(name = "http_guest_handle", level = Level::DEBUG)]
-    async fn handle(request: Request) -> Result<Response, ErrorCode> {
-        let router = Router::new().route("/", get(echo_get)).route("/", post(echo_post));
-        omnia_wasi_http::serve(router, request).await
-    }
-}
-```
-
-Handlers are ordinary Axum handlers. Return `omnia_sdk::HttpResult<T>` to map errors to HTTP responses; `anyhow::Context` works as usual.
-
-For **outbound** HTTP requests, use `omnia_wasi_http::handle` with a standard `http::Request` (see `examples/http-proxy` and the messaging example's upstream call).
-
-## Using WASI capabilities
-
-Each capability is a module in its `omnia-wasi-*` crate. The guest never names an implementation — the host decides what backs each interface.
-
-Key-value (`wasi:keyvalue`):
-
-```rust,noplayground
-let bucket = store::open("omnia_bucket".to_string()).await.context("opening bucket")?;
-
-bucket.set("my_key".to_string(), body.to_vec()).await.context("storing data")?;
-
-let res = bucket.get("my_key".to_string()).await.context("reading data")?;
-```
-
-Publishing a message (`wasi:messaging`):
-
-```rust
-let client = Client::connect("default".to_string()).await?;
-let message = Message::new(&payload);
-producer::send(&client, "my-topic".to_string(), message).await?;
-```
-
-The other capabilities follow the same shape; each has a full example:
-
-| Capability | Guest module | Example | Deep dive |
-| ---------- | ------------ | ------- | --------- |
-| Key-value | `omnia_wasi_keyvalue::store` | `examples/keyvalue` | — |
-| Messaging | `omnia_wasi_messaging::{producer, request_reply}` | `examples/messaging` | [Messaging](messaging.md) |
-| SQL | `omnia_wasi_sql`, `omnia_sdk::TableStore` (feature `sql`) | `examples/sql` | [SQL](sql.md) |
-| Document store | `omnia_wasi_docstore` | `examples/docstore` | [Document Store](document-store.md) |
-| Blob store | `omnia_wasi_blobstore` | `examples/blobstore` | — |
-| Secrets | `omnia_wasi_vault` | `examples/vault` | — |
-| Config | `omnia_wasi_config` | `examples/config` | — |
-| Identity/OAuth | `omnia_wasi_identity` | `examples/identity` | — |
-| Model completions | `omnia_wasi_model::completion` | `examples/model` | [Model Completions](model-completions.md) |
-| WebSockets | `omnia_wasi_websocket` | `examples/websocket` | [Messaging § WebSockets](messaging.md#websockets) |
-
-## Handling incoming messages
-
-A guest can export a messaging handler alongside (or instead of) an HTTP handler. The host's messaging trigger delivers each subscribed message to it:
-
-```rust,noplayground
-pub struct Messaging;
-omnia_wasi_messaging::export!(Messaging with_types_in omnia_wasi_messaging);
-
-impl omnia_wasi_messaging::incoming_handler::Guest for Messaging {
-    async fn handle(message: Message) -> anyhow::Result<(), Error> {
-        omnia_sdk::api::messaging::handle(&router(), message).await
-    }
-}
-```
-
-`examples/messaging` demonstrates pub-sub, request-reply, and fan-out with the in-memory default backend; the same guest works against Kafka or NATS.
 
 ## The handler contract
 
@@ -168,9 +89,120 @@ omnia_sdk::http!(router(omnia_sdk::WasiProvider));
 
 Routers map transport events onto handlers: HTTP routes are plain `axum::routing::MethodRouter`s registered on an `axum::Router` whose state is one provider-owning `Client`, and a messaging router maps exact topics. `omnia_sdk::http!(router(omnia_sdk::WasiProvider))` and `omnia_sdk::messaging!(messaging_router(omnia_sdk::WasiProvider))` expand to the `#[omnia_wasi_otel::instrument]`-scoped WASI exports on `wasm32` and to nothing on native targets.
 
-Messaging uses `api::messaging::Router` and `consume(create_item)`; topic matching is exact. A module that owns topics registers them on an `api::messaging::Routes` of its own, with no client, and the guest merges each into its one `Router` (`Router::merge`), as an `axum::Router` merges a module's routes before `with_state`; a topic registered twice panics where the two meet. The export remains visible application code and calls `api::messaging::handle`. Because the same handler fns register in any router, one guest can expose the same logic over HTTP, messaging, and a CLI without duplicating it.
+Messaging uses `api::messaging::Router` and `consume(create_item)`; topic matching is exact. A module that owns topics registers them on an `api::messaging::Routes` of its own, with no client, and the guest merges each into its one `Router` (`Router::merge`), as an `axum::Router` merges a module's routes before `with_state`; a topic registered twice panics where the two meet. Because the same handler fns register in any router, one guest can expose the same logic over HTTP, messaging, and a CLI without duplicating it.
 
 Typed routes default to JSON: `http::get` and `http::delete` decode path and query parameters, while `http::post`, `http::put`, and `http::patch` merge a JSON body with path parameters. Routes that speak another wire format (or need other methods) use the general constructors instead: `http::handle_with(filter, handler, decode, encode)` pairs a `MethodFilter` (unions work, e.g. `MethodFilter::POST.or(MethodFilter::PUT)`) with a decoder `Fn(RawRequest<'_>) -> Result<I, E>` (any `E: Into<HttpError>`, so a decoder can classify its refusal — a `not_found!` path parameter answers 404) over a raw-request view (path parameters, query, headers, body) plus an encoder `Fn(F::Output) -> Response`, and `messaging::consume_with(handler, decode)` takes a decoder `Fn(&Delivery) -> Result<I, DecodeError>` over the whole `Delivery`. Errors keep flowing through `Into<HttpError>`: an `omnia_sdk::Error` becomes the JSON `api::ErrorBody` (`{"error","message"}`) at the variant's status, and `HttpError::with_body` carries a preformatted error body (e.g. an XML document) with its content type.
+
+## HTTP handlers
+
+Register typed handlers on an [Axum](https://github.com/tokio-rs/axum) `Router` using `omnia_sdk::api::http::{get, post, put, patch, delete}` and export the router with `omnia_sdk::http!`:
+
+```rust,noplayground
+use axum::Router;
+use omnia_sdk::api::http::{get, post};
+use omnia_sdk::api::{Client, Context};
+use omnia_sdk::{Error, WasiProvider};
+
+pub fn router<P>(provider: P) -> Router
+where
+    P: Clone + Send + Sync + 'static,
+{
+    Router::new()
+        .route("/", get(echo_get))
+        .route("/", post(echo_post))
+        .with_state(Client::new("my-guest", provider))
+}
+
+omnia_sdk::http!(router(WasiProvider));
+```
+
+For **outbound** HTTP requests inside a handler, bound `P: HttpRequest` and call `context.provider().fetch(request).await` with a standard `http::Request` (or call `omnia_wasi_http::handle` directly in `wasm32`-only code; see `examples/http-proxy`).
+
+> **Advanced: raw WASI HTTP export.** When you need to customize the `wasi:http/incoming-handler` export directly (as the standalone `examples/` do to show the low-level binding), implement `wasip3::exports::http::handler::Guest` and hand the request to `omnia_wasi_http::serve`:
+>
+> ```rust,noplayground
+> struct HttpGuest;
+> wasip3::http::service::export!(HttpGuest);
+>
+> impl Guest for HttpGuest {
+>     #[omnia_wasi_otel::instrument(name = "http_guest_handle", level = Level::DEBUG)]
+>     async fn handle(request: Request) -> Result<Response, ErrorCode> {
+>         let router = Router::new().route("/", get(echo_get)).route("/", post(echo_post));
+>         omnia_wasi_http::serve(router, request).await
+>     }
+> }
+> ```
+
+## Using WASI capabilities
+
+In handlers, access host capabilities through the portable traits on `context.provider()` — `WasiProvider` implements every trait on `wasm32` over the underlying `omnia-wasi-*` WIT bindings, while `omnia_test::guest::Provider` backs them with in-memory doubles in native tests. The guest never names a backend implementation — the host decides what backs each interface.
+
+Key-value (`StateStore` over `wasi:keyvalue`):
+
+```rust,noplayground
+context.provider().set("my_key", &body, None).await?;
+let res = context.provider().get("my_key").await?;
+```
+
+Publishing a message (`Publish` over `wasi:messaging`):
+
+```rust,noplayground
+let message = Message::new(&payload);
+context.provider().send("my-topic", &message).await?;
+```
+
+When writing `wasm32`-only code (as in `examples/`), you can also call the `omnia-wasi-*` guest modules directly:
+
+| Capability | `WasiProvider` trait (`omnia_sdk`) | Raw guest module | Example | Deep dive |
+| ---------- | ---------------------------------- | ---------------- | ------- | --------- |
+| Key-value | `StateStore` | `omnia_wasi_keyvalue::store` | `examples/keyvalue` | — |
+| Messaging | `Publish` | `omnia_wasi_messaging::{producer, request_reply}` | `examples/messaging` | [Messaging](messaging.md) |
+| SQL | `TableStore` (feature `sql`) | `omnia_wasi_sql` | `examples/sql` | [SQL](sql.md) |
+| Document store | `DocumentStore` (feature `docstore`) | `omnia_wasi_docstore` | `examples/docstore` | [Document Store](document-store.md) |
+| Blob store | `BlobStore` | `omnia_wasi_blobstore` | `examples/blobstore` | — |
+| Secrets | `Vault` | `omnia_wasi_vault` | `examples/vault` | — |
+| Config | `Config` | `omnia_wasi_config` | `examples/config` | — |
+| Identity/OAuth | `Identity` | `omnia_wasi_identity` | `examples/identity` | — |
+| Outbound HTTP | `HttpRequest` | `omnia_wasi_http` | `examples/http-proxy` | — |
+| Model completions | `Model` | `omnia_wasi_model::completion` | `examples/model` | [Model Completions](model-completions.md) |
+| Version control | `Vcs` | `omnia_wasi_vcs` | — | — |
+| Dynamic plugins | `Plugins` | `omnia_sdk::plugins` | — | — |
+| WebSockets | `Broadcast` | `omnia_wasi_websocket` | `examples/websocket` | [Messaging § WebSockets](messaging.md#websockets) |
+
+## Handling incoming messages
+
+A guest can export a messaging handler alongside (or instead of) an HTTP handler. Build an `omnia_sdk::api::messaging::Router` over your provider and export it with `omnia_sdk::messaging!`:
+
+```rust,noplayground
+use omnia_sdk::WasiProvider;
+use omnia_sdk::api::Client;
+use omnia_sdk::api::messaging::{Router, consume};
+
+pub async fn messaging_router<P>(provider: P) -> Router<P>
+where
+    P: StateStore + Clone + Send + Sync + 'static,
+{
+    Router::new(Client::new("acme-corp", provider))
+        .route("items.created", consume(on_item_created))
+}
+
+omnia_sdk::messaging!(messaging_router(WasiProvider));
+```
+
+For guests that need direct control over the raw `wasi:messaging/incoming-handler` export (for example, `examples/messaging` demonstrating request-reply and fan-out), implement `omnia_wasi_messaging::incoming_handler::Guest` and dispatch via `omnia_sdk::api::messaging::handle`:
+
+```rust,noplayground
+pub struct Messaging;
+omnia_wasi_messaging::export!(Messaging with_types_in omnia_wasi_messaging);
+
+impl omnia_wasi_messaging::incoming_handler::Guest for Messaging {
+    async fn handle(message: Message) -> anyhow::Result<(), Error> {
+        omnia_sdk::api::messaging::handle(&router(), message).await
+    }
+}
+```
+
+`examples/messaging` demonstrates pub-sub, request-reply, and fan-out with the in-memory default backend; the same guest works against Kafka or NATS.
 
 ## Command-mode guests
 
