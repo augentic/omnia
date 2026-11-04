@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
 
 use anyhow::Result;
+use tokio::sync::watch;
 use wasmtime::Store;
 use wasmtime::component::{Instance, InstancePre};
 
@@ -114,6 +115,7 @@ struct RuntimeInner<B: 'static> {
     // one per `build_store`, so an observer can tell a quiet pool from one
     // whose guests finished between its looks
     stores_built: AtomicU64,
+    stop: watch::Sender<bool>,
 }
 
 /// [`Dispatcher`] over the runtime's shared state.
@@ -256,6 +258,7 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
             stdio: parts.stdio,
             extensions: Extensions::new(),
             stores_built: AtomicU64::new(0),
+            stop: watch::channel(false).0,
         }))
     }
 
@@ -718,6 +721,18 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
         Ok(())
     }
 
+    /// Signal long-lived trigger servers to stop accepting new work and drain.
+    pub fn stop(&self) {
+        let _ = self.inner.stop.send(true);
+    }
+
+    /// Resolves once [`stop`](Self::stop) or [`shutdown`](Self::shutdown) has
+    /// been called.
+    pub async fn stopped(&self) {
+        let mut rx = self.inner.stop.subscribe();
+        let _ = rx.wait_for(|&stopped| stopped).await;
+    }
+
     /// Release every link-serve endpoint, aborting the drain tasks that pin
     /// `Runtime` clones (and with them the engine's pooling reservation).
     ///
@@ -726,6 +741,7 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
     /// is finished. In-flight invocations hold their own server handles and
     /// complete; only new dispatches are cut off.
     pub fn shutdown(&self) {
+        self.stop();
         self.registry().seam().shutdown();
     }
 

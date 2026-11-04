@@ -1,6 +1,7 @@
 //! Deployment lifecycle: [`Backends`], [`Wiring`], [`run`], and [`run_with`].
 
 use std::future::Future;
+use std::pin::pin;
 use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
@@ -169,7 +170,24 @@ where
             });
             runtime.run_command().await
         }
-        Mode::Server => H::serve(&runtime).await.map(|()| ExitStatus::SUCCESS),
+        Mode::Server => {
+            let mut serve = pin!(H::serve(&runtime));
+            let result = tokio::select! {
+                result = &mut serve => result,
+                () = wait_for_shutdown_signal() => {
+                    tracing::info!(
+                        component = runtime.name(),
+                        "waiting for in-flight tasks to exit; send another signal to quit immediately"
+                    );
+                    runtime.stop();
+                    tokio::select! {
+                        result = &mut serve => result,
+                        () = wait_for_shutdown_signal() => Ok(()),
+                    }
+                }
+            };
+            result.map(|()| ExitStatus::SUCCESS)
+        }
     };
 
     epoch.abort();
@@ -186,6 +204,22 @@ where
     // batch-queued telemetry must survive a fast command-mode exit
     omnia_core::telemetry::flush();
     outcome
+}
+
+async fn wait_for_shutdown_signal() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{SignalKind, signal};
+        let mut sigterm = signal(SignalKind::terminate()).expect("SIGTERM handler");
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {}
+            _ = sigterm.recv() => {}
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = tokio::signal::ctrl_c().await;
+    }
 }
 
 fn drive_epoch(engine: Engine, tick: Duration) -> tokio::task::JoinHandle<()> {
