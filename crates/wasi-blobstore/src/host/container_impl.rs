@@ -8,11 +8,11 @@ use crate::host::generated::wasi::blobstore::container::{
 };
 use crate::host::resource::ContainerProxy;
 use crate::host::{
-    Error, IncomingValue, OutgoingValue, Result, StreamObjectNames, WasiBlobstore,
-    WasiBlobstoreCtxView,
+    Error, IncomingValue, OutgoingValue, Result, StreamObjectNames, WasiBlobStore,
+    WasiBlobStoreView,
 };
 
-impl<T> HostContainerWithStore<T> for WasiBlobstore {
+impl<T> HostContainerWithStore<T> for WasiBlobStore {
     fn name(mut host: Access<'_, T, Self>, self_: Resource<ContainerProxy>) -> Result<String> {
         let container = host.get().table.get(&self_).context("Container not found")?;
         Ok(container.name().context("getting name")?)
@@ -22,7 +22,11 @@ impl<T> HostContainerWithStore<T> for WasiBlobstore {
         mut host: Access<'_, T, Self>, self_: Resource<ContainerProxy>,
     ) -> Result<ContainerMetadata> {
         let container = host.get().table.get(&self_).context("Container not found")?;
-        Ok(container.info().context("getting info")?)
+        let info = container.info().context("getting info")?;
+        Ok(ContainerMetadata {
+            name: info.name,
+            created_at: info.created_at,
+        })
     }
 
     async fn get_data(
@@ -95,7 +99,13 @@ impl<T> HostContainerWithStore<T> for WasiBlobstore {
         accessor: &Accessor<T, Self>, self_: Resource<ContainerProxy>, name: String,
     ) -> Result<ObjectMetadata> {
         let container = get_container(accessor, &self_)?;
-        Ok(container.object_info(name).await.context("getting object info")?)
+        let info = container.object_info(name).await.context("getting object info")?;
+        Ok(ObjectMetadata {
+            name: info.name,
+            container: info.container,
+            created_at: info.created_at,
+            size: info.size,
+        })
     }
 
     async fn clear(accessor: &Accessor<T, Self>, self_: Resource<ContainerProxy>) -> Result<()> {
@@ -117,7 +127,7 @@ impl<T> HostContainerWithStore<T> for WasiBlobstore {
     }
 }
 
-impl<T> HostStreamObjectNamesWithStore<T> for WasiBlobstore {
+impl<T> HostStreamObjectNamesWithStore<T> for WasiBlobStore {
     fn read_stream_object_names(
         accessor: &Accessor<T, Self>, self_: Resource<StreamObjectNames>, len: u64,
     ) -> impl std::future::Future<Output = Result<(Vec<String>, bool)>> {
@@ -156,12 +166,12 @@ impl<T> HostStreamObjectNamesWithStore<T> for WasiBlobstore {
     }
 }
 
-impl Host for WasiBlobstoreCtxView<'_> {}
-impl HostContainer for WasiBlobstoreCtxView<'_> {}
-impl HostStreamObjectNames for WasiBlobstoreCtxView<'_> {}
+impl Host for WasiBlobStoreView<'_> {}
+impl HostContainer for WasiBlobStoreView<'_> {}
+impl HostStreamObjectNames for WasiBlobStoreView<'_> {}
 
 pub fn get_container<T>(
-    accessor: &Accessor<T, WasiBlobstore>, self_: &Resource<ContainerProxy>,
+    accessor: &Accessor<T, WasiBlobStore>, self_: &Resource<ContainerProxy>,
 ) -> Result<ContainerProxy> {
     Ok(omnia_core::get_cloned(accessor, self_).context("Container not found")?)
 }

@@ -3,20 +3,22 @@
 use omnia_core::HasMounts;
 use wasmtime::component::Accessor;
 
-use crate::host::generated::omnia::vcs::transport::{CloneOptions, Host, HostWithStore, Location};
-use crate::host::location::Intent;
-use crate::host::{Result, WasiVcs, WasiVcsCtxView};
+use crate::host::generated::omnia::vcs::transport::{
+    CloneOptions as WitCloneOptions, Host, HostWithStore, Location,
+};
+use crate::host::{CloneOptions, Intent, Result, WasiVcs, WasiVcsView};
 
 impl<T> HostWithStore<T> for WasiVcs
 where
     T: HasMounts,
 {
     async fn clone(
-        accessor: &Accessor<T, Self>, url: String, at: Location, options: CloneOptions,
+        accessor: &Accessor<T, Self>, url: String, at: Location, options: WitCloneOptions,
     ) -> Result<()> {
+        let options = CloneOptions { depth: options.depth };
         Self::dispatch(accessor, |access| {
             let at = Self::locate(access, &at, Intent::Create)?;
-            Ok(access.get().ctx.clone_repo(url, at, options))
+            Ok(access.get().client.clone_repo(url, at, options))
         })
         .await
     }
@@ -24,7 +26,7 @@ where
     async fn fetch(accessor: &Accessor<T, Self>, repo: Location, remote: String) -> Result<()> {
         Self::dispatch(accessor, |access| {
             let repo = Self::locate(access, &repo, Intent::Mutate)?;
-            Ok(access.get().ctx.fetch(repo, remote))
+            Ok(access.get().client.fetch(repo, remote))
         })
         .await
     }
@@ -34,7 +36,7 @@ where
     ) -> Result<()> {
         Self::dispatch(accessor, |access| {
             let repo = Self::locate(access, &repo, Intent::Mutate)?;
-            Ok(access.get().ctx.label(repo, name, revision))
+            Ok(access.get().client.label(repo, name, revision))
         })
         .await
     }
@@ -44,7 +46,7 @@ where
     ) -> Result<String> {
         Self::dispatch(accessor, |access| {
             let repo = Self::locate(access, &repo, Intent::Read)?;
-            Ok(access.get().ctx.labelled(repo, name))
+            Ok(access.get().client.labelled(repo, name))
         })
         .await
     }
@@ -54,7 +56,7 @@ where
     ) -> Result<String> {
         Self::dispatch(accessor, |access| {
             let repo = Self::locate(access, &repo, Intent::Read)?;
-            Ok(access.get().ctx.fetched(repo, remote, name))
+            Ok(access.get().client.fetched(repo, remote, name))
         })
         .await
     }
@@ -64,10 +66,10 @@ where
     ) -> Result<()> {
         Self::dispatch(accessor, |access| {
             let repo = Self::locate(access, &repo, Intent::Mutate)?;
-            Ok(access.get().ctx.push(repo, remote, label))
+            Ok(access.get().client.push(repo, remote, label))
         })
         .await
     }
 }
 
-impl Host for WasiVcsCtxView<'_> {}
+impl Host for WasiVcsView<'_> {}

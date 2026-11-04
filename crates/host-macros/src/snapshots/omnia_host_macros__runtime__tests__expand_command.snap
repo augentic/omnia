@@ -8,7 +8,7 @@ mod runtime {
     use omnia::Server;
     use omnia::tokio;
     use super::*;
-    use omnia::Backend;
+    use omnia::Connect;
     #[derive(Clone)]
     struct Backends {
         otel_default: OtelDefault,
@@ -16,7 +16,7 @@ mod runtime {
     impl omnia::Backends for Backends {
         async fn connect() -> Result<Self> {
             let (otel_default,) = tokio::try_join!(
-                < OtelDefault as Backend > ::connect(),
+                < OtelDefault as Connect > ::connect(),
             )?;
             Ok(Self { otel_default })
         }

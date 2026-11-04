@@ -17,8 +17,8 @@ use futures::FutureExt as _;
 use omnia::{ExitStatus, Mount};
 use omnia_test::host::{Backends, Deployment, scratch};
 use omnia_wasi_vcs::{
-    Change, ChangeKind, CloneOptions, Entry, Error, FutureResult, Merged, Place, Rule, WasiVcs,
-    WasiVcsCtx,
+    Change, ChangeKind, CloneOptions, Entry, Error, FutureResult, Merged, Place, Rule, VcsClient,
+    WasiVcs,
 };
 use parking_lot::Mutex;
 
@@ -89,7 +89,7 @@ fn held(place: &Place) -> String {
     shown(place.path())
 }
 
-impl WasiVcsCtx for Recorder {
+impl VcsClient for Recorder {
     fn resolve(&self, repo: Place, revision: String) -> FutureResult<String> {
         self.record(format!("resolve {} {revision}", held(&repo)));
         async move {
@@ -269,7 +269,7 @@ async fn vcs_flow() {
             format!("descends {root} unrelated sha:main"),
             format!("head {}", under("work")),
             format!("commit {} \"seal it\"", under("work")),
-            format!("merge {} feature \"merge it\" [*.lock=Strategy::Ours]", under("work")),
+            format!("merge {} feature \"merge it\" [*.lock=Ours]", under("work")),
             format!("merge {} conflicting \"merge it\" []", under("work")),
             format!("log {root} emery/rev sha:base"),
             format!("init {}", under("fresh")),

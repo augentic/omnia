@@ -8,7 +8,7 @@ mod runtime {
     use omnia::Server;
     use omnia::tokio;
     use super::*;
-    use omnia::Backend;
+    use omnia::Connect;
     #[derive(Clone)]
     struct Backends {
         http_default: HttpDefault,
@@ -17,14 +17,14 @@ mod runtime {
     impl omnia::Backends for Backends {
         async fn connect() -> Result<Self> {
             let (http_default, otel_default) = tokio::try_join!(
-                < HttpDefault as Backend > ::connect(), < OtelDefault as Backend >
+                < HttpDefault as Connect > ::connect(), < OtelDefault as Connect >
                 ::connect(),
             )?;
             Ok(Self { http_default, otel_default })
         }
     }
-    impl omnia::Provides<omnia::HttpCtx> for Backends {
-        fn borrow(&mut self) -> <omnia::HttpCtx as omnia::HostCtx>::Borrow<'_> {
+    impl omnia::Provides<WasiHttp> for Backends {
+        fn borrow(&mut self) -> <WasiHttp as omnia::HostCtx>::Borrow<'_> {
             &mut self.http_default
         }
     }
@@ -40,7 +40,7 @@ mod runtime {
     impl<B> omnia::Wiring<B> for Hooks
     where
         B: Clone + Send + Sync + 'static,
-        B: omnia::Provides<omnia::HttpCtx>,
+        B: omnia::Provides<WasiHttp>,
         B: omnia::Provides<WasiOtel>,
     {
         fn link(deployment: &mut omnia::Deployment<omnia::StoreCtx<B>>) -> Result<()> {

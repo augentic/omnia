@@ -1,12 +1,4 @@
-//! Workspace resolution in the host.
-//!
-//! A guest lends a `wasi:filesystem` workspace through
-//! `grants.workspace: option<workspace-grant>` — a borrowed mount-root
-//! descriptor plus a relative subpath. This module turns that grant into an
-//! owned, `Send + Sync` [`Workspace`] the backend can use across `.await`
-//! points, *after* proving the lent root is one the deployment authorized
-//! and reopening the subpath beneath it so the lend can never escape the
-//! mount.
+//! Workspace confinement and bounded I/O for `omnia:model`.
 
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
@@ -15,25 +7,73 @@ use std::sync::Arc;
 use anyhow::{Context as _, anyhow, ensure};
 use cap_std::fs::{Dir, Metadata, MetadataExt as _};
 use futures::{FutureExt as _, future};
-use omnia_core::{FutureResult, MountRegistry};
+use omnia_backend::model::DirEntry;
+use omnia_backend::{FutureResult, check_subpath};
+use omnia_core::{Mount, MountRegistry};
 use tokio::task::spawn_blocking;
 use wasmtime_wasi::filesystem::Descriptor;
 
-use super::generated::omnia::model::completion::WorkspaceGrant;
-use super::tool_host::DirEntry;
+use crate::host::WorkspaceGrant;
 
 const MAX_READ_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_WRITE_BYTES: usize = 4 * 1024 * 1024;
 const MAX_LIST_ENTRIES: usize = 4096;
 
-// A resolved workspace mount.
+/// A resolved workspace mount confined beneath an authorized [`Mount`].
+#[derive(Clone)]
 pub struct Workspace {
     dir: Arc<Dir>,
     local_path: PathBuf,
     writable: bool,
 }
 
+impl std::fmt::Debug for Workspace {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Workspace")
+            .field("local_path", &self.local_path)
+            .field("writable", &self.writable)
+            .finish_non_exhaustive()
+    }
+}
+
 impl Workspace {
+    pub fn from_mount(mount: &Mount, subpath: &str) -> anyhow::Result<Self> {
+        if subpath.is_empty() {
+            return Ok(Self {
+                dir: Arc::clone(&mount.dir),
+                local_path: mount.host_path.clone(),
+                writable: mount.writable,
+            });
+        }
+
+        check_subpath(subpath).context("grants.workspace")?;
+        let dir = mount
+            .dir
+            .open_dir(subpath)
+            .with_context(|| format!("opening lent workspace subpath `{subpath}`"))?;
+
+        Ok(Self {
+            dir: Arc::new(dir),
+            local_path: mount.host_path.join(subpath),
+            writable: mount.writable,
+        })
+    }
+
+    pub fn resolve(
+        descriptor: &Descriptor, registry: &MountRegistry, grant: &WorkspaceGrant,
+    ) -> anyhow::Result<Self> {
+        let Descriptor::Dir(dir) = descriptor else {
+            return Err(anyhow!("grants.workspace root must be a directory"));
+        };
+
+        let meta =
+            Metadata::from_file(&dir.dir).context("reading lent workspace directory metadata")?;
+        let entry = registry
+            .match_identity(meta.dev(), meta.ino())
+            .context("lent workspace root is not an authorized mount")?;
+        Self::from_mount(entry, &grant.subpath)
+    }
+
     #[must_use]
     pub fn local_path(&self) -> &Path {
         &self.local_path
@@ -105,63 +145,15 @@ impl Workspace {
     }
 }
 
-// Resolve a lent workspace directory and grant into a [`Workspace`].
-pub fn resolve(
-    descriptor: &Descriptor, registry: &MountRegistry, grant: &WorkspaceGrant,
-) -> anyhow::Result<Workspace> {
-    let Descriptor::Dir(dir) = descriptor else {
-        return Err(anyhow!("grants.workspace root must be a directory"));
-    };
-
-    // cap-std's `Metadata` derives the portable `(dev, ino)` the registry keys on
-    let meta =
-        Metadata::from_file(&dir.dir).context("reading lent workspace directory metadata")?;
-    let entry = registry
-        .match_identity(meta.dev(), meta.ino())
-        .context("lent workspace root is not an authorized mount")?;
-
-    if grant.subpath.is_empty() {
-        return Ok(Workspace {
-            dir: Arc::clone(&entry.dir),
-            local_path: entry.host_path.clone(),
-            writable: entry.writable,
-        });
-    }
-
-    check_subpath(&grant.subpath)?;
-    // cap-std's `open_dir` resolves beneath the verified mount root and
-    // refuses any escape, so the subpath grant inherits the root's authority.
-    let dir = entry
-        .dir
-        .open_dir(&grant.subpath)
-        .with_context(|| format!("opening lent workspace subpath `{}`", grant.subpath))?;
-
-    Ok(Workspace {
-        dir: Arc::new(dir),
-        local_path: entry.host_path.join(&grant.subpath),
-        writable: entry.writable,
-    })
-}
-
-// Refuse a subpath that is not a plain relative `/`-separated path.
-fn check_subpath(subpath: &str) -> anyhow::Result<()> {
-    let plain = !subpath.starts_with('/')
-        && !subpath.contains('\\')
-        && subpath.split('/').all(|part| !part.is_empty() && part != "." && part != "..");
-    ensure!(plain, "grants.workspace subpath `{subpath}` is not a plain relative path");
-    Ok(())
-}
-
-// subpath vetting and the I/O caps are pure; the guest scenarios cover mount
-// authority and write policy
 #[cfg(test)]
 mod tests {
     use std::fs;
 
     use cap_std::ambient_authority;
     use cap_std::fs::Dir;
+    use omnia_backend::check_subpath;
 
-    use super::{MAX_LIST_ENTRIES, MAX_READ_BYTES, MAX_WRITE_BYTES, Workspace, check_subpath};
+    use super::{MAX_LIST_ENTRIES, MAX_READ_BYTES, MAX_WRITE_BYTES, Workspace};
 
     fn temp_dir(label: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("omnia-ws-{label}-{}", std::process::id()));

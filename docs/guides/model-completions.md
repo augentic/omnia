@@ -8,10 +8,11 @@ This page covers the guest API, the grants model, the available backends, and ho
 
 ## Requesting a completion from a guest
 
-A model guest is typically a command-mode guest (see [Writing Guests](writing-guests.md#command-mode-guests)). It builds a `Request` and calls `Model::complete` on the `WasiModel` handle:
+A model guest is typically a command-mode guest (see [Writing Guests](writing-guests.md#command-mode-guests)). It builds a `Request` and calls `Model::complete` on `WasiProvider`:
 
 ```rust,noplayground
-use omnia_sdk::model::{Format, Message, Model as _, Request, Role, SchemaFormat, WasiModel};
+use omnia_sdk::WasiProvider;
+use omnia_sdk::model::{Format, Message, Model as _, Request, Role, SchemaFormat};
 
 let (system, user) = Sections {
     role: Some("a terse code reviewer".to_string()),
@@ -29,7 +30,7 @@ let request = Request::builder()
     ))
     .build();
 
-let answer = match WasiModel.complete(request).await {
+let answer = match WasiProvider.complete(request).await {
     Ok(reply) => reply.answer,
     Err(error) => format!("error: {error:?}"),
 };
@@ -48,7 +49,7 @@ The pieces:
 A request that declares function tools uses `Model::complete_with`, which runs the completion **session**: the model's tool calls stream back to the guest, a closure answers each one over guest state, and the future resolves with the reply once the model finishes:
 
 ```rust,noplayground
-let outcome = WasiModel
+let outcome = WasiProvider
     .complete_with(request, |call: ToolCall| async move {
         SHELF
             .iter()
@@ -68,7 +69,8 @@ The type a guest wants back cannot cross the WIT boundary, but a callback can. A
 `omnia_sdk::model::Question<T>` runs that exchange for a typed answer. `T` derives `Deserialize` and `JsonSchema` (the guest depends on `schemars` 1.x, the version `omnia-sdk` builds against); the question steers the provider with `T`'s schema, deserializes each candidate, hands it to the guest's closure, and returns the accepted `T`:
 
 ```rust,noplayground
-use omnia_sdk::model::{Question, WasiModel};
+use omnia_sdk::WasiProvider;
+use omnia_sdk::model::Question;
 use schemars::JsonSchema;
 use serde::Deserialize;
 
@@ -80,7 +82,7 @@ struct Verdict {
 
 let verdict = Question::<Verdict>::new("verdict")
     .system("a terse code reviewer")
-    .ask(&WasiModel, "decide whether the change is acceptable", None, |verdict| {
+    .ask(&WasiProvider, "decide whether the change is acceptable", None, |verdict| {
         if verdict.verdict == "pass" || !verdict.findings.is_empty() {
             Ok(())
         } else {
@@ -106,7 +108,7 @@ This grant is what drives the host-injected tools. The names `read`, `list`, and
 
 The default backend connects with zero configuration and answers every completion with its own prompt: the last message echoed as a string for `format::text`, wrapped as `{"echo": ...}` for `format::json`. That makes guest wiring and prompt assembly smoke-testable with no live model. `format::schema` requests fail with a `backend` error — no echo can conform to an arbitrary guest schema — so bind a real backend for typed answers. A `check` request gets its one candidate offered once; a rejection is `budget-exhausted`.
 
-For tests, CI, and local development of model guests, define an inline `WasiModelCtx` impl that returns a fixed answer — no network, no credentials, fully deterministic, and (unlike an echo) able to satisfy `format::schema` (see the recipe in [Testing Policy](testing-policy.md#canned-model-backends)). The [`model` example](../../examples/model/) serves its fixed schema answer that way:
+For tests, CI, and local development of model guests, define an inline `ModelClient` impl that returns a fixed answer — no network, no credentials, fully deterministic, and (unlike an echo) able to satisfy `format::schema` (see the recipe in [Testing Policy](testing-policy.md#canned-model-backends)). The [`model` example](../../examples/model/) serves its fixed schema answer that way:
 
 ```bash
 cargo build --example model-wasm --target wasm32-wasip2

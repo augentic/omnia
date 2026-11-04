@@ -1,11 +1,12 @@
+//! `OAuth2` client-credentials default implementation of [`IdentityClient`].
+
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
-use fromenv::FromEnv;
-use futures::FutureExt;
+use futures::FutureExt as _;
 use futures::lock::Mutex;
 use oauth2::basic::{BasicClient, BasicTokenType};
 use oauth2::reqwest::{self, redirect};
@@ -13,27 +14,32 @@ use oauth2::{
     ClientId, ClientSecret, EmptyExtraTokenFields, Scope, StandardTokenResponse,
     TokenResponse as _, TokenUrl,
 };
-use omnia_core::Backend;
+use omnia_backend::identity::{AccessToken, Identity, IdentityClient};
+use omnia_core::{Connect, FromEnv, FutureResult};
 use tracing::instrument;
-
-use crate::host::WasiIdentityCtx;
-pub use crate::host::generated::omnia::identity::credentials::AccessToken;
-use crate::host::resource::{FutureResult, Identity};
 
 type TokenResponse = StandardTokenResponse<EmptyExtraTokenFields, BasicTokenType>;
 
-#[derive(Clone, FromEnv)]
-pub struct ConnectOptions {
-    #[env(from = "IDENTITY_CLIENT_ID")]
-    pub client_id: String,
-    #[env(from = "IDENTITY_CLIENT_SECRET")]
-    pub client_secret: String,
-    #[env(from = "IDENTITY_TOKEN_URL")]
-    pub token_url: String,
-}
+#[expect(missing_docs, reason = "`FromEnv` has no docs")]
+mod config {
+    use fromenv::FromEnv;
 
-// Manual impl so the client secret can never leak through `Debug`-recording
-// sinks (`#[instrument]` records arguments via `Debug` by default).
+    /// Connection options for [`IdentityDefault`](super::IdentityDefault).
+    #[derive(Clone, FromEnv)]
+    pub struct ConnectOptions {
+        /// `OAuth2` client ID (`IDENTITY_CLIENT_ID`).
+        #[env(from = "IDENTITY_CLIENT_ID")]
+        pub client_id: String,
+        /// `OAuth2` client secret (`IDENTITY_CLIENT_SECRET`).
+        #[env(from = "IDENTITY_CLIENT_SECRET")]
+        pub client_secret: String,
+        /// `OAuth2` token endpoint URL (`IDENTITY_TOKEN_URL`).
+        #[env(from = "IDENTITY_TOKEN_URL")]
+        pub token_url: String,
+    }
+}
+pub use config::ConnectOptions;
+
 impl fmt::Debug for ConnectOptions {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ConnectOptions")
@@ -44,20 +50,19 @@ impl fmt::Debug for ConnectOptions {
     }
 }
 
-impl omnia_core::FromEnv for ConnectOptions {
+impl FromEnv for ConnectOptions {
     fn load_env() -> Result<Self> {
-        // `Self::from_env()` is the builder the `FromEnv` derive emits
         Self::from_env().finalize().context("issue loading connection options")
     }
 }
 
-/// Default implementation for `wasi:identity`.
+/// Default `OAuth2` client-credentials implementation of [`IdentityClient`].
 #[derive(Debug, Clone)]
 pub struct IdentityDefault {
     token_manager: TokenManager,
 }
 
-impl Backend for IdentityDefault {
+impl Connect for IdentityDefault {
     type ConnectOptions = ConnectOptions;
 
     #[instrument]
@@ -67,7 +72,7 @@ impl Backend for IdentityDefault {
     }
 }
 
-impl WasiIdentityCtx for IdentityDefault {
+impl IdentityClient for IdentityDefault {
     fn get_identity(&self, _name: String) -> FutureResult<Arc<dyn Identity>> {
         tracing::debug!("getting identity");
         let token_manager = self.token_manager.clone();
@@ -75,15 +80,13 @@ impl WasiIdentityCtx for IdentityDefault {
     }
 }
 
-impl From<TokenResponse> for AccessToken {
-    fn from(token_resp: TokenResponse) -> Self {
-        let token = token_resp.access_token().secret().clone();
-        let expires_in = token_resp.expires_in().unwrap_or(Duration::from_hours(1));
+fn into_access_token(token_resp: &TokenResponse) -> AccessToken {
+    let token = token_resp.access_token().secret().clone();
+    let expires_in = token_resp.expires_in().unwrap_or(Duration::from_hours(1));
 
-        Self {
-            token,
-            expires_in: expires_in.as_secs(),
-        }
+    AccessToken {
+        token,
+        expires_in: expires_in.as_secs(),
     }
 }
 
@@ -108,9 +111,6 @@ impl CachedToken {
 #[derive(Debug, Clone)]
 struct TokenManager {
     options: Arc<ConnectOptions>,
-    // keyed by normalized scopes: a token minted for one scope set is never
-    // handed out for another
-    // TODO: change to use wasi-keyvalue for distributed caching
     cache: Arc<Mutex<HashMap<Vec<String>, CachedToken>>>,
 }
 
@@ -134,7 +134,6 @@ impl TokenManager {
         let key = cache_key(scopes);
         let now = Instant::now();
 
-        // use cached token if still valid
         {
             let cache = self.cache.lock().await;
             if let Some(cached) = cache.get(&key)
@@ -144,7 +143,6 @@ impl TokenManager {
             }
         }
 
-        // if we drop through we need to fetch a new token
         let oauth2_client = BasicClient::new(ClientId::new(self.options.client_id.clone()))
             .set_client_secret(ClientSecret::new(self.options.client_secret.clone()))
             .set_token_uri(TokenUrl::new(self.options.token_url.clone())?);
@@ -157,9 +155,8 @@ impl TokenManager {
         }
 
         let token_resp = token_req.request_async(&http_client).await?;
-        let access_token = AccessToken::from(token_resp);
+        let access_token = into_access_token(&token_resp);
 
-        // double-check locking as another task may have refreshed this entry
         let mut cache = self.cache.lock().await;
         let entry = cache.entry(key).or_insert_with(|| CachedToken::new(access_token.clone()));
         if entry.expires_at <= now {
@@ -172,7 +169,6 @@ impl TokenManager {
     }
 }
 
-// order- and duplicate-insensitive
 fn cache_key(scopes: &[String]) -> Vec<String> {
     let mut key = scopes.to_vec();
     key.sort_unstable();

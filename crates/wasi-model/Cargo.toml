@@ -18,7 +18,9 @@ workspace = true
 # dependencies shared across host and guest
 [dependencies]
 anyhow.workspace = true
+omnia-backend = { workspace = true, features = ["model"] }
 serde.workspace = true
+serde_json.workspace = true
 tracing.workspace = true
 
 # host dependencies
@@ -26,7 +28,6 @@ tracing.workspace = true
 cap-std.workspace = true
 futures.workspace = true
 omnia-core.workspace = true
-serde_json.workspace = true
 tokio = { workspace = true, features = ["rt", "sync", "time"] }
 # `component-model-async` for `StreamReader`/`FutureReader`
 # belongs on the direct dependency.
@@ -40,6 +41,6 @@ wit-bindgen.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 omnia = { path = "../omnia" }
-omnia-test = { path = "../omnia-test", default-features = false, features = ["host"] }
+omnia-test = { path = "../test", default-features = false, features = ["host"] }
 test-programs.workspace = true
 tokio = { workspace = true, features = ["macros", "rt"] }

@@ -35,28 +35,27 @@ mod generated {
 
 use std::fmt::Debug;
 
+pub use omnia_backend::vcs::{
+    Change, ChangeKind, CloneOptions, Entry, Error, Merged, Place, Rule, Strategy, VcsClient,
+};
 pub use omnia_core::FutureResult;
 use omnia_core::{HasMounts, Host, Server, StoreView};
 use wasmtime::component::{Access, Accessor, HasData, Linker};
 
-pub use self::generated::omnia::vcs::store::{Entry, Merged, Rule, Strategy};
-pub use self::generated::omnia::vcs::transport::CloneOptions;
-pub use self::generated::omnia::vcs::types::Error;
+pub use self::generated::omnia::vcs::types::Error as WitError;
 use self::generated::omnia::vcs::types::{Host as TypesHost, Location};
-pub use self::generated::omnia::vcs::workspace::{Change, ChangeKind};
 use self::generated::omnia::vcs::{store, transport, types, workspace};
 use self::location::Intent;
-pub use self::location::Place;
 
 /// Result type for VCS operations.
-pub type Result<T> = std::result::Result<T, Error>;
+pub type Result<T> = std::result::Result<T, WitError>;
 
 /// Host-side service for `omnia:vcs`.
 #[derive(Debug)]
 pub struct WasiVcs;
 
 impl HasData for WasiVcs {
-    type Data<'a> = WasiVcsCtxView<'a>;
+    type Data<'a> = WasiVcsView<'a>;
 }
 
 impl<T> Host<T> for WasiVcs
@@ -74,8 +73,6 @@ where
 impl<B> Server<B> for WasiVcs {}
 
 impl WasiVcs {
-    // Resolve a guest location to the place the backend works through,
-    // refusing a mutation beneath a read-only mount before any backend runs.
     fn locate<T: HasMounts>(
         access: &mut Access<'_, T, Self>, location: &Location, intent: Intent,
     ) -> Result<Place> {
@@ -84,9 +81,6 @@ impl WasiVcs {
         location::resolve(descriptor, &mounts, location, intent).map_err(Self::lower)
     }
 
-    // The locations resolve inside the store access, where the borrowed
-    // descriptors are valid; the backend is awaited outside it, holding the
-    // opened places rather than paths a guest could redirect meanwhile.
     async fn dispatch<T, R>(
         accessor: &Accessor<T, Self>,
         op: impl FnOnce(&mut Access<'_, T, Self>) -> Result<FutureResult<R>>,
@@ -98,159 +92,29 @@ impl WasiVcs {
         pending.await.map_err(Self::lower)
     }
 
-    // A backend's typed failure passes through; anything else is `other`.
-    fn lower(error: anyhow::Error) -> Error {
-        error.downcast::<Error>().unwrap_or_else(Into::into)
+    fn lower(error: anyhow::Error) -> WitError {
+        to_wit_error(Error::from(error))
     }
 }
 
-/// A trait which provides internal WASI VCS context.
-///
-/// This is implemented by the version-control backend: one method per
-/// `omnia:vcs` operation, each over the [`Place`] the guest's location
-/// resolved to. The backend never sees a descriptor and the guest never
-/// sees a path. A place for `init`, `clone`, or the working copy `add`
-/// lays down exists when the backend runs, empty where nothing stood
-/// before; every other place must already exist, and one that does not is
-/// the host's [`Error::NotARepository`] before the backend runs. A typed
-/// failure is returned as an [`Error`] inside the `anyhow` error
-/// (`Err(Error::NotFound(..).into())`) and reaches the guest as that
-/// variant; any other error reaches it as [`Error::Other`].
-///
-/// The transport operation `clone` is `clone_repo` here, since `clone(&self,
-/// ..)` would shadow [`Clone::clone`] on every backend that is `Clone`.
-pub trait WasiVcsCtx: Debug + Send + Sync + 'static {
-    /// The commit `revision` names in the repository at `repo`.
-    fn resolve(&self, repo: Place, revision: String) -> FutureResult<String>;
-
-    /// Whether `ancestor` is in `descendant`'s history, itself included, in
-    /// the repository at `repo`.
-    fn descends(&self, repo: Place, ancestor: String, descendant: String) -> FutureResult<bool>;
-
-    /// The sealed commit the working copy at `at` sits on.
-    fn head(&self, at: Place) -> FutureResult<String>;
-
-    /// Seal every pending change at `at` as one commit; `None` when there
-    /// is nothing to seal.
-    fn commit(&self, at: Place, message: String) -> FutureResult<Option<String>>;
-
-    /// Merge `revision` into the working copy at `at` under `policy`.
-    fn merge(
-        &self, at: Place, revision: String, message: String, policy: Vec<Rule>,
-    ) -> FutureResult<Merged>;
-
-    /// The first-parent chain from `revision` back to `base` in the
-    /// repository at `repo`, newest first, `base` left out.
-    fn log(&self, repo: Place, revision: String, base: String) -> FutureResult<Vec<Entry>>;
-
-    /// A repository with no history at `at`.
-    fn init(&self, at: Place) -> FutureResult<()>;
-
-    /// A working copy of `repo` at `at`, detached at `revision`.
-    fn add(&self, repo: Place, at: Place, revision: String) -> FutureResult<()>;
-
-    /// Remove the working copy at `at` and its files.
-    fn remove(&self, at: Place) -> FutureResult<()>;
-
-    /// What the working copy at `at` holds that its head does not.
-    fn pending(&self, at: Place) -> FutureResult<Vec<Change>>;
-
-    /// A clone of `url` at `at`.
-    fn clone_repo(&self, url: String, at: Place, options: CloneOptions) -> FutureResult<()>;
-
-    /// Bring `remote`'s commits and labels into the repository at `repo`.
-    fn fetch(&self, repo: Place, remote: String) -> FutureResult<()>;
-
-    /// Point `name` at `revision` in the repository at `repo`.
-    fn label(&self, repo: Place, name: String, revision: String) -> FutureResult<()>;
-
-    /// The commit the label `name` points at in the repository at `repo`,
-    /// in the namespace `label` writes alone.
-    fn labelled(&self, repo: Place, name: String) -> FutureResult<String>;
-
-    /// The commit `remote`'s label `name` pointed at when the repository at
-    /// `repo` last fetched from it, in the namespace `fetch` and `clone`
-    /// write alone.
-    fn fetched(&self, repo: Place, remote: String, name: String) -> FutureResult<String>;
-
-    /// Send `label` and the commits it reaches to `remote`.
-    fn push(&self, repo: Place, remote: String, label: String) -> FutureResult<()>;
-}
-
-impl WasiVcsCtx for Box<dyn WasiVcsCtx> {
-    fn resolve(&self, repo: Place, revision: String) -> FutureResult<String> {
-        (**self).resolve(repo, revision)
-    }
-
-    fn descends(&self, repo: Place, ancestor: String, descendant: String) -> FutureResult<bool> {
-        (**self).descends(repo, ancestor, descendant)
-    }
-
-    fn head(&self, at: Place) -> FutureResult<String> {
-        (**self).head(at)
-    }
-
-    fn commit(&self, at: Place, message: String) -> FutureResult<Option<String>> {
-        (**self).commit(at, message)
-    }
-
-    fn merge(
-        &self, at: Place, revision: String, message: String, policy: Vec<Rule>,
-    ) -> FutureResult<Merged> {
-        (**self).merge(at, revision, message, policy)
-    }
-
-    fn log(&self, repo: Place, revision: String, base: String) -> FutureResult<Vec<Entry>> {
-        (**self).log(repo, revision, base)
-    }
-
-    fn init(&self, at: Place) -> FutureResult<()> {
-        (**self).init(at)
-    }
-
-    fn add(&self, repo: Place, at: Place, revision: String) -> FutureResult<()> {
-        (**self).add(repo, at, revision)
-    }
-
-    fn remove(&self, at: Place) -> FutureResult<()> {
-        (**self).remove(at)
-    }
-
-    fn pending(&self, at: Place) -> FutureResult<Vec<Change>> {
-        (**self).pending(at)
-    }
-
-    fn clone_repo(&self, url: String, at: Place, options: CloneOptions) -> FutureResult<()> {
-        (**self).clone_repo(url, at, options)
-    }
-
-    fn fetch(&self, repo: Place, remote: String) -> FutureResult<()> {
-        (**self).fetch(repo, remote)
-    }
-
-    fn label(&self, repo: Place, name: String, revision: String) -> FutureResult<()> {
-        (**self).label(repo, name, revision)
-    }
-
-    fn labelled(&self, repo: Place, name: String) -> FutureResult<String> {
-        (**self).labelled(repo, name)
-    }
-
-    fn fetched(&self, repo: Place, remote: String, name: String) -> FutureResult<String> {
-        (**self).fetched(repo, remote, name)
-    }
-
-    fn push(&self, repo: Place, remote: String, label: String) -> FutureResult<()> {
-        (**self).push(repo, remote, label)
+fn to_wit_error(err: Error) -> WitError {
+    match err {
+        Error::NotARepository => WitError::NotARepository,
+        Error::Exists(d) => WitError::Exists(d),
+        Error::NotFound(d) => WitError::NotFound(d),
+        Error::Pending(p) => WitError::Pending(p),
+        Error::Access(d) => WitError::Access(d),
+        Error::Diverged(d) => WitError::Diverged(d),
+        Error::Other(d) => WitError::Other(d),
     }
 }
 
-impl TypesHost for WasiVcsCtxView<'_> {
-    fn convert_error(&mut self, err: Error) -> wasmtime::Result<Error> {
+impl TypesHost for WasiVcsView<'_> {
+    fn convert_error(&mut self, err: WitError) -> wasmtime::Result<WitError> {
         Ok(err)
     }
 }
 
 // An untyped host failure is an `other` error at the boundary.
-omnia_core::host_error!(Error, Other);
+omnia_core::host_error!(WitError, Other);
 omnia_core::wasi_view!(Vcs);

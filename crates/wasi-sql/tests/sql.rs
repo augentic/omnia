@@ -8,7 +8,7 @@
 
 use omnia::ExitStatus;
 use omnia_test::host::{Backends, Deployment};
-use omnia_wasi_sql::{DataType, WasiSql, WasiSqlCtx as _};
+use omnia_wasi_sql::{DataType, SqlClient as _, WasiSql};
 
 // Every guest program in `crates/test-programs` must have a matching test
 // here; a new program without one fails to compile.

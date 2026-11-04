@@ -21,9 +21,11 @@ tracing.workspace = true
 
 # host dependencies
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+futures.workspace = true
+omnia-backend = { workspace = true, features = ["config"] }
 omnia-core.workspace = true
-wasmtime = { workspace = true, features = ["component-model-async"] }
-wasmtime-wasi-config.workspace = true
+wasmtime.workspace = true
+wasmtime-wasi.workspace = true
 
 # guest dependencies
 [target.'cfg(target_arch = "wasm32")'.dependencies]
@@ -31,6 +33,6 @@ wit-bindgen.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 omnia = { path = "../omnia" }
-omnia-test = { path = "../omnia-test", default-features = false, features = ["host"] }
+omnia-test = { path = "../test", default-features = false, features = ["host"] }
 test-programs.workspace = true
 tokio = { workspace = true, features = ["macros", "rt"] }

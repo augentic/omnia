@@ -153,6 +153,6 @@ where
     }
 
     async fn events(&self) -> Result<Events> {
-        self.state.store().view().ctx.connect().await?.events().await
+        self.state.store().view().client.endpoint().await?.events().await
     }
 }

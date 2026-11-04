@@ -7,7 +7,7 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_wasi_docstore::document_store::{Document, Filter, QueryOptions, SortField};
+use omnia_wasi_docstore::docstore::{Document, Filter, QueryOptions, SortField};
 use omnia_wasi_docstore::store;
 use serde_json::{Value, json};
 

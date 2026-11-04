@@ -20,6 +20,7 @@ workspace = true
 anyhow.workspace = true
 bytes.workspace = true
 futures.workspace = true
+omnia-backend = { workspace = true, features = ["blobstore"] }
 omnia-core.workspace = true
 parking_lot.workspace = true
 tracing.workspace = true
@@ -36,6 +37,6 @@ wit-bindgen.workspace = true
 # on this one, so a versioned dev-dep would make the first publish of a
 # fresh version unresolvable. Path-only dev-deps are stripped on publish.
 omnia = { path = "../omnia" }
-omnia-test = { path = "../omnia-test", default-features = false, features = ["host"] }
+omnia-test = { path = "../test", default-features = false, features = ["host"] }
 test-programs.workspace = true
 tokio = { workspace = true, features = ["macros", "rt"] }

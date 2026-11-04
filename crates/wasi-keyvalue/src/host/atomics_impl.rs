@@ -4,7 +4,7 @@ use std::sync::Arc;
 use anyhow::Context;
 use wasmtime::component::{Access, Accessor, Resource};
 
-use crate::WasiKeyValueCtxView;
+use crate::WasiKeyValueView;
 use crate::host::generated::wasi::keyvalue::atomics::{
     CasError, Host, HostCas, HostCasWithStore, HostWithStore,
 };
@@ -27,9 +27,14 @@ impl<T> HostWithStore<T> for WasiKeyValue {
         let cas = accessor.with(|mut store| store.get().table.delete(cas))?;
         let bucket = Arc::clone(&cas.bucket);
 
-        match bucket.swap(cas, value).await {
+        match bucket.cas(cas.key.clone(), cas.current, value).await {
             Ok(Ok(())) => Ok(()),
-            Ok(Err(fresh)) => {
+            Ok(Err(observed)) => {
+                let fresh = Cas {
+                    bucket,
+                    key: cas.key,
+                    current: observed,
+                };
                 let resource = accessor.with(|mut store| store.get().table.push(fresh))?;
                 Err(CasError::CasFailed(resource))
             }
@@ -82,9 +87,9 @@ impl From<wasmtime::component::ResourceTableError> for CasError {
     }
 }
 
-impl Host for WasiKeyValueCtxView<'_> {
+impl Host for WasiKeyValueView<'_> {
     fn convert_cas_error(&mut self, err: CasError) -> wasmtime::Result<CasError> {
         Ok(err)
     }
 }
-impl HostCas for WasiKeyValueCtxView<'_> {}
+impl HostCas for WasiKeyValueView<'_> {}

@@ -18,13 +18,12 @@ workspace = true
 # dependencies shared across host and guest
 [dependencies]
 anyhow.workspace = true
-chrono.workspace = true
+omnia-backend = { workspace = true, features = ["docstore"] }
 
 # host dependencies
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 futures.workspace = true
 omnia-core.workspace = true
-serde_json.workspace = true
 tracing.workspace = true
 wasmtime.workspace = true
 wasmtime-wasi.workspace = true
@@ -35,6 +34,7 @@ wit-bindgen.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 omnia = { path = "../omnia" }
-omnia-test = { path = "../omnia-test", default-features = false, features = ["host"] }
+omnia-test = { path = "../test", default-features = false, features = ["host"] }
+serde_json.workspace = true
 test-programs.workspace = true
 tokio = { workspace = true, features = ["macros", "rt"] }

@@ -12,10 +12,11 @@ use std::time::Duration;
 
 use futures::FutureExt as _;
 use omnia::{ExitStatus, Mount};
-use omnia_test::host::{Backends, Deployment, ScriptedModel, scratch};
+use omnia_test::backend::ScriptedModel;
+use omnia_test::host::{Backends, Deployment, scratch};
 use omnia_test::{Exchange, SeenFormat, SeenWorker};
 use omnia_wasi_model::{
-    Answer, FutureResult, Limits, ModelDefault, Request, ToolHost, Usage, WasiModel, WasiModelCtx,
+    Answer, FutureResult, Limits, ModelClient, ModelDefault, Request, ToolHost, Usage, WasiModel,
 };
 
 // Every guest program in `crates/test-programs` must have a matching test
@@ -26,7 +27,7 @@ test_programs::foreach_model!();
 // Harness
 // ------------------------------------------------------------------------
 
-async fn run_guest<M: WasiModelCtx + Clone>(wasm: &str, mounts: Vec<Mount>, model: M) {
+async fn run_guest<M: ModelClient + Clone>(wasm: &str, mounts: Vec<Mount>, model: M) {
     let backends = Backends::defaults().await.model(model);
     let status = Deployment::new()
         .guest("guest", wasm)
@@ -56,7 +57,7 @@ async fn run_scripted(wasm: &str, mounts: Vec<Mount>, model: ScriptedModel) -> S
 #[derive(Clone, Copy, Debug)]
 struct ParallelLookups;
 
-impl WasiModelCtx for ParallelLookups {
+impl ModelClient for ParallelLookups {
     fn complete(&self, _request: Request, tool_host: Arc<dyn ToolHost>) -> FutureResult<Answer> {
         async move {
             let (first, second) = futures::join!(
@@ -76,7 +77,7 @@ impl WasiModelCtx for ParallelLookups {
 #[derive(Clone, Copy, Debug)]
 struct IgnoringToolFailure;
 
-impl WasiModelCtx for IgnoringToolFailure {
+impl ModelClient for IgnoringToolFailure {
     fn complete(&self, _request: Request, tool_host: Arc<dyn ToolHost>) -> FutureResult<Answer> {
         async move {
             assert!(

@@ -1,6 +1,6 @@
 use wasmtime::component::{Accessor, Resource};
 
-use crate::WasiKeyValueCtxView;
+use crate::WasiKeyValueView;
 use crate::host::generated::wasi::keyvalue::batch::{Host, HostWithStore};
 use crate::host::resource::BucketProxy;
 use crate::host::store_impl::get_bucket;
@@ -28,7 +28,7 @@ impl<T> HostWithStore<T> for WasiKeyValue {
     ) -> Result<()> {
         let bucket = get_bucket(accessor, &bucket)?;
         for (key, value) in key_values {
-            bucket.set(key, value).await?;
+            bucket.set(key, value, None).await?;
         }
         Ok(())
     }
@@ -44,4 +44,4 @@ impl<T> HostWithStore<T> for WasiKeyValue {
     }
 }
 
-impl Host for WasiKeyValueCtxView<'_> {}
+impl Host for WasiKeyValueView<'_> {}

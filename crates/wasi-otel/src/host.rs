@@ -5,7 +5,6 @@ mod tracing_impl;
 mod types_impl;
 
 mod generated {
-
     pub use self::omnia::otel::types::Error;
 
     wasmtime::component::bindgen!({
@@ -25,12 +24,12 @@ mod generated {
 
 use std::fmt::Debug;
 
-use omnia_core::{FutureResult, Host, Server, StoreView};
-use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
-use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
+pub use default_impl::OtelDefault;
+pub use omnia_backend::otel::OtelClient;
+pub use omnia_core::FutureResult;
+use omnia_core::{Host, Server, StoreView};
 use wasmtime::component::{HasData, Linker};
 
-pub use self::default_impl::OtelDefault;
 use self::generated::omnia::otel::{metrics, resource, tracing, types};
 
 /// Host-side service for `wasi:otel`.
@@ -38,7 +37,7 @@ use self::generated::omnia::otel::{metrics, resource, tracing, types};
 pub struct WasiOtel;
 
 impl HasData for WasiOtel {
-    type Data<'a> = WasiOtelCtxView<'a>;
+    type Data<'a> = WasiOtelView<'a>;
 }
 
 impl<T> Host<T> for WasiOtel
@@ -54,23 +53,5 @@ where
 }
 
 impl<B> Server<B> for WasiOtel {}
-
-/// A trait which provides internal WASI OpenTelemetry context.
-///
-/// This is implemented by the resource-specific provider of OpenTelemetry
-/// functionality.
-pub trait WasiOtelCtx: Debug + Send + Sync + 'static {
-    /// Export traces using gRPC.
-    ///
-    /// Errors are logged but not propagated to prevent telemetry failures
-    /// from affecting application logic.
-    fn export_traces(&self, request: ExportTraceServiceRequest) -> FutureResult<()>;
-
-    /// Export metrics using gRPC.
-    ///
-    /// Errors are logged but not propagated to prevent telemetry failures
-    /// from affecting application logic.
-    fn export_metrics(&self, request: ExportMetricsServiceRequest) -> FutureResult<()>;
-}
 
 omnia_core::wasi_view!(Otel);

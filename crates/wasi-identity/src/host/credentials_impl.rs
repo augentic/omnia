@@ -2,17 +2,17 @@ use anyhow::Context;
 use wasmtime::component::{Access, Accessor, Resource};
 
 use crate::host::generated::omnia::identity::credentials::{
-    AccessToken, Host, HostIdentity, HostIdentityWithStore, HostWithStore,
+    AccessToken as WitAccessToken, Host, HostIdentity, HostIdentityWithStore, HostWithStore,
 };
 use crate::host::generated::omnia::identity::types::Error;
 use crate::host::resource::IdentityProxy;
-use crate::host::{Result, WasiIdentity, WasiIdentityCtxView};
+use crate::host::{Result, WasiIdentity, WasiIdentityView};
 
 impl<T> HostWithStore<T> for WasiIdentity {
     async fn get_identity(
         accessor: &Accessor<T, Self>, name: String,
     ) -> Result<Resource<IdentityProxy>> {
-        let identity = accessor.with(|mut store| store.get().ctx.get_identity(name)).await?;
+        let identity = accessor.with(|mut store| store.get().client.get_identity(name)).await?;
         let proxy = omnia_core::Proxy(identity);
         Ok(accessor.with(|mut store| store.get().table.push(proxy))?)
     }
@@ -21,12 +21,15 @@ impl<T> HostWithStore<T> for WasiIdentity {
 impl<T> HostIdentityWithStore<T> for WasiIdentity {
     async fn get_token(
         accessor: &Accessor<T, Self>, self_: Resource<IdentityProxy>, scopes: Vec<String>,
-    ) -> Result<AccessToken> {
+    ) -> Result<WitAccessToken> {
         let identity =
             omnia_core::get_cloned(accessor, &self_).map_err(|_stale| Error::NoSuchIdentity)?;
 
         let token = identity.0.get_token(scopes).await.context("issue getting access token")?;
-        Ok(token)
+        Ok(WitAccessToken {
+            token: token.token,
+            expires_in: token.expires_in,
+        })
     }
 
     fn drop(
@@ -36,5 +39,5 @@ impl<T> HostIdentityWithStore<T> for WasiIdentity {
     }
 }
 
-impl Host for WasiIdentityCtxView<'_> {}
-impl HostIdentity for WasiIdentityCtxView<'_> {}
+impl Host for WasiIdentityView<'_> {}
+impl HostIdentity for WasiIdentityView<'_> {}

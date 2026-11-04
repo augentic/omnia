@@ -11,7 +11,7 @@ use std::time::Duration;
 use futures::FutureExt as _;
 use omnia::{ExitStatus, FutureResult, Provides, Telemetry};
 use omnia_test::host::Deployment;
-use omnia_wasi_otel::{WasiOtel, WasiOtelCtx};
+use omnia_wasi_otel::{OtelClient, WasiOtel};
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
 use opentelemetry_proto::tonic::common::v1::any_value::Value as AnyValue;
@@ -31,7 +31,7 @@ test_programs::foreach_otel!();
 struct Backends(Recording);
 
 impl Provides<WasiOtel> for Backends {
-    fn borrow(&mut self) -> &mut dyn WasiOtelCtx {
+    fn borrow(&mut self) -> &mut dyn OtelClient {
         &mut self.0
     }
 }
@@ -110,7 +110,7 @@ fn histogram_point<'a>(metrics: &'a [Metric], name: &str) -> &'a HistogramDataPo
     point
 }
 
-impl WasiOtelCtx for Recording {
+impl OtelClient for Recording {
     fn export_traces(&self, request: ExportTraceServiceRequest) -> FutureResult<()> {
         self.traces.lock().expect("traces lock").push(request);
         async { Ok(()) }.boxed()

@@ -12,9 +12,10 @@ use axum::extract::Path;
 use axum::routing::{delete, get};
 use axum::{Json, Router};
 use chrono::Utc;
-use omnia_sdk::{HttpResult, TableStore};
+use omnia_sdk::sql::{DataType, Row};
+use omnia_sdk::{HttpResult, TableStore, WasiProvider};
+use omnia_wasi_sql::readwrite;
 use omnia_wasi_sql::types::{Connection, Statement};
-use omnia_wasi_sql::{DataType, Row, readwrite};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tracing::Level;
@@ -39,7 +40,7 @@ impl Guest for Http {
 async fn list_agencies() -> HttpResult<Json<Value>> {
     ensure_schema().await?;
 
-    let rows = Provider
+    let rows = WasiProvider
         .query(
             "db".to_string(),
             "SELECT agency_id, name, url, timezone, created_at FROM agency ORDER BY created_at DESC"
@@ -68,7 +69,7 @@ async fn create_agency(Json(req): Json<CreateAgencyRequest>) -> HttpResult<Json<
         created_at: Utc::now().format("%Y-%m-%d %H:%M:%S").to_string(),
     };
 
-    Provider
+    WasiProvider
         .exec(
             "db".to_string(),
             "INSERT INTO agency (agency_id, name, url, timezone, created_at) \
@@ -94,7 +95,7 @@ async fn create_agency(Json(req): Json<CreateAgencyRequest>) -> HttpResult<Json<
 async fn delete_agency(Path(id): Path<i64>) -> HttpResult<Json<Value>> {
     ensure_schema().await?;
 
-    let rows_affected = Provider
+    let rows_affected = WasiProvider
         .exec(
             "db".to_string(),
             "DELETE FROM agency WHERE agency_id = $1".to_string(),
@@ -195,7 +196,3 @@ struct CreateAgencyRequest {
     url: Option<String>,
     timezone: Option<String>,
 }
-
-struct Provider;
-
-impl TableStore for Provider {}

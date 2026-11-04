@@ -29,19 +29,13 @@ fromenv.workspace = true
 futures.workspace = true
 http-body-util.workspace = true
 hyper.workspace = true
-# `rustls-no-provider` keeps TLS (and `Identity::from_pem`) without reqwest's
-# default `aws-lc-sys` provider — `ring` comes from the explicit rustls
-# dependency below. The default backend installs ring as the process provider
-# before building a client (see `host/default_impl.rs`).
+omnia-core.workspace = true
 reqwest = { workspace = true, features = ["http2", "rustls-no-provider", "stream", "system-proxy"] }
 rustls.workspace = true
-tokio = { workspace = true, features = ["time"] }
+tokio = { workspace = true, features = ["net", "rt", "sync", "time"] }
 wasmtime = { workspace = true, features = ["component-model-async"] }
 wasmtime-wasi-http.workspace = true
-# Inspects the `Client-Cert` leaf (EKU, key usage, basic constraints,
-# validity) before it becomes a TLS identity.
 x509-cert.workspace = true
-omnia-core.workspace = true
 
 # guest dependencies
 [target.'cfg(target_arch = "wasm32")'.dependencies]
@@ -54,7 +48,7 @@ wasip3.workspace = true
 # dependency above, only its server side is test-only.
 hyper = { workspace = true, features = ["http1", "server"] }
 omnia = { path = "../omnia" }
-omnia-test = { path = "../omnia-test", default-features = false, features = ["host"] }
+omnia-test = { path = "../test", default-features = false, features = ["host"] }
 omnia-wasi-config = { path = "../wasi-config" }
 omnia-wasi-otel = { path = "../wasi-otel" }
 # Mints the throwaway `Client-Cert` bundles the tests feed the validator, so

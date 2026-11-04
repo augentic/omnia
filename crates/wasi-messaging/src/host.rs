@@ -16,7 +16,7 @@ mod generated {
         world: "messaging-request-reply",
         path: "wit",
         imports: {
-            default:  store | tracing | trappable,
+            default: store | tracing | trappable,
         },
         exports: {
             default: store | tracing | trappable,
@@ -33,28 +33,31 @@ mod generated {
 }
 
 use std::fmt::Debug;
-use std::sync::Arc;
 
+pub use default_impl::MessagingDefault;
+pub use omnia_backend::messaging::{
+    Endpoint, Error, HandleError, Handler, Message, MessagingClient, Metadata, Reply,
+    RequestOptions, Subscriptions, dispatch,
+};
 pub use omnia_core::FutureResult;
 use omnia_core::{Host, Runtime, Server, StoreCtx, StoreView};
 use wasmtime::component::{HasData, Linker};
 
-pub use self::default_impl::MessagingDefault;
 pub use self::generated::MessagingRequestReply;
-pub use self::generated::wasi::messaging::types::Error;
+use self::generated::wasi::messaging::types::Error as WitError;
 use self::generated::wasi::messaging::{producer, request_reply, types};
-pub use self::resource::*;
+pub use self::resource::ClientProxy;
 pub use self::server::MessagingHandler;
 
 /// Result type for messaging operations.
-pub type Result<T> = std::result::Result<T, Error>;
+pub type Result<T> = std::result::Result<T, WitError>;
 
 /// Host-side service for `wasi:messaging`.
 #[derive(Debug)]
 pub struct WasiMessaging;
 
 impl HasData for WasiMessaging {
-    type Data<'a> = WasiMessagingCtxView<'a>;
+    type Data<'a> = WasiMessagingView<'a>;
 }
 
 impl<T> Host<T> for WasiMessaging
@@ -78,21 +81,5 @@ where
     }
 }
 
-/// A trait which provides internal WASI Messaging context.
-///
-/// This is implemented by the resource-specific provider of messaging
-/// functionality. For example, a NATS, or a Kafka broker.
-///
-/// Message construction and mutation live on the host's [`Message`] struct;
-/// backends only translate at the [`Client`] seam.
-pub trait WasiMessagingCtx: Debug + Send + Sync + 'static {
-    /// Connect to the messaging system and return a client proxy.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the connection fails.
-    fn connect(&self) -> FutureResult<Arc<dyn Client>>;
-}
-
-omnia_core::host_error!(Error, Other);
+omnia_core::host_error!(WitError, Other);
 omnia_core::wasi_view!(Messaging);

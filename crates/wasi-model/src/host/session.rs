@@ -1,70 +1,45 @@
-//! Per-completion session plumbing between the backend's `ToolHost` and the
-//! guest's session streams.
-//!
-//! The backend stays store-free behind channels: `call-tool` pushes a
-//! `tool-call` into an mpsc bridge that [`CallsProducer`] drains toward the
-//! guest, and the guest's results stream is piped into [`ResultsConsumer`],
-//! which answers the pending oneshot for each call id. Host enforcement —
-//! declared-tool check, call budget, result size cap, per-call timeout —
-//! lives here, once, and records a typed [`Error`] that the reply pipeline
-//! prefers over the backend's own failure. The reserved `check` call rides
-//! the same bridge outside the declared-tool check and the call budget.
+//! Per-completion session state, budget enforcement, and Wasmtime stream bridges.
 
 use std::collections::HashMap;
+use std::fmt::{self, Debug};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::task::{Context, Poll};
-use std::time::Duration;
 
 use anyhow::anyhow;
-use futures::FutureExt as _;
+use futures::{FutureExt as _, future};
+use omnia_backend::FutureResult;
+use omnia_backend::model::{
+    Answer, CHECK_TOOL, DirEntry, Error, Limits, Reply, ToolCall, ToolHost, ToolOutcome,
+};
 use tokio::sync::{mpsc, oneshot};
 use wasmtime::StoreContextMut;
 use wasmtime::component::{Destination, Source, StreamConsumer, StreamProducer, StreamResult};
 
-use crate::host::generated::omnia::model::completion::{Reply, ToolCall, ToolResult};
-use crate::host::{Error, FutureResult, ToolOutcome};
+use crate::host::generated::omnia::model::completion::{
+    Error as WitError, Reply as WitReply, ToolCall as WitToolCall, ToolResult as WitToolResult,
+};
+use crate::host::workspace::Workspace;
 
 const CALL_QUEUE: usize = 8;
-const MAX_RESULT_BYTES: usize = 1024 * 1024;
-const CHECK_TOOL: &str = "check";
 
 /// Shared state for one completion session: the calls bridge, the pending
-/// calls awaiting guest results, the call budget, and the first typed
+/// calls awaiting results, the call budget, and the first typed
 /// host-enforcement failure.
 pub struct ToolSession {
     limits: Limits,
-    // tool names used by request, the only names `call-tool` accepts.
     allowed: Vec<String>,
     inner: Mutex<Inner>,
 }
 
-/// Session bounds the host enforces per completion, in `wasi:model`,
-/// regardless of backend.
-#[derive(Clone, Copy, Debug)]
-pub struct Limits {
-    /// Tool calls one completion may issue before `budget-exhausted`.
-    pub max_tool_calls: u32,
-    /// Byte cap on a single tool result's output, and on a `check`'s
-    /// correction text.
-    pub max_result_bytes: usize,
-    /// How long the host waits for the guest to answer one tool call.
-    pub tool_timeout: Duration,
-}
-
-impl Default for Limits {
-    fn default() -> Self {
-        Self {
-            max_tool_calls: 32,
-            max_result_bytes: MAX_RESULT_BYTES,
-            tool_timeout: Duration::from_secs(60),
-        }
+impl Debug for ToolSession {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ToolSession").field("limits", &self.limits).finish_non_exhaustive()
     }
 }
 
 struct Inner {
-    // Write end of the calls bridge; `None` once the host closed the stream.
     calls: Option<mpsc::Sender<ToolCall>>,
     pending: HashMap<String, oneshot::Sender<ToolOutcome>>,
     remaining: u32,
@@ -73,8 +48,6 @@ struct Inner {
 }
 
 impl Inner {
-    // The first typed failure wins. Spelled by hand because the generated
-    // `Display` for `Error` is `Debug`-shaped.
     fn record(&mut self, error: Error) -> anyhow::Error {
         let hard = anyhow!(match &error {
             Error::InvalidRequest(detail) => format!("invalid request: {detail}"),
@@ -94,6 +67,7 @@ struct PendingCall {
 }
 
 impl ToolSession {
+    #[must_use]
     pub fn new(limits: Limits, allowed: Vec<String>) -> (Arc<Self>, mpsc::Receiver<ToolCall>) {
         let (calls, calls_rx) = mpsc::channel(CALL_QUEUE);
         let state = Self {
@@ -110,14 +84,41 @@ impl ToolSession {
         (Arc::new(state), calls_rx)
     }
 
-    /// Take the typed failure host enforcement recorded, if any. The reply
-    /// pipeline prefers it over whatever the backend then returned.
+    #[must_use]
+    pub fn open(
+        limits: Limits, allowed: Vec<String>, workspace: Option<Workspace>,
+    ) -> (Arc<Self>, mpsc::Receiver<ToolCall>, Arc<dyn ToolHost>) {
+        let (session, calls_rx) = Self::new(limits, allowed);
+        let tool_host: Arc<dyn ToolHost> =
+            Arc::new(BoundToolHost::new(Arc::clone(&session), workspace));
+        (session, calls_rx, tool_host)
+    }
+
     pub fn take_error(&self) -> Option<Error> {
         self.lock().error.take()
     }
 
-    /// Run one declared function tool through the session; see
-    /// `ToolHost::call_tool` for the error contract.
+    pub async fn finish(self: Arc<Self>, answer: FutureResult<Answer>) -> Result<Reply, Error> {
+        let _close = SessionClose::new(Arc::clone(&self));
+        match answer.await {
+            Ok(answer) => self.take_error().map_or_else(
+                || {
+                    Ok(Reply {
+                        answer: answer.answer,
+                        usage: answer.usage,
+                    })
+                },
+                Err,
+            ),
+            Err(error) => {
+                if let Some(session_err) = self.take_error() {
+                    return Err(session_err);
+                }
+                Err(Error::from(error))
+            }
+        }
+    }
+
     pub fn call(self: Arc<Self>, name: String, arguments: String) -> FutureResult<ToolOutcome> {
         async move {
             if !self.allowed.contains(&name) {
@@ -132,13 +133,10 @@ impl ToolSession {
         .boxed()
     }
 
-    /// Ask the guest to accept `candidate` through the reserved `check`
-    /// call; see `ToolHost::check` for the contract.
     pub fn check(self: Arc<Self>, candidate: String) -> FutureResult<Result<(), String>> {
         async move {
             let pending = self.reserve(CHECK_TOOL, false)?;
             let output = self.exchange(pending, CHECK_TOOL, candidate).await?;
-            // the correction reaches the model, so the tool-result cap bounds it
             if let Err(correction) = &output {
                 self.cap(CHECK_TOOL, correction)?;
             }
@@ -147,7 +145,27 @@ impl ToolSession {
         .boxed()
     }
 
-    // Send one call toward the guest and await its result.
+    pub fn deliver(&self, id: &str, output: ToolOutcome) {
+        let sender = self.lock().pending.remove(id);
+        if let Some(sender) = sender {
+            drop(sender.send(output));
+        } else {
+            tracing::trace!(id = %id, "dropping tool result with no pending call");
+        }
+    }
+
+    pub fn shutdown(&self) {
+        let mut inner = self.lock();
+        inner.calls = None;
+        inner.pending.clear();
+    }
+
+    #[must_use]
+    pub fn dead(&self) -> bool {
+        let inner = self.lock();
+        inner.calls.is_none() && inner.pending.is_empty()
+    }
+
     async fn exchange(
         &self, pending: PendingCall, name: &str, arguments: String,
     ) -> anyhow::Result<ToolOutcome> {
@@ -165,7 +183,6 @@ impl ToolSession {
         self.wait_for_result(&pending.id, name, pending.result).await
     }
 
-    // Mint a pending call; `budgeted` calls consume the tool-call budget.
     fn reserve(&self, name: &str, budgeted: bool) -> anyhow::Result<PendingCall> {
         let mut inner = self.lock();
         let Some(calls) = inner.calls.clone() else {
@@ -218,7 +235,6 @@ impl ToolSession {
         Ok(output)
     }
 
-    // Fail hard when `text`, bound for the model, exceeds the result cap.
     fn cap(&self, name: &str, text: &str) -> anyhow::Result<()> {
         if text.len() > self.limits.max_result_bytes {
             return Err(self.fail(Error::ToolFailed(format!(
@@ -230,32 +246,6 @@ impl ToolSession {
         Ok(())
     }
 
-    // Deliver one guest result to its pending call. Unknown ids (stale after
-    // a timeout, or fabricated) are dropped, not fatal.
-    fn deliver(&self, result: ToolResult) {
-        let sender = self.lock().pending.remove(&result.id);
-        if let Some(sender) = sender {
-            // a rejected send means the caller stopped waiting
-            drop(sender.send(result.output));
-        } else {
-            tracing::trace!(id = %result.id, "dropping tool result with no pending call");
-        }
-    }
-
-    // Runs when the reply pipeline ends, and when the guest closes its results stream.
-    fn shutdown(&self) {
-        let mut inner = self.lock();
-        inner.calls = None;
-        inner.pending.clear();
-    }
-
-    // Rejecting further writes lets a guest still holding the results writer
-    // observe the session's end.
-    fn dead(&self) -> bool {
-        let inner = self.lock();
-        inner.calls.is_none() && inner.pending.is_empty()
-    }
-
     fn fail(&self, error: Error) -> anyhow::Error {
         self.lock().record(error)
     }
@@ -265,55 +255,12 @@ impl ToolSession {
     }
 }
 
-/// The spawned reply pipeline: the backend future piped through the answer
-/// gate, started eagerly at `create` time.
-///
-/// Eager because wasmtime polls a `FutureReader` producer only once the
-/// guest awaits the reply — but a session guest reads `calls` first, so a
-/// lazy backend would deadlock the session before its first tool call.
-/// Cancellation stays structural: dropping this task (the guest dropped its
-/// reply future, so wasmtime dropped the producer awaiting it) aborts the
-/// pipeline, whose [`SessionClose`] guard then ends the session.
-///
-/// Requires a tokio runtime, which every `omnia` deployment provides.
-pub struct ReplyTask {
-    handle: tokio::task::JoinHandle<Result<Reply, Error>>,
-}
-
-impl ReplyTask {
-    pub fn spawn(pipeline: impl Future<Output = Result<Reply, Error>> + Send + 'static) -> Self {
-        Self {
-            handle: tokio::spawn(pipeline),
-        }
-    }
-
-    /// Await the pipeline's outcome; dropping this future aborts the task.
-    pub async fn join(mut self) -> Result<Reply, Error> {
-        match (&mut self.handle).await {
-            Ok(result) => result,
-            // aborting requires dropping `self`, so this is a pipeline panic
-            Err(error) => Err(Error::Backend(format!("reply pipeline failed: {error}"))),
-        }
-    }
-}
-
-impl Drop for ReplyTask {
-    fn drop(&mut self) {
-        self.handle.abort();
-    }
-}
-
-/// Ends the session when dropped: the calls stream closes toward the guest
-/// and pending waiters fail — whether the reply pipeline completed normally
-/// or was cancelled by the guest dropping its reply future. Without it a
-/// guest joining the calls loop with the reply would wait on an open calls
-/// stream forever.
-pub struct SessionClose {
+struct SessionClose {
     state: Arc<ToolSession>,
 }
 
 impl SessionClose {
-    pub const fn new(state: Arc<ToolSession>) -> Self {
+    const fn new(state: Arc<ToolSession>) -> Self {
         Self { state }
     }
 }
@@ -324,8 +271,91 @@ impl Drop for SessionClose {
     }
 }
 
-/// Drains session tool calls toward the guest; a closed bridge (budget or
-/// deadline enforcement, or the session dropping) closes the stream.
+struct BoundToolHost {
+    session: Arc<ToolSession>,
+    workspace: Option<Workspace>,
+}
+
+impl BoundToolHost {
+    const fn new(session: Arc<ToolSession>, workspace: Option<Workspace>) -> Self {
+        Self { session, workspace }
+    }
+
+    fn with_workspace<R: Send + 'static>(
+        &self, op: &str, path: String, f: impl FnOnce(&Workspace, String) -> FutureResult<R>,
+    ) -> FutureResult<R> {
+        match &self.workspace {
+            Some(workspace) => f(workspace, path),
+            None => future::err(anyhow!("{op}(`{path}`) requires grants.workspace")).boxed(),
+        }
+    }
+}
+
+impl Debug for BoundToolHost {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("BoundToolHost")
+            .field("workspace", &self.workspace.as_ref().map(Workspace::local_path))
+            .finish_non_exhaustive()
+    }
+}
+
+impl ToolHost for BoundToolHost {
+    fn call_tool(&self, name: String, arguments: String) -> FutureResult<ToolOutcome> {
+        Arc::clone(&self.session).call(name, arguments)
+    }
+
+    fn check(&self, candidate: String) -> FutureResult<Result<(), String>> {
+        Arc::clone(&self.session).check(candidate)
+    }
+
+    fn read(&self, path: String) -> FutureResult<Vec<u8>> {
+        self.with_workspace("read", path, Workspace::read)
+    }
+
+    fn list(&self, path: String) -> FutureResult<Vec<DirEntry>> {
+        self.with_workspace("list", path, Workspace::list)
+    }
+
+    fn write(&self, path: String, bytes: Vec<u8>) -> FutureResult<()> {
+        self.with_workspace("write", path, move |workspace, path| workspace.write(path, bytes))
+    }
+
+    fn local_path(&self) -> Option<&std::path::Path> {
+        self.workspace.as_ref().map(Workspace::local_path)
+    }
+}
+
+/// The spawned reply pipeline: the backend future piped through the answer
+/// gate, started eagerly at `create` time.
+pub struct ReplyTask {
+    handle: tokio::task::JoinHandle<Result<WitReply, WitError>>,
+}
+
+impl ReplyTask {
+    pub fn spawn(
+        pipeline: impl Future<Output = Result<WitReply, WitError>> + Send + 'static,
+    ) -> Self {
+        Self {
+            handle: tokio::spawn(pipeline),
+        }
+    }
+
+    /// Await the pipeline's outcome; dropping this future aborts the task.
+    pub async fn join(mut self) -> Result<WitReply, WitError> {
+        match (&mut self.handle).await {
+            Ok(result) => result,
+            Err(error) => Err(WitError::Backend(format!("reply pipeline failed: {error}"))),
+        }
+    }
+}
+
+impl Drop for ReplyTask {
+    fn drop(&mut self) {
+        self.handle.abort();
+    }
+}
+
+/// Drains session tool calls toward the guest.
 pub struct CallsProducer {
     rx: mpsc::Receiver<ToolCall>,
 }
@@ -337,8 +367,8 @@ impl CallsProducer {
 }
 
 impl<D> StreamProducer<D> for CallsProducer {
-    type Buffer = Option<ToolCall>;
-    type Item = ToolCall;
+    type Buffer = Option<WitToolCall>;
+    type Item = WitToolCall;
 
     fn poll_produce(
         self: Pin<&mut Self>, cx: &mut Context<'_>, _store: StoreContextMut<D>,
@@ -347,7 +377,11 @@ impl<D> StreamProducer<D> for CallsProducer {
         let this = self.get_mut();
         match this.rx.poll_recv(cx) {
             Poll::Ready(Some(call)) => {
-                destination.set_buffer(Some(call));
+                destination.set_buffer(Some(WitToolCall {
+                    id: call.id,
+                    name: call.name,
+                    arguments: call.arguments,
+                }));
                 Poll::Ready(Ok(StreamResult::Completed))
             }
             Poll::Ready(None) => Poll::Ready(Ok(StreamResult::Dropped)),
@@ -357,8 +391,7 @@ impl<D> StreamProducer<D> for CallsProducer {
     }
 }
 
-/// Routes guest tool results to their pending calls; its drop (the guest
-/// closed the results stream, or store teardown) fails every waiter.
+/// Routes guest tool results to their pending calls.
 pub struct ResultsConsumer {
     state: Arc<ToolSession>,
 }
@@ -376,7 +409,7 @@ impl Drop for ResultsConsumer {
 }
 
 impl<D> StreamConsumer<D> for ResultsConsumer {
-    type Item = ToolResult;
+    type Item = WitToolResult;
 
     fn poll_consume(
         self: Pin<&mut Self>, _cx: &mut Context<'_>, mut store: StoreContextMut<D>,
@@ -385,11 +418,11 @@ impl<D> StreamConsumer<D> for ResultsConsumer {
         if self.state.dead() {
             return Poll::Ready(Ok(StreamResult::Dropped));
         }
-        let mut buffer: Vec<ToolResult> = Vec::with_capacity(8);
+        let mut buffer: Vec<WitToolResult> = Vec::with_capacity(8);
         source.read(&mut store, &mut buffer)?;
         let took = buffer.len();
         for result in buffer {
-            self.state.deliver(result);
+            self.state.deliver(&result.id, result.output);
         }
         if took == 0 && finish {
             return Poll::Ready(Ok(StreamResult::Cancelled));

@@ -7,7 +7,8 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_sdk::plugins::{Error, Location, Plugins as _, WasiPlugins};
+use omnia_sdk::WasiProvider;
+use omnia_sdk::plugins::{Error, Location, Plugins as _};
 
 omnia_sdk::command!(scenario);
 
@@ -28,7 +29,7 @@ async fn scenario() {
     // whatever sits there by then is what the host is handed.
     std::fs::copy(payload, target).expect("the payload is planted beneath the `.` mount");
 
-    let result = WasiPlugins.load(&Location::Declared("plugin".to_owned()), None).await;
+    let result = WasiProvider.load(&Location::Declared("plugin".to_owned()), None).await;
     match (&result, needle) {
         (Err(Error::Refused(detail)), Some(needle)) => {
             assert!(detail.contains(needle.as_str()), "`{detail}` does not mention `{needle}`");

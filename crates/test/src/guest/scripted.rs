@@ -1,0 +1,415 @@
+//! The scripted pair: a FIFO `Model` and a keyed `Plugins` loader.
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::future::{Future, ready};
+use std::hash::{DefaultHasher, Hash, Hasher};
+use std::sync::{Arc, Mutex};
+
+use omnia_sdk::model::{CHECK_TOOL, Error, Function, Model, Reply, Request, Tool, ToolCall};
+use omnia_sdk::plugins::{self, Digest, Location, Plugin, Plugins};
+
+use crate::{Exchange, Script, Seen};
+
+/// One scripted completion turn: the tool calls fed to the handler, then
+/// the turn's result.
+#[derive(Clone, Debug)]
+pub struct Turn {
+    /// Tool calls `complete_with` drives through the handler before the
+    /// result returns.
+    pub calls: Vec<ToolCall>,
+    /// The turn's outcome.
+    pub result: Result<Reply, Error>,
+}
+
+impl Turn {
+    const fn result(result: Result<Reply, Error>) -> Self {
+        Self {
+            calls: Vec::new(),
+            result,
+        }
+    }
+}
+
+/// A FIFO model script recording every request and handler exchange.
+///
+/// Each turn is a success or a typed failure and may carry scripted tool
+/// calls: `complete_with` feeds them to the handler and records each
+/// exchange before the turn's result returns. A call past the script panics;
+/// [`ScriptedModel::then`] opts into a fallback instead.
+///
+/// A request with `check` set plays the backend's loop: each scripted turn
+/// is one candidate, offered to the handler as the reserved `check` call and
+/// recorded. `Ok` returns that turn; `Err(correction)` advances to the next
+/// turn, and a script exhausted on a rejection is `BudgetExhausted`
+/// carrying the correction — one scripted answer per attempt.
+///
+/// ```
+/// use omnia_sdk::model::{Message, Model as _, Request, Role};
+/// use omnia_test::guest::ScriptedModel;
+///
+/// # tokio::runtime::Runtime::new().unwrap().block_on(async {
+/// let model = ScriptedModel::answering(["four"]);
+/// let request = Request::builder()
+///     .messages(vec![Message {
+///         role: Role::User,
+///         content: "2 + 2?".into(),
+///     }])
+///     .build();
+/// assert_eq!(model.complete(request).await.unwrap().answer, "four");
+/// assert_eq!(model.seen()[0].messages, ["2 + 2?"]);
+/// model.assert_exhausted();
+/// # });
+/// ```
+#[derive(Clone, Debug)]
+pub struct ScriptedModel {
+    script: Script<Request, Turn>,
+    exchanges: Arc<Mutex<Vec<Exchange>>>,
+}
+
+impl Default for ScriptedModel {
+    fn default() -> Self {
+        Self::new([])
+    }
+}
+
+impl ScriptedModel {
+    /// A script of ordered completion results.
+    pub fn new(results: impl IntoIterator<Item = Result<Reply, Error>>) -> Self {
+        Self {
+            script: Script::new(results.into_iter().map(Turn::result)),
+            exchanges: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    /// A success script of ordered answer strings.
+    pub fn answering<S: Into<String>>(answers: impl IntoIterator<Item = S>) -> Self {
+        Self::new(answers.into_iter().map(|answer| {
+            Ok(Reply {
+                answer: answer.into(),
+                usage: None,
+            })
+        }))
+    }
+
+    /// Attaches tool calls to the scripted turn at `index`; the handler
+    /// answers them before that turn's result returns.
+    ///
+    /// # Panics
+    ///
+    /// Panics when no turn is scripted at `index`.
+    #[must_use]
+    #[track_caller]
+    pub fn calling(self, index: usize, calls: impl IntoIterator<Item = ToolCall>) -> Self {
+        let calls: Vec<ToolCall> = calls.into_iter().collect();
+        Self {
+            script: self.script.edit(index, |turn| turn.calls.extend(calls)),
+            exchanges: self.exchanges,
+        }
+    }
+
+    /// Answers every completion past the scripted turns with `result`
+    /// instead of panicking.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a fallback was already set.
+    #[must_use]
+    pub fn then(self, result: impl Fn() -> Result<Reply, Error> + Send + Sync + 'static) -> Self {
+        Self {
+            script: self.script.then(move || Turn::result(result())),
+            exchanges: self.exchanges,
+        }
+    }
+
+    /// Every request in call order, as the handler built it.
+    #[must_use]
+    pub fn requests(&self) -> Vec<Request> {
+        self.script.seen()
+    }
+
+    /// Every request in call order, projected to the rung-neutral record.
+    #[must_use]
+    pub fn seen(&self) -> Vec<Seen> {
+        self.script.seen().iter().map(Seen::from).collect()
+    }
+
+    /// Every handler exchange in call order.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the exchange lock is poisoned.
+    #[must_use]
+    pub fn exchanges(&self) -> Vec<Exchange> {
+        self.exchanges.lock().expect("exchanges lock").clone()
+    }
+
+    /// Asserts that every scripted turn was consumed.
+    ///
+    /// # Panics
+    ///
+    /// Panics naming the number of unconsumed turns.
+    #[track_caller]
+    pub fn assert_exhausted(&self) {
+        self.script.assert_exhausted();
+    }
+}
+
+// panics when the script is exhausted without a fallback
+impl Model for ScriptedModel {
+    fn complete(&self, request: Request) -> impl Future<Output = Result<Reply, Error>> + Send {
+        // a single-shot completion has no handler, so tool calls or a check are a harness bug
+        assert!(!request.check, "a check requires complete_with");
+        let turn = self.script.next(request);
+        assert!(turn.calls.is_empty(), "scripted tool calls require complete_with");
+        ready(turn.result)
+    }
+
+    fn complete_with<H, F>(
+        &self, request: Request, mut handler: H,
+    ) -> impl Future<Output = Result<Reply, Error>> + Send
+    where
+        H: FnMut(ToolCall) -> F + Send,
+        F: Future<Output = Result<String, String>> + Send,
+    {
+        let script = self.script.clone();
+        let exchanges = Arc::clone(&self.exchanges);
+        async move {
+            let mut attempt = 0;
+            loop {
+                let turn = script.next(request.clone());
+                for call in turn.calls {
+                    let outcome = handler(call.clone()).await;
+                    exchanges.lock().expect("exchanges lock").push(Exchange {
+                        tool: call.name,
+                        arguments: call.arguments,
+                        outcome,
+                    });
+                }
+                let (candidate, reply) = match (&request.check, turn.result) {
+                    (false, result) | (true, result @ Err(_)) => return result,
+                    (true, Ok(reply)) => (reply.answer.clone(), reply),
+                };
+
+                attempt += 1;
+                let outcome = handler(ToolCall {
+                    id: format!("check-{attempt}"),
+                    name: CHECK_TOOL.to_owned(),
+                    arguments: candidate.clone(),
+                })
+                .await;
+                exchanges.lock().expect("exchanges lock").push(Exchange {
+                    tool: CHECK_TOOL.to_owned(),
+                    arguments: candidate,
+                    outcome: outcome.clone(),
+                });
+                match outcome {
+                    Ok(_) => return Ok(reply),
+                    // the next scripted answer is the corrected attempt; none left is the budget
+                    Err(correction) if script.remaining() == 0 => {
+                        return Err(Error::BudgetExhausted(correction));
+                    }
+                    Err(_) => {}
+                }
+            }
+        }
+    }
+}
+
+/// The function tools a request declares, in declaration order.
+#[must_use]
+pub fn function_tools(request: &Request) -> Vec<&Function> {
+    request
+        .tools
+        .iter()
+        .filter_map(|tool| match tool {
+            Tool::Function(function) => Some(function),
+            Tool::Mcp(_) => None,
+        })
+        .collect()
+}
+
+/// A keyed `Plugins` loader: per-name digests and refusals, every load
+/// recorded.
+///
+/// Keyed rather than FIFO because the loader contract is per name — the name
+/// a location registers under ([`Location::name`]): a load of a name with a
+/// scripted refusal fails with it; a declared name the script did not
+/// [`declare`] is refused as the host would refuse an undeclared guest, and
+/// so is a declared name loaded with a digest; otherwise the load resolves
+/// to the digest scripted for the name, the loader-wide default set by
+/// [`defaulting`], or a deterministic per-name placeholder — refusing a
+/// digest on the call that differs from it. A path or a package carries its
+/// own source, so it loads unless scripted otherwise.
+///
+/// [`declare`]: Self::declare
+/// [`defaulting`]: Self::defaulting
+///
+/// ```
+/// use omnia_sdk::plugins::{Error, Location, Plugins as _};
+/// use omnia_test::guest::ScriptedLoader;
+///
+/// # tokio::runtime::Runtime::new().unwrap().block_on(async {
+/// let loader =
+///     ScriptedLoader::default().declare("ok").refuse("bad", Error::Refused("unroutable".into()));
+/// let bad = Location::Registry {
+///     package: "bad".into(),
+///     endpoint: None,
+/// };
+/// assert!(matches!(loader.load(&bad, None).await, Err(Error::Refused(_))));
+/// assert_eq!(loader.load(&Location::Declared("ok".into()), None).await.unwrap().id(), "ok");
+/// assert!(matches!(
+///     loader.load(&Location::Declared("other".into()), None).await,
+///     Err(Error::Refused(_))
+/// ));
+/// assert_eq!(loader.load(&Location::Path("./ok.wasm".into()), None).await.unwrap().id(), "ok");
+/// assert_eq!(loader.loads().len(), 4);
+/// # });
+/// ```
+#[derive(Clone, Debug, Default)]
+pub struct ScriptedLoader {
+    inner: Arc<LoaderInner>,
+}
+
+#[derive(Debug, Default)]
+struct LoaderInner {
+    declared: Mutex<BTreeSet<String>>,
+    digests: Mutex<BTreeMap<String, Digest>>,
+    exports: Mutex<BTreeMap<String, Vec<String>>>,
+    default: Mutex<Option<Digest>>,
+    refusals: Mutex<BTreeMap<String, plugins::Error>>,
+    loads: Mutex<Vec<(Location, Option<Digest>)>>,
+}
+
+impl ScriptedLoader {
+    /// Declares the guest `name`, so a [`Location::Declared`] load of it
+    /// resolves.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a lock is poisoned.
+    #[must_use]
+    pub fn declare(self, name: impl Into<String>) -> Self {
+        self.inner.declared.lock().expect("declared lock").insert(name.into());
+        self
+    }
+
+    /// Resolves the name `name` to `digest`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a lock is poisoned.
+    #[must_use]
+    pub fn digest(self, name: impl Into<String>, digest: Digest) -> Self {
+        self.inner.digests.lock().expect("digests lock").insert(name.into(), digest);
+        self
+    }
+
+    /// Resolves every name without a scripted digest to `digest`, in place
+    /// of the per-name placeholder — for suites that assert one fixed digest
+    /// in their envelopes.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a lock is poisoned.
+    #[must_use]
+    pub fn defaulting(self, digest: Digest) -> Self {
+        *self.inner.default.lock().expect("default lock") = Some(digest);
+        self
+    }
+
+    /// Lists `exports` on the handle every load of the name `name` answers;
+    /// a name scripted none answers an empty list.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a lock is poisoned.
+    #[must_use]
+    pub fn exporting(
+        self, name: impl Into<String>, exports: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        self.inner
+            .exports
+            .lock()
+            .expect("exports lock")
+            .insert(name.into(), exports.into_iter().map(Into::into).collect());
+        self
+    }
+
+    /// Fails every load of the name `name` with `error`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a lock is poisoned.
+    #[must_use]
+    pub fn refuse(self, name: impl Into<String>, error: plugins::Error) -> Self {
+        self.inner.refusals.lock().expect("refusals lock").insert(name.into(), error);
+        self
+    }
+
+    /// Every load, in call order: the location and the digest it carried.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a lock is poisoned.
+    #[must_use]
+    pub fn loads(&self) -> Vec<(Location, Option<Digest>)> {
+        self.inner.loads.lock().expect("loads lock").clone()
+    }
+
+    fn resolve(&self, from: &Location, pin: Option<&Digest>) -> Result<Plugin, plugins::Error> {
+        self.inner.loads.lock().expect("loads lock").push((from.clone(), pin.cloned()));
+        let name = from.name();
+        if let Some(refusal) = self.inner.refusals.lock().expect("refusals lock").get(name) {
+            return Err(refusal.clone());
+        }
+        if let Location::Declared(name) = from {
+            if pin.is_some() {
+                return Err(plugins::Error::Refused(format!(
+                    "`{name}` is declared by the deployment, which pins it; the load takes no \
+                     digest"
+                )));
+            }
+            if !self.inner.declared.lock().expect("declared lock").contains(name) {
+                return Err(plugins::Error::Refused(format!(
+                    "no guest `{name}` is declared by this deployment"
+                )));
+            }
+        }
+        let resolved = self
+            .inner
+            .digests
+            .lock()
+            .expect("digests lock")
+            .get(name)
+            .cloned()
+            .or_else(|| self.inner.default.lock().expect("default lock").clone())
+            .unwrap_or_else(|| placeholder_digest(name));
+        if let Some(pin) = pin
+            && *pin != resolved
+        {
+            return Err(plugins::Error::Refused(format!(
+                "`{from}` resolved to {resolved}, not its pinned digest {pin}"
+            )));
+        }
+        let exports =
+            self.inner.exports.lock().expect("exports lock").get(name).cloned().unwrap_or_default();
+        Ok(Plugin::new(name, resolved, exports))
+    }
+}
+
+impl Plugins for ScriptedLoader {
+    fn load(
+        &self, from: &Location, digest: Option<&Digest>,
+    ) -> impl Future<Output = Result<Plugin, plugins::Error>> + Send {
+        ready(self.resolve(from, digest))
+    }
+}
+
+// A well-formed, name-specific pin for loads no scenario scripted, so two
+// such names never look like the same content.
+fn placeholder_digest(name: &str) -> Digest {
+    let mut hasher = DefaultHasher::new();
+    name.hash(&mut hasher);
+    let word = format!("{:016x}", hasher.finish());
+    format!("sha256:{}", word.repeat(4)).parse().expect("64 hex characters form a digest")
+}

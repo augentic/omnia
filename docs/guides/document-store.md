@@ -1,6 +1,6 @@
 # Document Store
 
-The `wasi:docstore` interface is a JSON document store: named collections of `{ id, data }` documents with a rich, backend-portable filter language and cursor-based pagination. The default backend is in-memory; production deployments swap in Azure Table Storage (`omnia-azure-table`) without guest changes.
+The `omnia:docstore` interface is a JSON document store: named collections of `{ id, data }` documents with a rich, backend-portable filter language and cursor-based pagination. The default backend is in-memory; production deployments swap in Azure Table Storage (`omnia-azure-table`) without guest changes.
 
 The [`docstore`](../../examples/docstore/) example is a minimal GTFS-flavoured service (a `stops` collection) showing CRUD and a combined query endpoint; the snippets below extend its patterns to the full filter vocabulary.
 
@@ -8,14 +8,11 @@ The [`docstore`](../../examples/docstore/) example is a minimal GTFS-flavoured s
 
 ## The provider
 
-Guest access goes through the `DocumentStore` trait from `omnia-sdk` — implement it on a unit struct and call its methods:
+Guest access goes through the `DocumentStore` trait from `omnia-sdk` — call its methods on `WasiProvider` (or through a generic provider `P: DocumentStore`):
 
-```rust
-use omnia_sdk::DocumentStore;
-use omnia_sdk::document_store::{Document, Filter, QueryOptions, ScalarValue, SortField};
-
-struct Provider;
-impl DocumentStore for Provider {}
+```rust,noplayground
+use omnia_sdk::docstore::{Document, Filter, QueryOptions, ScalarValue, SortField};
+use omnia_sdk::{DocumentStore, WasiProvider};
 ```
 
 ## CRUD
@@ -28,7 +25,7 @@ async fn create_stop(Json(req): Json<CreateStopRequest>) -> HttpResult<Json<Valu
         id: req.id.clone(),
         data: serde_json::to_vec(&req.stop).context("serializing stop")?,
     };
-    Provider.insert("stops", &doc).await.context("inserting stop")?;
+    WasiProvider.insert("stops", &doc).await.context("inserting stop")?;
     Ok(Json(json!({ "stop": req.stop, "id": req.id })))
 }
 ```
@@ -139,7 +136,7 @@ The backend translates the tree to its native query language (direct JSON evalua
 `query(collection, QueryOptions)` combines the filter with sorting and cursor pagination:
 
 ```rust,noplayground
-let result = Provider
+let result = WasiProvider
     .query(
         "stops",
         QueryOptions {

@@ -1,26 +1,20 @@
-//! Default `SQLite` implementation for wasi-sql
-//!
-//! This is a lightweight implementation for development use only.
+//! Default `SQLite`-backed implementation of [`SqlClient`].
 
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use futures::FutureExt;
-use omnia_core::Backend;
+use futures::FutureExt as _;
+use omnia_backend::sql::{Connection, DataType, Field, Row, SqlClient};
+use omnia_core::{Connect, FromEnv, FutureResult};
 use rusqlite::types::ValueRef;
 use rusqlite::{Connection as SqliteConnection, params_from_iter};
 use tracing::instrument;
-
-use crate::host::resource::{Connection, FutureResult};
-use crate::host::{DataType, Field, Row, WasiSqlCtx};
 
 #[expect(missing_docs, reason = "`FromEnv` has no docs")]
 mod config {
     use fromenv::FromEnv;
 
     /// Options used to connect to the SQL database.
-    ///
-    /// This struct is used to load connection options from environment variables.
     #[derive(Debug, Clone, FromEnv)]
     pub struct ConnectOptions {
         /// The `SQLite` database URI (`SQL_DATABASE`, default: one shared in-memory database).
@@ -30,29 +24,25 @@ mod config {
 }
 pub use config::ConnectOptions;
 
-impl omnia_core::FromEnv for ConnectOptions {
+impl FromEnv for ConnectOptions {
     fn load_env() -> Result<Self> {
-        // `Self::from_env()` is the builder the `FromEnv` derive emits
         Self::from_env().finalize().context("issue loading connection options")
     }
 }
 
-/// Default implementation for `wasi:sql`.
+/// Default `SQLite`-backed implementation of [`SqlClient`].
 #[derive(Debug, Clone)]
 pub struct SqlDefault {
-    // Store the database path to create new connections on demand
-    // Mutex is necessary since rusqlite::Connection isn't `Sync`
     conn: Arc<parking_lot::Mutex<SqliteConnection>>,
 }
 
-impl Backend for SqlDefault {
+impl Connect for SqlDefault {
     type ConnectOptions = ConnectOptions;
 
     #[instrument]
     async fn connect_with(options: Self::ConnectOptions) -> Result<Self> {
         tracing::debug!("initializing SQLite connection to: {}", options.database);
 
-        // open now, so a bad database path fails connect rather than the first query
         let conn = Arc::new(parking_lot::Mutex::new(
             SqliteConnection::open(&options.database).context("failed to open SQLite database")?,
         ));
@@ -61,7 +51,7 @@ impl Backend for SqlDefault {
     }
 }
 
-impl WasiSqlCtx for SqlDefault {
+impl SqlClient for SqlDefault {
     fn open(&self, _name: String) -> FutureResult<Arc<dyn Connection>> {
         tracing::trace!("opening SQL connection");
         let conn = Arc::clone(&self.conn);
@@ -89,7 +79,6 @@ impl Connection for SqliteConn {
         let conn = Arc::clone(&self.conn);
 
         async move {
-            // rusqlite blocks, and holds the mutex, so it never pins an executor thread
             tokio::task::spawn_blocking(move || {
                 let rusqlite_params: Vec<_> = params.iter().map(to_sqlite).collect();
 
@@ -142,7 +131,6 @@ impl Connection for SqliteConn {
         let conn = Arc::clone(&self.conn);
 
         async move {
-            // as `query`: keep the blocking work off the executor
             tokio::task::spawn_blocking(move || {
                 let rusqlite_params: Vec<_> = params.iter().map(to_sqlite).collect();
 
@@ -176,7 +164,6 @@ fn to_sqlite(dt: &DataType) -> rusqlite::types::Value {
         DataType::Str(Some(s)) => rusqlite::types::Value::Text(s.clone()),
         DataType::Binary(Some(b)) => rusqlite::types::Value::Blob(b.clone()),
         DataType::Timestamp(Some(ts)) => rusqlite::types::Value::Text(ts.clone()),
-        // every `None` variant
         _ => rusqlite::types::Value::Null,
     }
 }
@@ -198,14 +185,11 @@ fn from_sqlite(value: ValueRef) -> Result<DataType> {
 mod tests {
     use super::*;
 
-    // The obvious one-to-one mappings mirror the match arms; only the two
-    // conventions a reader could get wrong are pinned here.
-
     #[test]
     fn u64_stores_raw_bits() {
         assert_eq!(
             to_sqlite(&DataType::Uint64(Some(u64::MAX))),
-            rusqlite::types::Value::Integer(-1),
+            rusqlite::types::Value::Integer(-1)
         );
     }
 

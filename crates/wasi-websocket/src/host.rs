@@ -34,13 +34,13 @@ mod generated {
 }
 
 use std::fmt::Debug;
-use std::sync::Arc;
 
+pub use default_impl::{ConnectOptions, WebSocketDefault};
+pub use omnia_backend::websocket::{Endpoint, Event, Events, WebSocketClient};
 pub use omnia_core::FutureResult;
 use omnia_core::{Host, Runtime, Server, StoreCtx, StoreView};
 use wasmtime::component::{HasData, Linker};
 
-pub use self::default_impl::{ConnectOptions, WebSocketDefault};
 pub use self::generated::Duplex;
 pub use self::generated::omnia::websocket::types::Error;
 use self::generated::omnia::websocket::{client, types as generated_types};
@@ -55,7 +55,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub struct WasiWebSocket;
 
 impl HasData for WasiWebSocket {
-    type Data<'a> = WasiWebSocketCtxView<'a>;
+    type Data<'a> = WasiWebSocketView<'a>;
 }
 
 impl<T> Host<T> for WasiWebSocket
@@ -76,22 +76,6 @@ where
     async fn run(&self, state: &Runtime<B>) -> anyhow::Result<()> {
         server::run(state).await
     }
-}
-
-/// A trait which provides internal WASI WebSocket context.
-///
-/// This is implemented by the resource-specific provider of WebSocket
-/// functionality.
-///
-/// Event construction lives on the host's [`Event`] struct; backends only
-/// translate at the [`Client`] seam.
-pub trait WasiWebSocketCtx: Debug + Send + Sync + 'static {
-    /// Connect to the WebSocket service and return a socket.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the connection fails.
-    fn connect(&self) -> FutureResult<Arc<dyn Client>>;
 }
 
 omnia_core::host_error!(Error, Other);

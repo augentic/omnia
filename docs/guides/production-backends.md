@@ -23,7 +23,7 @@ The model backends (`genai`, `cursor`) are covered in [Model Completions and MCP
 
 ## Swapping a backend
 
-A backend is any type that implements `omnia::Backend` (connection management) plus the `WasiXxxCtx` context trait for its interface. In the `runtime!` macro, replace the default with the production client:
+A backend is any type that implements `omnia::Connect` (connection management) plus the `XxxClient` contract trait for its interface. In the `runtime!` macro, replace the default with the production client:
 
 ```rust
 use omnia_redis::Client as Redis;
@@ -40,14 +40,14 @@ omnia::runtime!({
 });
 ```
 
-Add the backend crate to your host's `Cargo.toml`. Each `omnia-backends` release line is paired with a specific omnia line — currently backends **0.29.x** pairs with omnia **0.35.x**; check the [omnia-backends release notes](https://github.com/augentic/omnia-backends/blob/main/RELEASES.md) for the pairing that matches your omnia version:
+Add the backend crate to your host's `Cargo.toml`. Each `omnia-backends` release line is paired with a specific omnia line — currently backends **0.32.x** pairs with omnia **0.38.x**; check the [omnia-backends release notes](https://github.com/augentic/omnia-backends/blob/main/RELEASES.md) for the pairing that matches your omnia version:
 
 ```toml
 [dependencies]
-omnia-redis = "0.29"
+omnia-redis = "0.32"
 ```
 
-For development against unreleased omnia changes, the `omnia-backends` workspace patches all `omnia`/`omnia-wasi-*` crates via `[patch.crates-io]` — to the omnia git repository by default, or to a sibling checkout by switching those entries to `path = "../omnia/crates/<name>"`. Mirror whichever pattern fits if your host lives in a third workspace.
+For development against unreleased omnia changes, the `omnia-backends` workspace patches all `omnia`/`omnia-wasi-*` crates via `[patch.crates-io]` — to the omnia git repository by default, or to a sibling checkout by switching those entries to `path = "../omnia/crates/<dir>"`, where `<dir>` is the crate directory without its published prefix (`backend` for `omnia-backend`, `wasi-keyvalue` for `omnia-wasi-keyvalue`, and so on). Mirror whichever pattern fits if your host lives in a third workspace.
 
 ## Configuration
 
@@ -69,7 +69,7 @@ Each crate's README in the `omnia-backends` repository documents its complete va
 
 ## Verifying against the real service
 
-Backend crates ship `#[ignore]`-gated **live tests** (`tests/live.rs`) that drive the backend's `WasiXxxCtx` implementation against the real service. They never run in CI; run them locally with the service up and credentials set:
+Backend crates ship `#[ignore]`-gated **live tests** (`tests/live.rs`) that drive the backend's `XxxClient` implementation against the real service. They never run in CI; run them locally with the service up and credentials set:
 
 ```bash
 # example: Redis

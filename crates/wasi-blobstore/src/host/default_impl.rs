@@ -1,41 +1,36 @@
-//! Default in-memory implementation for wasi-blobstore
-//!
-//! This is a lightweight implementation for development use only.
+//! In-memory default implementation of [`BlobStoreClient`].
 
 use std::collections::HashMap;
+use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Result, anyhow};
 use bytes::Bytes;
-use futures::FutureExt;
-use omnia_core::Backend;
+use futures::FutureExt as _;
+use omnia_backend::blobstore::{BlobStoreClient, Container, ContainerMetadata, ObjectMetadata};
+use omnia_core::{Connect, FutureResult, NoOptions};
 use parking_lot::RwLock;
 use tracing::instrument;
 
-use crate::host::WasiBlobstoreCtx;
-use crate::host::generated::wasi::blobstore::container::{ContainerMetadata, ObjectMetadata};
-use crate::host::resource::{Container, FutureResult};
-
-/// Default implementation for `wasi:blobstore`.
-#[derive(Debug, Clone)]
-pub struct BlobstoreDefault {
+/// Default in-memory implementation of [`BlobStoreClient`].
+#[derive(Debug, Clone, Default)]
+pub struct BlobStoreDefault {
     store: Arc<RwLock<HashMap<String, InMemContainer>>>,
 }
 
-impl Backend for BlobstoreDefault {
-    type ConnectOptions = omnia_core::NoOptions;
+impl Connect for BlobStoreDefault {
+    type ConnectOptions = NoOptions;
 
     #[instrument]
     async fn connect_with(options: Self::ConnectOptions) -> Result<Self> {
+        let _ = options;
         tracing::debug!("initializing in-memory blobstore");
-        Ok(Self {
-            store: Arc::new(RwLock::new(HashMap::new())),
-        })
+        Ok(Self::default())
     }
 }
 
-impl WasiBlobstoreCtx for BlobstoreDefault {
+impl BlobStoreClient for BlobStoreDefault {
     fn create_container(&self, name: String) -> FutureResult<Arc<dyn Container>> {
         tracing::trace!("creating container: {name}");
         let store = Arc::clone(&self.store);
@@ -58,10 +53,7 @@ impl WasiBlobstoreCtx for BlobstoreDefault {
         async move {
             let container = {
                 let store = store.read();
-                store
-                    .get(&name)
-                    .cloned()
-                    .ok_or_else(|| wasmtime::Error::msg(format!("container not found: {name}")))?
+                store.get(&name).cloned().ok_or_else(|| anyhow!("container not found: {name}"))?
             };
             Ok(Arc::new(container) as Arc<dyn Container>)
         }
@@ -224,9 +216,7 @@ impl Container for InMemContainer {
 
         async move {
             let guard = objects.read();
-            let object = guard
-                .get(&name)
-                .ok_or_else(|| wasmtime::Error::msg(format!("object not found: {name}")))?;
+            let object = guard.get(&name).ok_or_else(|| anyhow!("object not found: {name}"))?;
             let (size, created_at) = (object.data.len(), object.created_at);
             drop(guard);
 

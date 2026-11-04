@@ -17,6 +17,7 @@ axum.workspace = true
 clap.workspace = true
 futures.workspace = true
 omnia-sdk = { workspace = true, features = ["command", "http"] }
+omnia-test = { workspace = true, features = ["conformance"] }
 omnia-wasi-blobstore.workspace = true
 omnia-wasi-config.workspace = true
 omnia-wasi-docstore.workspace = true
@@ -69,6 +70,11 @@ path = "programs/config/seeded.rs"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "conformance_portable"
+path = "programs/conformance/portable.rs"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "docstore_crud_query"
 path = "programs/docstore/crud_query.rs"
 crate-type = ["cdylib"]
@@ -111,6 +117,11 @@ crate-type = ["cdylib"]
 [[example]]
 name = "keyvalue_bucket"
 path = "programs/keyvalue/bucket.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "keyvalue_set_with_ttl_expires"
+path = "programs/keyvalue/set_with_ttl_expires.rs"
 crate-type = ["cdylib"]
 
 [[example]]

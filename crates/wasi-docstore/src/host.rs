@@ -8,7 +8,7 @@ mod types_impl;
 mod generated {
     #![allow(missing_docs, reason = "wasmtime bindgen output")]
 
-    pub use self::wasi::docstore::types::Error;
+    pub use self::omnia::docstore::types::Error;
     pub use super::FilterProxy;
 
     wasmtime::component::bindgen!({
@@ -18,36 +18,38 @@ mod generated {
             default: store | tracing | trappable,
         },
         with: {
-            "wasi:docstore/types.filter": FilterProxy,
+            "omnia:docstore/types.filter": FilterProxy,
         },
         trappable_error_type: {
-            "wasi:docstore/types.error" => Error,
+            "omnia:docstore/types.error" => Error,
         },
     });
 }
 
 use std::fmt::Debug;
 
+pub use default_impl::DocStoreDefault;
+pub use omnia_backend::docstore::{
+    ComparisonOp, DocStoreClient, Document, Filter, QueryOptions, QueryResult, ScalarValue,
+    SortField,
+};
 pub use omnia_core::FutureResult;
 use omnia_core::{Host, Server, StoreView};
 use wasmtime::component::{HasData, Linker};
 
-pub use self::default_impl::DocStoreDefault;
-pub use self::generated::wasi::docstore::types::{
-    ComparisonOp, Document, Error, QueryResult, ScalarValue, SortField,
-};
-use self::generated::wasi::docstore::{store, types};
+pub use self::generated::omnia::docstore::types::Error;
+use self::generated::omnia::docstore::{store, types};
 pub use self::resource::*;
 
 /// Result type for docstore operations.
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// Host-side service for `wasi:docstore`.
+/// Host-side service for `omnia:docstore`.
 #[derive(Debug)]
 pub struct WasiDocStore;
 
 impl HasData for WasiDocStore {
-    type Data<'a> = WasiDocStoreCtxView<'a>;
+    type Data<'a> = WasiDocStoreView<'a>;
 }
 
 impl<T> Host<T> for WasiDocStore
@@ -61,43 +63,6 @@ where
 }
 
 impl<B> Server<B> for WasiDocStore {}
-
-/// A trait which provides internal WASI `DocStore` context.
-///
-/// This is implemented by the resource-specific provider of `DocStore`
-/// functionality. For example, the in-memory default, or Azure Table
-/// Storage.
-pub trait WasiDocStoreCtx: Debug + Send + Sync + 'static {
-    /// Point read by primary id.
-    fn get(&self, collection: String, id: String) -> FutureResult<Option<Document>>;
-
-    /// Insert if absent.
-    fn insert(&self, collection: String, doc: Document) -> FutureResult<()>;
-
-    /// Upsert by id.
-    fn put(&self, collection: String, doc: Document) -> FutureResult<()>;
-
-    /// Delete by id; `Ok(true)` if a document was removed.
-    fn delete(&self, collection: String, id: String) -> FutureResult<bool>;
-
-    /// Filtered listing with sort and pagination.
-    fn query(
-        &self, collection: String, filter: Option<FilterTree>, options: QueryOpts,
-    ) -> FutureResult<QueryResult>;
-}
-
-/// Host-side query options (WIT `query-options` without the filter resource).
-#[derive(Debug, Clone, Default)]
-pub struct QueryOpts {
-    /// Sort fields.
-    pub order_by: Vec<SortField>,
-    /// Max documents.
-    pub limit: Option<u32>,
-    /// Skip count (when no continuation token).
-    pub offset: Option<u32>,
-    /// Opaque continuation.
-    pub continuation: Option<String>,
-}
 
 omnia_core::host_error!(Error, Other);
 omnia_core::wasi_view!(DocStore);

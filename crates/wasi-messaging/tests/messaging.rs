@@ -3,7 +3,7 @@
 //! in-memory broker. Command exports are driven through `wasi:cli/run`; the
 //! `incoming-handler` export is driven in-process through
 //! [`MessagingHandler`], bypassing the backend's delivery loop, and once
-//! through the default broker's own [`Client::consume`]. The guest asserts
+//! through the default broker's own [`Endpoint::consume`]. The guest asserts
 //! what it observes across the boundary (and traps on failure); the host
 //! side asserts what reached the broker, from a subscription opened before
 //! the guest runs, and the typed outcome the handler returns.
@@ -17,8 +17,8 @@ use futures::{FutureExt as _, StreamExt as _};
 use omnia::{ExitStatus, GuestEntry, Host, Runtime, Server, StoreCtx};
 use omnia_test::host::{Backends, Deployment};
 use omnia_wasi_messaging::{
-    Client, Error, FutureResult, HandleError, Handler, Message, MessagingHandler, Metadata, Reply,
-    RequestOptions, WasiMessaging, WasiMessagingCtx,
+    Endpoint, Error, FutureResult, HandleError, Handler, Message, MessagingClient,
+    MessagingHandler, Metadata, Reply, RequestOptions, WasiMessaging,
 };
 use omnia_wasi_otel::WasiOtel;
 
@@ -31,13 +31,13 @@ test_programs::foreach_messaging!();
 #[derive(Clone, Debug)]
 struct EndedBroker;
 
-impl WasiMessagingCtx for EndedBroker {
-    fn connect(&self) -> FutureResult<Arc<dyn Client>> {
-        async { Ok(Arc::new(Self) as Arc<dyn Client>) }.boxed()
+impl MessagingClient for EndedBroker {
+    fn endpoint(&self) -> FutureResult<Arc<dyn Endpoint>> {
+        async { Ok(Arc::new(Self) as Arc<dyn Endpoint>) }.boxed()
     }
 }
 
-impl Client for EndedBroker {
+impl Endpoint for EndedBroker {
     fn consume(&self, _handler: Arc<dyn Handler>) -> FutureResult<()> {
         async { Ok(()) }.boxed()
     }

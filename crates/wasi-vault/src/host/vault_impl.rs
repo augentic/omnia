@@ -4,13 +4,13 @@ use wasmtime::component::{Access, Accessor, Resource};
 use crate::host::generated::omnia::vault::vault::Error;
 use crate::host::resource::LockerProxy;
 use crate::host::vault::{Host, HostLocker, HostLockerWithStore, HostWithStore};
-use crate::host::{Result, WasiVault, WasiVaultCtxView};
+use crate::host::{Result, WasiVault, WasiVaultView};
 
 impl<T> HostWithStore<T> for WasiVault {
     async fn open(
         accessor: &Accessor<T, Self>, locker_id: String,
     ) -> Result<Resource<LockerProxy>> {
-        let locker = accessor.with(|mut store| store.get().ctx.open_locker(locker_id)).await?;
+        let locker = accessor.with(|mut store| store.get().client.open_locker(locker_id)).await?;
         let proxy = omnia_core::Proxy(locker);
         Ok(accessor.with(|mut store| store.get().table.push(proxy))?)
     }
@@ -63,13 +63,13 @@ impl<T> HostLockerWithStore<T> for WasiVault {
     }
 }
 
-impl Host for WasiVaultCtxView<'_> {
+impl Host for WasiVaultView<'_> {
     fn convert_error(&mut self, err: Error) -> wasmtime::Result<Error> {
         Ok(err)
     }
 }
 
-impl HostLocker for WasiVaultCtxView<'_> {}
+impl HostLocker for WasiVaultView<'_> {}
 
 pub fn get_locker<T>(
     accessor: &Accessor<T, WasiVault>, self_: &Resource<LockerProxy>,

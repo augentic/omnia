@@ -1,0 +1,11 @@
+error: capability `Config` is already delegated to field `first` (and cannot also be delegated to `second`)
+ --> tests/ui/duplicate_capability.rs:7:16
+  |
+7 |     #[provider(Config)]
+  |                ^^^^^^
+
+error: `Config` first delegated on field `first` here
+ --> tests/ui/duplicate_capability.rs:5:16
+  |
+5 |     #[provider(Config)]
+  |                ^^^^^^

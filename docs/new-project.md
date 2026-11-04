@@ -37,7 +37,7 @@ members = ["guest", "host"]
 
 ## The guest crate
 
-A guest is a `cdylib` library targeting `wasm32-wasip2`:
+A guest is a library crate with `crate-type = ["cdylib", "rlib"]` — `cdylib` produces the `.wasm` component when compiled for `wasm32-wasip2`, and `rlib` lets native integration tests link your router and handlers directly:
 
 ```toml
 # guest/Cargo.toml
@@ -47,49 +47,59 @@ version = "0.1.0"
 edition = "2024"
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-anyhow = "1"
 axum = { version = "0.8", default-features = false, features = ["json"] }
-omnia-sdk = "0.36"
-omnia-wasi-http = "0.36"
+omnia-sdk = "0.38"
+serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-wasip3 = { version = "0.7", features = ["http-compat"] }
-wit-bindgen = { version = "0.60", features = ["async-spawn"] }
 ```
 
 ```rust
 // guest/src/lib.rs
-#![cfg(target_arch = "wasm32")]
-
-use axum::routing::get;
-use axum::{Json, Router};
-use omnia_sdk::HttpResult;
+use axum::Router;
+use omnia_sdk::api::http::{get, post};
+use omnia_sdk::api::{Client, Context};
+use omnia_sdk::{Error, WasiProvider};
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use wasip3::exports::http::handler::Guest;
-use wasip3::http::types::{ErrorCode, Request, Response};
 
-struct HttpGuest;
-wasip3::http::service::export!(HttpGuest);
-
-impl Guest for HttpGuest {
-    async fn handle(request: Request) -> Result<Response, ErrorCode> {
-        let router = Router::new().route("/", get(hello).post(echo));
-        omnia_wasi_http::serve(router, request).await
-    }
+pub fn router<P>(provider: P) -> Router
+where
+    P: Clone + Send + Sync + 'static,
+{
+    Router::new()
+        .route("/", get(hello))
+        .route("/", post(echo))
+        .with_state(Client::new("my-guest", provider))
 }
 
-async fn hello() -> HttpResult<Json<Value>> {
-    Ok(Json(json!({ "message": "hello from the guest" })))
+omnia_sdk::http!(router(WasiProvider));
+
+#[derive(Deserialize)]
+struct Hello {
+    name: Option<String>,
 }
 
-async fn echo(Json(body): Json<Value>) -> HttpResult<Json<Value>> {
-    Ok(Json(json!({ "echo": body })))
+#[derive(Serialize)]
+struct Reply {
+    message: String,
+}
+
+async fn hello<P>(input: Hello, _context: Context<P>) -> Result<Reply, Error> {
+    let target = input.name.as_deref().unwrap_or("from the guest");
+    Ok(Reply {
+        message: format!("hello {target}"),
+    })
+}
+
+async fn echo<P>(body: Value, _context: Context<P>) -> Result<Value, Error> {
+    Ok(json!({ "echo": body }))
 }
 ```
 
-Keep `wasip3` and `wit-bindgen` on the same versions the omnia release pins — a mismatch causes handler deadlocks (see [Troubleshooting](troubleshooting.md#outbound-http-or-spawned-work-inside-a-handler-deadlocks)).
+`omnia_sdk::http!` expands to the `wasi:http/incoming-handler` export (instrumented with an OpenTelemetry span) on `wasm32-wasip2` and to nothing on native targets. Because `omnia-sdk` re-exports `wasip3`, `wit-bindgen`, `omnia-wasi-http`, and `omnia-wasi-otel` internally for the macro expansion, your guest `Cargo.toml` does not need to pin `wasip3` or `wit-bindgen` directly (avoiding version-mismatch deadlocks — see [Troubleshooting](troubleshooting.md#outbound-http-or-spawned-work-inside-a-handler-deadlocks)).
 
 ## The host crate
 
@@ -103,9 +113,9 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-omnia = "0.36"
-omnia-wasi-http = "0.36"
-omnia-wasi-otel = "0.36"
+omnia = "0.38"
+omnia-wasi-http = "0.38"
+omnia-wasi-otel = "0.38"
 ```
 
 ```rust
@@ -121,7 +131,7 @@ omnia::runtime!({
 });
 ```
 
-Note the same `omnia-wasi-http` crate appears in both manifests: it compiles to guest bindings on `wasm32` and to the host implementation on native targets.
+`WasiHttp` serves incoming requests and provides outbound HTTP, while `WasiOtel` backs the `http_guest_handle` span emitted by `omnia_sdk::http!`.
 
 That dependency list is complete. `omnia` is the facade over the runtime — the crates behind it (`omnia-core`, `omnia-link`, `omnia-plugin`) are never named in a host's `Cargo.toml` or source, even when the deployment declares a `link:` or `plugin:` block or a hand-written `Backend`; everything the macro emits resolves through `omnia::…`, and it re-exports `anyhow` (`omnia::anyhow::Result`) and `futures` (`omnia::futures::future::BoxFuture`) for the `Backend`/`Wiring` and plugin-store signatures that speak them.
 
@@ -143,7 +153,7 @@ curl -X POST http://localhost:8080 -H "Content-Type: application/json" -d '{"hel
 
 ## Matching versions
 
-Keep every `omnia*` dependency on the same release line (all `0.35`, for example) — the WIT contracts must agree between guest bindings and host implementations. If the line you need is not yet on crates.io, point the dependencies at the git repository instead:
+Keep every `omnia*` dependency on the same release line (all `0.38`, for example) — the WIT contracts must agree between guest bindings and host implementations. If the line you need is not yet on crates.io, point the dependencies at the git repository instead:
 
 ```toml
 [patch.crates-io]

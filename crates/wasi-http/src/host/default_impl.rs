@@ -13,7 +13,7 @@ use futures::{Future, TryStreamExt};
 use http::{Request, Response};
 use http_body::{Body, Frame, SizeHint};
 use http_body_util::BodyExt;
-use omnia_core::Backend;
+use omnia_core::{Connect, FromEnv};
 use tokio::time::Sleep;
 use tracing::instrument;
 use wasmtime::component::ResourceTable;
@@ -21,7 +21,7 @@ use wasmtime_wasi_http::{
     Error as HttpError, RequestOptions, WasiBody, WasiHttpCtx, WasiHttpCtxView, WasiHttpHooks,
 };
 
-use super::client_cert;
+use super::{HttpBorrow, client_cert};
 
 pub type FutureResult<T> = Box<dyn Future<Output = Result<T, HttpError>> + Send>;
 
@@ -39,7 +39,7 @@ mod config {
 }
 pub use config::ConnectOptions;
 
-impl omnia_core::FromEnv for ConnectOptions {
+impl FromEnv for ConnectOptions {
     fn load_env() -> Result<Self> {
         Self::from_env().finalize().context("issue loading connection options")
     }
@@ -57,7 +57,7 @@ pub struct HttpDefault {
     ctx: WasiHttpCtx,
 }
 
-impl omnia_core::HttpBorrow for HttpDefault {
+impl HttpBorrow for HttpDefault {
     fn as_view<'a>(&'a mut self, table: &'a mut ResourceTable) -> WasiHttpCtxView<'a> {
         WasiHttpCtxView {
             hooks: &mut self.hooks,
@@ -76,7 +76,7 @@ fn ensure_crypto_provider() {
     }
 }
 
-impl Backend for HttpDefault {
+impl Connect for HttpDefault {
     type ConnectOptions = ConnectOptions;
 
     #[instrument]

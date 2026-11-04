@@ -4,7 +4,7 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_wasi_docstore::document_store::Document;
+use omnia_wasi_docstore::docstore::Document;
 use omnia_wasi_docstore::store;
 
 omnia_sdk::command!(scenario);

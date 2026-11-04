@@ -9,7 +9,7 @@ Every capability Omnia exposes to guests, its interface crate, the zero-config d
 | HTTP client/server | `wasi-http` | `WasiHttp` † | `HttpDefault` — hyper outbound client, axum inbound server (`HTTP_ADDR`, default `0.0.0.0:8080`) | — |
 | Key-value storage | `wasi-keyvalue` | `WasiKeyValue` | `KeyValueDefault` — in-memory cache | `omnia-redis`, `omnia-nats` |
 | Pub/sub messaging | `wasi-messaging` | `WasiMessaging` † | `MessagingDefault` — in-process broadcast | `omnia-kafka`, `omnia-nats` |
-| Blob storage | `wasi-blobstore` | `WasiBlobstore` | `BlobstoreDefault` — in-memory | `omnia-azure-blob`, `omnia-mongodb`, `omnia-nats` |
+| Blob storage | `wasi-blobstore` | `WasiBlobStore` | `BlobStoreDefault` — in-memory | `omnia-azure-blob`, `omnia-mongodb`, `omnia-nats` |
 | SQL | `wasi-sql` | `WasiSql` | `SqlDefault` — SQLite (`SQL_DATABASE`, default shared in-memory) | `omnia-postgres` |
 | Document store | `wasi-docstore` | `WasiDocStore` | `DocStoreDefault` — in-memory | `omnia-azure-table` |
 | Configuration | `wasi-config` | `WasiConfig` | `ConfigDefault` — host process environment snapshot | — |
@@ -25,7 +25,7 @@ Every capability Omnia exposes to guests, its interface crate, the zero-config d
 Notes:
 
 - Package names on crates.io carry the `omnia-` prefix (`omnia-wasi-keyvalue`, and so on); directory names in `crates/` drop it.
-- Most defaults are genuinely zero-config and in-memory. The exceptions: `HttpDefault` and `WebSocketDefault` bind real TCP ports, and `IdentityDefault` needs OAuth credentials. `ModelDefault` is a zero-config echo — it answers text/json completions with the prompt itself but rejects `format::schema`, so deployments bind a real backend and tests define inline canned backends. `wasi-vcs` ships no default at all: a repository is a tree on disk, so a deployment that links `WasiVcs` names a production backend, and a test scripts a `WasiVcsCtx` of its own.
+- Most defaults are genuinely zero-config and in-memory. The exceptions: `HttpDefault` and `WebSocketDefault` bind real TCP ports, and `IdentityDefault` needs OAuth credentials. `ModelDefault` is a zero-config echo — it answers text/json completions with the prompt itself but rejects `format::schema`, so deployments bind a real backend and tests define inline canned backends. `wasi-vcs` ships no default at all: a repository is a tree on disk, so a deployment that links `WasiVcs` names a production backend, and a test scripts a `VcsClient` of its own.
 - `omnia:vcs` operations name a repository or working copy as a `location` — a lent mount-root descriptor plus a relative subpath — and the host resolves it beneath the authorized mount before the backend runs: a descriptor that is not a mount root, a subpath that leaves the mount or starts at `/`, and a mutation beneath a read-only mount are refused with no backend call. The backend works through a `Place`, an open directory handle the host holds for the whole operation, never a path it would walk again.
 - Each interface crate compiles to guest bindings on `wasm32` and the host implementation on native targets, so guests and hosts depend on the same crate name.
 

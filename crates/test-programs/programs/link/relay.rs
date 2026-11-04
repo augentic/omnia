@@ -16,7 +16,9 @@ export!(Relay);
 impl exports::omnia_test::link::ops::Guest for Relay {
     fn ping(target: String, message: String) -> String {
         match message.parse::<u32>() {
-            Ok(hops) if hops > 0 => omnia_test::link::ops::ping(&target, &(hops - 1).to_string()),
+            Ok(hops) if hops > 0 => {
+                self::omnia_test::link::ops::ping(&target, &(hops - 1).to_string())
+            }
             _ => format!("{target} relayed to the end"),
         }
     }
@@ -24,7 +26,7 @@ impl exports::omnia_test::link::ops::Guest for Relay {
     async fn ping_async(target: String, message: String) -> String {
         match message.parse::<u32>() {
             Ok(hops) if hops > 0 => {
-                omnia_test::link::ops::ping_async(target, (hops - 1).to_string()).await
+                self::omnia_test::link::ops::ping_async(target, (hops - 1).to_string()).await
             }
             _ => format!("{target} relayed to the end"),
         }

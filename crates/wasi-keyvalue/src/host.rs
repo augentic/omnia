@@ -5,6 +5,7 @@ mod batch_impl;
 mod default_impl;
 mod resource;
 mod store_impl;
+mod ttl_impl;
 
 mod generated {
     pub use self::wasi::keyvalue::atomics::CasError;
@@ -30,13 +31,14 @@ mod generated {
 }
 
 use std::fmt::Debug;
-use std::sync::Arc;
 
+pub use default_impl::KeyValueDefault;
+pub use omnia_backend::keyvalue::{Bucket, KeyValueClient};
 pub use omnia_core::FutureResult;
 use omnia_core::{Host, Server, StoreView};
 use wasmtime::component::{HasData, Linker};
 
-pub use self::default_impl::KeyValueDefault;
+use self::generated::omnia::keyvalue::ttl;
 use self::generated::wasi::keyvalue::store::Error;
 use self::generated::wasi::keyvalue::{atomics, batch, store};
 pub use self::resource::*;
@@ -49,7 +51,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub struct WasiKeyValue;
 
 impl HasData for WasiKeyValue {
-    type Data<'a> = WasiKeyValueCtxView<'a>;
+    type Data<'a> = WasiKeyValueView<'a>;
 }
 
 impl<T> Host<T> for WasiKeyValue
@@ -59,20 +61,12 @@ where
     fn add_to_linker(linker: &mut Linker<T>) -> anyhow::Result<()> {
         store::add_to_linker::<_, Self>(linker, T::view)?;
         atomics::add_to_linker::<_, Self>(linker, T::view)?;
-        Ok(batch::add_to_linker::<_, Self>(linker, T::view)?)
+        batch::add_to_linker::<_, Self>(linker, T::view)?;
+        Ok(ttl::add_to_linker::<_, Self>(linker, T::view)?)
     }
 }
 
 impl<B> Server<B> for WasiKeyValue {}
-
-/// A trait which provides internal WASI Key-Value context.
-///
-/// This is implemented by the resource-specific provider of Key-Value
-/// functionality. For example, an in-memory store, or a Redis-backed store.
-pub trait WasiKeyValueCtx: Debug + Send + Sync + 'static {
-    /// Open a bucket.
-    fn open_bucket(&self, identifier: String) -> FutureResult<Arc<dyn Bucket>>;
-}
 
 omnia_core::host_error!(Error, Other);
 omnia_core::wasi_view!(KeyValue);

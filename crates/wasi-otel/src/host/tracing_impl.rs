@@ -15,7 +15,7 @@ use wasmtime::component::Accessor;
 
 use crate::host::generated::omnia::otel::tracing::{self as wasi, HostWithStore};
 use crate::host::types_impl::{datetime_nanos, decode_id};
-use crate::{WasiOtel, WasiOtelCtxView};
+use crate::{WasiOtel, WasiOtelView};
 
 impl<T> HostWithStore<T> for WasiOtel {
     async fn export(
@@ -55,13 +55,13 @@ impl<T> HostWithStore<T> for WasiOtel {
         let resource_spans = resource_spans(span_data, resource);
         let export = ExportTraceServiceRequest { resource_spans };
 
-        accessor.with(|mut store| store.get().ctx.export_traces(export)).await?;
+        accessor.with(|mut store| store.get().client.export_traces(export)).await?;
 
         Ok(())
     }
 }
 
-impl wasi::Host for WasiOtelCtxView<'_> {}
+impl wasi::Host for WasiOtelView<'_> {}
 
 pub fn resource_spans(
     spans: Vec<wasi::SpanData>, resource: &opentelemetry_sdk::Resource,
