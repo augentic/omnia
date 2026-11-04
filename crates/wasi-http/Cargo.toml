@@ -29,10 +29,11 @@ fromenv.workspace = true
 futures.workspace = true
 http-body-util.workspace = true
 hyper.workspace = true
+hyper-util = { workspace = true, features = ["server-auto", "tokio"] }
 omnia-core.workspace = true
 reqwest = { workspace = true, features = ["http2", "rustls-no-provider", "stream", "system-proxy"] }
 rustls.workspace = true
-tokio = { workspace = true, features = ["net", "rt", "sync", "time"] }
+tokio = { workspace = true, features = ["macros", "net", "rt", "sync", "time"] }
 wasmtime = { workspace = true, features = ["component-model-async"] }
 wasmtime-wasi-http.workspace = true
 x509-cert.workspace = true

@@ -311,6 +311,15 @@ async fn http_incoming_echo() {
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(collect(response).await, json!({ "message": "posted", "request_id": "req-post" }));
 
+    // http/2: authority and scheme arrive on the request URI with no `Host` header
+    let request = Request::get("http://echo.test/echo?message=h2")
+        .header("x-request-id", "req-h2")
+        .body(Full::new(Bytes::new()))
+        .expect("request");
+    let response = handler.handle(request).await.expect("handled");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(collect(response).await, json!({ "message": "h2", "request_id": "req-h2" }));
+
     runtime.shutdown();
 }
 
