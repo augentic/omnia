@@ -82,6 +82,7 @@ clippy (`make lint`) and nightly rustfmt (`make fmt`) are the style gate; beyond
 
 - Suppress a lint with `#[expect(lint, reason = "…")]` at the smallest scope, never `#[allow]`.
 - `<module>.rs` plus `<module>/<child>.rs`; `mod.rs` only under `tests/support/`.
+- Order a module top-down. Primary `pub` entry-point fns and top-level types come first. A type's inherent `impl`, trait `impl`s, and child types follow it immediately before the next top-level item. A private helper sits immediately below its first caller, and `#[cfg(test)] mod tests` sits last.
 - A fn over a type is that type's method, not a free fn taking it as its first argument, where the type's module declares the fn or the fn is a plain lookup or predicate on the type. A constructor is an associated fn. A policy `const` sits beside the type whose method reads it. Values several fns thread through every call become one struct whose methods they are. A fn stays free when it is pure over primitives and iterators, or when it is one module's rule applied to another module's type.
 
 Comments follow the conventions `std`, `serde`, and `tokio` converge on: docs state the observable contract for the crate's user, never the body's mechanics.

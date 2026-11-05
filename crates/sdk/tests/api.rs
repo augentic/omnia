@@ -10,7 +10,8 @@ use axum::response::{IntoResponse, Response};
 use http::header::CONTENT_TYPE;
 use http::{HeaderMap, HeaderValue, Method, Request, StatusCode};
 use omnia_sdk::api::http::{
-    HttpError, MethodFilter, RawRequest, delete, get, handle_with, patch, post, put,
+    HttpError, MethodFilter, RawRequest, body_input, delete, get, handle_with, patch, post, put,
+    query_input,
 };
 use omnia_sdk::api::{Client, Context, DecodeError, ErrorBody, Format, Metadata};
 use omnia_sdk::not_found;
@@ -814,4 +815,62 @@ async fn decoder_not_found() {
     let body: ErrorBody = serde_json::from_str(&body).expect("decode error body");
     assert_eq!(body.error, "not_found");
     assert_eq!(body.message, "no such item");
+}
+
+#[tokio::test]
+async fn query_and_body_input_match_verb_constructors() {
+    let custom = axum::Router::new()
+        .route(
+            "/echo/{name}",
+            handle_with(
+                MethodFilter::GET,
+                echo,
+                |raw: RawRequest<'_>| query_input(raw.path_params, raw.query),
+                |output| (StatusCode::OK, axum::Json(output)).into_response(),
+            )
+            .merge(handle_with(
+                MethodFilter::POST,
+                echo,
+                |raw: RawRequest<'_>| body_input(raw.path_params, raw.body),
+                |output| (StatusCode::OK, axum::Json(output)).into_response(),
+            )),
+        )
+        .with_state(Client::new("test", ()));
+
+    let get_req = || {
+        Request::builder()
+            .method(Method::GET)
+            .uri("/echo/alice?count=3")
+            .header("x-correlation-id", "corr-parity")
+            .body(Body::empty())
+            .expect("build get request")
+    };
+    let expected_get = send(get_req()).await;
+    let actual_get = {
+        let response = custom.clone().oneshot(get_req()).await.expect("custom get response");
+        let status = response.status();
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.expect("collect body");
+        let value = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
+        (status, value)
+    };
+    assert_eq!(actual_get, expected_get);
+
+    let post_req = || {
+        Request::builder()
+            .method(Method::POST)
+            .uri("/echo/bob")
+            .header(CONTENT_TYPE, "application/json")
+            .header("x-correlation-id", "corr-parity")
+            .body(Body::from(r#"{"count":5}"#))
+            .expect("build post request")
+    };
+    let expected_post = send(post_req()).await;
+    let actual_post = {
+        let response = custom.oneshot(post_req()).await.expect("custom post response");
+        let status = response.status();
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.expect("collect body");
+        let value = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
+        (status, value)
+    };
+    assert_eq!(actual_post, expected_post);
 }
