@@ -1,13 +1,13 @@
 //! Typed messaging routing over application handlers.
 //!
 //! A module registers its topics on a [`Routes`] of its own and the guest
-//! merges each into its one [`Router`] over a [`Client`], as `http::Routes`
-//! is merged before `with_state`; [`Routes::with_client`] closes merged
-//! routes as `with_state` does. A route decodes JSON unless
-//! registered with [`Routes::route_with`], and [`Routes::map_topics`]
-//! re-keys a module's topics for the deployment, a prefix say, as they are
-//! merged. [`export!`] binds the router fn as the guest's `wasi:messaging`
-//! handler.
+//! merges each (`Routes::from([..])` or [`Routes::merge`]) into its one
+//! [`Router`] over a [`Client`], closing the whole with
+//! [`Routes::with_state`] as [`http::Routes`](crate::api::http::Routes)
+//! does. A route decodes JSON unless registered with
+//! [`Routes::route_with`], and [`Routes::map`] re-keys a module's topics
+//! for the deployment, a prefix say, as they are merged. [`export!`] binds
+//! the router fn as the guest's `wasi:messaging` handler.
 
 use std::collections::BTreeMap;
 use std::error::Error;
@@ -145,9 +145,9 @@ where
 /// Exact-topic routes awaiting the client that dispatches them.
 ///
 /// Two routes for one topic are refused when they meet, whether through
-/// [`route`](Self::route), [`merge`](Self::merge), or
-/// [`map_topics`](Self::map_topics).
-#[must_use = "routes dispatch nothing until merged into a `Router`"]
+/// [`route`](Self::route), [`merge`](Self::merge), `Routes::from([..])`, or
+/// [`map`](Self::map).
+#[must_use = "routes dispatch nothing until closed into a `Router`"]
 pub struct Routes<P: Send + Sync + 'static> {
     routes: BTreeMap<String, Arc<dyn ErasedRoute<P>>>,
 }
@@ -216,14 +216,14 @@ impl<P: Send + Sync + 'static> Routes<P> {
     /// # Panics
     ///
     /// Panics when `map` yields an empty topic or one topic for two routes.
-    pub fn map_topics(self, mut map: impl FnMut(&str) -> String) -> Self {
+    pub fn map(self, mut map: impl FnMut(&str) -> String) -> Self {
         self.routes
             .into_iter()
             .fold(Self::new(), |routes, (topic, route)| routes.insert(map(&topic), route))
     }
 
     /// Close the routes over `client` as the [`Router`] that dispatches them.
-    pub const fn with_client(self, client: Client<P>) -> Router<P> {
+    pub const fn with_state(self, client: Client<P>) -> Router<P> {
         Router { client, routes: self }
     }
 
@@ -232,6 +232,12 @@ impl<P: Send + Sync + 'static> Routes<P> {
         assert!(!self.routes.contains_key(&topic), "duplicate messaging topic `{topic}`");
         self.routes.insert(topic, route);
         self
+    }
+}
+
+impl<P: Send + Sync + 'static, const N: usize> From<[Self; N]> for Routes<P> {
+    fn from(parts: [Self; N]) -> Self {
+        parts.into_iter().reduce(Self::merge).unwrap_or_default()
     }
 }
 

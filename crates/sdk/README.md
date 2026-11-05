@@ -69,7 +69,7 @@ pub async fn messaging_router<P: StateStore + Send + Sync + 'static>(provider: P
 messaging::export!(messaging_router);
 ```
 
-`route(topic, handler)` decodes JSON and acknowledges successful output; `route_with(topic, handler, decode)` takes a decoder `Fn(&Delivery) -> Result<I, DecodeError>` over the whole delivery for any other wire format. A module that owns topics registers them on a `messaging::Routes` of its own, with no client, and the root merges each into the one `Router` (`Router::merge`, or `Routes::with_client` once merged, as `http::Routes<P>` is closed into `http::Router` by `with_state`); `Routes::map_topics` rewrites every topic once, for an environment prefix or a namespace. `Client::call(handler, input, &metadata)` invokes a `Handler` directly inside the same `handler` span.
+`route(topic, handler)` decodes JSON and acknowledges successful output; `route_with(topic, handler, decode)` takes a decoder `Fn(&Delivery) -> Result<I, DecodeError>` over the whole delivery for any other wire format. A module that owns topics registers them on a `messaging::Routes` of its own, with no client, and the root merges each (`Routes::from([..])` or `Router::merge`) and closes the whole into the one `Router` with `Routes::with_state`, as `http::Routes<P>` is merged (`http::Routes::from([..])`) and closed into `http::Router` by `with_state`; `Routes::map` rewrites every topic once, for an environment prefix or a namespace. `Client::call(handler, input, &metadata)` invokes a `Handler` directly inside the same `handler` span.
 
 ### Command-mode guests
 

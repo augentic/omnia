@@ -81,7 +81,7 @@ async fn messaging_merged_routes() {
     let created = Routes::new().route("events.created", echo);
     let deleted = Routes::new().route("events.deleted", echo);
     let router = MessagingRouter::new(Client::new(()))
-        .merge(created.merge(deleted))
+        .merge(Routes::from([created, deleted]))
         .route("events.updated", echo);
 
     for topic in ["events.created", "events.deleted", "events.updated"] {
@@ -167,12 +167,12 @@ async fn tenant_metadata() {
 }
 
 #[tokio::test]
-async fn map_topics_prefixes() {
+async fn map_prefixes() {
     let prefixed = Routes::<()>::new()
         .route("created", echo)
         .route("deleted", echo)
-        .map_topics(|topic| format!("dev-{topic}"));
-    let router = prefixed.with_client(Client::new(()));
+        .map(|topic| format!("dev-{topic}"));
+    let router = prefixed.with_state(Client::new(()));
 
     assert_eq!(router.topics().collect::<Vec<_>>(), ["dev-created", "dev-deleted"]);
     router
@@ -187,7 +187,6 @@ async fn map_topics_prefixes() {
 
 #[test]
 #[should_panic(expected = "duplicate messaging topic `same`")]
-fn map_topics_collision() {
-    let _routes =
-        Routes::<()>::new().route("a", echo).route("b", echo).map_topics(|_| "same".to_string());
+fn map_collision() {
+    let _routes = Routes::<()>::new().route("a", echo).route("b", echo).map(|_| "same".to_string());
 }

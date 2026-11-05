@@ -5,12 +5,12 @@ Unreleased
 ### Added
 
 - `omnia_sdk::api::http::{Router, Routes}`, the finished `axum::Router`
-  and the `axum::Router` over a provider-owning `Client<P>` a module's
-  routes are before `with_state`, so a module writes `http::Routes<P>`
-  alongside `messaging::Routes<P>` and the guest closes them into
-  `http::Router` and `messaging::Router<P>`, and
-  `messaging::Routes::with_client(client)`, which closes merged routes as
-  `with_state(client)` closes merged HTTP routes.
+  and the routes over a provider-owning `Client<P>` a module's routes
+  are before `with_state`, `From<[Routes<P>; N]>` on both `http::Routes`
+  and `messaging::Routes`, and `messaging::Routes::with_state(client)`
+  (with `map_topics` shortened to `messaging::Routes::map`), so a module
+  writes `http::Routes<P>` alongside `messaging::Routes<P>` and a guest
+  merges and closes both the same way (`Routes::from([..]).with_state(client)`).
   `messaging::Router::new(client).merge(routes)` is unchanged.
 
 ---

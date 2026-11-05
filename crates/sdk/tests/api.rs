@@ -59,11 +59,11 @@ async fn echo_route<P: Send + Sync + 'static>(
 }
 
 fn routes<P: Send + Sync + 'static>() -> Routes<P> {
-    Routes::new().route("/echo", get(echo_route))
+    Routes::from([Routes::new().route("/echo", get(echo_route))])
 }
 
 fn router() -> Router {
-    routes().layer(from_fn(trace)).with_state(Client::new(()))
+    routes().with_state(Client::new(())).layer(from_fn(trace))
 }
 
 async fn send(router: axum::Router, request: Request<Body>) -> (StatusCode, serde_json::Value) {
