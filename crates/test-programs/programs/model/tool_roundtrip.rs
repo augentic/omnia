@@ -6,7 +6,7 @@ use omnia_sdk::WasiProvider;
 use omnia_sdk::model::{Model as _, Request, ToolCall};
 use test_programs::{lookup, user};
 
-omnia_sdk::command!(scenario);
+omnia_sdk::export!(command: scenario);
 
 async fn scenario() {
     let request = Request::builder().messages(vec![user("hi")]).tools(vec![lookup()]).build();

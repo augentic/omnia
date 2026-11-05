@@ -48,6 +48,6 @@ wasi-keyvalue/
 | Crate | Purpose |
 | ----- | ------- |
 | `omnia` | Runtime core: engine, CLI, deployment, registry, dispatch, telemetry |
-| `omnia-sdk` | Guest SDK: `Handler`, `Client`, `Context`, the HTTP and messaging routers, the command façade (`parse`, `Command`, `Response`, `command!`), errors with their status/exit map, the `TableStore` and `DocumentStore` capabilities, and MCP. Features: `sql`, `docstore`, and `http` (default), `command` |
+| `omnia-sdk` | Guest SDK: `Handler`, `Client`, `Context`, the HTTP and messaging routers, the command façade (`parse`, `Command`, `Response`), the `export!` macro, errors with their status/exit map, the `TableStore` and `DocumentStore` capabilities, and MCP. Features: `sql`, `docstore`, and `http` (default), `command` |
 | `omnia-guest-macros` | `#[instrument]` attribute |
 | `omnia-host-macros` | `runtime!` macro (use via `omnia::runtime!`) |

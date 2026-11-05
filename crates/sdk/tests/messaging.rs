@@ -1,10 +1,9 @@
 //! Exact-topic messaging routing contracts.
 
 use std::future::{Ready, ready};
+use std::sync::{Arc, Mutex};
 
-use omnia_sdk::api::messaging::{
-    Delivery, DeliveryError, Router as MessagingRouter, Routes, consume, consume_with,
-};
+use omnia_sdk::api::messaging::{Delivery, DeliveryError, Router as MessagingRouter, Routes};
 use omnia_sdk::api::{Client, Context, DecodeError};
 use serde::{Deserialize, Serialize};
 
@@ -18,7 +17,6 @@ struct EchoInput {
 struct EchoOutput {
     name: String,
     count: u32,
-    owner: String,
     correlation_id: Option<String>,
 }
 
@@ -28,7 +26,6 @@ fn echo<P: Send + Sync + 'static>(
     ready(Ok(EchoOutput {
         name: input.name,
         count: input.count.unwrap_or(1),
-        owner: context.owner().to_owned(),
         correlation_id: context.metadata.correlation_id,
     }))
 }
@@ -38,14 +35,16 @@ fn delivery(topic: Option<&str>, payload: &[u8]) -> Delivery {
         topic: topic.map(str::to_owned),
         payload: payload.to_vec(),
         content_type: Some("application/json".to_string()),
-        metadata: vec![("correlation-id".to_string(), "delivery-1".to_string())],
+        metadata: vec![
+            ("correlation-id".to_string(), "delivery-1".to_string()),
+            ("tenant".to_string(), "acme".to_string()),
+        ],
     }
 }
 
 #[tokio::test]
 async fn messaging_exact_topic() {
-    let router =
-        MessagingRouter::new(Client::new("messages", ())).route("events.created", consume(echo));
+    let router = MessagingRouter::new(Client::new(())).route("events.created", echo);
 
     router
         .handle(delivery(Some("events.created"), br#"{"name":"message","count":2}"#))
@@ -59,7 +58,7 @@ async fn messaging_exact_topic() {
 
 #[tokio::test]
 async fn messaging_failures() {
-    let router = MessagingRouter::new(Client::new("messages", ())).route("events", consume(echo));
+    let router = MessagingRouter::new(Client::new(())).route("events", echo);
 
     assert_eq!(
         router.handle(delivery(None, br#"{"name":"message"}"#)).await,
@@ -74,18 +73,16 @@ async fn messaging_failures() {
 #[test]
 #[should_panic(expected = "duplicate messaging topic")]
 fn messaging_duplicate_topic() {
-    let _router = MessagingRouter::new(Client::new("messages", ()))
-        .route("events", consume(echo))
-        .route("events", consume(echo));
+    let _router = MessagingRouter::new(Client::new(())).route("events", echo).route("events", echo);
 }
 
 #[tokio::test]
 async fn messaging_merged_routes() {
-    let created = Routes::new().route("events.created", consume(echo));
-    let deleted = Routes::new().route("events.deleted", consume(echo));
-    let router = MessagingRouter::new(Client::new("messages", ()))
+    let created = Routes::new().route("events.created", echo);
+    let deleted = Routes::new().route("events.deleted", echo);
+    let router = MessagingRouter::new(Client::new(()))
         .merge(created.merge(deleted))
-        .route("events.updated", consume(echo));
+        .route("events.updated", echo);
 
     for topic in ["events.created", "events.deleted", "events.updated"] {
         router
@@ -106,17 +103,16 @@ async fn messaging_merged_routes() {
 #[test]
 #[should_panic(expected = "duplicate messaging topic `events`")]
 fn messaging_duplicate_topic_across_routes() {
-    let _routes = Routes::<()>::new()
-        .route("events", consume(echo))
-        .merge(Routes::new().route("events", consume(echo)));
+    let _routes =
+        Routes::<()>::new().route("events", echo).merge(Routes::new().route("events", echo));
 }
 
 #[test]
 #[should_panic(expected = "duplicate messaging topic `events`")]
 fn messaging_duplicate_topic_merged_into_router() {
-    let _router = MessagingRouter::new(Client::new("messages", ()))
-        .route("events", consume(echo))
-        .merge(Routes::new().route("events", consume(echo)));
+    let _router = MessagingRouter::new(Client::new(()))
+        .route("events", echo)
+        .merge(Routes::new().route("events", echo));
 }
 
 #[derive(Debug)]
@@ -131,20 +127,67 @@ fn raw_text<P: Send + Sync + 'static>(
 }
 
 #[tokio::test]
-async fn consume_with_raw_payload() {
-    let router = MessagingRouter::new(Client::new("messages", ())).route(
+async fn route_with_raw_payload() {
+    let router = MessagingRouter::new(Client::new(())).route_with(
         "events.raw",
-        consume_with(raw_text, |delivery: &Delivery| {
+        raw_text,
+        |delivery: &Delivery| {
             std::str::from_utf8(&delivery.payload)
                 .map(|text| RawText {
                     text: text.to_owned(),
                 })
                 .map_err(|error| DecodeError::new(format!("payload is not utf-8: {error}")))
-        }),
+        },
     );
 
     router
         .handle(delivery(Some("events.raw"), b"not-json"))
         .await
-        .expect("raw decoder handles a payload JSON consume rejects");
+        .expect("the raw decoder handles a payload the JSON route rejects");
+}
+
+#[tokio::test]
+async fn tenant_metadata() {
+    let seen = Arc::new(Mutex::new(None));
+    let record = {
+        let seen = Arc::clone(&seen);
+        move |_input: EchoInput, context: Context<()>| {
+            *seen.lock().expect("record") = context.metadata.tenant;
+            ready(Ok::<(), omnia_sdk::Error>(()))
+        }
+    };
+    let router = MessagingRouter::new(Client::new(())).route("events", record);
+
+    router
+        .handle(delivery(Some("events"), br#"{"name":"message"}"#))
+        .await
+        .expect("the route handles the delivery");
+
+    assert_eq!(seen.lock().expect("seen").as_deref(), Some("acme"));
+}
+
+#[tokio::test]
+async fn map_topics_prefixes() {
+    let prefixed = Routes::<()>::new()
+        .route("created", echo)
+        .route("deleted", echo)
+        .map_topics(|topic| format!("dev-{topic}"));
+    let router = MessagingRouter::new(Client::new(())).merge(prefixed);
+
+    assert_eq!(router.topics().collect::<Vec<_>>(), ["dev-created", "dev-deleted"]);
+    router
+        .handle(delivery(Some("dev-created"), br#"{"name":"message"}"#))
+        .await
+        .expect("the prefixed route handles the delivery");
+    assert_eq!(
+        router.handle(delivery(Some("created"), br#"{"name":"message"}"#)).await,
+        Err(DeliveryError::UnhandledTopic("created".to_string()))
+    );
+}
+
+#[test]
+#[should_panic(expected = "duplicate messaging topic `same`")]
+fn map_topics_collision() {
+    let _routes =
+        Routes::<()>::new().route("a", echo).route("b", echo).map_topics(|_| "same".to_string());
 }

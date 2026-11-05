@@ -17,7 +17,7 @@ use omnia_sdk::plugins::{Location, Plugins as _};
 
 use self::omnia_test::link::ops;
 
-omnia_sdk::command!(scenario);
+omnia_sdk::export!(command: scenario);
 
 async fn scenario() {
     let noseam = Location::Declared("noseam".to_owned());

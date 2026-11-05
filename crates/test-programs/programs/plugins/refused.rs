@@ -15,7 +15,7 @@ wit_bindgen::generate!({
 
 use omnia::plugins::loader::{self, Error, Location, RegistryRef};
 
-omnia_sdk::command!(scenario);
+omnia_sdk::export!(command: scenario);
 
 // `declared`, `path`, `registry`, or `registry@<endpoint>` — the last naming
 // the registry the load fetches from.

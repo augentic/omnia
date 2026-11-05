@@ -13,7 +13,7 @@ use axum::routing::{delete, get};
 use axum::{Json, Router};
 use chrono::Utc;
 use omnia_sdk::sql::{DataType, Row};
-use omnia_sdk::{HttpResult, TableStore, WasiProvider};
+use omnia_sdk::{TableStore, WasiProvider};
 use omnia_wasi_sql::readwrite;
 use omnia_wasi_sql::types::{Connection, Statement};
 use serde::{Deserialize, Serialize};
@@ -37,7 +37,7 @@ impl Guest for Http {
 
 #[axum::debug_handler]
 #[omnia_wasi_otel::instrument]
-async fn list_agencies() -> HttpResult<Json<Value>> {
+async fn list_agencies() -> omnia_sdk::Result<Json<Value>> {
     ensure_schema().await?;
 
     let rows = WasiProvider
@@ -58,7 +58,7 @@ async fn list_agencies() -> HttpResult<Json<Value>> {
 
 #[axum::debug_handler]
 #[omnia_wasi_otel::instrument]
-async fn create_agency(Json(req): Json<CreateAgencyRequest>) -> HttpResult<Json<Value>> {
+async fn create_agency(Json(req): Json<CreateAgencyRequest>) -> omnia_sdk::Result<Json<Value>> {
     ensure_schema().await?;
 
     let agency = Agency {
@@ -92,7 +92,7 @@ async fn create_agency(Json(req): Json<CreateAgencyRequest>) -> HttpResult<Json<
 // zero affected rows means it did not exist
 #[axum::debug_handler]
 #[omnia_wasi_otel::instrument]
-async fn delete_agency(Path(id): Path<i64>) -> HttpResult<Json<Value>> {
+async fn delete_agency(Path(id): Path<i64>) -> omnia_sdk::Result<Json<Value>> {
     ensure_schema().await?;
 
     let rows_affected = WasiProvider

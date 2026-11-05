@@ -11,7 +11,6 @@
 use anyhow::anyhow;
 use axum::routing::post;
 use axum::{Json, Router};
-use omnia_sdk::HttpResult;
 use omnia_wasi_websocket::client;
 use omnia_wasi_websocket::types::{Client, Error, Event};
 use serde_json::{Value, json};
@@ -29,7 +28,7 @@ impl http::handler::Guest for HttpGuest {
 }
 
 #[axum::debug_handler]
-async fn send_message(message: String) -> HttpResult<Json<Value>> {
+async fn send_message(message: String) -> omnia_sdk::Result<Json<Value>> {
     let client =
         Client::connect("default".to_string()).await.map_err(|e| anyhow!("connecting: {e}"))?;
     let event = Event::new(&message.into_bytes());

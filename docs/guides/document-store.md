@@ -20,7 +20,7 @@ use omnia_sdk::{DocumentStore, WasiProvider};
 A `Document` is an id plus raw JSON bytes — serialize your own types into `data`:
 
 ```rust,noplayground
-async fn create_stop(Json(req): Json<CreateStopRequest>) -> HttpResult<Json<Value>> {
+async fn create_stop(Json(req): Json<CreateStopRequest>) -> omnia_sdk::Result<Json<Value>> {
     let doc = Document {
         id: req.id.clone(),
         data: serde_json::to_vec(&req.stop).context("serializing stop")?,

@@ -66,13 +66,13 @@ use omnia_sdk::{Error, WasiProvider};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-pub fn router<P: Send + Sync + 'static>(provider: P) -> Router {
+pub fn http_router<P: Send + Sync + 'static>(provider: P) -> Router {
     Router::new()
         .route("/", get(hello).post(echo))
-        .with_state(Client::new("my-guest", provider))
+        .with_state(Client::new(provider))
 }
 
-omnia_sdk::http!(router(WasiProvider));
+omnia_sdk::export!(http: http_router(WasiProvider));
 
 #[derive(Deserialize)]
 struct Hello {
@@ -87,7 +87,7 @@ struct Reply {
 async fn hello<P: Send + Sync + 'static>(
     context: Context<P>, Query(input): Query<Hello>,
 ) -> Result<Json<Reply>, Error> {
-    let target = input.name.as_deref().unwrap_or(context.owner());
+    let target = input.name.or(context.metadata.tenant).unwrap_or_else(|| "world".to_string());
     Ok(Json(Reply {
         message: format!("hello {target}"),
     }))
@@ -98,9 +98,9 @@ async fn echo(Json(body): Json<Value>) -> Result<Json<Value>, Error> {
 }
 ```
 
-The handlers are plain axum handlers. `Context<P>` is an extractor over the `Client` in the router state: it carries the owner, the provider the handler's capability bounds name, and the request's metadata (`x-request-id` and friends). A handler that needs none of that, like `echo`, takes only axum's own extractors. An `omnia_sdk::Error` answers the JSON `{"error","message"}` envelope at its status.
+The handlers are plain axum handlers. `Context<P>` is an extractor over the `Client` in the router state: it carries the provider the handler's capability bounds name and the request's metadata (`x-request-id`, `x-tenant`, and friends). A handler that needs none of that, like `echo`, takes only axum's own extractors. An `omnia_sdk::Error` answers the JSON `{"error","message"}` envelope at its status.
 
-`omnia_sdk::http!` expands to the `wasi:http/incoming-handler` export (instrumented with an OpenTelemetry span) on `wasm32-wasip2` and to nothing on native targets. Because `omnia-sdk` re-exports `wasip3`, `wit-bindgen`, `omnia-wasi-http`, and `omnia-wasi-otel` internally for the macro expansion, your guest `Cargo.toml` does not need to pin `wasip3` or `wit-bindgen` directly (avoiding version-mismatch deadlocks — see [Troubleshooting](troubleshooting.md#outbound-http-or-spawned-work-inside-a-handler-deadlocks)).
+`omnia_sdk::export!(http: ..)` expands to the `wasi:http/incoming-handler` export (instrumented with an OpenTelemetry span) on `wasm32-wasip2` and to nothing on native targets; a guest that also consumes messages or runs as a command adds an `export!(messaging: ..)` or `export!(command: ..)` beside it. Because `omnia-sdk` re-exports `wasip3`, `wit-bindgen`, `omnia-wasi-http`, and `omnia-wasi-otel` internally for the macro expansion, your guest `Cargo.toml` does not need to pin `wasip3` or `wit-bindgen` directly (avoiding version-mismatch deadlocks — see [Troubleshooting](troubleshooting.md#outbound-http-or-spawned-work-inside-a-handler-deadlocks)).
 
 ## The host crate
 
@@ -132,7 +132,7 @@ omnia::runtime!({
 });
 ```
 
-`WasiHttp` serves incoming requests and provides outbound HTTP, while `WasiOtel` backs the `http_guest_handle` span emitted by `omnia_sdk::http!`.
+`WasiHttp` serves incoming requests and provides outbound HTTP, while `WasiOtel` backs the `http_guest_handle` span emitted by the HTTP export.
 
 That dependency list is complete. `omnia` is the facade over the runtime — the crates behind it (`omnia-core`, `omnia-link`, `omnia-plugin`) are never named in a host's `Cargo.toml` or source, even when the deployment declares a `link:` or `plugin:` block or a hand-written `Backend`; everything the macro emits resolves through `omnia::…`, and it re-exports `anyhow` (`omnia::anyhow::Result`) and `futures` (`omnia::futures::future::BoxFuture`) for the `Backend`/`Wiring` and plugin-store signatures that speak them.
 

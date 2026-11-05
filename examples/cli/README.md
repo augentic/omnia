@@ -2,8 +2,8 @@
 
 Demonstrates a `wasi:cli/command` guest on the command façade: `parse`
 classifies clap argv, `Command::call` projects each verb (decode →
-`Client::call` → encode) onto a `Response`, and `command!` binds `main` as
-the `wasi:cli/run` export.
+`Client::call` → encode) onto a `Response`, and `export!(command: main)`
+binds `main` as the `wasi:cli/run` export.
 
 ## Quick Start
 

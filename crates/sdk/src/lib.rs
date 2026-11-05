@@ -58,7 +58,5 @@ pub use {
     omnia_wasi_messaging, omnia_wasi_otel, omnia_wasi_vault, omnia_wasi_vcs, wasip3, wit_bindgen,
 };
 
-#[cfg(feature = "http")]
-pub use crate::api::http::{HttpError, HttpResult};
 pub use crate::capabilities::*;
 pub use crate::error::*;

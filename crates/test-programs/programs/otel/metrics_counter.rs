@@ -1,11 +1,11 @@
 //! A `monotonic_counter.*` tracing field reaches the host as a metric:
-//! `command!` owns the telemetry lifecycle, so two increments accumulate in
+//! `export!(command: ..)` owns the telemetry lifecycle, so two increments accumulate in
 //! the guest's `MetricsLayer` and the flush at the end of the run exports a
 //! single `hits` sum.
 
 #![cfg(target_arch = "wasm32")]
 
-omnia_sdk::command!(scenario);
+omnia_sdk::export!(command: scenario);
 
 async fn scenario() {
     // ERROR-level: the events must pass the guest's default `EnvFilter` (the

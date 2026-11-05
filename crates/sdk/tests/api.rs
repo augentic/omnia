@@ -10,12 +10,11 @@ use axum::Json;
 use axum::body::{Body, to_bytes};
 use axum::extract::{Path, Query};
 use axum::middleware::from_fn;
-use axum::response::IntoResponse;
 use axum::routing::get;
 use http::header::CONTENT_TYPE;
-use http::{HeaderValue, Request, StatusCode};
-use omnia_sdk::api::http::{HttpError, HttpResult, trace};
-use omnia_sdk::api::{Client, Context, DecodeError, ErrorBody, Format, Metadata};
+use http::{Request, StatusCode};
+use omnia_sdk::api::http::trace;
+use omnia_sdk::api::{Client, Context, ErrorBody, Format, Metadata};
 use omnia_sdk::not_found;
 use serde::{Deserialize, Serialize};
 use tower::ServiceExt as _;
@@ -34,10 +33,10 @@ struct EchoInput {
 struct EchoOutput {
     name: String,
     count: u32,
-    owner: String,
     request_id: Option<String>,
     correlation_id: Option<String>,
     causation_id: Option<String>,
+    tenant: Option<String>,
 }
 
 fn echo<P: Send + Sync + 'static>(
@@ -46,10 +45,10 @@ fn echo<P: Send + Sync + 'static>(
     ready(Ok(EchoOutput {
         name: input.name,
         count: input.count.unwrap_or(1),
-        owner: context.owner().to_owned(),
         request_id: context.metadata.request_id,
         correlation_id: context.metadata.correlation_id,
         causation_id: context.metadata.causation_id,
+        tenant: context.metadata.tenant,
     }))
 }
 
@@ -63,7 +62,7 @@ fn router() -> axum::Router {
     axum::Router::new()
         .route("/echo", get(echo_route))
         .layer(from_fn(trace))
-        .with_state(Client::new("test", ()))
+        .with_state(Client::new(()))
 }
 
 async fn send(router: axum::Router, request: Request<Body>) -> (StatusCode, serde_json::Value) {
@@ -87,9 +86,10 @@ async fn send_raw(
 
 #[tokio::test]
 async fn invoke() {
-    let client = Client::new("tenant", ());
+    let client = Client::new(());
     let metadata = Metadata {
         correlation_id: Some("call-1".to_string()),
+        tenant: Some("acme".to_string()),
         ..Metadata::default()
     };
 
@@ -105,13 +105,13 @@ async fn invoke() {
         .await
         .expect("handler succeeds");
 
-    assert_eq!(output.owner, "tenant");
     assert_eq!(output.correlation_id.as_deref(), Some("call-1"));
+    assert_eq!(output.tenant.as_deref(), Some("acme"));
 }
 
 #[tokio::test]
 async fn invoke_direct() {
-    let context = Context::new("tenant", (), Metadata::default());
+    let context = Context::new((), Metadata::default());
 
     let output = echo(
         EchoInput {
@@ -123,7 +123,7 @@ async fn invoke_direct() {
     .await
     .expect("handler succeeds");
 
-    assert_eq!(output.owner, "tenant");
+    assert_eq!(output.name, "direct");
     assert_eq!(output.count, 2);
 }
 
@@ -133,6 +133,7 @@ async fn context_extractor() {
         .header("x-request-id", "req-1")
         .header("x-correlation-id", "corr-1")
         .header("x-causation-id", "cause-1")
+        .header("x-tenant", "acme")
         .body(Body::empty())
         .expect("build request");
     let (status, value) = send(router(), request).await;
@@ -140,17 +141,16 @@ async fn context_extractor() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(value["name"], "plan");
     assert_eq!(value["count"], 3);
-    assert_eq!(value["owner"], "test");
     assert_eq!(value["request_id"], "req-1");
     assert_eq!(value["correlation_id"], "corr-1");
     assert_eq!(value["causation_id"], "cause-1");
+    assert_eq!(value["tenant"], "acme");
 }
 
 // The extractor stands alone: without the `trace` layer it reads the headers itself.
 #[tokio::test]
 async fn context_extractor_without_trace() {
-    let router =
-        axum::Router::new().route("/echo", get(echo_route)).with_state(Client::new("test", ()));
+    let router = axum::Router::new().route("/echo", get(echo_route)).with_state(Client::new(()));
     let request = Request::get("/echo?name=plan")
         .header("x-request-id", "req-1")
         .body(Body::empty())
@@ -186,7 +186,7 @@ async fn missing_request_id() {
     let router = axum::Router::new()
         .route("/ids", get(ids))
         .layer(from_fn(trace))
-        .with_state(Client::new("test", ()));
+        .with_state(Client::new(()));
     let request = Request::get("/ids").body(Body::empty()).expect("build request");
     let (status, value) = send(router, request).await;
 
@@ -273,12 +273,9 @@ async fn context_shares_provider() {
     let router = axum::Router::new()
         .route("/first", get(observe))
         .route("/second", get(observe))
-        .with_state(Client::new(
-            "test",
-            StatefulProvider {
-                calls: AtomicUsize::new(0),
-            },
-        ));
+        .with_state(Client::new(StatefulProvider {
+            calls: AtomicUsize::new(0),
+        }));
 
     let (_, first) =
         send(router.clone(), Request::get("/first").body(Body::empty()).expect("build request"))
@@ -297,8 +294,7 @@ async fn lookup(Path(id): Path<String>) -> Result<Json<String>, omnia_sdk::Error
 
 #[tokio::test]
 async fn error_body_json() {
-    let router =
-        axum::Router::new().route("/items/{id}", get(lookup)).with_state(Client::new("test", ()));
+    let router = axum::Router::new().route("/items/{id}", get(lookup)).with_state(Client::new(()));
     let request = Request::get("/items/42").body(Body::empty()).expect("build request");
     let (status, content_type, body) = send_raw(router, request).await;
 
@@ -310,14 +306,14 @@ async fn error_body_json() {
     );
 }
 
-async fn save() -> HttpResult<Json<serde_json::Value>> {
+async fn save() -> Result<Json<serde_json::Value>, omnia_sdk::Error> {
     Err(anyhow::anyhow!("disk full").context("could not save"))?;
     Ok(Json(serde_json::json!({ "saved": true })))
 }
 
 #[tokio::test]
 async fn anyhow_error_body() {
-    let router = axum::Router::new().route("/save", get(save)).with_state(Client::new("test", ()));
+    let router = axum::Router::new().route("/save", get(save)).with_state(Client::new(()));
     let request = Request::get("/save").body(Body::empty()).expect("build request");
     let (status, content_type, body) = send_raw(router, request).await;
 
@@ -327,37 +323,6 @@ async fn anyhow_error_body() {
     assert_eq!(body.error, "server_error");
     assert!(body.message.contains("could not save"), "the context is kept: {}", body.message);
     assert!(body.message.contains("disk full"), "the cause is kept: {}", body.message);
-}
-
-#[tokio::test]
-async fn decode_error_body() {
-    let response = HttpError::from(DecodeError::new("missing field `name`")).into_response();
-
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    assert_eq!(response.headers()[CONTENT_TYPE], "application/json");
-    let bytes = to_bytes(response.into_body(), usize::MAX).await.expect("collect body");
-    assert_eq!(
-        serde_json::from_slice::<serde_json::Value>(&bytes).expect("decode error body"),
-        serde_json::json!({ "error": "invalid_request", "message": "missing field `name`" })
-    );
-}
-
-#[tokio::test]
-async fn http_error_bodies() {
-    let text = HttpError::new(StatusCode::CONFLICT, "busy").into_response();
-    assert_eq!(text.status(), StatusCode::CONFLICT);
-    assert_eq!(text.headers()[CONTENT_TYPE], "text/plain; charset=utf-8");
-    assert_eq!(to_bytes(text.into_body(), usize::MAX).await.expect("collect body"), "busy");
-
-    let xml = HttpError::with_body(
-        StatusCode::BAD_REQUEST,
-        HeaderValue::from_static("text/xml"),
-        b"<fault/>".to_vec(),
-    )
-    .into_response();
-    assert_eq!(xml.status(), StatusCode::BAD_REQUEST);
-    assert_eq!(xml.headers()[CONTENT_TYPE], "text/xml");
-    assert_eq!(to_bytes(xml.into_body(), usize::MAX).await.expect("collect body"), "<fault/>");
 }
 
 #[derive(Debug, Serialize)]
@@ -391,23 +356,6 @@ fn format_encode() {
     );
 }
 
-#[tokio::test]
-async fn encoded_into_response() {
-    let summary = Summary {
-        name: "widget".to_string(),
-        count: 3,
-    };
-
-    let response = Format::Text.encode(&summary, render_summary).into_response();
-
-    assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(response.headers()[CONTENT_TYPE], "text/plain; charset=utf-8");
-    assert_eq!(
-        to_bytes(response.into_body(), usize::MAX).await.expect("collect body"),
-        "widget x3"
-    );
-}
-
 #[test]
 fn from_lookup_mints() {
     let first = Metadata::from_lookup(|_| None);
@@ -417,6 +365,7 @@ fn from_lookup_mints() {
     assert!(is_minted_id(request_id));
     assert_eq!(first.correlation_id, first.request_id);
     assert_eq!(first.causation_id, None);
+    assert_eq!(first.tenant, None);
     assert_ne!(first.request_id, second.request_id);
     assert_eq!(Metadata::default().request_id, None);
 }
@@ -427,12 +376,14 @@ fn from_lookup_reads() {
         "request-id" => Some("req-1".to_owned()),
         "correlation-id" => Some("corr-1".to_owned()),
         "causation-id" => Some("cause-1".to_owned()),
+        "tenant" => Some("acme".to_owned()),
         _ => None,
     });
 
     assert_eq!(metadata.request_id.as_deref(), Some("req-1"));
     assert_eq!(metadata.correlation_id.as_deref(), Some("corr-1"));
     assert_eq!(metadata.causation_id.as_deref(), Some("cause-1"));
+    assert_eq!(metadata.tenant.as_deref(), Some("acme"));
     assert_eq!(metadata.deadline, None);
 }
 

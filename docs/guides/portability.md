@@ -65,17 +65,17 @@ Domain handler crates depend on `omnia-sdk` alone and expose transport routers g
 
 ### 1. Standard WASI component (`WasiProvider`)
 
-In the guest root crate (`src/lib.rs`), wire the HTTP and messaging routers to `omnia_sdk::WasiProvider` with `omnia_sdk::http!` and `omnia_sdk::messaging!`:
+In the guest root crate (`src/lib.rs`), wire the HTTP and messaging routers to `omnia_sdk::WasiProvider` with one `omnia_sdk::export!` per transport:
 
 ```rust,ignore
-pub use self::messaging::messaging_router;
-pub use self::routes::router;
+pub fn http_router<P: Capabilities>(provider: P) -> axum::Router { /* .. */ }
+pub async fn messaging_router<P: Capabilities>(provider: P) -> messaging::Router<P> { /* .. */ }
 
-omnia_sdk::http!(router(omnia_sdk::WasiProvider));
-omnia_sdk::messaging!(messaging_router(omnia_sdk::WasiProvider));
+omnia_sdk::export!(http: http_router(omnia_sdk::WasiProvider));
+omnia_sdk::export!(messaging: messaging_router(omnia_sdk::WasiProvider));
 ```
 
-Both macros expand to the `#[omnia_wasi_otel::instrument]`-scoped WASI export on `all(target_arch = "wasm32", target_os = "wasi")` and to nothing on native targets, so `cargo nextest` compiles the guest library natively against `omnia_test::guest::Provider` without pulling `wasmtime` or `omnia-wasi-*` into the native dependency graph.
+Each invocation expands to the `#[omnia_wasi_otel::instrument]`-scoped WASI export on `all(target_arch = "wasm32", target_os = "wasi")` and to nothing on native targets, so `cargo nextest` compiles the guest library natively against `omnia_test::guest::Provider` without pulling `wasmtime` or `omnia-wasi-*` into the native dependency graph.
 
 ### 2. Overriding capabilities with `#[derive(omnia_sdk::Provider)]`
 
@@ -90,7 +90,7 @@ struct Cached {
     wasi: WasiProvider,
 }
 
-omnia_sdk::http!(router(Cached::default()));
+omnia_sdk::export!(http: http_router(Cached::default()));
 ```
 
 ---

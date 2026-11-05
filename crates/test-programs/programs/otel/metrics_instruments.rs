@@ -12,7 +12,7 @@
 
 use opentelemetry::{KeyValue, global};
 
-omnia_sdk::command!(scenario);
+omnia_sdk::export!(command: scenario);
 
 async fn scenario() {
     let meter = global::meter("guest");

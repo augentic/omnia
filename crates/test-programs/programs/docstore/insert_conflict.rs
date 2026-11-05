@@ -7,7 +7,7 @@
 use omnia_wasi_docstore::docstore::Document;
 use omnia_wasi_docstore::store;
 
-omnia_sdk::command!(scenario);
+omnia_sdk::export!(command: scenario);
 
 const CONFLICT: &str = "conflict";
 

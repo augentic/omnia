@@ -7,7 +7,7 @@
 
 use omnia_wasi_vault::vault;
 
-omnia_sdk::command!(scenario);
+omnia_sdk::export!(command: scenario);
 
 async fn scenario() {
     let locker = vault::open("locker".to_owned()).await.expect("open");

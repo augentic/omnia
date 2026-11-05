@@ -80,11 +80,11 @@ The transport-neutral unit of guest application logic: an `async fn(I, Context<P
 
 ### Command façade
 
-`omnia_sdk::api::command`, the command-line adapter over the handler contract: `parse` classifies argv into the clap grammar or one of clap's own responses (`Parsed`), `Command::new(&client, &metadata, format).call(handler, decode, render)` projects one verb (decode → `Client::call` → encode) onto a `Response { stdout, stderr, exit }`, and `command!(main)` binds the entry as the `wasi:cli/run` export, writing the channels at that boundary. The clap-backed parts ship behind the `command` cargo feature. Distinct from the host-side **`omnia-cli`** crate, which is the `run` grammar of a host binary.
+`omnia_sdk::api::command`, the command-line adapter over the handler contract: `parse` classifies argv into the clap grammar or one of clap's own responses (`Parsed`), `Command::new(&client, &metadata, format).call(handler, decode, render)` projects one verb (decode → `Client::call` → encode) onto a `Response { stdout, stderr, exit }`, and `export!(command: main)` binds the entry as the `wasi:cli/run` export, writing the channels at that boundary. The clap-backed parts ship behind the `command` cargo feature. Distinct from the host-side **`omnia-cli`** crate, which is the `run` grammar of a host binary.
 
 ### Failure envelope
 
-What a command reports on stderr when a verb fails: the `Failure` type wrapping an `omnia_sdk::Error` plus an optional remedy hint. As text, `error[<code>]: <message>` then `hint: <hint>`; as JSON, flat `{"error","message","exit-code","hint"?}`. Its `error` and `message` are the transport-neutral `api::ErrorBody` that `HttpError::from(Error)` also emits as a JSON body, so one discriminant identifies a failure over HTTP and over a shell.
+What a command reports on stderr when a verb fails: the `Failure` type wrapping an `omnia_sdk::Error` plus an optional remedy hint. As text, `error[<code>]: <message>` then `hint: <hint>`; as JSON, flat `{"error","message","exit-code","hint"?}`. Its `error` and `message` are the transport-neutral `api::ErrorBody` that `Error::into_response` also emits as a JSON body, so one discriminant identifies a failure over HTTP and over a shell.
 
 ### Exit map
 

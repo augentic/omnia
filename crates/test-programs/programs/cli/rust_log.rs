@@ -3,7 +3,7 @@
 
 #![cfg(target_arch = "wasm32")]
 
-omnia_sdk::command!(scenario);
+omnia_sdk::export!(command: scenario);
 
 async fn scenario() {
     let arguments = wasip3::cli::environment::get_arguments();

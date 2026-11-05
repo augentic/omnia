@@ -136,7 +136,7 @@ fn render_nothing((): &(), _out: &mut dyn fmt::Write) -> fmt::Result {
     Ok(())
 }
 
-omnia_sdk::command!(main);
+omnia_sdk::export!(command: main);
 
 async fn main() -> Response {
     match parse::<App>(wasip3::cli::environment::get_arguments()) {
@@ -147,7 +147,7 @@ async fn main() -> Response {
 }
 
 async fn dispatch(app: App) -> Response {
-    let client = Client::new("examples", Provider { greeting: "Hello" });
+    let client = Client::new(Provider { greeting: "Hello" });
     let metadata = Metadata::from_env("CLI");
     let command = Command::new(&client, &metadata, app.format);
     match app.verb {

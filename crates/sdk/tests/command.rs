@@ -185,6 +185,7 @@ fn from_env_mints() {
     assert!(request_id.bytes().all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f')));
     assert_eq!(metadata.correlation_id, metadata.request_id);
     assert_eq!(metadata.causation_id, None);
+    assert_eq!(metadata.tenant, None);
     assert_ne!(Metadata::from_env("FROM_ENV_MINTS").request_id, metadata.request_id);
 }
 
@@ -239,7 +240,7 @@ fn stderr_json(response: &Response) -> serde_json::Value {
 
 #[tokio::test]
 async fn call_success_text() {
-    let client = Client::new("app", ());
+    let client = Client::new(());
     let metadata = Metadata::default();
     let response = Command::new(&client, &metadata, Format::Text)
         .call(greet, || Ok(ada()), render_greeting)
@@ -252,7 +253,7 @@ async fn call_success_text() {
 
 #[tokio::test]
 async fn call_success_json() {
-    let client = Client::new("app", ());
+    let client = Client::new(());
     let metadata = Metadata::default();
     let response = Command::new(&client, &metadata, Format::Json)
         .call(greet, || Ok(ada()), render_greeting)
@@ -270,7 +271,7 @@ async fn call_success_json() {
 
 #[tokio::test]
 async fn call_handler_error() {
-    let client = Client::new("app", ());
+    let client = Client::new(());
     let metadata = Metadata::default();
     let command = Command::new(&client, &metadata, Format::Json);
 
@@ -292,7 +293,7 @@ async fn call_handler_error() {
 
 #[tokio::test]
 async fn call_decode_error() {
-    let client = Client::new("app", ());
+    let client = Client::new(());
     let metadata = Metadata::default();
     let response = Command::new(&client, &metadata, Format::Json)
         .call(greet, || Err(bad_request!("name is required")), render_never)
@@ -305,7 +306,7 @@ async fn call_decode_error() {
 
 #[tokio::test]
 async fn hints_apply_by_error() {
-    let client = Client::new("app", ());
+    let client = Client::new(());
     let metadata = Metadata::default();
     let command = Command::new(&client, &metadata, Format::Text).hints(|error| {
         (error.code() == "not_found").then_some(Cow::Borrowed("run `app list` to see the items"))
@@ -344,7 +345,7 @@ mod http_parity {
 
     #[tokio::test]
     async fn handler_error_http() {
-        let client = Client::new("app", ());
+        let client = Client::new(());
         let metadata = Metadata::default();
         let response = Command::new(&client, &metadata, Format::Json)
             .call(lookup, || Ok(item("42")), render_never)

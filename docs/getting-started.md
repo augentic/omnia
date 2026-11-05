@@ -19,19 +19,19 @@ cargo build --example http-wasm --target wasm32-wasip2
 
 This produces `target/wasm32-wasip2/debug/examples/http_wasm.wasm` (note: the file name uses underscores).
 
-The guest itself is ordinary Rust. In an Omnia service, you write plain [Axum](https://github.com/tokio-rs/axum) handlers on a `Router` whose state is a capability-owning `Client`, and export the WASI HTTP interface with `omnia_sdk::http!` over `omnia_sdk::WasiProvider`:
+The guest itself is ordinary Rust. In an Omnia service, you write plain [Axum](https://github.com/tokio-rs/axum) handlers on a `Router` whose state is a capability-owning `Client`, and export the WASI HTTP interface with `omnia_sdk::export!` over `omnia_sdk::WasiProvider`:
 
 ```rust,noplayground
-pub fn router<P: Send + Sync + 'static>(provider: P) -> Router {
+pub fn http_router<P: Send + Sync + 'static>(provider: P) -> Router {
     Router::new()
         .route("/", get(echo_get).post(echo_post))
-        .with_state(Client::new("my-guest", provider))
+        .with_state(Client::new(provider))
 }
 
-omnia_sdk::http!(router(WasiProvider));
+omnia_sdk::export!(http: http_router(WasiProvider));
 ```
 
-A handler reaches its capabilities through the `omnia_sdk::api::Context<P>` extractor; `get`, `post`, and the input extractors are axum's own. On `wasm32`, `omnia_sdk::http!` expands to the raw WASI `wasip3::http::service::export!` implementation and serves each request through `omnia_wasi_http::serve` inside an `http_guest_handle` OpenTelemetry span (the standalone `examples/http/guest.rs` writes that expansion out explicitly so you can see the underlying WASI boundary).
+A handler reaches its capabilities through the `omnia_sdk::api::Context<P>` extractor; `get`, `post`, and the input extractors are axum's own. On `wasm32`, `omnia_sdk::export!(http: ..)` expands to the raw WASI `wasip3::http::service::export!` implementation and serves each request through `omnia_wasi_http::serve` inside an `http_guest_handle` OpenTelemetry span (the standalone `examples/http/guest.rs` writes that expansion out explicitly so you can see the underlying WASI boundary).
 
 ## Step 2: Run it in a host
 
@@ -86,7 +86,7 @@ async fn store_item<P: StateStore + 'static>(
 Under the hood, `WasiProvider` delegates to the standard `wasi:keyvalue` interface, which the standalone `keyvalue` example (`examples/keyvalue/guest.rs`) calls directly to demonstrate the raw WIT binding:
 
 ```rust,noplayground
-async fn handler(body: Bytes) -> HttpResult<Json<Value>> {
+async fn handler(body: Bytes) -> omnia_sdk::Result<Json<Value>> {
     let bucket = store::open("omnia_bucket".to_string()).await.context("opening bucket")?;
 
     bucket.set("my_key".to_string(), body.to_vec()).await.context("storing data")?;

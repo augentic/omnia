@@ -6,15 +6,16 @@
 //! [`Client::call`] → encode — onto a [`Response`]. A success body rides
 //! stdout in the selected [`Format`]; a [`Failure`] envelope rides stderr
 //! with the exit status from [`Error::exit_code`](crate::Error::exit_code),
-//! and a clap usage error exits [`USAGE_EXIT`]. [`command!`](crate::command)
-//! binds an `async fn main() -> Response` as the `wasi:cli/run` export and
-//! [`IntoExit`] writes the channels at that boundary.
+//! and a clap usage error exits [`USAGE_EXIT`]. `export!(command: main)`
+//! ([`export!`](crate::export)) binds an `async fn main() -> Response` as the
+//! `wasi:cli/run` export and [`IntoExit`] writes the channels at that
+//! boundary.
 //!
 //! ```rust,ignore
 //! use omnia_sdk::api::command::{Command, Parsed, Response, parse};
 //! use omnia_sdk::api::{Client, Metadata};
 //!
-//! omnia_sdk::command!(main);
+//! omnia_sdk::export!(command: main);
 //!
 //! async fn main() -> Response {
 //!     let app = match parse::<App>(wasip3::cli::environment::get_arguments()) {
@@ -22,7 +23,7 @@
 //!         Parsed::Display(text) => return Response::success(text),
 //!         Parsed::Usage(error) => return Response::usage(&error),
 //!     };
-//!     let client = Client::new("app", Provider);
+//!     let client = Client::new(Provider);
 //!     let metadata = Metadata::from_env("APP");
 //!     let command = Command::new(&client, &metadata, app.format);
 //!     match app.verb {
@@ -44,9 +45,10 @@ pub const USAGE_EXIT: u8 = 64;
 
 impl Metadata {
     /// Build metadata from the process environment: `<PREFIX>_REQUEST_ID`,
-    /// `<PREFIX>_CORRELATION_ID`, and `<PREFIX>_CAUSATION_ID`.
+    /// `<PREFIX>_CORRELATION_ID`, `<PREFIX>_CAUSATION_ID`, and
+    /// `<PREFIX>_TENANT`.
     ///
-    /// The command line's carrier for the ids HTTP reads from headers; a
+    /// The command line's carrier for the values HTTP reads from headers; a
     /// missing request id is minted as on every transport.
     #[must_use]
     pub fn from_env(prefix: &str) -> Self {
@@ -59,50 +61,12 @@ fn env_key(prefix: &str, name: &str) -> String {
     format!("{prefix}_{}", name.to_ascii_uppercase().replace('-', "_"))
 }
 
-/// Wires an `async fn` as the guest's `wasi:cli/run` export, driven through
-/// `execute_wasi` (wasm32 only) so telemetry is initialized and flushed
-/// around it.
-///
-/// The entry returns a [`Response`] (buffered channels plus exit status, the
-/// façade's shape), `Result<(), u8>` (a CLI that writes its own channels and
-/// reports an exit status), or `()` (a scenario that asserts internally and
-/// traps on failure); see [`IntoExit`].
-///
-/// ```rust,ignore
-/// use omnia_sdk::api::command::{Parsed, Response, parse};
-///
-/// omnia_sdk::command!(main);
-///
-/// async fn main() -> Response {
-///     match parse::<App>(wasip3::cli::environment::get_arguments()) {
-///         Parsed::App(app) => dispatch(app).await,
-///         Parsed::Display(text) => Response::success(text),
-///         Parsed::Usage(error) => Response::usage(&error),
-///     }
-/// }
-/// ```
-#[macro_export]
-macro_rules! command {
-    ($entry:path) => {
-        #[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
-        const _: () = {
-            struct CliGuest;
-
-            $crate::wasip3::cli::command::export!(CliGuest);
-
-            impl $crate::wasip3::exports::cli::run::Guest for CliGuest {
-                async fn run() -> ::core::result::Result<(), ()> {
-                    $crate::api::command::execute_wasi($entry()).await;
-                    Ok(())
-                }
-            }
-        };
-    };
-}
-
-/// The exit status a [`command!`](crate::command) entry yields: `()` always
+/// The exit status an `export!(command: ..)` entry yields: `()` always
 /// succeeds, `Result<(), u8>` passes its code through, and [`Response`]
 /// writes its channels first.
+///
+/// A scenario that asserts internally and traps on failure returns `()`; a
+/// CLI that writes its own channels reports `Result<(), u8>`.
 pub trait IntoExit {
     /// The status handed to the WASI CLI boundary.
     ///

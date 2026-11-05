@@ -8,7 +8,7 @@ use omnia_wasi_model::completion::Role as WireRole;
 use omnia_wasi_model::prompt::{Example, Sections};
 use test_programs::user;
 
-omnia_sdk::command!(scenario);
+omnia_sdk::export!(command: scenario);
 
 async fn scenario() {
     let sections = Sections {

@@ -1,5 +1,5 @@
 //! The exit map through the real runtime: each verb's error class leaves the
-//! `command!` boundary as its mapped exit status (`bad` 1, `missing` 2,
+//! `export!(command: ..)` boundary as its mapped exit status (`bad` 1, `missing` 2,
 //! `upstream` 4, `ok` 0), and an unknown verb is a clap usage error at
 //! `USAGE_EXIT`.
 
@@ -56,7 +56,7 @@ fn render_nothing((): &(), _out: &mut dyn fmt::Write) -> fmt::Result {
     Ok(())
 }
 
-omnia_sdk::command!(main);
+omnia_sdk::export!(command: main);
 
 async fn main() -> Response {
     match parse::<App>(wasip3::cli::environment::get_arguments()) {
@@ -67,7 +67,7 @@ async fn main() -> Response {
 }
 
 async fn dispatch(app: App) -> Response {
-    let client = Client::new("exit-map", Provider);
+    let client = Client::new(Provider);
     let metadata = Metadata::from_env("EXIT_MAP");
     let command = Command::new(&client, &metadata, app.format);
     match app.verb {

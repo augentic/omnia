@@ -5,7 +5,8 @@
 //! [`Context`] each call receives. The [`messaging`] and [`command`]
 //! transports dispatch a `Handler`; an HTTP route is a plain axum handler
 //! that takes its `Context` as an extractor over the `Client` in the router
-//! state (see [`http`]).
+//! state (see [`http`]). [`export!`](crate::export) binds each transport's
+//! router or entry as the guest's WASI export.
 //!
 //! ```rust,ignore
 //! use std::convert::Infallible;
@@ -19,11 +20,11 @@
 //! }
 //!
 //! async fn greet(input: Greet, context: Context<Provider>) -> Result<String, Infallible> {
-//!     Ok(format!("hello, {} from {}", input.name, context.owner()))
+//!     Ok(format!("hello, {} ({:?})", input.name, context.metadata.request_id))
 //! }
 //!
 //! async fn run() -> String {
-//!     let client = Client::new("acme", Provider);
+//!     let client = Client::new(Provider);
 //!     client.call(greet, Greet { name: "omnia".into() }, &Metadata::default()).await.unwrap()
 //! }
 //! ```
@@ -40,8 +41,96 @@ use tracing::Instrument as _;
 pub mod command;
 #[cfg(feature = "http")]
 pub mod http;
-/// Typed exact-topic messaging routing.
 pub mod messaging;
+
+/// Binds one of the guest's WASI exports, named by transport.
+///
+/// - `http: <router>` serves each `wasi:http` request through the
+///   `axum::Router` the expression builds, inside the `handler` span
+///   `api::http::trace` opens.
+/// - `messaging: <router>` dispatches each `wasi:messaging` delivery through
+///   the [`messaging::Router`] the expression resolves to; the expression is
+///   awaited, so the router may read configuration.
+/// - `command: <entry>` runs the `async fn` as `wasi:cli/run`; see
+///   [`command`].
+///
+/// A guest invokes the macro once per transport it serves. Omnia creates one
+/// component instance per request, delivery, or invocation, so the expression
+/// is evaluated for that one call and durable state belongs in host-side
+/// capabilities. Each invocation expands to nothing on native targets, so the
+/// same crate's tests build the routers natively.
+///
+/// ```rust,ignore
+/// omnia_sdk::export!(http: http_router(omnia_sdk::WasiProvider));
+/// omnia_sdk::export!(messaging: messaging_router(omnia_sdk::WasiProvider));
+/// ```
+#[macro_export]
+macro_rules! export {
+    (http: $router:expr) => {
+        #[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
+        const _: () = {
+            use $crate::omnia_wasi_otel;
+
+            struct HttpGuest;
+
+            $crate::wasip3::http::service::export!(HttpGuest);
+
+            impl $crate::wasip3::exports::http::handler::Guest for HttpGuest {
+                #[omnia_wasi_otel::instrument(name = "http_guest_handle", level = $crate::tracing::Level::INFO)]
+                async fn handle(
+                    request: $crate::wasip3::http::types::Request,
+                ) -> ::core::result::Result<
+                    $crate::wasip3::http::types::Response,
+                    $crate::wasip3::http::types::ErrorCode,
+                > {
+                    let router = $crate::axum::Router::layer(
+                        $router,
+                        $crate::axum::middleware::from_fn($crate::api::http::trace),
+                    );
+                    $crate::api::http::serve(router, request).await
+                }
+            }
+        };
+    };
+    (messaging: $router:expr) => {
+        #[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
+        const _: () = {
+            use $crate::omnia_wasi_otel;
+
+            struct MessagingGuest;
+
+            $crate::omnia_wasi_messaging::export!(
+                MessagingGuest with_types_in $crate::omnia_wasi_messaging
+            );
+
+            impl $crate::omnia_wasi_messaging::incoming_handler::Guest for MessagingGuest {
+                #[omnia_wasi_otel::instrument(name = "messaging_guest_handle")]
+                async fn handle(
+                    message: $crate::omnia_wasi_messaging::types::Message,
+                ) -> ::core::result::Result<(), $crate::omnia_wasi_messaging::types::Error>
+                {
+                    let router = $router.await;
+                    $crate::api::messaging::handle(&router, message).await
+                }
+            }
+        };
+    };
+    (command: $entry:expr) => {
+        #[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
+        const _: () = {
+            struct CliGuest;
+
+            $crate::wasip3::cli::command::export!(CliGuest);
+
+            impl $crate::wasip3::exports::cli::run::Guest for CliGuest {
+                async fn run() -> ::core::result::Result<(), ()> {
+                    $crate::api::command::execute_wasi($entry()).await;
+                    Ok(())
+                }
+            }
+        };
+    };
+}
 
 /// An input that could not be decoded into handler input.
 #[derive(Debug)]
@@ -156,6 +245,9 @@ pub struct Metadata {
     /// Identifies the invocation that directly caused this work.
     pub causation_id: Option<String>,
 
+    /// The tenant the work is done for, when the transport names one.
+    pub tenant: Option<String>,
+
     /// The latest instant at which the caller considers the work useful.
     pub deadline: Option<SystemTime>,
 }
@@ -164,14 +256,16 @@ impl Metadata {
     /// Build metadata from a transport's named-value lookup.
     ///
     /// Names are the transport-neutral `request-id` / `correlation-id` /
-    /// `causation-id`. A missing request id is minted so every invocation
-    /// is observable; the correlation id falls back to the request id.
+    /// `causation-id` / `tenant`. A missing request id is minted so every
+    /// invocation is observable; the correlation id falls back to the
+    /// request id.
     pub fn from_lookup(lookup: impl Fn(&str) -> Option<String>) -> Self {
         let request_id = lookup("request-id").unwrap_or_else(mint_request_id);
         Self {
             correlation_id: Some(lookup("correlation-id").unwrap_or_else(|| request_id.clone())),
             request_id: Some(request_id),
             causation_id: lookup("causation-id"),
+            tenant: lookup("tenant"),
             deadline: None,
         }
     }
@@ -185,6 +279,7 @@ impl Metadata {
             correlation_id: Some(request_id.clone()),
             request_id: Some(request_id),
             causation_id: None,
+            tenant: None,
             deadline: None,
         }
     }
@@ -219,7 +314,6 @@ fn random_u64_pair() -> (u64, u64) {
 /// in the router state, so an HTTP handler is `async fn(Context<P>, ..)`.
 #[derive(Clone, Debug)]
 pub struct Context<P> {
-    owner: Arc<str>,
     provider: Arc<P>,
 
     /// Transport-neutral invocation metadata.
@@ -228,18 +322,11 @@ pub struct Context<P> {
 
 impl<P> Context<P> {
     /// Create a context outside a [`Client`], typically to unit-test a handler.
-    pub fn new(owner: impl Into<String>, provider: P, metadata: Metadata) -> Self {
+    pub fn new(provider: P, metadata: Metadata) -> Self {
         Self {
-            owner: Arc::from(owner.into()),
             provider: Arc::new(provider),
             metadata,
         }
-    }
-
-    /// Return the owning tenant or namespace.
-    #[must_use]
-    pub fn owner(&self) -> &str {
-        &self.owner
     }
 
     /// Return the provider used to fulfil the call.
@@ -295,23 +382,15 @@ where
 /// Clones share one provider allocation. Transports define its lifetime; HTTP
 /// constructs one client per WASI request and keeps durable state host-side.
 pub struct Client<P> {
-    owner: Arc<str>,
     provider: Arc<P>,
 }
 
 impl<P: Send + Sync + 'static> Client<P> {
     /// Create a client with one clone-shared provider allocation.
-    pub fn new(owner: impl Into<String>, provider: P) -> Self {
+    pub fn new(provider: P) -> Self {
         Self {
-            owner: Arc::from(owner.into()),
             provider: Arc::new(provider),
         }
-    }
-
-    /// Return the owning tenant or namespace.
-    #[must_use]
-    pub fn owner(&self) -> &str {
-        &self.owner
     }
 
     /// Return the shared provider.
@@ -338,7 +417,6 @@ impl<P: Send + Sync + 'static> Client<P> {
             correlation_id = metadata.correlation_id.as_deref(),
         );
         let context = Context {
-            owner: Arc::clone(&self.owner),
             provider: Arc::clone(&self.provider),
             metadata: metadata.clone(),
         };
@@ -349,7 +427,6 @@ impl<P: Send + Sync + 'static> Client<P> {
 impl<P: Send + Sync + 'static> Clone for Client<P> {
     fn clone(&self) -> Self {
         Self {
-            owner: Arc::clone(&self.owner),
             provider: Arc::clone(&self.provider),
         }
     }
@@ -357,6 +434,6 @@ impl<P: Send + Sync + 'static> Clone for Client<P> {
 
 impl<P: Send + Sync + 'static> fmt::Debug for Client<P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Client").field("owner", &self.owner).finish_non_exhaustive()
+        f.debug_struct("Client").finish_non_exhaustive()
     }
 }

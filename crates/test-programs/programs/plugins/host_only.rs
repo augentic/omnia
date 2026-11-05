@@ -7,7 +7,7 @@
 use omnia_sdk::WasiProvider;
 use omnia_sdk::plugins::{Location, Plugins as _};
 
-omnia_sdk::command!(scenario);
+omnia_sdk::export!(command: scenario);
 
 async fn scenario() {
     let plugin = WasiProvider

@@ -27,7 +27,6 @@ use anyhow::Context;
 use axum::routing::post;
 use axum::{Json, Router};
 use bytes::Bytes;
-use omnia_sdk::HttpResult;
 use omnia_wasi_vault::vault;
 use serde_json::Value;
 use tracing::Level;
@@ -46,7 +45,7 @@ impl Guest for Http {
 }
 
 #[omnia_wasi_otel::instrument]
-async fn handler(body: Bytes) -> HttpResult<Json<Value>> {
+async fn handler(body: Bytes) -> omnia_sdk::Result<Json<Value>> {
     let locker =
         vault::open("omnia-locker".to_string()).await.context("failed to open vault locker")?;
 

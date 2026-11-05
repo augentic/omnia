@@ -5,7 +5,7 @@
 use omnia_wasi_model::{completion, wit_stream};
 use test_programs::{raw_lookup, raw_request};
 
-omnia_sdk::command!(scenario);
+omnia_sdk::export!(command: scenario);
 
 async fn scenario() {
     let request = raw_request(

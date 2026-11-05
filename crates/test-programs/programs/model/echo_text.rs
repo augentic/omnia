@@ -6,7 +6,7 @@ use omnia_sdk::WasiProvider;
 use omnia_sdk::model::{Model as _, Request};
 use test_programs::user;
 
-omnia_sdk::command!(scenario);
+omnia_sdk::export!(command: scenario);
 
 async fn scenario() {
     let reply = WasiProvider

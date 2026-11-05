@@ -1,4 +1,4 @@
-//! An instrumented function's span reaches the host: `command!` owns the
+//! An instrumented function's span reaches the host: `export!(command: ..)` owns the
 //! telemetry lifecycle here, so `traced` records into it and the flush at
 //! the end of the run exports the span.
 
@@ -6,7 +6,7 @@
 
 use tracing::Level;
 
-omnia_sdk::command!(scenario);
+omnia_sdk::export!(command: scenario);
 
 async fn scenario() {
     traced().await;

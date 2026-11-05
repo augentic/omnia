@@ -16,7 +16,6 @@
 use anyhow::Context;
 use axum::routing::get;
 use axum::{Json, Router};
-use omnia_sdk::HttpResult;
 use omnia_wasi_identity::credentials::get_identity;
 use serde_json::{Value, json};
 use tracing::Level;
@@ -37,7 +36,7 @@ impl Guest for Http {
 }
 
 #[omnia_wasi_otel::instrument]
-async fn handler() -> HttpResult<Json<Value>> {
+async fn handler() -> omnia_sdk::Result<Json<Value>> {
     let identity = get_identity("identity".to_string()).await.context("getting identity")?;
 
     let scopes = vec![SCOPE.to_string()];
