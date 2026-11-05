@@ -1,22 +1,28 @@
-//! Handler invocation and HTTP routing contracts.
+//! Handler invocation and HTTP handler support contracts.
 
 #![cfg(feature = "http")]
 
 use std::future::{Ready, ready};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 
+use axum::Json;
 use axum::body::{Body, to_bytes};
-use axum::response::{IntoResponse, Response};
+use axum::extract::{Path, Query};
+use axum::middleware::from_fn;
+use axum::response::IntoResponse;
+use axum::routing::get;
 use http::header::CONTENT_TYPE;
-use http::{HeaderMap, HeaderValue, Method, Request, StatusCode};
-use omnia_sdk::api::http::{
-    HttpError, MethodFilter, RawRequest, body_input, delete, get, handle_with, patch, post, put,
-    query_input,
-};
+use http::{HeaderValue, Request, StatusCode};
+use omnia_sdk::api::http::{HttpError, HttpResult, trace};
 use omnia_sdk::api::{Client, Context, DecodeError, ErrorBody, Format, Metadata};
 use omnia_sdk::not_found;
 use serde::{Deserialize, Serialize};
 use tower::ServiceExt as _;
+use tracing::field::{Field, Visit};
+use tracing::span::{Attributes, Id};
+use tracing_subscriber::Registry;
+use tracing_subscriber::layer::{Context as LayerContext, Layer, SubscriberExt as _};
 
 #[derive(Debug, Deserialize)]
 struct EchoInput {
@@ -29,7 +35,9 @@ struct EchoOutput {
     name: String,
     count: u32,
     owner: String,
+    request_id: Option<String>,
     correlation_id: Option<String>,
+    causation_id: Option<String>,
 }
 
 fn echo<P: Send + Sync + 'static>(
@@ -39,44 +47,42 @@ fn echo<P: Send + Sync + 'static>(
         name: input.name,
         count: input.count.unwrap_or(1),
         owner: context.owner().to_owned(),
+        request_id: context.metadata.request_id,
         correlation_id: context.metadata.correlation_id,
+        causation_id: context.metadata.causation_id,
     }))
 }
 
-struct StatefulProvider {
-    calls: AtomicUsize,
-}
-
-#[derive(Serialize)]
-struct ProviderObservation {
-    name: String,
-    address: usize,
-    call: usize,
-}
-
-#[derive(Debug, Deserialize)]
-struct ObserveInput {
-    name: String,
+async fn echo_route<P: Send + Sync + 'static>(
+    context: Context<P>, Query(input): Query<EchoInput>,
+) -> Result<Json<EchoOutput>, omnia_sdk::Error> {
+    echo(input, context).await.map(Json)
 }
 
 fn router() -> axum::Router {
     axum::Router::new()
-        .route("/echo", get(echo))
-        .route("/echo", post(echo))
-        .route("/echo/{name}", get(echo))
-        .route("/echo/{name}", post(echo))
-        .route("/echo/{name}", put(echo))
-        .route("/echo/{name}", patch(echo))
-        .route("/echo/{name}", delete(echo))
+        .route("/echo", get(echo_route))
+        .layer(from_fn(trace))
         .with_state(Client::new("test", ()))
 }
 
-async fn send(request: Request<Body>) -> (StatusCode, serde_json::Value) {
-    let response = router().oneshot(request).await.expect("router serves request");
+async fn send(router: axum::Router, request: Request<Body>) -> (StatusCode, serde_json::Value) {
+    let response = router.oneshot(request).await.expect("router serves request");
     let status = response.status();
     let bytes = to_bytes(response.into_body(), usize::MAX).await.expect("collect body");
     let value = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
     (status, value)
+}
+
+async fn send_raw(
+    router: axum::Router, request: Request<Body>,
+) -> (StatusCode, Option<String>, String) {
+    let response = router.oneshot(request).await.expect("router serves request");
+    let status = response.status();
+    let content_type =
+        response.headers().get(CONTENT_TYPE).map(|value| value.to_str().unwrap().to_owned());
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.expect("collect body");
+    (status, content_type, String::from_utf8(bytes.to_vec()).expect("utf-8 body"))
 }
 
 #[tokio::test]
@@ -122,158 +128,148 @@ async fn invoke_direct() {
 }
 
 #[tokio::test]
-async fn get_query() {
-    let request = Request::builder()
-        .method(Method::GET)
-        .uri("/echo?name=plan&count=3")
-        .header("x-request-id", "request-1")
+async fn context_extractor() {
+    let request = Request::get("/echo?name=plan&count=3")
+        .header("x-request-id", "req-1")
+        .header("x-correlation-id", "corr-1")
+        .header("x-causation-id", "cause-1")
         .body(Body::empty())
         .expect("build request");
-    let (status, value) = send(request).await;
+    let (status, value) = send(router(), request).await;
 
     assert_eq!(status, StatusCode::OK);
+    assert_eq!(value["name"], "plan");
+    assert_eq!(value["count"], 3);
+    assert_eq!(value["owner"], "test");
+    assert_eq!(value["request_id"], "req-1");
+    assert_eq!(value["correlation_id"], "corr-1");
+    assert_eq!(value["causation_id"], "cause-1");
+}
+
+// The extractor stands alone: without the `trace` layer it reads the headers itself.
+#[tokio::test]
+async fn context_extractor_without_trace() {
+    let router =
+        axum::Router::new().route("/echo", get(echo_route)).with_state(Client::new("test", ()));
+    let request = Request::get("/echo?name=plan")
+        .header("x-request-id", "req-1")
+        .body(Body::empty())
+        .expect("build request");
+    let (status, value) = send(router, request).await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(value["request_id"], "req-1");
+    assert_eq!(value["correlation_id"], "req-1");
+}
+
+fn is_minted_id(id: &str) -> bool {
+    id.len() == 32 && id.bytes().all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+}
+
+#[derive(Serialize)]
+struct Ids {
+    metadata: Option<String>,
+    context: Option<String>,
+}
+
+async fn ids(metadata: Metadata, context: Context<()>) -> Json<Ids> {
+    Json(Ids {
+        metadata: metadata.request_id,
+        context: context.metadata.request_id,
+    })
+}
+
+// A request without an id gets one minted id, which the span, the `Metadata`
+// extractor, and the `Context` extractor all carry.
+#[tokio::test]
+async fn missing_request_id() {
+    let router = axum::Router::new()
+        .route("/ids", get(ids))
+        .layer(from_fn(trace))
+        .with_state(Client::new("test", ()));
+    let request = Request::get("/ids").body(Body::empty()).expect("build request");
+    let (status, value) = send(router, request).await;
+
+    assert_eq!(status, StatusCode::OK);
+    let minted = value["metadata"].as_str().expect("request id is minted");
+    assert!(is_minted_id(minted), "{minted:?} is not 32 lowercase hex chars");
+    assert_eq!(value["context"], minted);
+}
+
+type Span = (String, Vec<(String, String)>);
+
+#[derive(Default)]
+struct Spans(Arc<Mutex<Vec<Span>>>);
+
+impl<S: tracing::Subscriber> Layer<S> for Spans {
+    fn on_new_span(&self, attrs: &Attributes<'_>, _id: &Id, _ctx: LayerContext<'_, S>) {
+        struct Fields(Vec<(String, String)>);
+
+        impl Visit for Fields {
+            fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
+                self.0.push((field.name().to_owned(), format!("{value:?}")));
+            }
+
+            fn record_str(&mut self, field: &Field, value: &str) {
+                self.0.push((field.name().to_owned(), value.to_owned()));
+            }
+        }
+
+        let mut fields = Fields(Vec::new());
+        attrs.record(&mut fields);
+        self.0.lock().unwrap().push((attrs.metadata().name().to_owned(), fields.0));
+    }
+}
+
+#[tokio::test]
+async fn trace_span() {
+    let spans = Spans::default();
+    let recorded = Arc::clone(&spans.0);
+    let _guard = tracing::subscriber::set_default(Registry::default().with(spans));
+    let request = Request::get("/echo?name=plan")
+        .header("x-request-id", "req-1")
+        .header("x-correlation-id", "corr-1")
+        .body(Body::empty())
+        .expect("build request");
+
+    let (status, _) = send(router(), request).await;
+
+    assert_eq!(status, StatusCode::OK);
+    let (_, fields) = recorded
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|(name, _)| name == "handler")
+        .cloned()
+        .expect("the trace layer opens a `handler` span");
     assert_eq!(
-        value,
-        serde_json::json!({
-            "name": "plan",
-            "count": 3,
-            "owner": "test",
-            "correlation_id": "request-1"
-        })
+        fields,
+        [
+            ("request_id".to_owned(), "req-1".to_owned()),
+            ("correlation_id".to_owned(), "corr-1".to_owned()),
+        ]
     );
 }
 
-#[tokio::test]
-async fn get_path_and_query() {
-    let request = Request::builder()
-        .method(Method::GET)
-        .uri("/echo/slice?count=2")
-        .body(Body::empty())
-        .expect("build request");
-    let (status, value) = send(request).await;
+struct StatefulProvider {
+    calls: AtomicUsize,
+}
 
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(value["name"], "slice");
-    assert_eq!(value["count"], 2);
+#[derive(Serialize)]
+struct ProviderObservation {
+    address: usize,
+    call: usize,
+}
+
+async fn observe(context: Context<StatefulProvider>) -> Json<ProviderObservation> {
+    Json(ProviderObservation {
+        address: std::ptr::from_ref(context.provider()).addr(),
+        call: context.provider().calls.fetch_add(1, Ordering::SeqCst) + 1,
+    })
 }
 
 #[tokio::test]
-async fn get_missing_field() {
-    let request = Request::builder()
-        .method(Method::GET)
-        .uri("/echo?count=3")
-        .body(Body::empty())
-        .expect("build request");
-    let (status, _) = send(request).await;
-
-    assert_eq!(status, StatusCode::BAD_REQUEST);
-}
-
-#[tokio::test]
-async fn post_body_and_path() {
-    let request = Request::builder()
-        .method(Method::POST)
-        .uri("/echo/slice")
-        .header(http::header::CONTENT_TYPE, "application/json")
-        .body(Body::from(r#"{"count":7}"#))
-        .expect("build request");
-    let (status, value) = send(request).await;
-
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(value["name"], "slice");
-    assert_eq!(value["count"], 7);
-}
-
-#[tokio::test]
-async fn post_empty_body() {
-    let request = Request::builder()
-        .method(Method::POST)
-        .uri("/echo/slice")
-        .body(Body::empty())
-        .expect("build request");
-    let (status, value) = send(request).await;
-
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(value["count"], 1);
-}
-
-#[tokio::test]
-async fn post_non_object_body() {
-    let request = Request::builder()
-        .method(Method::POST)
-        .uri("/echo/slice")
-        .body(Body::from("[1,2]"))
-        .expect("build request");
-    let (status, _) = send(request).await;
-
-    assert_eq!(status, StatusCode::BAD_REQUEST);
-}
-
-#[tokio::test]
-async fn put_body_and_path() {
-    let request = Request::builder()
-        .method(Method::PUT)
-        .uri("/echo/slice")
-        .header(http::header::CONTENT_TYPE, "application/json")
-        .body(Body::from(r#"{"count":4}"#))
-        .expect("build request");
-    let (status, value) = send(request).await;
-
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(value["name"], "slice");
-    assert_eq!(value["count"], 4);
-}
-
-#[tokio::test]
-async fn patch_body_and_path() {
-    let request = Request::builder()
-        .method(Method::PATCH)
-        .uri("/echo/slice")
-        .header(http::header::CONTENT_TYPE, "application/json")
-        .body(Body::from(r#"{"count":5}"#))
-        .expect("build request");
-    let (status, value) = send(request).await;
-
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(value["name"], "slice");
-    assert_eq!(value["count"], 5);
-}
-
-#[tokio::test]
-async fn delete_path_and_query() {
-    let request = Request::builder()
-        .method(Method::DELETE)
-        .uri("/echo/slice?count=6")
-        .body(Body::empty())
-        .expect("build request");
-    let (status, value) = send(request).await;
-
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(value["name"], "slice");
-    assert_eq!(value["count"], 6);
-}
-
-#[tokio::test]
-async fn unregistered_method() {
-    let request = Request::builder()
-        .method(Method::PUT)
-        .uri("/echo")
-        .body(Body::from(r#"{"name":"slice"}"#))
-        .expect("build request");
-    let (status, _) = send(request).await;
-
-    assert_eq!(status, StatusCode::METHOD_NOT_ALLOWED);
-}
-
-#[tokio::test]
-async fn route_state_clones() {
-    let observe = |input: ObserveInput, context: Context<StatefulProvider>| {
-        ready(Ok::<_, omnia_sdk::Error>(ProviderObservation {
-            name: input.name,
-            address: std::ptr::from_ref(context.provider()).addr(),
-            call: context.provider().calls.fetch_add(1, Ordering::SeqCst) + 1,
-        }))
-    };
+async fn context_shares_provider() {
     let router = axum::Router::new()
         .route("/first", get(observe))
         .route("/second", get(observe))
@@ -284,346 +280,26 @@ async fn route_state_clones() {
             },
         ));
 
-    let first = router
-        .clone()
-        .oneshot(
-            Request::builder().uri("/first?name=first").body(Body::empty()).expect("build request"),
-        )
-        .await
-        .expect("first route serves request");
-    let second = router
-        .oneshot(
-            Request::builder()
-                .uri("/second?name=second")
-                .body(Body::empty())
-                .expect("build request"),
-        )
-        .await
-        .expect("second route serves request");
-    let first: serde_json::Value = serde_json::from_slice(
-        &to_bytes(first.into_body(), usize::MAX).await.expect("collect first body"),
-    )
-    .expect("decode first body");
-    let second: serde_json::Value = serde_json::from_slice(
-        &to_bytes(second.into_body(), usize::MAX).await.expect("collect second body"),
-    )
-    .expect("decode second body");
+    let (_, first) =
+        send(router.clone(), Request::get("/first").body(Body::empty()).expect("build request"))
+            .await;
+    let (_, second) =
+        send(router, Request::get("/second").body(Body::empty()).expect("build request")).await;
 
-    assert_eq!(first["name"], "first");
-    assert_eq!(second["name"], "second");
     assert_eq!(first["address"], second["address"]);
     assert_eq!(first["call"], 1);
     assert_eq!(second["call"], 2);
 }
 
-#[derive(Debug, Deserialize)]
-struct Welcome {
-    name: String,
-}
-
-#[tokio::test]
-async fn closure_handler() {
-    let greeting = "welcome".to_string();
-    let router = axum::Router::new()
-        .route(
-            "/welcome",
-            get(move |input: Welcome, _context: Context<()>| async move {
-                Ok::<_, omnia_sdk::Error>(format!("{greeting}, {}", input.name))
-            }),
-        )
-        .with_state(Client::new("test", ()));
-
-    let request = Request::builder()
-        .method(Method::GET)
-        .uri("/welcome?name=ada")
-        .body(Body::empty())
-        .expect("build request");
-    let response = router.oneshot(request).await.expect("router serves request");
-
-    assert_eq!(response.status(), StatusCode::OK);
-    let bytes = to_bytes(response.into_body(), usize::MAX).await.expect("collect body");
-    assert_eq!(serde_json::from_slice::<String>(&bytes).expect("decode body"), "welcome, ada");
-}
-
-#[derive(Debug)]
-struct JoinNames {
-    names: Vec<String>,
-}
-
-fn join_names<P: Send + Sync + 'static>(
-    input: JoinNames, _context: Context<P>,
-) -> Ready<Result<String, omnia_sdk::Error>> {
-    let JoinNames { names } = input;
-    ready(Ok(names.join(" & ")))
-}
-
-#[derive(Debug)]
-struct Greet {
-    name: String,
-    greeting: String,
-}
-
-fn greet<P: Send + Sync + 'static>(
-    input: Greet, _context: Context<P>,
-) -> Ready<Result<String, omnia_sdk::Error>> {
-    let Greet { name, greeting } = input;
-    ready(Ok(format!("{greeting}, {name}")))
-}
-
-fn text_response(body: String) -> Response {
-    (StatusCode::OK, [(CONTENT_TYPE, HeaderValue::from_static("text/plain; charset=utf-8"))], body)
-        .into_response()
-}
-
-fn text_router() -> axum::Router {
-    axum::Router::new()
-        .route(
-            "/join",
-            handle_with(
-                MethodFilter::POST.or(MethodFilter::PUT),
-                join_names,
-                |raw: RawRequest<'_>| -> Result<JoinNames, DecodeError> {
-                    let body = std::str::from_utf8(raw.body)
-                        .map_err(|error| DecodeError::new(format!("body is not utf-8: {error}")))?;
-                    Ok(JoinNames {
-                        names: body.lines().map(str::to_owned).collect(),
-                    })
-                },
-                text_response,
-            ),
-        )
-        .route(
-            "/greet/{name}",
-            handle_with(
-                MethodFilter::GET,
-                greet,
-                |raw: RawRequest<'_>| -> Result<Greet, DecodeError> {
-                    let name = raw
-                        .path_params
-                        .iter()
-                        .find(|(key, _)| key == "name")
-                        .map(|(_, value)| value.clone())
-                        .ok_or_else(|| DecodeError::new("missing name path parameter"))?;
-                    let greeting = raw
-                        .headers
-                        .get("x-greeting")
-                        .and_then(|value| value.to_str().ok())
-                        .ok_or_else(|| DecodeError::new("missing x-greeting header"))?;
-                    Ok(Greet {
-                        name,
-                        greeting: greeting.to_owned(),
-                    })
-                },
-                text_response,
-            ),
-        )
-        .with_state(Client::new("test", ()))
-}
-
-async fn send_raw(
-    router: axum::Router, request: Request<Body>,
-) -> (StatusCode, Option<String>, String) {
-    let response = router.oneshot(request).await.expect("router serves request");
-    let status = response.status();
-    let content_type = response
-        .headers()
-        .get(CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        .map(str::to_owned);
-    let bytes = to_bytes(response.into_body(), usize::MAX).await.expect("collect body");
-    (status, content_type, String::from_utf8_lossy(&bytes).into_owned())
-}
-
-#[tokio::test]
-async fn text_codec_post() {
-    let request = Request::builder()
-        .method(Method::POST)
-        .uri("/join")
-        .body(Body::from("ada\ngrace"))
-        .expect("build request");
-    let (status, content_type, body) = send_raw(text_router(), request).await;
-
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(content_type.as_deref(), Some("text/plain; charset=utf-8"));
-    assert_eq!(body, "ada & grace");
-}
-
-#[tokio::test]
-async fn method_filter_union() {
-    let request = Request::builder()
-        .method(Method::PUT)
-        .uri("/join")
-        .body(Body::from("ada\ngrace"))
-        .expect("build request");
-    let (status, _, body) = send_raw(text_router(), request).await;
-
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(body, "ada & grace");
-}
-
-#[tokio::test]
-async fn text_codec_path_and_header() {
-    let request = Request::builder()
-        .method(Method::GET)
-        .uri("/greet/ada")
-        .header("x-greeting", "hello")
-        .body(Body::empty())
-        .expect("build request");
-    let (status, content_type, body) = send_raw(text_router(), request).await;
-
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(content_type.as_deref(), Some("text/plain; charset=utf-8"));
-    assert_eq!(body, "hello, ada");
-}
-
-#[tokio::test]
-async fn text_codec_missing_header() {
-    let request = Request::builder()
-        .method(Method::GET)
-        .uri("/greet/ada")
-        .body(Body::empty())
-        .expect("build request");
-    let (status, _, _) = send_raw(text_router(), request).await;
-
-    assert_eq!(status, StatusCode::BAD_REQUEST);
-}
-
-#[derive(Debug)]
-struct XmlGreet {
-    name: String,
-}
-
-#[derive(Debug)]
-struct EmptyName;
-
-impl std::fmt::Display for EmptyName {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("name cannot be empty")
-    }
-}
-
-impl std::error::Error for EmptyName {}
-
-impl From<EmptyName> for HttpError {
-    fn from(error: EmptyName) -> Self {
-        let body = format!("<error><code>empty_name</code><message>{error}</message></error>");
-        Self::with_body(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            HeaderValue::from_static("text/xml; charset=utf-8"),
-            body.into_bytes(),
-        )
-    }
-}
-
-fn xml_greet<P: Send + Sync + 'static>(
-    input: XmlGreet, _context: Context<P>,
-) -> Ready<Result<String, EmptyName>> {
-    let XmlGreet { name } = input;
-    ready(if name.is_empty() { Err(EmptyName) } else { Ok(format!("hello, {name}")) })
-}
-
-fn parse_greet(headers: &HeaderMap, body: &[u8]) -> Result<XmlGreet, DecodeError> {
-    let content_type = headers.get(CONTENT_TYPE).and_then(|value| value.to_str().ok());
-    if content_type != Some("text/xml") {
-        return Err(DecodeError::new("expected a text/xml request"));
-    }
-    let body = std::str::from_utf8(body)
-        .map_err(|error| DecodeError::new(format!("body is not utf-8: {error}")))?;
-    let start = body.find("<name>").map(|index| index + "<name>".len());
-    let end = body.find("</name>");
-    match (start, end) {
-        (Some(start), Some(end)) if start <= end => Ok(XmlGreet {
-            name: body[start..end].to_owned(),
-        }),
-        _ => Err(DecodeError::new("malformed greet document")),
-    }
-}
-
-fn xml_router() -> axum::Router {
-    axum::Router::new()
-        .route(
-            "/greet",
-            handle_with(
-                MethodFilter::POST,
-                xml_greet,
-                |raw: RawRequest<'_>| parse_greet(raw.headers, raw.body),
-                |greeting: String| {
-                    (
-                        StatusCode::OK,
-                        [(CONTENT_TYPE, HeaderValue::from_static("text/xml; charset=utf-8"))],
-                        format!("<greeting>{greeting}</greeting>"),
-                    )
-                        .into_response()
-                },
-            ),
-        )
-        .with_state(Client::new("xml", ()))
-}
-
-fn xml_request(body: &'static str) -> Request<Body> {
-    Request::builder()
-        .method(Method::POST)
-        .uri("/greet")
-        .header(CONTENT_TYPE, "text/xml")
-        .body(Body::from(body))
-        .expect("build request")
-}
-
-#[tokio::test]
-async fn xml_success() {
-    let (status, content_type, body) =
-        send_raw(xml_router(), xml_request("<greet><name>ada</name></greet>")).await;
-
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(content_type.as_deref(), Some("text/xml; charset=utf-8"));
-    assert_eq!(body, "<greeting>hello, ada</greeting>");
-}
-
-#[tokio::test]
-async fn xml_handler_error() {
-    let (status, content_type, body) =
-        send_raw(xml_router(), xml_request("<greet><name></name></greet>")).await;
-
-    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
-    assert_eq!(content_type.as_deref(), Some("text/xml; charset=utf-8"));
-    assert_eq!(
-        body,
-        "<error><code>empty_name</code><message>name cannot be empty</message></error>"
-    );
-}
-
-#[tokio::test]
-async fn xml_malformed_body() {
-    let (status, content_type, body) = send_raw(xml_router(), xml_request("<greet>")).await;
-
-    assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert_eq!(content_type.as_deref(), Some("application/json"));
-    let body: ErrorBody = serde_json::from_str(&body).expect("decode error body");
-    assert_eq!(body.error, "invalid_request");
-    assert_eq!(body.message, "malformed greet document");
-}
-
-#[derive(Debug, Deserialize)]
-struct Lookup {
-    id: String,
-}
-
-fn lookup<P: Send + Sync + 'static>(
-    input: Lookup, _context: Context<P>,
-) -> Ready<Result<String, omnia_sdk::Error>> {
-    let Lookup { id } = input;
-    ready(Err(not_found!("no item {id}")))
+async fn lookup(Path(id): Path<String>) -> Result<Json<String>, omnia_sdk::Error> {
+    Err(not_found!("no item {id}"))
 }
 
 #[tokio::test]
 async fn error_body_json() {
     let router =
-        axum::Router::new().route("/items", get(lookup)).with_state(Client::new("test", ()));
-    let request = Request::builder()
-        .method(Method::GET)
-        .uri("/items?id=42")
-        .body(Body::empty())
-        .expect("build request");
+        axum::Router::new().route("/items/{id}", get(lookup)).with_state(Client::new("test", ()));
+    let request = Request::get("/items/42").body(Body::empty()).expect("build request");
     let (status, content_type, body) = send_raw(router, request).await;
 
     assert_eq!(status, StatusCode::NOT_FOUND);
@@ -632,6 +308,56 @@ async fn error_body_json() {
         serde_json::from_str::<serde_json::Value>(&body).expect("decode error body"),
         serde_json::json!({ "error": "not_found", "message": "no item 42" })
     );
+}
+
+async fn save() -> HttpResult<Json<serde_json::Value>> {
+    Err(anyhow::anyhow!("disk full").context("could not save"))?;
+    Ok(Json(serde_json::json!({ "saved": true })))
+}
+
+#[tokio::test]
+async fn anyhow_error_body() {
+    let router = axum::Router::new().route("/save", get(save)).with_state(Client::new("test", ()));
+    let request = Request::get("/save").body(Body::empty()).expect("build request");
+    let (status, content_type, body) = send_raw(router, request).await;
+
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(content_type.as_deref(), Some("application/json"));
+    let body: ErrorBody = serde_json::from_str(&body).expect("decode error body");
+    assert_eq!(body.error, "server_error");
+    assert!(body.message.contains("could not save"), "the context is kept: {}", body.message);
+    assert!(body.message.contains("disk full"), "the cause is kept: {}", body.message);
+}
+
+#[tokio::test]
+async fn decode_error_body() {
+    let response = HttpError::from(DecodeError::new("missing field `name`")).into_response();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(response.headers()[CONTENT_TYPE], "application/json");
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.expect("collect body");
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&bytes).expect("decode error body"),
+        serde_json::json!({ "error": "invalid_request", "message": "missing field `name`" })
+    );
+}
+
+#[tokio::test]
+async fn http_error_bodies() {
+    let text = HttpError::new(StatusCode::CONFLICT, "busy").into_response();
+    assert_eq!(text.status(), StatusCode::CONFLICT);
+    assert_eq!(text.headers()[CONTENT_TYPE], "text/plain; charset=utf-8");
+    assert_eq!(to_bytes(text.into_body(), usize::MAX).await.expect("collect body"), "busy");
+
+    let xml = HttpError::with_body(
+        StatusCode::BAD_REQUEST,
+        HeaderValue::from_static("text/xml"),
+        b"<fault/>".to_vec(),
+    )
+    .into_response();
+    assert_eq!(xml.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(xml.headers()[CONTENT_TYPE], "text/xml");
+    assert_eq!(to_bytes(xml.into_body(), usize::MAX).await.expect("collect body"), "<fault/>");
 }
 
 #[derive(Debug, Serialize)]
@@ -665,65 +391,21 @@ fn format_encode() {
     );
 }
 
-#[derive(Debug, Deserialize)]
-struct Summarize {
-    name: String,
-    count: u32,
-}
-
-fn summarize<P: Send + Sync + 'static>(
-    input: Summarize, _context: Context<P>,
-) -> Ready<Result<Summary, omnia_sdk::Error>> {
-    ready(Ok(Summary {
-        name: input.name,
-        count: input.count,
-    }))
-}
-
 #[tokio::test]
 async fn encoded_into_response() {
-    let router = axum::Router::new()
-        .route(
-            "/summary",
-            handle_with(
-                MethodFilter::GET,
-                summarize,
-                |raw: RawRequest<'_>| {
-                    serde_urlencoded::from_str::<Summarize>(raw.query.unwrap_or_default())
-                        .map_err(|error| DecodeError::new(error.to_string()))
-                },
-                |summary: Summary| Format::Text.encode(&summary, render_summary).into_response(),
-            ),
-        )
-        .with_state(Client::new("test", ()));
-    let request = Request::builder()
-        .method(Method::GET)
-        .uri("/summary?name=widget&count=3")
-        .body(Body::empty())
-        .expect("build request");
-    let (status, content_type, body) = send_raw(router, request).await;
+    let summary = Summary {
+        name: "widget".to_string(),
+        count: 3,
+    };
 
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(content_type.as_deref(), Some("text/plain; charset=utf-8"));
-    assert_eq!(body, "widget x3");
-}
+    let response = Format::Text.encode(&summary, render_summary).into_response();
 
-fn is_minted_id(id: &str) -> bool {
-    id.len() == 32 && id.bytes().all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
-}
-
-#[tokio::test]
-async fn missing_request_id() {
-    let request = Request::builder()
-        .method(Method::GET)
-        .uri("/echo?name=plan")
-        .body(Body::empty())
-        .expect("build request");
-    let (status, value) = send(request).await;
-
-    assert_eq!(status, StatusCode::OK);
-    let correlation_id = value["correlation_id"].as_str().expect("correlation id is minted");
-    assert!(is_minted_id(correlation_id), "{correlation_id:?} is not 32 lowercase hex chars");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()[CONTENT_TYPE], "text/plain; charset=utf-8");
+    assert_eq!(
+        to_bytes(response.into_body(), usize::MAX).await.expect("collect body"),
+        "widget x3"
+    );
 }
 
 #[test]
@@ -761,116 +443,4 @@ fn from_lookup_correlation() {
     assert_eq!(metadata.request_id.as_deref(), Some("req-2"));
     assert_eq!(metadata.correlation_id.as_deref(), Some("req-2"));
     assert_eq!(metadata.causation_id, None);
-}
-
-#[derive(Debug)]
-struct Fetch {
-    id: String,
-}
-
-fn fetch<P: Send + Sync + 'static>(
-    input: Fetch, _context: Context<P>,
-) -> Ready<Result<String, omnia_sdk::Error>> {
-    let Fetch { id } = input;
-    ready(Ok(format!("item {id}")))
-}
-
-#[tokio::test]
-async fn decoder_not_found() {
-    let router = axum::Router::new()
-        .route(
-            "/items/{id}",
-            handle_with(
-                MethodFilter::GET,
-                fetch,
-                |raw: RawRequest<'_>| -> Result<Fetch, omnia_sdk::Error> {
-                    let id = raw
-                        .path_params
-                        .iter()
-                        .find(|(key, value)| key == "id" && value.parse::<u32>().is_ok())
-                        .map(|(_, value)| value.clone())
-                        .ok_or_else(|| not_found!("no such item"))?;
-                    Ok(Fetch { id })
-                },
-                text_response,
-            ),
-        )
-        .with_state(Client::new("test", ()));
-
-    let (status, _, body) = send_raw(
-        router.clone(),
-        Request::builder().uri("/items/7").body(Body::empty()).expect("build request"),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(body, "item 7");
-
-    let (status, content_type, body) = send_raw(
-        router,
-        Request::builder().uri("/items/seven").body(Body::empty()).expect("build request"),
-    )
-    .await;
-    assert_eq!(status, StatusCode::NOT_FOUND);
-    assert_eq!(content_type.as_deref(), Some("application/json"));
-    let body: ErrorBody = serde_json::from_str(&body).expect("decode error body");
-    assert_eq!(body.error, "not_found");
-    assert_eq!(body.message, "no such item");
-}
-
-#[tokio::test]
-async fn query_and_body_input_match_verb_constructors() {
-    let custom = axum::Router::new()
-        .route(
-            "/echo/{name}",
-            handle_with(
-                MethodFilter::GET,
-                echo,
-                |raw: RawRequest<'_>| query_input(raw.path_params, raw.query),
-                |output| (StatusCode::OK, axum::Json(output)).into_response(),
-            )
-            .merge(handle_with(
-                MethodFilter::POST,
-                echo,
-                |raw: RawRequest<'_>| body_input(raw.path_params, raw.body),
-                |output| (StatusCode::OK, axum::Json(output)).into_response(),
-            )),
-        )
-        .with_state(Client::new("test", ()));
-
-    let get_req = || {
-        Request::builder()
-            .method(Method::GET)
-            .uri("/echo/alice?count=3")
-            .header("x-correlation-id", "corr-parity")
-            .body(Body::empty())
-            .expect("build get request")
-    };
-    let expected_get = send(get_req()).await;
-    let actual_get = {
-        let response = custom.clone().oneshot(get_req()).await.expect("custom get response");
-        let status = response.status();
-        let bytes = to_bytes(response.into_body(), usize::MAX).await.expect("collect body");
-        let value = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
-        (status, value)
-    };
-    assert_eq!(actual_get, expected_get);
-
-    let post_req = || {
-        Request::builder()
-            .method(Method::POST)
-            .uri("/echo/bob")
-            .header(CONTENT_TYPE, "application/json")
-            .header("x-correlation-id", "corr-parity")
-            .body(Body::from(r#"{"count":5}"#))
-            .expect("build post request")
-    };
-    let expected_post = send(post_req()).await;
-    let actual_post = {
-        let response = custom.oneshot(post_req()).await.expect("custom post response");
-        let status = response.status();
-        let bytes = to_bytes(response.into_body(), usize::MAX).await.expect("collect body");
-        let value = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
-        (status, value)
-    };
-    assert_eq!(actual_post, expected_post);
 }

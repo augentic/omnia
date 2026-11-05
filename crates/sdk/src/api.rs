@@ -2,7 +2,10 @@
 //!
 //! Application logic is a [`Handler`]: any `async fn(I, Context<P>)`
 //! returning a `Result`. [`Client`] owns the provider and builds the
-//! [`Context`] each call receives.
+//! [`Context`] each call receives. The [`messaging`] and [`command`]
+//! transports dispatch a `Handler`; an HTTP route is a plain axum handler
+//! that takes its `Context` as an extractor over the `Client` in the router
+//! state (see [`http`]).
 //!
 //! ```rust,ignore
 //! use std::convert::Infallible;
@@ -211,6 +214,9 @@ fn random_u64_pair() -> (u64, u64) {
 }
 
 /// Context owned by one handler call.
+///
+/// With the `http` feature it is also an axum extractor over the [`Client`]
+/// in the router state, so an HTTP handler is `async fn(Context<P>, ..)`.
 #[derive(Clone, Debug)]
 pub struct Context<P> {
     owner: Arc<str>,

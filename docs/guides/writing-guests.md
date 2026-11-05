@@ -53,31 +53,35 @@ cargo build --example <name>-wasm --target wasm32-wasip2
 
 ## The handler contract
 
-`omnia-sdk` keeps application logic independent of how it is invoked. Three pieces, defined once and reused by every transport:
+`omnia-sdk` keeps application logic independent of how it is invoked. Three pieces, defined once:
 
-- A **handler** is one unit of application work: an `async fn(I, Context<P>) -> Result<O, E>` named for the operation (e.g. `create_item`), taking the input DTO by value (e.g. `CreateItem`).
 - A **provider** is the struct your handlers run against — it carries their capabilities (implement `DocumentStore`, `Config`, etc. on it).
-- A **client** (`Client::new(owner, provider)`) binds the provider to an owner id and calls handlers.
+- A **client** (`Client::new(owner, provider)`) binds the provider to an owner id. It is the state of an HTTP router and the thing a messaging router or command invokes handlers through.
+- A **context** (`Context<P>`) is what a handler receives: `owner()`, `provider()`, and the public transport-neutral `metadata` (request, correlation, and causation ids). A handler bounds its `P` on the capability traits it uses and never names the provider.
 
-Write a handler as a plain `async fn`. The first parameter is the owned input; the second is an owned `Context<P>` exposing `owner()`, `provider()`, and the public transport-neutral `metadata`:
+An **HTTP handler** is a plain [Axum](https://github.com/tokio-rs/axum) handler. `Context<P>` is an extractor over the `Client` in the router state; the input comes through axum's own `Path`, `Query`, and `Json` extractors; the output is anything `IntoResponse`, typically `Json<Reply>`:
 
 ```rust,noplayground
-async fn create_item<P>(input: CreateItem, context: Context<P>) -> Result<ItemReply, Error>
+async fn create_item<P>(
+    context: Context<P>, Json(input): Json<CreateItem>,
+) -> Result<Json<ItemReply>, Error>
 where
-    P: Config + StateStore,
+    P: Config + StateStore + 'static,
 {
     // context.provider() carries the capabilities in the fn's bounds
 }
 ```
 
-Every fn of that shape is a `Handler<P, I>` through a blanket impl, as is any `Clone` closure of it — so a closure can carry configuration into a route. Implementing `Handler<P, I>` by hand on a local non-fn type is the escape hatch for the rare case a fn cannot express. A mis-shaped fn is reported by rustc's own diagnostics at the route or `Client::call` site. To unit-test a handler without a `Client`, build its context with `Context::new(owner, provider, metadata)`.
+A **messaging or command handler** is an `async fn(I, Context<P>) -> Result<O, E>` named for the operation, taking the input DTO by value. Every fn of that shape is a `Handler<P, I>` through a blanket impl, as is any `Clone` closure of it — so a closure can carry configuration into a route. Implementing `Handler<P, I>` by hand on a local non-fn type is the escape hatch for the rare case a fn cannot express. To unit-test a fn that takes a context without a `Client` or a router, build its context with `Context::new(owner, provider, metadata)`.
+
+Logic shared by an HTTP route and a topic lives in a plain fn both call: the axum handler extracts and hands over, the messaging handler decodes and hands over.
 
 For a guest that runs on the WASI-backed capability defaults, `omnia_sdk::WasiProvider` is a zero-sized struct that implements every capability trait on `wasm32`. Native handler tests run the same handlers against `omnia_test::guest::Provider` (see [Provider Portability](portability.md) and [Testing Omnia-Based Code](testing-omnia-code.md)):
 
 ```rust,noplayground
 pub fn router<P>(provider: P) -> axum::Router
 where
-    P: Config + HttpRequest + Identity + Publish + StateStore + Clone + Send + Sync + 'static,
+    P: Config + HttpRequest + Identity + Publish + StateStore + 'static,
 {
     axum::Router::new()
         .route("/api/items", post(create_item))
@@ -87,29 +91,27 @@ where
 omnia_sdk::http!(router(omnia_sdk::WasiProvider));
 ```
 
-Routers map transport events onto handlers: HTTP routes are plain `axum::routing::MethodRouter`s registered on an `axum::Router` whose state is one provider-owning `Client`, and a messaging router maps exact topics. `omnia_sdk::http!(router(omnia_sdk::WasiProvider))` and `omnia_sdk::messaging!(messaging_router(omnia_sdk::WasiProvider))` expand to the `#[omnia_wasi_otel::instrument]`-scoped WASI exports on `wasm32` and to nothing on native targets.
+Routers map transport events onto handlers: an HTTP route is registered through axum's own `get`/`post`/`put`/`patch`/`delete` on an `axum::Router` whose state is one provider-owning `Client`, and a messaging router maps exact topics. `omnia_sdk::http!(router(omnia_sdk::WasiProvider))` and `omnia_sdk::messaging!(messaging_router(omnia_sdk::WasiProvider))` expand to the `#[omnia_wasi_otel::instrument]`-scoped WASI exports on `wasm32` and to nothing on native targets. The HTTP export also layers `api::http::trace`, which serves each request inside a `handler` span carrying the request and correlation ids; a native test can layer it with `axum::middleware::from_fn(trace)`.
 
-Messaging uses `api::messaging::Router` and `consume(create_item)`; topic matching is exact. A module that owns topics registers them on an `api::messaging::Routes` of its own, with no client, and the guest merges each into its one `Router` (`Router::merge`), as an `axum::Router` merges a module's routes before `with_state`; a topic registered twice panics where the two meet. Because the same handler fns register in any router, one guest can expose the same logic over HTTP, messaging, and a CLI without duplicating it.
+Messaging uses `api::messaging::Router` and `consume(item_created)`; topic matching is exact. A module that owns topics registers them on an `api::messaging::Routes` of its own, with no client, and the guest merges each into its one `Router` (`Router::merge`), as an `axum::Router` merges a module's routes before `with_state`; a topic registered twice panics where the two meet. `consume` decodes JSON; `messaging::consume_with(handler, decode)` takes a decoder `Fn(&Delivery) -> Result<I, DecodeError>` over the whole `Delivery` for any other wire format.
 
-Typed routes default to JSON: `http::get` and `http::delete` decode path and query parameters, while `http::post`, `http::put`, and `http::patch` merge a JSON body with path parameters. Routes that speak another wire format (or need other methods) use the general constructors instead: `http::handle_with(filter, handler, decode, encode)` pairs a `MethodFilter` (unions work, e.g. `MethodFilter::POST.or(MethodFilter::PUT)`) with a decoder `Fn(RawRequest<'_>) -> Result<I, E>` (any `E: Into<HttpError>`, so a decoder can classify its refusal — a `not_found!` path parameter answers 404) over a raw-request view (path parameters, query, headers, body) plus an encoder `Fn(F::Output) -> Response`, and `messaging::consume_with(handler, decode)` takes a decoder `Fn(&Delivery) -> Result<I, DecodeError>` over the whole `Delivery`. Errors keep flowing through `Into<HttpError>`: an `omnia_sdk::Error` becomes the JSON `api::ErrorBody` (`{"error","message"}`) at the variant's status, and `HttpError::with_body` carries a preformatted error body (e.g. an XML document) with its content type.
+### Errors
+
+An HTTP handler's error is anything `IntoResponse`. An `omnia_sdk::Error` (`bad_request!`, `not_found!`, `server_error!`, `bad_gateway!`) becomes the JSON `api::ErrorBody` (`{"error","message"}`) at the variant's status, the same envelope the command transport writes to stderr. `omnia_sdk::HttpResult<T>` is `Result<T, HttpError>`, where `?` on an `omnia_sdk::Error`, a `DecodeError`, or an `anyhow::Error` lands in the same envelope; `HttpError::new(status, message)` answers plain text and `HttpError::with_body(status, content_type, body)` carries a preformatted body in another wire format (e.g. an XML fault). A domain error with its own wire shape implements `IntoResponse` itself and delegates its host-failure variant to `HttpError::from(inner).into_response()`. A malformed body or query is refused by axum's extractor before the handler runs (`400`, or `415` without `Content-Type: application/json`).
 
 ## HTTP handlers
 
-Register typed handlers on an [Axum](https://github.com/tokio-rs/axum) `Router` using `omnia_sdk::api::http::{get, post, put, patch, delete}` and export the router with `omnia_sdk::http!`:
+Register handlers on an [Axum](https://github.com/tokio-rs/axum) `Router` under axum's `get`/`post`/`put`/`patch`/`delete`, and export the router with `omnia_sdk::http!`:
 
 ```rust,noplayground
 use axum::Router;
-use omnia_sdk::api::http::{get, post};
-use omnia_sdk::api::{Client, Context};
-use omnia_sdk::{Error, WasiProvider};
+use axum::routing::get;
+use omnia_sdk::api::Client;
+use omnia_sdk::WasiProvider;
 
-pub fn router<P>(provider: P) -> Router
-where
-    P: Clone + Send + Sync + 'static,
-{
+pub fn router<P: Send + Sync + 'static>(provider: P) -> Router {
     Router::new()
-        .route("/", get(echo_get))
-        .route("/", post(echo_post))
+        .route("/", get(echo_get).post(echo_post))
         .with_state(Client::new("my-guest", provider))
 }
 
@@ -206,7 +208,7 @@ impl omnia_wasi_messaging::incoming_handler::Guest for Messaging {
 
 ## Command-mode guests
 
-For run-once workloads (jobs, CLIs, agent tasks), `omnia_sdk::api::command` is the command-line mirror of the HTTP router over the same [handler contract](#the-handler-contract): argv is decoded into handler input, the handler runs through `Client::call`, and the output is encoded onto the process channels. The clap-backed parts (`parse`, `completions`, the `clap::ValueEnum` derive on `Format`) sit behind the `command` cargo feature (`omnia-sdk = { version = "...", features = ["command"] }`); the projector itself needs no feature.
+For run-once workloads (jobs, CLIs, agent tasks), `omnia_sdk::api::command` is the command-line transport over the [handler contract](#the-handler-contract): argv is decoded into handler input, the handler runs through `Client::call`, and the output is encoded onto the process channels. The clap-backed parts (`parse`, `completions`, the `clap::ValueEnum` derive on `Format`) sit behind the `command` cargo feature (`omnia-sdk = { version = "...", features = ["command"] }`); the projector itself needs no feature.
 
 ```rust,noplayground
 use std::fmt;

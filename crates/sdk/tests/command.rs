@@ -326,13 +326,21 @@ async fn hints_apply_by_error() {
 
 #[cfg(feature = "http")]
 mod http_parity {
+    use axum::Json;
     use axum::body::{Body, to_bytes};
+    use axum::extract::Query;
+    use axum::routing::get;
     use http::{Request, StatusCode};
     use omnia_sdk::api::ErrorBody;
-    use omnia_sdk::api::http::get;
     use tower::ServiceExt as _;
 
     use super::*;
+
+    async fn lookup_route(
+        context: Context<()>, Query(input): Query<Lookup>,
+    ) -> Result<Json<Greeting>, omnia_sdk::Error> {
+        lookup(input, context).await.map(Json)
+    }
 
     #[tokio::test]
     async fn handler_error_http() {
@@ -344,7 +352,7 @@ mod http_parity {
         let command_body: ErrorBody =
             serde_json::from_slice(&response.stderr).expect("stderr carries an error body");
 
-        let router = axum::Router::new().route("/items", get(lookup)).with_state(client);
+        let router = axum::Router::new().route("/items", get(lookup_route)).with_state(client);
         let request =
             Request::builder().uri("/items?id=42").body(Body::empty()).expect("build request");
         let http = router.oneshot(request).await.expect("router serves request");

@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 
 use base64ct::{Base64, Encoding};
 use bytes::Bytes;
-use http::header::HOST;
+use http::header::{CONTENT_TYPE, HOST};
 use http::{HeaderMap, Request, Response, StatusCode};
 use http_body_util::{BodyExt as _, Full};
 use hyper::body::Incoming;
@@ -304,6 +304,7 @@ async fn http_incoming_echo() {
     // post: the message is the json body
     let request = Request::post("/echo")
         .header(HOST, "echo.test")
+        .header(CONTENT_TYPE, "application/json")
         .header("x-request-id", "req-post")
         .body(Full::new(Bytes::from_static(br#"{"message":"posted"}"#)))
         .expect("request");

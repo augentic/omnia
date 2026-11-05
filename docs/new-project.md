@@ -50,7 +50,7 @@ edition = "2024"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-axum = { version = "0.8", default-features = false, features = ["json"] }
+axum = { version = "0.8", default-features = false, features = ["json", "query"] }
 omnia-sdk = "0.38"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -58,20 +58,17 @@ serde_json = "1"
 
 ```rust
 // guest/src/lib.rs
-use axum::Router;
-use omnia_sdk::api::http::{get, post};
+use axum::extract::Query;
+use axum::routing::get;
+use axum::{Json, Router};
 use omnia_sdk::api::{Client, Context};
 use omnia_sdk::{Error, WasiProvider};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-pub fn router<P>(provider: P) -> Router
-where
-    P: Clone + Send + Sync + 'static,
-{
+pub fn router<P: Send + Sync + 'static>(provider: P) -> Router {
     Router::new()
-        .route("/", get(hello))
-        .route("/", post(echo))
+        .route("/", get(hello).post(echo))
         .with_state(Client::new("my-guest", provider))
 }
 
@@ -87,17 +84,21 @@ struct Reply {
     message: String,
 }
 
-async fn hello<P>(input: Hello, _context: Context<P>) -> Result<Reply, Error> {
-    let target = input.name.as_deref().unwrap_or("from the guest");
-    Ok(Reply {
+async fn hello<P: Send + Sync + 'static>(
+    context: Context<P>, Query(input): Query<Hello>,
+) -> Result<Json<Reply>, Error> {
+    let target = input.name.as_deref().unwrap_or(context.owner());
+    Ok(Json(Reply {
         message: format!("hello {target}"),
-    })
+    }))
 }
 
-async fn echo<P>(body: Value, _context: Context<P>) -> Result<Value, Error> {
-    Ok(json!({ "echo": body }))
+async fn echo(Json(body): Json<Value>) -> Result<Json<Value>, Error> {
+    Ok(Json(json!({ "echo": body })))
 }
 ```
+
+The handlers are plain axum handlers. `Context<P>` is an extractor over the `Client` in the router state: it carries the owner, the provider the handler's capability bounds name, and the request's metadata (`x-request-id` and friends). A handler that needs none of that, like `echo`, takes only axum's own extractors. An `omnia_sdk::Error` answers the JSON `{"error","message"}` envelope at its status.
 
 `omnia_sdk::http!` expands to the `wasi:http/incoming-handler` export (instrumented with an OpenTelemetry span) on `wasm32-wasip2` and to nothing on native targets. Because `omnia-sdk` re-exports `wasip3`, `wit-bindgen`, `omnia-wasi-http`, and `omnia-wasi-otel` internally for the macro expansion, your guest `Cargo.toml` does not need to pin `wasip3` or `wit-bindgen` directly (avoiding version-mismatch deadlocks — see [Troubleshooting](troubleshooting.md#outbound-http-or-spawned-work-inside-a-handler-deadlocks)).
 

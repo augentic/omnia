@@ -19,23 +19,19 @@ cargo build --example http-wasm --target wasm32-wasip2
 
 This produces `target/wasm32-wasip2/debug/examples/http_wasm.wasm` (note: the file name uses underscores).
 
-The guest itself is ordinary Rust. In an Omnia service, you write transport-neutral `async fn(I, Context<P>) -> Result<O, Error>` handlers on an [Axum](https://github.com/tokio-rs/axum) `Router` and export the WASI HTTP interface with `omnia_sdk::http!` over `omnia_sdk::WasiProvider`:
+The guest itself is ordinary Rust. In an Omnia service, you write plain [Axum](https://github.com/tokio-rs/axum) handlers on a `Router` whose state is a capability-owning `Client`, and export the WASI HTTP interface with `omnia_sdk::http!` over `omnia_sdk::WasiProvider`:
 
 ```rust,noplayground
-pub fn router<P>(provider: P) -> Router
-where
-    P: Clone + Send + Sync + 'static,
-{
+pub fn router<P: Send + Sync + 'static>(provider: P) -> Router {
     Router::new()
-        .route("/", get(echo_get))
-        .route("/", post(echo_post))
+        .route("/", get(echo_get).post(echo_post))
         .with_state(Client::new("my-guest", provider))
 }
 
 omnia_sdk::http!(router(WasiProvider));
 ```
 
-On `wasm32`, `omnia_sdk::http!` expands to the raw WASI `wasip3::http::service::export!` implementation and serves each request through `omnia_wasi_http::serve` inside an `http_guest_handle` OpenTelemetry span (the standalone `examples/http/guest.rs` writes that expansion out explicitly so you can see the underlying WASI boundary).
+A handler reaches its capabilities through the `omnia_sdk::api::Context<P>` extractor; `get`, `post`, and the input extractors are axum's own. On `wasm32`, `omnia_sdk::http!` expands to the raw WASI `wasip3::http::service::export!` implementation and serves each request through `omnia_wasi_http::serve` inside an `http_guest_handle` OpenTelemetry span (the standalone `examples/http/guest.rs` writes that expansion out explicitly so you can see the underlying WASI boundary).
 
 ## Step 2: Run it in a host
 
@@ -77,9 +73,9 @@ Each entry pairs a **WASI host** (the interface guests see, e.g. `WasiKeyValue`)
 In application handlers, capabilities are traits on `context.provider()` (implemented by `WasiProvider` in the guest and by `omnia_test::guest::Provider` in native tests), such as `StateStore` for key-value storage:
 
 ```rust,noplayground
-async fn store_item<P: StateStore>(
-    input: ItemInput, context: Context<P>,
-) -> Result<ItemReply, Error> {
+async fn store_item<P: StateStore + 'static>(
+    context: Context<P>, Json(input): Json<ItemInput>,
+) -> Result<Json<ItemReply>, Error> {
     context.provider().set("my_key", input.body.as_bytes(), None).await?;
     let res = context.provider().get("my_key").await?;
     tracing::debug!("found val: {res:?}");
