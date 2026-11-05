@@ -6,8 +6,10 @@
 //! `Query`, and `Json` extractors, and answers a `Result` whose error is an
 //! [`Error`](crate::Error), the JSON [`ErrorBody`] at its status; `?` on an
 //! `anyhow::Error` reaches the same envelope. A domain error with a wire shape
-//! of its own implements `IntoResponse` itself. [`export!`] binds the router
-//! fn as the guest's `wasi:http` handler and serves each request inside the
+//! of its own implements `IntoResponse` itself. A module builds its routes
+//! as a [`Router`] of its own and the guest merges them before
+//! `with_state(Client::new(provider))`. [`export!`] binds the router fn as
+//! the guest's `wasi:http` handler and serves each request inside the
 //! `handler` span [`trace`] opens.
 
 use std::convert::Infallible;
@@ -73,6 +75,14 @@ macro_rules! __export_http {
 /// ```
 #[doc(inline)]
 pub use crate::__export_http as export;
+
+/// An `axum::Router` over a provider-owning [`Client`], awaiting its state.
+///
+/// A module's routes are one of these and the guest's router fn merges
+/// them, closing the whole with `with_state(Client::new(provider))`, as
+/// topics are [`messaging::Routes`](crate::api::messaging::Routes) closed
+/// with a client.
+pub type Router<P> = axum::Router<Client<P>>;
 
 /// Serve a request inside a `handler` span carrying its request and correlation ids.
 ///

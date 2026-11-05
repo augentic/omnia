@@ -2,7 +2,8 @@
 //!
 //! A module registers its topics on a [`Routes`] of its own and the guest
 //! merges each into its one [`Router`] over a [`Client`], as an
-//! `axum::Router` is merged before `with_state`. A route decodes JSON unless
+//! `axum::Router` is merged before `with_state`; [`Routes::with_client`]
+//! closes merged routes as `with_state` does. A route decodes JSON unless
 //! registered with [`Routes::route_with`], and [`Routes::map_topics`]
 //! re-keys a module's topics for the deployment, a prefix say, as they are
 //! merged. [`export!`] binds the router fn as the guest's `wasi:messaging`
@@ -219,6 +220,11 @@ impl<P: Send + Sync + 'static> Routes<P> {
         self.routes
             .into_iter()
             .fold(Self::new(), |routes, (topic, route)| routes.insert(map(&topic), route))
+    }
+
+    /// Close the routes over `client` as the [`Router`] that dispatches them.
+    pub const fn with_client(self, client: Client<P>) -> Router<P> {
+        Router { client, routes: self }
     }
 
     fn insert(mut self, topic: String, route: Arc<dyn ErasedRoute<P>>) -> Self {

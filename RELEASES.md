@@ -2,6 +2,16 @@
 
 Unreleased
 
+### Added
+
+- `omnia_sdk::api::http::Router<P>`, the `axum::Router` over a
+  provider-owning `Client<P>` a module's routes are, so a module writes
+  `Router<P>` where it wrote `axum::Router<Client<P>>`, and
+  `messaging::Routes::with_client(client)`, which closes merged routes as
+  `with_state(client)` closes merged HTTP routes. A guest's two routers now
+  end the same way, and `messaging::Router::new(client).merge(routes)` is
+  unchanged.
+
 ---
 
 Release notes for previous releases can be found on the respective release branches of the repository.
