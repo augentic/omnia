@@ -15,7 +15,7 @@ use omnia_sdk::plugins::{Location, Plugins as _};
 
 use self::omnia_test::link::ops;
 
-omnia_sdk::export!(command: scenario);
+omnia_sdk::api::command::export!(scenario);
 
 async fn scenario() {
     let echoer = Location::Declared("echoer".to_owned());

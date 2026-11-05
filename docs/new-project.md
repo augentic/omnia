@@ -61,8 +61,8 @@ serde_json = "1"
 use axum::extract::Query;
 use axum::routing::get;
 use axum::{Json, Router};
-use omnia_sdk::api::{Client, Context};
-use omnia_sdk::{Error, WasiProvider};
+use omnia_sdk::Error;
+use omnia_sdk::api::{Client, Context, http};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -72,7 +72,7 @@ pub fn http_router<P: Send + Sync + 'static>(provider: P) -> Router {
         .with_state(Client::new(provider))
 }
 
-omnia_sdk::export!(http: http_router(WasiProvider));
+http::export!(http_router);
 
 #[derive(Deserialize)]
 struct Hello {
@@ -100,7 +100,7 @@ async fn echo(Json(body): Json<Value>) -> Result<Json<Value>, Error> {
 
 The handlers are plain axum handlers. `Context<P>` is an extractor over the `Client` in the router state: it carries the provider the handler's capability bounds name and the request's metadata (`x-request-id`, `x-tenant`, and friends). A handler that needs none of that, like `echo`, takes only axum's own extractors. An `omnia_sdk::Error` answers the JSON `{"error","message"}` envelope at its status.
 
-`omnia_sdk::export!(http: ..)` expands to the `wasi:http/incoming-handler` export (instrumented with an OpenTelemetry span) on `wasm32-wasip2` and to nothing on native targets; a guest that also consumes messages or runs as a command adds an `export!(messaging: ..)` or `export!(command: ..)` beside it. Because `omnia-sdk` re-exports `wasip3`, `wit-bindgen`, `omnia-wasi-http`, and `omnia-wasi-otel` internally for the macro expansion, your guest `Cargo.toml` does not need to pin `wasip3` or `wit-bindgen` directly (avoiding version-mismatch deadlocks — see [Troubleshooting](troubleshooting.md#outbound-http-or-spawned-work-inside-a-handler-deadlocks)).
+`http::export!(http_router)` expands to the `wasi:http/incoming-handler` export (instrumented with an OpenTelemetry span) on `wasm32-wasip2` and to nothing on native targets; a guest that also consumes messages or runs as a command adds `messaging::export!(..)` or `command::export!(..)` beside it. Because `omnia-sdk` re-exports `wasip3`, `wit-bindgen`, `omnia-wasi-http`, and `omnia-wasi-otel` internally for the macro expansion, your guest `Cargo.toml` does not need to pin `wasip3` or `wit-bindgen` directly (avoiding version-mismatch deadlocks — see [Troubleshooting](troubleshooting.md#outbound-http-or-spawned-work-inside-a-handler-deadlocks)).
 
 ## The host crate
 

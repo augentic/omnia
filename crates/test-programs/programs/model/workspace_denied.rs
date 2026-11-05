@@ -6,7 +6,7 @@ use omnia_sdk::WasiProvider;
 use omnia_sdk::model::{Error, Model as _, Request};
 use test_programs::user;
 
-omnia_sdk::export!(command: scenario);
+omnia_sdk::api::command::export!(scenario);
 
 async fn scenario() {
     let error = WasiProvider

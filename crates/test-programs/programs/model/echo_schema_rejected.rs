@@ -6,7 +6,7 @@ use omnia_sdk::WasiProvider;
 use omnia_sdk::model::{Error, Format, Model as _, Request, SchemaFormat};
 use test_programs::{VERDICT_SCHEMA, user};
 
-omnia_sdk::export!(command: scenario);
+omnia_sdk::api::command::export!(scenario);
 
 async fn scenario() {
     let request = Request::builder()

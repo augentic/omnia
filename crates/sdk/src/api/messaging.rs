@@ -5,8 +5,8 @@
 //! `axum::Router` is merged before `with_state`. A route decodes JSON unless
 //! registered with [`Routes::route_with`], and [`Routes::map_topics`]
 //! re-keys a module's topics for the deployment, a prefix say, as they are
-//! merged. [`export!`](crate::export) binds the router as the guest's
-//! `wasi:messaging` handler.
+//! merged. [`export!`] binds the router fn as the guest's `wasi:messaging`
+//! handler.
 
 use std::collections::BTreeMap;
 use std::error::Error;
@@ -19,6 +19,52 @@ use std::sync::Arc;
 use serde::de::DeserializeOwned;
 
 use crate::api::{Client, DecodeError, Handler, Metadata};
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __export_messaging {
+    ($router:path $(,)?) => {
+        $crate::api::messaging::export!($router, $crate::WasiProvider);
+    };
+    ($router:path, $provider:expr $(,)?) => {
+        #[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
+        const _: () = {
+            use $crate::omnia_wasi_otel;
+
+            struct MessagingGuest;
+
+            $crate::omnia_wasi_messaging::export!(
+                MessagingGuest with_types_in $crate::omnia_wasi_messaging
+            );
+
+            impl $crate::omnia_wasi_messaging::incoming_handler::Guest for MessagingGuest {
+                #[omnia_wasi_otel::instrument(name = "messaging_guest_handle")]
+                async fn handle(
+                    message: $crate::omnia_wasi_messaging::types::Message,
+                ) -> ::core::result::Result<(), $crate::omnia_wasi_messaging::types::Error>
+                {
+                    let router = $router($provider).await;
+                    $crate::api::messaging::handle(&router, message).await
+                }
+            }
+        };
+    };
+}
+
+/// Bind an async router fn as the guest's `wasi:messaging` export.
+///
+/// Awaits the router fn on each delivery with [`WasiProvider`](crate::WasiProvider),
+/// or with the provider expression passed as a second argument, and dispatches
+/// the delivery through the resulting [`Router`]. Expands to nothing on native
+/// targets, so the same crate's tests build the router natively.
+///
+/// ```rust,ignore
+/// use omnia_sdk::api::messaging;
+///
+/// messaging::export!(messaging_router);
+/// ```
+#[doc(inline)]
+pub use crate::__export_messaging as export;
 
 /// An owned inbound delivery independent of a messaging binding.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]

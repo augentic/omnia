@@ -7,7 +7,7 @@ use omnia_sdk::WasiProvider;
 use omnia_sdk::model::{Error, Question};
 use test_programs::Verdict;
 
-omnia_sdk::export!(command: scenario);
+omnia_sdk::api::command::export!(scenario);
 
 async fn scenario() {
     let error = Question::<Verdict>::new("verdict")

@@ -1,14 +1,14 @@
 //! HTTP handlers over plain axum.
 //!
-//! A route is an ordinary axum handler on an [`axum::Router`] whose state is
+//! A route is an ordinary axum handler on an `axum::Router` whose state is
 //! one provider-owning [`Client`]. The handler reaches its capabilities
 //! through the [`Context`] extractor, reads its input with axum's `Path`,
 //! `Query`, and `Json` extractors, and answers a `Result` whose error is an
 //! [`Error`](crate::Error), the JSON [`ErrorBody`] at its status; `?` on an
 //! `anyhow::Error` reaches the same envelope. A domain error with a wire shape
-//! of its own implements `IntoResponse` itself. [`export!`](crate::export)
-//! binds the finished router as the guest's `wasi:http` handler and serves
-//! each request inside the `handler` span [`trace`] opens.
+//! of its own implements `IntoResponse` itself. [`export!`] binds the router
+//! fn as the guest's `wasi:http` handler and serves each request inside the
+//! `handler` span [`trace`] opens.
 
 use std::convert::Infallible;
 use std::future::{Future, ready};
@@ -24,12 +24,62 @@ use tracing::Instrument as _;
 
 use crate::api::{Client, Context, ErrorBody, Metadata};
 
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __export_http {
+    ($router:path $(,)?) => {
+        $crate::api::http::export!($router, $crate::WasiProvider);
+    };
+    ($router:path, $provider:expr $(,)?) => {
+        #[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
+        const _: () = {
+            use $crate::omnia_wasi_otel;
+
+            struct HttpGuest;
+
+            $crate::wasip3::http::service::export!(HttpGuest);
+
+            impl $crate::wasip3::exports::http::handler::Guest for HttpGuest {
+                #[omnia_wasi_otel::instrument(name = "http_guest_handle", level = $crate::tracing::Level::INFO)]
+                async fn handle(
+                    request: $crate::wasip3::http::types::Request,
+                ) -> ::core::result::Result<
+                    $crate::wasip3::http::types::Response,
+                    $crate::wasip3::http::types::ErrorCode,
+                > {
+                    let router = $crate::axum::Router::layer(
+                        $router($provider),
+                        $crate::axum::middleware::from_fn($crate::api::http::trace),
+                    );
+                    $crate::api::http::serve(router, request).await
+                }
+            }
+        };
+    };
+}
+
+/// Bind a router fn as the guest's `wasi:http` export.
+///
+/// Calls the router fn on each request with [`WasiProvider`](crate::WasiProvider),
+/// or with the provider expression passed as a second argument, and serves the
+/// request through the resulting `axum::Router` inside the `handler` span
+/// [`trace`] opens. Expands to nothing on native targets, so the same crate's
+/// tests build the router natively.
+///
+/// ```rust,ignore
+/// use omnia_sdk::api::http;
+///
+/// http::export!(http_router);
+/// ```
+#[doc(inline)]
+pub use crate::__export_http as export;
+
 /// Serve a request inside a `handler` span carrying its request and correlation ids.
 ///
-/// Apply with `axum::middleware::from_fn(trace)`; [`export!`](crate::export)
-/// applies it to the router it exports. The ids the span carries are the ones
-/// the [`Metadata`] and [`Context`] extractors hand the handler, a minted
-/// request id included.
+/// Apply with `axum::middleware::from_fn(trace)`; [`export!`] applies it to
+/// the router it exports. The ids the span carries are the ones the
+/// [`Metadata`] and [`Context`] extractors hand the handler, a minted request
+/// id included.
 pub async fn trace(mut request: Request, next: Next) -> Response {
     let metadata = Metadata::from_headers(request.headers());
     let span = tracing::info_span!(

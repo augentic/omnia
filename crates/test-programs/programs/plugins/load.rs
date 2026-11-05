@@ -20,7 +20,7 @@ use omnia_sdk::plugins::{Digest, Location, Plugins as _};
 
 use self::omnia_test::link::ops;
 
-omnia_sdk::export!(command: scenario);
+omnia_sdk::api::command::export!(scenario);
 
 // `declared`, `path`, `registry`, or `registry@<endpoint>` — the last naming
 // the registry the load fetches from.

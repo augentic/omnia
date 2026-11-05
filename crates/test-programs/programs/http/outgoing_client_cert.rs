@@ -9,7 +9,7 @@
 use omnia_sdk::http::{Method, Request, StatusCode};
 use omnia_sdk::{Config, WasiProvider};
 
-omnia_sdk::export!(command: scenario);
+omnia_sdk::api::command::export!(scenario);
 
 async fn scenario() {
     let origin = WasiProvider.get("ORIGIN").await.expect("ORIGIN seeded");

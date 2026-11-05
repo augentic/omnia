@@ -36,7 +36,7 @@ Guest spans are grafted onto the host trace: the host span live when the guest e
 
 ### Guest
 
-On `wasm32` the same crate is the guest's telemetry runtime. `#[instrument]` on an `async fn` opens a span, and the outermost one runs the lifecycle (`scope`): it installs a `tracing` subscriber on first use and exports every buffered span and recorded metric to the host as the function returns. `omnia_sdk::export!(command: ..)` does the same for a CLI entry.
+On `wasm32` the same crate is the guest's telemetry runtime. `#[instrument]` on an `async fn` opens a span, and the outermost one runs the lifecycle (`scope`): it installs a `tracing` subscriber on first use and exports every buffered span and recorded metric to the host as the function returns. `omnia_sdk::api::command::export!` does the same for a CLI entry.
 
 ```rust,ignore
 #[omnia_wasi_otel::instrument(name = "http_guest_handle")]

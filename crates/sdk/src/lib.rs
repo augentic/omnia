@@ -6,6 +6,9 @@ mod error;
 #[cfg(feature = "http")]
 pub mod mcp;
 
+pub use crate::capabilities::*;
+pub use crate::error::*;
+
 /// Blobstore metadata value types.
 pub mod blobstore {
     pub use omnia_backend::blobstore::{ContainerMetadata, ObjectMetadata};
@@ -57,6 +60,3 @@ pub use {
     omnia_wasi_blobstore, omnia_wasi_http, omnia_wasi_identity, omnia_wasi_keyvalue,
     omnia_wasi_messaging, omnia_wasi_otel, omnia_wasi_vault, omnia_wasi_vcs, wasip3, wit_bindgen,
 };
-
-pub use crate::capabilities::*;
-pub use crate::error::*;

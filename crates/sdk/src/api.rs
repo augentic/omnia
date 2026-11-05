@@ -5,8 +5,8 @@
 //! [`Context`] each call receives. The [`messaging`] and [`command`]
 //! transports dispatch a `Handler`; an HTTP route is a plain axum handler
 //! that takes its `Context` as an extractor over the `Client` in the router
-//! state (see [`http`]). [`export!`](crate::export) binds each transport's
-//! router or entry as the guest's WASI export.
+//! state (see [`http`]). Each transport's `export!` macro binds its router or
+//! entry as the guest's WASI export.
 //!
 //! ```rust,ignore
 //! use std::convert::Infallible;
@@ -42,95 +42,6 @@ pub mod command;
 #[cfg(feature = "http")]
 pub mod http;
 pub mod messaging;
-
-/// Binds one of the guest's WASI exports, named by transport.
-///
-/// - `http: <router>` serves each `wasi:http` request through the
-///   `axum::Router` the expression builds, inside the `handler` span
-///   `api::http::trace` opens.
-/// - `messaging: <router>` dispatches each `wasi:messaging` delivery through
-///   the [`messaging::Router`] the expression resolves to; the expression is
-///   awaited, so the router may read configuration.
-/// - `command: <entry>` runs the `async fn` as `wasi:cli/run`; see
-///   [`command`].
-///
-/// A guest invokes the macro once per transport it serves. Omnia creates one
-/// component instance per request, delivery, or invocation, so the expression
-/// is evaluated for that one call and durable state belongs in host-side
-/// capabilities. Each invocation expands to nothing on native targets, so the
-/// same crate's tests build the routers natively.
-///
-/// ```rust,ignore
-/// omnia_sdk::export!(http: http_router(omnia_sdk::WasiProvider));
-/// omnia_sdk::export!(messaging: messaging_router(omnia_sdk::WasiProvider));
-/// ```
-#[macro_export]
-macro_rules! export {
-    (http: $router:expr) => {
-        #[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
-        const _: () = {
-            use $crate::omnia_wasi_otel;
-
-            struct HttpGuest;
-
-            $crate::wasip3::http::service::export!(HttpGuest);
-
-            impl $crate::wasip3::exports::http::handler::Guest for HttpGuest {
-                #[omnia_wasi_otel::instrument(name = "http_guest_handle", level = $crate::tracing::Level::INFO)]
-                async fn handle(
-                    request: $crate::wasip3::http::types::Request,
-                ) -> ::core::result::Result<
-                    $crate::wasip3::http::types::Response,
-                    $crate::wasip3::http::types::ErrorCode,
-                > {
-                    let router = $crate::axum::Router::layer(
-                        $router,
-                        $crate::axum::middleware::from_fn($crate::api::http::trace),
-                    );
-                    $crate::api::http::serve(router, request).await
-                }
-            }
-        };
-    };
-    (messaging: $router:expr) => {
-        #[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
-        const _: () = {
-            use $crate::omnia_wasi_otel;
-
-            struct MessagingGuest;
-
-            $crate::omnia_wasi_messaging::export!(
-                MessagingGuest with_types_in $crate::omnia_wasi_messaging
-            );
-
-            impl $crate::omnia_wasi_messaging::incoming_handler::Guest for MessagingGuest {
-                #[omnia_wasi_otel::instrument(name = "messaging_guest_handle")]
-                async fn handle(
-                    message: $crate::omnia_wasi_messaging::types::Message,
-                ) -> ::core::result::Result<(), $crate::omnia_wasi_messaging::types::Error>
-                {
-                    let router = $router.await;
-                    $crate::api::messaging::handle(&router, message).await
-                }
-            }
-        };
-    };
-    (command: $entry:expr) => {
-        #[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
-        const _: () = {
-            struct CliGuest;
-
-            $crate::wasip3::cli::command::export!(CliGuest);
-
-            impl $crate::wasip3::exports::cli::run::Guest for CliGuest {
-                async fn run() -> ::core::result::Result<(), ()> {
-                    $crate::api::command::execute_wasi($entry()).await;
-                    Ok(())
-                }
-            }
-        };
-    };
-}
 
 /// An input that could not be decoded into handler input.
 #[derive(Debug)]

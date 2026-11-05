@@ -13,7 +13,7 @@ use omnia_wasi_vcs::{store, workspace};
 use wasip3::filesystem::preopens;
 use wasip3::filesystem::types::{Descriptor, DescriptorFlags, OpenFlags, PathFlags};
 
-omnia_sdk::export!(command: scenario);
+omnia_sdk::api::command::export!(scenario);
 
 fn preopen<'a>(directories: &'a [(Descriptor, String)], wanted: &str) -> &'a Descriptor {
     directories

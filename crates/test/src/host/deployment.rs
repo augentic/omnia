@@ -284,7 +284,7 @@ impl Deployment {
     }
 
     /// [`Deployment::run`] linking the host under test, `H`, plus the
-    /// telemetry host every `omnia_sdk::export!(command: ..)` guest imports.
+    /// telemetry host every `omnia_sdk::api::command::export!` guest imports.
     ///
     /// A suite testing `WasiOtel` itself, or a bundle without an otel
     /// backend, links by hand through [`run`](Self::run).

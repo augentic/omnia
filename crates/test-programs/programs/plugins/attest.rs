@@ -7,7 +7,7 @@
 use omnia_sdk::WasiProvider;
 use omnia_sdk::plugins::{Digest, Location, Plugins as _};
 
-omnia_sdk::export!(command: scenario);
+omnia_sdk::api::command::export!(scenario);
 
 async fn scenario() {
     let arguments = wasip3::cli::environment::get_arguments();

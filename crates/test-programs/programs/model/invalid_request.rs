@@ -8,7 +8,7 @@ use omnia_sdk::model::{
 };
 use test_programs::user;
 
-omnia_sdk::export!(command: scenario);
+omnia_sdk::api::command::export!(scenario);
 
 async fn refused(request: Request) -> String {
     match WasiProvider.complete(request).await {

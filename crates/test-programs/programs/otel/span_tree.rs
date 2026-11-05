@@ -9,7 +9,7 @@ use opentelemetry::KeyValue;
 use opentelemetry::trace::{TraceContextExt as _, Tracer as _};
 use tracing::{Instrument as _, Level};
 
-omnia_sdk::export!(command: scenario);
+omnia_sdk::api::command::export!(scenario);
 
 async fn scenario() {
     parent().await;

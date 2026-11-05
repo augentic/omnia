@@ -4,9 +4,9 @@ A guest is your application logic compiled to a WebAssembly component. This guid
 
 - [Project setup](#project-setup) — the crate shape every guest shares
 - [The handler contract](#the-handler-contract) — Handler + Client + Context behind typed HTTP/messaging routing and CLI dispatch
-- [HTTP handlers](#http-handlers) — serve requests with Axum and `omnia_sdk::export!`
+- [HTTP handlers](#http-handlers) — serve requests with Axum and `http::export!`
 - [Using WASI capabilities](#using-wasi-capabilities) — storage, messaging, SQL, models, and the rest via `WasiProvider`
-- [Handling incoming messages](#handling-incoming-messages) — the messaging trigger and `omnia_sdk::export!`
+- [Handling incoming messages](#handling-incoming-messages) — the messaging trigger and `messaging::export!`
 - [Command-mode guests](#command-mode-guests) — run-once jobs and CLIs
 - [Tracing](#tracing) — spans and logs from inside the sandbox
 - [Serving MCP tools](#serving-mcp-tools) — expose tools to AI agents
@@ -19,7 +19,7 @@ A guest is a library crate with `crate-type = ["cdylib", "rlib"]`: `cdylib` prod
 
 Typical guest dependencies:
 
-- `omnia-sdk` — the guest SDK: the handler contract, `WasiProvider`, HTTP/messaging routers and the command façade, the `omnia_sdk::export!` macro that binds the WASI exports, error types, capability traits, and MCP support
+- `omnia-sdk` — the guest SDK: the handler contract, `WasiProvider`, HTTP/messaging routers and the command façade, each transport's `export!` macro (`http::export!`, `messaging::export!`, `command::export!`), error types, capability traits, and MCP support
 - `axum`, `serde`, `serde_json` — routing and typed request/response serialization
 
 A minimal HTTP guest `Cargo.toml` looks like this:
@@ -88,10 +88,10 @@ where
         .with_state(Client::new(provider))
 }
 
-omnia_sdk::export!(http: http_router(omnia_sdk::WasiProvider));
+omnia_sdk::api::http::export!(http_router);
 ```
 
-Routers map transport events onto handlers: an HTTP route is registered through axum's own `get`/`post`/`put`/`patch`/`delete` on an `axum::Router` whose state is one provider-owning `Client`, and a messaging router maps exact topics. `omnia_sdk::export!` binds one WASI export per invocation, named by transport (`http:`, `messaging:`, or `command:`) with the expression that builds its router or entry, and expands to the `#[omnia_wasi_otel::instrument]`-scoped export on `wasm32` and to nothing on native targets. The HTTP export also layers `api::http::trace`, which serves each request inside a `handler` span carrying the request and correlation ids; a native test can layer it with `axum::middleware::from_fn(trace)`.
+Routers map transport events onto handlers: an HTTP route is registered through axum's own `get`/`post`/`put`/`patch`/`delete` on an `axum::Router` whose state is one provider-owning `Client`, and a messaging router maps exact topics. Each transport's `export!` macro (`http::export!`, `messaging::export!`, or `command::export!`) binds its WASI export, calling the router fn with `WasiProvider` (or a custom provider passed as a second argument), and expands to the `#[omnia_wasi_otel::instrument]`-scoped export on `wasm32` and to nothing on native targets. The HTTP export also layers `api::http::trace`, which serves each request inside a `handler` span carrying the request and correlation ids; a native test can layer it with `axum::middleware::from_fn(trace)`.
 
 Messaging uses `api::messaging::Router` and `route("items.created", item_created)`; topic matching is exact. A module that owns topics registers them on an `api::messaging::Routes` of its own, with no client, and the guest merges each into its one `Router` (`Router::merge`), as an `axum::Router` merges a module's routes before `with_state`; a topic registered twice panics where the two meet. `Routes::map_topics` rewrites every topic in one pass, so a module registers bare topic names and the root qualifies them once with the deployment's prefix. `route` decodes JSON; `route_with(topic, handler, decode)` takes a decoder `Fn(&Delivery) -> Result<I, DecodeError>` over the whole `Delivery` for any other wire format.
 
@@ -101,13 +101,12 @@ An HTTP handler's error is anything `IntoResponse`. An `omnia_sdk::Error` (`bad_
 
 ## HTTP handlers
 
-Register handlers on an [Axum](https://github.com/tokio-rs/axum) `Router` under axum's `get`/`post`/`put`/`patch`/`delete`, and export the router with `omnia_sdk::export!`:
+Register handlers on an [Axum](https://github.com/tokio-rs/axum) `Router` under axum's `get`/`post`/`put`/`patch`/`delete`, and export the router with `http::export!`:
 
 ```rust,noplayground
 use axum::Router;
 use axum::routing::get;
-use omnia_sdk::api::Client;
-use omnia_sdk::WasiProvider;
+use omnia_sdk::api::{Client, http};
 
 pub fn http_router<P: Send + Sync + 'static>(provider: P) -> Router {
     Router::new()
@@ -115,7 +114,7 @@ pub fn http_router<P: Send + Sync + 'static>(provider: P) -> Router {
         .with_state(Client::new(provider))
 }
 
-omnia_sdk::export!(http: http_router(WasiProvider));
+http::export!(http_router);
 ```
 
 For **outbound** HTTP requests inside a handler, bound `P: HttpRequest` and call `context.provider().fetch(request).await` with a standard `http::Request` (or call `omnia_wasi_http::handle` directly in `wasm32`-only code; see `examples/http-proxy`).
@@ -173,12 +172,11 @@ When writing `wasm32`-only code (as in `examples/`), you can also call the `omni
 
 ## Handling incoming messages
 
-A guest can export a messaging handler alongside (or instead of) an HTTP handler. Build an `omnia_sdk::api::messaging::Router` over your provider and export it with `omnia_sdk::export!(messaging: ..)`:
+A guest can export a messaging handler alongside (or instead of) an HTTP handler. Build an `omnia_sdk::api::messaging::Router` over your provider and export it with `messaging::export!`:
 
 ```rust,noplayground
-use omnia_sdk::WasiProvider;
 use omnia_sdk::api::Client;
-use omnia_sdk::api::messaging::Router;
+use omnia_sdk::api::messaging::{self, Router};
 
 pub async fn messaging_router<P>(provider: P) -> Router<P>
 where
@@ -187,7 +185,7 @@ where
     Router::new(Client::new(provider)).route("items.created", on_item_created)
 }
 
-omnia_sdk::export!(messaging: messaging_router(WasiProvider));
+messaging::export!(messaging_router);
 ```
 
 For guests that need direct control over the raw `wasi:messaging/incoming-handler` export (for example, `examples/messaging` demonstrating request-reply and fan-out), implement `omnia_wasi_messaging::incoming_handler::Guest` and dispatch via `omnia_sdk::api::messaging::handle`:
@@ -214,7 +212,7 @@ use std::fmt;
 
 use clap::{Args, Parser, Subcommand};
 use omnia_sdk::Error;
-use omnia_sdk::api::command::{Command, Parsed, Response, parse};
+use omnia_sdk::api::command::{self, Command, Parsed, Response, parse};
 use omnia_sdk::api::{Client, Context, Format, Metadata};
 use serde::Serialize;
 
@@ -251,7 +249,7 @@ fn render_synced(synced: &Synced, out: &mut dyn fmt::Write) -> fmt::Result {
     writeln!(out, "synced {} items", synced.count)
 }
 
-omnia_sdk::export!(command: main);
+command::export!(main);
 
 async fn main() -> Response {
     let app = match parse::<App>(wasip3::cli::environment::get_arguments()) {
@@ -273,7 +271,7 @@ The pieces, in the order argv flows through them:
 
 - **`parse::<App>(argv) -> Parsed`** classifies clap's outcomes: the grammar (`Parsed::App`), help or version text for stdout at exit 0 (`Parsed::Display`), or a usage error (`Parsed::Usage`), which `Response::usage(&error)` renders on stderr at `USAGE_EXIT` (64, `EX_USAGE`). `completions::<App>(shell, name)` produces a shell-completion script as a `Response`; `Shell` is re-exported from `clap_complete`.
 - **`Command::new(&client, &metadata, format)`** is the projector, and `command.call(handler, decode, render)` runs one verb. `decode: FnOnce() -> Result<I, Error>` builds the handler input from the parsed grammar (its `bad_request!` exits 1 like any other refusal); the handler runs through `Client::call`; a success body is encoded in the selected `Format` onto stdout at exit 0 — `render` is its text form (`Fn(&T, &mut dyn fmt::Write) -> fmt::Result`), and `Format::Json` is the output pretty-printed with a trailing newline. `.hints(|error| ..)` attaches a remedy hint to every failure that carries none.
-- **`Response { stdout, stderr, exit }`** buffers both channels. `export!(command: main)` binds an `async fn main() -> Response` as the `wasi:cli/run` export and writes the channels at that boundary through `IntoExit`: a `BrokenPipe` on either channel (a reader that went away) keeps the response's own exit, any other refused channel exits 3. Because the channels are whole buffers, a command that must stream writes to the process channels itself and returns `Result<(), u8>` or `()`, which the export also accepts; a guest that needs its own export writes the raw `wasip3` export and calls `command::execute_wasi` itself.
+- **`Response { stdout, stderr, exit }`** buffers both channels. `command::export!(main)` binds an `async fn main() -> Response` as the `wasi:cli/run` export and writes the channels at that boundary through `IntoExit`: a `BrokenPipe` on either channel (a reader that went away) keeps the response's own exit, any other refused channel exits 3. Because the channels are whole buffers, a command that must stream writes to the process channels itself and returns `Result<(), u8>` or `()`, which the export also accepts; a guest that needs its own export writes the raw `wasip3` export and calls `command::execute_wasi` itself.
 - **`Metadata::from_env(prefix)`** reads `<PREFIX>_REQUEST_ID`, `<PREFIX>_CORRELATION_ID`, `<PREFIX>_CAUSATION_ID`, and `<PREFIX>_TENANT` from the environment. A missing request id is minted from `wasi:random`, as on every transport, so a command invocation is as observable as an HTTP request: `Client::call` runs the handler in a `handler` span carrying the request and correlation ids.
 
 ### Failures and the exit map
@@ -305,7 +303,7 @@ Annotate functions with `#[omnia_wasi_otel::instrument]` to wrap them in an Open
 async fn handle(request: Request) -> Result<Response, ErrorCode> { /* ... */ }
 ```
 
-The outermost instrumented `async fn` (or `export!(command: ..)`, which does the same for a CLI entry) runs inside `omnia_wasi_otel::scope`: it initializes the guest's telemetry on entry and exports every span and metric as it returns, so put the attribute on the export's `handle` and on any handler beneath it. A sync function only opens a span.
+The outermost instrumented `async fn` (or `command::export!`, which does the same for a CLI entry) runs inside `omnia_wasi_otel::scope`: it initializes the guest's telemetry on entry and exports every span and metric as it returns, so put the attribute on the export's `handle` and on any handler beneath it. A sync function only opens a span.
 
 The OpenTelemetry API works directly too: `global::tracer(..)` and `global::meter(..)` return Omnia's own providers, which record straight into the `omnia:otel` records the flush exports — no OpenTelemetry SDK is linked into the guest. Counters, histograms, and gauges export delta series (one instance per invocation); up-down counters are cumulative. Observable (callback) instruments are no-ops: record through a synchronous instrument instead.
 

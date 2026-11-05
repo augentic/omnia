@@ -33,7 +33,7 @@ The target gate on the dev line is the canonical shape for a guest crate: handle
 A guest wires its routers to `omnia_sdk::WasiProvider`, which implements every capability trait over the WASI bindings on `wasm32`:
 
 ```rust,ignore
-omnia_sdk::export!(http: http_router(omnia_sdk::WasiProvider));
+omnia_sdk::api::http::export!(http_router);
 ```
 
 A test runs the same handler against `omnia_test::guest::Provider`, which implements every capability trait over one `pub` field per double, each seeded through a consuming builder of the same name:

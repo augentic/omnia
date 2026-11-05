@@ -7,7 +7,7 @@ use omnia_sdk::WasiProvider;
 use omnia_sdk::model::Question;
 use test_programs::Verdict;
 
-omnia_sdk::export!(command: scenario);
+omnia_sdk::api::command::export!(scenario);
 
 async fn scenario() {
     let mut candidates = 0;

@@ -9,7 +9,7 @@
 use omnia_wasi_keyvalue::atomics::{self, Cas, CasError};
 use omnia_wasi_keyvalue::{batch, store};
 
-omnia_sdk::export!(command: scenario);
+omnia_sdk::api::command::export!(scenario);
 
 async fn scenario() {
     let bucket = store::open("bucket".to_owned()).await.expect("open");

@@ -6,16 +6,15 @@
 //! [`Client::call`] → encode — onto a [`Response`]. A success body rides
 //! stdout in the selected [`Format`]; a [`Failure`] envelope rides stderr
 //! with the exit status from [`Error::exit_code`](crate::Error::exit_code),
-//! and a clap usage error exits [`USAGE_EXIT`]. `export!(command: main)`
-//! ([`export!`](crate::export)) binds an `async fn main() -> Response` as the
-//! `wasi:cli/run` export and [`IntoExit`] writes the channels at that
-//! boundary.
+//! and a clap usage error exits [`USAGE_EXIT`]. [`export!`] binds an
+//! `async fn main() -> Response` as the `wasi:cli/run` export and [`IntoExit`]
+//! writes the channels at that boundary.
 //!
 //! ```rust,ignore
-//! use omnia_sdk::api::command::{Command, Parsed, Response, parse};
+//! use omnia_sdk::api::command::{self, Command, Parsed, Response, parse};
 //! use omnia_sdk::api::{Client, Metadata};
 //!
-//! omnia_sdk::export!(command: main);
+//! command::export!(main);
 //!
 //! async fn main() -> Response {
 //!     let app = match parse::<App>(wasip3::cli::environment::get_arguments()) {
@@ -40,6 +39,39 @@ use serde::{Serialize, Serializer};
 
 use crate::api::{Client, ErrorBody, Format, Handler, Metadata};
 
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __export_command {
+    ($entry:path $(,)?) => {
+        #[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
+        const _: () = {
+            struct CliGuest;
+
+            $crate::wasip3::cli::command::export!(CliGuest);
+
+            impl $crate::wasip3::exports::cli::run::Guest for CliGuest {
+                async fn run() -> ::core::result::Result<(), ()> {
+                    $crate::api::command::execute_wasi($entry()).await;
+                    Ok(())
+                }
+            }
+        };
+    };
+}
+
+/// Bind an `async fn` entry as the guest's `wasi:cli/run` export.
+///
+/// Awaits the entry inside the guest telemetry scope and converts its return
+/// value through [`IntoExit`]. Expands to nothing on native targets.
+///
+/// ```rust,ignore
+/// use omnia_sdk::api::command;
+///
+/// command::export!(main);
+/// ```
+#[doc(inline)]
+pub use crate::__export_command as export;
+
 /// The exit status of a command-line usage error (`EX_USAGE`).
 pub const USAGE_EXIT: u8 = 64;
 
@@ -61,9 +93,9 @@ fn env_key(prefix: &str, name: &str) -> String {
     format!("{prefix}_{}", name.to_ascii_uppercase().replace('-', "_"))
 }
 
-/// The exit status an `export!(command: ..)` entry yields: `()` always
-/// succeeds, `Result<(), u8>` passes its code through, and [`Response`]
-/// writes its channels first.
+/// The exit status an [`export!`] entry yields: `()` always succeeds,
+/// `Result<(), u8>` passes its code through, and [`Response`] writes its
+/// channels first.
 ///
 /// A scenario that asserts internally and traps on failure returns `()`; a
 /// CLI that writes its own channels reports `Result<(), u8>`.

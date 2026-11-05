@@ -39,13 +39,13 @@ pub fn http_router<P: StateStore + 'static>(provider: P) -> axum::Router {
 }
 ```
 
-Routes are registered with axum's own `get`/`post`/`put`/`patch`/`delete`, chained per path (`get(list).post(create)`). The router's state is one `Client`, which owns the provider; `Context<P>` extracts from it, so `context.provider()` and the public `context.metadata` (the request's `x-request-id`, `x-correlation-id`, `x-causation-id`, and `x-tenant`, with a request id minted when absent) are available to every handler on the router. `Context::new(provider, metadata)` builds one directly for unit-testing a fn that takes a context without a router. The guest's root crate binds the router to the WASI export over `WasiProvider`, the zero-sized provider that serves every capability through the WASI host:
+Routes are registered with axum's own `get`/`post`/`put`/`patch`/`delete`, chained per path (`get(list).post(create)`). The router's state is one `Client`, which owns the provider; `Context<P>` extracts from it, so `context.provider()` and the public `context.metadata` (the request's `x-request-id`, `x-correlation-id`, `x-causation-id`, and `x-tenant`, with a request id minted when absent) are available to every handler on the router. `Context::new(provider, metadata)` builds one directly for unit-testing a fn that takes a context without a router. The guest's root crate binds the router fn to the WASI export over `WasiProvider`, the zero-sized provider that serves every capability through the WASI host:
 
 ```rust,ignore
-omnia_sdk::export!(http: http_router(omnia_sdk::WasiProvider));
+omnia_sdk::api::http::export!(http_router);
 ```
 
-`export!` binds one WASI export per invocation, named by transport (`http:`, `messaging:`, or `command:`), and expands to nothing on native targets, so the same crate's handler tests run natively over `omnia_test::guest::Provider`, driving the router with `tower::ServiceExt::oneshot`. On `wasm32` the HTTP export serves each request inside a `handler` tracing span carrying the request and correlation ids (`api::http::trace`, an axum middleware a native test can layer on too). Omnia creates one WASI component instance per HTTP request; the router expression runs inside each `handle` call, and axum's route-state clones share that client's `Arc<P>` only for that request. Durable application state belongs in host-side capabilities, not guest statics.
+Each transport module's `export!` (`http::export!`, `messaging::export!`, `command::export!`) binds one WASI export and expands to nothing on native targets, so the same crate's handler tests run natively over `omnia_test::guest::Provider`, driving the router with `tower::ServiceExt::oneshot`. On `wasm32` the HTTP export calls the router fn with `WasiProvider` (or a custom provider passed as a second argument) and serves each request inside a `handler` tracing span carrying the request and correlation ids (`api::http::trace`, an axum middleware a native test can layer on too). Omnia creates one WASI component instance per HTTP request; the router fn runs inside each `handle` call, and axum's route-state clones share that client's `Arc<P>` only for that request. Durable application state belongs in host-side capabilities, not guest statics.
 
 ### Errors
 
@@ -56,7 +56,7 @@ A handler's error is anything `IntoResponse`. `omnia_sdk::Error` (`bad_request!`
 Messaging routes are `Handler`s: any `async fn(I, Context<P>) -> Result<O, E>`, registered on exact topics and exported the same way. Every fn of that shape (and every `Clone` closure of it, so a closure can carry configuration) is a `Handler<P, I>` through a blanket impl.
 
 ```rust,ignore
-use omnia_sdk::api::messaging::Router;
+use omnia_sdk::api::messaging::{self, Router};
 
 async fn item_created<P: StateStore>(input: CreateItem, context: Context<P>) -> Result<(), Error> {
     context.provider().set(&input.name, b"created", None).await
@@ -66,20 +66,20 @@ pub async fn messaging_router<P: StateStore + Send + Sync + 'static>(provider: P
     Router::new(Client::new(provider)).route("items.created", item_created)
 }
 
-omnia_sdk::export!(messaging: messaging_router(omnia_sdk::WasiProvider));
+messaging::export!(messaging_router);
 ```
 
 `route(topic, handler)` decodes JSON and acknowledges successful output; `route_with(topic, handler, decode)` takes a decoder `Fn(&Delivery) -> Result<I, DecodeError>` over the whole delivery for any other wire format. A module that owns topics registers them on a `messaging::Routes` of its own, with no client, and the root merges each into the one `Router` (`Router::merge`); `Routes::map_topics` rewrites every topic once, for an environment prefix or a namespace. `Client::call(handler, input, &metadata)` invokes a `Handler` directly inside the same `handler` span.
 
 ### Command-mode guests
 
-`api::command` is the command-line transport over `Handler`s (`command` feature for the clap-backed parts): `parse::<App>(argv)` classifies argv into the grammar or one of clap's own responses (`Parsed::{App, Display, Usage}`), and `Command::new(&client, &metadata, format).call(handler, decode, render)` projects one verb — decode → `Client::call` → encode — onto a `Response { stdout, stderr, exit }`. `omnia_sdk::export!(command: main)` binds an `async fn main() -> Response` as the `wasi:cli/run` export and writes the channels at that boundary (`IntoExit`; `Result<(), u8>` and `()` entries are accepted too). Omnia creates a fresh component instance for each command invocation.
+`api::command` is the command-line transport over `Handler`s (`command` feature for the clap-backed parts): `parse::<App>(argv)` classifies argv into the grammar or one of clap's own responses (`Parsed::{App, Display, Usage}`), and `Command::new(&client, &metadata, format).call(handler, decode, render)` projects one verb — decode → `Client::call` → encode — onto a `Response { stdout, stderr, exit }`. `command::export!(main)` binds an `async fn main() -> Response` as the `wasi:cli/run` export and writes the channels at that boundary (`IntoExit`; `Result<(), u8>` and `()` entries are accepted too). Omnia creates a fresh component instance for each command invocation.
 
 ```rust,ignore
-use omnia_sdk::api::command::{Command, Parsed, Response, parse};
+use omnia_sdk::api::command::{self, Command, Parsed, Response, parse};
 use omnia_sdk::api::{Client, Metadata};
 
-omnia_sdk::export!(command: main);
+command::export!(main);
 
 async fn main() -> Response {
     let app = match parse::<App>(wasip3::cli::environment::get_arguments()) {
@@ -162,8 +162,8 @@ See the [workspace documentation](https://github.com/augentic/omnia) for the ful
 
 - `sql` *(default)*: the `TableStore` capability over `wasi:sql`.
 - `docstore` *(default)*: the `DocumentStore` capability and the `docstore` re-exports.
-- `http` *(default)*: the axum-backed `api::http` handler support (the `Context` and `Metadata` extractors, `trace`, `Error: IntoResponse`, and the `export!(http: ..)` arm) and the `mcp` server. The outbound `HttpRequest` capability and `Error::status()` need no feature.
-- `command`: the clap-backed parts of `api::command` (`parse`, `completions`, `Response::usage`, the `clap_complete::Shell` re-export, and the `clap::ValueEnum` derive on `api::Format`). The `Command` projector, `Response`, `Failure`, and `export!(command: ..)` need no feature.
+- `http` *(default)*: the axum-backed `api::http` handler support (the `Context` and `Metadata` extractors, `trace`, `Error: IntoResponse`, and `http::export!`) and the `mcp` server. The outbound `HttpRequest` capability and `Error::status()` need no feature.
+- `command`: the clap-backed parts of `api::command` (`parse`, `completions`, `Response::usage`, the `clap_complete::Shell` re-export, and the `clap::ValueEnum` derive on `api::Format`). The `Command` projector, `Response`, `Failure`, and `command::export!` need no feature.
 
 Guests that do not use SQL, documents, or inbound HTTP can disable defaults to shrink wasm build time and size, naming only the capabilities they use (`features = ["sql"]` for `TableStore` alone); a command-only guest is `default-features = false, features = ["command"]`.
 

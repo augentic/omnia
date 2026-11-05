@@ -1,5 +1,5 @@
 //! The exit map through the real runtime: each verb's error class leaves the
-//! `export!(command: ..)` boundary as its mapped exit status (`bad` 1, `missing` 2,
+//! `command::export!` boundary as its mapped exit status (`bad` 1, `missing` 2,
 //! `upstream` 4, `ok` 0), and an unknown verb is a clap usage error at
 //! `USAGE_EXIT`.
 
@@ -8,7 +8,7 @@
 use std::fmt;
 
 use clap::{Parser, Subcommand};
-use omnia_sdk::api::command::{Command, Parsed, Response, parse};
+use omnia_sdk::api::command::{self, Command, Parsed, Response, parse};
 use omnia_sdk::api::{Client, Context, Format, Metadata};
 use omnia_sdk::{Error, bad_gateway, bad_request, not_found};
 
@@ -56,7 +56,7 @@ fn render_nothing((): &(), _out: &mut dyn fmt::Write) -> fmt::Result {
     Ok(())
 }
 
-omnia_sdk::export!(command: main);
+command::export!(main);
 
 async fn main() -> Response {
     match parse::<App>(wasip3::cli::environment::get_arguments()) {

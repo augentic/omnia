@@ -1,4 +1,4 @@
-//! A `wasi:http/incoming-handler` guest behind `omnia_sdk::export!`, plain axum
+//! A `wasi:http/incoming-handler` guest behind `http::export!`, plain axum
 //! handlers, and `WasiProvider`: the one route echoes a `message` taken from
 //! the JSON body (POST) or the query string (GET), alongside the request id
 //! the `Context` extractor carried in. Middleware first asserts the host's
@@ -13,11 +13,11 @@ use axum::http::Request;
 use axum::http::uri::Authority;
 use axum::middleware::map_request;
 use axum::routing::get;
-use omnia_sdk::api::{Client, Context};
-use omnia_sdk::{Error, WasiProvider};
+use omnia_sdk::Error;
+use omnia_sdk::api::{Client, Context, http};
 use serde::{Deserialize, Serialize};
 
-omnia_sdk::export!(http: router(WasiProvider));
+http::export!(router);
 
 fn router<P: Send + Sync + 'static>(provider: P) -> Router {
     Router::new()

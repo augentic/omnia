@@ -65,21 +65,23 @@ Domain handler crates depend on `omnia-sdk` alone and expose transport routers g
 
 ### 1. Standard WASI component (`WasiProvider`)
 
-In the guest root crate (`src/lib.rs`), wire the HTTP and messaging routers to `omnia_sdk::WasiProvider` with one `omnia_sdk::export!` per transport:
+In the guest root crate (`src/lib.rs`), wire the HTTP and messaging routers to `omnia_sdk::WasiProvider` with each transport's `export!`:
 
 ```rust,ignore
+use omnia_sdk::api::{http, messaging};
+
 pub fn http_router<P: Capabilities>(provider: P) -> axum::Router { /* .. */ }
 pub async fn messaging_router<P: Capabilities>(provider: P) -> messaging::Router<P> { /* .. */ }
 
-omnia_sdk::export!(http: http_router(omnia_sdk::WasiProvider));
-omnia_sdk::export!(messaging: messaging_router(omnia_sdk::WasiProvider));
+http::export!(http_router);
+messaging::export!(messaging_router);
 ```
 
 Each invocation expands to the `#[omnia_wasi_otel::instrument]`-scoped WASI export on `all(target_arch = "wasm32", target_os = "wasi")` and to nothing on native targets, so `cargo nextest` compiles the guest library natively against `omnia_test::guest::Provider` without pulling `wasmtime` or `omnia-wasi-*` into the native dependency graph.
 
 ### 2. Overriding capabilities with `#[derive(omnia_sdk::Provider)]`
 
-A guest that overrides one or more capabilities — for example, wrapping outbound HTTP in `omnia_http_cache::HttpCache` — derives `Provider` and delegates the remaining capabilities to `WasiProvider`:
+A guest that overrides one or more capabilities — for example, wrapping outbound HTTP in `omnia_http_cache::HttpCache` — derives `Provider`, delegates the remaining capabilities to `WasiProvider`, and passes the provider as the second argument to `export!`:
 
 ```rust,ignore
 #[derive(Clone, Default, omnia_sdk::Provider)]
@@ -90,7 +92,7 @@ struct Cached {
     wasi: WasiProvider,
 }
 
-omnia_sdk::export!(http: http_router(Cached::default()));
+http::export!(http_router, Cached::default());
 ```
 
 ---

@@ -2,8 +2,8 @@
 //!
 //! A `wasi:cli/command` reactor on the command façade: `parse` classifies
 //! argv into the clap grammar, `Command::call` projects each verb (decode →
-//! `Client::call` → encode) onto a `Response`, and `command!` binds `main` as
-//! the `wasi:cli/run` export.
+//! `Client::call` → encode) onto a `Response`, and `command::export!` binds
+//! `main` as the `wasi:cli/run` export.
 //!
 //! The module is `#[cfg(target_arch = "wasm32")]`-guarded because examples
 //! also compile for the host triple, where `wasip3` is unavailable.
@@ -14,7 +14,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use omnia_sdk::api::command::{Command, Parsed, Response, parse};
+use omnia_sdk::api::command::{self, Command, Parsed, Response, parse};
 use omnia_sdk::api::{Client, Context, Format, Metadata};
 use omnia_sdk::{Error, bad_gateway, bad_request, not_found, server_error};
 use serde::Serialize;
@@ -136,7 +136,7 @@ fn render_nothing((): &(), _out: &mut dyn fmt::Write) -> fmt::Result {
     Ok(())
 }
 
-omnia_sdk::export!(command: main);
+command::export!(main);
 
 async fn main() -> Response {
     match parse::<App>(wasip3::cli::environment::get_arguments()) {
