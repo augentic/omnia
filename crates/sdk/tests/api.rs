@@ -13,7 +13,7 @@ use axum::middleware::from_fn;
 use axum::routing::get;
 use http::header::CONTENT_TYPE;
 use http::{Request, StatusCode};
-use omnia_sdk::api::http::trace;
+use omnia_sdk::api::http::{Router, Routes, trace};
 use omnia_sdk::api::{Client, Context, ErrorBody, Format, Metadata};
 use omnia_sdk::not_found;
 use serde::{Deserialize, Serialize};
@@ -58,11 +58,12 @@ async fn echo_route<P: Send + Sync + 'static>(
     echo(input, context).await.map(Json)
 }
 
-fn router() -> axum::Router {
-    axum::Router::new()
-        .route("/echo", get(echo_route))
-        .layer(from_fn(trace))
-        .with_state(Client::new(()))
+fn routes<P: Send + Sync + 'static>() -> Routes<P> {
+    Routes::new().route("/echo", get(echo_route))
+}
+
+fn router() -> Router {
+    routes().layer(from_fn(trace)).with_state(Client::new(()))
 }
 
 async fn send(router: axum::Router, request: Request<Body>) -> (StatusCode, serde_json::Value) {

@@ -172,7 +172,7 @@ async fn map_topics_prefixes() {
         .route("created", echo)
         .route("deleted", echo)
         .map_topics(|topic| format!("dev-{topic}"));
-    let router = MessagingRouter::new(Client::new(())).merge(prefixed);
+    let router = prefixed.with_client(Client::new(()));
 
     assert_eq!(router.topics().collect::<Vec<_>>(), ["dev-created", "dev-deleted"]);
     router

@@ -1,9 +1,9 @@
 //! Typed messaging routing over application handlers.
 //!
 //! A module registers its topics on a [`Routes`] of its own and the guest
-//! merges each into its one [`Router`] over a [`Client`], as an
-//! `axum::Router` is merged before `with_state`; [`Routes::with_client`]
-//! closes merged routes as `with_state` does. A route decodes JSON unless
+//! merges each into its one [`Router`] over a [`Client`], as `http::Routes`
+//! is merged before `with_state`; [`Routes::with_client`] closes merged
+//! routes as `with_state` does. A route decodes JSON unless
 //! registered with [`Routes::route_with`], and [`Routes::map_topics`]
 //! re-keys a module's topics for the deployment, a prefix say, as they are
 //! merged. [`export!`] binds the router fn as the guest's `wasi:messaging`
