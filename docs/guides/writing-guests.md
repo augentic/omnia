@@ -93,7 +93,7 @@ omnia_sdk::api::http::export!(http_router);
 
 Routers map transport events onto handlers: an HTTP route is registered through axum's own `get`/`post`/`put`/`patch`/`delete` on an `axum::Router` whose state is one provider-owning `Client`, and a messaging router maps exact topics. Each transport's `export!` macro (`http::export!`, `messaging::export!`, or `command::export!`) binds its WASI export, calling the router fn with `WasiProvider` (or a custom provider passed as a second argument), and expands to the `#[omnia_wasi_otel::instrument]`-scoped export on `wasm32` and to nothing on native targets. The HTTP export also layers `api::http::trace`, which serves each request inside a `handler` span carrying the request and correlation ids; a native test can layer it with `axum::middleware::from_fn(trace)`.
 
-Messaging uses `api::messaging::Router` and `route("items.created", item_created)`; topic matching is exact. A module that owns topics registers them on an `api::messaging::Routes` of its own, with no client, and the guest merges each (`Routes::from([..])` or `Router::merge`) and closes the whole into its one `Router` with `Routes::with_state`, as a module's routes are an `api::http::Routes<P>` merged (`http::Routes::from([..])`) and closed into an `api::http::Router` by `with_state`; a topic registered twice panics where the two meet. `Routes::map` rewrites every topic in one pass, so a module registers bare topic names and the root qualifies them once with the deployment's prefix. `route` decodes JSON; `route_with(topic, handler, decode)` takes a decoder `Fn(&Delivery) -> Result<I, DecodeError>` over the whole `Delivery` for any other wire format.
+Messaging uses `api::messaging::Router` and `route("items.created", item_created)`; topic matching is exact. A module that owns topics registers them on an `api::messaging::Topics` of its own, with no client, and the guest merges each (`Topics::from([..])` or `Router::merge`) and closes the whole into its one `Router` with `Topics::with_state`, as a module's routes are an `api::http::Routes<P>` merged (`http::Routes::from([..])`) and closed into an `api::http::Router` by `with_state`; a topic registered twice panics where the two meet. `Topics::map` rewrites every topic in one pass, so a module registers bare topic names and the root qualifies them once with the deployment's prefix. `route` decodes JSON; `route_with(topic, handler, decode)` takes a decoder `Fn(&Delivery) -> Result<I, DecodeError>` over the whole `Delivery` for any other wire format.
 
 ### Errors
 
@@ -205,31 +205,16 @@ impl omnia_wasi_messaging::incoming_handler::Guest for Messaging {
 
 ## Command-mode guests
 
-For run-once workloads (jobs, CLIs, agent tasks), `omnia_sdk::api::command` is the command-line transport over the [handler contract](#the-handler-contract): argv is decoded into handler input, the handler runs through `Client::call`, and the output is encoded onto the process channels. The clap-backed parts (`parse`, `completions`, the `clap::ValueEnum` derive on `Format`) sit behind the `command` cargo feature (`omnia-sdk = { version = "...", features = ["command"] }`); the projector itself needs no feature.
+For run-once workloads (jobs, CLIs, agent tasks), `omnia_sdk::api::command` is the command-line transport over the [handler contract](#the-handler-contract): subcommands are registered on `command::Commands<P>`, merged (`Commands::from([..])` or `Commands::merge`), and closed into `command::Router<P>` with `with_state(Client::new(provider))`, matching `http` and `messaging`. The clap-backed router (`Commands`, `Router`, `parse`, `completions`, the `clap::ValueEnum` derive on `Format`) sits behind the `command` cargo feature (`omnia-sdk = { version = "...", features = ["command"] }`); the low-level `Command` projector needs no feature.
 
 ```rust,noplayground
 use std::fmt;
 
-use clap::{Args, Parser, Subcommand};
+use clap::Args;
 use omnia_sdk::Error;
-use omnia_sdk::api::command::{self, Command, Parsed, Response, parse};
-use omnia_sdk::api::{Client, Context, Format, Metadata};
+use omnia_sdk::api::command::{self, Commands, Router};
+use omnia_sdk::api::{Client, Context};
 use serde::Serialize;
-
-#[derive(Parser)]
-struct App {
-    /// Output format for every verb
-    #[arg(long, global = true, default_value = "text")]
-    format: Format,
-
-    #[command(subcommand)]
-    verb: Verb,
-}
-
-#[derive(Subcommand)]
-enum Verb {
-    Sync(SyncInput),
-}
 
 #[derive(Args)]
 struct SyncInput {
@@ -249,30 +234,23 @@ fn render_synced(synced: &Synced, out: &mut dyn fmt::Write) -> fmt::Result {
     writeln!(out, "synced {} items", synced.count)
 }
 
-command::export!(main);
-
-async fn main() -> Response {
-    let app = match parse::<App>(wasip3::cli::environment::get_arguments()) {
-        Parsed::App(app) => app,
-        Parsed::Display(text) => return Response::success(text),
-        Parsed::Usage(error) => return Response::usage(&error),
-    };
-    let client = Client::new(MyProvider);
-    let metadata = Metadata::from_env("APP");
-    let command = Command::new(&client, &metadata, app.format)
-        .hints(|error| (error.code() == "not_found").then(|| "run `app sync --help`".into()));
-    match app.verb {
-        Verb::Sync(input) => command.call(sync, || Ok(input), render_synced).await,
-    }
+pub fn command_router(provider: MyProvider) -> Router<MyProvider> {
+    Commands::new()
+        .route("sync", sync, render_synced)
+        .with_state(Client::new(provider))
+        .name("app")
+        .hints(|error| (error.code() == "not_found").then(|| "run `app sync --help`".into()))
 }
+
+command::export!(command_router, MyProvider);
 ```
 
 The pieces, in the order argv flows through them:
 
-- **`parse::<App>(argv) -> Parsed`** classifies clap's outcomes: the grammar (`Parsed::App`), help or version text for stdout at exit 0 (`Parsed::Display`), or a usage error (`Parsed::Usage`), which `Response::usage(&error)` renders on stderr at `USAGE_EXIT` (64, `EX_USAGE`). `completions::<App>(shell, name)` produces a shell-completion script as a `Response`; `Shell` is re-exported from `clap_complete`.
-- **`Command::new(&client, &metadata, format)`** is the projector, and `command.call(handler, decode, render)` runs one verb. `decode: FnOnce() -> Result<I, Error>` builds the handler input from the parsed grammar (its `bad_request!` exits 1 like any other refusal); the handler runs through `Client::call`; a success body is encoded in the selected `Format` onto stdout at exit 0 — `render` is its text form (`Fn(&T, &mut dyn fmt::Write) -> fmt::Result`), and `Format::Json` is the output pretty-printed with a trailing newline. `.hints(|error| ..)` attaches a remedy hint to every failure that carries none.
-- **`Response { stdout, stderr, exit }`** buffers both channels. `command::export!(main)` binds an `async fn main() -> Response` as the `wasi:cli/run` export and writes the channels at that boundary through `IntoExit`: a `BrokenPipe` on either channel (a reader that went away) keeps the response's own exit, any other refused channel exits 3. Because the channels are whole buffers, a command that must stream writes to the process channels itself and returns `Result<(), u8>` or `()`, which the export also accepts; a guest that needs its own export writes the raw `wasip3` export and calls `command::execute_wasi` itself.
-- **`Metadata::from_env(prefix)`** reads `<PREFIX>_REQUEST_ID`, `<PREFIX>_CORRELATION_ID`, `<PREFIX>_CAUSATION_ID`, and `<PREFIX>_TENANT` from the environment. A missing request id is minted from `wasi:random`, as on every transport, so a command invocation is as observable as an HTTP request: `Client::call` runs the handler in a `handler` span carrying the request and correlation ids.
+- **`Commands<P>` and `Router<P>`** register subcommands with `route(name, handler, render)` (where the handler input `I` implements `clap::Args`, `()` included) or `route_with(subcommand, handler, decode, render)`, merge module commands with `Commands::from([..])` or `Commands::merge`, and close over `Client<P>` with `with_state`. `Router` automatically wires global `--format text|json` and `-v`/`--verbose` / `-q`/`--quiet` (`Verbosity`), answers `--help` and `--version` on stdout at exit 0, and renders clap usage errors on stderr at `USAGE_EXIT` (64, `EX_USAGE`). `Router::completions(shell)` (or `completions::<App>(shell, name)` for a custom grammar) produces a shell-completion script as a `Response`; `Shell` is re-exported from `clap_complete`.
+- **`Command::new(&client, &metadata, format)`** is the underlying projector `Router` dispatches through (and can be used directly with `parse::<App>(argv) -> Parsed`), where `command.call(handler, decode, render)` runs one verb: `decode` builds the handler input, the handler runs through `Client::call`, and a success body is encoded in the selected `Format` onto stdout at exit 0 — `render` is its text form (`Fn(&T, &mut dyn fmt::Write) -> fmt::Result`), and `Format::Json` is the output pretty-printed with a trailing newline. `.hints(|error| ..)` attaches a remedy hint to every failure that carries none.
+- **`Response { stdout, stderr, exit }`** buffers both channels. `command::export!(command_router)` binds a router fn (or a zero-argument `async fn` returning `IntoExit`) as the `wasi:cli/run` export and writes the channels at that boundary through `IntoExit`: a `BrokenPipe` on either channel (a reader that went away) keeps the response's own exit, any other refused channel exits 3. Because the channels are whole buffers, a command that must stream writes to the process channels itself and returns `Result<(), u8>` or `()`, which the export also accepts; a guest that needs its own export writes the raw `wasip3` export and calls `command::execute_wasi` itself.
+- **`Metadata::from_env(prefix)`** reads `<PREFIX>_REQUEST_ID`, `<PREFIX>_CORRELATION_ID`, `<PREFIX>_CAUSATION_ID`, and `<PREFIX>_TENANT` from the environment (`Router::handle` derives the default prefix from the command name, or `.env_prefix(..)` sets it). A missing request id is minted from `wasi:random`, as on every transport, so a command invocation is as observable as an HTTP request: `Client::call` runs the handler in a `handler` span carrying the request and correlation ids.
 
 ### Failures and the exit map
 

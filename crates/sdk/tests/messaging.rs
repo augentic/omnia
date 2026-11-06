@@ -3,7 +3,7 @@
 use std::future::{Ready, ready};
 use std::sync::{Arc, Mutex};
 
-use omnia_sdk::api::messaging::{Delivery, DeliveryError, Router as MessagingRouter, Routes};
+use omnia_sdk::api::messaging::{Delivery, DeliveryError, Router as MessagingRouter, Topics};
 use omnia_sdk::api::{Client, Context, DecodeError};
 use serde::{Deserialize, Serialize};
 
@@ -78,10 +78,10 @@ fn messaging_duplicate_topic() {
 
 #[tokio::test]
 async fn messaging_merged_routes() {
-    let created = Routes::new().route("events.created", echo);
-    let deleted = Routes::new().route("events.deleted", echo);
+    let created = Topics::new().route("events.created", echo);
+    let deleted = Topics::new().route("events.deleted", echo);
     let router = MessagingRouter::new(Client::new(()))
-        .merge(Routes::from([created, deleted]))
+        .merge(Topics::from([created, deleted]))
         .route("events.updated", echo);
 
     for topic in ["events.created", "events.deleted", "events.updated"] {
@@ -104,7 +104,7 @@ async fn messaging_merged_routes() {
 #[should_panic(expected = "duplicate messaging topic `events`")]
 fn messaging_duplicate_topic_across_routes() {
     let _routes =
-        Routes::<()>::new().route("events", echo).merge(Routes::new().route("events", echo));
+        Topics::<()>::new().route("events", echo).merge(Topics::new().route("events", echo));
 }
 
 #[test]
@@ -112,7 +112,7 @@ fn messaging_duplicate_topic_across_routes() {
 fn messaging_duplicate_topic_merged_into_router() {
     let _router = MessagingRouter::new(Client::new(()))
         .route("events", echo)
-        .merge(Routes::new().route("events", echo));
+        .merge(Topics::new().route("events", echo));
 }
 
 #[derive(Debug)]
@@ -168,7 +168,7 @@ async fn tenant_metadata() {
 
 #[tokio::test]
 async fn map_prefixes() {
-    let prefixed = Routes::<()>::new()
+    let prefixed = Topics::<()>::new()
         .route("created", echo)
         .route("deleted", echo)
         .map(|topic| format!("dev-{topic}"));
@@ -188,5 +188,5 @@ async fn map_prefixes() {
 #[test]
 #[should_panic(expected = "duplicate messaging topic `same`")]
 fn map_collision() {
-    let _routes = Routes::<()>::new().route("a", echo).route("b", echo).map(|_| "same".to_string());
+    let _routes = Topics::<()>::new().route("a", echo).route("b", echo).map(|_| "same".to_string());
 }

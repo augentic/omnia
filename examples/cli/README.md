@@ -1,9 +1,10 @@
 # CLI Command Example
 
-Demonstrates a `wasi:cli/command` guest on the command façade: `parse`
-classifies clap argv, `Command::call` projects each verb (decode →
-`Client::call` → encode) onto a `Response`, and `command::export!(main)`
-binds `main` as the `wasi:cli/run` export.
+Demonstrates a `wasi:cli/command` guest on the command router: `Commands`
+registers each subcommand over its `clap::Args` input, `Router` dispatches
+argv (decode → `Client::call` → encode) onto a `Response`, and
+`command::export!(command_router, ..)` binds `command_router` as the
+`wasi:cli/run` export.
 
 ## Quick Start
 

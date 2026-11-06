@@ -84,7 +84,7 @@ pub use crate::__export_http as export;
 /// A module registers its paths on one of these and the guest merges them
 /// (`Routes::from([..])` or [`merge`](Self::merge)), closing the whole with
 /// [`with_state`](Self::with_state) into a [`Router`], as topics are
-/// [`messaging::Routes`](crate::api::messaging::Routes) closed into a
+/// [`messaging::Topics`](crate::api::messaging::Topics) closed into a
 /// [`messaging::Router`](crate::api::messaging::Router).
 #[must_use = "routes serve nothing until closed into a `Router` with `with_state`"]
 pub struct Routes<P: Send + Sync + 'static>(axum::Router<Client<P>>);

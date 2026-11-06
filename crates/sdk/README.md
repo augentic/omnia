@@ -69,36 +69,40 @@ pub async fn messaging_router<P: StateStore + Send + Sync + 'static>(provider: P
 messaging::export!(messaging_router);
 ```
 
-`route(topic, handler)` decodes JSON and acknowledges successful output; `route_with(topic, handler, decode)` takes a decoder `Fn(&Delivery) -> Result<I, DecodeError>` over the whole delivery for any other wire format. A module that owns topics registers them on a `messaging::Routes` of its own, with no client, and the root merges each (`Routes::from([..])` or `Router::merge`) and closes the whole into the one `Router` with `Routes::with_state`, as `http::Routes<P>` is merged (`http::Routes::from([..])`) and closed into `http::Router` by `with_state`; `Routes::map` rewrites every topic once, for an environment prefix or a namespace. `Client::call(handler, input, &metadata)` invokes a `Handler` directly inside the same `handler` span.
+`route(topic, handler)` decodes JSON and acknowledges successful output; `route_with(topic, handler, decode)` takes a decoder `Fn(&Delivery) -> Result<I, DecodeError>` over the whole delivery for any other wire format. A module that owns topics registers them on a `messaging::Topics` of its own, with no client, and the root merges each (`Topics::from([..])` or `Router::merge`) and closes the whole into the one `Router` with `Topics::with_state`, as `http::Routes<P>` is merged (`http::Routes::from([..])`) and closed into `http::Router` by `with_state`; `Topics::map` rewrites every topic once, for an environment prefix or a namespace. `Client::call(handler, input, &metadata)` invokes a `Handler` directly inside the same `handler` span.
 
 ### Command-mode guests
 
-`api::command` is the command-line transport over `Handler`s (`command` feature for the clap-backed parts): `parse::<App>(argv)` classifies argv into the grammar or one of clap's own responses (`Parsed::{App, Display, Usage}`), and `Command::new(&client, &metadata, format).call(handler, decode, render)` projects one verb — decode → `Client::call` → encode — onto a `Response { stdout, stderr, exit }`. `command::export!(main)` binds an `async fn main() -> Response` as the `wasi:cli/run` export and writes the channels at that boundary (`IntoExit`; `Result<(), u8>` and `()` entries are accepted too). Omnia creates a fresh component instance for each command invocation.
+`api::command` is the command-line transport over `Handler`s (`command` feature for the clap-backed router): a module registers its subcommands on a `command::Commands<P>` with `route(name, handler, render)` (where the handler's input implements `clap::Args`, including `()`) or `route_with(subcommand, handler, decode, render)`, and the guest merges them (`Commands::from([..])` or `Commands::merge`) and closes them with `with_state(Client::new(provider))` into a `command::Router<P>`, as `http` and `messaging` do. `command::export!(command_router)` binds the router fn as the `wasi:cli/run` export (or a zero-argument `async fn` returning `IntoExit`) and writes the channels at that boundary. Omnia creates a fresh component instance for each command invocation.
 
 ```rust,ignore
-use omnia_sdk::api::command::{self, Command, Parsed, Response, parse};
-use omnia_sdk::api::{Client, Metadata};
+use std::fmt;
 
-command::export!(main);
+use clap::Args;
+use omnia_sdk::api::command::{self, Commands, Router};
+use omnia_sdk::api::{Client, Context};
 
-async fn main() -> Response {
-    let app = match parse::<App>(wasip3::cli::environment::get_arguments()) {
-        Parsed::App(app) => app,
-        Parsed::Display(text) => return Response::success(text),
-        Parsed::Usage(error) => return Response::usage(&error),
-    };
-    let client = Client::new(omnia_sdk::WasiProvider);
-    let metadata = Metadata::from_env("APP");
-    let command = Command::new(&client, &metadata, app.format);
-    match app.verb {
-        Verb::Created(input) => command.call(item_created, || Ok(input), render_unit).await,
-    }
+#[derive(Args)]
+struct CreateItem {
+    name: String,
 }
+
+fn render_unit((): &(), _out: &mut dyn fmt::Write) -> fmt::Result {
+    Ok(())
+}
+
+pub fn command_router<P: StateStore + Send + Sync + 'static>(provider: P) -> Router<P> {
+    Commands::new()
+        .route("create", item_created, render_unit)
+        .with_state(Client::new(provider))
+}
+
+command::export!(command_router);
 ```
 
-A success body is encoded in the selected `api::Format` (`Text` through the `render` closure, `Json` pretty-printed) onto stdout at exit 0. A decode or handler error is a `Failure` envelope on stderr at `Error::exit_code()` — `BadRequest` 1, `NotFound` 2, `ServerError` 3, `BadGateway` 4 — rendered as `error[<code>]: <message>` (plus `hint: …` when `.hints(..)` or `with_hint` attached one) or as flat JSON `{"error","message","exit-code","hint"?}`; `error` and `message` are the same `ErrorBody` HTTP emits. A clap usage error exits `USAGE_EXIT` (64), so exit 2 always means `NotFound`. `Metadata::from_env(prefix)` reads `<PREFIX>_REQUEST_ID` / `_CORRELATION_ID` / `_CAUSATION_ID` / `_TENANT`, minting a request id when absent as every transport does.
+A success body is encoded in the selected `api::Format` (`--format text|json`; `Text` through the `render` closure, `Json` pretty-printed) onto stdout at exit 0. A decode or handler error is a `Failure` envelope on stderr at `Error::exit_code()` — `BadRequest` 1, `NotFound` 2, `ServerError` 3, `BadGateway` 4 — rendered as `error[<code>]: <message>` (plus `hint: …` when `.hints(..)` or `with_hint` attached one) or as flat JSON `{"error","message","exit-code","hint"?}`; `error` and `message` are the same `ErrorBody` HTTP emits. A clap usage error exits `USAGE_EXIT` (64), so exit 2 always means `NotFound`. `Metadata::from_env(prefix)` reads `<PREFIX>_REQUEST_ID` / `_CORRELATION_ID` / `_CAUSATION_ID` / `_TENANT`, minting a request id when absent as every transport does.
 
-The runtime's verbosity flags — `-v`/`--verbose` and `-q`/`--quiet`, each repetition one level from the command's default of `info` — are read by the host out of argv and set the bare level of the guest's `RUST_LOG` before it runs (the process `RUST_LOG`'s targeted directives stay on top); argv still arrives verbatim, so a grammar declares them with `#[command(flatten)] verbosity: omnia_sdk::api::command::Verbosity` to list them in help and completions and to refuse `-v` beside `-q`. The command never acts on the parsed values.
+The runtime's verbosity flags — `-v`/`--verbose` and `-q`/`--quiet`, each repetition one level from the command's default of `info` — are read by the host out of argv and set the bare level of the guest's `RUST_LOG` before it runs (the process `RUST_LOG`'s targeted directives stay on top); `command::Router` includes them (along with `--format`) automatically, and a hand-written clap grammar declares them with `#[command(flatten)] verbosity: omnia_sdk::api::command::Verbosity`.
 
 ## Capabilities
 

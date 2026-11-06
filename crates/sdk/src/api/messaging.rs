@@ -1,11 +1,11 @@
 //! Typed messaging routing over application handlers.
 //!
-//! A module registers its topics on a [`Routes`] of its own and the guest
-//! merges each (`Routes::from([..])` or [`Routes::merge`]) into its one
+//! A module registers its topics on a [`Topics`] of its own and the guest
+//! merges each (`Topics::from([..])` or [`Topics::merge`]) into its one
 //! [`Router`] over a [`Client`], closing the whole with
-//! [`Routes::with_state`] as [`http::Routes`](crate::api::http::Routes)
+//! [`Topics::with_state`] as [`http::Routes`](crate::api::http::Routes)
 //! does. A route decodes JSON unless registered with
-//! [`Routes::route_with`], and [`Routes::map`] re-keys a module's topics
+//! [`Topics::route_with`], and [`Topics::map`] re-keys a module's topics
 //! for the deployment, a prefix say, as they are merged. [`export!`] binds
 //! the router fn as the guest's `wasi:messaging` handler.
 
@@ -145,21 +145,21 @@ where
 /// Exact-topic routes awaiting the client that dispatches them.
 ///
 /// Two routes for one topic are refused when they meet, whether through
-/// [`route`](Self::route), [`merge`](Self::merge), `Routes::from([..])`, or
+/// [`route`](Self::route), [`merge`](Self::merge), `Topics::from([..])`, or
 /// [`map`](Self::map).
-#[must_use = "routes dispatch nothing until closed into a `Router`"]
-pub struct Routes<P: Send + Sync + 'static> {
+#[must_use = "topics dispatch nothing until closed into a `Router`"]
+pub struct Topics<P: Send + Sync + 'static> {
     routes: BTreeMap<String, Arc<dyn ErasedRoute<P>>>,
 }
 
-impl<P: Send + Sync + 'static> Default for Routes<P> {
+impl<P: Send + Sync + 'static> Default for Topics<P> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<P: Send + Sync + 'static> Routes<P> {
-    /// Create an empty set of routes.
+impl<P: Send + Sync + 'static> Topics<P> {
+    /// Create an empty set of topic routes.
     pub fn new() -> Self {
         Self {
             routes: BTreeMap::new(),
@@ -201,7 +201,7 @@ impl<P: Send + Sync + 'static> Routes<P> {
         self.insert(topic.into(), Arc::new(route))
     }
 
-    /// Take every route of `other`.
+    /// Take every topic route of `other`.
     ///
     /// # Panics
     ///
@@ -210,7 +210,7 @@ impl<P: Send + Sync + 'static> Routes<P> {
         other.routes.into_iter().fold(self, |routes, (topic, route)| routes.insert(topic, route))
     }
 
-    /// Re-key every route through `map`, so routes registered under a bare
+    /// Re-key every topic through `map`, so topics registered under a bare
     /// name are mounted under the deployment's.
     ///
     /// # Panics
@@ -222,7 +222,7 @@ impl<P: Send + Sync + 'static> Routes<P> {
             .fold(Self::new(), |routes, (topic, route)| routes.insert(map(&topic), route))
     }
 
-    /// Close the routes over `client` as the [`Router`] that dispatches them.
+    /// Close the topics over `client` as the [`Router`] that dispatches them.
     pub const fn with_state(self, client: Client<P>) -> Router<P> {
         Router { client, routes: self }
     }
@@ -235,7 +235,7 @@ impl<P: Send + Sync + 'static> Routes<P> {
     }
 }
 
-impl<P: Send + Sync + 'static, const N: usize> From<[Self; N]> for Routes<P> {
+impl<P: Send + Sync + 'static, const N: usize> From<[Self; N]> for Topics<P> {
     fn from(parts: [Self; N]) -> Self {
         parts.into_iter().reduce(Self::merge).unwrap_or_default()
     }
@@ -245,7 +245,7 @@ impl<P: Send + Sync + 'static, const N: usize> From<[Self; N]> for Routes<P> {
 #[must_use = "a router dispatches nothing until it handles a delivery"]
 pub struct Router<P: Send + Sync + 'static> {
     client: Client<P>,
-    routes: Routes<P>,
+    routes: Topics<P>,
 }
 
 impl<P: Send + Sync + 'static> Router<P> {
@@ -253,7 +253,7 @@ impl<P: Send + Sync + 'static> Router<P> {
     pub fn new(client: Client<P>) -> Self {
         Self {
             client,
-            routes: Routes::new(),
+            routes: Topics::new(),
         }
     }
 
@@ -286,13 +286,13 @@ impl<P: Send + Sync + 'static> Router<P> {
         self
     }
 
-    /// Take every route of `routes`.
+    /// Take every topic route of `topics`.
     ///
     /// # Panics
     ///
-    /// Panics when a topic of `routes` is already registered.
-    pub fn merge(mut self, routes: Routes<P>) -> Self {
-        self.routes = self.routes.merge(routes);
+    /// Panics when a topic of `topics` is already registered.
+    pub fn merge(mut self, topics: Topics<P>) -> Self {
+        self.routes = self.routes.merge(topics);
         self
     }
 

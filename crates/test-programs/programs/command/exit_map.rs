@@ -7,28 +7,9 @@
 
 use std::fmt;
 
-use clap::{Parser, Subcommand};
-use omnia_sdk::api::command::{self, Command, Parsed, Response, parse};
-use omnia_sdk::api::{Client, Context, Format, Metadata};
+use omnia_sdk::api::command::{self, Commands, Router};
+use omnia_sdk::api::{Client, Context};
 use omnia_sdk::{Error, bad_gateway, bad_request, not_found};
-
-#[derive(Parser)]
-#[command(name = "exit-map", bin_name = "exit-map", subcommand_required = true)]
-struct App {
-    #[arg(long, global = true, default_value = "text")]
-    format: Format,
-
-    #[command(subcommand)]
-    verb: Verb,
-}
-
-#[derive(Subcommand)]
-enum Verb {
-    Ok,
-    Bad,
-    Missing,
-    Upstream,
-}
 
 struct Provider;
 
@@ -56,24 +37,14 @@ fn render_nothing((): &(), _out: &mut dyn fmt::Write) -> fmt::Result {
     Ok(())
 }
 
-command::export!(main);
-
-async fn main() -> Response {
-    match parse::<App>(wasip3::cli::environment::get_arguments()) {
-        Parsed::App(app) => dispatch(app).await,
-        Parsed::Display(text) => Response::success(text),
-        Parsed::Usage(error) => Response::usage(&error),
-    }
+fn command_router(provider: Provider) -> Router<Provider> {
+    Commands::new()
+        .route("ok", ok, render_text)
+        .route("bad", bad, render_nothing)
+        .route("missing", missing, render_nothing)
+        .route("upstream", upstream, render_nothing)
+        .with_state(Client::new(provider))
+        .name("exit-map")
 }
 
-async fn dispatch(app: App) -> Response {
-    let client = Client::new(Provider);
-    let metadata = Metadata::from_env("EXIT_MAP");
-    let command = Command::new(&client, &metadata, app.format);
-    match app.verb {
-        Verb::Ok => command.call(ok, || Ok(()), render_text).await,
-        Verb::Bad => command.call(bad, || Ok(()), render_nothing).await,
-        Verb::Missing => command.call(missing, || Ok(()), render_nothing).await,
-        Verb::Upstream => command.call(upstream, || Ok(()), render_nothing).await,
-    }
-}
+command::export!(command_router, Provider);

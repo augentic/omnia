@@ -1,9 +1,9 @@
 //! # CLI Command Wasm Guest
 //!
-//! A `wasi:cli/command` reactor on the command façade: `parse` classifies
-//! argv into the clap grammar, `Command::call` projects each verb (decode →
-//! `Client::call` → encode) onto a `Response`, and `command::export!` binds
-//! `main` as the `wasi:cli/run` export.
+//! A `wasi:cli/command` reactor on the command router: `Commands` registers
+//! each subcommand over its `clap::Args` input, `Router` dispatches argv
+//! through `Client::call` onto a `Response`, and `command::export!` binds
+//! `command_router` as the `wasi:cli/run` export.
 //!
 //! The module is `#[cfg(target_arch = "wasm32")]`-guarded because examples
 //! also compile for the host triple, where `wasip3` is unavailable.
@@ -13,41 +13,11 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
-use clap::{Args, Parser, Subcommand, ValueEnum};
-use omnia_sdk::api::command::{self, Command, Parsed, Response, parse};
-use omnia_sdk::api::{Client, Context, Format, Metadata};
+use clap::{Args, ValueEnum};
+use omnia_sdk::api::command::{self, Commands, Router};
+use omnia_sdk::api::{Client, Context};
 use omnia_sdk::{Error, bad_gateway, bad_request, not_found, server_error};
 use serde::Serialize;
-
-#[derive(Parser)]
-#[command(
-    name = "cli",
-    bin_name = "cli",
-    version = env!("CARGO_PKG_VERSION"),
-    about = "Omnia wasi:cli/command example",
-    arg_required_else_help = true,
-    subcommand_required = true
-)]
-struct App {
-    /// Output format for every verb
-    #[arg(long, global = true, default_value = "text")]
-    format: Format,
-
-    #[command(subcommand)]
-    verb: Verb,
-}
-
-#[derive(Subcommand)]
-enum Verb {
-    /// Print a greeting
-    Greet(GreetInput),
-    /// Print the sum of the integer arguments
-    Add(AddInput),
-    /// Print the inherited environment, one key=value per line
-    Env,
-    /// Fail with an error class; its exit code follows the exit map
-    Fail(FailInput),
-}
 
 #[derive(Args)]
 struct GreetInput {
@@ -136,24 +106,16 @@ fn render_nothing((): &(), _out: &mut dyn fmt::Write) -> fmt::Result {
     Ok(())
 }
 
-command::export!(main);
-
-async fn main() -> Response {
-    match parse::<App>(wasip3::cli::environment::get_arguments()) {
-        Parsed::App(app) => dispatch(app).await,
-        Parsed::Display(text) => Response::success(text),
-        Parsed::Usage(error) => Response::usage(&error),
-    }
+fn command_router(provider: Provider) -> Router<Provider> {
+    Commands::new()
+        .route("greet", greet, render_greeting)
+        .route("add", add, render_sum)
+        .route("env", env, render_env)
+        .route("fail", fail, render_nothing)
+        .with_state(Client::new(provider))
+        .name("cli")
+        .version(env!("CARGO_PKG_VERSION"))
+        .about("Omnia wasi:cli/command example")
 }
 
-async fn dispatch(app: App) -> Response {
-    let client = Client::new(Provider { greeting: "Hello" });
-    let metadata = Metadata::from_env("CLI");
-    let command = Command::new(&client, &metadata, app.format);
-    match app.verb {
-        Verb::Greet(input) => command.call(greet, || Ok(input), render_greeting).await,
-        Verb::Add(input) => command.call(add, || Ok(input), render_sum).await,
-        Verb::Env => command.call(env, || Ok(()), render_env).await,
-        Verb::Fail(input) => command.call(fail, || Ok(input), render_nothing).await,
-    }
-}
+command::export!(command_router, Provider { greeting: "Hello" });
