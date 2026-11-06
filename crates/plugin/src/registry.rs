@@ -38,22 +38,6 @@ pub struct RegistryClient<S = NoStore> {
     store: S,
 }
 
-// Whose word a package's registry is: the deployment's, by its `registries`
-// routing, or the load's, for a package the deployment routes nowhere.
-#[derive(Debug, PartialEq, Eq)]
-enum Origin {
-    Routed(Registry),
-    Named(Registry),
-}
-
-impl Origin {
-    const fn registry(&self) -> &Registry {
-        match self {
-            Self::Routed(registry) | Self::Named(registry) => registry,
-        }
-    }
-}
-
 impl<S: PackageStore> RegistryClient<S> {
     /// An acquirer routing every package through `config` and keeping what
     /// it fetches in `store`.
@@ -234,6 +218,22 @@ impl<S: PackageStore> RegistrySource for RegistryClient<S> {
         &'a self, package: &'a str, endpoint: Option<&'a str>,
     ) -> BoxFuture<'a, Result<Vec<u8>, AcquireError>> {
         self.acquire(package, endpoint).boxed()
+    }
+}
+
+// Whose word a package's registry is: the deployment's, by its `registries`
+// routing, or the load's, for a package the deployment routes nowhere.
+#[derive(Debug, PartialEq, Eq)]
+enum Origin {
+    Routed(Registry),
+    Named(Registry),
+}
+
+impl Origin {
+    const fn registry(&self) -> &Registry {
+        match self {
+            Self::Routed(registry) | Self::Named(registry) => registry,
+        }
     }
 }
 

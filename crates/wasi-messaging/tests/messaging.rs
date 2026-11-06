@@ -22,10 +22,6 @@ use omnia_wasi_messaging::{
 };
 use omnia_wasi_otel::WasiOtel;
 
-// Every guest program in `crates/test-programs` must have a matching test
-// here; a new program without one fails to compile.
-test_programs::foreach_messaging!();
-
 // A backend whose consumer has already given up, as librdkafka presents a
 // consumer it has abandoned; everything else is a no-op.
 #[derive(Clone, Debug)]
@@ -52,6 +48,10 @@ impl Endpoint for EndedBroker {
         async { Ok(Message::default()) }.boxed()
     }
 }
+
+// Every guest program in `crates/test-programs` must have a matching test
+// here; a new program without one fails to compile.
+test_programs::foreach_messaging!();
 
 async fn boot<B>(deployment: &Deployment, backends: B) -> Runtime<B>
 where

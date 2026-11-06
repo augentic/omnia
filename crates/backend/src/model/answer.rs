@@ -55,70 +55,6 @@ pub struct ToolTurn {
     pub result: serde_json::Value,
 }
 
-impl std::fmt::Display for Format {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            Self::Text => "text",
-            Self::Json => "json",
-            Self::Schema(_) => "schema",
-        })
-    }
-}
-
-impl Format {
-    /// The final-answer instruction appended to a prompt for backends that
-    /// steer output shape through prose rather than a provider `response_format`.
-    #[must_use]
-    pub fn instruction(&self) -> String {
-        match self {
-            Self::Schema(spec) => format!(
-                "When you are done, reply with only your final answer as a single JSON value \
-                 conforming to this JSON Schema, and nothing else:\n{schema}",
-                schema = spec.schema
-            ),
-            Self::Json => "When you are done, reply with only your final answer as a single JSON \
-                           object and nothing else."
-                .to_owned(),
-            Self::Text => {
-                "When you are done, reply with only your final answer as plain text and nothing \
-                 else."
-                    .to_owned()
-            }
-        }
-    }
-
-    /// The candidate answer in a model's final text: the text itself for
-    /// `text`; for `json` and `schema`, the whole text when it parses as
-    /// JSON, otherwise the largest fenced or bracketed JSON value, and the
-    /// raw text when there is none. A courtesy for providers that wrap JSON
-    /// in prose, never a gate — the guest's check decides.
-    #[must_use]
-    pub fn candidate(&self, text: &str) -> String {
-        match self {
-            Self::Text => text.to_owned(),
-            Self::Json | Self::Schema(_) => extract_json(text)
-                .iter()
-                .map(ToString::to_string)
-                .max_by_key(String::len)
-                .unwrap_or_else(|| text.to_owned()),
-        }
-    }
-}
-
-// Every JSON value in `text`: the whole text alone when it parses, else each
-// span that parses whole. A span that does not — prose in brackets, code in
-// a fence, a document cut short — is passed over entire, never read for the
-// values inside it, so a fragment of a broken answer is never the answer.
-fn extract_json(text: &str) -> Vec<Value> {
-    // the whole text is one value
-    let text = text.trim();
-    if let Ok(value) = serde_json::from_str(text) {
-        return vec![value];
-    }
-
-    Spans { rest: text }.filter_map(|span| serde_json::from_str(span).ok()).collect()
-}
-
 // Fence bodies and bracketed blocks, left to right; whichever opens first
 // owns what it spans. A fence delimiter is a "```" that begins a line, as
 // Markdown places it: one inside a line — in prose, or in a JSON string,
@@ -183,6 +119,70 @@ impl<'a> Iterator for Spans<'a> {
         let start = [self.fence_at(), self.rest.find(['{', '['])].into_iter().flatten().min()?;
         self.rest = &self.rest[start..];
         Some(if self.rest.starts_with("```") { self.fence() } else { self.block() })
+    }
+}
+
+// Every JSON value in `text`: the whole text alone when it parses, else each
+// span that parses whole. A span that does not — prose in brackets, code in
+// a fence, a document cut short — is passed over entire, never read for the
+// values inside it, so a fragment of a broken answer is never the answer.
+fn extract_json(text: &str) -> Vec<Value> {
+    // the whole text is one value
+    let text = text.trim();
+    if let Ok(value) = serde_json::from_str(text) {
+        return vec![value];
+    }
+
+    Spans { rest: text }.filter_map(|span| serde_json::from_str(span).ok()).collect()
+}
+
+impl std::fmt::Display for Format {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Text => "text",
+            Self::Json => "json",
+            Self::Schema(_) => "schema",
+        })
+    }
+}
+
+impl Format {
+    /// The final-answer instruction appended to a prompt for backends that
+    /// steer output shape through prose rather than a provider `response_format`.
+    #[must_use]
+    pub fn instruction(&self) -> String {
+        match self {
+            Self::Schema(spec) => format!(
+                "When you are done, reply with only your final answer as a single JSON value \
+                 conforming to this JSON Schema, and nothing else:\n{schema}",
+                schema = spec.schema
+            ),
+            Self::Json => "When you are done, reply with only your final answer as a single JSON \
+                           object and nothing else."
+                .to_owned(),
+            Self::Text => {
+                "When you are done, reply with only your final answer as plain text and nothing \
+                 else."
+                    .to_owned()
+            }
+        }
+    }
+
+    /// The candidate answer in a model's final text: the text itself for
+    /// `text`; for `json` and `schema`, the whole text when it parses as
+    /// JSON, otherwise the largest fenced or bracketed JSON value, and the
+    /// raw text when there is none. A courtesy for providers that wrap JSON
+    /// in prose, never a gate — the guest's check decides.
+    #[must_use]
+    pub fn candidate(&self, text: &str) -> String {
+        match self {
+            Self::Text => text.to_owned(),
+            Self::Json | Self::Schema(_) => extract_json(text)
+                .iter()
+                .map(ToString::to_string)
+                .max_by_key(String::len)
+                .unwrap_or_else(|| text.to_owned()),
+        }
     }
 }
 

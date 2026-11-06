@@ -60,8 +60,6 @@ impl std::fmt::Display for Error {
     }
 }
 
-omnia_core::host_error!(Error, Other);
-
 /// Incoming value for a blobstore operation.
 pub type IncomingValue = Bytes;
 /// Outgoing value for a blobstore operation.
@@ -141,6 +139,8 @@ where
 }
 
 impl<B> Server<B> for WasiBlobStore {}
+
+omnia_core::host_error!(Error, Other);
 
 omnia_core::wasi_view!(BlobStore);
 

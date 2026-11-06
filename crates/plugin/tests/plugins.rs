@@ -26,6 +26,14 @@ use omnia::{
 use omnia_test::host::{Backends, Scratch, scratch};
 use omnia_wasi_otel::WasiOtel;
 
+// what the registry holds for a guest name
+#[derive(Debug, PartialEq, Eq)]
+enum Registered {
+    Absent,
+    /// Active, with the digest recorded at admission.
+    Active(Digest),
+}
+
 // Every guest program in `crates/test-programs/programs/plugins` must have a
 // matching test here; a new program without one fails to compile.
 test_programs::foreach_plugins!();
@@ -121,14 +129,6 @@ async fn call_export(
         Some(Val::String(answer)) => Ok(answer),
         other => bail!("`{guest}`'s `{func}` returned a non-string result: {other:?}"),
     }
-}
-
-// what the registry holds for a guest name
-#[derive(Debug, PartialEq, Eq)]
-enum Registered {
-    Absent,
-    /// Active, with the digest recorded at admission.
-    Active(Digest),
 }
 
 fn recorded(runtime: &Runtime<Backends>, guest: &str) -> Registered {

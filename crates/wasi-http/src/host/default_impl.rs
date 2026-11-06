@@ -24,26 +24,7 @@ use wasmtime_wasi_http::{
 use super::{HttpBorrow, client_cert};
 
 pub type FutureResult<T> = Box<dyn Future<Output = Result<T, HttpError>> + Send>;
-
-#[expect(missing_docs, reason = "`FromEnv` has no docs")]
-mod config {
-    use fromenv::FromEnv;
-
-    /// Options for the default outbound `wasi:http` client.
-    #[derive(Debug, Clone, FromEnv)]
-    pub struct ConnectOptions {
-        /// Connect timeout in seconds (`HTTP_CONNECT_TIMEOUT`, default 10).
-        #[env(from = "HTTP_CONNECT_TIMEOUT", default = "10")]
-        pub connect_timeout: u64,
-    }
-}
 pub use config::ConnectOptions;
-
-impl FromEnv for ConnectOptions {
-    fn load_env() -> Result<Self> {
-        Self::from_env().finalize().context("issue loading connection options")
-    }
-}
 
 #[derive(Debug, Clone)]
 struct HttpHooks {
@@ -64,15 +45,6 @@ impl HttpBorrow for HttpDefault {
             ctx: &mut self.ctx,
             table,
         }
-    }
-}
-
-// reqwest is built with `rustls-no-provider` (keeping `aws-lc-sys` out of the
-// tree), so a process-level provider must exist before a client is built; an
-// embedder's own provider wins, and a lost install race still leaves one.
-fn ensure_crypto_provider() {
-    if rustls::crypto::CryptoProvider::get_default().is_none() {
-        let _ = rustls::crypto::ring::default_provider().install_default();
     }
 }
 
@@ -148,6 +120,53 @@ impl Clients {
     }
 }
 
+// A response body held to the guest's `between-bytes-timeout`: the deadline
+// restarts at every frame, and a body silent past it fails as a read timeout.
+struct Paced {
+    inner: WasiBody,
+    between: Duration,
+    deadline: Pin<Box<Sleep>>,
+}
+
+impl Paced {
+    fn new(inner: WasiBody, between: Duration) -> Self {
+        Self {
+            inner,
+            between,
+            deadline: Box::pin(tokio::time::sleep(between)),
+        }
+    }
+}
+
+impl Body for Paced {
+    type Data = Bytes;
+    type Error = HttpError;
+
+    fn poll_frame(
+        self: Pin<&mut Self>, cx: &mut task::Context<'_>,
+    ) -> Poll<Option<Result<Frame<Bytes>, HttpError>>> {
+        let this = self.get_mut();
+        match Pin::new(&mut this.inner).poll_frame(cx) {
+            Poll::Ready(frame) => {
+                this.deadline.as_mut().reset(tokio::time::Instant::now() + this.between);
+                Poll::Ready(frame)
+            }
+            Poll::Pending => {
+                ready!(this.deadline.as_mut().poll(cx));
+                Poll::Ready(Some(Err(HttpError::ConnectionReadTimeout)))
+            }
+        }
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.inner.is_end_stream()
+    }
+
+    fn size_hint(&self) -> SizeHint {
+        self.inner.size_hint()
+    }
+}
+
 impl WasiHttpHooks for HttpHooks {
     // reqwest derives `Host` from the URL, and a guest can never supply one
     fn set_host_header(&mut self) -> bool {
@@ -219,50 +238,31 @@ impl WasiHttpHooks for HttpHooks {
     }
 }
 
-// A response body held to the guest's `between-bytes-timeout`: the deadline
-// restarts at every frame, and a body silent past it fails as a read timeout.
-struct Paced {
-    inner: WasiBody,
-    between: Duration,
-    deadline: Pin<Box<Sleep>>,
-}
+#[expect(missing_docs, reason = "`FromEnv` has no docs")]
+mod config {
+    use fromenv::FromEnv;
 
-impl Paced {
-    fn new(inner: WasiBody, between: Duration) -> Self {
-        Self {
-            inner,
-            between,
-            deadline: Box::pin(tokio::time::sleep(between)),
-        }
+    /// Options for the default outbound `wasi:http` client.
+    #[derive(Debug, Clone, FromEnv)]
+    pub struct ConnectOptions {
+        /// Connect timeout in seconds (`HTTP_CONNECT_TIMEOUT`, default 10).
+        #[env(from = "HTTP_CONNECT_TIMEOUT", default = "10")]
+        pub connect_timeout: u64,
     }
 }
 
-impl Body for Paced {
-    type Data = Bytes;
-    type Error = HttpError;
-
-    fn poll_frame(
-        self: Pin<&mut Self>, cx: &mut task::Context<'_>,
-    ) -> Poll<Option<Result<Frame<Bytes>, HttpError>>> {
-        let this = self.get_mut();
-        match Pin::new(&mut this.inner).poll_frame(cx) {
-            Poll::Ready(frame) => {
-                this.deadline.as_mut().reset(tokio::time::Instant::now() + this.between);
-                Poll::Ready(frame)
-            }
-            Poll::Pending => {
-                ready!(this.deadline.as_mut().poll(cx));
-                Poll::Ready(Some(Err(HttpError::ConnectionReadTimeout)))
-            }
-        }
+impl FromEnv for ConnectOptions {
+    fn load_env() -> Result<Self> {
+        Self::from_env().finalize().context("issue loading connection options")
     }
+}
 
-    fn is_end_stream(&self) -> bool {
-        self.inner.is_end_stream()
-    }
-
-    fn size_hint(&self) -> SizeHint {
-        self.inner.size_hint()
+// reqwest is built with `rustls-no-provider` (keeping `aws-lc-sys` out of the
+// tree), so a process-level provider must exist before a client is built; an
+// embedder's own provider wins, and a lost install race still leaves one.
+fn ensure_crypto_provider() {
+    if rustls::crypto::CryptoProvider::get_default().is_none() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
     }
 }
 

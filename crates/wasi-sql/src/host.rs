@@ -58,8 +58,6 @@ impl Error {
     }
 }
 
-omnia_core::host_error!(Error, Other);
-
 /// Host-side service for `wasi:sql`.
 #[derive(Debug)]
 pub struct WasiSql;
@@ -79,5 +77,7 @@ where
 }
 
 impl<B> Server<B> for WasiSql {}
+
+omnia_core::host_error!(Error, Other);
 
 omnia_core::wasi_view!(Sql);

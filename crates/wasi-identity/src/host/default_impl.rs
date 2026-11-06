@@ -19,42 +19,7 @@ use omnia_core::{Connect, FromEnv, FutureResult};
 use tracing::instrument;
 
 type TokenResponse = StandardTokenResponse<EmptyExtraTokenFields, BasicTokenType>;
-
-#[expect(missing_docs, reason = "`FromEnv` has no docs")]
-mod config {
-    use fromenv::FromEnv;
-
-    /// Connection options for [`IdentityDefault`](super::IdentityDefault).
-    #[derive(Clone, FromEnv)]
-    pub struct ConnectOptions {
-        /// `OAuth2` client ID (`IDENTITY_CLIENT_ID`).
-        #[env(from = "IDENTITY_CLIENT_ID")]
-        pub client_id: String,
-        /// `OAuth2` client secret (`IDENTITY_CLIENT_SECRET`).
-        #[env(from = "IDENTITY_CLIENT_SECRET")]
-        pub client_secret: String,
-        /// `OAuth2` token endpoint URL (`IDENTITY_TOKEN_URL`).
-        #[env(from = "IDENTITY_TOKEN_URL")]
-        pub token_url: String,
-    }
-}
 pub use config::ConnectOptions;
-
-impl fmt::Debug for ConnectOptions {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ConnectOptions")
-            .field("client_id", &self.client_id)
-            .field("client_secret", &"<redacted>")
-            .field("token_url", &self.token_url)
-            .finish()
-    }
-}
-
-impl FromEnv for ConnectOptions {
-    fn load_env() -> Result<Self> {
-        Self::from_env().finalize().context("issue loading connection options")
-    }
-}
 
 /// Default `OAuth2` client-credentials implementation of [`IdentityClient`].
 #[derive(Debug, Clone)]
@@ -77,16 +42,6 @@ impl IdentityClient for IdentityDefault {
         tracing::debug!("getting identity");
         let token_manager = self.token_manager.clone();
         async move { Ok(Arc::new(token_manager) as Arc<dyn Identity>) }.boxed()
-    }
-}
-
-fn into_access_token(token_resp: &TokenResponse) -> AccessToken {
-    let token = token_resp.access_token().secret().clone();
-    let expires_in = token_resp.expires_in().unwrap_or(Duration::from_hours(1));
-
-    AccessToken {
-        token,
-        expires_in: expires_in.as_secs(),
     }
 }
 
@@ -166,6 +121,51 @@ impl TokenManager {
         drop(cache);
 
         Ok(token)
+    }
+}
+
+#[expect(missing_docs, reason = "`FromEnv` has no docs")]
+mod config {
+    use fromenv::FromEnv;
+
+    /// Connection options for [`IdentityDefault`](super::IdentityDefault).
+    #[derive(Clone, FromEnv)]
+    pub struct ConnectOptions {
+        /// `OAuth2` client ID (`IDENTITY_CLIENT_ID`).
+        #[env(from = "IDENTITY_CLIENT_ID")]
+        pub client_id: String,
+        /// `OAuth2` client secret (`IDENTITY_CLIENT_SECRET`).
+        #[env(from = "IDENTITY_CLIENT_SECRET")]
+        pub client_secret: String,
+        /// `OAuth2` token endpoint URL (`IDENTITY_TOKEN_URL`).
+        #[env(from = "IDENTITY_TOKEN_URL")]
+        pub token_url: String,
+    }
+}
+
+impl fmt::Debug for ConnectOptions {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ConnectOptions")
+            .field("client_id", &self.client_id)
+            .field("client_secret", &"<redacted>")
+            .field("token_url", &self.token_url)
+            .finish()
+    }
+}
+
+impl FromEnv for ConnectOptions {
+    fn load_env() -> Result<Self> {
+        Self::from_env().finalize().context("issue loading connection options")
+    }
+}
+
+fn into_access_token(token_resp: &TokenResponse) -> AccessToken {
+    let token = token_resp.access_token().secret().clone();
+    let expires_in = token_resp.expires_in().unwrap_or(Duration::from_hours(1));
+
+    AccessToken {
+        token,
+        expires_in: expires_in.as_secs(),
     }
 }
 

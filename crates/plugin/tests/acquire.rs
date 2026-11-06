@@ -15,17 +15,17 @@ use omnia_plugin::{
 use tempfile::TempDir;
 use wasm_pkg_client::{Config, Registry};
 
+#[derive(serde::Serialize)]
+struct LocalBackendConfig {
+    root: PathBuf,
+}
+
 const PACKAGE: &str = "test:adapter@1.0.0";
 // the file the store keeps `PACKAGE` under
 const STORED: &str = "test_adapter@1.0.0.wasm";
 const DEFAULT_REGISTRY: &str = "registry.test";
 // A closed local port: connection refused immediately, no network reached.
 const UNROUTABLE_REGISTRY: &str = "127.0.0.1:1";
-
-#[derive(serde::Serialize)]
-struct LocalBackendConfig {
-    root: PathBuf,
-}
 
 fn stage(root: &Path, package: &str, bytes: &[u8]) {
     let (name, version) = package.split_once('@').expect("test packages pin versions");

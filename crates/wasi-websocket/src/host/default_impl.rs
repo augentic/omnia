@@ -18,10 +18,6 @@ use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 use tokio_tungstenite::{WebSocketStream, accept_async};
 use tracing::instrument;
 
-const MAX_CONNECTIONS: usize = 1024;
-const BROADCAST_CAPACITY: usize = 256;
-const CLIENT_CAPACITY: usize = 256;
-
 type ConnectionMap = Arc<DashMap<String, mpsc::Sender<Message>>>;
 
 /// Options used to connect to the WebSocket service.
@@ -228,3 +224,7 @@ impl WebSocketDefault {
         }
     }
 }
+
+const MAX_CONNECTIONS: usize = 1024;
+const BROADCAST_CAPACITY: usize = 256;
+const CLIENT_CAPACITY: usize = 256;

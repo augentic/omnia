@@ -38,8 +38,6 @@ enum Source {
     ScanPackages { dir: PathBuf, group: String },
 }
 
-const DEFAULT_GROUP: &str = "examples";
-
 impl Source {
     // `[[example]]` targets are uplifted under `debug/examples/`, not `debug/`
     const fn is_examples(&self) -> bool {
@@ -414,6 +412,8 @@ impl Built {
             .unwrap_or_else(|err| panic!("writing {}: {err}", out.display()));
     }
 }
+
+const DEFAULT_GROUP: &str = "examples";
 
 #[expect(clippy::print_stdout, reason = "cargo's build-script protocol")]
 fn rerun_if_changed(path: &Path) {

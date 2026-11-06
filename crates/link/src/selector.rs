@@ -16,6 +16,16 @@ use anyhow::{Result, bail};
 use omnia_core::GuestId;
 use wasmtime::component::Val;
 
+/// The default strategy: the first parameter is a string identity.
+///
+/// The leading argument names the target and is **forwarded through** (the
+/// adapter imports and exports the same interface, so the target's export
+/// expects the identity argument too). A consumer that wants different behaviour
+/// (strip the id, read it from a later argument, key off the interface) supplies
+/// its own [`GuestSelector`].
+#[derive(Clone, Copy, Debug, Default)]
+pub struct FirstArgSelector;
+
 /// Chooses the target guest for a host-mediated call and the parameters to
 /// forward to it.
 ///
@@ -39,16 +49,6 @@ pub trait GuestSelector: Send + Sync + 'static {
         &self, interface: &str, func: &str, params: &'a [Val],
     ) -> Result<(GuestId, Cow<'a, [Val]>)>;
 }
-
-/// The default strategy: the first parameter is a string identity.
-///
-/// The leading argument names the target and is **forwarded through** (the
-/// adapter imports and exports the same interface, so the target's export
-/// expects the identity argument too). A consumer that wants different behaviour
-/// (strip the id, read it from a later argument, key off the interface) supplies
-/// its own [`GuestSelector`].
-#[derive(Clone, Copy, Debug, Default)]
-pub struct FirstArgSelector;
 
 impl GuestSelector for FirstArgSelector {
     fn select<'a>(

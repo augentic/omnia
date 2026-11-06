@@ -4,17 +4,17 @@
 
 #![cfg(target_arch = "wasm32")]
 
-wit_bindgen::generate!({
-    world: "partial",
-    path: "wit",
-});
-
 struct Partial;
-
-export!(Partial);
 
 impl Guest for Partial {
     fn poke(message: String) -> String {
         self::omnia_test::link::ops::ping("echoer", &message)
     }
 }
+
+wit_bindgen::generate!({
+    world: "partial",
+    path: "wit",
+});
+
+export!(Partial);

@@ -23,10 +23,6 @@ use opentelemetry_proto::tonic::metrics::v1::{
 use opentelemetry_proto::tonic::trace::v1::Span;
 use opentelemetry_proto::tonic::trace::v1::status::StatusCode;
 
-// Every guest program in `crates/test-programs` must have a matching test
-// here; a new program without one fails to compile.
-test_programs::foreach_otel!();
-
 #[derive(Clone, Debug)]
 struct Backends(Recording);
 
@@ -79,6 +75,22 @@ impl Recording {
     }
 }
 
+impl OtelClient for Recording {
+    fn export_traces(&self, request: ExportTraceServiceRequest) -> FutureResult<()> {
+        self.traces.lock().expect("traces lock").push(request);
+        async { Ok(()) }.boxed()
+    }
+
+    fn export_metrics(&self, request: ExportMetricsServiceRequest) -> FutureResult<()> {
+        self.metrics.lock().expect("metrics lock").push(request);
+        async { Ok(()) }.boxed()
+    }
+}
+
+// Every guest program in `crates/test-programs` must have a matching test
+// here; a new program without one fails to compile.
+test_programs::foreach_otel!();
+
 fn attribute<'a>(
     attributes: &'a [opentelemetry_proto::tonic::common::v1::KeyValue], key: &str,
 ) -> Option<&'a AnyValue> {
@@ -108,18 +120,6 @@ fn histogram_point<'a>(metrics: &'a [Metric], name: &str) -> &'a HistogramDataPo
         panic!("one attribute set on `{name}`, got {}", histogram.data_points.len());
     };
     point
-}
-
-impl OtelClient for Recording {
-    fn export_traces(&self, request: ExportTraceServiceRequest) -> FutureResult<()> {
-        self.traces.lock().expect("traces lock").push(request);
-        async { Ok(()) }.boxed()
-    }
-
-    fn export_metrics(&self, request: ExportMetricsServiceRequest) -> FutureResult<()> {
-        self.metrics.lock().expect("metrics lock").push(request);
-        async { Ok(()) }.boxed()
-    }
 }
 
 async fn run_guest(wasm: &str) -> Recording {

@@ -6,12 +6,6 @@ use wasmtime::{Engine, Precompiled};
 
 use crate::source::Verified;
 
-// Appended to every pre-compiled deserialization failure: the usual cause is a
-// compile-affecting settings mismatch, not corruption.
-const SETTINGS_HINT: &str = "the artifact must be built with the same compile-affecting settings \
-                             used by `omnia compile` (MAX_FUEL, BRANCH_HINTING, \
-                             MEMORY_RESERVATION, MEMORY_GUARD_SIZE)";
-
 /// Load verified component bytes into a [`Component`] on a blocking thread.
 ///
 /// The bytes are a raw wasm component, compiled here, or `omnia compile`
@@ -74,3 +68,9 @@ fn load(engine: &Engine, bytes: &[u8]) -> Result<Component> {
         ),
     }
 }
+
+// Appended to every pre-compiled deserialization failure: the usual cause is a
+// compile-affecting settings mismatch, not corruption.
+const SETTINGS_HINT: &str = "the artifact must be built with the same compile-affecting settings \
+                             used by `omnia compile` (MAX_FUEL, BRANCH_HINTING, \
+                             MEMORY_RESERVATION, MEMORY_GUARD_SIZE)";

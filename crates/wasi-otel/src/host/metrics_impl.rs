@@ -21,6 +21,37 @@ use crate::host::generated::omnia::otel::metrics::{self as wasi, HostWithStore};
 use crate::host::types_impl::{datetime_nanos, decode_id};
 use crate::host::{WasiOtel, WasiOtelView};
 
+omnia_core::host_error!(wasi::Error, InternalFailure);
+
+fn array_value<T>(items: Vec<T>, value: fn(T) -> Value) -> Value {
+    Value::ArrayValue(ArrayValue {
+        values: items
+            .into_iter()
+            .map(|item| AnyValue {
+                value: Some(value(item)),
+            })
+            .collect(),
+    })
+}
+
+// shared by the Gauge and Sum conversions
+fn number_dp(
+    attributes: Vec<wasi::KeyValue>, value: wasi::DataValue, exemplars: Vec<wasi::Exemplar>,
+    start_time_unix_nano: u64, time_unix_nano: u64,
+) -> NumberDataPoint {
+    NumberDataPoint {
+        attributes: attributes.into_iter().map(Into::into).collect(),
+        start_time_unix_nano,
+        time_unix_nano,
+        exemplars: exemplars.into_iter().map(Into::into).collect(),
+        flags: DATA_POINT_FLAGS_DO_NOT_USE,
+        value: Some(value.into()),
+    }
+}
+
+// The proto `DataPointFlags` default (`FLAG_NONE` / "do not use").
+const DATA_POINT_FLAGS_DO_NOT_USE: u32 = 0;
+
 impl<T> HostWithStore<T> for WasiOtel {
     async fn export(
         accessor: &Accessor<T, Self>, rm: wasi::ResourceMetrics,
@@ -38,8 +69,6 @@ impl<T> HostWithStore<T> for WasiOtel {
 }
 
 impl wasi::Host for WasiOtelView<'_> {}
-
-omnia_core::host_error!(wasi::Error, InternalFailure);
 
 impl From<wasi::ResourceMetrics> for ExportMetricsServiceRequest {
     fn from(rm: wasi::ResourceMetrics) -> Self {
@@ -91,17 +120,6 @@ impl From<wasi::Value> for AnyValue {
     }
 }
 
-fn array_value<T>(items: Vec<T>, value: fn(T) -> Value) -> Value {
-    Value::ArrayValue(ArrayValue {
-        values: items
-            .into_iter()
-            .map(|item| AnyValue {
-                value: Some(value(item)),
-            })
-            .collect(),
-    })
-}
-
 impl From<wasi::ScopeMetrics> for ScopeMetrics {
     fn from(sm: wasi::ScopeMetrics) -> Self {
         let schema_url = sm.scope.clone().schema_url.unwrap_or_default();
@@ -149,21 +167,6 @@ impl From<wasi::MetricData> for MetricData {
             wasi::MetricData::Histogram(hist) => Self::Histogram(hist.into()),
             wasi::MetricData::ExponentialHistogram(hist) => Self::ExponentialHistogram(hist.into()),
         }
-    }
-}
-
-// shared by the Gauge and Sum conversions
-fn number_dp(
-    attributes: Vec<wasi::KeyValue>, value: wasi::DataValue, exemplars: Vec<wasi::Exemplar>,
-    start_time_unix_nano: u64, time_unix_nano: u64,
-) -> NumberDataPoint {
-    NumberDataPoint {
-        attributes: attributes.into_iter().map(Into::into).collect(),
-        start_time_unix_nano,
-        time_unix_nano,
-        exemplars: exemplars.into_iter().map(Into::into).collect(),
-        flags: DATA_POINT_FLAGS_DO_NOT_USE,
-        value: Some(value.into()),
     }
 }
 
@@ -315,9 +318,6 @@ impl From<wasi::Temporality> for i32 {
         AggregationTemporality::from(temporality) as Self
     }
 }
-
-// The proto `DataPointFlags` default (`FLAG_NONE` / "do not use").
-const DATA_POINT_FLAGS_DO_NOT_USE: u32 = 0;
 
 #[cfg(test)]
 mod tests {

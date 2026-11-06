@@ -17,6 +17,17 @@ use omnia_sdk::Error;
 use omnia_sdk::api::{Client, Context, http};
 use serde::{Deserialize, Serialize};
 
+#[derive(Deserialize)]
+struct Input {
+    message: String,
+}
+
+#[derive(Serialize)]
+struct Echo {
+    message: String,
+    request_id: String,
+}
+
 http::export!(router);
 
 fn router<P: Send + Sync + 'static>(provider: P) -> Router {
@@ -30,17 +41,6 @@ async fn check_uri(request: Request<Body>) -> Request<Body> {
     assert_eq!(request.uri().scheme_str(), Some("http"));
     assert_eq!(request.uri().authority().map(Authority::as_str), Some("echo.test"));
     request
-}
-
-#[derive(Deserialize)]
-struct Input {
-    message: String,
-}
-
-#[derive(Serialize)]
-struct Echo {
-    message: String,
-    request_id: String,
 }
 
 async fn echo_get<P: Send + Sync + 'static>(

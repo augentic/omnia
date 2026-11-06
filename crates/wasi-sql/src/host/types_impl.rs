@@ -8,6 +8,23 @@ use crate::host::generated::wasi::sql::types::{
 use crate::host::resource::ConnectionProxy;
 use crate::host::{DataType, WasiSql, WasiSqlView};
 
+fn from_wit_data_type(dt: WitDataType) -> DataType {
+    match dt {
+        WitDataType::Int32(v) => DataType::Int32(v),
+        WitDataType::Int64(v) => DataType::Int64(v),
+        WitDataType::Uint32(v) => DataType::Uint32(v),
+        WitDataType::Uint64(v) => DataType::Uint64(v),
+        WitDataType::Float(v) => DataType::Float(v),
+        WitDataType::Double(v) => DataType::Double(v),
+        WitDataType::Str(v) => DataType::Str(v),
+        WitDataType::Boolean(v) => DataType::Boolean(v),
+        WitDataType::Date(v) => DataType::Date(v),
+        WitDataType::Time(v) => DataType::Time(v),
+        WitDataType::Timestamp(v) => DataType::Timestamp(v),
+        WitDataType::Binary(v) => DataType::Binary(v),
+    }
+}
+
 impl<T> HostConnectionWithStore<T> for WasiSql {
     async fn open(
         accessor: &Accessor<T, Self>, name: String,
@@ -74,20 +91,3 @@ impl Host for WasiSqlView<'_> {
 impl HostConnection for WasiSqlView<'_> {}
 impl HostStatement for WasiSqlView<'_> {}
 impl HostError for WasiSqlView<'_> {}
-
-fn from_wit_data_type(dt: WitDataType) -> DataType {
-    match dt {
-        WitDataType::Int32(v) => DataType::Int32(v),
-        WitDataType::Int64(v) => DataType::Int64(v),
-        WitDataType::Uint32(v) => DataType::Uint32(v),
-        WitDataType::Uint64(v) => DataType::Uint64(v),
-        WitDataType::Float(v) => DataType::Float(v),
-        WitDataType::Double(v) => DataType::Double(v),
-        WitDataType::Str(v) => DataType::Str(v),
-        WitDataType::Boolean(v) => DataType::Boolean(v),
-        WitDataType::Date(v) => DataType::Date(v),
-        WitDataType::Time(v) => DataType::Time(v),
-        WitDataType::Timestamp(v) => DataType::Timestamp(v),
-        WitDataType::Binary(v) => DataType::Binary(v),
-    }
-}

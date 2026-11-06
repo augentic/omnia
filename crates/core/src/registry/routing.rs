@@ -22,28 +22,6 @@ use wasmtime::component::InstancePre;
 
 use super::{GuestId, Registry};
 
-/// A per-trigger route table resolving a routing key to a target identity.
-pub trait Resolver {
-    /// Resolve a routing key (a path, topic, ...) to a target guest identity.
-    fn resolve(&self, key: &str) -> Option<&GuestId>;
-
-    /// Iterate the identities every route in the table targets.
-    fn targets(&self) -> impl Iterator<Item = &GuestId>;
-
-    /// Returns `true` when the table holds no routes.
-    fn is_empty(&self) -> bool;
-}
-
-/// Match-and-order policy that distinguishes the route tables.
-pub trait MatchStrategy {
-    /// Whether `key` matches route `pattern`.
-    fn matches(key: &str, pattern: &str) -> bool;
-
-    /// Reorder entries at construction so a linear `resolve` scan returns the
-    /// intended winner. Defaults to preserving declaration order.
-    fn order(_entries: &mut [(String, GuestId)]) {}
-}
-
 /// Longest-prefix path matching: `/target/omnia` wins over `/target`.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct PrefixMatch;
@@ -56,6 +34,16 @@ pub struct PatternMatch;
 /// Exact string matching, used for CLI subcommands.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ExactMatch;
+
+/// Match-and-order policy that distinguishes the route tables.
+pub trait MatchStrategy {
+    /// Whether `key` matches route `pattern`.
+    fn matches(key: &str, pattern: &str) -> bool;
+
+    /// Reorder entries at construction so a linear `resolve` scan returns the
+    /// intended winner. Defaults to preserving declaration order.
+    fn order(_entries: &mut [(String, GuestId)]) {}
+}
 
 impl MatchStrategy for PrefixMatch {
     fn matches(key: &str, pattern: &str) -> bool {
@@ -100,6 +88,18 @@ impl<M: MatchStrategy> RouteTable<M> {
             strategy: PhantomData,
         }
     }
+}
+
+/// A per-trigger route table resolving a routing key to a target identity.
+pub trait Resolver {
+    /// Resolve a routing key (a path, topic, ...) to a target guest identity.
+    fn resolve(&self, key: &str) -> Option<&GuestId>;
+
+    /// Iterate the identities every route in the table targets.
+    fn targets(&self) -> impl Iterator<Item = &GuestId>;
+
+    /// Returns `true` when the table holds no routes.
+    fn is_empty(&self) -> bool;
 }
 
 impl<M: MatchStrategy> Resolver for RouteTable<M> {

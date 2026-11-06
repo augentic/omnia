@@ -11,14 +11,7 @@
 
 #![cfg(target_arch = "wasm32")]
 
-wit_bindgen::generate!({
-    world: "router",
-    path: "guest-link/wit",
-});
-
 struct Router;
-
-export!(Router);
 
 impl Guest for Router {
     // the host runs the selector, dispatches to a fresh responder, returns its result
@@ -41,3 +34,10 @@ impl Guest for Router {
         example::link::echo::echo_slow(target, message).await
     }
 }
+
+wit_bindgen::generate!({
+    world: "router",
+    path: "guest-link/wit",
+});
+
+export!(Router);

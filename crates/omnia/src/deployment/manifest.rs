@@ -363,12 +363,6 @@ impl Manifest {
     }
 }
 
-// a path the deployment names relative to the operator's home, expanded at
-// assembly rather than against the manifest's directory
-fn is_home_relative(path: &Path) -> bool {
-    path.starts_with("~")
-}
-
 /// The `[plugins]` table: where acquired packages are kept and how they are
 /// routed to a registry.
 ///
@@ -569,15 +563,6 @@ impl GuestEntry {
     }
 }
 
-// The one resolution from a `[[guest]]` entry to its loadable source.
-fn source(entry: &GuestEntry) -> Source {
-    let source = Source::new(entry.name.as_str(), entry.source.clone());
-    match entry.digest {
-        Some(digest) => source.pinned(digest),
-        None => source,
-    }
-}
-
 /// A guest's inbound routes, one pattern list per trigger; the containing
 /// guest is the implicit target.
 ///
@@ -627,6 +612,21 @@ pub enum TransportKind {
     Nats,
     /// QUIC (cross-node).
     Quic,
+}
+
+// a path the deployment names relative to the operator's home, expanded at
+// assembly rather than against the manifest's directory
+fn is_home_relative(path: &Path) -> bool {
+    path.starts_with("~")
+}
+
+// The one resolution from a `[[guest]]` entry to its loadable source.
+fn source(entry: &GuestEntry) -> Source {
+    let source = Source::new(entry.name.as_str(), entry.source.clone());
+    match entry.digest {
+        Some(digest) => source.pinned(digest),
+        None => source,
+    }
 }
 
 // Unit tests by design: manifest parsing/validation is pure translation.

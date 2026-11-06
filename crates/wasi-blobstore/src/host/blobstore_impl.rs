@@ -9,6 +9,32 @@ fn same_object(src: &ObjectId, dest: &ObjectId) -> bool {
     src.container == dest.container && src.object == dest.object
 }
 
+// returns the source container so `move_object` can delete the source after
+async fn copy<T>(
+    accessor: &Accessor<T, WasiBlobStore>, src: &ObjectId, dest: ObjectId,
+) -> Result<std::sync::Arc<dyn crate::host::Container>> {
+    let src_container = accessor
+        .with(|mut store| store.get().client.get_container(src.container.clone()))
+        .await
+        .context("getting source container")?;
+
+    let data = src_container
+        .get_data(src.object.clone(), 0, u64::MAX)
+        .await
+        .context("reading source object")?
+        .ok_or_else(|| {
+            Error::NotFound(format!("source object not found: {}/{}", src.container, src.object))
+        })?;
+
+    let dest_container = accessor
+        .with(|mut store| store.get().client.get_container(dest.container.clone()))
+        .await
+        .context("getting destination container")?;
+
+    dest_container.write_data(dest.object, data).await.context("writing object")?;
+    Ok(src_container)
+}
+
 impl<T> HostWithStore<T> for WasiBlobStore {
     async fn create_container(
         accessor: &Accessor<T, Self>, name: String,
@@ -85,32 +111,6 @@ impl<T> HostWithStore<T> for WasiBlobStore {
         src_container.delete_object(src.object).await.context("deleting source object")?;
         Ok(())
     }
-}
-
-// returns the source container so `move_object` can delete the source after
-async fn copy<T>(
-    accessor: &Accessor<T, WasiBlobStore>, src: &ObjectId, dest: ObjectId,
-) -> Result<std::sync::Arc<dyn crate::host::Container>> {
-    let src_container = accessor
-        .with(|mut store| store.get().client.get_container(src.container.clone()))
-        .await
-        .context("getting source container")?;
-
-    let data = src_container
-        .get_data(src.object.clone(), 0, u64::MAX)
-        .await
-        .context("reading source object")?
-        .ok_or_else(|| {
-            Error::NotFound(format!("source object not found: {}/{}", src.container, src.object))
-        })?;
-
-    let dest_container = accessor
-        .with(|mut store| store.get().client.get_container(dest.container.clone()))
-        .await
-        .context("getting destination container")?;
-
-    dest_container.write_data(dest.object, data).await.context("writing object")?;
-    Ok(src_container)
 }
 
 impl Host for WasiBlobStoreView<'_> {}

@@ -7,9 +7,6 @@ use anyhow::{Result, bail, ensure};
 use serde::Deserialize;
 use sha2::{Digest as _, Sha256};
 
-const SCHEME: &str = "sha256:";
-const HEX_LEN: usize = 64;
-
 /// A sha256 content digest, spelled `sha256:<64 hex characters>`.
 ///
 /// The pin a deployment declares for a guest's bytes, and the record a
@@ -67,15 +64,6 @@ impl FromStr for Digest {
     }
 }
 
-const fn nibble(digit: u8) -> Option<u8> {
-    match digit {
-        b'0'..=b'9' => Some(digit - b'0'),
-        b'a'..=b'f' => Some(digit - b'a' + 10),
-        b'A'..=b'F' => Some(digit - b'A' + 10),
-        _ => None,
-    }
-}
-
 impl TryFrom<String> for Digest {
     type Error = anyhow::Error;
 
@@ -98,6 +86,18 @@ impl fmt::Display for Digest {
 impl fmt::Debug for Digest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Display::fmt(self, f)
+    }
+}
+
+const SCHEME: &str = "sha256:";
+const HEX_LEN: usize = 64;
+
+const fn nibble(digit: u8) -> Option<u8> {
+    match digit {
+        b'0'..=b'9' => Some(digit - b'0'),
+        b'a'..=b'f' => Some(digit - b'a' + 10),
+        b'A'..=b'F' => Some(digit - b'A' + 10),
+        _ => None,
     }
 }
 

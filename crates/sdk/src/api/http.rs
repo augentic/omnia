@@ -131,12 +131,6 @@ impl<P: Send + Sync + 'static, const N: usize> From<[Self; N]> for Routes<P> {
     }
 }
 
-impl<P: Send + Sync + 'static> From<Routes<P>> for axum::Router<Client<P>> {
-    fn from(routes: Routes<P>) -> Self {
-        routes.0
-    }
-}
-
 impl<P: Send + Sync + 'static> Clone for Routes<P> {
     fn clone(&self) -> Self {
         Self(self.0.clone())
@@ -151,6 +145,12 @@ impl<P: Send + Sync + 'static> fmt::Debug for Routes<P> {
 
 /// A finished `axum::Router` ready to serve requests, or one over state `S`.
 pub type Router<S = ()> = axum::Router<S>;
+
+impl<P: Send + Sync + 'static> From<Routes<P>> for axum::Router<Client<P>> {
+    fn from(routes: Routes<P>) -> Self {
+        routes.0
+    }
+}
 
 /// Serve a request inside a `handler` span carrying its request and correlation ids.
 ///
@@ -168,6 +168,10 @@ pub async fn trace(mut request: Request, next: Next) -> Response {
     request.extensions_mut().insert(metadata);
     next.run(request).instrument(span).await
 }
+
+/// Serve one WASI HTTP request through a finished [`axum::Router`].
+#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
+pub use omnia_wasi_http::serve;
 
 impl Metadata {
     /// Build metadata from HTTP request headers: `x-request-id`,
@@ -226,7 +230,3 @@ impl IntoResponse for crate::Error {
         (self.status(), Json(ErrorBody::from(&self))).into_response()
     }
 }
-
-/// Serve one WASI HTTP request through a finished [`axum::Router`].
-#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
-pub use omnia_wasi_http::serve;

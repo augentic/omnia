@@ -17,6 +17,39 @@ use crate::host::generated::omnia::otel::tracing::{self as wasi, HostWithStore};
 use crate::host::types_impl::{datetime_nanos, decode_id};
 use crate::{WasiOtel, WasiOtelView};
 
+pub fn resource_spans(
+    spans: Vec<wasi::SpanData>, resource: &opentelemetry_sdk::Resource,
+) -> Vec<ResourceSpans> {
+    // Linear scan: an export carries a handful of scopes, and the generated types have no `Hash`.
+    let mut scope_spans: Vec<ScopeSpans> = Vec::new();
+    for span in spans {
+        let schema_url = span.instrumentation_scope.schema_url.clone().unwrap_or_default();
+        let scope = InstrumentationScope::from(span.instrumentation_scope.clone());
+        if let Some(group) = scope_spans
+            .iter_mut()
+            .find(|group| group.scope.as_ref() == Some(&scope) && group.schema_url == schema_url)
+        {
+            group.spans.push(span.into());
+        } else {
+            scope_spans.push(ScopeSpans {
+                scope: Some(scope),
+                schema_url,
+                spans: vec![span.into()],
+            });
+        }
+    }
+
+    vec![ResourceSpans {
+        resource: Some(Resource {
+            attributes: resource.iter().map(Into::into).collect(),
+            dropped_attributes_count: 0,
+            entity_refs: vec![],
+        }),
+        scope_spans,
+        schema_url: resource.schema_url().map(Into::into).unwrap_or_default(),
+    }]
+}
+
 impl<T> HostWithStore<T> for WasiOtel {
     async fn export(
         accessor: &Accessor<T, Self>, mut span_data: Vec<wasi::SpanData>,
@@ -62,39 +95,6 @@ impl<T> HostWithStore<T> for WasiOtel {
 }
 
 impl wasi::Host for WasiOtelView<'_> {}
-
-pub fn resource_spans(
-    spans: Vec<wasi::SpanData>, resource: &opentelemetry_sdk::Resource,
-) -> Vec<ResourceSpans> {
-    // Linear scan: an export carries a handful of scopes, and the generated types have no `Hash`.
-    let mut scope_spans: Vec<ScopeSpans> = Vec::new();
-    for span in spans {
-        let schema_url = span.instrumentation_scope.schema_url.clone().unwrap_or_default();
-        let scope = InstrumentationScope::from(span.instrumentation_scope.clone());
-        if let Some(group) = scope_spans
-            .iter_mut()
-            .find(|group| group.scope.as_ref() == Some(&scope) && group.schema_url == schema_url)
-        {
-            group.spans.push(span.into());
-        } else {
-            scope_spans.push(ScopeSpans {
-                scope: Some(scope),
-                schema_url,
-                spans: vec![span.into()],
-            });
-        }
-    }
-
-    vec![ResourceSpans {
-        resource: Some(Resource {
-            attributes: resource.iter().map(Into::into).collect(),
-            dropped_attributes_count: 0,
-            entity_refs: vec![],
-        }),
-        scope_spans,
-        schema_url: resource.schema_url().map(Into::into).unwrap_or_default(),
-    }]
-}
 
 impl From<wasi::SpanData> for Span {
     fn from(span: wasi::SpanData) -> Self {

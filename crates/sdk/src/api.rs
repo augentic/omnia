@@ -102,16 +102,6 @@ pub enum Format {
     Json,
 }
 
-/// An encoded body with its media type.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Encoded {
-    /// The encoded body bytes.
-    pub bytes: Vec<u8>,
-
-    /// The media type describing `bytes`.
-    pub media_type: &'static str,
-}
-
 impl Format {
     /// Encode a body, rendering it through `render` for [`Format::Text`].
     ///
@@ -142,6 +132,16 @@ impl Format {
             }
         }
     }
+}
+
+/// An encoded body with its media type.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Encoded {
+    /// The encoded body bytes.
+    pub bytes: Vec<u8>,
+
+    /// The media type describing `bytes`.
+    pub media_type: &'static str,
 }
 
 /// Transport-neutral invocation metadata.
@@ -192,29 +192,6 @@ impl Metadata {
             causation_id: None,
             tenant: None,
             deadline: None,
-        }
-    }
-}
-
-// A fresh request id: 32 lowercase hex chars from 128 random bits.
-fn mint_request_id() -> String {
-    let (high, low) = random_u64_pair();
-    format!("{high:016x}{low:016x}")
-}
-
-// The native arm exists so the transports are testable off-target; it
-// is unique per call but not a CSPRNG, and no native transport mints ids.
-fn random_u64_pair() -> (u64, u64) {
-    cfg_select! {
-        all(target_arch = "wasm32", target_os = "wasi") => {
-            use wasip3::random::random::get_random_u64;
-
-            (get_random_u64(), get_random_u64())
-        }
-        _ => {
-            use std::hash::{BuildHasher, RandomState};
-
-            (RandomState::new().hash_one(0_u8), RandomState::new().hash_one(1_u8))
         }
     }
 }
@@ -346,5 +323,28 @@ impl<P: Send + Sync + 'static> Clone for Client<P> {
 impl<P: Send + Sync + 'static> fmt::Debug for Client<P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Client").finish_non_exhaustive()
+    }
+}
+
+// A fresh request id: 32 lowercase hex chars from 128 random bits.
+fn mint_request_id() -> String {
+    let (high, low) = random_u64_pair();
+    format!("{high:016x}{low:016x}")
+}
+
+// The native arm exists so the transports are testable off-target; it
+// is unique per call but not a CSPRNG, and no native transport mints ids.
+fn random_u64_pair() -> (u64, u64) {
+    cfg_select! {
+        all(target_arch = "wasm32", target_os = "wasi") => {
+            use wasip3::random::random::get_random_u64;
+
+            (get_random_u64(), get_random_u64())
+        }
+        _ => {
+            use std::hash::{BuildHasher, RandomState};
+
+            (RandomState::new().hash_one(0_u8), RandomState::new().hash_one(1_u8))
+        }
     }
 }

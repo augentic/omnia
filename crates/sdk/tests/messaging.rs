@@ -20,6 +20,11 @@ struct EchoOutput {
     correlation_id: Option<String>,
 }
 
+#[derive(Debug)]
+struct RawText {
+    text: String,
+}
+
 fn echo<P: Send + Sync + 'static>(
     input: EchoInput, context: Context<P>,
 ) -> Ready<Result<EchoOutput, omnia_sdk::Error>> {
@@ -113,11 +118,6 @@ fn messaging_duplicate_topic_merged_into_router() {
     let _router = MessagingRouter::new(Client::new(()))
         .route("events", echo)
         .merge(Topics::new().route("events", echo));
-}
-
-#[derive(Debug)]
-struct RawText {
-    text: String,
 }
 
 fn raw_text<P: Send + Sync + 'static>(

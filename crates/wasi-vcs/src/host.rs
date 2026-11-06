@@ -109,12 +109,12 @@ fn to_wit_error(err: Error) -> WitError {
     }
 }
 
+// An untyped host failure is an `other` error at the boundary.
+omnia_core::host_error!(WitError, Other);
+omnia_core::wasi_view!(Vcs);
+
 impl TypesHost for WasiVcsView<'_> {
     fn convert_error(&mut self, err: WitError) -> wasmtime::Result<WitError> {
         Ok(err)
     }
 }
-
-// An untyped host failure is an `other` error at the boundary.
-omnia_core::host_error!(WitError, Other);
-omnia_core::wasi_view!(Vcs);

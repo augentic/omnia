@@ -47,15 +47,6 @@ pub trait StateStore: Send + Sync {
 }
 
 #[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
-async fn open_bucket() -> Result<omnia_wasi_keyvalue::store::Bucket> {
-    use anyhow::Context as _;
-
-    omnia_wasi_keyvalue::store::open(omnia_backend::keyvalue::BUCKET.to_string())
-        .await
-        .with_context(|| format!("opening bucket `{}`", omnia_backend::keyvalue::BUCKET))
-}
-
-#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
 impl StateStore for crate::WasiProvider {
     async fn get(&self, key: &str) -> Result<Option<Vec<u8>>> {
         use anyhow::Context as _;
@@ -122,4 +113,13 @@ impl StateStore for crate::WasiProvider {
             .await
             .map_err(|e| anyhow::anyhow!("incrementing `{key}`: {e:?}"))
     }
+}
+
+#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
+async fn open_bucket() -> Result<omnia_wasi_keyvalue::store::Bucket> {
+    use anyhow::Context as _;
+
+    omnia_wasi_keyvalue::store::open(omnia_backend::keyvalue::BUCKET.to_string())
+        .await
+        .with_context(|| format!("opening bucket `{}`", omnia_backend::keyvalue::BUCKET))
 }

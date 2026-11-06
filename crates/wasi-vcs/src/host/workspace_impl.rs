@@ -8,6 +8,17 @@ use crate::host::generated::omnia::vcs::workspace::{
 };
 use crate::host::{Change, ChangeKind, Intent, Result, WasiVcs, WasiVcsView};
 
+fn to_wit_change(change: Change) -> WitChange {
+    WitChange {
+        path: change.path,
+        kind: match change.kind {
+            ChangeKind::Added => WitChangeKind::Added,
+            ChangeKind::Modified => WitChangeKind::Modified,
+            ChangeKind::Deleted => WitChangeKind::Deleted,
+        },
+    }
+}
+
 impl<T> HostWithStore<T> for WasiVcs
 where
     T: HasMounts,
@@ -50,14 +61,3 @@ where
 }
 
 impl Host for WasiVcsView<'_> {}
-
-fn to_wit_change(change: Change) -> WitChange {
-    WitChange {
-        path: change.path,
-        kind: match change.kind {
-            ChangeKind::Added => WitChangeKind::Added,
-            ChangeKind::Modified => WitChangeKind::Modified,
-            ChangeKind::Deleted => WitChangeKind::Deleted,
-        },
-    }
-}

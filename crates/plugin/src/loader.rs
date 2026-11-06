@@ -56,15 +56,6 @@ pub struct Plugins {
     admission: Box<dyn Admission>,
 }
 
-// One of the deployment's mounts as a path load sees it: the handle it
-// reads through, and whether the guest can write beneath it.
-#[derive(Debug)]
-struct Root {
-    name: String,
-    dir: Arc<Dir>,
-    writable: bool,
-}
-
 impl Plugins {
     /// Install the loader capability on `runtime`: its mounts are the roots
     /// a path load resolves against — the read-only ones as code roots, the
@@ -192,6 +183,53 @@ impl Plugins {
     }
 }
 
+// One of the deployment's mounts as a path load sees it: the handle it
+// reads through, and whether the guest can write beneath it.
+#[derive(Debug)]
+struct Root {
+    name: String,
+    dir: Arc<Dir>,
+    writable: bool,
+}
+
+/// Loaded plugin: routed identity, content digest, and what it exports.
+#[derive(Clone, Debug)]
+pub struct Plugin {
+    id: GuestId,
+    digest: Digest,
+    exports: Arc<[String]>,
+}
+
+impl Plugin {
+    /// The handle of a seated guest.
+    #[must_use]
+    pub fn of<T: 'static>(guest: &Guest<T>) -> Self {
+        Self {
+            id: guest.id().clone(),
+            digest: guest.digest(),
+            exports: Arc::clone(guest.exports()),
+        }
+    }
+
+    /// Routed identity for host-mediated dispatch.
+    #[must_use]
+    pub const fn id(&self) -> &GuestId {
+        &self.id
+    }
+
+    /// The content digest of the bytes the guest was loaded from.
+    #[must_use]
+    pub const fn digest(&self) -> Digest {
+        self.digest
+    }
+
+    /// The names the component exports, as [`Guest::exports`] lists them.
+    #[must_use]
+    pub fn exports(&self) -> &[String] {
+        &self.exports
+    }
+}
+
 // Refuses a writable mount that shares or nests a read-only mount's
 // directory: written through one view, its files would load through the
 // other. Directories are told apart by identity, not path.
@@ -249,44 +287,6 @@ fn check_subpath(path: &str, subpath: &str) -> Result<(), LoadError> {
         )));
     }
     Ok(())
-}
-
-/// Loaded plugin: routed identity, content digest, and what it exports.
-#[derive(Clone, Debug)]
-pub struct Plugin {
-    id: GuestId,
-    digest: Digest,
-    exports: Arc<[String]>,
-}
-
-impl Plugin {
-    /// The handle of a seated guest.
-    #[must_use]
-    pub fn of<T: 'static>(guest: &Guest<T>) -> Self {
-        Self {
-            id: guest.id().clone(),
-            digest: guest.digest(),
-            exports: Arc::clone(guest.exports()),
-        }
-    }
-
-    /// Routed identity for host-mediated dispatch.
-    #[must_use]
-    pub const fn id(&self) -> &GuestId {
-        &self.id
-    }
-
-    /// The content digest of the bytes the guest was loaded from.
-    #[must_use]
-    pub const fn digest(&self) -> Digest {
-        self.digest
-    }
-
-    /// The names the component exports, as [`Guest::exports`] lists them.
-    #[must_use]
-    pub fn exports(&self) -> &[String] {
-        &self.exports
-    }
 }
 
 #[cfg(test)]

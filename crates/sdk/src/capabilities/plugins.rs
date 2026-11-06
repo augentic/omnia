@@ -26,9 +26,6 @@ mod generated {
     });
 }
 
-const SCHEME: &str = "sha256:";
-const HEX_LEN: usize = 64;
-
 /// A validated `sha256:<hex>` content digest, canonicalized to lowercase.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
@@ -65,12 +62,6 @@ impl TryFrom<String> for Digest {
 
     fn try_from(digest: String) -> Result<Self, Error> {
         digest.parse()
-    }
-}
-
-impl From<Digest> for String {
-    fn from(digest: Digest) -> Self {
-        digest.0
     }
 }
 
@@ -272,6 +263,9 @@ impl Plugins for crate::WasiProvider {
     }
 }
 
+const SCHEME: &str = "sha256:";
+const HEX_LEN: usize = 64;
+
 #[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
 mod wire {
     use super::generated::omnia::plugins::loader;
@@ -298,6 +292,12 @@ mod wire {
                 loader::Error::Internal(detail) => Self::Internal(detail),
             }
         }
+    }
+}
+
+impl From<Digest> for String {
+    fn from(digest: Digest) -> Self {
+        digest.0
     }
 }
 

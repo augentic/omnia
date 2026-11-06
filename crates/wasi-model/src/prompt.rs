@@ -25,15 +25,6 @@ pub struct Sections {
     pub variables: Vec<(String, String)>,
 }
 
-/// One few-shot input/output pair.
-#[derive(Clone, Debug)]
-pub struct Example {
-    /// Example user input.
-    pub input: String,
-    /// Example model output.
-    pub output: String,
-}
-
 impl Sections {
     /// Assemble the template into `(system, user-turn)` text: the system
     /// channel is `preamble` + role + constraint bullets; the user turn is
@@ -89,6 +80,15 @@ impl Sections {
             }],
         )
     }
+}
+
+/// One few-shot input/output pair.
+#[derive(Clone, Debug)]
+pub struct Example {
+    /// Example user input.
+    pub input: String,
+    /// Example model output.
+    pub output: String,
 }
 
 fn join(parts: &[String]) -> Option<String> {

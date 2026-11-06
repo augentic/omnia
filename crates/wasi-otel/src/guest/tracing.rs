@@ -195,17 +195,6 @@ impl Drop for Span {
     }
 }
 
-// a counter stands in should the random source fail, so an id is never the all-zero invalid one
-fn random<const N: usize>() -> [u8; N] {
-    let mut bytes = [0; N];
-    if getrandom::fill(&mut bytes).is_err() {
-        static NEXT: AtomicU64 = AtomicU64::new(1);
-        let counter = NEXT.fetch_add(1, Ordering::Relaxed).to_be_bytes();
-        bytes[N - counter.len()..].copy_from_slice(&counter);
-    }
-    bytes
-}
-
 /// Export all buffered spans to the host.
 pub async fn export(buffer: &SpanBuffer) {
     let spans = take(buffer);
@@ -221,6 +210,17 @@ pub async fn export(buffer: &SpanBuffer) {
 // A `MutexGuard` binding inside `export` would make its future `!Send`.
 fn take(buffer: &SpanBuffer) -> Vec<wasi::SpanData> {
     buffer.lock().map(|mut spans| std::mem::take(&mut *spans)).unwrap_or_default()
+}
+
+// a counter stands in should the random source fail, so an id is never the all-zero invalid one
+fn random<const N: usize>() -> [u8; N] {
+    let mut bytes = [0; N];
+    if getrandom::fill(&mut bytes).is_err() {
+        static NEXT: AtomicU64 = AtomicU64::new(1);
+        let counter = NEXT.fetch_add(1, Ordering::Relaxed).to_be_bytes();
+        bytes[N - counter.len()..].copy_from_slice(&counter);
+    }
+    bytes
 }
 
 impl From<SpanContext> for wasi::SpanContext {

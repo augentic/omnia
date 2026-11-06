@@ -39,6 +39,53 @@ struct EchoOutput {
     tenant: Option<String>,
 }
 
+#[derive(Serialize)]
+struct Ids {
+    metadata: Option<String>,
+    context: Option<String>,
+}
+
+type Span = (String, Vec<(String, String)>);
+
+#[derive(Default)]
+struct Spans(Arc<Mutex<Vec<Span>>>);
+
+impl<S: tracing::Subscriber> Layer<S> for Spans {
+    fn on_new_span(&self, attrs: &Attributes<'_>, _id: &Id, _ctx: LayerContext<'_, S>) {
+        struct Fields(Vec<(String, String)>);
+
+        impl Visit for Fields {
+            fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
+                self.0.push((field.name().to_owned(), format!("{value:?}")));
+            }
+
+            fn record_str(&mut self, field: &Field, value: &str) {
+                self.0.push((field.name().to_owned(), value.to_owned()));
+            }
+        }
+
+        let mut fields = Fields(Vec::new());
+        attrs.record(&mut fields);
+        self.0.lock().unwrap().push((attrs.metadata().name().to_owned(), fields.0));
+    }
+}
+
+struct StatefulProvider {
+    calls: AtomicUsize,
+}
+
+#[derive(Serialize)]
+struct ProviderObservation {
+    address: usize,
+    call: usize,
+}
+
+#[derive(Debug, Serialize)]
+struct Summary {
+    name: String,
+    count: u32,
+}
+
 fn echo<P: Send + Sync + 'static>(
     input: EchoInput, context: Context<P>,
 ) -> Ready<Result<EchoOutput, omnia_sdk::Error>> {
@@ -167,12 +214,6 @@ fn is_minted_id(id: &str) -> bool {
     id.len() == 32 && id.bytes().all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
 }
 
-#[derive(Serialize)]
-struct Ids {
-    metadata: Option<String>,
-    context: Option<String>,
-}
-
 async fn ids(metadata: Metadata, context: Context<()>) -> Json<Ids> {
     Json(Ids {
         metadata: metadata.request_id,
@@ -195,31 +236,6 @@ async fn missing_request_id() {
     let minted = value["metadata"].as_str().expect("request id is minted");
     assert!(is_minted_id(minted), "{minted:?} is not 32 lowercase hex chars");
     assert_eq!(value["context"], minted);
-}
-
-type Span = (String, Vec<(String, String)>);
-
-#[derive(Default)]
-struct Spans(Arc<Mutex<Vec<Span>>>);
-
-impl<S: tracing::Subscriber> Layer<S> for Spans {
-    fn on_new_span(&self, attrs: &Attributes<'_>, _id: &Id, _ctx: LayerContext<'_, S>) {
-        struct Fields(Vec<(String, String)>);
-
-        impl Visit for Fields {
-            fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
-                self.0.push((field.name().to_owned(), format!("{value:?}")));
-            }
-
-            fn record_str(&mut self, field: &Field, value: &str) {
-                self.0.push((field.name().to_owned(), value.to_owned()));
-            }
-        }
-
-        let mut fields = Fields(Vec::new());
-        attrs.record(&mut fields);
-        self.0.lock().unwrap().push((attrs.metadata().name().to_owned(), fields.0));
-    }
 }
 
 #[tokio::test]
@@ -250,16 +266,6 @@ async fn trace_span() {
             ("correlation_id".to_owned(), "corr-1".to_owned()),
         ]
     );
-}
-
-struct StatefulProvider {
-    calls: AtomicUsize,
-}
-
-#[derive(Serialize)]
-struct ProviderObservation {
-    address: usize,
-    call: usize,
 }
 
 async fn observe(context: Context<StatefulProvider>) -> Json<ProviderObservation> {
@@ -324,12 +330,6 @@ async fn anyhow_error_body() {
     assert_eq!(body.error, "server_error");
     assert!(body.message.contains("could not save"), "the context is kept: {}", body.message);
     assert!(body.message.contains("disk full"), "the cause is kept: {}", body.message);
-}
-
-#[derive(Debug, Serialize)]
-struct Summary {
-    name: String,
-    count: u32,
 }
 
 fn render_summary(summary: &Summary, out: &mut dyn std::fmt::Write) -> std::fmt::Result {

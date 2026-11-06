@@ -17,10 +17,6 @@ use omnia_wasi_websocket::{
     Endpoint, Event, Events, WasiWebSocket, WebSocketClient, WebSocketHandler,
 };
 
-// Every guest program in `crates/test-programs` must have a matching test
-// here; a new program without one fails to compile.
-test_programs::foreach_websocket!();
-
 #[derive(Clone, Debug)]
 struct Backends {
     websocket: Recording,
@@ -67,6 +63,10 @@ impl Endpoint for Recording {
         async { Ok(()) }.boxed()
     }
 }
+
+// Every guest program in `crates/test-programs` must have a matching test
+// here; a new program without one fails to compile.
+test_programs::foreach_websocket!();
 
 #[tokio::test]
 async fn websocket_handler_echo() {

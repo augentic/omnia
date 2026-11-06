@@ -21,6 +21,10 @@ use crate::source::LoadedGuest;
 /// chain context the invocation runs at.
 pub type StoreFactory<T> = Arc<dyn Fn(ChainCtx) -> Store<T> + Send + Sync>;
 
+/// The seam of a deployment that declares no link interfaces.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct NoLinks;
+
 /// Guest→guest linking as the registry drives it.
 ///
 /// Endpoints move through two stages. [`serve`](Self::serve) runs *outside*
@@ -72,10 +76,6 @@ pub trait LinkSeam<T: 'static>: Send + Sync + 'static {
     /// Drop every pending and live endpoint.
     fn shutdown(&self);
 }
-
-/// The seam of a deployment that declares no link interfaces.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct NoLinks;
 
 impl<T: 'static> LinkSeam<T> for NoLinks {
     fn polyfill(

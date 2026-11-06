@@ -324,37 +324,6 @@ pub struct Deployment<T: WasiView + 'static> {
     stdio: Option<Stdio>,
 }
 
-cfg_select! {
-    feature = "loader" => {
-        #[derive(Default)]
-        struct Loader {
-            // the package store's root; `None` keeps nothing fetched
-            store: Option<PathBuf>,
-            // `None` installs a `RegistryClient` over the store and the deployment's `registries`
-            registry: Option<Arc<dyn RegistrySource>>,
-        }
-
-        impl Loader {
-            fn registry(&self, config: Option<&str>) -> Result<Arc<dyn RegistrySource>> {
-                if let Some(registry) = &self.registry {
-                    return Ok(Arc::clone(registry));
-                }
-                Ok(match &self.store {
-                    Some(root) => Arc::new(RegistryClient::from_toml(config, FsStore::open(root))?),
-                    None => Arc::new(RegistryClient::from_toml(config, NoStore)?),
-                })
-            }
-        }
-    }
-    _ => {}
-}
-
-/// Store bound [`DeploymentBuilder::build`] requires; every deployment store
-/// context ([`StoreCtx`]) satisfies it.
-pub trait LinkStore: WasiView + HasChain + HasDispatcher + 'static {}
-
-impl<T: WasiView + HasChain + HasDispatcher + 'static> LinkStore for T {}
-
 impl<T: WasiView> Deployment<T> {
     /// Link a WASI host's interfaces into the shared Linker.
     ///
@@ -513,6 +482,37 @@ impl<B: Clone + Send + Sync + 'static> Deployment<StoreCtx<B>> {
         let loader = std::mem::take(&mut self.loader);
         Ok((self, loader))
     }
+}
+
+/// Store bound [`DeploymentBuilder::build`] requires; every deployment store
+/// context ([`StoreCtx`]) satisfies it.
+pub trait LinkStore: WasiView + HasChain + HasDispatcher + 'static {}
+
+impl<T: WasiView + HasChain + HasDispatcher + 'static> LinkStore for T {}
+
+cfg_select! {
+    feature = "loader" => {
+        #[derive(Default)]
+        struct Loader {
+            // the package store's root; `None` keeps nothing fetched
+            store: Option<PathBuf>,
+            // `None` installs a `RegistryClient` over the store and the deployment's `registries`
+            registry: Option<Arc<dyn RegistrySource>>,
+        }
+
+        impl Loader {
+            fn registry(&self, config: Option<&str>) -> Result<Arc<dyn RegistrySource>> {
+                if let Some(registry) = &self.registry {
+                    return Ok(Arc::clone(registry));
+                }
+                Ok(match &self.store {
+                    Some(root) => Arc::new(RegistryClient::from_toml(config, FsStore::open(root))?),
+                    None => Arc::new(RegistryClient::from_toml(config, NoStore)?),
+                })
+            }
+        }
+    }
+    _ => {}
 }
 
 // Build the shared engine, WASI-linked linker, and runtime options.

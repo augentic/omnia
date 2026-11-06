@@ -32,7 +32,6 @@ use wasip3::exports::http::handler::Guest;
 use wasip3::http::types::{ErrorCode, Request, Response};
 
 pub struct Http;
-wasip3::http::service::export!(Http);
 
 impl Guest for Http {
     async fn handle(request: Request) -> Result<Response, ErrorCode> {
@@ -44,44 +43,7 @@ impl Guest for Http {
     }
 }
 
-async fn pub_sub(Json(body): Json<Value>) -> omnia_sdk::Result<Json<Value>> {
-    tracing::debug!("sending message to topic 'a'");
-
-    let client =
-        Client::connect("default".to_string()).await.map_err(|e| anyhow!("connect: {e}"))?;
-    let message = Message::new(&Bytes::from(body.to_string()));
-    message.set_content_type("application/json");
-    message.add_metadata("key", "example_key");
-
-    producer::send(&client, "a".to_string(), message)
-        .await
-        .map_err(|e| anyhow!("publishing to topic 'a': {e}"))?;
-
-    Ok(Json(json!({"message": "message published"})))
-}
-
-async fn request_reply_handler(body: Bytes) -> omnia_sdk::Result<Json<Value>> {
-    let client =
-        Client::connect("default".to_string()).await.map_err(|e| anyhow!("connect: {e}"))?;
-    let message = Message::new(&body);
-    let reply = request_reply::request(&client, "c".to_string(), &message, None)
-        .await
-        .map_err(|e| anyhow!("request-reply: {e}"))?;
-
-    let first = reply.first().context("empty reply")?;
-    let data = first.data();
-    let data_str = String::from_utf8_lossy(&data);
-
-    Ok(Json(json!({"reply": data_str})))
-}
-
-// the target for outbound http from the messaging handler
-async fn upstream_handler(body: Bytes) -> Json<Value> {
-    Json(json!({"echo": String::from_utf8_lossy(&body)}))
-}
-
 pub struct Messaging;
-omnia_wasi_messaging::export!(Messaging with_types_in omnia_wasi_messaging);
 
 impl omnia_wasi_messaging::incoming_handler::Guest for Messaging {
     async fn handle(message: Message) -> Result<(), Error> {
@@ -179,3 +141,41 @@ impl omnia_wasi_messaging::incoming_handler::Guest for Messaging {
         Ok(())
     }
 }
+wasip3::http::service::export!(Http);
+
+async fn pub_sub(Json(body): Json<Value>) -> omnia_sdk::Result<Json<Value>> {
+    tracing::debug!("sending message to topic 'a'");
+
+    let client =
+        Client::connect("default".to_string()).await.map_err(|e| anyhow!("connect: {e}"))?;
+    let message = Message::new(&Bytes::from(body.to_string()));
+    message.set_content_type("application/json");
+    message.add_metadata("key", "example_key");
+
+    producer::send(&client, "a".to_string(), message)
+        .await
+        .map_err(|e| anyhow!("publishing to topic 'a': {e}"))?;
+
+    Ok(Json(json!({"message": "message published"})))
+}
+
+async fn request_reply_handler(body: Bytes) -> omnia_sdk::Result<Json<Value>> {
+    let client =
+        Client::connect("default".to_string()).await.map_err(|e| anyhow!("connect: {e}"))?;
+    let message = Message::new(&body);
+    let reply = request_reply::request(&client, "c".to_string(), &message, None)
+        .await
+        .map_err(|e| anyhow!("request-reply: {e}"))?;
+
+    let first = reply.first().context("empty reply")?;
+    let data = first.data();
+    let data_str = String::from_utf8_lossy(&data);
+
+    Ok(Json(json!({"reply": data_str})))
+}
+
+// the target for outbound http from the messaging handler
+async fn upstream_handler(body: Bytes) -> Json<Value> {
+    Json(json!({"echo": String::from_utf8_lossy(&body)}))
+}
+omnia_wasi_messaging::export!(Messaging with_types_in omnia_wasi_messaging);

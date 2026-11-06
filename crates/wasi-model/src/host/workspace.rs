@@ -15,10 +15,6 @@ use wasmtime_wasi::filesystem::Descriptor;
 
 use crate::host::WorkspaceGrant;
 
-const MAX_READ_BYTES: u64 = 4 * 1024 * 1024;
-const MAX_WRITE_BYTES: usize = 4 * 1024 * 1024;
-const MAX_LIST_ENTRIES: usize = 4096;
-
 /// A resolved workspace mount confined beneath an authorized [`Mount`].
 #[derive(Clone)]
 pub struct Workspace {
@@ -144,6 +140,10 @@ impl Workspace {
         }
     }
 }
+
+const MAX_READ_BYTES: u64 = 4 * 1024 * 1024;
+const MAX_WRITE_BYTES: usize = 4 * 1024 * 1024;
+const MAX_LIST_ENTRIES: usize = 4096;
 
 #[cfg(test)]
 mod tests {

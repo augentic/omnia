@@ -57,14 +57,6 @@ pub struct Deployment {
     stdio: Option<Stdio>,
 }
 
-// One added through `guest` is read into bytes when the manifest is built,
-// so it loads at boot like the `runtime!` macro's embedded guests.
-#[derive(Clone, Debug)]
-struct Entry {
-    entry: GuestEntry,
-    embed: bool,
-}
-
 impl From<ManifestSource> for Deployment {
     fn from(base: ManifestSource) -> Self {
         Self {
@@ -323,8 +315,13 @@ impl Deployment {
     }
 }
 
-// generous, since a run past it traps the guest's write
-const CAPTURE_BYTES: usize = 64 << 20;
+// One added through `guest` is read into bytes when the manifest is built,
+// so it loads at boot like the `runtime!` macro's embedded guests.
+#[derive(Clone, Debug)]
+struct Entry {
+    entry: GuestEntry,
+    embed: bool,
+}
 
 /// A [`Deployment`] whose guests write to captured streams, from
 /// [`Deployment::captured`]; each run answers a [`Run`].
@@ -333,17 +330,6 @@ pub struct Captured {
     deployment: Deployment,
     stdout: MemoryOutputPipe,
     stderr: MemoryOutputPipe,
-}
-
-/// What one captured run produced.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Run {
-    /// The command guest's exit status.
-    pub status: ExitStatus,
-    /// Everything the guests wrote to stdout, lossily as UTF-8.
-    pub stdout: String,
-    /// Everything the guests wrote to stderr, lossily as UTF-8.
-    pub stderr: String,
 }
 
 impl Captured {
@@ -404,3 +390,17 @@ impl Captured {
         }
     }
 }
+
+/// What one captured run produced.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Run {
+    /// The command guest's exit status.
+    pub status: ExitStatus,
+    /// Everything the guests wrote to stdout, lossily as UTF-8.
+    pub stdout: String,
+    /// Everything the guests wrote to stderr, lossily as UTF-8.
+    pub stderr: String,
+}
+
+// generous, since a run past it traps the guest's write
+const CAPTURE_BYTES: usize = 64 << 20;

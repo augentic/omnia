@@ -23,7 +23,6 @@ use wasip3::exports::http::handler::Guest;
 use wasip3::http::types::{ErrorCode, Request, Response};
 
 struct Http;
-wasip3::http::service::export!(Http);
 
 impl Guest for Http {
     #[omnia_wasi_otel::instrument(name = "http_guest_handle", level = Level::DEBUG)]
@@ -34,6 +33,40 @@ impl Guest for Http {
         omnia_wasi_http::serve(router, request).await
     }
 }
+
+// Row mapping
+
+#[derive(Debug, Clone, Serialize)]
+struct Agency {
+    agency_id: i64,
+    name: String,
+    url: Option<String>,
+    timezone: Option<String>,
+    created_at: String,
+}
+
+impl Agency {
+    fn from_row(row: &Row) -> Result<Self> {
+        Ok(Self {
+            agency_id: int(field(row, "agency_id")?)?,
+            name: text(field(row, "name")?)?,
+            url: nullable_text(field(row, "url")?)?,
+            timezone: nullable_text(field(row, "timezone")?)?,
+            created_at: text(field(row, "created_at")?)?,
+        })
+    }
+}
+
+// Request types
+
+#[derive(Debug, Deserialize)]
+struct CreateAgencyRequest {
+    agency_id: i64,
+    name: String,
+    url: Option<String>,
+    timezone: Option<String>,
+}
+wasip3::http::service::export!(Http);
 
 #[axum::debug_handler]
 #[omnia_wasi_otel::instrument]
@@ -136,29 +169,6 @@ async fn ensure_schema() -> Result<()> {
     Ok(())
 }
 
-// Row mapping
-
-#[derive(Debug, Clone, Serialize)]
-struct Agency {
-    agency_id: i64,
-    name: String,
-    url: Option<String>,
-    timezone: Option<String>,
-    created_at: String,
-}
-
-impl Agency {
-    fn from_row(row: &Row) -> Result<Self> {
-        Ok(Self {
-            agency_id: int(field(row, "agency_id")?)?,
-            name: text(field(row, "name")?)?,
-            url: nullable_text(field(row, "url")?)?,
-            timezone: nullable_text(field(row, "timezone")?)?,
-            created_at: text(field(row, "created_at")?)?,
-        })
-    }
-}
-
 fn field<'a>(row: &'a Row, name: &str) -> Result<&'a DataType> {
     row.fields
         .iter()
@@ -185,14 +195,4 @@ fn nullable_text(value: &DataType) -> Result<Option<String>> {
         DataType::Str(v) => Ok(v.clone()),
         other => bail!("expected text, got {other:?}"),
     }
-}
-
-// Request types
-
-#[derive(Debug, Deserialize)]
-struct CreateAgencyRequest {
-    agency_id: i64,
-    name: String,
-    url: Option<String>,
-    timezone: Option<String>,
 }

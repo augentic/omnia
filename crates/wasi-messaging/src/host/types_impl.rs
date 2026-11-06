@@ -7,6 +7,18 @@ pub use crate::host::generated::wasi::messaging::types::{
 use crate::host::resource::{ClientProxy, Message, from_wit_metadata, to_wit_metadata};
 use crate::host::{Result, WasiMessaging, WasiMessagingView};
 
+pub fn get_client<T>(
+    accessor: &Accessor<T, WasiMessaging>, self_: &Resource<ClientProxy>,
+) -> Result<ClientProxy> {
+    Ok(omnia_core::get_cloned(accessor, self_)?)
+}
+
+pub fn get_message<T>(
+    accessor: &Accessor<T, WasiMessaging>, self_: &Resource<Message>,
+) -> Result<Message> {
+    Ok(omnia_core::get_cloned(accessor, self_)?)
+}
+
 impl<T> HostClientWithStore<T> for WasiMessaging {
     async fn connect(accessor: &Accessor<T, Self>, _name: String) -> Result<Resource<ClientProxy>> {
         let client = accessor.with(|mut store| store.get().client.endpoint()).await?;
@@ -111,15 +123,3 @@ impl Host for WasiMessagingView<'_> {
 }
 impl HostClient for WasiMessagingView<'_> {}
 impl HostMessage for WasiMessagingView<'_> {}
-
-pub fn get_client<T>(
-    accessor: &Accessor<T, WasiMessaging>, self_: &Resource<ClientProxy>,
-) -> Result<ClientProxy> {
-    Ok(omnia_core::get_cloned(accessor, self_)?)
-}
-
-pub fn get_message<T>(
-    accessor: &Accessor<T, WasiMessaging>, self_: &Resource<Message>,
-) -> Result<Message> {
-    Ok(omnia_core::get_cloned(accessor, self_)?)
-}

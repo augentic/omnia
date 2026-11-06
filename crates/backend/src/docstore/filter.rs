@@ -12,8 +12,6 @@ use serde_json::Value;
 
 use super::{ComparisonOp, Document, Filter, QueryOptions, QueryResult, ScalarValue, SortField};
 
-const MAX_PAGE_SIZE: u64 = 1000;
-
 type Collections = HashMap<String, BTreeMap<String, Value>>;
 
 /// Shared in-memory document collection store with [`Filter`] evaluation,
@@ -128,34 +126,6 @@ impl MemoryStore {
     }
 }
 
-fn paginate(
-    rows: Vec<(String, Value)>, skip: usize, page_size: usize,
-) -> (Vec<(String, Value)>, Option<String>) {
-    let total = rows.len();
-    let page: Vec<_> = rows.into_iter().skip(skip).take(page_size).collect();
-    let next = skip.saturating_add(page.len());
-    let continuation = (next < total).then(|| next.to_string());
-    (page, continuation)
-}
-
-fn parse_continuation(continuation: Option<&str>) -> Result<u64> {
-    continuation.map_or_else(
-        || Ok(0),
-        |s| s.parse().with_context(|| format!("invalid continuation token: {s:?}")),
-    )
-}
-
-fn parse_body(doc: &Document) -> Result<Value> {
-    serde_json::from_slice(&doc.data).context("invalid JSON in document body")
-}
-
-fn to_document(id: &str, body: &Value) -> Result<Document> {
-    Ok(Document {
-        id: id.to_owned(),
-        data: serde_json::to_vec(body).context("serialize JSON body")?,
-    })
-}
-
 /// Evaluate `tree` against a JSON document body.
 #[must_use]
 pub fn matches(tree: &Filter, doc: &Value) -> bool {
@@ -215,6 +185,36 @@ pub fn compare_documents(a: &Value, b: &Value, order_by: &[SortField]) -> Orderi
         }
     }
     Ordering::Equal
+}
+
+const MAX_PAGE_SIZE: u64 = 1000;
+
+fn paginate(
+    rows: Vec<(String, Value)>, skip: usize, page_size: usize,
+) -> (Vec<(String, Value)>, Option<String>) {
+    let total = rows.len();
+    let page: Vec<_> = rows.into_iter().skip(skip).take(page_size).collect();
+    let next = skip.saturating_add(page.len());
+    let continuation = (next < total).then(|| next.to_string());
+    (page, continuation)
+}
+
+fn parse_continuation(continuation: Option<&str>) -> Result<u64> {
+    continuation.map_or_else(
+        || Ok(0),
+        |s| s.parse().with_context(|| format!("invalid continuation token: {s:?}")),
+    )
+}
+
+fn parse_body(doc: &Document) -> Result<Value> {
+    serde_json::from_slice(&doc.data).context("invalid JSON in document body")
+}
+
+fn to_document(id: &str, body: &Value) -> Result<Document> {
+    Ok(Document {
+        id: id.to_owned(),
+        data: serde_json::to_vec(body).context("serialize JSON body")?,
+    })
 }
 
 const NULL: Value = Value::Null;

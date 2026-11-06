@@ -41,6 +41,21 @@ enum Verb {
     Completions { shell: Shell },
 }
 
+#[derive(Args, Debug, Deserialize)]
+struct Greet {
+    name: String,
+}
+
+#[derive(Debug, Serialize)]
+struct Greeting {
+    text: String,
+}
+
+#[derive(Args, Debug, Deserialize)]
+struct Lookup {
+    id: String,
+}
+
 #[test]
 fn parse_app() {
     let Parsed::App(app) = parse::<App>(["app", "--format", "json", "greet", "ada"]) else {
@@ -190,16 +205,6 @@ fn from_env_mints() {
     assert_ne!(Metadata::from_env("FROM_ENV_MINTS").request_id, metadata.request_id);
 }
 
-#[derive(Args, Debug, Deserialize)]
-struct Greet {
-    name: String,
-}
-
-#[derive(Debug, Serialize)]
-struct Greeting {
-    text: String,
-}
-
 fn greet(input: Greet, _context: Context<()>) -> Ready<Result<Greeting, omnia_sdk::Error>> {
     let Greet { name } = input;
     ready(Ok(Greeting {
@@ -209,11 +214,6 @@ fn greet(input: Greet, _context: Context<()>) -> Ready<Result<Greeting, omnia_sd
 
 fn render_greeting(greeting: &Greeting, out: &mut dyn fmt::Write) -> fmt::Result {
     writeln!(out, "{}", greeting.text)
-}
-
-#[derive(Args, Debug, Deserialize)]
-struct Lookup {
-    id: String,
 }
 
 fn lookup(input: Lookup, _context: Context<()>) -> Ready<Result<Greeting, omnia_sdk::Error>> {

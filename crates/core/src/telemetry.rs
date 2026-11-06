@@ -39,9 +39,6 @@ use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Registry};
 
-static SETTLED: Mutex<bool> = Mutex::new(false);
-static PROVIDERS: OnceLock<Providers> = OnceLock::new();
-
 /// The runtime's own crate prefixes, which the console may refine apart from
 /// the run — see [`Telemetry::runtime_level`].
 ///
@@ -193,18 +190,6 @@ impl Exports {
     };
 }
 
-fn exports(endpoint: Option<&str>, env: impl Fn(&str) -> Option<String>) -> Exports {
-    fn set(value: Option<impl AsRef<str>>) -> bool {
-        value.is_some_and(|value| !value.as_ref().is_empty())
-    }
-    let shared = set(endpoint) || set(env(OTEL_EXPORTER_OTLP_ENDPOINT));
-
-    Exports {
-        traces: shared || set(env(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT)),
-        metrics: shared || set(env(OTEL_EXPORTER_OTLP_METRICS_ENDPOINT)),
-    }
-}
-
 /// The run's tracing directives: the verbosity flag composed with `RUST_LOG`.
 ///
 /// The global level is `level` when one is selected, else the bare level
@@ -293,40 +278,6 @@ struct Tokens<'a> {
     invalid: Vec<(&'a str, ParseError)>,
 }
 
-impl Tokens<'_> {
-    // the fallback fills an empty `RUST_LOG`, never one that names a target
-    fn bare(&self, level: Option<LevelFilter>, fallback: LevelFilter) -> Option<LevelFilter> {
-        level.or(self.global).or_else(|| self.targeted.is_empty().then_some(fallback))
-    }
-}
-
-fn tokens(rust_log: Option<&str>) -> Tokens<'_> {
-    let mut tokens = Tokens {
-        global: None,
-        targeted: Vec::new(),
-        invalid: Vec::new(),
-    };
-    for token in rust_log.unwrap_or_default().split(',').map(str::trim) {
-        // an empty token would parse as `error`; `EnvFilter` skips it too
-        if token.is_empty() {
-            continue;
-        }
-        if let Ok(level) = token.parse::<LevelFilter>() {
-            tokens.global = Some(level);
-        } else if let Err(error) = token.parse::<Directive>() {
-            tokens.invalid.push((token, error));
-        } else {
-            tokens.targeted.push(token);
-        }
-    }
-    tokens
-}
-
-// read once per build so `directives` stays pure over its inputs
-fn rust_log() -> Option<String> {
-    env::var("RUST_LOG").ok()
-}
-
 /// Whether the host console colours its lines: stderr is a terminal and
 /// `NO_COLOR` is unset or empty.
 ///
@@ -364,6 +315,30 @@ struct Providers {
     meter: SdkMeterProvider,
 }
 
+/// Flush batched telemetry to the exporters.
+///
+/// A no-op when telemetry was never installed.
+pub fn flush() {
+    if let Some(providers) = PROVIDERS.get() {
+        flush_providers(&providers.tracer, &providers.meter);
+    }
+}
+
+/// Returns the OpenTelemetry [`Resource`] telemetry was installed with.
+///
+/// `None` when telemetry has not been installed.
+#[must_use]
+pub fn resource() -> Option<&'static Resource> {
+    PROVIDERS.get().map(|providers| &providers.resource)
+}
+
+impl Tokens<'_> {
+    // the fallback fills an empty `RUST_LOG`, never one that names a target
+    fn bare(&self, level: Option<LevelFilter>, fallback: LevelFilter) -> Option<LevelFilter> {
+        level.or(self.global).or_else(|| self.targeted.is_empty().then_some(fallback))
+    }
+}
+
 impl Providers {
     // Built whatever exports: guest telemetry grafts onto the resource and
     // tracer, and a provider with no processor or reader drops what it gets.
@@ -381,6 +356,48 @@ impl Providers {
         global::set_tracer_provider(self.tracer.clone());
         PROVIDERS.set(self).map_err(|_providers| anyhow!("telemetry providers already installed"))
     }
+}
+
+static SETTLED: Mutex<bool> = Mutex::new(false);
+static PROVIDERS: OnceLock<Providers> = OnceLock::new();
+
+fn exports(endpoint: Option<&str>, env: impl Fn(&str) -> Option<String>) -> Exports {
+    fn set(value: Option<impl AsRef<str>>) -> bool {
+        value.is_some_and(|value| !value.as_ref().is_empty())
+    }
+    let shared = set(endpoint) || set(env(OTEL_EXPORTER_OTLP_ENDPOINT));
+
+    Exports {
+        traces: shared || set(env(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT)),
+        metrics: shared || set(env(OTEL_EXPORTER_OTLP_METRICS_ENDPOINT)),
+    }
+}
+
+fn tokens(rust_log: Option<&str>) -> Tokens<'_> {
+    let mut tokens = Tokens {
+        global: None,
+        targeted: Vec::new(),
+        invalid: Vec::new(),
+    };
+    for token in rust_log.unwrap_or_default().split(',').map(str::trim) {
+        // an empty token would parse as `error`; `EnvFilter` skips it too
+        if token.is_empty() {
+            continue;
+        }
+        if let Ok(level) = token.parse::<LevelFilter>() {
+            tokens.global = Some(level);
+        } else if let Err(error) = token.parse::<Directive>() {
+            tokens.invalid.push((token, error));
+        } else {
+            tokens.targeted.push(token);
+        }
+    }
+    tokens
+}
+
+// read once per build so `directives` stays pure over its inputs
+fn rust_log() -> Option<String> {
+    env::var("RUST_LOG").ok()
 }
 
 fn build_traces(
@@ -439,23 +456,6 @@ fn settle(signal: &str, result: OTelSdkResult) {
         Ok(()) | Err(OTelSdkError::AlreadyShutdown) => {}
         Err(error) => tracing::debug!(%error, "telemetry: {signal} flush failed"),
     }
-}
-
-/// Flush batched telemetry to the exporters.
-///
-/// A no-op when telemetry was never installed.
-pub fn flush() {
-    if let Some(providers) = PROVIDERS.get() {
-        flush_providers(&providers.tracer, &providers.meter);
-    }
-}
-
-/// Returns the OpenTelemetry [`Resource`] telemetry was installed with.
-///
-/// `None` when telemetry has not been installed.
-#[must_use]
-pub fn resource() -> Option<&'static Resource> {
-    PROVIDERS.get().map(|providers| &providers.resource)
 }
 
 // these pin the tracing/OTLP SDK contract, not guest-host boundary behaviour

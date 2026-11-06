@@ -46,13 +46,6 @@ impl fmt::Debug for Stdio {
     }
 }
 
-/// Exposes a store context's [`StoreLimits`] so the runtime can install a
-/// per-guest resource limiter on every [`Store`](wasmtime::Store) it creates.
-pub trait HasLimits {
-    /// Returns a mutable reference to the context's resource limits.
-    fn limits(&mut self) -> &mut StoreLimits;
-}
-
 /// The per-store construction inputs for [`StoreBase::new`].
 ///
 /// `options`, `dispatcher`, and `chain` are required; the rest default
@@ -204,6 +197,13 @@ impl<B: Send + 'static> WasiView for StoreCtx<B> {
     }
 }
 
+/// Exposes a store context's [`StoreLimits`] so the runtime can install a
+/// per-guest resource limiter on every [`Store`](wasmtime::Store) it creates.
+pub trait HasLimits {
+    /// Returns a mutable reference to the context's resource limits.
+    fn limits(&mut self) -> &mut StoreLimits;
+}
+
 impl<B: Send + 'static> HasLimits for StoreCtx<B> {
     fn limits(&mut self) -> &mut StoreLimits {
         &mut self.base.limits
@@ -285,9 +285,6 @@ impl<B: Send + 'static> HasChain for StoreCtx<B> {
     }
 }
 
-const RUST_LOG: &str = "RUST_LOG";
-const NO_COLOR: &str = "NO_COLOR";
-
 /// The complete guest environment: every `host` pair, with `RUST_LOG` set to
 /// the run's tracing directives and `NO_COLOR` set when the console does not
 /// colour its lines.
@@ -320,6 +317,9 @@ pub fn guest_env(
 
     env
 }
+
+const RUST_LOG: &str = "RUST_LOG";
+const NO_COLOR: &str = "NO_COLOR";
 
 #[cfg(test)]
 mod tests {

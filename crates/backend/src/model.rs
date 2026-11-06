@@ -20,9 +20,6 @@ pub use self::answer::{Answer, ToolTurn, Transcript};
 #[cfg(not(target_arch = "wasm32"))]
 pub use self::client::{ModelClient, ToolHost};
 
-#[cfg(not(target_arch = "wasm32"))]
-const MAX_RESULT_BYTES: usize = 1024 * 1024;
-
 /// The reserved tool name a `check` candidate arrives under.
 pub const CHECK_TOOL: &str = "check";
 
@@ -176,6 +173,17 @@ pub struct SchemaFormat {
     pub schema: String,
 }
 
+impl SchemaFormat {
+    /// `T`'s JSON Schema (draft 2020-12) under `name`.
+    #[must_use]
+    pub fn of<T: JsonSchema>(name: &str) -> Self {
+        Self {
+            name: name.to_owned(),
+            schema: schema_of::<T>(),
+        }
+    }
+}
+
 /// Alias matching the `omnia:model/completion` WIT record name.
 pub type Schema = SchemaFormat;
 
@@ -202,6 +210,18 @@ pub struct Function {
     /// JSON Schema for the tool's arguments object.
     #[builder(into)]
     pub parameters: String,
+}
+
+impl Function {
+    /// A function tool whose parameters are `T`'s JSON Schema.
+    #[must_use]
+    pub fn of<T: JsonSchema>(name: &str, description: &str) -> Self {
+        Self {
+            name: name.to_owned(),
+            description: description.to_owned(),
+            parameters: schema_of::<T>(),
+        }
+    }
 }
 
 /// Remote MCP server offered to the model for this completion.
@@ -292,33 +312,6 @@ impl ToolCall {
     }
 }
 
-impl SchemaFormat {
-    /// `T`'s JSON Schema (draft 2020-12) under `name`.
-    #[must_use]
-    pub fn of<T: JsonSchema>(name: &str) -> Self {
-        Self {
-            name: name.to_owned(),
-            schema: schema_of::<T>(),
-        }
-    }
-}
-
-impl Function {
-    /// A function tool whose parameters are `T`'s JSON Schema.
-    #[must_use]
-    pub fn of<T: JsonSchema>(name: &str, description: &str) -> Self {
-        Self {
-            name: name.to_owned(),
-            description: description.to_owned(),
-            parameters: schema_of::<T>(),
-        }
-    }
-}
-
-fn schema_of<T: JsonSchema>() -> String {
-    schemars::schema_for!(T).to_value().to_string()
-}
-
 /// Session bounds enforced per completion, regardless of backend.
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone, Copy, Debug)]
@@ -356,4 +349,11 @@ pub struct DirEntry {
     pub name: String,
     /// Whether the entry is a directory.
     pub is_directory: bool,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+const MAX_RESULT_BYTES: usize = 1024 * 1024;
+
+fn schema_of<T: JsonSchema>() -> String {
+    schemars::schema_for!(T).to_value().to_string()
 }

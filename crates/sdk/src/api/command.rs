@@ -94,51 +94,6 @@ pub use crate::__export_command as export;
 /// The exit status of a command-line usage error (`EX_USAGE`).
 pub const USAGE_EXIT: u8 = 64;
 
-impl Metadata {
-    /// Build metadata from the process environment: `<PREFIX>_REQUEST_ID`,
-    /// `<PREFIX>_CORRELATION_ID`, `<PREFIX>_CAUSATION_ID`, and
-    /// `<PREFIX>_TENANT`.
-    ///
-    /// The command line's carrier for the values HTTP reads from headers; a
-    /// missing request id is minted as on every transport.
-    #[must_use]
-    pub fn from_env(prefix: &str) -> Self {
-        Self::from_lookup(|name| std::env::var(env_key(prefix, name)).ok())
-    }
-}
-
-// The environment variable carrying the metadata field `name` under `prefix`.
-fn env_key(prefix: &str, name: &str) -> String {
-    format!("{prefix}_{}", name.to_ascii_uppercase().replace('-', "_"))
-}
-
-/// The exit status an [`export!`] entry yields: `()` always succeeds,
-/// `Result<(), u8>` passes its code through, and [`Response`] writes its
-/// channels first.
-///
-/// A scenario that asserts internally and traps on failure returns `()`; a
-/// CLI that writes its own channels reports `Result<(), u8>`.
-pub trait IntoExit {
-    /// The status handed to the WASI CLI boundary.
-    ///
-    /// # Errors
-    ///
-    /// Returns the non-zero exit code the guest reports.
-    fn into_exit(self) -> Result<(), u8>;
-}
-
-impl IntoExit for () {
-    fn into_exit(self) -> Result<(), u8> {
-        Ok(())
-    }
-}
-
-impl IntoExit for Result<(), u8> {
-    fn into_exit(self) -> Result<(), u8> {
-        self
-    }
-}
-
 /// Buffered command output and exit status.
 ///
 /// Both channels are whole buffers written at the exit boundary; a command
@@ -177,6 +132,21 @@ impl Response {
     }
 }
 
+/// The exit status an [`export!`] entry yields: `()` always succeeds,
+/// `Result<(), u8>` passes its code through, and [`Response`] writes its
+/// channels first.
+///
+/// A scenario that asserts internally and traps on failure returns `()`; a
+/// CLI that writes its own channels reports `Result<(), u8>`.
+pub trait IntoExit {
+    /// The status handed to the WASI CLI boundary.
+    ///
+    /// # Errors
+    ///
+    /// Returns the non-zero exit code the guest reports.
+    fn into_exit(self) -> Result<(), u8>;
+}
+
 impl IntoExit for Response {
     fn into_exit(self) -> Result<(), u8> {
         write_channel(&mut std::io::stdout(), &self.stdout)?;
@@ -185,13 +155,15 @@ impl IntoExit for Response {
     }
 }
 
-fn write_channel(sink: &mut impl Write, bytes: &[u8]) -> Result<(), u8> {
-    match sink.write_all(bytes).and_then(|()| sink.flush()) {
-        Ok(()) => Ok(()),
-        // a reader that has gone away is the consumer's decision, not this command's failure
-        Err(error) if error.kind() == ErrorKind::BrokenPipe => Ok(()),
-        // anything else is unclassified, so it takes a `ServerError`'s exit
-        Err(error) => Err(crate::server_error!("process channel: {error}").exit_code()),
+impl IntoExit for () {
+    fn into_exit(self) -> Result<(), u8> {
+        Ok(())
+    }
+}
+
+impl IntoExit for Result<(), u8> {
+    fn into_exit(self) -> Result<(), u8> {
+        self
     }
 }
 
@@ -263,17 +235,6 @@ impl From<anyhow::Error> for Failure {
     }
 }
 
-// The flat wire shape: `{"error","message","exit-code","hint"?}`.
-#[derive(Serialize)]
-#[serde(rename_all = "kebab-case")]
-struct FailureWire<'a> {
-    #[serde(flatten)]
-    body: ErrorBody,
-    exit_code: u8,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    hint: Option<&'a str>,
-}
-
 impl Serialize for Failure {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         FailureWire {
@@ -283,6 +244,17 @@ impl Serialize for Failure {
         }
         .serialize(serializer)
     }
+}
+
+// The flat wire shape: `{"error","message","exit-code","hint"?}`.
+#[derive(Serialize)]
+#[serde(rename_all = "kebab-case")]
+struct FailureWire<'a> {
+    #[serde(flatten)]
+    body: ErrorBody,
+    exit_code: u8,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    hint: Option<&'a str>,
 }
 
 type HintFn<'a> = Box<dyn Fn(&crate::Error) -> Option<Cow<'static, str>> + Send + Sync + 'a>;
@@ -355,6 +327,88 @@ impl<P> fmt::Debug for Command<'_, P> {
             .field("format", &self.format)
             .field("hint", &self.hint.is_some())
             .finish_non_exhaustive()
+    }
+}
+
+#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
+#[doc(hidden)]
+pub trait Export<P, M> {
+    fn run(self, provider: P) -> impl Future<Output = ()>;
+}
+
+#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
+impl<F, Fut, P, E> Export<P, ()> for F
+where
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = E>,
+    E: IntoExit,
+{
+    async fn run(self, _provider: P) {
+        execute_wasi(self()).await;
+    }
+}
+
+#[cfg(all(target_arch = "wasm32", target_os = "wasi", feature = "command"))]
+impl<F, P> Export<P, Router<P>> for F
+where
+    F: FnOnce(P) -> Router<P>,
+    P: Send + Sync + 'static,
+{
+    async fn run(self, provider: P) {
+        execute_wasi(async move {
+            let router = self(provider);
+            router.handle(wasip3::cli::environment::get_arguments()).await
+        })
+        .await;
+    }
+}
+
+#[cfg(all(target_arch = "wasm32", target_os = "wasi", feature = "command"))]
+impl<F, Fut, P> Export<P, (Router<P>,)> for F
+where
+    F: FnOnce(P) -> Fut,
+    Fut: Future<Output = Router<P>>,
+    P: Send + Sync + 'static,
+{
+    async fn run(self, provider: P) {
+        execute_wasi(async move {
+            let router = self(provider).await;
+            router.handle(wasip3::cli::environment::get_arguments()).await
+        })
+        .await;
+    }
+}
+
+/// Execute a guest command entry at the WASI CLI boundary.
+///
+/// Initializes guest telemetry, awaits `entry`, and flushes telemetry and
+/// stdout.
+#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
+#[doc(hidden)]
+pub async fn execute_wasi<E: IntoExit>(entry: impl Future<Output = E>) {
+    // `scope` exports telemetry before an `exit-with-code`, which never returns.
+    let result = omnia_wasi_otel::scope(|| entry).await.into_exit();
+    // `exit-with-code` exits immediately, meaning stdout never flushes
+    let _ = std::io::stdout().flush();
+    if let Err(code) = result
+        && code != 0
+    {
+        wasip3::cli::exit::exit_with_code(code);
+    }
+}
+
+// The environment variable carrying the metadata field `name` under `prefix`.
+fn env_key(prefix: &str, name: &str) -> String {
+    format!("{prefix}_{}", name.to_ascii_uppercase().replace('-', "_"))
+}
+
+fn write_channel(sink: &mut impl Write, bytes: &[u8]) -> Result<(), u8> {
+    match sink.write_all(bytes).and_then(|()| sink.flush()) {
+        Ok(()) => Ok(()),
+        // a reader that has gone away is the consumer's decision, not this command's failure
+        Err(error) if error.kind() == ErrorKind::BrokenPipe => Ok(()),
+        // anything else is unclassified, so it takes a `ServerError`'s exit
+        Err(error) => Err(crate::server_error!("process channel: {error}").exit_code()),
     }
 }
 
@@ -832,70 +886,16 @@ cfg_select! {
     _ => {}
 }
 
-#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
-#[doc(hidden)]
-pub trait Export<P, M> {
-    fn run(self, provider: P) -> impl Future<Output = ()>;
-}
-
-#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
-impl<F, Fut, P, E> Export<P, ()> for F
-where
-    F: FnOnce() -> Fut,
-    Fut: Future<Output = E>,
-    E: IntoExit,
-{
-    async fn run(self, _provider: P) {
-        execute_wasi(self()).await;
-    }
-}
-
-#[cfg(all(target_arch = "wasm32", target_os = "wasi", feature = "command"))]
-impl<F, P> Export<P, Router<P>> for F
-where
-    F: FnOnce(P) -> Router<P>,
-    P: Send + Sync + 'static,
-{
-    async fn run(self, provider: P) {
-        execute_wasi(async move {
-            let router = self(provider);
-            router.handle(wasip3::cli::environment::get_arguments()).await
-        })
-        .await;
-    }
-}
-
-#[cfg(all(target_arch = "wasm32", target_os = "wasi", feature = "command"))]
-impl<F, Fut, P> Export<P, (Router<P>,)> for F
-where
-    F: FnOnce(P) -> Fut,
-    Fut: Future<Output = Router<P>>,
-    P: Send + Sync + 'static,
-{
-    async fn run(self, provider: P) {
-        execute_wasi(async move {
-            let router = self(provider).await;
-            router.handle(wasip3::cli::environment::get_arguments()).await
-        })
-        .await;
-    }
-}
-
-/// Execute a guest command entry at the WASI CLI boundary.
-///
-/// Initializes guest telemetry, awaits `entry`, and flushes telemetry and
-/// stdout.
-#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
-#[doc(hidden)]
-pub async fn execute_wasi<E: IntoExit>(entry: impl Future<Output = E>) {
-    // `scope` exports telemetry before an `exit-with-code`, which never returns.
-    let result = omnia_wasi_otel::scope(|| entry).await.into_exit();
-    // `exit-with-code` exits immediately, meaning stdout never flushes
-    let _ = std::io::stdout().flush();
-    if let Err(code) = result
-        && code != 0
-    {
-        wasip3::cli::exit::exit_with_code(code);
+impl Metadata {
+    /// Build metadata from the process environment: `<PREFIX>_REQUEST_ID`,
+    /// `<PREFIX>_CORRELATION_ID`, `<PREFIX>_CAUSATION_ID`, and
+    /// `<PREFIX>_TENANT`.
+    ///
+    /// The command line's carrier for the values HTTP reads from headers; a
+    /// missing request id is minted as on every transport.
+    #[must_use]
+    pub fn from_env(prefix: &str) -> Self {
+        Self::from_lookup(|name| std::env::var(env_key(prefix, name)).ok())
     }
 }
 

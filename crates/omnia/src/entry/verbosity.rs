@@ -4,16 +4,6 @@
 
 use crate::{DeploymentBuilder, LevelFilter, Mode};
 
-// The scale the flags step along, quietest first.
-const LADDER: [LevelFilter; 6] = [
-    LevelFilter::OFF,
-    LevelFilter::ERROR,
-    LevelFilter::WARN,
-    LevelFilter::INFO,
-    LevelFilter::DEBUG,
-    LevelFilter::TRACE,
-];
-
 /// The levels a run's verbosity flags select, each `None` when they select
 /// nothing.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -106,6 +96,16 @@ fn cluster_of(letters: &str, letter: u8) -> bool {
 fn count(letters: &str) -> u8 {
     u8::try_from(letters.len()).unwrap_or(u8::MAX)
 }
+
+// The scale the flags step along, quietest first.
+const LADDER: [LevelFilter; 6] = [
+    LevelFilter::OFF,
+    LevelFilter::ERROR,
+    LevelFilter::WARN,
+    LevelFilter::INFO,
+    LevelFilter::DEBUG,
+    LevelFilter::TRACE,
+];
 
 #[cfg(test)]
 mod tests {

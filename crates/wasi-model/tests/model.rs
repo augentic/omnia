@@ -19,32 +19,6 @@ use omnia_wasi_model::{
     Answer, FutureResult, Limits, ModelClient, ModelDefault, Request, ToolHost, Usage, WasiModel,
 };
 
-// Every guest program in `crates/test-programs` must have a matching test
-// here; a new program without one fails to compile.
-test_programs::foreach_model!();
-
-// ------------------------------------------------------------------------
-// Harness
-// ------------------------------------------------------------------------
-
-async fn run_guest<M: ModelClient + Clone>(wasm: &str, mounts: Vec<Mount>, model: M) {
-    let backends = Backends::defaults().await.model(model);
-    let status = Deployment::new()
-        .guest("guest", wasm)
-        .mounts(mounts)
-        .run_host::<WasiModel, _>(backends)
-        .await
-        .expect("guest runs");
-    assert_eq!(status, ExitStatus::SUCCESS, "guest `{wasm}` failed");
-}
-
-// also requires the script to be exactly consumed; returns the model for its recordings
-async fn run_scripted(wasm: &str, mounts: Vec<Mount>, model: ScriptedModel) -> ScriptedModel {
-    run_guest(wasm, mounts, model.clone()).await;
-    model.assert_exhausted();
-    model
-}
-
 // ------------------------------------------------------------------------
 // Scenario backends
 // ------------------------------------------------------------------------
@@ -88,6 +62,32 @@ impl ModelClient for IgnoringToolFailure {
         }
         .boxed()
     }
+}
+
+// Every guest program in `crates/test-programs` must have a matching test
+// here; a new program without one fails to compile.
+test_programs::foreach_model!();
+
+// ------------------------------------------------------------------------
+// Harness
+// ------------------------------------------------------------------------
+
+async fn run_guest<M: ModelClient + Clone>(wasm: &str, mounts: Vec<Mount>, model: M) {
+    let backends = Backends::defaults().await.model(model);
+    let status = Deployment::new()
+        .guest("guest", wasm)
+        .mounts(mounts)
+        .run_host::<WasiModel, _>(backends)
+        .await
+        .expect("guest runs");
+    assert_eq!(status, ExitStatus::SUCCESS, "guest `{wasm}` failed");
+}
+
+// also requires the script to be exactly consumed; returns the model for its recordings
+async fn run_scripted(wasm: &str, mounts: Vec<Mount>, model: ScriptedModel) -> ScriptedModel {
+    run_guest(wasm, mounts, model.clone()).await;
+    model.assert_exhausted();
+    model
 }
 
 // the candidates the `check_*` scenarios' scripted backend proposes

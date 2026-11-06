@@ -8,9 +8,6 @@ use std::process::Command;
 
 pub const WASM_TARGET: &str = "wasm32-wasip2";
 
-// a sibling of the outer profile directory
-const NESTED_TARGET: &str = "wasm32-fixtures";
-
 /// A cargo-provided variable, or a panic naming it: the pipeline only runs
 /// under `cargo` as a build script.
 pub fn var(name: &str) -> OsString {
@@ -99,6 +96,9 @@ fn sanitise(command: &mut Command, keys: impl IntoIterator<Item = String>) -> Ve
     }
     removed
 }
+
+// a sibling of the outer profile directory
+const NESTED_TARGET: &str = "wasm32-fixtures";
 
 const KEPT_CARGO_VARS: [&str; 2] = ["CARGO_HOME", "CARGO_NET_OFFLINE"];
 const STRIPPED_TOOLCHAIN_VARS: [&str; 5] =

@@ -270,16 +270,6 @@ pub struct ScriptedLoader {
     inner: Arc<LoaderInner>,
 }
 
-#[derive(Debug, Default)]
-struct LoaderInner {
-    declared: Mutex<BTreeSet<String>>,
-    digests: Mutex<BTreeMap<String, Digest>>,
-    exports: Mutex<BTreeMap<String, Vec<String>>>,
-    default: Mutex<Option<Digest>>,
-    refusals: Mutex<BTreeMap<String, plugins::Error>>,
-    loads: Mutex<Vec<(Location, Option<Digest>)>>,
-}
-
 impl ScriptedLoader {
     /// Declares the guest `name`, so a [`Location::Declared`] load of it
     /// resolves.
@@ -403,6 +393,16 @@ impl Plugins for ScriptedLoader {
     ) -> impl Future<Output = Result<Plugin, plugins::Error>> + Send {
         ready(self.resolve(from, digest))
     }
+}
+
+#[derive(Debug, Default)]
+struct LoaderInner {
+    declared: Mutex<BTreeSet<String>>,
+    digests: Mutex<BTreeMap<String, Digest>>,
+    exports: Mutex<BTreeMap<String, Vec<String>>>,
+    default: Mutex<Option<Digest>>,
+    refusals: Mutex<BTreeMap<String, plugins::Error>>,
+    loads: Mutex<Vec<(Location, Option<Digest>)>>,
 }
 
 // A well-formed, name-specific pin for loads no scenario scripted, so two

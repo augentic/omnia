@@ -6,6 +6,12 @@ use crate::host::resource::LockerProxy;
 use crate::host::vault::{Host, HostLocker, HostLockerWithStore, HostWithStore};
 use crate::host::{Result, WasiVault, WasiVaultView};
 
+pub fn get_locker<T>(
+    accessor: &Accessor<T, WasiVault>, self_: &Resource<LockerProxy>,
+) -> Result<LockerProxy> {
+    Ok(omnia_core::get_cloned(accessor, self_)?)
+}
+
 impl<T> HostWithStore<T> for WasiVault {
     async fn open(
         accessor: &Accessor<T, Self>, locker_id: String,
@@ -70,9 +76,3 @@ impl Host for WasiVaultView<'_> {
 }
 
 impl HostLocker for WasiVaultView<'_> {}
-
-pub fn get_locker<T>(
-    accessor: &Accessor<T, WasiVault>, self_: &Resource<LockerProxy>,
-) -> Result<LockerProxy> {
-    Ok(omnia_core::get_cloned(accessor, self_)?)
-}

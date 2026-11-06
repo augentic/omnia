@@ -9,10 +9,6 @@ use super::types::{INVALID_REQUEST, McpError, PARSE_ERROR};
 /// newest revision this server implements.
 pub const PROTOCOL_VERSION: &str = "2025-06-18";
 
-// revisions this stateless server behaves identically across; any other
-// negotiates down to `PROTOCOL_VERSION`, as the spec allows
-const SUPPORTED_VERSIONS: &[&str] = &["2025-06-18", "2025-03-26"];
-
 /// Handle one JSON-RPC message, returning the serialized response — or `None`
 /// for a notification (a message with no `id`), which never gets a reply.
 ///
@@ -119,6 +115,10 @@ fn error_response(id: &Value, code: i32, message: &str) -> String {
     })
     .to_string()
 }
+
+// revisions this stateless server behaves identically across; any other
+// negotiates down to `PROTOCOL_VERSION`, as the spec allows
+const SUPPORTED_VERSIONS: &[&str] = &["2025-06-18", "2025-03-26"];
 
 #[cfg(test)]
 mod tests {
