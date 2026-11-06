@@ -130,7 +130,7 @@ mod tests {
     }
 
     #[test]
-    fn manifest_beats_positional() {
+    fn manifest_wins() {
         let long =
             plan(argv(&["bin", "run", "guest.wasm", "--manifest", "omnia.toml"]), None, true)
                 .unwrap_or_else(|error| panic!("{}", fatal(error)));
@@ -150,7 +150,7 @@ mod tests {
     }
 
     #[test]
-    fn positional_beats_compiled() {
+    fn positional_wins() {
         let plan = plan(argv(&["bin", "run", "guest.wasm"]), None, true)
             .unwrap_or_else(|error| panic!("{}", fatal(error)));
         assert_eq!(plan.source, RunSource::Wasm(PathBuf::from("guest.wasm")));
@@ -205,7 +205,7 @@ mod tests {
     }
 
     #[test]
-    fn run_verbose_quiet_conflict() {
+    fn verbose_quiet() {
         let error = plan(argv(&["bin", "run", "-v", "-q", "guest.wasm"]), None, false)
             .expect_err("`-v` with `-q` is a usage error");
         assert!(matches!(error, PlanError::Usage(_)));

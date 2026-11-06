@@ -306,7 +306,7 @@ mod tests {
     use super::{Digest, Error};
 
     #[test]
-    fn digest_canonicalizes_case() {
+    fn digest_case_norm() {
         let parsed: Digest =
             format!("sha256:{}", "AB".repeat(32)).parse().expect("uppercase hex accepted");
         assert_eq!(parsed.as_str(), format!("sha256:{}", "ab".repeat(32)));

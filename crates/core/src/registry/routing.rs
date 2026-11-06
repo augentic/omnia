@@ -428,7 +428,7 @@ mod tests {
     }
 
     #[test]
-    fn declared_is_never_catch_all() {
+    fn not_catch_all() {
         let router =
             Router::build("http", &[], |guest| *guest == id("later"), HttpRoutes::default())
                 .expect("no loaded exporter is inert, whatever is declared");

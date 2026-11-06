@@ -32,7 +32,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_skips_malformed_entries() {
+    fn skip_malformed() {
         assert_eq!(
             parse("vendor=opaque,noequals,other=v"),
             pairs(&[("vendor", "opaque"), ("other", "v")])

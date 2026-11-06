@@ -324,7 +324,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn export_request_carries_schema_url_once() {
+    fn schema_url_once() {
         let rm = wasi::ResourceMetrics {
             resource: wasi::Resource {
                 attributes: vec![wasi::KeyValue {

@@ -157,7 +157,7 @@ mod tests {
     // Only the file the reference names is read: an old `<name>.wasm`, the
     // colon spelling, and a `wkg get` temp file never become a release.
     #[tokio::test]
-    async fn fs_store_reads_one_spelling() {
+    async fn one_spelling() {
         let dir = tempfile::tempdir().expect("scratch dir");
         let store = FsStore::open(dir.path());
         let tool = reference("acme:tool@1.2.3");

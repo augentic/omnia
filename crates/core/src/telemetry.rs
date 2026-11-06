@@ -547,7 +547,7 @@ mod tests {
         use super::super::{LevelFilter, directives};
 
         #[test]
-        fn flag_displaces_bare_level() {
+        fn flag_displaces_level() {
             assert_eq!(
                 directives(Some(LevelFilter::DEBUG), LevelFilter::INFO, Some("info")),
                 "debug"
@@ -587,7 +587,7 @@ mod tests {
 
         // the fallback stands in for an empty variable alone
         #[test]
-        fn targeted_only_takes_no_fallback() {
+        fn targeted_no_fallback() {
             assert_eq!(
                 directives(None, LevelFilter::INFO, Some("omnia_core=trace")),
                 "omnia_core=trace"
@@ -620,7 +620,7 @@ mod tests {
         }
 
         #[test]
-        fn whitespace_and_empty_tokens() {
+        fn ws_empty_tokens() {
             assert_eq!(
                 directives(None, LevelFilter::INFO, Some(" info , tower=off ,,")),
                 "info,tower=off"
@@ -654,7 +654,7 @@ mod tests {
         use super::super::{LevelFilter, bare};
 
         #[test]
-        fn flag_displaces_bare_level() {
+        fn flag_displaces_level() {
             assert_eq!(
                 bare(Some(LevelFilter::INFO), LevelFilter::WARN, Some("trace")),
                 Some(LevelFilter::INFO)
@@ -679,7 +679,7 @@ mod tests {
         }
 
         #[test]
-        fn targeted_only_takes_no_fallback() {
+        fn targeted_no_fallback() {
             assert_eq!(bare(None, LevelFilter::WARN, Some("my_sdk=debug")), None);
         }
     }
@@ -722,7 +722,7 @@ mod tests {
         // a more specific directive wins where it applies and leaves the rest of
         // the crate to the refinement; a span-only directive names no target
         #[test]
-        fn narrower_directives_refined_around() {
+        fn narrower_refined() {
             assert_eq!(
                 refine("info,omnia_core::runtime=trace", LevelFilter::WARN),
                 "info,omnia_core::runtime=trace,omnia::=warn,omnia_core=warn,omnia_link=warn,\

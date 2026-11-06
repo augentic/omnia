@@ -253,7 +253,7 @@ mod tests {
     }
 
     #[test]
-    fn match_identity_by_dev_ino() {
+    fn match_dev_ino() {
         let root = temp_root("select");
         let registry = registry(".", &root, false);
         let (dev, ino) = identity_of(&root);
@@ -293,7 +293,7 @@ mod tests {
     // a path beneath a writable mount is placed by identity whether or not it
     // exists yet; one beneath a read-only mount, or beside every mount, is not
     #[test]
-    fn beneath_writable_by_ancestor() {
+    fn writable_ancestor() {
         let root = temp_root("beneath");
         let aside = temp_root("beside");
         let registry = MountRegistry::open(vec![
@@ -317,7 +317,7 @@ mod tests {
     // a relative store that does not exist yet is placed under the current
     // directory, not refused for its empty parent
     #[test]
-    fn ancestry_of_relative_path() {
+    fn relative_ancestry() {
         let relative = Path::new("omnia-reg-no-such-store").join("store");
         let placed = MountRegistry::ancestry(&relative).expect("the current directory exists");
         let cwd = std::env::current_dir().expect("a current directory");

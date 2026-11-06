@@ -728,7 +728,7 @@ mod tests {
     }
 
     #[test]
-    fn reject_unknown_route_trigger() {
+    fn bad_route_trigger() {
         let toml = "[[guest]]\nname = \"a\"\nsource.path = \"./a.wasm\"\nroutes.grpc = [\"/a\"]\n";
         toml::from_str::<Manifest>(toml).unwrap_err();
     }
@@ -770,7 +770,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_and_resolve_plugins() {
+    fn resolve_plugins() {
         let toml = r#"
             [[guest]]
             name = "engine"
@@ -798,14 +798,14 @@ mod tests {
     // The retired top-level `[registries]` table is an unknown key like any
     // other; the routing lives under `[plugins]`.
     #[test]
-    fn reject_top_level_registries() {
+    fn top_level_registries() {
         let toml = "[[guest]]\nname = \"a\"\nsource.path = \"./a.wasm\"\n\n\
              [registries]\npath = \"wasm-pkg.toml\"\n";
         toml::from_str::<Manifest>(toml).unwrap_err();
     }
 
     #[test]
-    fn plugins_without_loader_feature() {
+    fn plugins_no_loader() {
         let manifest = Manifest::new()
             .guest(GuestEntry::new("a", "./a.wasm"))
             .registries("default_registry = \"ghcr.io\"\n");
@@ -821,7 +821,7 @@ mod tests {
     // A `[plugins] registries` names a path; the contents variant is the
     // macro's and the programmatic API's alone.
     #[test]
-    fn reject_registries_contents_in_toml() {
+    fn registries_in_toml() {
         let toml = "[[guest]]\nname = \"a\"\nsource.path = \"./a.wasm\"\n\n\
              [plugins]\nregistries.contents = \"default_registry = 'ghcr.io'\"\n";
         toml::from_str::<Manifest>(toml).unwrap_err();
@@ -908,7 +908,7 @@ mod tests {
     }
 
     #[test]
-    fn reject_non_default_transport() {
+    fn bad_transport() {
         let toml = "[[guest]]\nname = \"only\"\nsource.path = \"./only.wasm\"\n\n\
              [transport]\ndefault = \"unix\"\n";
         let manifest: Manifest = toml::from_str(toml).expect("manifest should parse");
@@ -947,7 +947,7 @@ mod tests {
     }
 
     #[test]
-    fn reject_multiple_command_guests() {
+    fn multi_command() {
         let manifest = Manifest::new()
             .guest(GuestEntry::new("a", "./a.wasm").command())
             .guest(GuestEntry::new("b", "./b.wasm").command());
@@ -958,7 +958,7 @@ mod tests {
     }
 
     #[test]
-    fn reject_duplicate_guest_names() {
+    fn dup_guest_names() {
         let toml = "[[guest]]\nname = \"same\"\nsource.path = \"./a.wasm\"\n\n\
              [[guest]]\nname = \"same\"\nsource.path = \"./b.wasm\"\n";
         let manifest: Manifest = toml::from_str(toml).expect("manifest should parse");
@@ -1109,7 +1109,7 @@ mod tests {
     // A package source is fetched through the guest loader's registry
     // client, which only the `loader` feature builds.
     #[test]
-    fn package_without_loader_feature() {
+    fn package_no_loader() {
         let manifest = Manifest::new()
             .guest(GuestEntry::new("app", "./app.wasm"))
             .guest(GuestEntry::package("acme:tool@1.0.0"));

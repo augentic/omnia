@@ -236,7 +236,7 @@ fn client_cert(purpose: ExtendedKeyUsagePurpose) -> String {
 }
 
 #[tokio::test]
-async fn http_outgoing_client_cert() {
+async fn http_client_cert() {
     let (origin, url) = Origin::serve().await;
     let backends = Backends::defaults().await.config([
         ("ORIGIN", url),
@@ -244,7 +244,7 @@ async fn http_outgoing_client_cert() {
         ("CLIENT_CERT_SERVER", client_cert(ExtendedKeyUsagePurpose::ServerAuth)),
     ]);
 
-    run_guest(test_programs::HTTP_OUTGOING_CLIENT_CERT, backends).await;
+    run_guest(test_programs::HTTP_CLIENT_CERT, backends).await;
 
     // only the client-auth request reached the origin, and the bundle never left the host
     let hits = origin.hits();

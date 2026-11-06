@@ -375,7 +375,7 @@ mod tests {
     }
 
     #[test]
-    fn verified_wasm_refuses_precompiled() {
+    fn wasm_refuses_precomp() {
         let error = Verified::wasm(precompiled()).expect_err("native code is refused");
         assert!(error.to_string().contains("raw wasm alone"), "{error}");
 

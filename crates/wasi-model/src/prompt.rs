@@ -101,7 +101,7 @@ mod tests {
     use super::Sections;
 
     #[test]
-    fn assemble_drops_blank_system() {
+    fn drops_blank_system() {
         let sections = Sections {
             role: Some("   ".to_owned()),
             task: "do it".to_owned(),

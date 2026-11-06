@@ -243,7 +243,7 @@ async fn unloadable_guest() {
 // that gives up on its transport must take the process down for a restart
 // rather than leave it idle and looking healthy.
 #[tokio::test]
-async fn consumer_end_fails_server() {
+async fn consumer_end_fails() {
     let backends = Backends::defaults().await.messaging(EndedBroker);
     let runtime = boot(&sole(test_programs::MESSAGING_PRODUCE_HANDLE), backends).await;
 

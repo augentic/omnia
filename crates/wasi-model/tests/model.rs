@@ -187,8 +187,8 @@ async fn model_echo_json() {
 }
 
 #[tokio::test]
-async fn model_echo_schema_rejected() {
-    run_guest(test_programs::MODEL_ECHO_SCHEMA_REJECTED, vec![], ModelDefault).await;
+async fn model_schema_rejected() {
+    run_guest(test_programs::MODEL_SCHEMA_REJECTED, vec![], ModelDefault).await;
 }
 
 #[tokio::test]
@@ -391,8 +391,8 @@ async fn model_stale_result() {
 }
 
 #[tokio::test]
-async fn model_out_of_order_results() {
-    run_guest(test_programs::MODEL_OUT_OF_ORDER_RESULTS, vec![], ParallelLookups).await;
+async fn model_ooo_results() {
+    run_guest(test_programs::MODEL_OOO_RESULTS, vec![], ParallelLookups).await;
 }
 
 #[tokio::test]
@@ -467,11 +467,11 @@ async fn model_workspace_readonly() {
 }
 
 #[tokio::test]
-async fn model_workspace_unauthorized() {
+async fn model_ws_unauthorized() {
     let workspace = scratch();
     fs::create_dir(workspace.path().join("nested")).expect("creating nested dir");
     run_scripted(
-        test_programs::MODEL_WORKSPACE_UNAUTHORIZED,
+        test_programs::MODEL_WS_UNAUTHORIZED,
         vec![workspace.mount(true)],
         ScriptedModel::default(),
     )

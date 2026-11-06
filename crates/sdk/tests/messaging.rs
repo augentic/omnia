@@ -77,7 +77,7 @@ async fn messaging_failures() {
 
 #[test]
 #[should_panic(expected = "duplicate messaging topic")]
-fn messaging_duplicate_topic() {
+fn dup_topic() {
     let _router = MessagingRouter::new(Client::new(())).route("events", echo).route("events", echo);
 }
 
@@ -107,14 +107,14 @@ async fn messaging_merged_routes() {
 
 #[test]
 #[should_panic(expected = "duplicate messaging topic `events`")]
-fn messaging_duplicate_topic_across_routes() {
+fn dup_topic_across() {
     let _routes =
         Topics::<()>::new().route("events", echo).merge(Topics::new().route("events", echo));
 }
 
 #[test]
 #[should_panic(expected = "duplicate messaging topic `events`")]
-fn messaging_duplicate_topic_merged_into_router() {
+fn dup_topic_merged() {
     let _router = MessagingRouter::new(Client::new(()))
         .route("events", echo)
         .merge(Topics::new().route("events", echo));

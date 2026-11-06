@@ -150,16 +150,16 @@ async fn run(deployment: Deployment, label: &str) -> Recording {
 }
 
 #[tokio::test]
-async fn otel_instrumented_handler() {
-    let recording = run_guest(test_programs::OTEL_INSTRUMENTED_HANDLER).await;
+async fn otel_instrumented() {
+    let recording = run_guest(test_programs::OTEL_INSTRUMENTED).await;
     assert_eq!(recording.span_names(), ["traced"]);
     // no metrics recorded, so the flush skips the export rather than send an empty one
     assert!(recording.metrics.lock().expect("metrics lock").is_empty());
 }
 
 #[tokio::test]
-async fn otel_spawned_task_pending() {
-    let recording = run_guest(test_programs::OTEL_SPAWNED_TASK_PENDING).await;
+async fn otel_spawn_pending() {
+    let recording = run_guest(test_programs::OTEL_SPAWN_PENDING).await;
     assert_eq!(recording.span_names(), ["traced"]);
 }
 

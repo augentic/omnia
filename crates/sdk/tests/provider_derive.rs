@@ -39,7 +39,7 @@ pub struct GenericWithPrivateField<S> {
 }
 
 #[tokio::test]
-async fn generic_and_multi_capability() {
+async fn generic_multi() {
     let provider = Generic {
         config: MapConfig::default().with([("k", "v")]),
         storage: Memory::default(),

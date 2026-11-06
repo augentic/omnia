@@ -317,7 +317,7 @@ mod tests {
     }
 
     #[test]
-    fn ordering_needs_comparable() {
+    fn needs_comparable() {
         let filter = compare("lat", ComparisonOp::Gte, ScalarValue::Float64(1.0));
         assert!(matches(&filter, &json!({"lat": 1.5})));
         assert!(!matches(&filter, &json!({"lat": "1.5"})), "string does not order against number");
@@ -325,7 +325,7 @@ mod tests {
     }
 
     #[test]
-    fn starts_with_and_ends_with() {
+    fn prefix_and_suffix() {
         let doc = json!({"name": "Northern Line"});
         let starts = Filter::StartsWith {
             field: "name".to_string(),
@@ -486,7 +486,7 @@ mod tests {
     }
 
     #[test]
-    fn continuation_rejects_junk() {
+    fn junk_continuation() {
         parse_continuation(Some("not-a-number")).expect_err("garbage token is rejected");
         assert_eq!(parse_continuation(None).expect("empty token"), 0);
     }

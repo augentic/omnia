@@ -210,7 +210,7 @@ mod tests {
     }
 
     #[test]
-    fn resource_spans_groups_by_scope() {
+    fn spans_by_scope() {
         let resource = opentelemetry_sdk::Resource::builder_empty()
             .with_schema_url(std::iter::empty::<KeyValue>(), "https://resource")
             .build();

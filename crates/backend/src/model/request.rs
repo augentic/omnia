@@ -208,7 +208,7 @@ mod tests {
     }
 
     #[test]
-    fn mcp_servers_skip_functions() {
+    fn skip_mcp_fns() {
         let request = request(
             None,
             vec![(Role::User, "hi")],

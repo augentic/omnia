@@ -193,13 +193,13 @@ mod tests {
     }
 
     #[test]
-    fn initialize_default_version() {
+    fn init_default_ver() {
         let result = result_of(&json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize" }));
         assert_eq!(result["protocolVersion"], PROTOCOL_VERSION);
     }
 
     #[test]
-    fn initialize_unsupported_version() {
+    fn init_bad_version() {
         let result = result_of(&json!({
             "jsonrpc": "2.0", "id": 1, "method": "initialize",
             "params": { "protocolVersion": "1999-01-01" }

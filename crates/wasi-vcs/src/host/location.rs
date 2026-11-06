@@ -149,7 +149,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn open_refuses_dangling_symlink() {
+    fn refuse_dangling() {
         let root = temp_dir("open-dangling");
         std::os::unix::fs::symlink("../../nowhere", root.join("out")).expect("linking out");
         std::os::unix::fs::symlink("nowhere", root.join("within")).expect("linking within");

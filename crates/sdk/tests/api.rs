@@ -197,7 +197,7 @@ async fn context_extractor() {
 
 // The extractor stands alone: without the `trace` layer it reads the headers itself.
 #[tokio::test]
-async fn context_extractor_without_trace() {
+async fn extractor_no_trace() {
     let router = axum::Router::new().route("/echo", get(echo_route)).with_state(Client::new(()));
     let request = Request::get("/echo?name=plan")
         .header("x-request-id", "req-1")

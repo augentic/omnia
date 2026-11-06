@@ -70,7 +70,7 @@ fn edit_out_of_range() {
 }
 
 #[test]
-fn assert_exhausted_remainder() {
+fn exhausted_remainder() {
     let script = Script::<(), i32>::new([1, 2, 3]);
     assert_eq!(script.next(()), 1);
     let result = catch_unwind(AssertUnwindSafe(|| script.assert_exhausted()));
@@ -130,7 +130,7 @@ fn drop_check_asserted() {
 }
 
 #[test]
-fn drop_check_unrelated_panic() {
+fn unrelated_panic() {
     let result = catch_unwind(|| {
         let _script = Script::<(), i32>::new([1]);
         panic!("the real failure");

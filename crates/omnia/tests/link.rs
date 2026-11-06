@@ -183,7 +183,7 @@ async fn link_full() {
 // registering `full` afterwards must polyfill the missing `ping-async` on the
 // linker clone.
 #[tokio::test]
-async fn link_full_registered_late() {
+async fn registered_late() {
     let runtime =
         boot(&[("echoer", test_programs::LINK_ECHOER), ("partial", test_programs::LINK_PARTIAL)])
             .await
@@ -206,7 +206,7 @@ async fn link_full_registered_late() {
 // through the `unsafe` `Verified::trusted`, the embedder's word that the
 // artifact came from its own toolchain.
 #[tokio::test]
-async fn register_refuses_precompiled() {
+async fn refuse_precompiled() {
     let runtime =
         boot(&[("echoer", test_programs::LINK_ECHOER), ("partial", test_programs::LINK_PARTIAL)])
             .await
@@ -239,7 +239,7 @@ async fn register_refuses_precompiled() {
 // `register` and `admit` are refused under it with nothing seated, and the
 // first use that follows still reaches the entry's own bytes.
 #[tokio::test]
-async fn register_declared_refused() {
+async fn declared_refused() {
     let full = std::fs::read(test_programs::LINK_FULL).expect("reading the full guest");
     let manifest = Manifest::new()
         .guest(GuestEntry::new("full", full.clone()))

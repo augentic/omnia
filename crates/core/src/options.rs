@@ -331,7 +331,7 @@ mod tests {
     // an artifact compiled under the defaults loads into a runtime whose
     // environment sets none of the compile-affecting variables
     #[test]
-    fn compile_options_default_is_env_default() {
+    fn default_from_env() {
         let options = RuntimeOptions::load_env().expect("should load");
         assert_eq!(options.compile_options(), CompileOptions::default());
     }
@@ -345,7 +345,7 @@ mod tests {
     }
 
     #[test]
-    fn per_module_memories_over_total() {
+    fn mem_over_total() {
         let options = RuntimeOptions {
             pool_total_memories: 8,
             pool_max_memories_per_module: Some(16),
@@ -355,7 +355,7 @@ mod tests {
     }
 
     #[test]
-    fn per_module_tables_over_total() {
+    fn tbl_over_total() {
         let options = RuntimeOptions {
             pool_total_tables: 8,
             pool_max_tables_per_module: Some(16),

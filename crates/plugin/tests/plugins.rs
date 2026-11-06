@@ -649,7 +649,7 @@ async fn writable_mount_refused() {
 // refuses at assembly, naming both: written through one view, a component
 // would load through the other.
 #[tokio::test]
-async fn overlap_refused_at_install() {
+async fn overlap_at_install() {
     let scratch = scratch();
     std::fs::create_dir(scratch.path().join("out")).expect("creating out");
     let out = |writable| omnia::Mount {
@@ -681,7 +681,7 @@ async fn overlap_refused_at_install() {
 // package whose namespace it routes — here through the default — is refused
 // rather than fetched elsewhere, and the refusal names both registries.
 #[tokio::test]
-async fn endpoint_conflicts_with_routing() {
+async fn endpoint_routing() {
     let scratch = scratch();
     stage_package(scratch.path(), ECHOER_PACKAGE, test_programs::LINK_ECHOER);
     let manifest = requester(test_programs::PLUGINS_REFUSED)
@@ -699,7 +699,7 @@ async fn endpoint_conflicts_with_routing() {
 // load names — one the deployment's `registries` configures but routes
 // nothing to.
 #[tokio::test]
-async fn endpoint_unrouted_namespace() {
+async fn endpoint_unrouted() {
     let scratch = scratch();
     stage_package(scratch.path(), ECHOER_PACKAGE, test_programs::LINK_ECHOER);
     let manifest = requester(test_programs::PLUGINS_LOAD)
@@ -894,7 +894,7 @@ async fn reregister_refused() {
 // The guest-side copies exist because published crates cannot reference WIT
 // outside their package root; the host copy stays canonical.
 #[test]
-fn wit_copies_stay_identical() {
+fn wit_copies_identical() {
     let canonical = include_str!("../wit/plugins.wit");
     assert_eq!(
         include_str!("../../sdk/wit/plugins.wit"),
@@ -962,7 +962,7 @@ fn store_root(scratch: &Scratch) -> PathBuf {
 // there with no registry routed at all — the store is the one place a
 // package's bytes come from once it holds them.
 #[tokio::test]
-async fn second_start_fetches_nothing() {
+async fn second_start_idle() {
     let scratch = scratch();
     let store = store_root(&scratch);
     stage_package(scratch.path(), ECHOER_PACKAGE, test_programs::LINK_ECHOER);
@@ -1028,7 +1028,7 @@ async fn stored_release() {
 // A pre-compiled release a registry serves is refused before it is written,
 // so the store holds nothing a later start would load.
 #[tokio::test]
-async fn precompiled_package_never_stored() {
+async fn precomp_not_stored() {
     let scratch = scratch();
     let store = store_root(&scratch);
     let plugin_bin = precompile(&scratch, "plugin.bin", test_programs::LINK_ECHOER);
@@ -1050,7 +1050,7 @@ async fn precompiled_package_never_stored() {
 // plant bytes of its choosing under a reference the deployment later
 // acquires on its own, where the store answers before the routing refusal.
 #[tokio::test]
-async fn named_endpoint_never_stored() {
+async fn named_not_stored() {
     let scratch = scratch();
     let store = store_root(&scratch);
     let planted = scratch.path().join("planted.wasm");
@@ -1078,7 +1078,7 @@ async fn named_endpoint_never_stored() {
 // writable mount at assembly — whether the directory exists yet or not,
 // since a guest could create it through the mount.
 #[tokio::test]
-async fn store_beneath_writable_refused() {
+async fn store_under_writable() {
     let scratch = scratch();
     let present = scratch.path().join("present");
     std::fs::create_dir_all(&present).expect("creating the present store");

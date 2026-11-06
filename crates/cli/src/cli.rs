@@ -151,7 +151,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_mount_requires_path() {
+    fn mount_requires_path() {
         assert!("name=.,writable".parse::<MountArg>().is_err(), "a mount must name a path");
     }
 
