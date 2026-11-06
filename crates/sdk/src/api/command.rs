@@ -391,23 +391,6 @@ where
     }
 }
 
-#[cfg(all(target_arch = "wasm32", target_os = "wasi", feature = "command"))]
-impl<F, Fut, P> Export<P, (crate::api::Router<P>,)> for F
-where
-    F: FnOnce(P) -> Fut,
-    Fut: Future<Output = crate::api::Router<P>>,
-    P: Send + Sync + 'static,
-{
-    async fn run(self, provider: P, package: Package) {
-        execute_wasi(async move {
-            let mut router = self(provider).await;
-            router.program.package(&package);
-            router.run(wasip3::cli::environment::get_arguments()).await
-        })
-        .await;
-    }
-}
-
 /// Execute a guest command entry at the WASI CLI boundary.
 ///
 /// Initializes guest telemetry, awaits `entry`, and flushes telemetry and

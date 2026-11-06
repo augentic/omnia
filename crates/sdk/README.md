@@ -62,14 +62,14 @@ async fn item_created<P: StateStore>(input: CreateItem, context: Context<P>) -> 
     context.provider().set(&input.name, b"created", None).await
 }
 
-pub async fn messaging_router<P: StateStore + Send + Sync + 'static>(provider: P) -> Router<P> {
+pub fn messaging_router<P: StateStore + Send + Sync + 'static>(provider: P) -> Router<P> {
     Router::new(Client::new(provider)).topic("items.created", item_created)
 }
 
 messaging::export!(messaging_router);
 ```
 
-`topic(topic, handler)` decodes JSON and acknowledges successful output; `topic_with(topic, handler, decode)` takes a decoder `Fn(&Delivery) -> Result<I, DecodeError>` over the whole delivery for any other wire format. A module registers its HTTP routes, messaging topics, and subcommands on a `Handlers<P>` of its own, with no client, and the root merges each (`Handlers::from([..])` or `Router::merge`) and closes the whole into the one `Router<P>` with `Handlers::with_state`; `Handlers::map_topics` rewrites every topic once, for an environment prefix or a namespace. `Client::call(handler, input, &metadata)` invokes a `Handler` directly inside the same `handler` span.
+`topic(topic, handler)` decodes JSON and acknowledges successful output; `topic_with(topic, handler, decode)` takes a decoder `Fn(&Delivery) -> Result<I, DecodeError>` over the whole delivery for any other wire format. A module registers its HTTP routes, messaging topics, and subcommands on a `Handlers<P>` of its own, with no client, and the root merges each (`Handlers::from([..])` or `Router::merge`) and closes the whole into the one `Router<P>` with `Handlers::with_state`. `Client::call(handler, input, &metadata)` invokes a `Handler` directly inside the same `handler` span.
 
 ### Command-mode guests
 

@@ -17,7 +17,7 @@ The SDK defines thirteen capability traits, each implemented by `WasiProvider` o
 
 | Capability | WASI Host Backing | Test Double | Composition |
 | --- | --- | --- | --- |
-| `StateStore`, `Publish`, `Config`, `BlobStore` | `omnia-wasi-{keyvalue,messaging,config,blobstore}` | `Memory`, `Sink`, `MapConfig` | `omnia-extensions` decorators / adapters |
+| `StateStore`, `Publish`, `Config`, `BlobStore` | `omnia-wasi-{keyvalue,messaging,config,blobstore}` | `Memory`, `Sink`, `MapConfig` | `omnia-ext` decorators / adapters |
 | `HttpRequest` | `omnia-wasi-http` | `MatchedHttp` | `omnia_http_cache::HttpCache<H, S>` decorator |
 | `TableStore` | `omnia-wasi-sql` | `ScriptedTables` | `omnia-orm` query builders |
 | `DocumentStore`, `Identity`, `Vault`, `Broadcast` | `omnia-wasi-{docstore,identity,vault,websocket}` | `MemoryDocs`, `FixedIdentity`, `Memory`, `Sink` | — |
@@ -65,16 +65,15 @@ Domain handler crates depend on `omnia-sdk` alone and expose transport routers g
 
 ### 1. Standard WASI component (`WasiProvider`)
 
-In the guest root crate (`src/lib.rs`), wire the HTTP and messaging routers to `omnia_sdk::WasiProvider` with each transport's `export!`:
+In the guest root crate (`src/lib.rs`), wire the guest's router to `omnia_sdk::WasiProvider` with each transport's `export!`:
 
 ```rust,ignore
 use omnia_sdk::api::{Router, http, messaging};
 
-pub fn http_router<P: Capabilities>(provider: P) -> Router<P> { /* .. */ }
-pub async fn messaging_router<P: Capabilities>(provider: P) -> Router<P> { /* .. */ }
+pub fn router<P: Capabilities>(provider: P) -> Router<P> { /* .. */ }
 
-http::export!(http_router);
-messaging::export!(messaging_router);
+http::export!(router);
+messaging::export!(router);
 ```
 
 Each invocation expands to the `#[omnia_wasi_otel::instrument]`-scoped WASI export on `all(target_arch = "wasm32", target_os = "wasi")` and to nothing on native targets, so `cargo nextest` compiles the guest library natively against `omnia_test::guest::Provider` without pulling `wasmtime` or `omnia-wasi-*` into the native dependency graph.

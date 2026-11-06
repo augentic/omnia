@@ -6,9 +6,7 @@
 //! [`Router`](crate::api::Router) over a [`Client`], closing the whole with
 //! [`Handlers::with_state`](crate::api::Handlers::with_state). A topic
 //! decodes JSON unless registered with
-//! [`Handlers::topic_with`](crate::api::Handlers::topic_with), and
-//! [`Handlers::map_topics`](crate::api::Handlers::map_topics) re-keys a
-//! module's topics for the deployment, a prefix say, as they are merged.
+//! [`Handlers::topic_with`](crate::api::Handlers::topic_with).
 //! [`export!`] binds the router fn as the guest's `wasi:messaging` handler.
 
 use std::collections::BTreeMap;
@@ -46,7 +44,7 @@ macro_rules! __export_messaging {
                     message: $crate::omnia_wasi_messaging::types::Message,
                 ) -> ::core::result::Result<(), $crate::omnia_wasi_messaging::types::Error>
                 {
-                    let router = $router($provider).await;
+                    let router = $router($provider);
                     $crate::api::messaging::handle(&router, message).await
                 }
             }
@@ -54,9 +52,9 @@ macro_rules! __export_messaging {
     };
 }
 
-/// Bind an async router fn as the guest's `wasi:messaging` export.
+/// Bind a router fn as the guest's `wasi:messaging` export.
 ///
-/// Awaits the router fn on each delivery with [`WasiProvider`](crate::WasiProvider),
+/// Calls the router fn on each delivery with [`WasiProvider`](crate::WasiProvider),
 /// or with the provider expression passed as a second argument, and dispatches
 /// the delivery through the resulting [`Router`](crate::api::Router). Expands to nothing on native
 /// targets, so the same crate's tests build the router natively.
@@ -64,7 +62,7 @@ macro_rules! __export_messaging {
 /// ```rust,ignore
 /// use omnia_sdk::api::messaging;
 ///
-/// messaging::export!(messaging_router);
+/// messaging::export!(router);
 /// ```
 #[doc(inline)]
 pub use crate::__export_messaging as export;
@@ -168,12 +166,6 @@ impl<P: Send + Sync + 'static> Topics<P> {
 
     pub(crate) fn merge(self, other: Self) -> Self {
         other.routes.into_iter().fold(self, |routes, (topic, route)| routes.insert(topic, route))
-    }
-
-    pub(crate) fn map(self, mut map: impl FnMut(&str) -> String) -> Self {
-        self.routes
-            .into_iter()
-            .fold(Self::new(), |routes, (topic, route)| routes.insert(map(&topic), route))
     }
 
     pub(crate) fn topics(&self) -> impl Iterator<Item = &str> {

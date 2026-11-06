@@ -513,17 +513,6 @@ impl<P: Send + Sync + 'static> Handlers<P> {
         }
     }
 
-    /// Re-key every topic through `map`, so topics registered under a bare
-    /// name are mounted under the deployment's.
-    ///
-    /// # Panics
-    ///
-    /// Panics when `map` yields an empty topic or one topic for two routes.
-    pub fn map_topics(mut self, map: impl FnMut(&str) -> String) -> Self {
-        self.topics = self.topics.map(map);
-        self
-    }
-
     /// Close the handlers over `client` as the [`Router`] that serves HTTP
     /// requests, dispatches messaging deliveries, and runs argv.
     pub fn with_state(self, client: Client<P>) -> Router<P> {

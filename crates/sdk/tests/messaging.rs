@@ -162,29 +162,3 @@ async fn tenant_metadata() {
 
     assert_eq!(seen.lock().expect("seen").as_deref(), Some("acme"));
 }
-
-#[tokio::test]
-async fn map_topics_prefixes() {
-    let prefixed = Handlers::<()>::new()
-        .topic("created", echo)
-        .topic("deleted", echo)
-        .map_topics(|topic| format!("dev-{topic}"));
-    let router = prefixed.with_state(Client::new(()));
-
-    assert_eq!(router.topics().collect::<Vec<_>>(), ["dev-created", "dev-deleted"]);
-    router
-        .handle(delivery(Some("dev-created"), br#"{"name":"message"}"#))
-        .await
-        .expect("the prefixed route handles the delivery");
-    assert_eq!(
-        router.handle(delivery(Some("created"), br#"{"name":"message"}"#)).await,
-        Err(DeliveryError::UnhandledTopic("created".to_string()))
-    );
-}
-
-#[test]
-#[should_panic(expected = "duplicate messaging topic `same`")]
-fn map_topics_collision() {
-    let _handlers =
-        Handlers::<()>::new().topic("a", echo).topic("b", echo).map_topics(|_| "same".to_string());
-}

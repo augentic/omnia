@@ -7,13 +7,13 @@ Unreleased
 - `omnia_sdk::api::{Handlers, Router}`: a module registers its HTTP routes
   (`route`), messaging topics (`topic`, `topic_with`), and CLI subcommands
   (`command`, `command_with`, behind the `command` feature) on one
-  `Handlers<P>`, `From<[..; N]>` (or `merge`) merges them, `map_topics`
-  rewrites topics, and `with_state(client)` closes the whole into the one
-  `Router<P>` that serves requests, handles deliveries, and `run`s argv.
-  `command::export!` binds a command router fn (with `WasiProvider` or a
-  custom provider) alongside a zero-argument `async fn` entry, stamping
-  the guest crate's `CARGO_PKG_VERSION` and `CARGO_PKG_DESCRIPTION` as the
-  program's `--version` and `--help` defaults.
+  `Handlers<P>`, `From<[..; N]>` (or `merge`) merges them, and
+  `with_state(client)` closes the whole into the one `Router<P>` that
+  serves requests, handles deliveries, and `run`s argv. `command::export!`
+  binds a command router fn (with `WasiProvider` or a custom provider)
+  alongside a zero-argument `async fn` entry, stamping the guest crate's
+  `CARGO_PKG_VERSION` and `CARGO_PKG_DESCRIPTION` as the program's
+  `--version` and `--help` defaults.
 - `omnia_sdk::api::Render`: the text form of a handler output, which
   `Format::Text` encodes (`()` and `String` implement it); `Failure`
   renders its envelope through it.
