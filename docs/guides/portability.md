@@ -68,10 +68,10 @@ Domain handler crates depend on `omnia-sdk` alone and expose transport routers g
 In the guest root crate (`src/lib.rs`), wire the HTTP and messaging routers to `omnia_sdk::WasiProvider` with each transport's `export!`:
 
 ```rust,ignore
-use omnia_sdk::api::{http, messaging};
+use omnia_sdk::api::{Router, http, messaging};
 
-pub fn http_router<P: Capabilities>(provider: P) -> axum::Router { /* .. */ }
-pub async fn messaging_router<P: Capabilities>(provider: P) -> messaging::Router<P> { /* .. */ }
+pub fn http_router<P: Capabilities>(provider: P) -> Router<P> { /* .. */ }
+pub async fn messaging_router<P: Capabilities>(provider: P) -> Router<P> { /* .. */ }
 
 http::export!(http_router);
 messaging::export!(messaging_router);

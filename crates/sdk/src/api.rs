@@ -2,11 +2,13 @@
 //!
 //! Application logic is a [`Handler`]: any `async fn(I, Context<P>)`
 //! returning a `Result`. [`Client`] owns the provider and builds the
-//! [`Context`] each call receives. The [`messaging`] and [`command`]
-//! transports dispatch a `Handler`; an HTTP route is a plain axum handler
-//! that takes its `Context` as an extractor over the `Client` in the router
-//! state (see [`http`]). Each transport's `export!` macro binds its router or
-//! entry as the guest's WASI export.
+//! [`Context`] each call receives. A module registers its HTTP paths and
+//! messaging topics on a [`Handlers`] of its own and the guest merges them
+//! (`Handlers::from([..])` or [`Handlers::merge`]), closing the whole with
+//! [`Handlers::with_state`] into a [`Router`] that serves HTTP requests and
+//! dispatches messaging deliveries; [`command::Commands`] does the same for
+//! subcommands. Each transport's `export!` macro binds its router or entry as
+//! the guest's WASI export.
 //!
 //! ```rust,ignore
 //! use std::convert::Infallible;
@@ -35,6 +37,9 @@ use std::future::Future;
 use std::sync::Arc;
 use std::time::SystemTime;
 
+#[cfg(feature = "http")]
+use axum::routing::MethodRouter;
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tracing::Instrument as _;
 
@@ -42,6 +47,8 @@ pub mod command;
 #[cfg(feature = "http")]
 pub mod http;
 pub mod messaging;
+
+use self::messaging::{Delivery, DeliveryError, Topics};
 
 /// An input that could not be decoded into handler input.
 #[derive(Debug)]
@@ -196,13 +203,36 @@ impl Metadata {
     }
 }
 
+// A fresh request id: 32 lowercase hex chars from 128 random bits.
+fn mint_request_id() -> String {
+    let (high, low) = random_u64_pair();
+    format!("{high:016x}{low:016x}")
+}
+
+// The native arm exists so the transports are testable off-target; it
+// is unique per call but not a CSPRNG, and no native transport mints ids.
+fn random_u64_pair() -> (u64, u64) {
+    cfg_select! {
+        all(target_arch = "wasm32", target_os = "wasi") => {
+            use wasip3::random::random::get_random_u64;
+
+            (get_random_u64(), get_random_u64())
+        }
+        _ => {
+            use std::hash::{BuildHasher, RandomState};
+
+            (RandomState::new().hash_one(0_u8), RandomState::new().hash_one(1_u8))
+        }
+    }
+}
+
 /// Context owned by one handler call.
 ///
 /// With the `http` feature it is also an axum extractor over the [`Client`]
 /// in the router state, so an HTTP handler is `async fn(Context<P>, ..)`.
 #[derive(Clone, Debug)]
 pub struct Context<P> {
-    provider: Arc<P>,
+    pub(crate) provider: Arc<P>,
 
     /// Transport-neutral invocation metadata.
     pub metadata: Metadata,
@@ -270,7 +300,7 @@ where
 /// Clones share one provider allocation. Transports define its lifetime; HTTP
 /// constructs one client per WASI request and keeps durable state host-side.
 pub struct Client<P> {
-    provider: Arc<P>,
+    pub(crate) provider: Arc<P>,
 }
 
 impl<P: Send + Sync + 'static> Client<P> {
@@ -326,25 +356,292 @@ impl<P: Send + Sync + 'static> fmt::Debug for Client<P> {
     }
 }
 
-// A fresh request id: 32 lowercase hex chars from 128 random bits.
-fn mint_request_id() -> String {
-    let (high, low) = random_u64_pair();
-    format!("{high:016x}{low:016x}")
+/// HTTP routes and messaging topics over a provider-owning [`Client`], awaiting their state.
+///
+/// A module registers its paths and topics on one of these and the guest
+/// merges them (`Handlers::from([..])` or [`merge`](Self::merge)), closing the
+/// whole with [`with_state`](Self::with_state) into a [`Router`]. Two handlers
+/// for one path and method, or for one topic, are refused when they meet.
+#[must_use = "handlers serve nothing until closed into a `Router` with `with_state`"]
+pub struct Handlers<P: Send + Sync + 'static> {
+    #[cfg(feature = "http")]
+    http: axum::Router<Client<P>>,
+    topics: Topics<P>,
 }
 
-// The native arm exists so the transports are testable off-target; it
-// is unique per call but not a CSPRNG, and no native transport mints ids.
-fn random_u64_pair() -> (u64, u64) {
-    cfg_select! {
-        all(target_arch = "wasm32", target_os = "wasi") => {
-            use wasip3::random::random::get_random_u64;
-
-            (get_random_u64(), get_random_u64())
+impl<P: Send + Sync + 'static> Handlers<P> {
+    /// Create an empty set of handlers.
+    pub fn new() -> Self {
+        Self {
+            #[cfg(feature = "http")]
+            http: axum::Router::new(),
+            topics: Topics::new(),
         }
-        _ => {
-            use std::hash::{BuildHasher, RandomState};
+    }
 
-            (RandomState::new().hash_one(0_u8), RandomState::new().hash_one(1_u8))
+    /// Register a [`MethodRouter`] at `path`.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `path` overlaps an existing route for the same method.
+    #[cfg(feature = "http")]
+    pub fn route(mut self, path: &str, method_router: MethodRouter<Client<P>>) -> Self {
+        self.http = self.http.route(path, method_router);
+        self
+    }
+
+    /// Register one handler for one exact topic, decoding the payload as JSON.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the topic is empty or already registered.
+    pub fn topic<F, I>(mut self, topic: impl Into<String>, handler: F) -> Self
+    where
+        F: Handler<P, I>,
+        I: DeserializeOwned + Send + 'static,
+    {
+        self.topics = self.topics.route(topic, handler);
+        self
+    }
+
+    /// Register one handler for one exact topic with a decoder over the whole delivery.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the topic is empty or already registered.
+    pub fn topic_with<F, I, D>(mut self, topic: impl Into<String>, handler: F, decode: D) -> Self
+    where
+        F: Handler<P, I>,
+        I: Send + 'static,
+        D: Fn(&Delivery) -> Result<I, DecodeError> + Send + Sync + 'static,
+    {
+        self.topics = self.topics.route_with(topic, handler, decode);
+        self
+    }
+
+    /// Take every route and topic of `other`.
+    ///
+    /// # Panics
+    ///
+    /// Panics when a path of `other` overlaps an existing route for the same
+    /// method or a topic of `other` is already registered.
+    pub fn merge(self, other: Self) -> Self {
+        Self {
+            #[cfg(feature = "http")]
+            http: self.http.merge(other.http),
+            topics: self.topics.merge(other.topics),
         }
+    }
+
+    /// Re-key every topic through `map`, so topics registered under a bare
+    /// name are mounted under the deployment's.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `map` yields an empty topic or one topic for two routes.
+    pub fn map_topics(mut self, map: impl FnMut(&str) -> String) -> Self {
+        self.topics = self.topics.map(map);
+        self
+    }
+
+    /// Close the handlers over `client` as the [`Router`] that serves HTTP
+    /// requests and dispatches messaging deliveries.
+    pub fn with_state(self, client: Client<P>) -> Router<P> {
+        Router {
+            #[cfg(feature = "http")]
+            http: self.http.with_state(client.clone()),
+            client,
+            topics: self.topics,
+        }
+    }
+}
+
+impl<P: Send + Sync + 'static> Default for Handlers<P> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<P: Send + Sync + 'static, const N: usize> From<[Self; N]> for Handlers<P> {
+    fn from(parts: [Self; N]) -> Self {
+        parts.into_iter().reduce(Self::merge).unwrap_or_default()
+    }
+}
+
+impl<P: Send + Sync + 'static> Clone for Handlers<P> {
+    fn clone(&self) -> Self {
+        Self {
+            #[cfg(feature = "http")]
+            http: self.http.clone(),
+            topics: self.topics.clone(),
+        }
+    }
+}
+
+impl<P: Send + Sync + 'static> fmt::Debug for Handlers<P> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut debug = f.debug_struct("Handlers");
+        #[cfg(feature = "http")]
+        debug.field("http", &self.http);
+        debug.field("topics", &self.topics).finish()
+    }
+}
+
+#[cfg(feature = "http")]
+impl<P: Send + Sync + 'static> From<Handlers<P>> for axum::Router<Client<P>> {
+    fn from(handlers: Handlers<P>) -> Self {
+        handlers.http
+    }
+}
+
+/// A finished router backed by a [`Client`], ready to serve HTTP requests and
+/// dispatch messaging deliveries.
+#[must_use = "a router serves nothing until it handles a request or delivery"]
+pub struct Router<P: Send + Sync + 'static = ()> {
+    client: Client<P>,
+    #[cfg(feature = "http")]
+    http: axum::Router,
+    topics: Topics<P>,
+}
+
+impl<P: Send + Sync + 'static> Router<P> {
+    /// Create an empty router backed by a client.
+    pub fn new(client: Client<P>) -> Self {
+        Handlers::new().with_state(client)
+    }
+
+    /// Register a [`MethodRouter`] at `path`.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `path` overlaps an existing route for the same method.
+    #[cfg(feature = "http")]
+    pub fn route(mut self, path: &str, method_router: MethodRouter<Client<P>>) -> Self {
+        self.http = self.http.route(path, method_router.with_state(self.client.clone()));
+        self
+    }
+
+    /// Apply a [`tower::Layer`] to every HTTP route on this router.
+    #[cfg(feature = "http")]
+    pub fn layer<L>(mut self, layer: L) -> Self
+    where
+        L: tower::Layer<axum::routing::Route> + Clone + Send + Sync + 'static,
+        L::Service:
+            tower::Service<::http::Request<axum::body::Body>> + Clone + Send + Sync + 'static,
+        <L::Service as tower::Service<::http::Request<axum::body::Body>>>::Response:
+            axum::response::IntoResponse + 'static,
+        <L::Service as tower::Service<::http::Request<axum::body::Body>>>::Error:
+            Into<std::convert::Infallible> + 'static,
+        <L::Service as tower::Service<::http::Request<axum::body::Body>>>::Future: Send + 'static,
+    {
+        self.http = self.http.layer(layer);
+        self
+    }
+
+    /// Register one handler for one exact topic, decoding the payload as JSON.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the topic is empty or already registered.
+    pub fn topic<F, I>(mut self, topic: impl Into<String>, handler: F) -> Self
+    where
+        F: Handler<P, I>,
+        I: DeserializeOwned + Send + 'static,
+    {
+        self.topics = self.topics.route(topic, handler);
+        self
+    }
+
+    /// Register one handler for one exact topic with a decoder over the whole delivery.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the topic is empty or already registered.
+    pub fn topic_with<F, I, D>(mut self, topic: impl Into<String>, handler: F, decode: D) -> Self
+    where
+        F: Handler<P, I>,
+        I: Send + 'static,
+        D: Fn(&Delivery) -> Result<I, DecodeError> + Send + Sync + 'static,
+    {
+        self.topics = self.topics.route_with(topic, handler, decode);
+        self
+    }
+
+    /// Take every route and topic of `handlers`.
+    ///
+    /// # Panics
+    ///
+    /// Panics when a path of `handlers` overlaps an existing route for the same
+    /// method or a topic of `handlers` is already registered.
+    pub fn merge(mut self, handlers: Handlers<P>) -> Self {
+        #[cfg(feature = "http")]
+        {
+            self.http = self.http.merge(handlers.http.with_state(self.client.clone()));
+        }
+        self.topics = self.topics.merge(handlers.topics);
+        self
+    }
+
+    /// The exact topics registered on this router, in order.
+    pub fn topics(&self) -> impl Iterator<Item = &str> {
+        self.topics.topics()
+    }
+
+    /// Dispatch one delivery by exact topic.
+    ///
+    /// # Errors
+    ///
+    /// Returns missing-topic, unhandled-topic, decoding, or handler failures.
+    pub async fn handle(&self, delivery: Delivery) -> Result<(), DeliveryError> {
+        self.topics.handle(delivery, &self.client).await
+    }
+}
+
+impl<P: Send + Sync + 'static> Clone for Router<P> {
+    fn clone(&self) -> Self {
+        Self {
+            client: self.client.clone(),
+            #[cfg(feature = "http")]
+            http: self.http.clone(),
+            topics: self.topics.clone(),
+        }
+    }
+}
+
+impl<P: Send + Sync + 'static> fmt::Debug for Router<P> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut debug = f.debug_struct("Router");
+        #[cfg(feature = "http")]
+        debug.field("http", &self.http);
+        debug.field("topics", &self.topics).finish_non_exhaustive()
+    }
+}
+
+#[cfg(feature = "http")]
+impl<P: Send + Sync + 'static> From<Router<P>> for axum::Router {
+    fn from(router: Router<P>) -> Self {
+        router.http
+    }
+}
+
+#[cfg(feature = "http")]
+impl<P, B> tower::Service<::http::Request<B>> for Router<P>
+where
+    P: Send + Sync + 'static,
+    B: http_body::Body<Data = bytes::Bytes> + Send + 'static,
+    B::Error: Into<axum::BoxError>,
+{
+    type Error = std::convert::Infallible;
+    type Future = axum::routing::future::RouteFuture<std::convert::Infallible>;
+    type Response = axum::response::Response;
+
+    fn poll_ready(
+        &mut self, cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        <axum::Router as tower::Service<::http::Request<B>>>::poll_ready(&mut self.http, cx)
+    }
+
+    fn call(&mut self, req: ::http::Request<B>) -> Self::Future {
+        self.http.call(req)
     }
 }

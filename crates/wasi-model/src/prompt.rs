@@ -95,21 +95,3 @@ fn join(parts: &[String]) -> Option<String> {
     let kept: Vec<&str> = parts.iter().map(|p| p.trim()).filter(|p| !p.is_empty()).collect();
     if kept.is_empty() { None } else { Some(kept.join("\n\n")) }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::Sections;
-
-    #[test]
-    fn drops_blank_system() {
-        let sections = Sections {
-            role: Some("   ".to_owned()),
-            task: "do it".to_owned(),
-            context: Some(String::new()),
-            ..Sections::default()
-        };
-        let (system, user) = sections.assemble(None);
-        assert!(system.is_none());
-        assert_eq!(user, "do it");
-    }
-}

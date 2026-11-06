@@ -93,7 +93,7 @@ omnia_sdk::api::http::export!(http_router);
 
 Routers map transport events onto handlers: an HTTP route is registered through axum's own `get`/`post`/`put`/`patch`/`delete` on an `axum::Router` whose state is one provider-owning `Client`, and a messaging router maps exact topics. Each transport's `export!` macro (`http::export!`, `messaging::export!`, or `command::export!`) binds its WASI export, calling the router fn with `WasiProvider` (or a custom provider passed as a second argument), and expands to the `#[omnia_wasi_otel::instrument]`-scoped export on `wasm32` and to nothing on native targets. The HTTP export also layers `api::http::trace`, which serves each request inside a `handler` span carrying the request and correlation ids; a native test can layer it with `axum::middleware::from_fn(trace)`.
 
-Messaging uses `api::messaging::Router` and `route("items.created", item_created)`; topic matching is exact. A module that owns topics registers them on an `api::messaging::Topics` of its own, with no client, and the guest merges each (`Topics::from([..])` or `Router::merge`) and closes the whole into its one `Router` with `Topics::with_state`, as a module's routes are an `api::http::Routes<P>` merged (`http::Routes::from([..])`) and closed into an `api::http::Router` by `with_state`; a topic registered twice panics where the two meet. `Topics::map` rewrites every topic in one pass, so a module registers bare topic names and the root qualifies them once with the deployment's prefix. `route` decodes JSON; `route_with(topic, handler, decode)` takes a decoder `Fn(&Delivery) -> Result<I, DecodeError>` over the whole `Delivery` for any other wire format.
+Messaging uses `api::Router` and `topic("items.created", item_created)`; topic matching is exact. A module registers its HTTP routes and topics on an `api::Handlers<P>` of its own, with no client, and the guest merges each (`Handlers::from([..])` or `Router::merge`) and closes the whole into its one `api::Router<P>` with `Handlers::with_state`; a path or topic registered twice panics where the two meet. `Handlers::map_topics` rewrites every topic in one pass, so a module registers bare topic names and the root qualifies them once with the deployment's prefix. `topic` decodes JSON; `topic_with(topic, handler, decode)` takes a decoder `Fn(&Delivery) -> Result<I, DecodeError>` over the whole `Delivery` for any other wire format.
 
 ### Errors
 
@@ -172,17 +172,16 @@ When writing `wasm32`-only code (as in `examples/`), you can also call the `omni
 
 ## Handling incoming messages
 
-A guest can export a messaging handler alongside (or instead of) an HTTP handler. Build an `omnia_sdk::api::messaging::Router` over your provider and export it with `messaging::export!`:
+A guest can export a messaging handler alongside (or instead of) an HTTP handler. Build an `omnia_sdk::api::Router` over your provider and export it with `messaging::export!`:
 
 ```rust,noplayground
-use omnia_sdk::api::Client;
-use omnia_sdk::api::messaging::{self, Router};
+use omnia_sdk::api::{Client, Router, messaging};
 
 pub async fn messaging_router<P>(provider: P) -> Router<P>
 where
     P: StateStore + Clone + Send + Sync + 'static,
 {
-    Router::new(Client::new(provider)).route("items.created", on_item_created)
+    Router::new(Client::new(provider)).topic("items.created", on_item_created)
 }
 
 messaging::export!(messaging_router);

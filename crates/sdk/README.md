@@ -56,20 +56,20 @@ A handler's error is anything `IntoResponse`. `omnia_sdk::Error` (`bad_request!`
 Messaging routes are `Handler`s: any `async fn(I, Context<P>) -> Result<O, E>`, registered on exact topics and exported the same way. Every fn of that shape (and every `Clone` closure of it, so a closure can carry configuration) is a `Handler<P, I>` through a blanket impl.
 
 ```rust,ignore
-use omnia_sdk::api::messaging::{self, Router};
+use omnia_sdk::api::{Client, Context, Router, messaging};
 
 async fn item_created<P: StateStore>(input: CreateItem, context: Context<P>) -> Result<(), Error> {
     context.provider().set(&input.name, b"created", None).await
 }
 
 pub async fn messaging_router<P: StateStore + Send + Sync + 'static>(provider: P) -> Router<P> {
-    Router::new(Client::new(provider)).route("items.created", item_created)
+    Router::new(Client::new(provider)).topic("items.created", item_created)
 }
 
 messaging::export!(messaging_router);
 ```
 
-`route(topic, handler)` decodes JSON and acknowledges successful output; `route_with(topic, handler, decode)` takes a decoder `Fn(&Delivery) -> Result<I, DecodeError>` over the whole delivery for any other wire format. A module that owns topics registers them on a `messaging::Topics` of its own, with no client, and the root merges each (`Topics::from([..])` or `Router::merge`) and closes the whole into the one `Router` with `Topics::with_state`, as `http::Routes<P>` is merged (`http::Routes::from([..])`) and closed into `http::Router` by `with_state`; `Topics::map` rewrites every topic once, for an environment prefix or a namespace. `Client::call(handler, input, &metadata)` invokes a `Handler` directly inside the same `handler` span.
+`topic(topic, handler)` decodes JSON and acknowledges successful output; `topic_with(topic, handler, decode)` takes a decoder `Fn(&Delivery) -> Result<I, DecodeError>` over the whole delivery for any other wire format. A module registers its HTTP routes and messaging topics on a `Handlers<P>` of its own, with no client, and the root merges each (`Handlers::from([..])` or `Router::merge`) and closes the whole into the one `Router<P>` with `Handlers::with_state`; `Handlers::map_topics` rewrites every topic once, for an environment prefix or a namespace. `Client::call(handler, input, &metadata)` invokes a `Handler` directly inside the same `handler` span.
 
 ### Command-mode guests
 

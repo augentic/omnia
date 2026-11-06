@@ -317,8 +317,9 @@ impl ModelClient for ScriptedModel {
         let this = self.clone();
         async move {
             loop {
-                let turn = this.turn(&request)?;
+                let mut turn = this.turn(&request)?;
                 this.drive(&tool_host, turn.steps).await?;
+                turn.answer.answer = request.format.candidate(&turn.answer.answer);
                 if !request.check {
                     return Ok(turn.answer);
                 }

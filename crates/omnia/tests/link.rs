@@ -316,6 +316,40 @@ async fn link_skewed() {
     }
 }
 
+// Store-bound handles (resources, futures, streams) cannot cross the link
+// seam; pre-instantiation rejects a guest importing one before any call.
+#[tokio::test]
+async fn link_refuses_handles() {
+    for (wat, kind) in [
+        (
+            r#"(component (import "acme:bad/ops" (instance
+                (export "r" (type $r (sub resource)))
+                (export "take" (func (param "r" (own $r))))
+            )))"#,
+            "resource",
+        ),
+        (
+            r#"(component (import "acme:bad/ops" (instance
+                (export "wait" (func (result (future u32))))
+            )))"#,
+            "future",
+        ),
+        (
+            r#"(component (import "acme:bad/ops" (instance
+                (export "read" (func (param "s" (stream u8))))
+            )))"#,
+            "stream",
+        ),
+    ] {
+        let manifest = Manifest::new().guest(GuestEntry::new("bad", wat.as_bytes().to_vec()));
+        let Err(err) = assemble(manifest, |builder| builder).await else {
+            panic!("handle signature ({kind}) must be refused at assembly");
+        };
+        let text = format!("{err:#}");
+        assert!(text.contains(kind), "expected `{kind}` in `{text}`");
+    }
+}
+
 // The host→guest hop is entered from a root, so it is depth 1 and with a bound
 // of 3 the relay may hop twice more: `2` lands exactly on the bound, `3` would
 // need depth 4. Were the dispatcher to restart the chain at 0, `3` would

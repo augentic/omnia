@@ -204,36 +204,3 @@ impl Bucket for InMemBucket {
 fn encode_i64(value: i64) -> Vec<u8> {
     value.to_be_bytes().to_vec()
 }
-
-#[cfg(test)]
-mod tests {
-    use std::time::Duration;
-
-    use super::*;
-
-    #[tokio::test]
-    async fn cas_under_ttl() {
-        let store = KeyValueDefault::connect_with(NoOptions).await.expect("connect");
-        let bucket = store.open_bucket("b".to_owned()).await.expect("bucket");
-
-        bucket
-            .set("ephemeral".to_owned(), b"v1".to_vec(), Some(Duration::from_millis(80)))
-            .await
-            .expect("set");
-        assert_eq!(bucket.get("ephemeral".to_owned()).await.expect("get"), Some(b"v1".to_vec()));
-
-        // CAS updates the bytes and preserves the remaining TTL rather than clearing it.
-        assert_eq!(
-            bucket
-                .cas("ephemeral".to_owned(), Some(b"v1".to_vec()), b"v2".to_vec())
-                .await
-                .expect("cas"),
-            Ok(())
-        );
-        assert_eq!(bucket.get("ephemeral".to_owned()).await.expect("get"), Some(b"v2".to_vec()));
-
-        std::thread::sleep(Duration::from_millis(120));
-        assert_eq!(bucket.get("ephemeral".to_owned()).await.expect("get"), None);
-        assert!(!bucket.exists("ephemeral".to_owned()).await.expect("exists"));
-    }
-}

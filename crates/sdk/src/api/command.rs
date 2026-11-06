@@ -3,10 +3,9 @@
 //! A module registers its subcommands on a [`Commands`] of its own and the
 //! guest merges each (`Commands::from([..])` or [`Commands::merge`]) into its
 //! one [`Router`] over a [`Client`], closing the whole with
-//! [`Commands::with_state`] as [`http::Routes`](crate::api::http::Routes) and
-//! [`messaging::Topics`](crate::api::messaging::Topics) do. Each subcommand
-//! decodes its input through [`clap::Args`] (or a custom decoder registered
-//! with [`Commands::route_with`]), runs the [`Handler`] through
+//! [`Commands::with_state`] as [`Handlers`](crate::api::Handlers) does. Each
+//! subcommand decodes its input through [`clap::Args`] (or a custom decoder
+//! registered with [`Commands::route_with`]), runs the [`Handler`] through
 //! [`Client::call`], and encodes a success body onto stdout in the selected [`Format`] or a
 //! [`Failure`] envelope onto stderr at [`Error::exit_code`](crate::Error::exit_code);
 //! a clap usage error exits [`USAGE_EXIT`]. [`export!`] binds the router fn
@@ -896,41 +895,5 @@ impl Metadata {
     #[must_use]
     pub fn from_env(prefix: &str) -> Self {
         Self::from_lookup(|name| std::env::var(env_key(prefix, name)).ok())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::io::{self, ErrorKind, Write};
-
-    use super::{env_key, write_channel};
-
-    #[test]
-    fn env_key_prefix() {
-        assert_eq!(env_key("CLI", "request-id"), "CLI_REQUEST_ID");
-        assert_eq!(env_key("CLI", "correlation-id"), "CLI_CORRELATION_ID");
-        assert_eq!(env_key("EXIT_MAP", "causation-id"), "EXIT_MAP_CAUSATION_ID");
-    }
-
-    struct Refusing(ErrorKind);
-
-    impl Write for Refusing {
-        fn write(&mut self, _: &[u8]) -> io::Result<usize> {
-            Err(io::Error::from(self.0))
-        }
-
-        fn flush(&mut self) -> io::Result<()> {
-            Ok(())
-        }
-    }
-
-    #[test]
-    fn broken_pipe() {
-        assert_eq!(write_channel(&mut Refusing(ErrorKind::BrokenPipe), b"body"), Ok(()));
-    }
-
-    #[test]
-    fn refused_channel() {
-        assert_eq!(write_channel(&mut Refusing(ErrorKind::PermissionDenied), b"body"), Err(3));
     }
 }

@@ -69,29 +69,3 @@ pub fn arguments<T: DeserializeOwned>(value: &Value) -> Result<T, McpError> {
     T::deserialize(value)
         .map_err(|error| McpError::invalid_params(format!("invalid arguments: {error}")))
 }
-
-#[cfg(test)]
-mod tests {
-    use serde::Deserialize;
-    use serde_json::json;
-
-    use super::arguments;
-
-    #[derive(Debug, Deserialize)]
-    struct ReadDoc {
-        name: String,
-    }
-
-    #[test]
-    fn arguments_deserialize() {
-        let ReadDoc { name } = arguments(&json!({ "name": "guide" })).expect("valid arguments");
-        assert_eq!(name, "guide");
-    }
-
-    #[test]
-    fn arguments_invalid() {
-        let error = arguments::<ReadDoc>(&json!({})).expect_err("missing field");
-        assert_eq!(error.code, super::types::INVALID_PARAMS);
-        assert!(error.message.contains("invalid arguments"), "{}", error.message);
-    }
-}

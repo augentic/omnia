@@ -13,8 +13,9 @@ use axum::middleware::from_fn;
 use axum::routing::get;
 use http::header::CONTENT_TYPE;
 use http::{Request, StatusCode};
-use omnia_sdk::api::http::{Router, Routes, trace};
-use omnia_sdk::api::{Client, Context, ErrorBody, Format, Metadata};
+use omnia_sdk::api::http::trace;
+use omnia_sdk::api::messaging::Delivery;
+use omnia_sdk::api::{Client, Context, ErrorBody, Format, Handlers, Metadata, Router};
 use omnia_sdk::not_found;
 use serde::{Deserialize, Serialize};
 use tower::ServiceExt as _;
@@ -105,16 +106,18 @@ async fn echo_route<P: Send + Sync + 'static>(
     echo(input, context).await.map(Json)
 }
 
-fn routes<P: Send + Sync + 'static>() -> Routes<P> {
-    Routes::from([Routes::new().route("/echo", get(echo_route))])
+fn handlers<P: Send + Sync + 'static>() -> Handlers<P> {
+    Handlers::from([Handlers::new().route("/echo", get(echo_route)).topic("echo", echo)])
 }
 
 fn router() -> Router {
-    routes().with_state(Client::new(())).layer(from_fn(trace))
+    handlers().with_state(Client::new(())).layer(from_fn(trace))
 }
 
-async fn send(router: axum::Router, request: Request<Body>) -> (StatusCode, serde_json::Value) {
-    let response = router.oneshot(request).await.expect("router serves request");
+async fn send(
+    router: impl Into<axum::Router>, request: Request<Body>,
+) -> (StatusCode, serde_json::Value) {
+    let response = router.into().oneshot(request).await.expect("router serves request");
     let status = response.status();
     let bytes = to_bytes(response.into_body(), usize::MAX).await.expect("collect body");
     let value = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
@@ -395,4 +398,187 @@ fn from_lookup_correlation() {
     assert_eq!(metadata.request_id.as_deref(), Some("req-2"));
     assert_eq!(metadata.correlation_id.as_deref(), Some("req-2"));
     assert_eq!(metadata.causation_id, None);
+}
+
+#[tokio::test]
+async fn route_and_topic() {
+    let router = router();
+    let request = Request::get("/echo?name=both").body(Body::empty()).expect("build request");
+
+    let response = router.clone().oneshot(request).await.expect("router serves request");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let delivery = Delivery {
+        topic: Some("echo".to_string()),
+        payload: br#"{"name":"both"}"#.to_vec(),
+        ..Delivery::default()
+    };
+    router.handle(delivery).await.expect("router dispatches delivery");
+}
+
+#[tokio::test]
+async fn capability_error_taxonomy() {
+    use omnia_sdk::{plugins, vcs};
+
+    async fn route(Path(kind): Path<String>) -> Result<Json<()>, omnia_sdk::Error> {
+        match kind.as_str() {
+            "vcs-missing" => Err(vcs::Error::NotFound("v1".into()))?,
+            "vcs-access" => Err(vcs::Error::Access("denied".into()))?,
+            "vcs-pending" => Err(vcs::Error::Pending(vec!["a.rs".into(), "b.md".into()]))?,
+            "vcs-other" => Err(vcs::Error::Other("boom".into()))?,
+            "plugin-refused" => Err(plugins::Error::Refused("r".into()))?,
+            "plugin-unavailable" => Err(plugins::Error::Unavailable("u".into()))?,
+            "plugin-internal" => Err(plugins::Error::Internal("x".into()))?,
+            _ => Ok(Json(())),
+        }
+    }
+
+    let router = axum::Router::new().route("/err/{kind}", get(route)).with_state(Client::new(()));
+
+    for (path, expected_status, expected_code) in [
+        ("/err/vcs-missing", StatusCode::NOT_FOUND, "not-found"),
+        ("/err/vcs-access", StatusCode::BAD_GATEWAY, "access"),
+        ("/err/vcs-pending", StatusCode::BAD_REQUEST, "pending"),
+        ("/err/vcs-other", StatusCode::INTERNAL_SERVER_ERROR, "other"),
+        ("/err/plugin-refused", StatusCode::BAD_REQUEST, "refused"),
+        ("/err/plugin-unavailable", StatusCode::BAD_GATEWAY, "unavailable"),
+        ("/err/plugin-internal", StatusCode::INTERNAL_SERVER_ERROR, "internal"),
+    ] {
+        let request = Request::get(path).body(Body::empty()).expect("build request");
+        let (status, _, body) = send_raw(router.clone(), request).await;
+        assert_eq!(status, expected_status, "{path}");
+        let body: ErrorBody = serde_json::from_str(&body).expect("decode error body");
+        assert_eq!(body.error, expected_code, "{path}");
+    }
+}
+
+#[derive(Deserialize)]
+struct ReadDoc {
+    name: String,
+}
+
+struct Docs;
+
+impl omnia_sdk::mcp::McpServer for Docs {
+    fn info(&self) -> omnia_sdk::mcp::Implementation {
+        omnia_sdk::mcp::Implementation::new("docs", "1.2.3")
+    }
+
+    fn instructions(&self) -> Option<String> {
+        Some("Read the guide first.".to_owned())
+    }
+
+    fn tools(&self) -> Vec<omnia_sdk::mcp::Tool> {
+        vec![omnia_sdk::mcp::Tool::new(
+            "read_doc",
+            "read a document",
+            serde_json::json!({ "type": "object" }),
+        )]
+    }
+
+    fn call_tool(
+        &self, name: &str, arguments: &serde_json::Value,
+    ) -> Result<omnia_sdk::mcp::CallToolResult, omnia_sdk::mcp::McpError> {
+        if name != "read_doc" {
+            return Err(omnia_sdk::mcp::McpError::unknown_tool(name));
+        }
+        let ReadDoc { name } = omnia_sdk::mcp::arguments(arguments)?;
+        if name == "guide" {
+            Ok(omnia_sdk::mcp::CallToolResult::text("the guide body"))
+        } else {
+            Ok(omnia_sdk::mcp::CallToolResult::error(format!("no such doc `{name}`")))
+        }
+    }
+
+    fn resources(&self) -> Vec<omnia_sdk::mcp::Resource> {
+        vec![omnia_sdk::mcp::Resource::new("doc://guide", "guide", "the guide", "text/markdown")]
+    }
+
+    fn read_resource(
+        &self, uri: &str,
+    ) -> Result<omnia_sdk::mcp::ResourceContents, omnia_sdk::mcp::McpError> {
+        if uri == "doc://guide" {
+            Ok(omnia_sdk::mcp::ResourceContents::text(uri, "text/markdown", "the guide body"))
+        } else {
+            Err(omnia_sdk::mcp::McpError::resource_not_found(uri))
+        }
+    }
+}
+
+#[tokio::test]
+async fn mcp_router() {
+    use http::Method;
+    use omnia_sdk::mcp::{self, PROTOCOL_VERSION};
+
+    let app = mcp::router(Docs);
+    let post = |body: serde_json::Value| {
+        let app = app.clone();
+        async move {
+            let req = Request::builder()
+                .method(Method::POST)
+                .uri("/mcp")
+                .header(CONTENT_TYPE, "application/json")
+                .body(Body::from(body.to_string()))
+                .expect("request");
+            send(app, req).await
+        }
+    };
+
+    // initialize (default version and negotiated version)
+    let (status, init) =
+        post(serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize" })).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(init["result"]["protocolVersion"], PROTOCOL_VERSION);
+    assert_eq!(init["result"]["serverInfo"]["name"], "docs");
+    assert_eq!(init["result"]["instructions"], "Read the guide first.");
+
+    // tools/list and tools/call (valid, tool error, invalid params, unknown tool)
+    let (_, list) =
+        post(serde_json::json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" })).await;
+    assert_eq!(list["result"]["tools"][0]["name"], "read_doc");
+
+    let (_, call) = post(serde_json::json!({
+        "jsonrpc": "2.0", "id": 3, "method": "tools/call",
+        "params": { "name": "read_doc", "arguments": { "name": "guide" } }
+    }))
+    .await;
+    assert_eq!(call["result"]["isError"], false);
+    assert_eq!(call["result"]["content"][0]["text"], "the guide body");
+
+    let (_, tool_err) = post(serde_json::json!({
+        "jsonrpc": "2.0", "id": 4, "method": "tools/call",
+        "params": { "name": "read_doc", "arguments": { "name": "missing" } }
+    }))
+    .await;
+    assert_eq!(tool_err["result"]["isError"], true);
+
+    let (_, bad_args) = post(serde_json::json!({
+        "jsonrpc": "2.0", "id": 5, "method": "tools/call",
+        "params": { "name": "read_doc", "arguments": {} }
+    }))
+    .await;
+    assert!(bad_args["error"]["message"].as_str().unwrap().contains("invalid arguments"));
+
+    let (_, unknown_tool) = post(serde_json::json!({
+        "jsonrpc": "2.0", "id": 6, "method": "tools/call",
+        "params": { "name": "nope" }
+    }))
+    .await;
+    assert_eq!(unknown_tool["error"]["message"], "Unknown tool: nope");
+
+    // resources/read and notification (202 Accepted) and GET (405 Method Not Allowed)
+    let (_, res) = post(serde_json::json!({
+        "jsonrpc": "2.0", "id": 7, "method": "resources/read",
+        "params": { "uri": "doc://guide" }
+    }))
+    .await;
+    assert_eq!(res["result"]["contents"][0]["text"], "the guide body");
+
+    let (notif_status, _) =
+        post(serde_json::json!({ "jsonrpc": "2.0", "method": "notifications/initialized" })).await;
+    assert_eq!(notif_status, StatusCode::ACCEPTED);
+
+    let get_req = Request::get("/mcp").body(Body::empty()).expect("get");
+    let (get_status, _) = send(app, get_req).await;
+    assert_eq!(get_status, StatusCode::METHOD_NOT_ALLOWED);
 }

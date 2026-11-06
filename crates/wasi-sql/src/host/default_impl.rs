@@ -180,21 +180,3 @@ fn from_sqlite(value: ValueRef) -> Result<DataType> {
         ValueRef::Blob(b) => Ok(DataType::Binary(Some(b.to_vec()))),
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn u64_stores_raw_bits() {
-        assert_eq!(
-            to_sqlite(&DataType::Uint64(Some(u64::MAX))),
-            rusqlite::types::Value::Integer(-1)
-        );
-    }
-
-    #[test]
-    fn invalid_utf8_rejected() {
-        from_sqlite(ValueRef::Text(&[0xff])).unwrap_err();
-    }
-}

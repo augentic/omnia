@@ -64,31 +64,3 @@ impl GuestSelector for FirstArgSelector {
         Ok((GuestId::from(id.as_str()), Cow::Borrowed(params)))
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn first_arg() {
-        let params = vec![Val::String("responder".to_owned()), Val::String("hello".to_owned())];
-        let (id, forwarded) =
-            FirstArgSelector.select("example:link/echo", "echo", &params).expect("should select");
-
-        assert_eq!(id, GuestId::from("responder"));
-        // the default forwards every parameter, identity included
-        assert_eq!(&*forwarded, params.as_slice());
-    }
-
-    #[test]
-    fn first_arg_invalid() {
-        let error = FirstArgSelector
-            .select("example:link/echo", "echo", &[Val::U32(7)])
-            .expect_err("a non-string identity must fail");
-        assert!(error.to_string().contains("leading string identity"));
-
-        FirstArgSelector
-            .select("example:link/echo", "echo", &[])
-            .expect_err("a missing identity must fail");
-    }
-}

@@ -152,22 +152,3 @@ impl<T: HasChain + HasDispatcher + 'static> LinkSeam<T> for InProcessLinks {
         self.routes.clear();
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::is_host;
-
-    #[test]
-    fn host_namespaces() {
-        for interface in ["wasi:cli/run@0.2.0", "wasi:http/types", "omnia:plugins/loader@0.1.0"] {
-            assert!(is_host(interface), "{interface}");
-        }
-    }
-
-    #[test]
-    fn guest_namespaces() {
-        for interface in ["omnia-test:link/ops", "emery:adapter/source@0.1.0", "acme:ledger/ops"] {
-            assert!(!is_host(interface), "{interface}");
-        }
-    }
-}

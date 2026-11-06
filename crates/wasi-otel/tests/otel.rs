@@ -152,7 +152,7 @@ async fn run(deployment: Deployment, label: &str) -> Recording {
 #[tokio::test]
 async fn otel_instrumented() {
     let recording = run_guest(test_programs::OTEL_INSTRUMENTED).await;
-    assert_eq!(recording.span_names(), ["traced"]);
+    assert_eq!(recording.span_names(), ["sync_traced", "traced"]);
     // no metrics recorded, so the flush skips the export rather than send an empty one
     assert!(recording.metrics.lock().expect("metrics lock").is_empty());
 }
@@ -187,11 +187,14 @@ async fn otel_span_tree() {
     let (api_scope, api) = find("api");
 
     // The `tracing` bridge's spans sit in the layer's scope; the API span in
-    // the tracer's own.
+    // the tracer's own. Spans sharing a scope are grouped into one `ScopeSpans`.
     assert_eq!(
         (parent_scope.as_str(), child_scope.as_str(), api_scope.as_str()),
         ("global", "global", "guest")
     );
+    let traces = recording.traces.lock().expect("traces lock");
+    assert_eq!(traces[0].resource_spans[0].scope_spans.len(), 2);
+    drop(traces);
 
     // One trace: the host's, which re-parents the guest's root to its live
     // span and leaves the children under their guest parent.
@@ -213,9 +216,15 @@ async fn otel_span_tree() {
     assert_eq!(child.status.as_ref().map(|s| s.code), Some(StatusCode::Error as i32));
     assert_eq!(parent.status.as_ref().map(|s| s.code), Some(StatusCode::Unset as i32));
 
-    // The API span's attribute set through `TraceContextExt`.
+    // The API span's attribute and link trace_state set through `TraceContextExt`.
     assert_eq!(attribute(&api.attributes, "kind"), Some(&AnyValue::StringValue("direct".into())));
     assert_eq!(api.status.as_ref().map(|s| s.code), Some(StatusCode::Unset as i32));
+    let [link] = api.links.as_slice() else {
+        panic!("one link on `api`, got {:?}", api.links);
+    };
+    assert_eq!(link.trace_id, [1; 16]);
+    assert_eq!(link.span_id, [2; 8]);
+    assert_eq!(link.trace_state, "vendor=opaque,other=value");
 }
 
 #[tokio::test]

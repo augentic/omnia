@@ -410,7 +410,7 @@ mod http_parity {
     use axum::extract::Query;
     use axum::routing::get;
     use http::{Request, StatusCode};
-    use omnia_sdk::api::{ErrorBody, http as sdk_http};
+    use omnia_sdk::api::{ErrorBody, Handlers};
     use tower::ServiceExt as _;
 
     use super::*;
@@ -430,7 +430,7 @@ mod http_parity {
         let command_body: ErrorBody =
             serde_json::from_slice(&response.stderr).expect("stderr carries an error body");
 
-        let router = sdk_http::Routes::new().route("/items", get(lookup_route)).with_state(client);
+        let router = Handlers::new().route("/items", get(lookup_route)).with_state(client);
         let request =
             Request::builder().uri("/items?id=42").body(Body::empty()).expect("build request");
         let http = router.oneshot(request).await.expect("router serves request");

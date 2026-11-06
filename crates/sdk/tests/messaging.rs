@@ -3,8 +3,8 @@
 use std::future::{Ready, ready};
 use std::sync::{Arc, Mutex};
 
-use omnia_sdk::api::messaging::{Delivery, DeliveryError, Router as MessagingRouter, Topics};
-use omnia_sdk::api::{Client, Context, DecodeError};
+use omnia_sdk::api::messaging::{Delivery, DeliveryError};
+use omnia_sdk::api::{Client, Context, DecodeError, Handlers, Router};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize)]
@@ -49,7 +49,7 @@ fn delivery(topic: Option<&str>, payload: &[u8]) -> Delivery {
 
 #[tokio::test]
 async fn messaging_exact_topic() {
-    let router = MessagingRouter::new(Client::new(())).route("events.created", echo);
+    let router = Router::new(Client::new(())).topic("events.created", echo);
 
     router
         .handle(delivery(Some("events.created"), br#"{"name":"message","count":2}"#))
@@ -63,7 +63,7 @@ async fn messaging_exact_topic() {
 
 #[tokio::test]
 async fn messaging_failures() {
-    let router = MessagingRouter::new(Client::new(())).route("events", echo);
+    let router = Router::new(Client::new(())).topic("events", echo);
 
     assert_eq!(
         router.handle(delivery(None, br#"{"name":"message"}"#)).await,
@@ -78,16 +78,16 @@ async fn messaging_failures() {
 #[test]
 #[should_panic(expected = "duplicate messaging topic")]
 fn dup_topic() {
-    let _router = MessagingRouter::new(Client::new(())).route("events", echo).route("events", echo);
+    let _router = Router::new(Client::new(())).topic("events", echo).topic("events", echo);
 }
 
 #[tokio::test]
 async fn messaging_merged_routes() {
-    let created = Topics::new().route("events.created", echo);
-    let deleted = Topics::new().route("events.deleted", echo);
-    let router = MessagingRouter::new(Client::new(()))
-        .merge(Topics::from([created, deleted]))
-        .route("events.updated", echo);
+    let created = Handlers::new().topic("events.created", echo);
+    let deleted = Handlers::new().topic("events.deleted", echo);
+    let router = Router::new(Client::new(()))
+        .merge(Handlers::from([created, deleted]))
+        .topic("events.updated", echo);
 
     for topic in ["events.created", "events.deleted", "events.updated"] {
         router
@@ -108,16 +108,16 @@ async fn messaging_merged_routes() {
 #[test]
 #[should_panic(expected = "duplicate messaging topic `events`")]
 fn dup_topic_across() {
-    let _routes =
-        Topics::<()>::new().route("events", echo).merge(Topics::new().route("events", echo));
+    let _handlers =
+        Handlers::<()>::new().topic("events", echo).merge(Handlers::new().topic("events", echo));
 }
 
 #[test]
 #[should_panic(expected = "duplicate messaging topic `events`")]
 fn dup_topic_merged() {
-    let _router = MessagingRouter::new(Client::new(()))
-        .route("events", echo)
-        .merge(Topics::new().route("events", echo));
+    let _router = Router::new(Client::new(()))
+        .topic("events", echo)
+        .merge(Handlers::new().topic("events", echo));
 }
 
 fn raw_text<P: Send + Sync + 'static>(
@@ -127,18 +127,15 @@ fn raw_text<P: Send + Sync + 'static>(
 }
 
 #[tokio::test]
-async fn route_with_raw_payload() {
-    let router = MessagingRouter::new(Client::new(())).route_with(
-        "events.raw",
-        raw_text,
-        |delivery: &Delivery| {
+async fn topic_with_raw_payload() {
+    let router =
+        Router::new(Client::new(())).topic_with("events.raw", raw_text, |delivery: &Delivery| {
             std::str::from_utf8(&delivery.payload)
                 .map(|text| RawText {
                     text: text.to_owned(),
                 })
                 .map_err(|error| DecodeError::new(format!("payload is not utf-8: {error}")))
-        },
-    );
+        });
 
     router
         .handle(delivery(Some("events.raw"), b"not-json"))
@@ -156,7 +153,7 @@ async fn tenant_metadata() {
             ready(Ok::<(), omnia_sdk::Error>(()))
         }
     };
-    let router = MessagingRouter::new(Client::new(())).route("events", record);
+    let router = Router::new(Client::new(())).topic("events", record);
 
     router
         .handle(delivery(Some("events"), br#"{"name":"message"}"#))
@@ -167,11 +164,11 @@ async fn tenant_metadata() {
 }
 
 #[tokio::test]
-async fn map_prefixes() {
-    let prefixed = Topics::<()>::new()
-        .route("created", echo)
-        .route("deleted", echo)
-        .map(|topic| format!("dev-{topic}"));
+async fn map_topics_prefixes() {
+    let prefixed = Handlers::<()>::new()
+        .topic("created", echo)
+        .topic("deleted", echo)
+        .map_topics(|topic| format!("dev-{topic}"));
     let router = prefixed.with_state(Client::new(()));
 
     assert_eq!(router.topics().collect::<Vec<_>>(), ["dev-created", "dev-deleted"]);
@@ -187,6 +184,7 @@ async fn map_prefixes() {
 
 #[test]
 #[should_panic(expected = "duplicate messaging topic `same`")]
-fn map_collision() {
-    let _routes = Topics::<()>::new().route("a", echo).route("b", echo).map(|_| "same".to_string());
+fn map_topics_collision() {
+    let _handlers =
+        Handlers::<()>::new().topic("a", echo).topic("b", echo).map_topics(|_| "same".to_string());
 }

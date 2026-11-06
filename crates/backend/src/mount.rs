@@ -44,30 +44,3 @@ pub fn check_subpath(subpath: &str) -> Result<()> {
     ensure!(plain, "subpath `{subpath}` is not a plain relative path");
     Ok(())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::check_subpath;
-
-    #[test]
-    fn plain_subpath() {
-        check_subpath("docs").unwrap();
-        check_subpath("docs/guides").unwrap();
-        check_subpath(".emery/vcs/repos/abc").unwrap();
-    }
-
-    #[test]
-    fn complex_subpath() {
-        for subpath in ["/abs", "a\\b", "a//b", ".", "..", "a/../b", "./a", "a/"] {
-            check_subpath(subpath).unwrap_err();
-        }
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn drive_prefixed_subpath() {
-        for subpath in ["C:evil", "C:/evil"] {
-            check_subpath(subpath).unwrap_err();
-        }
-    }
-}

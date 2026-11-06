@@ -4,15 +4,15 @@ Unreleased
 
 ### Added
 
-- `omnia_sdk::api::http::{Router, Routes}`,
-  `omnia_sdk::api::messaging::{Router, Topics}`, and
+- `omnia_sdk::api::{Handlers, Router}` and
   `omnia_sdk::api::command::{Commands, Router}`: a module registers its
-  HTTP routes on `Routes<P>`, its topics on `Topics<P>`, and its
-  subcommands on `Commands<P>`, `From<[..; N]>` (or `merge`) merges them,
-  `map` rewrites topics or subcommand names, and `with_state(client)`
-  closes each into the guest's `Router`. `command::export!` binds a
-  command router fn (with `WasiProvider` or a custom provider) alongside a
-  zero-argument `async fn` entry.
+  HTTP routes (`route`) and messaging topics (`topic`, `topic_with`) on
+  `Handlers<P>`, and its subcommands on `Commands<P>`, `From<[..; N]>`
+  (or `merge`) merges them, `map_topics` and `Commands::map` rewrite
+  topics or subcommand names, and `with_state(client)` closes each into
+  the guest's `Router`. `command::export!` binds a command router fn
+  (with `WasiProvider` or a custom provider) alongside a zero-argument
+  `async fn` entry.
 
 ---
 

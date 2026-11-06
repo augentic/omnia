@@ -24,7 +24,7 @@ docstore = ["omnia-backend/docstore", "dep:omnia-wasi-docstore"]
 
 # Enables the axum-backed `api::http` handler support and the `mcp` server.
 # The outbound `HttpRequest` capability and `Error::status()` need no feature.
-http = ["dep:axum"]
+http = ["dep:axum", "dep:tower"]
 
 # Enables the clap-backed `api::command` façade (argv parsing, `--format`,
 # shell completions).
@@ -51,6 +51,7 @@ schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+tower = { workspace = true, optional = true }
 tracing.workspace = true
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
@@ -74,7 +75,6 @@ wit-bindgen.workspace = true
 [dev-dependencies]
 http-body-util.workspace = true
 tokio = { workspace = true, features = ["macros", "rt"] }
-tower.workspace = true
 tracing-subscriber.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]

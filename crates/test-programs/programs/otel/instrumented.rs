@@ -15,4 +15,9 @@ async fn scenario() {
 // ERROR-level: the span must pass the guest's default `EnvFilter` (the test
 // environment sets no `RUST_LOG`).
 #[omnia_wasi_otel::instrument(level = Level::ERROR)]
-async fn traced() {}
+async fn traced() {
+    sync_traced();
+}
+
+#[omnia_wasi_otel::instrument(level = Level::ERROR)]
+fn sync_traced() {}

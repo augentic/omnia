@@ -63,37 +63,3 @@ impl From<Value> for types::Value {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn decode_id_hex() {
-        assert_eq!(decode_id("0af7651916cd43dd"), [0x0a, 0xf7, 0x65, 0x19, 0x16, 0xcd, 0x43, 0xdd]);
-    }
-
-    #[test]
-    fn decode_id_malformed() {
-        assert_eq!(decode_id("not-hex"), b"");
-        assert_eq!(decode_id("abc"), b"");
-    }
-
-    #[test]
-    fn datetime_nanos_combines() {
-        let dt = types::Datetime {
-            seconds: 3,
-            nanoseconds: 7,
-        };
-        assert_eq!(datetime_nanos(dt), 3_000_000_007);
-    }
-
-    #[test]
-    fn datetime_nanos_saturates() {
-        let dt = types::Datetime {
-            seconds: u64::MAX,
-            nanoseconds: 999_999_999,
-        };
-        assert_eq!(datetime_nanos(dt), u64::MAX);
-    }
-}

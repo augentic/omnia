@@ -262,6 +262,93 @@ fn queries() {
     assert_eq!(ids, ["b"]);
     assert!(rest.continuation.is_none());
     assert_eq!(now(docs.documents("people")).expect("all").len(), 4);
+
+    // Malformed continuation token is rejected.
+    now(docs.query(
+        "people",
+        QueryOptions {
+            continuation: Some("not-a-number".into()),
+            ..QueryOptions::default()
+        },
+    ))
+    .expect_err("garbage continuation token rejected");
+}
+
+#[test]
+fn query_filters_and_sorting() {
+    let docs = MemoryDocs::default();
+    for (id, body) in [
+        (
+            "a",
+            r#"{"name":"Newmarket Station","route_type":2,"stop":{"zone":{"id":"z1"}},"updated":"2026-03-19T12:00:00Z","rank":1}"#,
+        ),
+        (
+            "b",
+            r#"{"name":"Britomart","route_type":3,"stop":{"zone":{"id":"z2"}},"updated":"2026-03-20T00:00:00Z","rank":1}"#,
+        ),
+        (
+            "c",
+            r#"{"name":"Northern Line","route_type":1,"updated":"2026-12-31T23:59:59Z","rank":"str"}"#,
+        ),
+    ] {
+        now(docs.put("stops", &doc(id, body))).expect("put");
+    }
+
+    let query_ids = |filter: Filter| -> Vec<String> {
+        now(docs.query(
+            "stops",
+            QueryOptions {
+                filter: Some(filter),
+                ..QueryOptions::default()
+            },
+        ))
+        .expect("query")
+        .documents
+        .into_iter()
+        .map(|d| d.id)
+        .collect()
+    };
+
+    assert_eq!(query_ids(Filter::eq("stop.zone.id", "z1")), ["a"]);
+    assert_eq!(query_ids(Filter::ne("stop.zone.id", "z1")), ["b", "c"]);
+    assert_eq!(query_ids(Filter::in_list("route_type", [2, 3])), ["a", "b"]);
+    assert_eq!(query_ids(Filter::not_in_list("route_type", [1, 2])), ["b"]);
+    assert_eq!(query_ids(Filter::is_null("stop.zone.id")), ["c"]);
+    assert_eq!(query_ids(Filter::contains("name", "Station")), ["a"]);
+    assert_eq!(query_ids(Filter::starts_with("name", "Northern")), ["c"]);
+    assert_eq!(query_ids(Filter::ends_with("name", "Line")), ["c"]);
+    assert_eq!(
+        query_ids(Filter::or([
+            Filter::starts_with("name", "Brit"),
+            Filter::ends_with("name", "Line"),
+        ])),
+        ["b", "c"]
+    );
+    assert_eq!(query_ids(Filter::negate(Filter::eq("route_type", 1))), ["a", "b"]);
+    assert_eq!(query_ids(Filter::on_date("updated", "2026-03-19").expect("valid date")), ["a"]);
+    assert_eq!(query_ids(Filter::on_date("updated", "2026-12-31").expect("month end")), ["c"]);
+    Filter::on_date("updated", "2026-13-01").expect_err("invalid month");
+
+    // Multi-field sort and mixed JSON type ordering (number < string).
+    let sorted = now(docs.query(
+        "stops",
+        QueryOptions {
+            order_by: vec![
+                SortField {
+                    field: "rank".into(),
+                    descending: false,
+                },
+                SortField {
+                    field: "route_type".into(),
+                    descending: true,
+                },
+            ],
+            ..QueryOptions::default()
+        },
+    ))
+    .expect("sorted query");
+    let sorted_ids: Vec<_> = sorted.documents.iter().map(|d| d.id.as_str()).collect();
+    assert_eq!(sorted_ids, ["b", "a", "c"]);
 }
 
 // -- ScriptedTables ----------------------------------------------------------

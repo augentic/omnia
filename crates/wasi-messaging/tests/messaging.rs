@@ -80,17 +80,19 @@ fn sole(wasm: &str) -> Deployment {
     Deployment::new().guest("guest", wasm)
 }
 
-// Explicit routes: `guest` handles `orders`, and `absent` — declared from a
-// path that does not exist, so it loads (and fails) at first use — handles
-// `absent`; any other topic has no route.
+// Explicit routes: `guest` handles `orders` and `events.*.created` (`>`
+// and `*` wildcards), and `absent` — declared from a path that does not
+// exist, so it loads (and fails) at first use — handles `absent.>`; any
+// other topic has no route.
 fn routed() -> Deployment {
     let absent = std::env::temp_dir().join("omnia-messaging-absent-guest.wasm");
     Deployment::new()
         .entry(
             GuestEntry::new("guest", test_programs::MESSAGING_PRODUCE_HANDLE)
-                .route_messaging("orders"),
+                .route_messaging("orders")
+                .route_messaging("events.*.created"),
         )
-        .entry(GuestEntry::new("absent", absent).route_messaging("absent"))
+        .entry(GuestEntry::new("absent", absent).route_messaging("absent.>"))
 }
 
 fn order(topic: &str) -> Message {
@@ -220,6 +222,10 @@ async fn no_route() {
     let handler = handler(&runtime);
 
     handler.handle(order("nowhere")).await.expect("an unrouted topic is dropped, not an error");
+    handler
+        .handle(order("events.user.deleted"))
+        .await
+        .expect("a non-matching wildcard topic is dropped");
 
     runtime.shutdown();
 }
@@ -230,7 +236,8 @@ async fn unloadable_guest() {
     let runtime = boot(&routed(), Backends::defaults().await).await;
     let handler = handler(&runtime);
 
-    let error = handler.handle(order("absent")).await.expect_err("an unloadable guest is an error");
+    let error =
+        handler.handle(order("absent.job.1")).await.expect_err("an unloadable guest is an error");
     assert!(
         matches!(&error, HandleError::Unavailable(reason) if reason.contains("absent")),
         "unexpected error: {error}"

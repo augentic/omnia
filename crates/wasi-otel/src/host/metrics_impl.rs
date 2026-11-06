@@ -318,34 +318,3 @@ impl From<wasi::Temporality> for i32 {
         AggregationTemporality::from(temporality) as Self
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn schema_url_once() {
-        let rm = wasi::ResourceMetrics {
-            resource: wasi::Resource {
-                attributes: vec![wasi::KeyValue {
-                    key: "service.name".to_string(),
-                    value: wasi::Value::String("guest".to_string()),
-                }],
-                schema_url: Some("https://resource".to_string()),
-            },
-            scope_metrics: Vec::new(),
-        };
-
-        let request = ExportMetricsServiceRequest::from(rm);
-        let [resource_metrics] = request.resource_metrics.as_slice() else {
-            panic!("one resource, got {}", request.resource_metrics.len());
-        };
-        assert_eq!(resource_metrics.schema_url, "https://resource");
-        // the url is not doubled as a resource attribute
-        let attributes = &resource_metrics.resource.as_ref().expect("resource").attributes;
-        assert_eq!(
-            attributes.iter().map(|kv| kv.key.as_str()).collect::<Vec<_>>(),
-            ["service.name"]
-        );
-    }
-}

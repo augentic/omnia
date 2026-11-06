@@ -96,7 +96,10 @@ fn strict(verdict: &Verdict) -> Result<(), Vec<String>> {
 #[tokio::test]
 async fn accepted() {
     let model = ScriptedModel::answering([r#"{"verdict":"pass","findings":[]}"#]);
-    let verdict = question().ask(&model, "judge this", None, strict).await.expect("a verdict");
+    let question = question().schema(|schema| {
+        schema["properties"]["verdict"]["enum"] = serde_json::json!(["pass", "fail"]);
+    });
+    let verdict = question.ask(&model, "judge this", None, strict).await.expect("a verdict");
     assert_eq!(verdict.verdict, "pass");
 
     let seen = model.seen().remove(0);
@@ -202,12 +205,19 @@ async fn other_tools() {
         }],
     );
     let tools: Tools = Box::new(|call: ToolCall| {
-        Box::pin(async move { Ok(format!("looked up {}", call.arguments)) })
+        Box::pin(async move {
+            #[derive(Deserialize)]
+            struct LookupArgs {
+                id: u32,
+            }
+            let LookupArgs { id } = call.arguments().expect("valid tool arguments");
+            Ok(format!("looked up {id}"))
+        })
     });
     question().ask(&model, "judge this", Some(tools), strict).await.expect("a verdict");
     let exchanges = model.exchanges();
     assert_eq!(exchanges[0].tool, "lookup");
-    assert_eq!(exchanges[0].outcome, Ok(r#"looked up {"id":1}"#.into()));
+    assert_eq!(exchanges[0].outcome, Ok("looked up 1".into()));
     assert_eq!(exchanges[1].tool, "check");
 }
 

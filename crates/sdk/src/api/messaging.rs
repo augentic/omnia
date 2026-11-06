@@ -1,13 +1,15 @@
 //! Typed messaging routing over application handlers.
 //!
-//! A module registers its topics on a [`Topics`] of its own and the guest
-//! merges each (`Topics::from([..])` or [`Topics::merge`]) into its one
-//! [`Router`] over a [`Client`], closing the whole with
-//! [`Topics::with_state`] as [`http::Routes`](crate::api::http::Routes)
-//! does. A route decodes JSON unless registered with
-//! [`Topics::route_with`], and [`Topics::map`] re-keys a module's topics
-//! for the deployment, a prefix say, as they are merged. [`export!`] binds
-//! the router fn as the guest's `wasi:messaging` handler.
+//! A module registers its topics on a [`Handlers`](crate::api::Handlers) of
+//! its own and the guest merges each (`Handlers::from([..])` or
+//! [`Handlers::merge`](crate::api::Handlers::merge)) into its one
+//! [`Router`](crate::api::Router) over a [`Client`], closing the whole with
+//! [`Handlers::with_state`](crate::api::Handlers::with_state). A topic
+//! decodes JSON unless registered with
+//! [`Handlers::topic_with`](crate::api::Handlers::topic_with), and
+//! [`Handlers::map_topics`](crate::api::Handlers::map_topics) re-keys a
+//! module's topics for the deployment, a prefix say, as they are merged.
+//! [`export!`] binds the router fn as the guest's `wasi:messaging` handler.
 
 use std::collections::BTreeMap;
 use std::error::Error;
@@ -103,6 +105,114 @@ impl fmt::Display for DeliveryError {
 
 impl Error for DeliveryError {}
 
+/// Adapt a WIT message to an owned delivery and dispatch it.
+///
+/// The current WIT contract carries only `result<_, error>`: success
+/// acknowledges the delivery, while every router failure is returned as
+/// `error.other` for the host to interpret.
+///
+/// # Errors
+///
+/// Returns the WIT delivery failure.
+#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
+pub async fn handle<P: Send + Sync + 'static>(
+    router: &crate::api::Router<P>, message: omnia_wasi_messaging::types::Message,
+) -> Result<(), omnia_wasi_messaging::types::Error> {
+    let delivery = Delivery {
+        topic: message.topic(),
+        payload: message.data(),
+        content_type: message.content_type(),
+        metadata: message.metadata().unwrap_or_default(),
+    };
+    router
+        .handle(delivery)
+        .await
+        .map_err(|error| omnia_wasi_messaging::types::Error::Other(error.to_string()))
+}
+
+pub(crate) struct Topics<P: Send + Sync + 'static> {
+    routes: BTreeMap<String, Arc<dyn ErasedRoute<P>>>,
+}
+
+impl<P: Send + Sync + 'static> Topics<P> {
+    pub(crate) fn new() -> Self {
+        Self {
+            routes: BTreeMap::new(),
+        }
+    }
+
+    pub(crate) fn route<F, I>(self, topic: impl Into<String>, handler: F) -> Self
+    where
+        F: Handler<P, I>,
+        I: DeserializeOwned + Send + 'static,
+    {
+        self.route_with(topic, handler, |delivery: &Delivery| {
+            serde_json::from_slice(&delivery.payload)
+                .map_err(|error| DecodeError::new(format!("malformed JSON payload: {error}")))
+        })
+    }
+
+    pub(crate) fn route_with<F, I, D>(self, topic: impl Into<String>, handler: F, decode: D) -> Self
+    where
+        F: Handler<P, I>,
+        I: Send + 'static,
+        D: Fn(&Delivery) -> Result<I, DecodeError> + Send + Sync + 'static,
+    {
+        let route = Route::<P, F, I, D> {
+            handler,
+            decode,
+            marker: PhantomData,
+        };
+        self.insert(topic.into(), Arc::new(route))
+    }
+
+    pub(crate) fn merge(self, other: Self) -> Self {
+        other.routes.into_iter().fold(self, |routes, (topic, route)| routes.insert(topic, route))
+    }
+
+    pub(crate) fn map(self, mut map: impl FnMut(&str) -> String) -> Self {
+        self.routes
+            .into_iter()
+            .fold(Self::new(), |routes, (topic, route)| routes.insert(map(&topic), route))
+    }
+
+    pub(crate) fn topics(&self) -> impl Iterator<Item = &str> {
+        self.routes.keys().map(String::as_str)
+    }
+
+    pub(crate) async fn handle(
+        &self, delivery: Delivery, client: &Client<P>,
+    ) -> Result<(), DeliveryError> {
+        let topic = delivery.topic.as_deref().ok_or(DeliveryError::MissingTopic)?;
+        let route = self
+            .routes
+            .get(topic)
+            .ok_or_else(|| DeliveryError::UnhandledTopic(topic.to_owned()))?;
+        route.dispatch(&delivery, client).await
+    }
+
+    fn insert(mut self, topic: String, route: Arc<dyn ErasedRoute<P>>) -> Self {
+        assert!(!topic.is_empty(), "messaging topic cannot be empty");
+        assert!(!self.routes.contains_key(&topic), "duplicate messaging topic `{topic}`");
+        self.routes.insert(topic, route);
+        self
+    }
+}
+
+impl<P: Send + Sync + 'static> Clone for Topics<P> {
+    fn clone(&self) -> Self {
+        Self {
+            routes: self.routes.clone(),
+        }
+    }
+}
+
+impl<P: Send + Sync + 'static> fmt::Debug for Topics<P> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_set().entries(self.routes.keys()).finish()
+    }
+}
+
 type DispatchFuture<'a> = Pin<Box<dyn Future<Output = Result<(), DeliveryError>> + Send + 'a>>;
 
 struct Route<P, F, I, D> {
@@ -140,204 +250,4 @@ where
                 .map_err(|error| DeliveryError::Rejected(error.to_string()))
         })
     }
-}
-
-/// Exact-topic routes awaiting the client that dispatches them.
-///
-/// Two routes for one topic are refused when they meet, whether through
-/// [`route`](Self::route), [`merge`](Self::merge), `Topics::from([..])`, or
-/// [`map`](Self::map).
-#[must_use = "topics dispatch nothing until closed into a `Router`"]
-pub struct Topics<P: Send + Sync + 'static> {
-    routes: BTreeMap<String, Arc<dyn ErasedRoute<P>>>,
-}
-
-impl<P: Send + Sync + 'static> Default for Topics<P> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl<P: Send + Sync + 'static> Topics<P> {
-    /// Create an empty set of topic routes.
-    pub fn new() -> Self {
-        Self {
-            routes: BTreeMap::new(),
-        }
-    }
-
-    /// Register one handler for one exact topic, decoding the payload as JSON.
-    ///
-    /// # Panics
-    ///
-    /// Panics when the topic is empty or already registered.
-    pub fn route<F, I>(self, topic: impl Into<String>, handler: F) -> Self
-    where
-        F: Handler<P, I>,
-        I: DeserializeOwned + Send + 'static,
-    {
-        self.route_with(topic, handler, |delivery: &Delivery| {
-            serde_json::from_slice(&delivery.payload)
-                .map_err(|error| DecodeError::new(format!("malformed JSON payload: {error}")))
-        })
-    }
-
-    /// Register one handler for one exact topic with a decoder over the whole delivery.
-    ///
-    /// # Panics
-    ///
-    /// Panics when the topic is empty or already registered.
-    pub fn route_with<F, I, D>(self, topic: impl Into<String>, handler: F, decode: D) -> Self
-    where
-        F: Handler<P, I>,
-        I: Send + 'static,
-        D: Fn(&Delivery) -> Result<I, DecodeError> + Send + Sync + 'static,
-    {
-        let route = Route::<P, F, I, D> {
-            handler,
-            decode,
-            marker: PhantomData,
-        };
-        self.insert(topic.into(), Arc::new(route))
-    }
-
-    /// Take every topic route of `other`.
-    ///
-    /// # Panics
-    ///
-    /// Panics when a topic of `other` is already registered.
-    pub fn merge(self, other: Self) -> Self {
-        other.routes.into_iter().fold(self, |routes, (topic, route)| routes.insert(topic, route))
-    }
-
-    /// Re-key every topic through `map`, so topics registered under a bare
-    /// name are mounted under the deployment's.
-    ///
-    /// # Panics
-    ///
-    /// Panics when `map` yields an empty topic or one topic for two routes.
-    pub fn map(self, mut map: impl FnMut(&str) -> String) -> Self {
-        self.routes
-            .into_iter()
-            .fold(Self::new(), |routes, (topic, route)| routes.insert(map(&topic), route))
-    }
-
-    /// Close the topics over `client` as the [`Router`] that dispatches them.
-    pub const fn with_state(self, client: Client<P>) -> Router<P> {
-        Router { client, routes: self }
-    }
-
-    fn insert(mut self, topic: String, route: Arc<dyn ErasedRoute<P>>) -> Self {
-        assert!(!topic.is_empty(), "messaging topic cannot be empty");
-        assert!(!self.routes.contains_key(&topic), "duplicate messaging topic `{topic}`");
-        self.routes.insert(topic, route);
-        self
-    }
-}
-
-impl<P: Send + Sync + 'static, const N: usize> From<[Self; N]> for Topics<P> {
-    fn from(parts: [Self; N]) -> Self {
-        parts.into_iter().reduce(Self::merge).unwrap_or_default()
-    }
-}
-
-/// An exact-topic messaging router.
-#[must_use = "a router dispatches nothing until it handles a delivery"]
-pub struct Router<P: Send + Sync + 'static> {
-    client: Client<P>,
-    routes: Topics<P>,
-}
-
-impl<P: Send + Sync + 'static> Router<P> {
-    /// Create an empty router backed by a client.
-    pub fn new(client: Client<P>) -> Self {
-        Self {
-            client,
-            routes: Topics::new(),
-        }
-    }
-
-    /// Register one handler for one exact topic, decoding the payload as JSON.
-    ///
-    /// # Panics
-    ///
-    /// Panics when the topic is empty or already registered.
-    pub fn route<F, I>(mut self, topic: impl Into<String>, handler: F) -> Self
-    where
-        F: Handler<P, I>,
-        I: DeserializeOwned + Send + 'static,
-    {
-        self.routes = self.routes.route(topic, handler);
-        self
-    }
-
-    /// Register one handler for one exact topic with a decoder over the whole delivery.
-    ///
-    /// # Panics
-    ///
-    /// Panics when the topic is empty or already registered.
-    pub fn route_with<F, I, D>(mut self, topic: impl Into<String>, handler: F, decode: D) -> Self
-    where
-        F: Handler<P, I>,
-        I: Send + 'static,
-        D: Fn(&Delivery) -> Result<I, DecodeError> + Send + Sync + 'static,
-    {
-        self.routes = self.routes.route_with(topic, handler, decode);
-        self
-    }
-
-    /// Take every topic route of `topics`.
-    ///
-    /// # Panics
-    ///
-    /// Panics when a topic of `topics` is already registered.
-    pub fn merge(mut self, topics: Topics<P>) -> Self {
-        self.routes = self.routes.merge(topics);
-        self
-    }
-
-    /// The exact topics registered on this router, in order.
-    pub fn topics(&self) -> impl Iterator<Item = &str> {
-        self.routes.routes.keys().map(String::as_str)
-    }
-
-    /// Dispatch one delivery by exact topic.
-    ///
-    /// # Errors
-    ///
-    /// Returns missing-topic, unhandled-topic, decoding, or handler failures.
-    pub async fn handle(&self, delivery: Delivery) -> Result<(), DeliveryError> {
-        let topic = delivery.topic.as_deref().ok_or(DeliveryError::MissingTopic)?;
-        let route = self
-            .routes
-            .routes
-            .get(topic)
-            .ok_or_else(|| DeliveryError::UnhandledTopic(topic.to_owned()))?;
-        route.dispatch(&delivery, &self.client).await
-    }
-}
-
-/// Adapt a WIT message to an owned delivery and dispatch it.
-///
-/// The current WIT contract carries only `result<_, error>`: success
-/// acknowledges the delivery, while every router failure is returned as
-/// `error.other` for the host to interpret.
-///
-/// # Errors
-///
-/// Returns the WIT delivery failure.
-#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
-pub async fn handle<P: Send + Sync + 'static>(
-    router: &Router<P>, message: omnia_wasi_messaging::types::Message,
-) -> Result<(), omnia_wasi_messaging::types::Error> {
-    let delivery = Delivery {
-        topic: message.topic(),
-        payload: message.data(),
-        content_type: message.content_type(),
-        metadata: message.metadata().unwrap_or_default(),
-    };
-    router
-        .handle(delivery)
-        .await
-        .map_err(|error| omnia_wasi_messaging::types::Error::Other(error.to_string()))
 }

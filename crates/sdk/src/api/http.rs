@@ -7,14 +7,14 @@
 //! [`Error`](crate::Error), the JSON [`ErrorBody`] at its status; `?` on an
 //! `anyhow::Error` reaches the same envelope. A domain error with a wire shape
 //! of its own implements `IntoResponse` itself. A module builds its routes
-//! as a [`Routes`] of its own and the guest merges them (`Routes::from([..])`
-//! or [`Routes::merge`]) into its one [`Router`] with
-//! `with_state(Client::new(provider))`. [`export!`] binds the router fn as
-//! the guest's `wasi:http` handler and serves each request inside the
-//! `handler` span [`trace`] opens.
+//! and topics on a [`Handlers`](crate::api::Handlers) of its own and the
+//! guest merges them (`Handlers::from([..])` or
+//! [`Handlers::merge`](crate::api::Handlers::merge)) into its one
+//! [`api::Router`](crate::api::Router) with `with_state(Client::new(provider))`.
+//! [`export!`] binds the router fn as the guest's `wasi:http` handler and
+//! serves each request inside the `handler` span [`trace`] opens.
 
 use std::convert::Infallible;
-use std::fmt;
 use std::future::{Future, ready};
 use std::sync::Arc;
 
@@ -22,7 +22,6 @@ use axum::Json;
 use axum::extract::{FromRef, FromRequestParts, Request};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use axum::routing::MethodRouter;
 use http::HeaderMap;
 use http::request::Parts;
 use tracing::Instrument as _;
@@ -53,7 +52,7 @@ macro_rules! __export_http {
                     $crate::wasip3::http::types::ErrorCode,
                 > {
                     let router = $crate::axum::Router::layer(
-                        $router($provider),
+                        $crate::axum::Router::from($router($provider)),
                         $crate::axum::middleware::from_fn($crate::api::http::trace),
                     );
                     $crate::api::http::serve(router, request).await
@@ -67,9 +66,9 @@ macro_rules! __export_http {
 ///
 /// Calls the router fn on each request with [`WasiProvider`](crate::WasiProvider),
 /// or with the provider expression passed as a second argument, and serves the
-/// request through the resulting `axum::Router` inside the `handler` span
-/// [`trace`] opens. Expands to nothing on native targets, so the same crate's
-/// tests build the router natively.
+/// request through the resulting router inside the `handler` span [`trace`]
+/// opens. Expands to nothing on native targets, so the same crate's tests
+/// build the router natively.
 ///
 /// ```rust,ignore
 /// use omnia_sdk::api::http;
@@ -79,78 +78,8 @@ macro_rules! __export_http {
 #[doc(inline)]
 pub use crate::__export_http as export;
 
-/// HTTP routes over a provider-owning [`Client`], awaiting their state.
-///
-/// A module registers its paths on one of these and the guest merges them
-/// (`Routes::from([..])` or [`merge`](Self::merge)), closing the whole with
-/// [`with_state`](Self::with_state) into a [`Router`], as topics are
-/// [`messaging::Topics`](crate::api::messaging::Topics) closed into a
-/// [`messaging::Router`](crate::api::messaging::Router).
-#[must_use = "routes serve nothing until closed into a `Router` with `with_state`"]
-pub struct Routes<P: Send + Sync + 'static>(axum::Router<Client<P>>);
-
-impl<P: Send + Sync + 'static> Default for Routes<P> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl<P: Send + Sync + 'static> Routes<P> {
-    /// Create an empty set of routes.
-    pub fn new() -> Self {
-        Self(axum::Router::new())
-    }
-
-    /// Register a [`MethodRouter`] at `path`.
-    ///
-    /// # Panics
-    ///
-    /// Panics when `path` overlaps an existing route for the same method.
-    pub fn route(self, path: &str, method_router: MethodRouter<Client<P>>) -> Self {
-        Self(self.0.route(path, method_router))
-    }
-
-    /// Take every route of `other`.
-    ///
-    /// # Panics
-    ///
-    /// Panics when a path of `other` overlaps an existing route for the same method.
-    pub fn merge(self, other: Self) -> Self {
-        Self(self.0.merge(other.0))
-    }
-
-    /// Close the routes over `client` as the [`Router`] that serves them.
-    pub fn with_state(self, client: Client<P>) -> Router {
-        self.0.with_state(client)
-    }
-}
-
-impl<P: Send + Sync + 'static, const N: usize> From<[Self; N]> for Routes<P> {
-    fn from(parts: [Self; N]) -> Self {
-        parts.into_iter().reduce(Self::merge).unwrap_or_default()
-    }
-}
-
-impl<P: Send + Sync + 'static> Clone for Routes<P> {
-    fn clone(&self) -> Self {
-        Self(self.0.clone())
-    }
-}
-
-impl<P: Send + Sync + 'static> fmt::Debug for Routes<P> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
 /// A finished `axum::Router` ready to serve requests, or one over state `S`.
 pub type Router<S = ()> = axum::Router<S>;
-
-impl<P: Send + Sync + 'static> From<Routes<P>> for axum::Router<Client<P>> {
-    fn from(routes: Routes<P>) -> Self {
-        routes.0
-    }
-}
 
 /// Serve a request inside a `handler` span carrying its request and correlation ids.
 ///

@@ -91,8 +91,8 @@ async fn run_scripted(wasm: &str, mounts: Vec<Mount>, model: ScriptedModel) -> S
 }
 
 // the candidates the `check_*` scenarios' scripted backend proposes
-const PASS: &str = r#"{"verdict":"pass","findings":[]}"#;
-const FAIL: &str = r#"{"verdict":"fail","findings":["x"]}"#;
+const PASS: &str = r#"{"findings":[],"verdict":"pass"}"#;
+const FAIL: &str = r#"{"findings":["x"],"verdict":"fail"}"#;
 
 fn check(candidate: &str, outcome: Result<&str, &str>) -> Exchange {
     Exchange {
@@ -115,12 +115,14 @@ fn lookup_turn(answer: &str) -> ScriptedModel {
     ScriptedModel::answering([answer]).calling(0, [("lookup", "{}")])
 }
 
-// read the seed, write `out.txt`, list the root, answer
+// read the seed, write `out.txt`, list the root and a subdirectory, answer
 fn workspace_turn() -> ScriptedModel {
-    ScriptedModel::answering(["hello:out.txt,seed.txt"])
+    ScriptedModel::answering(["hello:docs,out.txt,seed.txt"])
         .reading(0, "seed.txt")
         .writing(0, "out.txt", "written")
+        .writing(0, "docs/a.txt", "a")
         .listing(0, "")
+        .listing(0, "docs")
 }
 
 // what a fully served `workspace_turn` records
@@ -133,7 +135,9 @@ fn workspace_exchanges() -> Vec<Exchange> {
     vec![
         exchange("read", "seed.txt", "hello"),
         exchange("write", "out.txt", ""),
-        exchange("list", "", "out.txt,seed.txt"),
+        exchange("write", "docs/a.txt", ""),
+        exchange("list", "", "docs,out.txt,seed.txt"),
+        exchange("list", "docs", "a.txt"),
     ]
 }
 
@@ -207,7 +211,7 @@ async fn model_invalid_request() {
 
 #[tokio::test]
 async fn model_schema_answer() {
-    let model = ScriptedModel::answering([r#"{"verdict":"pass"}"#]);
+    let model = ScriptedModel::answering(["Done.\n```json\n{\"verdict\":\"pass\"}\n```"]);
     let model = run_scripted(test_programs::MODEL_SCHEMA_ANSWER, vec![], model).await;
     assert!(!model.seen()[0].check, "no check was asked for");
     assert_eq!(model.exchanges(), vec![]);
@@ -398,6 +402,7 @@ async fn model_ooo_results() {
 #[tokio::test]
 async fn model_workspace_tools() {
     let workspace = scratch();
+    fs::create_dir(workspace.path().join("docs")).expect("creating docs dir");
     fs::write(workspace.path().join("seed.txt"), "hello").expect("seeding workspace");
 
     let model = run_scripted(
@@ -438,6 +443,7 @@ async fn model_workspace_subpath() {
     let workspace = scratch();
     let nested = workspace.path().join("nested");
     fs::create_dir(&nested).expect("creating nested dir");
+    fs::create_dir(nested.join("docs")).expect("creating nested docs dir");
     fs::write(nested.join("seed.txt"), "hello").expect("seeding nested workspace");
 
     let model = run_scripted(
