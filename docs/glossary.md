@@ -80,7 +80,7 @@ The transport-neutral unit of guest application logic: an `async fn(I, Context<P
 
 ### Command façade
 
-`omnia_sdk::api::command`, the command-line adapter over the handler contract: `parse` classifies argv into the clap grammar or one of clap's own responses (`Parsed`), `Command::new(&client, &metadata, format).call(handler, decode, render)` projects one verb (decode → `Client::call` → encode) onto a `Response { stdout, stderr, exit }`, and `command::export!(main)` binds the entry as the `wasi:cli/run` export, writing the channels at that boundary. The clap-backed parts ship behind the `command` cargo feature. Distinct from the host-side **`omnia-cli`** crate, which is the `run` grammar of a host binary.
+`omnia_sdk::api::command`, the command-line adapter over the handler contract: `Handlers::command(name, handler)` registers a subcommand beside a module's paths and topics, the closed `Router` `run`s argv (clap decode → `Client::call` → encode in the selected `Format`, the output's `Render` form as text) onto a `Response { stdout, stderr, exit }`, and `command::export!(command_router)` binds the router fn as the `wasi:cli/run` export, writing the channels at that boundary. `parse` and `Command::call` are the same pieces for a hand-written clap grammar. The clap-backed parts ship behind the `command` cargo feature. Distinct from the host-side **`omnia-cli`** crate, which is the `run` grammar of a host binary.
 
 ### Failure envelope
 

@@ -58,7 +58,7 @@ macro_rules! __export_messaging {
 ///
 /// Awaits the router fn on each delivery with [`WasiProvider`](crate::WasiProvider),
 /// or with the provider expression passed as a second argument, and dispatches
-/// the delivery through the resulting [`Router`]. Expands to nothing on native
+/// the delivery through the resulting [`Router`](crate::api::Router). Expands to nothing on native
 /// targets, so the same crate's tests build the router natively.
 ///
 /// ```rust,ignore

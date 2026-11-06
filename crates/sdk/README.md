@@ -69,40 +69,37 @@ pub async fn messaging_router<P: StateStore + Send + Sync + 'static>(provider: P
 messaging::export!(messaging_router);
 ```
 
-`topic(topic, handler)` decodes JSON and acknowledges successful output; `topic_with(topic, handler, decode)` takes a decoder `Fn(&Delivery) -> Result<I, DecodeError>` over the whole delivery for any other wire format. A module registers its HTTP routes and messaging topics on a `Handlers<P>` of its own, with no client, and the root merges each (`Handlers::from([..])` or `Router::merge`) and closes the whole into the one `Router<P>` with `Handlers::with_state`; `Handlers::map_topics` rewrites every topic once, for an environment prefix or a namespace. `Client::call(handler, input, &metadata)` invokes a `Handler` directly inside the same `handler` span.
+`topic(topic, handler)` decodes JSON and acknowledges successful output; `topic_with(topic, handler, decode)` takes a decoder `Fn(&Delivery) -> Result<I, DecodeError>` over the whole delivery for any other wire format. A module registers its HTTP routes, messaging topics, and subcommands on a `Handlers<P>` of its own, with no client, and the root merges each (`Handlers::from([..])` or `Router::merge`) and closes the whole into the one `Router<P>` with `Handlers::with_state`; `Handlers::map_topics` rewrites every topic once, for an environment prefix or a namespace. `Client::call(handler, input, &metadata)` invokes a `Handler` directly inside the same `handler` span.
 
 ### Command-mode guests
 
-`api::command` is the command-line transport over `Handler`s (`command` feature for the clap-backed router): a module registers its subcommands on a `command::Commands<P>` with `route(name, handler, render)` (where the handler's input implements `clap::Args`, including `()`) or `route_with(subcommand, handler, decode, render)`, and the guest merges them (`Commands::from([..])` or `Commands::merge`) and closes them with `with_state(Client::new(provider))` into a `command::Router<P>`, as `http` and `messaging` do. `command::export!(command_router)` binds the router fn as the `wasi:cli/run` export (or a zero-argument `async fn` returning `IntoExit`) and writes the channels at that boundary. Omnia creates a fresh component instance for each command invocation.
+A subcommand is one more handler on the same `Handlers<P>` (`command` feature): `command(name, handler)` registers it beside the paths and topics, where the handler's input implements `clap::Args` (`()` included) and its output `Serialize` and `api::Render`, and `command_with(subcommand, handler, decode)` takes a `clap::Command` with a decoder `Fn(&ArgMatches) -> Result<I, DecodeError>` for any other grammar. The same `with_state(Client::new(provider))` closes the whole into the `Router<P>` that `run`s argv, and `command::export!(command_router)` binds the router fn as the `wasi:cli/run` export (or a zero-argument `async fn` returning `IntoExit`), writing the channels at that boundary. Omnia creates a fresh component instance for each command invocation.
 
 ```rust,ignore
-use std::fmt;
-
 use clap::Args;
-use omnia_sdk::api::command::{self, Commands, Router};
-use omnia_sdk::api::{Client, Context};
+use omnia_sdk::api::{Client, Context, Handlers, Router, command};
 
+/// Create an item by name.
 #[derive(Args)]
 struct CreateItem {
+    /// The item's name
     name: String,
 }
 
-fn render_unit((): &(), _out: &mut dyn fmt::Write) -> fmt::Result {
-    Ok(())
+async fn create<P: StateStore>(input: CreateItem, context: Context<P>) -> omnia_sdk::Result<()> {
+    // ...
 }
 
 pub fn command_router<P: StateStore + Send + Sync + 'static>(provider: P) -> Router<P> {
-    Commands::new()
-        .route("create", item_created, render_unit)
-        .with_state(Client::new(provider))
+    Handlers::new().command("create", create).with_state(Client::new(provider))
 }
 
 command::export!(command_router);
 ```
 
-A success body is encoded in the selected `api::Format` (`--format text|json`; `Text` through the `render` closure, `Json` pretty-printed) onto stdout at exit 0. A decode or handler error is a `Failure` envelope on stderr at `Error::exit_code()` — `BadRequest` 1, `NotFound` 2, `ServerError` 3, `BadGateway` 4 — rendered as `error[<code>]: <message>` (plus `hint: …` when `.hints(..)` or `with_hint` attached one) or as flat JSON `{"error","message","exit-code","hint"?}`; `error` and `message` are the same `ErrorBody` HTTP emits. A clap usage error exits `USAGE_EXIT` (64), so exit 2 always means `NotFound`. `Metadata::from_env(prefix)` reads `<PREFIX>_REQUEST_ID` / `_CORRELATION_ID` / `_CAUSATION_ID` / `_TENANT`, minting a request id when absent as every transport does.
+The input type's doc comments are the help text (the struct's for the subcommand, each field's for its argument). A success body is encoded in the selected `api::Format` (`--format text|json`; `Text` through the output's `Render` impl, `Json` pretty-printed) onto stdout at exit 0. A decode or handler error is a `Failure` envelope on stderr at `Error::exit_code()` — `BadRequest` 1, `NotFound` 2, `ServerError` 3, `BadGateway` 4 — rendered as `error[<code>]: <message>` (plus `hint: …` when `Router::hints(..)` or `with_hint` attached one) or as flat JSON `{"error","message","exit-code","hint"?}`; `error` and `message` are the same `ErrorBody` HTTP emits. A clap usage error exits `USAGE_EXIT` (64), so exit 2 always means `NotFound`. `Metadata::from_env(prefix)` reads `<PREFIX>_REQUEST_ID` / `_CORRELATION_ID` / `_CAUSATION_ID` / `_TENANT`, minting a request id when absent as every transport does.
 
-The runtime's verbosity flags — `-v`/`--verbose` and `-q`/`--quiet`, each repetition one level from the command's default of `info` — are read by the host out of argv and set the bare level of the guest's `RUST_LOG` before it runs (the process `RUST_LOG`'s targeted directives stay on top); `command::Router` includes them (along with `--format`) automatically, and a hand-written clap grammar declares them with `#[command(flatten)] verbosity: omnia_sdk::api::command::Verbosity`.
+The router is also the program: `--version` answers the guest crate's `CARGO_PKG_VERSION` and `--help` opens with its `CARGO_PKG_DESCRIPTION`, both stamped by `command::export!`, and `Router::name`, `version`, `about`, and `env_prefix` override them. The runtime's verbosity flags — `-v`/`--verbose` and `-q`/`--quiet`, each repetition one level from the command's default of `info` — are read by the host out of argv and set the bare level of the guest's `RUST_LOG` before it runs (the process `RUST_LOG`'s targeted directives stay on top); the router declares them (along with `--format`) itself, and a hand-written clap grammar declares them with `#[command(flatten)] verbosity: omnia_sdk::api::command::Verbosity`.
 
 ## Capabilities
 
@@ -167,7 +164,7 @@ See the [workspace documentation](https://github.com/augentic/omnia) for the ful
 - `sql` *(default)*: the `TableStore` capability over `wasi:sql`.
 - `docstore` *(default)*: the `DocumentStore` capability and the `docstore` re-exports.
 - `http` *(default)*: the axum-backed `api::http` handler support (the `Context` and `Metadata` extractors, `trace`, `Error: IntoResponse`, and `http::export!`) and the `mcp` server. The outbound `HttpRequest` capability and `Error::status()` need no feature.
-- `command`: the clap-backed parts of `api::command` (`parse`, `completions`, `Response::usage`, the `clap_complete::Shell` re-export, and the `clap::ValueEnum` derive on `api::Format`). The `Command` projector, `Response`, `Failure`, and `command::export!` need no feature.
+- `command`: the clap-backed parts of `api::command` (`Handlers::command`, the `Router`'s program methods and `run`, `parse`, `completions`, `Response::usage`, the `clap_complete::Shell` re-export, and the `clap::ValueEnum` derive on `api::Format`). The `Command` projector, `Response`, `Failure`, `api::Render`, and `command::export!` need no feature.
 
 Guests that do not use SQL, documents, or inbound HTTP can disable defaults to shrink wasm build time and size, naming only the capabilities they use (`features = ["sql"]` for `TableStore` alone); a command-only guest is `default-features = false, features = ["command"]`.
 
