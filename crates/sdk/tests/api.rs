@@ -15,7 +15,7 @@ use http::header::CONTENT_TYPE;
 use http::{Request, StatusCode};
 use omnia_sdk::api::http::trace;
 use omnia_sdk::api::messaging::Delivery;
-use omnia_sdk::api::{Client, Context, ErrorBody, Format, Handlers, Metadata, Router};
+use omnia_sdk::api::{Client, Context, ErrorBody, Format, Handlers, Metadata, Render, Router};
 use omnia_sdk::not_found;
 use serde::{Deserialize, Serialize};
 use tower::ServiceExt as _;
@@ -335,8 +335,10 @@ async fn anyhow_error_body() {
     assert!(body.message.contains("disk full"), "the cause is kept: {}", body.message);
 }
 
-fn render_summary(summary: &Summary, out: &mut dyn std::fmt::Write) -> std::fmt::Result {
-    write!(out, "{} x{}", summary.name, summary.count)
+impl Render for Summary {
+    fn render(&self, out: &mut dyn std::fmt::Write) -> std::fmt::Result {
+        write!(out, "{} x{}", self.name, self.count)
+    }
 }
 
 #[test]
@@ -346,11 +348,11 @@ fn format_encode() {
         count: 3,
     };
 
-    let text = Format::Text.encode(&summary, render_summary);
+    let text = Format::Text.encode(&summary);
     assert_eq!(text.media_type, "text/plain; charset=utf-8");
     assert_eq!(text.bytes, b"widget x3");
 
-    let json = Format::Json.encode(&summary, render_summary);
+    let json = Format::Json.encode(&summary);
     assert_eq!(json.media_type, "application/json");
     let json = String::from_utf8(json.bytes).expect("json is utf-8");
     assert!(json.ends_with('\n'));

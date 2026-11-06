@@ -1,41 +1,55 @@
 //! The command façade: argv in, buffered channels and an exit status out.
 //!
-//! A module registers its subcommands on a [`Commands`] of its own and the
-//! guest merges each (`Commands::from([..])` or [`Commands::merge`]) into its
-//! one [`Router`] over a [`Client`], closing the whole with
-//! [`Commands::with_state`] as [`Handlers`](crate::api::Handlers) does. Each
-//! subcommand decodes its input through [`clap::Args`] (or a custom decoder
-//! registered with [`Commands::route_with`]), runs the [`Handler`] through
-//! [`Client::call`], and encodes a success body onto stdout in the selected [`Format`] or a
-//! [`Failure`] envelope onto stderr at [`Error::exit_code`](crate::Error::exit_code);
-//! a clap usage error exits [`USAGE_EXIT`]. [`export!`] binds the router fn
-//! (or a zero-argument `async fn` entry) as the `wasi:cli/run` export and
-//! [`IntoExit`] writes the channels at that boundary.
+//! A subcommand is one more handler on a [`Handlers`](crate::api::Handlers).
+//! [`Handlers::command`](crate::api::Handlers::command) registers it beside
+//! the paths and topics, decoding its arguments through [`clap::Args`];
+//! [`Handlers::command_with`](crate::api::Handlers::command_with) takes a
+//! decoder over the [`clap::ArgMatches`] instead. The closed
+//! [`Router`](crate::api::Router) [`run`](crate::api::Router::run)s argv:
+//!
+//! - the verb's [`Handler`] runs through [`Client::call`]
+//! - a success body is encoded onto stdout in the selected [`Format`], its
+//!   text form the output's [`Render`]
+//! - a [`Failure`] envelope goes to stderr at
+//!   [`Error::exit_code`](crate::Error::exit_code)
+//! - a clap usage error exits [`USAGE_EXIT`]
+//!
+//! [`export!`] binds the router fn (or a zero-argument `async fn` entry) as
+//! the `wasi:cli/run` export, with the crate's version and description as
+//! the program's defaults, and [`IntoExit`] writes the channels at that
+//! boundary.
 //!
 //! ```rust,ignore
 //! use std::fmt;
 //!
 //! use clap::Args;
-//! use omnia_sdk::api::command::{self, Commands, Router};
-//! use omnia_sdk::api::{Client, Context};
+//! use omnia_sdk::api::command;
+//! use omnia_sdk::api::{Client, Context, Handlers, Render, Router};
+//! use serde::Serialize;
 //!
+//! /// Greet someone by name.
 //! #[derive(Args)]
 //! struct Greet {
 //!     name: String,
 //! }
 //!
-//! async fn greet<P>(input: Greet, _context: Context<P>) -> omnia_sdk::Result<String> {
-//!     Ok(format!("hello, {}", input.name))
+//! #[derive(Serialize)]
+//! struct Greeting {
+//!     text: String,
 //! }
 //!
-//! fn render_greeting(greeting: &String, out: &mut dyn fmt::Write) -> fmt::Result {
-//!     writeln!(out, "{greeting}")
+//! impl Render for Greeting {
+//!     fn render(&self, out: &mut dyn fmt::Write) -> fmt::Result {
+//!         writeln!(out, "{}", self.text)
+//!     }
+//! }
+//!
+//! async fn greet<P>(input: Greet, _context: Context<P>) -> omnia_sdk::Result<Greeting> {
+//!     Ok(Greeting { text: format!("hello, {}", input.name) })
 //! }
 //!
 //! pub fn command_router<P: Send + Sync + 'static>(provider: P) -> Router<P> {
-//!     Commands::new()
-//!         .route("greet", greet, render_greeting)
-//!         .with_state(Client::new(provider))
+//!     Handlers::new().command("greet", greet).with_state(Client::new(provider))
 //! }
 //!
 //! command::export!(command_router);
@@ -44,10 +58,11 @@
 use std::borrow::Cow;
 use std::fmt;
 use std::io::{ErrorKind, Write};
+use std::sync::Arc;
 
 use serde::{Serialize, Serializer};
 
-use crate::api::{Client, ErrorBody, Format, Handler, Metadata};
+use crate::api::{Client, ErrorBody, Format, Handler, Metadata, Render};
 
 #[doc(hidden)]
 #[macro_export]
@@ -64,7 +79,15 @@ macro_rules! __export_command {
 
             impl $crate::wasip3::exports::cli::run::Guest for CliGuest {
                 async fn run() -> ::core::result::Result<(), ()> {
-                    $crate::api::command::Export::run($entry, $provider).await;
+                    $crate::api::command::Export::run(
+                        $entry,
+                        $provider,
+                        $crate::api::command::Package {
+                            version: ::core::env!("CARGO_PKG_VERSION"),
+                            description: ::core::env!("CARGO_PKG_DESCRIPTION"),
+                        },
+                    )
+                    .await;
                     Ok(())
                 }
             }
@@ -76,11 +99,15 @@ macro_rules! __export_command {
 /// guest's `wasi:cli/run` export.
 ///
 /// Calls a router fn with [`WasiProvider`](crate::WasiProvider) (or with the
-/// provider expression passed as a second argument) and dispatches the WASI
-/// command-line arguments through the resulting [`Router`], or awaits a
-/// zero-argument `async fn` returning [`IntoExit`], inside the guest
-/// telemetry scope. Expands to nothing on native targets, so the same
-/// crate's tests build the router natively.
+/// provider expression passed as a second argument) and runs the WASI
+/// command-line arguments through the resulting
+/// [`Router`](crate::api::Router), or awaits a zero-argument `async fn`
+/// returning [`IntoExit`], inside the guest telemetry scope. The router's
+/// program answers `--version` with the invoking crate's `CARGO_PKG_VERSION`
+/// and opens `--help` with its `CARGO_PKG_DESCRIPTION` unless
+/// [`Router::version`](crate::api::Router::version) or
+/// [`Router::about`](crate::api::Router::about) set them. Expands to nothing
+/// on native targets, so the same crate's tests build the router natively.
 ///
 /// ```rust,ignore
 /// use omnia_sdk::api::command;
@@ -168,6 +195,10 @@ impl IntoExit for Result<(), u8> {
 
 /// The failure envelope a command reports: the error, its exit status, and
 /// an optional remedy hint.
+///
+/// Its text form ([`Render`]) is `error[<code>]: <message>` and an optional
+/// `hint:` line; its JSON form ([`Serialize`]) is the flat
+/// `{"error","message","exit-code","hint"?}`.
 #[derive(Clone, Debug)]
 pub struct Failure {
     error: crate::Error,
@@ -205,14 +236,10 @@ impl Failure {
         self.hint = Some(hint.into());
         self
     }
+}
 
-    /// Render the envelope as `error[<code>]: <message>` and an optional
-    /// `hint:` line; the text-mode counterpart of its JSON form.
-    ///
-    /// # Errors
-    ///
-    /// Propagates the sink's formatting failure.
-    pub fn text(&self, out: &mut dyn fmt::Write) -> fmt::Result {
+impl Render for Failure {
+    fn render(&self, out: &mut dyn fmt::Write) -> fmt::Result {
         let ErrorBody { error, message } = self.body();
         writeln!(out, "error[{error}]: {message}")?;
         if let Some(hint) = self.hint() {
@@ -256,10 +283,10 @@ struct FailureWire<'a> {
     hint: Option<&'a str>,
 }
 
-type HintFn<'a> = Box<dyn Fn(&crate::Error) -> Option<Cow<'static, str>> + Send + Sync + 'a>;
+type HintFn<'a> = Arc<dyn Fn(&crate::Error) -> Option<Cow<'static, str>> + Send + Sync + 'a>;
 
-/// The command projector: decode → [`Client::call`] → encode onto a
-/// [`Response`], with the [`Failure`] envelope on stderr.
+/// The command projector: [`Client::call`] → encode onto a [`Response`],
+/// with the [`Failure`] envelope on stderr.
 pub struct Command<'a, P> {
     client: &'a Client<P>,
     metadata: &'a Metadata,
@@ -286,26 +313,20 @@ impl<'a, P: Send + Sync + 'static> Command<'a, P> {
     pub fn hints(
         mut self, hint: impl Fn(&crate::Error) -> Option<Cow<'static, str>> + Send + Sync + 'a,
     ) -> Self {
-        self.hint = Some(Box::new(hint));
+        self.hint = Some(Arc::new(hint));
         self
     }
 
-    /// Run one verb: `decode` the input, invoke `handler` through the
-    /// client, and encode the output (`render` is its text form).
-    pub async fn call<F, I, D, R>(&self, handler: F, decode: D, render: R) -> Response
+    /// Run one verb: invoke `handler` on `input` through the client and
+    /// encode the output in the projector's [`Format`].
+    pub async fn call<F, I>(&self, handler: F, input: I) -> Response
     where
         F: Handler<P, I>,
-        F::Output: Serialize,
+        F::Output: Serialize + Render,
         F::Error: Into<Failure>,
-        D: FnOnce() -> Result<I, crate::Error>,
-        R: Fn(&F::Output, &mut dyn fmt::Write) -> fmt::Result,
     {
-        let input = match decode() {
-            Ok(input) => input,
-            Err(error) => return self.refuse(Failure::from(error)),
-        };
         match self.client.call(handler, input, self.metadata).await {
-            Ok(output) => Response::success(self.format.encode(&output, render).bytes),
+            Ok(output) => Response::success(self.format.encode(&output).bytes),
             Err(error) => self.refuse(error.into()),
         }
     }
@@ -316,7 +337,7 @@ impl<'a, P: Send + Sync + 'static> Command<'a, P> {
         {
             failure.hint = hint(&failure.error);
         }
-        Response::failure(self.format.encode(&failure, Failure::text).bytes, failure.exit_code())
+        Response::failure(self.format.encode(&failure).bytes, failure.exit_code())
     }
 }
 
@@ -331,8 +352,15 @@ impl<P> fmt::Debug for Command<'_, P> {
 
 #[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
 #[doc(hidden)]
+pub struct Package {
+    pub version: &'static str,
+    pub description: &'static str,
+}
+
+#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
+#[doc(hidden)]
 pub trait Export<P, M> {
-    fn run(self, provider: P) -> impl Future<Output = ()>;
+    fn run(self, provider: P, package: Package) -> impl Future<Output = ()>;
 }
 
 #[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
@@ -342,37 +370,39 @@ where
     Fut: Future<Output = E>,
     E: IntoExit,
 {
-    async fn run(self, _provider: P) {
+    async fn run(self, _provider: P, _package: Package) {
         execute_wasi(self()).await;
     }
 }
 
 #[cfg(all(target_arch = "wasm32", target_os = "wasi", feature = "command"))]
-impl<F, P> Export<P, Router<P>> for F
+impl<F, P> Export<P, crate::api::Router<P>> for F
 where
-    F: FnOnce(P) -> Router<P>,
+    F: FnOnce(P) -> crate::api::Router<P>,
     P: Send + Sync + 'static,
 {
-    async fn run(self, provider: P) {
+    async fn run(self, provider: P, package: Package) {
         execute_wasi(async move {
-            let router = self(provider);
-            router.handle(wasip3::cli::environment::get_arguments()).await
+            let mut router = self(provider);
+            router.program.package(&package);
+            router.run(wasip3::cli::environment::get_arguments()).await
         })
         .await;
     }
 }
 
 #[cfg(all(target_arch = "wasm32", target_os = "wasi", feature = "command"))]
-impl<F, Fut, P> Export<P, (Router<P>,)> for F
+impl<F, Fut, P> Export<P, (crate::api::Router<P>,)> for F
 where
     F: FnOnce(P) -> Fut,
-    Fut: Future<Output = Router<P>>,
+    Fut: Future<Output = crate::api::Router<P>>,
     P: Send + Sync + 'static,
 {
-    async fn run(self, provider: P) {
+    async fn run(self, provider: P, package: Package) {
         execute_wasi(async move {
-            let router = self(provider).await;
-            router.handle(wasip3::cli::environment::get_arguments()).await
+            let mut router = self(provider).await;
+            router.program.package(&package);
+            router.run(wasip3::cli::environment::get_arguments()).await
         })
         .await;
     }
@@ -419,9 +449,10 @@ cfg_select! {
         use std::marker::PhantomData;
         use std::path::Path;
         use std::pin::Pin;
-        use std::sync::Arc;
 
         pub use clap_complete::Shell;
+
+        use crate::api::DecodeError;
 
         impl Response {
             /// A usage error rendered by clap, exiting [`USAGE_EXIT`].
@@ -454,7 +485,8 @@ cfg_select! {
         /// the command never acts on these values. Declaring them keeps the parser
         /// accepting what the runtime already honoured, lists them in `--help` and
         /// completions, and refuses `-v` beside `-q` as a usage error (the runtime
-        /// applies no level for that pair however argv splits it).
+        /// applies no level for that pair however argv splits it). A
+        /// [`Router`](crate::api::Router) declares them itself.
         ///
         /// ```rust,ignore
         /// #[derive(clap::Parser)]
@@ -480,132 +512,47 @@ cfg_select! {
             pub quiet: u8,
         }
 
-        #[derive(clap::Args)]
-        #[command(about = None, long_about = None)]
-        struct Globals {
-            /// Output format for every verb.
-            #[arg(long, default_value = "text", global = true)]
-            format: Format,
-
-            #[command(flatten)]
-            verbosity: Verbosity,
-        }
-
-        type DispatchFuture<'a> = Pin<Box<dyn Future<Output = Response> + Send + 'a>>;
-
-        trait ErasedRoute<P: Send + Sync + 'static>: Send + Sync {
-            fn dispatch<'a>(
-                &'a self, matches: &'a clap::ArgMatches, command: &'a Command<'a, P>,
-            ) -> DispatchFuture<'a>;
-        }
-
-        struct Route<P, F, I, D, R> {
-            handler: F,
-            decode: D,
-            render: R,
-            marker: PhantomData<fn(P) -> I>,
-        }
-
-        impl<P, F, I, D, R> ErasedRoute<P> for Route<P, F, I, D, R>
-        where
-            P: Send + Sync + 'static,
-            F: Handler<P, I>,
-            F::Output: Serialize,
-            F::Error: Into<Failure>,
-            I: Send + 'static,
-            D: Fn(&clap::ArgMatches) -> Result<I, crate::Error> + Send + Sync + 'static,
-            R: Fn(&F::Output, &mut dyn fmt::Write) -> fmt::Result + Send + Sync + 'static,
-        {
-            fn dispatch<'a>(
-                &'a self, matches: &'a clap::ArgMatches, command: &'a Command<'a, P>,
-            ) -> DispatchFuture<'a> {
-                Box::pin(async move {
-                    command
-                        .call(self.handler.clone(), || (self.decode)(matches), &self.render)
-                        .await
-                })
-            }
-        }
-
-        struct ErasedCommand<P: Send + Sync + 'static> {
-            command: clap::Command,
-            route: Arc<dyn ErasedRoute<P>>,
-        }
-
-        /// Subcommand routes awaiting the client that dispatches them.
-        ///
-        /// Two routes for one subcommand name are refused when they meet,
-        /// whether through [`route`](Self::route),
-        /// [`route_with`](Self::route_with), [`merge`](Self::merge),
-        /// `Commands::from([..])`, or [`map`](Self::map).
-        #[must_use = "commands dispatch nothing until closed into a `Router`"]
-        pub struct Commands<P: Send + Sync + 'static> {
+        pub(crate) struct Commands<P: Send + Sync + 'static> {
             routes: BTreeMap<String, ErasedCommand<P>>,
         }
 
-        impl<P: Send + Sync + 'static> Default for Commands<P> {
-            fn default() -> Self {
-                Self::new()
-            }
-        }
-
         impl<P: Send + Sync + 'static> Commands<P> {
-            /// Create an empty set of subcommand routes.
-            pub const fn new() -> Self {
+            pub(crate) const fn new() -> Self {
                 Self {
                     routes: BTreeMap::new(),
                 }
             }
 
-            /// Register one handler for one subcommand name, decoding its
-            /// arguments through [`clap::Args`].
-            ///
-            /// # Panics
-            ///
-            /// Panics when `name` is empty or already registered.
-            pub fn route<F, I, R>(self, name: impl Into<String>, handler: F, render: R) -> Self
+            pub(crate) fn route<F, I>(self, name: impl Into<String>, handler: F) -> Self
             where
                 F: Handler<P, I>,
-                F::Output: Serialize,
+                F::Output: Serialize + Render,
                 F::Error: Into<Failure>,
                 I: clap::Args + Send + 'static,
-                R: Fn(&F::Output, &mut dyn fmt::Write) -> fmt::Result + Send + Sync + 'static,
             {
                 let name = name.into();
                 assert!(!name.is_empty(), "command name cannot be empty");
                 let command = I::augment_args(clap::Command::new(name));
-                self.route_with(
-                    command,
-                    handler,
-                    |matches| {
-                        I::from_arg_matches(matches).map_err(|error| crate::bad_request!("{error}"))
-                    },
-                    render,
-                )
+                self.route_with(command, handler, |matches| {
+                    I::from_arg_matches(matches)
+                        .map_err(|error| DecodeError::new(error.to_string()))
+                })
             }
 
-            /// Register one handler for one [`clap::Command`] subcommand with a
-            /// decoder over its [`clap::ArgMatches`].
-            ///
-            /// # Panics
-            ///
-            /// Panics when the subcommand name is empty or already registered.
-            pub fn route_with<F, I, D, R>(
-                self, command: clap::Command, handler: F, decode: D, render: R,
+            pub(crate) fn route_with<F, I, D>(
+                self, command: clap::Command, handler: F, decode: D,
             ) -> Self
             where
                 F: Handler<P, I>,
-                F::Output: Serialize,
+                F::Output: Serialize + Render,
                 F::Error: Into<Failure>,
                 I: Send + 'static,
-                D: Fn(&clap::ArgMatches) -> Result<I, crate::Error> + Send + Sync + 'static,
-                R: Fn(&F::Output, &mut dyn fmt::Write) -> fmt::Result + Send + Sync + 'static,
+                D: Fn(&clap::ArgMatches) -> Result<I, DecodeError> + Send + Sync + 'static,
             {
                 let name = command.get_name().to_owned();
-                let route = Route::<P, F, I, D, R> {
+                let route = Route::<P, F, I, D> {
                     handler,
                     decode,
-                    render,
                     marker: PhantomData,
                 };
                 self.insert(
@@ -617,42 +564,15 @@ cfg_select! {
                 )
             }
 
-            /// Take every subcommand route of `other`.
-            ///
-            /// # Panics
-            ///
-            /// Panics when a subcommand name of `other` is already registered.
-            pub fn merge(self, other: Self) -> Self {
+            pub(crate) fn merge(self, other: Self) -> Self {
                 other
                     .routes
                     .into_iter()
                     .fold(self, |routes, (name, entry)| routes.insert(name, entry))
             }
 
-            /// Re-key every subcommand route through `map`.
-            ///
-            /// # Panics
-            ///
-            /// Panics when `map` yields an empty name or one name for two routes.
-            pub fn map(self, mut map: impl FnMut(&str) -> String) -> Self {
-                self.routes.into_iter().fold(Self::new(), |routes, (name, mut entry)| {
-                    let mapped = map(&name);
-                    entry.command = entry.command.name(mapped.clone());
-                    routes.insert(mapped, entry)
-                })
-            }
-
-            /// Close the commands over `client` as the [`Router`] that dispatches them.
-            pub const fn with_state(self, client: Client<P>) -> Router<P> {
-                Router {
-                    client,
-                    routes: self,
-                    name: None,
-                    version: None,
-                    about: None,
-                    env_prefix: None,
-                    hint: None,
-                }
+            pub(crate) fn commands(&self) -> impl Iterator<Item = &str> {
+                self.routes.keys().map(String::as_str)
             }
 
             fn insert(mut self, name: String, entry: ErasedCommand<P>) -> Self {
@@ -663,126 +583,102 @@ cfg_select! {
             }
         }
 
-        impl<P: Send + Sync + 'static, const N: usize> From<[Self; N]> for Commands<P> {
-            fn from(parts: [Self; N]) -> Self {
-                parts.into_iter().reduce(Self::merge).unwrap_or_default()
+        impl<P: Send + Sync + 'static> Clone for Commands<P> {
+            fn clone(&self) -> Self {
+                Self {
+                    routes: self.routes.clone(),
+                }
             }
         }
 
-        /// A subcommand router backed by a [`Client`].
-        #[must_use = "a router dispatches nothing until it handles argv"]
-        pub struct Router<P: Send + Sync + 'static> {
-            client: Client<P>,
-            routes: Commands<P>,
-            name: Option<String>,
-            version: Option<String>,
-            about: Option<String>,
-            env_prefix: Option<String>,
-            hint: Option<HintFn<'static>>,
+        impl<P: Send + Sync + 'static> fmt::Debug for Commands<P> {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.debug_set().entries(self.routes.keys()).finish()
+            }
         }
 
-        impl<P: Send + Sync + 'static> Router<P> {
-            /// Create an empty subcommand router backed by a client.
-            pub const fn new(client: Client<P>) -> Self {
-                Commands::new().with_state(client)
+        struct ErasedCommand<P: Send + Sync + 'static> {
+            command: clap::Command,
+            route: Arc<dyn ErasedRoute<P>>,
+        }
+
+        impl<P: Send + Sync + 'static> Clone for ErasedCommand<P> {
+            fn clone(&self) -> Self {
+                Self {
+                    command: self.command.clone(),
+                    route: Arc::clone(&self.route),
+                }
+            }
+        }
+
+        type DispatchFuture<'a> = Pin<Box<dyn Future<Output = Response> + Send + 'a>>;
+
+        trait ErasedRoute<P: Send + Sync + 'static>: Send + Sync {
+            fn dispatch<'a>(
+                &'a self, matches: &'a clap::ArgMatches, command: &'a Command<'a, P>,
+            ) -> DispatchFuture<'a>;
+        }
+
+        struct Route<P, F, I, D> {
+            handler: F,
+            decode: D,
+            marker: PhantomData<fn(P) -> I>,
+        }
+
+        impl<P, F, I, D> ErasedRoute<P> for Route<P, F, I, D>
+        where
+            P: Send + Sync + 'static,
+            F: Handler<P, I>,
+            F::Output: Serialize + Render,
+            F::Error: Into<Failure>,
+            I: Send + 'static,
+            D: Fn(&clap::ArgMatches) -> Result<I, DecodeError> + Send + Sync + 'static,
+        {
+            fn dispatch<'a>(
+                &'a self, matches: &'a clap::ArgMatches, command: &'a Command<'a, P>,
+            ) -> DispatchFuture<'a> {
+                Box::pin(async move {
+                    match (self.decode)(matches) {
+                        Ok(input) => command.call(self.handler.clone(), input).await,
+                        Err(error) => command.refuse(crate::bad_request!("{error}").into()),
+                    }
+                })
+            }
+        }
+
+        // The subcommands a closed router runs, with the program identity
+        // clap shows around them.
+        pub(crate) struct Program<P: Send + Sync + 'static> {
+            pub(crate) commands: Commands<P>,
+            pub(crate) name: Option<String>,
+            pub(crate) version: Option<String>,
+            pub(crate) about: Option<String>,
+            pub(crate) env_prefix: Option<String>,
+            pub(crate) hint: Option<HintFn<'static>>,
+        }
+
+        impl<P: Send + Sync + 'static> Program<P> {
+            pub(crate) const fn new(commands: Commands<P>) -> Self {
+                Self {
+                    commands,
+                    name: None,
+                    version: None,
+                    about: None,
+                    env_prefix: None,
+                    hint: None,
+                }
             }
 
-            /// Set the binary name shown in usage and help text.
-            ///
-            /// Defaults to `argv[0]` (or `"app"` when `argv` is empty).
-            pub fn name(mut self, name: impl Into<String>) -> Self {
-                self.name = Some(name.into());
-                self
+            // Cargo stamps an empty description where the manifest sets none.
+            #[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
+            pub(crate) fn package(&mut self, package: &Package) {
+                self.version.get_or_insert_with(|| package.version.to_owned());
+                if !package.description.is_empty() {
+                    self.about.get_or_insert_with(|| package.description.to_owned());
+                }
             }
 
-            /// Set the version string answered for `--version`.
-            pub fn version(mut self, version: impl Into<String>) -> Self {
-                self.version = Some(version.into());
-                self
-            }
-
-            /// Set the description shown at the top of `--help`.
-            pub fn about(mut self, about: impl Into<String>) -> Self {
-                self.about = Some(about.into());
-                self
-            }
-
-            /// Set the environment-variable prefix [`handle`](Self::handle)
-            /// passes to [`Metadata::from_env`].
-            ///
-            /// Defaults to the binary name in uppercase with `-` replaced by `_`.
-            pub fn env_prefix(mut self, prefix: impl Into<String>) -> Self {
-                self.env_prefix = Some(prefix.into());
-                self
-            }
-
-            /// Attach a remedy-hint fn consulted for every failure that carries
-            /// no hint of its own.
-            pub fn hints(
-                mut self,
-                hint: impl Fn(&crate::Error) -> Option<Cow<'static, str>> + Send + Sync + 'static,
-            ) -> Self {
-                self.hint = Some(Box::new(hint));
-                self
-            }
-
-            /// Register one handler for one subcommand name, decoding its
-            /// arguments through [`clap::Args`].
-            ///
-            /// # Panics
-            ///
-            /// Panics when `name` is empty or already registered.
-            pub fn route<F, I, R>(mut self, name: impl Into<String>, handler: F, render: R) -> Self
-            where
-                F: Handler<P, I>,
-                F::Output: Serialize,
-                F::Error: Into<Failure>,
-                I: clap::Args + Send + 'static,
-                R: Fn(&F::Output, &mut dyn fmt::Write) -> fmt::Result + Send + Sync + 'static,
-            {
-                self.routes = self.routes.route(name, handler, render);
-                self
-            }
-
-            /// Register one handler for one [`clap::Command`] subcommand with a
-            /// decoder over its [`clap::ArgMatches`].
-            ///
-            /// # Panics
-            ///
-            /// Panics when the subcommand name is empty or already registered.
-            pub fn route_with<F, I, D, R>(
-                mut self, command: clap::Command, handler: F, decode: D, render: R,
-            ) -> Self
-            where
-                F: Handler<P, I>,
-                F::Output: Serialize,
-                F::Error: Into<Failure>,
-                I: Send + 'static,
-                D: Fn(&clap::ArgMatches) -> Result<I, crate::Error> + Send + Sync + 'static,
-                R: Fn(&F::Output, &mut dyn fmt::Write) -> fmt::Result + Send + Sync + 'static,
-            {
-                self.routes = self.routes.route_with(command, handler, decode, render);
-                self
-            }
-
-            /// Take every subcommand route of `commands`.
-            ///
-            /// # Panics
-            ///
-            /// Panics when a subcommand name of `commands` is already registered.
-            pub fn merge(mut self, commands: Commands<P>) -> Self {
-                self.routes = self.routes.merge(commands);
-                self
-            }
-
-            /// The subcommand names registered on this router, in order.
-            pub fn commands(&self) -> impl Iterator<Item = &str> {
-                self.routes.routes.keys().map(String::as_str)
-            }
-
-            /// Generate a shell-completion script for this router's command grammar.
-            #[must_use]
-            pub fn completions(&self, shell: Shell) -> Response {
+            pub(crate) fn completions(&self, shell: Shell) -> Response {
                 let name = self.name.as_deref().unwrap_or("app");
                 let mut command = self.build_command(name);
                 let mut out = Vec::new();
@@ -790,9 +686,8 @@ cfg_select! {
                 Response::success(out)
             }
 
-            /// Parse `argv`, read [`Metadata::from_env`], and dispatch the matched subcommand.
-            pub async fn handle(
-                &self, argv: impl IntoIterator<Item: Into<OsString> + Clone>,
+            pub(crate) async fn run(
+                &self, client: &Client<P>, argv: impl IntoIterator<Item: Into<OsString>>,
             ) -> Response {
                 let argv: Vec<OsString> = argv.into_iter().map(Into::into).collect();
                 let bin = self.bin_name(&argv);
@@ -801,15 +696,15 @@ cfg_select! {
                     .clone()
                     .unwrap_or_else(|| bin.to_ascii_uppercase().replace('-', "_"));
                 let metadata = Metadata::from_env(&prefix);
-                self.dispatch_argv(argv, &metadata).await
+                self.dispatch(client, argv, &metadata).await
             }
 
-            /// Parse `argv` and dispatch the matched subcommand with explicit `metadata`.
-            pub async fn handle_with(
-                &self, argv: impl IntoIterator<Item: Into<OsString> + Clone>, metadata: &Metadata,
+            pub(crate) async fn run_with(
+                &self, client: &Client<P>, argv: impl IntoIterator<Item: Into<OsString>>,
+                metadata: &Metadata,
             ) -> Response {
                 let argv: Vec<OsString> = argv.into_iter().map(Into::into).collect();
-                self.dispatch_argv(argv, metadata).await
+                self.dispatch(client, argv, metadata).await
             }
 
             fn bin_name<'a>(&'a self, argv: &'a [OsString]) -> &'a str {
@@ -824,24 +719,29 @@ cfg_select! {
                     .unwrap_or("app")
             }
 
+            // `Verbosity` clears the about it is flattened into, so the
+            // program's own text goes on after the globals.
             fn build_command(&self, bin_name: &str) -> clap::Command {
-                let mut command = clap::Command::new(bin_name.to_owned())
-                    .bin_name(bin_name.to_owned())
-                    .subcommand_required(true);
+                let mut command = <Globals as clap::Args>::augment_args(
+                    clap::Command::new(bin_name.to_owned())
+                        .bin_name(bin_name.to_owned())
+                        .subcommand_required(true),
+                );
                 if let Some(version) = &self.version {
                     command = command.version(version.clone());
                 }
                 if let Some(about) = &self.about {
                     command = command.about(about.clone());
                 }
-                command = <Globals as clap::Args>::augment_args(command);
-                for entry in self.routes.routes.values() {
+                for entry in self.commands.routes.values() {
                     command = command.subcommand(entry.command.clone());
                 }
                 command
             }
 
-            async fn dispatch_argv(&self, argv: Vec<OsString>, metadata: &Metadata) -> Response {
+            async fn dispatch(
+                &self, client: &Client<P>, argv: Vec<OsString>, metadata: &Metadata,
+            ) -> Response {
                 let bin = self.bin_name(&argv).to_owned();
                 let command = self.build_command(&bin);
                 let matches = match command.try_get_matches_from(argv) {
@@ -853,13 +753,50 @@ cfg_select! {
                     .expect("globals augmented on command");
                 let (name, sub_matches) =
                     matches.subcommand().expect("subcommand_required is enabled");
-                let entry = self.routes.routes.get(name).expect("matched subcommand is registered");
-                let mut projector = Command::new(&self.client, metadata, globals.format);
+                let entry =
+                    self.commands.routes.get(name).expect("matched subcommand is registered");
+                let mut projector = Command::new(client, metadata, globals.format);
                 if let Some(hint) = &self.hint {
-                    projector = projector.hints(|error| hint(error));
+                    projector.hint = Some(Arc::clone(hint));
                 }
                 entry.route.dispatch(sub_matches, &projector).await
             }
+        }
+
+        impl<P: Send + Sync + 'static> Clone for Program<P> {
+            fn clone(&self) -> Self {
+                Self {
+                    commands: self.commands.clone(),
+                    name: self.name.clone(),
+                    version: self.version.clone(),
+                    about: self.about.clone(),
+                    env_prefix: self.env_prefix.clone(),
+                    hint: self.hint.clone(),
+                }
+            }
+        }
+
+        impl<P: Send + Sync + 'static> fmt::Debug for Program<P> {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.debug_struct("Program")
+                    .field("commands", &self.commands)
+                    .field("name", &self.name)
+                    .field("version", &self.version)
+                    .field("about", &self.about)
+                    .field("env_prefix", &self.env_prefix)
+                    .field("hint", &self.hint.is_some())
+                    .finish()
+            }
+        }
+
+        #[derive(clap::Args)]
+        struct Globals {
+            /// Output format for every verb.
+            #[arg(long, default_value = "text", global = true)]
+            format: Format,
+
+            #[command(flatten)]
+            verbosity: Verbosity,
         }
 
         /// Parse argv into the grammar `A`, classifying clap's own outcomes.

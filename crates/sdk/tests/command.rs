@@ -1,5 +1,5 @@
 //! Command façade contracts: argv parsing, the failure envelope, completions,
-//! the projector, and the exit boundary.
+//! the projector, the router's subcommands, and the exit boundary.
 
 #![cfg(all(not(target_arch = "wasm32"), feature = "command"))]
 
@@ -9,10 +9,9 @@ use std::future::{Ready, ready};
 
 use clap::{Args, Parser, Subcommand};
 use omnia_sdk::api::command::{
-    Command, Commands, Failure, IntoExit, Parsed, Response, Router, Shell, USAGE_EXIT, Verbosity,
-    completions, parse,
+    Command, Failure, IntoExit, Parsed, Response, Shell, USAGE_EXIT, Verbosity, completions, parse,
 };
-use omnia_sdk::api::{Client, Context, Format, Metadata};
+use omnia_sdk::api::{Client, Context, DecodeError, Format, Handlers, Metadata, Render, Router};
 use omnia_sdk::{bad_request, not_found};
 use serde::{Deserialize, Serialize};
 
@@ -41,14 +40,22 @@ enum Verb {
     Completions { shell: Shell },
 }
 
+/// Greet someone by name.
 #[derive(Args, Debug, Deserialize)]
 struct Greet {
+    /// Who to greet
     name: String,
 }
 
 #[derive(Debug, Serialize)]
 struct Greeting {
     text: String,
+}
+
+impl Render for Greeting {
+    fn render(&self, out: &mut dyn fmt::Write) -> fmt::Result {
+        writeln!(out, "{}", self.text)
+    }
 }
 
 #[derive(Args, Debug, Deserialize)]
@@ -155,10 +162,10 @@ fn failure_text() {
     let failure = Failure::from(not_found!("no item 42")).with_hint("run `app list`");
 
     let mut text = String::new();
-    failure.text(&mut text).expect("a String sink never fails");
+    failure.render(&mut text).expect("a String sink never fails");
     assert_eq!(text, "error[not_found]: no item 42\nhint: run `app list`\n");
 
-    let encoded = Format::Text.encode(&failure, Failure::text);
+    let encoded = Format::Text.encode(&failure);
     assert_eq!(encoded.bytes, text.into_bytes());
 }
 
@@ -212,17 +219,19 @@ fn greet(input: Greet, _context: Context<()>) -> Ready<Result<Greeting, omnia_sd
     }))
 }
 
-fn render_greeting(greeting: &Greeting, out: &mut dyn fmt::Write) -> fmt::Result {
-    writeln!(out, "{}", greeting.text)
-}
-
 fn lookup(input: Lookup, _context: Context<()>) -> Ready<Result<Greeting, omnia_sdk::Error>> {
     let Lookup { id } = input;
     ready(Err(not_found!("no item {id}")))
 }
 
-fn render_never(_: &Greeting, _: &mut dyn fmt::Write) -> fmt::Result {
-    panic!("a failure never renders the success body")
+fn reject(_input: Greet, _context: Context<()>) -> Ready<Result<Greeting, omnia_sdk::Error>> {
+    ready(Err(bad_request!("name is required")))
+}
+
+fn ping((): (), _context: Context<()>) -> Ready<Result<Greeting, omnia_sdk::Error>> {
+    ready(Ok(Greeting {
+        text: "pong".to_string(),
+    }))
 }
 
 fn ada() -> Greet {
@@ -243,9 +252,7 @@ fn stderr_json(response: &Response) -> serde_json::Value {
 async fn call_success_text() {
     let client = Client::new(());
     let metadata = Metadata::default();
-    let response = Command::new(&client, &metadata, Format::Text)
-        .call(greet, || Ok(ada()), render_greeting)
-        .await;
+    let response = Command::new(&client, &metadata, Format::Text).call(greet, ada()).await;
 
     assert_eq!(response.exit, 0);
     assert_eq!(response.stderr, b"");
@@ -256,9 +263,7 @@ async fn call_success_text() {
 async fn call_success_json() {
     let client = Client::new(());
     let metadata = Metadata::default();
-    let response = Command::new(&client, &metadata, Format::Json)
-        .call(greet, || Ok(ada()), render_greeting)
-        .await;
+    let response = Command::new(&client, &metadata, Format::Json).call(greet, ada()).await;
 
     assert_eq!(response.exit, 0);
     let stdout = String::from_utf8(response.stdout).expect("json is utf-8");
@@ -276,7 +281,7 @@ async fn call_handler_error() {
     let metadata = Metadata::default();
     let command = Command::new(&client, &metadata, Format::Json);
 
-    let response = command.call(lookup, || Ok(item("42")), render_never).await;
+    let response = command.call(lookup, item("42")).await;
 
     assert_eq!(response.exit, 2);
     assert_eq!(response.stdout, b"");
@@ -285,24 +290,9 @@ async fn call_handler_error() {
         serde_json::json!({ "error": "not_found", "message": "no item 42", "exit-code": 2 })
     );
 
-    let text = Command::new(&client, &metadata, Format::Text)
-        .call(lookup, || Ok(item("42")), render_never)
-        .await;
+    let text = Command::new(&client, &metadata, Format::Text).call(lookup, item("42")).await;
     assert_eq!(text.exit, 2);
     assert_eq!(text.stderr, b"error[not_found]: no item 42\n");
-}
-
-#[tokio::test]
-async fn call_decode_error() {
-    let client = Client::new(());
-    let metadata = Metadata::default();
-    let response = Command::new(&client, &metadata, Format::Json)
-        .call(greet, || Err(bad_request!("name is required")), render_never)
-        .await;
-
-    assert_eq!(response.exit, 1);
-    assert_eq!(stderr_json(&response)["error"], "bad_request");
-    assert_eq!(stderr_json(&response)["exit-code"], 1);
 }
 
 #[tokio::test]
@@ -313,32 +303,25 @@ async fn hints_apply_by_error() {
         (error.code() == "not_found").then_some(Cow::Borrowed("run `app list` to see the items"))
     });
 
-    let hinted = command.call(lookup, || Ok(item("42")), render_never).await;
+    let hinted = command.call(lookup, item("42")).await;
     assert_eq!(hinted.exit, 2);
     assert_eq!(
         hinted.stderr,
         b"error[not_found]: no item 42\nhint: run `app list` to see the items\n"
     );
 
-    let unhinted =
-        command.call(greet, || Err(bad_request!("name is required")), render_never).await;
+    let unhinted = command.call(reject, ada()).await;
     assert_eq!(unhinted.exit, 1);
     assert_eq!(unhinted.stderr, b"error[bad_request]: name is required\n");
 }
 
-fn ping((): (), _context: Context<()>) -> Ready<Result<Greeting, omnia_sdk::Error>> {
-    ready(Ok(Greeting {
-        text: "pong".to_string(),
-    }))
-}
-
 #[tokio::test]
-async fn router_merged_routes() {
-    let greeting = Commands::new().route("greet", greet, render_greeting);
-    let looking = Commands::new().route("lookup", lookup, render_never);
-    let router = Commands::from([greeting, looking])
+async fn merged_commands() {
+    let greeting = Handlers::new().command("greet", greet);
+    let looking = Handlers::new().command("lookup", lookup);
+    let router = Handlers::from([greeting, looking])
         .with_state(Client::new(()))
-        .route("ping", ping, render_greeting)
+        .command("ping", ping)
         .name("app")
         .version("1.2.3")
         .about("Greets people")
@@ -346,28 +329,28 @@ async fn router_merged_routes() {
 
     assert_eq!(router.commands().collect::<Vec<_>>(), ["greet", "lookup", "ping"]);
 
-    let ok = router.handle(["app", "greet", "ada"]).await;
+    let ok = router.run(["app", "greet", "ada"]).await;
     assert_eq!(ok.exit, 0);
     assert_eq!(ok.stdout, b"hello, ada\n");
 
-    let unit = router.handle(["app", "--format", "json", "ping"]).await;
+    let unit = router.run(["app", "--format", "json", "ping"]).await;
     assert_eq!(unit.exit, 0);
     assert_eq!(
         serde_json::from_slice::<serde_json::Value>(&unit.stdout).expect("decode json"),
         serde_json::json!({ "text": "pong" })
     );
 
-    let missing = router.handle(["app", "lookup", "42"]).await;
+    let missing = router.run(["app", "lookup", "42"]).await;
     assert_eq!(missing.exit, 2);
     assert_eq!(missing.stderr, b"error[not_found]: no item 42\nhint: run `app list`\n");
 
-    let unknown = router.handle(["app", "bogus"]).await;
+    let unknown = router.run(["app", "bogus"]).await;
     assert_eq!(unknown.exit, USAGE_EXIT);
 
-    let conflict = router.handle(["app", "-v", "-q", "ping"]).await;
+    let conflict = router.run(["app", "-v", "-q", "ping"]).await;
     assert_eq!(conflict.exit, USAGE_EXIT);
 
-    let version = router.handle(["app", "--version"]).await;
+    let version = router.run(["app", "--version"]).await;
     assert_eq!(version.exit, 0);
     assert_eq!(String::from_utf8(version.stdout).expect("utf-8").trim(), "app 1.2.3");
 
@@ -378,29 +361,68 @@ async fn router_merged_routes() {
     assert!(script.contains("lookup"));
 }
 
+// The input type's doc comments are the help text: the struct's for the
+// subcommand's `about`, each field's for its argument.
 #[tokio::test]
-async fn router_map_prefixes() {
-    let router = Commands::new()
-        .route("greet", greet, render_greeting)
-        .route("ping", ping, render_greeting)
-        .map(|name| format!("dev-{name}"))
+async fn help_from_docs() {
+    let router = Handlers::new()
+        .command("greet", greet)
+        .with_state(Client::new(()))
+        .name("app")
+        .about("Greets people");
+
+    let help = router.run(["app", "--help"]).await;
+    assert_eq!(help.exit, 0);
+    let text = String::from_utf8(help.stdout).expect("utf-8");
+    assert!(text.starts_with("Greets people"), "{text}");
+    assert!(text.contains("greet  Greet someone by name"), "{text}");
+
+    let verb = router.run(["app", "greet", "-h"]).await;
+    assert_eq!(verb.exit, 0);
+    let text = String::from_utf8(verb.stdout).expect("utf-8");
+    assert!(text.starts_with("Greet someone by name"), "{text}");
+    assert!(text.contains("<NAME>  Who to greet"), "{text}");
+}
+
+// A decoder's refusal is a `bad_request` envelope, as a malformed payload
+// is on every transport, not a clap usage error.
+#[tokio::test]
+async fn command_with_decoder() {
+    let router = Handlers::new()
+        .command_with(
+            clap::Command::new("lookup").arg(clap::Arg::new("id").required(true)),
+            lookup,
+            |matches| {
+                let id = matches.get_one::<String>("id").expect("id is required");
+                if id.chars().all(|c| c.is_ascii_digit()) {
+                    Ok(Lookup { id: id.clone() })
+                } else {
+                    Err(DecodeError::new(format!("`{id}` is not an item id")))
+                }
+            },
+        )
         .with_state(Client::new(()));
 
-    assert_eq!(router.commands().collect::<Vec<_>>(), ["dev-greet", "dev-ping"]);
-    let ok = router.handle(["app", "dev-ping"]).await;
-    assert_eq!(ok.exit, 0);
-    assert_eq!(ok.stdout, b"pong\n");
-    assert_eq!(router.handle(["app", "ping"]).await.exit, USAGE_EXIT);
+    let decoded = router.run(["app", "lookup", "42"]).await;
+    assert_eq!(decoded.exit, 2);
+    assert_eq!(decoded.stderr, b"error[not_found]: no item 42\n");
+
+    let refused = router.run(["app", "--format", "json", "lookup", "forty-two"]).await;
+    assert_eq!(refused.exit, 1);
+    assert_eq!(
+        stderr_json(&refused),
+        serde_json::json!({
+            "error": "bad_request",
+            "message": "`forty-two` is not an item id",
+            "exit-code": 1
+        })
+    );
 }
 
 #[test]
 #[should_panic(expected = "duplicate command `greet`")]
-fn router_duplicate_command() {
-    let _router = Router::new(Client::new(())).route("greet", greet, render_greeting).route(
-        "greet",
-        greet,
-        render_greeting,
-    );
+fn duplicate_command() {
+    let _router = Router::new(Client::new(())).command("greet", greet).command("greet", greet);
 }
 
 #[cfg(feature = "http")]
@@ -410,7 +432,7 @@ mod http_parity {
     use axum::extract::Query;
     use axum::routing::get;
     use http::{Request, StatusCode};
-    use omnia_sdk::api::{ErrorBody, Handlers};
+    use omnia_sdk::api::ErrorBody;
     use tower::ServiceExt as _;
 
     use super::*;
@@ -421,16 +443,19 @@ mod http_parity {
         lookup(input, context).await.map(Json)
     }
 
+    // One `Handlers` carries the path and the subcommand, and the one router
+    // answers both with the same error body.
     #[tokio::test]
     async fn handler_error_http() {
-        let client = Client::new(());
-        let command_router =
-            Commands::new().route("lookup", lookup, render_never).with_state(client.clone());
-        let response = command_router.handle(["app", "--format", "json", "lookup", "42"]).await;
+        let router = Handlers::new()
+            .route("/items", get(lookup_route))
+            .command("lookup", lookup)
+            .with_state(Client::new(()));
+
+        let response = router.run(["app", "--format", "json", "lookup", "42"]).await;
         let command_body: ErrorBody =
             serde_json::from_slice(&response.stderr).expect("stderr carries an error body");
 
-        let router = Handlers::new().route("/items", get(lookup_route)).with_state(client);
         let request =
             Request::builder().uri("/items?id=42").body(Body::empty()).expect("build request");
         let http = router.oneshot(request).await.expect("router serves request");
