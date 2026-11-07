@@ -43,7 +43,7 @@ unused_result_ok = "warn"
 anyhow = "1.0.104"
 axum = { version = "0.8.9", default-features = false, features = ["json"] }
 base64ct = { version = "1.8.3", features = ["std"] }
-bon = "3.10.2"
+bon = "3.10.3"
 bytes = "1.12.1"
 cap-fs-ext = "4.0.3"
 cap-std = "4.0.3"
@@ -76,7 +76,7 @@ rand = "0.10.3"
 rcgen = "0.14.10"
 regex = "1.13.1"
 reqwest = { version = "0.13.5", default-features = false }
-rusqlite = { version = "0.40.2", features = ["bundled"] }
+rusqlite = { version = "0.41.1", features = ["bundled"] }
 rustls = { version = "0.23.46", default-features = false, features = ["ring", "std"] }
 schemars = "1.2.3"
 serde = { version = "1.0.229", features = ["derive"] }
@@ -89,7 +89,7 @@ tokio = { version = "1.54.1", default-features = false }
 tokio-stream = { version = "0.1.19", features = ["sync"] }
 tokio-tungstenite = "0.30.0"
 tokio-util = { version = "0.7.20", features = ["codec"] }
-toml = { version = "1.1.8", default-features = false, features = ["parse", "serde", "std"] }
+toml = { version = "1.2.1", default-features = false, features = ["parse", "serde", "std"] }
 tower = "0.5.3"
 tracing = "0.1.44"
 tracing-opentelemetry = { version = "0.34.0", default-features = false }
@@ -101,8 +101,6 @@ wasm-pkg-common = "0.16.1"
 wasmtime = { version = "50.0.1", default-features = false, features = ["anyhow", "component-model-bytes", "parallel-compilation"] }
 wasmtime-wasi = { version = "50.0.1", default-features = false, features = ["p2", "p3"] }
 wasmtime-wasi-http = { version = "50.0.1", default-features = false, features = ["p3"] }
-# pinned to the wit-bindgen `wasip3` depends on: a guest links both, and a
-# newer wit-bindgen's `spawn_local` panics over the older task context
 wit-bindgen = { version = "0.63.0", features = ["async-spawn"] }
 x509-cert = { version = "0.3.0", default-features = false, features = ["std"] }
 
