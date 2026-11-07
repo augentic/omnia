@@ -58,6 +58,9 @@ Unreleased
   one to close. `Router::new(client).topic(..)` is
   `Handlers::new().topic(..).with_state(client)`.
 - `omnia_sdk::api::http::Router`, the alias of `axum::Router`.
+- `Client::call`: a handler runs through the router's dispatch, inside its
+  `handler` span, and a unit test calls the fn directly over
+  `Context::new(provider, metadata)`.
 
 ---
 

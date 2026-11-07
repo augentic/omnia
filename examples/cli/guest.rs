@@ -2,7 +2,7 @@
 //!
 //! A `wasi:cli/command` reactor on the one router: `Handlers::command`
 //! registers each subcommand over its `clap::Args` input, `Router::run`
-//! dispatches argv (decode → `Client::call` → encode) onto a `Response`, and
+//! dispatches argv (decode → handler → encode) onto a `Response`, and
 //! `command::export!` binds `command_router` as the `wasi:cli/run` export.
 //!
 //! The module is `#[cfg(target_arch = "wasm32")]`-guarded because examples

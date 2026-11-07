@@ -7,7 +7,7 @@
 //! decoder over the [`clap::ArgMatches`] instead. The closed
 //! [`Router`](crate::api::Router) [`run`](crate::api::Router::run)s argv:
 //!
-//! - the verb's [`Handler`] runs through [`Client::call`]
+//! - the verb's [`Handler`] runs over the router's [`Client`]
 //! - a success body is encoded onto stdout in the selected [`Format`], its
 //!   text form the output's [`Render`]
 //! - a [`Failure`] envelope goes to stderr at
@@ -364,8 +364,8 @@ struct FailureWire<'a> {
 
 type HintFn<'a> = Arc<dyn Fn(&crate::Error) -> Option<Cow<'static, str>> + Send + Sync + 'a>;
 
-/// The command projector: [`Client::call`] → encode onto a [`Response`],
-/// with the [`Failure`] envelope on stderr.
+/// The command projector: a verb run over the [`Client`], its output encoded
+/// onto a [`Response`], with the [`Failure`] envelope on stderr.
 pub struct Command<'a, P> {
     client: &'a Client<P>,
     metadata: &'a Metadata,

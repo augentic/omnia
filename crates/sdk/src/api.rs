@@ -1,21 +1,25 @@
 //! Transport-neutral handler invocation and transport adapters.
 //!
 //! Application logic is a [`Handler`]: any `async fn(Context<P>, I)`
-//! returning a `Result`. [`Client`] owns the provider and builds the
-//! [`Context`] each call receives. A module registers its HTTP paths,
-//! messaging topics, and subcommands on a [`Handlers`] of its own and the
-//! guest merges them (`Handlers::from([..])` or [`Handlers::merge`]), closing
-//! the whole with [`Handlers::with_state`] into a [`Router`] that serves HTTP
-//! requests, dispatches messaging deliveries, and runs argv. Each transport's
-//! `export!` macro binds the router as the guest's WASI export.
+//! returning a `Result`. A module registers its HTTP paths, messaging
+//! topics, and subcommands on a [`Handlers`] of its own and the guest merges
+//! them (`Handlers::from([..])` or [`Handlers::merge`]), closing the whole
+//! with [`Handlers::with_state`] into a [`Router`] that serves HTTP
+//! requests, dispatches messaging deliveries, and runs argv. The [`Client`]
+//! the router closes over owns the provider, and the router's dispatch
+//! builds each handler's [`Context`] over it. [`Context::new`] builds one
+//! directly to unit-test a handler. Each transport's `export!` macro binds
+//! the router as the guest's WASI export.
 //!
 //! ```rust,ignore
 //! use std::convert::Infallible;
 //!
-//! use omnia_sdk::api::{Client, Context, Metadata};
+//! use omnia_sdk::api::{Client, Context, Handlers, Router};
+//! use serde::Deserialize;
 //!
 //! struct Provider;
 //!
+//! #[derive(Deserialize)]
 //! struct Greet {
 //!     name: String,
 //! }
@@ -24,9 +28,8 @@
 //!     Ok(format!("hello, {} ({:?})", input.name, context.metadata.request_id))
 //! }
 //!
-//! async fn run() -> String {
-//!     let client = Client::new(Provider);
-//!     client.call(greet, Greet { name: "omnia".into() }, &Metadata::default()).await.unwrap()
+//! fn router(provider: Provider) -> Router<Provider> {
+//!     Handlers::new().topic("greet", greet).with_state(Client::new(provider))
 //! }
 //! ```
 
@@ -308,17 +311,8 @@ impl<P: Send + Sync + 'static> Client<P> {
         &self.provider
     }
 
-    /// Invoke a handler with the given input and metadata.
-    ///
-    /// The [`Router`]'s dispatch runs a handler inside a `handler` tracing
-    /// span carrying the request and correlation ids and the field naming
-    /// the handler (`method` and `route`, `topic`, or `command`). A direct
-    /// call opens none.
-    ///
-    /// # Errors
-    ///
-    /// Returns the handler's error.
-    pub async fn call<F, I>(
+    // Opens no `handler` span; the transport's dispatch does.
+    pub(crate) async fn call<F, I>(
         &self, handler: F, input: I, metadata: &Metadata,
     ) -> Result<F::Output, F::Error>
     where

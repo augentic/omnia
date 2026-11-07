@@ -100,33 +100,13 @@ async fn send_raw(
 }
 
 #[tokio::test]
-async fn invoke() {
-    let client = Client::new(());
+async fn invoke_direct() {
     let metadata = Metadata {
         correlation_id: Some("call-1".to_string()),
         tenant: Some("acme".to_string()),
         ..Metadata::default()
     };
-
-    let output = client
-        .call(
-            echo,
-            EchoInput {
-                name: "core".to_string(),
-                count: None,
-            },
-            &metadata,
-        )
-        .await
-        .expect("handler succeeds");
-
-    assert_eq!(output.correlation_id.as_deref(), Some("call-1"));
-    assert_eq!(output.tenant.as_deref(), Some("acme"));
-}
-
-#[tokio::test]
-async fn invoke_direct() {
-    let context = Context::new((), Metadata::default());
+    let context = Context::new((), metadata);
 
     let output = echo(
         context,
@@ -140,6 +120,8 @@ async fn invoke_direct() {
 
     assert_eq!(output.name, "direct");
     assert_eq!(output.count, 2);
+    assert_eq!(output.correlation_id.as_deref(), Some("call-1"));
+    assert_eq!(output.tenant.as_deref(), Some("acme"));
 }
 
 // `Config` and `StateStore` both define `get`; the accessors pick one
@@ -156,10 +138,9 @@ async fn context_accessors() {
 
     let provider = Provider::default().config(MapConfig::default().with([("region", "eu")]));
     provider.storage.insert_state("region", b"eu-west");
-    let client = Client::new(provider);
+    let context = Context::new(provider, Metadata::default());
 
-    let (setting, state) =
-        client.call(lookup, "region".to_string(), &Metadata::default()).await.expect("lookup");
+    let (setting, state) = lookup(context, "region".to_string()).await.expect("lookup");
 
     assert_eq!(setting, "eu");
     assert_eq!(state.as_deref(), Some(b"eu-west".as_slice()));
