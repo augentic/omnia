@@ -67,7 +67,7 @@ impl Connection for SqliteConn {
                 let mut stmt = conn.prepare(&query).context("failed to prepare statement")?;
 
                 let column_names: Vec<String> =
-                    stmt.column_names().iter().map(ToString::to_string).collect();
+                    stmt.column_names().map(ToString::to_string).collect();
 
                 let mut rows = stmt
                     .query(params_from_iter(rusqlite_params.iter()))
