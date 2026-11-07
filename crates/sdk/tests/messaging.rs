@@ -105,6 +105,31 @@ async fn topic_span() {
     );
 }
 
+#[tokio::test]
+async fn rejected_delivery_span() {
+    let (spans, _guard) = Spans::install();
+    let router = Router::new(Client::new(())).topic("events.created", echo);
+    let delivery = Delivery {
+        topic: Some("events.created".to_string()),
+        payload: b"not-json".to_vec(),
+        metadata: vec![
+            ("request-id".to_string(), "req-1".to_string()),
+            ("correlation-id".to_string(), "corr-1".to_string()),
+        ],
+        ..Delivery::default()
+    };
+
+    assert!(matches!(router.handle(delivery).await, Err(DeliveryError::Rejected(_))));
+    assert_eq!(
+        spans.handler(),
+        fields([
+            ("request_id", "req-1"),
+            ("correlation_id", "corr-1"),
+            ("topic", "events.created"),
+        ])
+    );
+}
+
 #[test]
 #[should_panic(expected = "duplicate messaging topic")]
 fn dup_topic() {

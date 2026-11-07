@@ -226,28 +226,30 @@ where
     D: Fn(&Delivery) -> Result<I, DecodeError> + Send + Sync + 'static,
 {
     fn dispatch<'a>(&'a self, delivery: &'a Delivery, client: &'a Client<P>) -> DispatchFuture<'a> {
-        Box::pin(async move {
-            let input = (self.decode)(delivery)
-                .map_err(|error| DeliveryError::Rejected(error.to_string()))?;
-            let metadata = Metadata::from_lookup(|name| {
-                delivery
-                    .metadata
-                    .iter()
-                    .find(|(key, _)| key.eq_ignore_ascii_case(name))
-                    .map(|(_, value)| value.clone())
-            });
-            let span = tracing::info_span!(
-                "handler",
-                request_id = metadata.request_id.as_deref(),
-                correlation_id = metadata.correlation_id.as_deref(),
-                topic = delivery.topic.as_deref(),
-            );
-            client
-                .call(self.handler.clone(), input, &metadata)
-                .instrument(span)
-                .await
-                .map(|_| ())
-                .map_err(|error| DeliveryError::Rejected(error.to_string()))
-        })
+        let metadata = Metadata::from_lookup(|name| {
+            delivery
+                .metadata
+                .iter()
+                .find(|(key, _)| key.eq_ignore_ascii_case(name))
+                .map(|(_, value)| value.clone())
+        });
+        let span = tracing::info_span!(
+            "handler",
+            request_id = metadata.request_id.as_deref(),
+            correlation_id = metadata.correlation_id.as_deref(),
+            topic = delivery.topic.as_deref(),
+        );
+        Box::pin(
+            async move {
+                let input = (self.decode)(delivery)
+                    .map_err(|error| DeliveryError::Rejected(error.to_string()))?;
+                client
+                    .call(self.handler.clone(), input, &metadata)
+                    .await
+                    .map(|_| ())
+                    .map_err(|error| DeliveryError::Rejected(error.to_string()))
+            }
+            .instrument(span),
+        )
     }
 }

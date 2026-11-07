@@ -272,6 +272,24 @@ async fn trace_route_template() {
     assert!(spans.handler().contains(&("route".to_owned(), "/items/{id}".to_owned())));
 }
 
+#[tokio::test]
+async fn trace_unmatched_path() {
+    let (spans, _guard) = Spans::install();
+    let request = Request::get("/missing")
+        .header("x-request-id", "req-1")
+        .header("x-correlation-id", "corr-1")
+        .body(Body::empty())
+        .expect("build request");
+
+    let (status, _) = send(router(), request).await;
+
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(
+        spans.handler(),
+        fields([("request_id", "req-1"), ("correlation_id", "corr-1"), ("method", "GET")])
+    );
+}
+
 async fn observe(context: Context<StatefulProvider>) -> Json<ProviderObservation> {
     Json(ProviderObservation {
         address: std::ptr::from_ref(context.provider()).addr(),

@@ -87,20 +87,16 @@ pub type Router<S = ()> = axum::Router<S>;
 /// Apply with `axum::middleware::from_fn(trace)`; [`export!`] applies it to
 /// the router it exports. The ids the span carries are the ones the
 /// [`Metadata`] and [`Context`] extractors hand the handler, a minted request
-/// id included. The `route` is the path the router matched, a template such
-/// as `/items/{id}`, and the request's own path when none matched.
+/// id included. The `route` is the template the router matched, such as
+/// `/items/{id}`; a request no route matched carries none.
 pub async fn trace(mut request: Request, next: Next) -> Response {
     let metadata = Metadata::from_headers(request.headers());
-    let route = request
-        .extensions()
-        .get::<MatchedPath>()
-        .map_or_else(|| request.uri().path(), MatchedPath::as_str);
     let span = tracing::info_span!(
         "handler",
         request_id = metadata.request_id.as_deref(),
         correlation_id = metadata.correlation_id.as_deref(),
         method = request.method().as_str(),
-        route,
+        route = request.extensions().get::<MatchedPath>().map(MatchedPath::as_str),
     );
     request.extensions_mut().insert(metadata);
     next.run(request).instrument(span).await
