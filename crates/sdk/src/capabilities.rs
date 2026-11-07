@@ -41,14 +41,14 @@ pub use blob::{BlobStore, ContainerMetadata, ObjectMetadata};
 pub use broadcast::Broadcast;
 #[doc(hidden)]
 pub use broadcast::HasBroadcast;
-pub use config::{Config, ConfigExt};
 #[doc(hidden)]
 pub use config::HasConfig;
-#[cfg(feature = "docstore")]
-pub use document::{DocumentStore, DocumentStoreExt};
+pub use config::{Config, ConfigExt};
 #[cfg(feature = "docstore")]
 #[doc(hidden)]
 pub use document::HasDocumentStore;
+#[cfg(feature = "docstore")]
+pub use document::{DocumentStore, DocumentStoreExt};
 #[doc(hidden)]
 pub use http::HasHttpRequest;
 pub use http::{HttpRequest, HttpRequestExt};
