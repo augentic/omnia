@@ -1,11 +1,15 @@
 //! Exact-topic messaging routing contracts.
 
+mod support;
+
 use std::future::{Ready, ready};
 use std::sync::{Arc, Mutex};
 
 use omnia_sdk::api::messaging::{Delivery, DeliveryError};
 use omnia_sdk::api::{Client, Context, DecodeError, Handlers, Router};
 use serde::{Deserialize, Serialize};
+
+use self::support::{Spans, fields};
 
 #[derive(Debug, Deserialize)]
 struct EchoInput {
@@ -73,6 +77,32 @@ async fn messaging_failures() {
         router.handle(delivery(Some("events"), b"not-json")).await,
         Err(DeliveryError::Rejected(_))
     ));
+}
+
+#[tokio::test]
+async fn topic_span() {
+    let (spans, _guard) = Spans::install();
+    let router = Router::new(Client::new(())).topic("events.created", echo);
+    let delivery = Delivery {
+        topic: Some("events.created".to_string()),
+        payload: br#"{"name":"message"}"#.to_vec(),
+        metadata: vec![
+            ("request-id".to_string(), "req-1".to_string()),
+            ("correlation-id".to_string(), "corr-1".to_string()),
+        ],
+        ..Delivery::default()
+    };
+
+    router.handle(delivery).await.expect("the route handles the delivery");
+
+    assert_eq!(
+        spans.handler(),
+        fields([
+            ("request_id", "req-1"),
+            ("correlation_id", "corr-1"),
+            ("topic", "events.created"),
+        ])
+    );
 }
 
 #[test]

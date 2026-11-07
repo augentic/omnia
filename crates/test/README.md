@@ -6,7 +6,7 @@ naming what a consumer uses.
 
 | Feature | Carries | Depends on |
 | ------- | ------- | ---------- |
-| `guest` | Native doubles for every `omnia_sdk` capability trait and the `Provider` that bundles them | `omnia-sdk` (with `sql`, `docstore`), `backend`, `conformance` |
+| `guest` | Native doubles for every `omnia_sdk` capability trait, the `Provider` that bundles them, and the `send`/`deliver` drivers that run one request or one delivery through a guest router | `omnia-sdk` (with `sql`, `docstore`), `tower`, `backend`, `conformance` |
 | `host` | `Deployment`, `Backends`, `Scratch` — the component runtime harness | `omnia` and the `wasi-*` host crates, `backend`, `conformance` |
 | `backend` | `ScriptedModel`, `ScriptedVcs` — `wasmtime`-free `*Client` doubles | `omnia-backend` |
 | `conformance` | One scenario per row of the capability contract, and the `conformance!` macro pairing each with a test | `omnia-sdk` (with `sql`, `docstore`) |

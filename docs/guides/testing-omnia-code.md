@@ -57,6 +57,8 @@ async fn device_site_header() {
 
 The handler's own bounds pick out the capabilities it touches, so a test seeds only those fields and leaves the rest at their defaults. `StateStore`, `BlobStore`, and `Vault` share one `storage` field — one `Memory` serves all three, the shape a production provider's storage backend has. The full field/double table is on the struct's rustdoc: `MapConfig`, `MatchedHttp`, `FixedIdentity`, `Sink` (for `Publish` and `Broadcast`), `Memory`, `MemoryDocs`, `ScriptedTables`, `ScriptedModel` (for `Model`), `ScriptedLoader` (for `Plugins`), and `ScriptedVcs` (for `Vcs`).
 
+A test that drives the router rather than a handler builds it once, `handlers().with_state(Client::new(provider.clone()))`, and runs one request through it with `omnia_test::guest::send(&router, request)`, which answers the reply with its body collected, or one delivery with `omnia_test::guest::deliver(&router, topic, payload)`.
+
 Every capability trait is also implemented for `Arc<T>`, `&T`, and `Box<T>`, so a handler bounded on `P: StateStore` accepts `Arc<Memory>` directly.
 
 That covers the two other shapes a test provider takes. A handler bounded on a single capability needs no struct at all: pass `Arc<Memory>` (or `&Memory`) where the provider goes. A bespoke struct — generic over a storage type, say, or holding a double behind an `Arc` — hand-writes its impls, each method forwarding to the field that carries the double, exactly as a production provider over a custom backend would.

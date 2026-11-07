@@ -18,6 +18,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use serde::de::DeserializeOwned;
+use tracing::Instrument as _;
 
 use crate::api::{Client, DecodeError, Handler, Metadata};
 
@@ -235,8 +236,15 @@ where
                     .find(|(key, _)| key.eq_ignore_ascii_case(name))
                     .map(|(_, value)| value.clone())
             });
+            let span = tracing::info_span!(
+                "handler",
+                request_id = metadata.request_id.as_deref(),
+                correlation_id = metadata.correlation_id.as_deref(),
+                topic = delivery.topic.as_deref(),
+            );
             client
                 .call(self.handler.clone(), input, &metadata)
+                .instrument(span)
                 .await
                 .map(|_| ())
                 .map_err(|error| DeliveryError::Rejected(error.to_string()))

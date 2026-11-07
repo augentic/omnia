@@ -45,7 +45,7 @@ Routes are registered with axum's own `get`/`post`/`put`/`patch`/`delete`, chain
 omnia_sdk::api::http::export!(http_router);
 ```
 
-Each transport module's `export!` (`http::export!`, `messaging::export!`, `command::export!`) binds one WASI export and expands to nothing on native targets, so the same crate's handler tests run natively over `omnia_test::guest::Provider`, driving the router with `tower::ServiceExt::oneshot`. On `wasm32` the HTTP export calls the router fn with `WasiProvider` (or a custom provider passed as a second argument) and serves each request inside a `handler` tracing span carrying the request and correlation ids (`api::http::trace`, an axum middleware a native test can layer on too). Omnia creates one WASI component instance per HTTP request; the router fn runs inside each `handle` call, and axum's route-state clones share that client's `Arc<P>` only for that request. Durable application state belongs in host-side capabilities, not guest statics.
+Each transport module's `export!` (`http::export!`, `messaging::export!`, `command::export!`) binds one WASI export and expands to nothing on native targets, so the same crate's handler tests run natively over `omnia_test::guest::Provider`, driving the router with `omnia_test::guest::send` (one request, the reply with its body collected) and `omnia_test::guest::deliver` (one delivery on a topic). On `wasm32` the HTTP export calls the router fn with `WasiProvider` (or a custom provider passed as a second argument) and serves each request inside a `handler` tracing span carrying the request and correlation ids, the method, and the matched route (`api::http::trace`, an axum middleware a native test can layer on too). Omnia creates one WASI component instance per HTTP request; the router fn runs inside each `handle` call, and axum's route-state clones share that client's `Arc<P>` only for that request. Durable application state belongs in host-side capabilities, not guest statics.
 
 ### Errors
 
@@ -69,7 +69,7 @@ pub fn messaging_router<P: StateStore + Send + Sync + 'static>(provider: P) -> R
 messaging::export!(messaging_router);
 ```
 
-`topic(topic, handler)` decodes JSON and acknowledges successful output; `topic_with(topic, handler, decode)` takes a decoder `Fn(&Delivery) -> Result<I, DecodeError>` over the whole delivery for any other wire format. A module registers its HTTP routes, messaging topics, and subcommands on a `Handlers<P>` of its own, with no client, and the root merges each (`Handlers::from([..])` or `Router::merge`) and closes the whole into the one `Router<P>` with `Handlers::with_state`. `Client::call(handler, input, &metadata)` invokes a `Handler` directly inside the same `handler` span.
+`topic(topic, handler)` decodes JSON and acknowledges successful output; `topic_with(topic, handler, decode)` takes a decoder `Fn(&Delivery) -> Result<I, DecodeError>` over the whole delivery for any other wire format. A module registers its HTTP routes, messaging topics, and subcommands on a `Handlers<P>` of its own, with no client, and the root merges each (`Handlers::from([..])` or `Router::merge`) and closes the whole into the one `Router<P>` with `Handlers::with_state`. A delivery and a subcommand run inside the same `handler` span through the router's dispatch, which names the `topic` or the `command`; `Client::call(handler, input, &metadata)` invokes a `Handler` directly, outside any span.
 
 ### Command-mode guests
 

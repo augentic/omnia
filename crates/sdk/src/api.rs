@@ -44,7 +44,6 @@ use std::time::SystemTime;
 use axum::routing::MethodRouter;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use tracing::Instrument as _;
 
 pub mod command;
 #[cfg(feature = "http")]
@@ -388,8 +387,12 @@ impl<P: Send + Sync + 'static> Client<P> {
         &self.provider
     }
 
-    /// Invoke a handler with the given input and metadata inside a `handler`
-    /// tracing span carrying the request and correlation ids.
+    /// Invoke a handler with the given input and metadata.
+    ///
+    /// The [`Router`]'s dispatch runs a handler inside a `handler` tracing
+    /// span carrying the request and correlation ids and the field naming
+    /// the handler (`method` and `route`, `topic`, or `command`). A direct
+    /// call opens none.
     ///
     /// # Errors
     ///
@@ -400,16 +403,11 @@ impl<P: Send + Sync + 'static> Client<P> {
     where
         F: Handler<P, I>,
     {
-        let span = tracing::info_span!(
-            "handler",
-            request_id = metadata.request_id.as_deref(),
-            correlation_id = metadata.correlation_id.as_deref(),
-        );
         let context = Context {
             provider: Arc::clone(&self.provider),
             metadata: metadata.clone(),
         };
-        handler.call(context, input).instrument(span).await
+        handler.call(context, input).await
     }
 }
 

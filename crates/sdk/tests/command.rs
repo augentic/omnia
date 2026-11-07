@@ -3,6 +3,8 @@
 
 #![cfg(all(not(target_arch = "wasm32"), feature = "command"))]
 
+mod support;
+
 use std::borrow::Cow;
 use std::fmt;
 use std::future::{Ready, ready};
@@ -14,6 +16,8 @@ use omnia_sdk::api::command::{
 use omnia_sdk::api::{Client, Context, DecodeError, Format, Handlers, Metadata, Render, Router};
 use omnia_sdk::{bad_request, not_found};
 use serde::{Deserialize, Serialize};
+
+use self::support::{Spans, fields};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -359,6 +363,25 @@ async fn merged_commands() {
     let script = String::from_utf8(completion.stdout).expect("utf-8");
     assert!(script.contains("greet"));
     assert!(script.contains("lookup"));
+}
+
+#[tokio::test]
+async fn command_span() {
+    let (spans, _guard) = Spans::install();
+    let router = Handlers::new().command("greet", greet).with_state(Client::new(())).name("app");
+    let metadata = Metadata {
+        request_id: Some("req-1".to_string()),
+        correlation_id: Some("corr-1".to_string()),
+        ..Metadata::default()
+    };
+
+    let response = router.run_with(["app", "greet", "ada"], &metadata).await;
+
+    assert_eq!(response.exit, 0);
+    assert_eq!(
+        spans.handler(),
+        fields([("request_id", "req-1"), ("correlation_id", "corr-1"), ("command", "greet")])
+    );
 }
 
 // The input type's doc comments are the help text: the struct's for the

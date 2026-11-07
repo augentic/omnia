@@ -19,7 +19,7 @@ use std::future::{Future, ready};
 use std::sync::Arc;
 
 use axum::Json;
-use axum::extract::{FromRef, FromRequestParts, Request};
+use axum::extract::{FromRef, FromRequestParts, MatchedPath, Request};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use http::HeaderMap;
@@ -81,18 +81,26 @@ pub use crate::__export_http as export;
 /// A finished `axum::Router` ready to serve requests, or one over state `S`.
 pub type Router<S = ()> = axum::Router<S>;
 
-/// Serve a request inside a `handler` span carrying its request and correlation ids.
+/// Serve a request inside a `handler` span carrying its request and
+/// correlation ids, its method, and its route.
 ///
 /// Apply with `axum::middleware::from_fn(trace)`; [`export!`] applies it to
 /// the router it exports. The ids the span carries are the ones the
 /// [`Metadata`] and [`Context`] extractors hand the handler, a minted request
-/// id included.
+/// id included. The `route` is the path the router matched, a template such
+/// as `/items/{id}`, and the request's own path when none matched.
 pub async fn trace(mut request: Request, next: Next) -> Response {
     let metadata = Metadata::from_headers(request.headers());
+    let route = request
+        .extensions()
+        .get::<MatchedPath>()
+        .map_or_else(|| request.uri().path(), MatchedPath::as_str);
     let span = tracing::info_span!(
         "handler",
         request_id = metadata.request_id.as_deref(),
         correlation_id = metadata.correlation_id.as_deref(),
+        method = request.method().as_str(),
+        route,
     );
     request.extensions_mut().insert(metadata);
     next.run(request).instrument(span).await

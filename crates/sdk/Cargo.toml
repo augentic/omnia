@@ -32,7 +32,7 @@ command = ["dep:clap", "dep:clap_complete"]
 
 [dependencies]
 anyhow.workspace = true
-axum = { workspace = true, features = ["json", "query"], optional = true }
+axum = { workspace = true, features = ["json", "matched-path", "query"], optional = true }
 bytes.workspace = true
 clap = { workspace = true, features = ["string"], optional = true }
 clap_complete = { workspace = true, optional = true }

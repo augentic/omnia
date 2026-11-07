@@ -434,6 +434,7 @@ cfg_select! {
         use std::pin::Pin;
 
         pub use clap_complete::Shell;
+        use tracing::Instrument as _;
 
         use crate::api::DecodeError;
 
@@ -742,7 +743,13 @@ cfg_select! {
                 if let Some(hint) = &self.hint {
                     projector.hint = Some(Arc::clone(hint));
                 }
-                entry.route.dispatch(sub_matches, &projector).await
+                let span = tracing::info_span!(
+                    "handler",
+                    request_id = metadata.request_id.as_deref(),
+                    correlation_id = metadata.correlation_id.as_deref(),
+                    command = name,
+                );
+                entry.route.dispatch(sub_matches, &projector).instrument(span).await
             }
         }
 

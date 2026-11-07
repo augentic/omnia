@@ -2484,6 +2484,7 @@ dependencies = [
  "tempfile",
  "test-programs",
  "tokio",
+ "tower",
 ]
 
 [[package]]

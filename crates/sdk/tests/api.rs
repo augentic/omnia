@@ -2,28 +2,25 @@
 
 #![cfg(feature = "http")]
 
+mod support;
+
 use std::future::{Ready, ready};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
 
 use axum::Json;
-use axum::body::{Body, to_bytes};
+use axum::body::Body;
 use axum::extract::{Path, Query};
 use axum::middleware::from_fn;
 use axum::routing::get;
 use http::header::CONTENT_TYPE;
 use http::{Request, StatusCode};
 use omnia_sdk::api::http::trace;
-use omnia_sdk::api::messaging::Delivery;
 use omnia_sdk::api::{Client, Context, ErrorBody, Format, Handlers, Metadata, Render, Router};
 use omnia_sdk::{Config, StateStore, not_found};
-use omnia_test::guest::{MapConfig, Provider};
+use omnia_test::guest::{self, MapConfig, Provider};
 use serde::{Deserialize, Serialize};
-use tower::ServiceExt as _;
-use tracing::field::{Field, Visit};
-use tracing::span::{Attributes, Id};
-use tracing_subscriber::Registry;
-use tracing_subscriber::layer::{Context as LayerContext, Layer, SubscriberExt as _};
+
+use self::support::{Spans, fields};
 
 #[derive(Debug, Deserialize)]
 struct EchoInput {
@@ -45,31 +42,6 @@ struct EchoOutput {
 struct Ids {
     metadata: Option<String>,
     context: Option<String>,
-}
-
-type Span = (String, Vec<(String, String)>);
-
-#[derive(Default)]
-struct Spans(Arc<Mutex<Vec<Span>>>);
-
-impl<S: tracing::Subscriber> Layer<S> for Spans {
-    fn on_new_span(&self, attrs: &Attributes<'_>, _id: &Id, _ctx: LayerContext<'_, S>) {
-        struct Fields(Vec<(String, String)>);
-
-        impl Visit for Fields {
-            fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
-                self.0.push((field.name().to_owned(), format!("{value:?}")));
-            }
-
-            fn record_str(&mut self, field: &Field, value: &str) {
-                self.0.push((field.name().to_owned(), value.to_owned()));
-            }
-        }
-
-        let mut fields = Fields(Vec::new());
-        attrs.record(&mut fields);
-        self.0.lock().unwrap().push((attrs.metadata().name().to_owned(), fields.0));
-    }
 }
 
 struct StatefulProvider {
@@ -118,22 +90,19 @@ fn router() -> Router {
 async fn send(
     router: impl Into<axum::Router>, request: Request<Body>,
 ) -> (StatusCode, serde_json::Value) {
-    let response = router.into().oneshot(request).await.expect("router serves request");
-    let status = response.status();
-    let bytes = to_bytes(response.into_body(), usize::MAX).await.expect("collect body");
-    let value = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
-    (status, value)
+    let response = guest::send(&router.into(), request).await;
+    let value = serde_json::from_slice(response.body()).unwrap_or(serde_json::Value::Null);
+    (response.status(), value)
 }
 
 async fn send_raw(
     router: axum::Router, request: Request<Body>,
 ) -> (StatusCode, Option<String>, String) {
-    let response = router.oneshot(request).await.expect("router serves request");
-    let status = response.status();
+    let response = guest::send(&router, request).await;
     let content_type =
         response.headers().get(CONTENT_TYPE).map(|value| value.to_str().unwrap().to_owned());
-    let bytes = to_bytes(response.into_body(), usize::MAX).await.expect("collect body");
-    (status, content_type, String::from_utf8(bytes.to_vec()).expect("utf-8 body"))
+    let body = String::from_utf8(response.body().to_vec()).expect("utf-8 body");
+    (response.status(), content_type, body)
 }
 
 #[tokio::test]
@@ -267,9 +236,7 @@ async fn missing_request_id() {
 
 #[tokio::test]
 async fn trace_span() {
-    let spans = Spans::default();
-    let recorded = Arc::clone(&spans.0);
-    let _guard = tracing::subscriber::set_default(Registry::default().with(spans));
+    let (spans, _guard) = Spans::install();
     let request = Request::get("/echo?name=plan")
         .header("x-request-id", "req-1")
         .header("x-correlation-id", "corr-1")
@@ -279,20 +246,30 @@ async fn trace_span() {
     let (status, _) = send(router(), request).await;
 
     assert_eq!(status, StatusCode::OK);
-    let (_, fields) = recorded
-        .lock()
-        .unwrap()
-        .iter()
-        .find(|(name, _)| name == "handler")
-        .cloned()
-        .expect("the trace layer opens a `handler` span");
     assert_eq!(
-        fields,
-        [
-            ("request_id".to_owned(), "req-1".to_owned()),
-            ("correlation_id".to_owned(), "corr-1".to_owned()),
-        ]
+        spans.handler(),
+        fields([
+            ("request_id", "req-1"),
+            ("correlation_id", "corr-1"),
+            ("method", "GET"),
+            ("route", "/echo"),
+        ])
     );
+}
+
+#[tokio::test]
+async fn trace_route_template() {
+    let (spans, _guard) = Spans::install();
+    let router = axum::Router::new()
+        .route("/items/{id}", get(lookup))
+        .layer(from_fn(trace))
+        .with_state(Client::new(()));
+    let request = Request::get("/items/42").body(Body::empty()).expect("build request");
+
+    let (status, _) = send(router, request).await;
+
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert!(spans.handler().contains(&("route".to_owned(), "/items/{id}".to_owned())));
 }
 
 async fn observe(context: Context<StatefulProvider>) -> Json<ProviderObservation> {
@@ -431,15 +408,12 @@ async fn route_and_topic() {
     let router = router();
     let request = Request::get("/echo?name=both").body(Body::empty()).expect("build request");
 
-    let response = router.clone().oneshot(request).await.expect("router serves request");
+    let response = guest::send(&router, request).await;
     assert_eq!(response.status(), StatusCode::OK);
 
-    let delivery = Delivery {
-        topic: Some("echo".to_string()),
-        payload: br#"{"name":"both"}"#.to_vec(),
-        ..Delivery::default()
-    };
-    router.handle(delivery).await.expect("router dispatches delivery");
+    guest::deliver(&router, "echo", br#"{"name":"both"}"#)
+        .await
+        .expect("router dispatches delivery");
 }
 
 #[tokio::test]
