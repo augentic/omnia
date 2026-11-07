@@ -57,7 +57,7 @@ cargo build --example <name>-wasm --target wasm32-wasip2
 
 - A **provider** is the struct your handlers run against — it carries their capabilities (implement `DocumentStore`, `Config`, etc. on it).
 - A **client** (`Client::new(provider)`) owns the provider. It is the state of an HTTP router and the thing a messaging router or command invokes handlers through.
-- A **context** (`Context<P>`) is what a handler receives: `provider()` and the public transport-neutral `metadata` (request, correlation, and causation ids, and the tenant when the transport names one). A handler bounds its `P` on the capability traits it uses and never names the provider.
+- A **context** (`Context<P>`) is what a handler receives: the provider, through `provider()` or one accessor per capability (`config()`, `state()`, `tables()`, `http()`, ...), and the public transport-neutral `metadata` (request, correlation, and causation ids, and the tenant when the transport names one). A handler bounds its `P` on the capability traits it uses and never names the provider; an accessor names the one capability a call means where two of them share a method name.
 
 An **HTTP handler** is a plain [Axum](https://github.com/tokio-rs/axum) handler. `Context<P>` is an extractor over the `Client` in the router state; the input comes through axum's own `Path`, `Query`, and `Json` extractors; the output is anything `IntoResponse`, typically `Json<Reply>`:
 
@@ -68,11 +68,11 @@ async fn create_item<P>(
 where
     P: Config + StateStore + 'static,
 {
-    // context.provider() carries the capabilities in the fn's bounds
+    // context.config() and context.state() are the capabilities in the fn's bounds
 }
 ```
 
-A **messaging or command handler** is an `async fn(I, Context<P>) -> Result<O, E>` named for the operation, taking the input DTO by value. Every fn of that shape is a `Handler<P, I>` through a blanket impl, as is any `Clone` closure of it — so a closure can carry configuration into a route. Implementing `Handler<P, I>` by hand on a local non-fn type is the escape hatch for the rare case a fn cannot express. To unit-test a fn that takes a context without a `Client` or a router, build its context with `Context::new(provider, metadata)`.
+A **messaging or command handler** is an `async fn(Context<P>, I) -> Result<O, E>` named for the operation, taking the context first as an HTTP handler does and the input DTO by value. Every fn of that shape is a `Handler<P, I>` through a blanket impl, as is any `Clone` closure of it — so a closure can carry configuration into a route. Implementing `Handler<P, I>` by hand on a local non-fn type is the escape hatch for the rare case a fn cannot express. To unit-test a fn that takes a context without a `Client` or a router, build its context with `Context::new(provider, metadata)`.
 
 Logic shared by an HTTP route and a topic lives in a plain fn both call: the axum handler extracts and hands over, the messaging handler decodes and hands over.
 
@@ -232,7 +232,7 @@ impl Render for Synced {
     }
 }
 
-async fn sync(input: SyncInput, context: Context<MyProvider>) -> Result<Synced, Error> {
+async fn sync(context: Context<MyProvider>, input: SyncInput) -> Result<Synced, Error> {
     // ...
 }
 

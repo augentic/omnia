@@ -36,7 +36,7 @@ pub struct Messaging;
 omnia_wasi_messaging::export!(Messaging with_types_in omnia_wasi_messaging);
 
 async fn create_order(
-    input: CreateOrder, context: Context<MyProvider>,
+    context: Context<MyProvider>, input: CreateOrder,
 ) -> Result<(), omnia_sdk::Error> {
     // ...
 }

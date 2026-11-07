@@ -5,7 +5,9 @@
 
 use std::future::Future;
 
-use anyhow::Result;
+use anyhow::{Context as _, Result};
+use serde::Serialize;
+use serde::de::DeserializeOwned;
 
 /// Typed CAS failure, mirroring the `wasi:keyvalue/atomics` cas-error variant.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -21,6 +23,8 @@ pub enum CasError {
 }
 
 /// Store and retrieve key-value state, optionally with a TTL.
+///
+/// JSON codecs over the stored bytes are [`StateStoreExt`].
 #[omnia_guest_macros::capability]
 pub trait StateStore: Send + Sync {
     /// Retrieve a previously stored value from the state store.
@@ -49,15 +53,11 @@ pub trait StateStore: Send + Sync {
 #[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
 impl StateStore for crate::WasiProvider {
     async fn get(&self, key: &str) -> Result<Option<Vec<u8>>> {
-        use anyhow::Context as _;
-
         let bucket = open_bucket().await?;
         bucket.get(key.to_string()).await.with_context(|| format!("reading `{key}`"))
     }
 
     async fn set(&self, key: &str, value: &[u8], ttl_secs: Option<u64>) -> Result<()> {
-        use anyhow::Context as _;
-
         let bucket = open_bucket().await?;
         match ttl_secs {
             Some(secs) => {
@@ -69,8 +69,6 @@ impl StateStore for crate::WasiProvider {
     }
 
     async fn delete(&self, key: &str) -> Result<()> {
-        use anyhow::Context as _;
-
         let bucket = open_bucket().await?;
         bucket.delete(key.to_string()).await.with_context(|| format!("deleting `{key}`"))
     }
@@ -117,9 +115,37 @@ impl StateStore for crate::WasiProvider {
 
 #[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
 async fn open_bucket() -> Result<omnia_wasi_keyvalue::store::Bucket> {
-    use anyhow::Context as _;
-
     omnia_wasi_keyvalue::store::open(omnia_backend::keyvalue::BUCKET.to_string())
         .await
         .with_context(|| format!("opening bucket `{}`", omnia_backend::keyvalue::BUCKET))
 }
+
+/// JSON codecs over any [`StateStore`].
+///
+/// Blanket-implemented for every [`StateStore`]; never implemented by hand.
+pub trait StateStoreExt: StateStore {
+    /// Retrieve and deserialize a JSON value from the state store.
+    fn get_json<T: DeserializeOwned>(
+        &self, key: &str,
+    ) -> impl Future<Output = Result<Option<T>>> + Send {
+        async move {
+            let Some(bytes) = self.get(key).await? else {
+                return Ok(None);
+            };
+            serde_json::from_slice(&bytes).with_context(|| format!("parsing `{key}`")).map(Some)
+        }
+    }
+
+    /// Serialize `value` as JSON and store it in the state store.
+    fn set_json<T: Serialize + Sync + ?Sized>(
+        &self, key: &str, value: &T, ttl_secs: Option<u64>,
+    ) -> impl Future<Output = Result<()>> + Send {
+        async move {
+            let bytes =
+                serde_json::to_vec(value).with_context(|| format!("serializing `{key}`"))?;
+            self.set(key, &bytes, ttl_secs).await
+        }
+    }
+}
+
+impl<P: StateStore + ?Sized> StateStoreExt for P {}

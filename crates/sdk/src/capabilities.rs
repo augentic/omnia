@@ -9,6 +9,14 @@
 //! by `#[omnia_guest_macros::capability]`) with a blanket forwarding impl and
 //! implementations for `Arc<P>`, `&P`, and `Box<P>`, so `#[derive(Provider)]`
 //! and pointer wrappers delegate without repeating method signatures.
+//!
+//! A `<Capability>Ext` trait ([`StateStoreExt`], [`ConfigExt`], ...) holds the
+//! caller-side codecs and parsers over a capability's primitives. It is
+//! blanket-implemented for every implementor and never implemented by hand, so
+//! one encoding holds across providers. Its methods return `anyhow::Result`
+//! like the primitives they wrap; [`HttpRequestExt::fetch_json`] alone returns
+//! [`crate::Result`], since it also maps a non-2xx status to
+//! [`Error::BadGateway`](crate::Error::BadGateway).
 
 mod blob;
 mod broadcast;
@@ -33,20 +41,20 @@ pub use blob::{BlobStore, ContainerMetadata, ObjectMetadata};
 pub use broadcast::Broadcast;
 #[doc(hidden)]
 pub use broadcast::HasBroadcast;
-pub use config::Config;
+pub use config::{Config, ConfigExt};
 #[doc(hidden)]
 pub use config::HasConfig;
 #[cfg(feature = "docstore")]
-pub use document::DocumentStore;
+pub use document::{DocumentStore, DocumentStoreExt};
 #[cfg(feature = "docstore")]
 #[doc(hidden)]
 pub use document::HasDocumentStore;
 #[doc(hidden)]
 pub use http::HasHttpRequest;
-pub use http::HttpRequest;
+pub use http::{HttpRequest, HttpRequestExt};
 #[doc(hidden)]
 pub use identity::HasIdentity;
-pub use identity::{AccessToken, Identity};
+pub use identity::{AccessToken, Identity, IdentityExt};
 #[doc(hidden)]
 pub use messaging::HasPublish;
 pub use messaging::{Message, Publish};
@@ -60,12 +68,12 @@ pub use plugins::HasPlugins;
 pub use plugins::Plugins;
 #[doc(hidden)]
 pub use state::HasStateStore;
-pub use state::{CasError, StateStore};
+pub use state::{CasError, StateStore, StateStoreExt};
 #[cfg(feature = "sql")]
 #[doc(hidden)]
 pub use table::HasTableStore;
 #[cfg(feature = "sql")]
-pub use table::TableStore;
+pub use table::{TableStore, TableStoreExt};
 #[doc(hidden)]
 pub use vault::HasVault;
 pub use vault::Vault;

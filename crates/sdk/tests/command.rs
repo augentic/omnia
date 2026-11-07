@@ -212,23 +212,23 @@ fn from_env_mints() {
     assert_ne!(Metadata::from_env("FROM_ENV_MINTS").request_id, metadata.request_id);
 }
 
-fn greet(input: Greet, _context: Context<()>) -> Ready<Result<Greeting, omnia_sdk::Error>> {
+fn greet(_context: Context<()>, input: Greet) -> Ready<Result<Greeting, omnia_sdk::Error>> {
     let Greet { name } = input;
     ready(Ok(Greeting {
         text: format!("hello, {name}"),
     }))
 }
 
-fn lookup(input: Lookup, _context: Context<()>) -> Ready<Result<Greeting, omnia_sdk::Error>> {
+fn lookup(_context: Context<()>, input: Lookup) -> Ready<Result<Greeting, omnia_sdk::Error>> {
     let Lookup { id } = input;
     ready(Err(not_found!("no item {id}")))
 }
 
-fn reject(_input: Greet, _context: Context<()>) -> Ready<Result<Greeting, omnia_sdk::Error>> {
+fn reject(_context: Context<()>, _input: Greet) -> Ready<Result<Greeting, omnia_sdk::Error>> {
     ready(Err(bad_request!("name is required")))
 }
 
-fn ping((): (), _context: Context<()>) -> Ready<Result<Greeting, omnia_sdk::Error>> {
+fn ping(_context: Context<()>, (): ()) -> Ready<Result<Greeting, omnia_sdk::Error>> {
     ready(Ok(Greeting {
         text: "pong".to_string(),
     }))
@@ -440,7 +440,7 @@ mod http_parity {
     async fn lookup_route(
         context: Context<()>, Query(input): Query<Lookup>,
     ) -> Result<Json<Greeting>, omnia_sdk::Error> {
-        lookup(input, context).await.map(Json)
+        lookup(context, input).await.map(Json)
     }
 
     // One `Handlers` carries the path and the subcommand, and the one router

@@ -16,7 +16,8 @@ use http::{Request, StatusCode};
 use omnia_sdk::api::http::trace;
 use omnia_sdk::api::messaging::Delivery;
 use omnia_sdk::api::{Client, Context, ErrorBody, Format, Handlers, Metadata, Render, Router};
-use omnia_sdk::not_found;
+use omnia_sdk::{Config, StateStore, not_found};
+use omnia_test::guest::{MapConfig, Provider};
 use serde::{Deserialize, Serialize};
 use tower::ServiceExt as _;
 use tracing::field::{Field, Visit};
@@ -88,7 +89,7 @@ struct Summary {
 }
 
 fn echo<P: Send + Sync + 'static>(
-    input: EchoInput, context: Context<P>,
+    context: Context<P>, input: EchoInput,
 ) -> Ready<Result<EchoOutput, omnia_sdk::Error>> {
     ready(Ok(EchoOutput {
         name: input.name,
@@ -103,7 +104,7 @@ fn echo<P: Send + Sync + 'static>(
 async fn echo_route<P: Send + Sync + 'static>(
     context: Context<P>, Query(input): Query<EchoInput>,
 ) -> Result<Json<EchoOutput>, omnia_sdk::Error> {
-    echo(input, context).await.map(Json)
+    echo(context, input).await.map(Json)
 }
 
 fn handlers<P: Send + Sync + 'static>() -> Handlers<P> {
@@ -165,17 +166,40 @@ async fn invoke_direct() {
     let context = Context::new((), Metadata::default());
 
     let output = echo(
+        context,
         EchoInput {
             name: "direct".to_string(),
             count: Some(2),
         },
-        context,
     )
     .await
     .expect("handler succeeds");
 
     assert_eq!(output.name, "direct");
     assert_eq!(output.count, 2);
+}
+
+// `Config` and `StateStore` both define `get`; the accessors pick one
+// without UFCS
+#[tokio::test]
+async fn context_accessors() {
+    async fn lookup<P: Config + StateStore>(
+        context: Context<P>, key: String,
+    ) -> Result<(String, Option<Vec<u8>>), omnia_sdk::Error> {
+        let setting = context.config().get(&key).await?;
+        let state = context.state().get(&key).await?;
+        Ok((setting, state))
+    }
+
+    let provider = Provider::default().config(MapConfig::default().with([("region", "eu")]));
+    provider.storage.insert_state("region", b"eu-west");
+    let client = Client::new(provider);
+
+    let (setting, state) =
+        client.call(lookup, "region".to_string(), &Metadata::default()).await.expect("lookup");
+
+    assert_eq!(setting, "eu");
+    assert_eq!(state.as_deref(), Some(b"eu-west".as_slice()));
 }
 
 #[tokio::test]

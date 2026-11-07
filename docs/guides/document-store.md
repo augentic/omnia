@@ -12,21 +12,27 @@ Guest access goes through the `DocumentStore` trait from `omnia-sdk` — call it
 
 ```rust,noplayground
 use omnia_sdk::docstore::{Document, Filter, QueryOptions, ScalarValue, SortField};
-use omnia_sdk::{DocumentStore, WasiProvider};
+use omnia_sdk::{DocumentStore, DocumentStoreExt as _, WasiProvider};
 ```
 
 ## CRUD
 
-A `Document` is an id plus raw JSON bytes — serialize your own types into `data`:
+A `Document` is an id plus raw JSON bytes. `Document::json` serializes your own type into `data`, `Document::decode` reads it back, and `get_as` (from `DocumentStoreExt`, blanket-implemented for every `DocumentStore`) fetches and decodes in one call:
 
 ```rust,noplayground
 async fn create_stop(Json(req): Json<CreateStopRequest>) -> omnia_sdk::Result<Json<Value>> {
-    let doc = Document {
-        id: req.id.clone(),
-        data: serde_json::to_vec(&req.stop).context("serializing stop")?,
-    };
+    let doc = Document::json(req.id.clone(), &req.stop).context("serializing stop")?;
     WasiProvider.insert("stops", &doc).await.context("inserting stop")?;
     Ok(Json(json!({ "stop": req.stop, "id": req.id })))
+}
+
+async fn get_stop(Path(id): Path<String>) -> omnia_sdk::Result<Json<Stop>> {
+    let stop: Stop = WasiProvider
+        .get_as("stops", &id)
+        .await
+        .context("reading stop")?
+        .ok_or_else(|| not_found!("stop {id} not found"))?;
+    Ok(Json(stop))
 }
 ```
 
@@ -39,7 +45,7 @@ The four operations:
 | `put(collection, &doc)` | Upsert (create or replace) |
 | `delete(collection, id)` | Remove → `bool` (whether anything was deleted) |
 
-Collections are created implicitly on first write.
+`get_as::<T>(collection, id)` is `get` with the body decoded into `T`. Collections are created implicitly on first write.
 
 ## Filters
 
@@ -153,7 +159,7 @@ let result = WasiProvider
     .await
     .context("querying stops")?;
 
-let stops = deserialize_docs(&result.documents)?;
+let stops: Vec<Stop> = result.documents.iter().map(Document::decode).collect::<Result<_, _>>()?;
 Ok(Json(json!({ "stops": stops, "continuation": result.continuation })))
 ```
 

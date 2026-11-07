@@ -11,19 +11,19 @@ use omnia_sdk::{Error, bad_gateway, bad_request, not_found};
 
 struct Provider;
 
-async fn ok((): (), _context: Context<Provider>) -> Result<String, Error> {
+async fn ok(_context: Context<Provider>, (): ()) -> Result<String, Error> {
     Ok("ok".to_owned())
 }
 
-async fn bad((): (), _context: Context<Provider>) -> Result<(), Error> {
+async fn bad(_context: Context<Provider>, (): ()) -> Result<(), Error> {
     Err(bad_request!("refused as a bad request"))
 }
 
-async fn missing((): (), _context: Context<Provider>) -> Result<(), Error> {
+async fn missing(_context: Context<Provider>, (): ()) -> Result<(), Error> {
     Err(not_found!("refused as not found"))
 }
 
-async fn upstream((): (), _context: Context<Provider>) -> Result<(), Error> {
+async fn upstream(_context: Context<Provider>, (): ()) -> Result<(), Error> {
     Err(bad_gateway!("refused as a bad gateway"))
 }
 

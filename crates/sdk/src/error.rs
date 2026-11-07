@@ -138,6 +138,16 @@ impl From<serde_json::Error> for Error {
     }
 }
 
+#[cfg(feature = "sql")]
+impl From<omnia_backend::sql::ColumnError> for Error {
+    fn from(err: omnia_backend::sql::ColumnError) -> Self {
+        Self::ServerError {
+            code: "server_error".to_string(),
+            description: err.to_string(),
+        }
+    }
+}
+
 impl From<crate::model::Error> for Error {
     fn from(err: crate::model::Error) -> Self {
         use crate::model::Error as Model;

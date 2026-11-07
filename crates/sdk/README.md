@@ -53,13 +53,13 @@ A handler's error is anything `IntoResponse`. `omnia_sdk::Error` (`bad_request!`
 
 ### Messaging
 
-Messaging routes are `Handler`s: any `async fn(I, Context<P>) -> Result<O, E>`, registered on exact topics and exported the same way. Every fn of that shape (and every `Clone` closure of it, so a closure can carry configuration) is a `Handler<P, I>` through a blanket impl.
+Messaging routes are `Handler`s: any `async fn(Context<P>, I) -> Result<O, E>`, the context first as in an HTTP handler, registered on exact topics and exported the same way. Every fn of that shape (and every `Clone` closure of it, so a closure can carry configuration) is a `Handler<P, I>` through a blanket impl.
 
 ```rust,ignore
 use omnia_sdk::api::{Client, Context, Router, messaging};
 
-async fn item_created<P: StateStore>(input: CreateItem, context: Context<P>) -> Result<(), Error> {
-    context.provider().set(&input.name, b"created", None).await
+async fn item_created<P: StateStore>(context: Context<P>, input: CreateItem) -> Result<(), Error> {
+    context.state().set(&input.name, b"created", None).await
 }
 
 pub fn messaging_router<P: StateStore + Send + Sync + 'static>(provider: P) -> Router<P> {
@@ -86,7 +86,7 @@ struct CreateItem {
     name: String,
 }
 
-async fn create<P: StateStore>(input: CreateItem, context: Context<P>) -> omnia_sdk::Result<()> {
+async fn create<P: StateStore>(context: Context<P>, input: CreateItem) -> omnia_sdk::Result<()> {
     // ...
 }
 

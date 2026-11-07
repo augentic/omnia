@@ -93,23 +93,23 @@ impl Render for Env {
     }
 }
 
-async fn greet(input: GreetInput, context: Context<Provider>) -> Result<Greeting, Error> {
+async fn greet(context: Context<Provider>, input: GreetInput) -> Result<Greeting, Error> {
     Ok(Greeting {
         greeting: format!("{}, {}!", context.provider().greeting, input.name),
     })
 }
 
-async fn add(input: AddInput, _context: Context<Provider>) -> Result<Sum, Error> {
+async fn add(_context: Context<Provider>, input: AddInput) -> Result<Sum, Error> {
     Ok(Sum {
         sum: input.numbers.iter().sum(),
     })
 }
 
-async fn env(EnvInput: EnvInput, _context: Context<Provider>) -> Result<Env, Error> {
+async fn env(_context: Context<Provider>, EnvInput: EnvInput) -> Result<Env, Error> {
     Ok(Env(std::env::vars().collect()))
 }
 
-async fn fail(input: FailInput, _context: Context<Provider>) -> Result<(), Error> {
+async fn fail(_context: Context<Provider>, input: FailInput) -> Result<(), Error> {
     Err(match input.class {
         ErrorClass::BadRequest => bad_request!("failing as a bad request"),
         ErrorClass::NotFound => not_found!("failing as not found"),

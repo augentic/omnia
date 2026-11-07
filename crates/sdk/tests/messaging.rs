@@ -26,7 +26,7 @@ struct RawText {
 }
 
 fn echo<P: Send + Sync + 'static>(
-    input: EchoInput, context: Context<P>,
+    context: Context<P>, input: EchoInput,
 ) -> Ready<Result<EchoOutput, omnia_sdk::Error>> {
     ready(Ok(EchoOutput {
         name: input.name,
@@ -121,7 +121,7 @@ fn dup_topic_merged() {
 }
 
 fn raw_text<P: Send + Sync + 'static>(
-    input: RawText, _context: Context<P>,
+    _context: Context<P>, input: RawText,
 ) -> Ready<Result<String, omnia_sdk::Error>> {
     ready(Ok(input.text))
 }
@@ -148,7 +148,7 @@ async fn tenant_metadata() {
     let seen = Arc::new(Mutex::new(None));
     let record = {
         let seen = Arc::clone(&seen);
-        move |_input: EchoInput, context: Context<()>| {
+        move |context: Context<()>, _input: EchoInput| {
             *seen.lock().expect("record") = context.metadata.tenant;
             ready(Ok::<(), omnia_sdk::Error>(()))
         }

@@ -366,11 +366,10 @@ fn tables() {
         .on_query(|sql, _| sql.starts_with("SELECT"), vec![row])
         .on_exec(|sql, params| sql.starts_with("INSERT") && params.len() == 1, 1);
 
-    let rows = now(tables.query("db".into(), "SELECT 1".into(), vec![])).expect("query");
+    let rows = now(tables.query("db", "SELECT 1", &[])).expect("query");
     assert_eq!(rows.len(), 1);
     let affected =
-        now(tables.exec("db".into(), "INSERT".into(), vec![DataType::Str(Some("x".into()))]))
-            .expect("exec");
+        now(tables.exec("db", "INSERT", &[DataType::Str(Some("x".into()))])).expect("exec");
     assert_eq!(affected, 1);
 
     let statements = tables.statements();
@@ -382,7 +381,7 @@ fn tables() {
 fn unmatched_statement() {
     let tables = ScriptedTables::default();
     let result = catch_unwind(AssertUnwindSafe(|| {
-        drop(tables.exec("db".into(), "DROP TABLE t".into(), vec![]));
+        drop(tables.exec("db", "DROP TABLE t", &[]));
     }));
     let payload = result.expect_err("unmatched exec panics");
     let text = payload.downcast_ref::<String>().cloned().unwrap_or_default();
@@ -457,6 +456,6 @@ fn map_config() {
 #[test]
 fn fixed_identity() {
     let identity = FixedIdentity::new("tok");
-    assert_eq!(now(identity.access_token("svc".into())).expect("token"), "tok");
+    assert_eq!(now(identity.token("svc", &[])).expect("token").token, "tok");
     assert_eq!(identity.asked(), ["svc"]);
 }

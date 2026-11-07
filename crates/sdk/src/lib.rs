@@ -33,10 +33,11 @@ pub mod keyvalue {
     pub use omnia_backend::keyvalue::BUCKET;
 }
 
-/// SQL table value types.
+/// SQL table value types and typed row decoding.
 #[cfg(feature = "sql")]
 pub mod sql {
-    pub use omnia_backend::sql::{DataType, Field, Row};
+    pub use omnia_backend::sql::{ColumnError, DataType, Field, FromColumn, FromRow, Row};
+    pub use omnia_guest_macros::FromRow;
 }
 
 /// Secret vault wire constants.
@@ -47,7 +48,7 @@ pub mod vault {
 #[cfg(feature = "http")]
 #[doc(hidden)]
 pub use axum;
-pub use omnia_guest_macros::Provider;
+pub use omnia_guest_macros::{Provider, Settings};
 #[doc(hidden)]
 pub mod http {
     pub use ::http::*;

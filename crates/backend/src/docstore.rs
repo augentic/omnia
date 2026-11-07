@@ -7,6 +7,10 @@ pub mod filter;
 
 use std::ops::Not;
 
+use anyhow::Context as _;
+use serde::Serialize;
+use serde::de::DeserializeOwned;
+
 #[cfg(not(target_arch = "wasm32"))]
 pub use self::client::DocStoreClient;
 
@@ -338,6 +342,30 @@ pub struct Document {
     pub id: String,
     /// JSON payload.
     pub data: Vec<u8>,
+}
+
+impl Document {
+    /// The document `id` names, with `value` serialized as its JSON body.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when `value` cannot be serialized to JSON.
+    pub fn json<T: Serialize + ?Sized>(id: impl Into<String>, value: &T) -> anyhow::Result<Self> {
+        let id = id.into();
+        let data =
+            serde_json::to_vec(value).with_context(|| format!("encoding document `{id}`"))?;
+        Ok(Self { id, data })
+    }
+
+    /// Deserialize the JSON body as `T`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the body is not the JSON of a `T`.
+    pub fn decode<T: DeserializeOwned>(&self) -> anyhow::Result<T> {
+        serde_json::from_slice(&self.data)
+            .with_context(|| format!("decoding document `{}`", self.id))
+    }
 }
 
 /// Result of a query with optional next-page token.

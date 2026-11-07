@@ -1,6 +1,6 @@
 //! Transport-neutral handler invocation and transport adapters.
 //!
-//! Application logic is a [`Handler`]: any `async fn(I, Context<P>)`
+//! Application logic is a [`Handler`]: any `async fn(Context<P>, I)`
 //! returning a `Result`. [`Client`] owns the provider and builds the
 //! [`Context`] each call receives. A module registers its HTTP paths,
 //! messaging topics, and subcommands on a [`Handlers`] of its own and the
@@ -20,7 +20,7 @@
 //!     name: String,
 //! }
 //!
-//! async fn greet(input: Greet, context: Context<Provider>) -> Result<String, Infallible> {
+//! async fn greet(context: Context<Provider>, input: Greet) -> Result<String, Infallible> {
 //!     Ok(format!("hello, {} ({:?})", input.name, context.metadata.request_id))
 //! }
 //!
@@ -285,11 +285,51 @@ impl<P> Context<P> {
     }
 }
 
-/// An application handler: any `async fn(I, Context<P>) -> Result<O, E>`.
+// one accessor per capability, so a handler bounded on two traits that both
+// define a method (`Config::get`, `StateStore::get`) names the one it means
+// without UFCS
+macro_rules! accessors {
+    ($($(#[$meta:meta])* $name:ident: $trait:ident),* $(,)?) => {
+        $(
+            $(#[$meta])*
+            impl<P: crate::$trait> Context<P> {
+                #[doc = concat!(
+                    "Borrow the provider as a [`", stringify!($trait), "`](crate::",
+                    stringify!($trait), ")."
+                )]
+                #[must_use]
+                pub fn $name(&self) -> &impl crate::$trait {
+                    &*self.provider
+                }
+            }
+        )*
+    };
+}
+
+accessors! {
+    blobs: BlobStore,
+    broadcast: Broadcast,
+    config: Config,
+    #[cfg(feature = "docstore")]
+    docs: DocumentStore,
+    http: HttpRequest,
+    identity: Identity,
+    model: Model,
+    plugins: Plugins,
+    publish: Publish,
+    state: StateStore,
+    #[cfg(feature = "sql")]
+    tables: TableStore,
+    vault: Vault,
+    vcs: Vcs,
+}
+
+/// An application handler: any `async fn(Context<P>, I) -> Result<O, E>`.
 ///
-/// Every such fn (and every `Clone` closure of that shape) is a `Handler`
-/// through the blanket impl; implement the trait by hand only for a
-/// non-fn type.
+/// The context comes first, as it does for an HTTP handler that takes
+/// [`Context`] as its leading extractor. Every such fn (and every `Clone`
+/// closure of that shape) is a `Handler` through the blanket impl; implement
+/// the trait by hand only for a non-fn type.
 pub trait Handler<P, I>: Clone + Send + Sync + 'static {
     /// The typed handler output.
     type Output: Send;
@@ -303,7 +343,7 @@ pub trait Handler<P, I>: Clone + Send + Sync + 'static {
     ///
     /// Returns the handler's error.
     fn call(
-        self, input: I, context: Context<P>,
+        self, context: Context<P>, input: I,
     ) -> impl Future<Output = Result<Self::Output, Self::Error>> + Send;
 }
 
@@ -311,7 +351,7 @@ pub trait Handler<P, I>: Clone + Send + Sync + 'static {
 // `Input` would be unconstrained in this blanket impl (E0207).
 impl<F, Fut, P, I, O, E> Handler<P, I> for F
 where
-    F: FnOnce(I, Context<P>) -> Fut + Clone + Send + Sync + 'static,
+    F: FnOnce(Context<P>, I) -> Fut + Clone + Send + Sync + 'static,
     Fut: Future<Output = Result<O, E>> + Send,
     O: Send,
     E: Error + Send + Sync + 'static,
@@ -320,9 +360,9 @@ where
     type Output = O;
 
     fn call(
-        self, input: I, context: Context<P>,
+        self, context: Context<P>, input: I,
     ) -> impl Future<Output = Result<Self::Output, Self::Error>> + Send {
-        self(input, context)
+        self(context, input)
     }
 }
 
@@ -369,7 +409,7 @@ impl<P: Send + Sync + 'static> Client<P> {
             provider: Arc::clone(&self.provider),
             metadata: metadata.clone(),
         };
-        handler.call(input, context).instrument(span).await
+        handler.call(context, input).instrument(span).await
     }
 }
 

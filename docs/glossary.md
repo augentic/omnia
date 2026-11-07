@@ -76,7 +76,7 @@ A [guest entry](#guest-entry) whose component is not compiled into the runtime �
 
 ### Handler contract
 
-The transport-neutral unit of guest application logic: an `async fn(I, Context<P>) -> Result<O, E>` invoked through `Client::call(handler, input, &metadata)`. The messaging router and the command façade are adapters that decode a transport event into `I` and encode the result back; an HTTP route is a plain axum handler that takes the same `Context<P>` as an extractor over the `Client` in the router state. See [Writing Guests](guides/writing-guests.md#the-handler-contract).
+The transport-neutral unit of guest application logic: an `async fn(Context<P>, I) -> Result<O, E>` invoked through `Client::call(handler, input, &metadata)`. The messaging router and the command façade are adapters that decode a transport event into `I` and encode the result back; an HTTP route is a plain axum handler that takes the same `Context<P>` as an extractor over the `Client` in the router state. See [Writing Guests](guides/writing-guests.md#the-handler-contract).
 
 ### Command façade
 

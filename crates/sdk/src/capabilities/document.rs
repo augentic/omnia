@@ -3,13 +3,15 @@
 use std::future::Future;
 
 use anyhow::Result;
+use serde::de::DeserializeOwned;
 
 use crate::docstore::{Document, QueryOptions, QueryResult};
 
 /// Document storage (`omnia:docstore`).
 ///
 /// [`WasiProvider`](crate::WasiProvider) delegates to `omnia:docstore` via
-/// `omnia-wasi-docstore`.
+/// `omnia-wasi-docstore`. Typed reads of a document body are
+/// [`DocumentStoreExt`].
 #[omnia_guest_macros::capability]
 pub trait DocumentStore: Send + Sync {
     /// Fetch a document by id.
@@ -52,3 +54,17 @@ impl DocumentStore for crate::WasiProvider {
         omnia_wasi_docstore::store::query(store, options).await
     }
 }
+
+/// Typed reads over any [`DocumentStore`].
+///
+/// Blanket-implemented for every [`DocumentStore`]; never implemented by hand.
+pub trait DocumentStoreExt: DocumentStore {
+    /// Fetch a document by id and decode its JSON body as `T`.
+    fn get_as<T: DeserializeOwned>(
+        &self, store: &str, id: &str,
+    ) -> impl Future<Output = Result<Option<T>>> + Send {
+        async move { self.get(store, id).await?.map(|document| document.decode()).transpose() }
+    }
+}
+
+impl<P: DocumentStore + ?Sized> DocumentStoreExt for P {}

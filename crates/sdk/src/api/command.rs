@@ -44,7 +44,7 @@
 //!     }
 //! }
 //!
-//! async fn greet<P>(input: Greet, _context: Context<P>) -> omnia_sdk::Result<Greeting> {
+//! async fn greet<P>(_context: Context<P>, input: Greet) -> omnia_sdk::Result<Greeting> {
 //!     Ok(Greeting { text: format!("hello, {}", input.name) })
 //! }
 //!
