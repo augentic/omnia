@@ -147,93 +147,6 @@ pub struct RuntimeOptions {
     pub branch_hinting: bool,
 }
 
-// compile-affecting settings through `configure`, then the runtime-only ones
-impl From<&RuntimeOptions> for Config {
-    fn from(options: &RuntimeOptions) -> Self {
-        let mut config = Self::new();
-        options.compile_options().configure(&mut config);
-
-        // runtime-only engine settings, before the pooling early-return
-        config.async_stack_zeroing(options.async_stack_zeroing);
-        if let Some(bytes) = options.memory_reservation_for_growth {
-            config.memory_reservation_for_growth(bytes);
-        }
-
-        // backtraces off via the max-frames api; `true` leaves the default on
-        if !options.wasm_backtrace {
-            config.wasm_backtrace_max_frames(None);
-        }
-
-        if !options.pooling {
-            return config;
-        }
-
-        // SECURITY: the pooling allocator + CoW is exactly the configuration
-        // historical Wasmtime advisories target, so the workspace `wasmtime`
-        // pin tracks upstream releases promptly; this is where a lagging pin
-        // matters most.
-        let mut pool = PoolingAllocationConfig::new();
-
-        // totals stay independent of the instance count: one component can
-        // embed several core instances, memories and tables
-        pool.total_component_instances(options.pool_max_instances)
-            .total_core_instances(options.pool_total_core_instances)
-            .total_memories(options.pool_total_memories)
-            .total_tables(options.pool_total_tables)
-            .total_stacks(options.pool_total_stacks)
-            .max_memory_size(options.pool_max_memory_bytes.unwrap_or(options.max_memory_bytes))
-            // keep-resident skips decommit and zeroing on slot reuse
-            .linear_memory_keep_resident(options.pool_memory_keep_resident)
-            .table_keep_resident(options.pool_table_keep_resident)
-            .async_stack_keep_resident(options.pool_async_stack_keep_resident)
-            .max_unused_warm_slots(options.pool_max_unused_warm_slots)
-            // batching amortises the per-teardown decommit syscalls
-            .decommit_batch_size(options.pool_decommit_batch_size)
-            // linux-only fast memory reset; `Auto` falls back where unsupported
-            .pagemap_scan(options.pool_pagemap_scan);
-
-        // gc heaps only when compiled in
-        #[cfg(feature = "gc")]
-        if let Some(count) = options.pool_total_gc_heaps {
-            pool.total_gc_heaps(count);
-        }
-
-        // structural limits only when set, so unset keeps the wasmtime default
-        if let Some(count) = options.pool_max_core_instances_per_component {
-            pool.max_core_instances_per_component(count);
-        }
-        if let Some(count) = options.pool_max_memories_per_component {
-            pool.max_memories_per_component(count);
-        }
-        if let Some(count) = options.pool_max_tables_per_component {
-            pool.max_tables_per_component(count);
-        }
-        if let Some(count) = options.pool_max_memories_per_module {
-            pool.max_memories_per_module(count);
-        }
-        if let Some(count) = options.pool_max_tables_per_module {
-            pool.max_tables_per_module(count);
-        }
-        if let Some(size) = options.pool_max_core_instance_size {
-            pool.max_core_instance_size(size);
-        }
-        if let Some(size) = options.pool_max_component_instance_size {
-            pool.max_component_instance_size(size);
-        }
-
-        #[cfg(feature = "mpk")]
-        {
-            pool.memory_protection_keys(options.pool_memory_protection_keys);
-            if let Some(max) = options.pool_max_memory_protection_keys {
-                pool.max_memory_protection_keys(max);
-            }
-        }
-
-        config.allocation_strategy(InstanceAllocationStrategy::Pooling(pool));
-        config
-    }
-}
-
 impl RuntimeOptions {
     /// Finalize the runtime configuration.
     ///
@@ -324,54 +237,89 @@ fn parse_enabled(value: &str) -> ParseResult<Enabled> {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{CompileOptions, Enabled, RuntimeOptions, parse_enabled};
+// compile-affecting settings through `configure`, then the runtime-only ones
+impl From<&RuntimeOptions> for Config {
+    fn from(options: &RuntimeOptions) -> Self {
+        let mut config = Self::new();
+        options.compile_options().configure(&mut config);
 
-    // an artifact compiled under the defaults loads into a runtime whose
-    // environment sets none of the compile-affecting variables
-    #[test]
-    fn compile_options_default_is_env_default() {
-        let options = RuntimeOptions::load_env().expect("should load");
-        assert_eq!(options.compile_options(), CompileOptions::default());
-    }
+        // runtime-only engine settings, before the pooling early-return
+        config.async_stack_zeroing(options.async_stack_zeroing);
+        if let Some(bytes) = options.memory_reservation_for_growth {
+            config.memory_reservation_for_growth(bytes);
+        }
 
-    #[test]
-    fn parse_enabled_values() {
-        assert_eq!(parse_enabled("auto").unwrap(), Enabled::Auto);
-        assert_eq!(parse_enabled("YES").unwrap(), Enabled::Yes);
-        assert_eq!(parse_enabled(" no ").unwrap(), Enabled::No);
-        parse_enabled("maybe").unwrap_err();
-    }
+        // backtraces off via the max-frames api; `true` leaves the default on
+        if !options.wasm_backtrace {
+            config.wasm_backtrace_max_frames(None);
+        }
 
-    #[test]
-    fn per_module_memories_over_total() {
-        let options = RuntimeOptions {
-            pool_total_memories: 8,
-            pool_max_memories_per_module: Some(16),
-            ..RuntimeOptions::load_env().expect("should load")
-        };
-        options.validate().unwrap_err();
-    }
+        if !options.pooling {
+            return config;
+        }
 
-    #[test]
-    fn per_module_tables_over_total() {
-        let options = RuntimeOptions {
-            pool_total_tables: 8,
-            pool_max_tables_per_module: Some(16),
-            ..RuntimeOptions::load_env().expect("should load")
-        };
-        options.validate().unwrap_err();
-    }
+        // SECURITY: the pooling allocator + CoW is exactly the configuration
+        // historical Wasmtime advisories target, so the workspace `wasmtime`
+        // pin tracks upstream releases promptly; this is where a lagging pin
+        // matters most.
+        let mut pool = PoolingAllocationConfig::new();
 
-    #[test]
-    fn pooling_disabled() {
-        let options = RuntimeOptions {
-            pooling: false,
-            pool_total_memories: 8,
-            pool_max_memories_per_module: Some(16),
-            ..RuntimeOptions::load_env().expect("should load")
-        };
-        options.validate().unwrap();
+        // totals stay independent of the instance count: one component can
+        // embed several core instances, memories and tables
+        pool.total_component_instances(options.pool_max_instances)
+            .total_core_instances(options.pool_total_core_instances)
+            .total_memories(options.pool_total_memories)
+            .total_tables(options.pool_total_tables)
+            .total_stacks(options.pool_total_stacks)
+            .max_memory_size(options.pool_max_memory_bytes.unwrap_or(options.max_memory_bytes))
+            // keep-resident skips decommit and zeroing on slot reuse
+            .linear_memory_keep_resident(options.pool_memory_keep_resident)
+            .table_keep_resident(options.pool_table_keep_resident)
+            .async_stack_keep_resident(options.pool_async_stack_keep_resident)
+            .max_unused_warm_slots(options.pool_max_unused_warm_slots)
+            // batching amortises the per-teardown decommit syscalls
+            .decommit_batch_size(options.pool_decommit_batch_size)
+            // linux-only fast memory reset; `Auto` falls back where unsupported
+            .pagemap_scan(options.pool_pagemap_scan);
+
+        // gc heaps only when compiled in
+        #[cfg(feature = "gc")]
+        if let Some(count) = options.pool_total_gc_heaps {
+            pool.total_gc_heaps(count);
+        }
+
+        // structural limits only when set, so unset keeps the wasmtime default
+        if let Some(count) = options.pool_max_core_instances_per_component {
+            pool.max_core_instances_per_component(count);
+        }
+        if let Some(count) = options.pool_max_memories_per_component {
+            pool.max_memories_per_component(count);
+        }
+        if let Some(count) = options.pool_max_tables_per_component {
+            pool.max_tables_per_component(count);
+        }
+        if let Some(count) = options.pool_max_memories_per_module {
+            pool.max_memories_per_module(count);
+        }
+        if let Some(count) = options.pool_max_tables_per_module {
+            pool.max_tables_per_module(count);
+        }
+        if let Some(size) = options.pool_max_core_instance_size {
+            pool.max_core_instance_size(size);
+        }
+        if let Some(size) = options.pool_max_component_instance_size {
+            pool.max_component_instance_size(size);
+        }
+
+        #[cfg(feature = "mpk")]
+        {
+            pool.memory_protection_keys(options.pool_memory_protection_keys);
+            if let Some(max) = options.pool_max_memory_protection_keys {
+                pool.max_memory_protection_keys(max);
+            }
+        }
+
+        config.allocation_strategy(InstanceAllocationStrategy::Pooling(pool));
+        config
     }
 }

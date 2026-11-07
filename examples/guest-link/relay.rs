@@ -7,14 +7,7 @@
 
 #![cfg(target_arch = "wasm32")]
 
-wit_bindgen::generate!({
-    world: "relay",
-    path: "guest-link/wit",
-});
-
 struct Relay;
-
-export!(Relay);
 
 impl exports::example::link::echo::Guest for Relay {
     fn echo(target: String, message: String) -> String {
@@ -34,3 +27,10 @@ impl exports::example::link::echo::Guest for Relay {
         }
     }
 }
+
+wit_bindgen::generate!({
+    world: "relay",
+    path: "guest-link/wit",
+});
+
+export!(Relay);

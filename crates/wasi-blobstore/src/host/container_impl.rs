@@ -12,6 +12,12 @@ use crate::host::{
     WasiBlobStoreView,
 };
 
+pub fn get_container<T>(
+    accessor: &Accessor<T, WasiBlobStore>, self_: &Resource<ContainerProxy>,
+) -> Result<ContainerProxy> {
+    Ok(omnia_core::get_cloned(accessor, self_).context("Container not found")?)
+}
+
 impl<T> HostContainerWithStore<T> for WasiBlobStore {
     fn name(mut host: Access<'_, T, Self>, self_: Resource<ContainerProxy>) -> Result<String> {
         let container = host.get().table.get(&self_).context("Container not found")?;
@@ -169,9 +175,3 @@ impl<T> HostStreamObjectNamesWithStore<T> for WasiBlobStore {
 impl Host for WasiBlobStoreView<'_> {}
 impl HostContainer for WasiBlobStoreView<'_> {}
 impl HostStreamObjectNames for WasiBlobStoreView<'_> {}
-
-pub fn get_container<T>(
-    accessor: &Accessor<T, WasiBlobStore>, self_: &Resource<ContainerProxy>,
-) -> Result<ContainerProxy> {
-    Ok(omnia_core::get_cloned(accessor, self_).context("Container not found")?)
-}

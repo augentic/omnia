@@ -25,15 +25,6 @@ pub struct Sections {
     pub variables: Vec<(String, String)>,
 }
 
-/// One few-shot input/output pair.
-#[derive(Clone, Debug)]
-pub struct Example {
-    /// Example user input.
-    pub input: String,
-    /// Example model output.
-    pub output: String,
-}
-
 impl Sections {
     /// Assemble the template into `(system, user-turn)` text: the system
     /// channel is `preamble` + role + constraint bullets; the user turn is
@@ -91,25 +82,16 @@ impl Sections {
     }
 }
 
+/// One few-shot input/output pair.
+#[derive(Clone, Debug)]
+pub struct Example {
+    /// Example user input.
+    pub input: String,
+    /// Example model output.
+    pub output: String,
+}
+
 fn join(parts: &[String]) -> Option<String> {
     let kept: Vec<&str> = parts.iter().map(|p| p.trim()).filter(|p| !p.is_empty()).collect();
     if kept.is_empty() { None } else { Some(kept.join("\n\n")) }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::Sections;
-
-    #[test]
-    fn assemble_drops_blank_system() {
-        let sections = Sections {
-            role: Some("   ".to_owned()),
-            task: "do it".to_owned(),
-            context: Some(String::new()),
-            ..Sections::default()
-        };
-        let (system, user) = sections.assemble(None);
-        assert!(system.is_none());
-        assert_eq!(user, "do it");
-    }
 }

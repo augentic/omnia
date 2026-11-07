@@ -16,17 +16,13 @@
 use anyhow::Context;
 use axum::routing::get;
 use axum::{Json, Router};
-use omnia_sdk::HttpResult;
 use omnia_wasi_identity::credentials::get_identity;
 use serde_json::{Value, json};
 use tracing::Level;
 use wasip3::exports::http::handler::Guest;
 use wasip3::http::types::{ErrorCode, Request, Response};
 
-const SCOPE: &str = "https://management.azure.com/.default";
-
 struct Http;
-wasip3::http::service::export!(Http);
 
 impl Guest for Http {
     #[omnia_wasi_otel::instrument(name = "http_guest_handle", level = Level::INFO)]
@@ -36,8 +32,11 @@ impl Guest for Http {
     }
 }
 
+const SCOPE: &str = "https://management.azure.com/.default";
+wasip3::http::service::export!(Http);
+
 #[omnia_wasi_otel::instrument]
-async fn handler() -> HttpResult<Json<Value>> {
+async fn handler() -> omnia_sdk::Result<Json<Value>> {
     let identity = get_identity("identity".to_string()).await.context("getting identity")?;
 
     let scopes = vec![SCOPE.to_string()];

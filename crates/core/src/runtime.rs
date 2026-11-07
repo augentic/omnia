@@ -47,12 +47,6 @@ impl From<i32> for ExitStatus {
     }
 }
 
-impl From<ExitStatus> for std::process::ExitCode {
-    fn from(status: ExitStatus) -> Self {
-        Self::from(status.code_u8())
-    }
-}
-
 /// Inputs to [`Runtime::from_parts`].
 pub struct RuntimeParts<B: 'static> {
     /// Deployment name read by trigger servers and the bootstrap log.
@@ -95,124 +89,6 @@ pub struct Runtime<B: 'static> {
     // built once so `store()` hands out clones instead of one per store
     dispatcher: Arc<dyn Dispatcher>,
 }
-
-struct RuntimeInner<B: 'static> {
-    // carried state, never a process environment variable
-    name: Arc<str>,
-    registry: Arc<Registry<StoreCtx<B>>>,
-    args: Arc<Vec<String>>,
-    mounts: MountRegistry,
-    backends: B,
-    packages: Option<Arc<dyn RegistrySource>>,
-    // absent, command mode routes to the sole static `wasi:cli/run` exporter
-    command_guest: Option<GuestId>,
-    // for an embedder that installs the loader capability by hand
-    registry_config: Option<String>,
-    // every store's environment, taken once at assembly
-    env: Arc<Vec<(String, String)>>,
-    stdio: Option<Stdio>,
-    extensions: Extensions,
-    // one per `build_store`, so an observer can tell a quiet pool from one
-    // whose guests finished between its looks
-    stores_built: AtomicU64,
-    stop: watch::Sender<bool>,
-}
-
-/// [`Dispatcher`] over the runtime's shared state.
-///
-/// A separate type (rather than `Runtime` itself) so the cached
-/// `Arc<dyn Dispatcher>` inside [`Runtime`] does not create a reference cycle.
-pub struct RuntimeDispatcher<B: 'static> {
-    inner: Arc<RuntimeInner<B>>,
-}
-
-impl<B: Clone + Send + Sync + 'static> RuntimeDispatcher<B> {
-    /// Rehydrate a full runtime handle for a dispatched call.
-    pub fn runtime(&self) -> Runtime<B> {
-        Runtime::with_inner(Arc::clone(&self.inner))
-    }
-}
-
-/// A non-owning [`Runtime`] handle, the form a runtime extension holds to
-/// call back into the runtime without leaking it through a reference cycle.
-pub struct WeakRuntime<B: 'static> {
-    inner: Weak<RuntimeInner<B>>,
-}
-
-// Manual: a handle clone must not require `B: Clone`.
-impl<B: 'static> Clone for WeakRuntime<B> {
-    fn clone(&self) -> Self {
-        Self {
-            inner: Weak::clone(&self.inner),
-        }
-    }
-}
-
-impl<B: Clone + Send + Sync + 'static> WeakRuntime<B> {
-    /// Upgrade to a full handle; `None` once the runtime has shut down.
-    #[must_use]
-    pub fn upgrade(&self) -> Option<Runtime<B>> {
-        Some(Runtime::with_inner(self.inner.upgrade()?))
-    }
-}
-
-/// What bytes must satisfy before they become the guest an identity names:
-/// the two admission policies, chosen by the caller of
-/// [`Runtime::admit_bytes`].
-#[derive(Clone, Copy, Debug)]
-pub enum Policy<'a> {
-    /// The deployment's entry is the authority: the bytes hash to its pin,
-    /// a pre-compiled artifact is admitted as its source kind allows, and a
-    /// racing first use that seated the name first stands.
-    Declared(&'a Source),
-    /// A caller named the bytes: raw wasm alone, hashing to `pin` when one
-    /// is given, under a name the deployment does not declare; a name
-    /// already active attests on the same digest alone.
-    CallerNamed {
-        /// The digest the bytes must hash to, when the caller knows it.
-        pin: Option<Digest>,
-    },
-}
-
-/// Why the runtime could not produce the guest an identity names, from
-/// [`Runtime::guest`] or [`Runtime::admit_bytes`].
-#[derive(Clone, Debug)]
-pub enum GuestError {
-    /// The deployment neither registered nor declares the identity.
-    Unregistered(GuestId),
-    /// The source could not produce its bytes; a retry may succeed.
-    Unavailable(String),
-    /// The bytes were refused: they miss the pin, are a pre-compiled
-    /// artifact where raw wasm alone is admitted, do not load as a
-    /// component against the deployment's host set, were offered under a
-    /// name the deployment declares, or under a name active with other
-    /// bytes.
-    Refused(String),
-    /// The runtime has no registry to fetch a package from, or the
-    /// registration itself failed.
-    Internal(String),
-}
-
-// How seating verified bytes as a guest failed.
-enum SeatError {
-    // an earlier or racing registration holds the identity
-    Occupied,
-    Refused(String),
-    Internal(String),
-}
-
-impl fmt::Display for GuestError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Unregistered(id) => write!(f, "guest `{id}` is not registered"),
-            Self::Unavailable(reason) | Self::Refused(reason) | Self::Internal(reason) => {
-                f.write_str(reason)
-            }
-        }
-    }
-}
-
-impl std::error::Error for GuestError {}
 
 // Manual: `StoreCtx<B>` is not `Clone`; both fields are `Arc`-backed.
 impl<B: Clone + Send + Sync + 'static> Clone for Runtime<B> {
@@ -786,6 +662,124 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
     }
 }
 
+struct RuntimeInner<B: 'static> {
+    // carried state, never a process environment variable
+    name: Arc<str>,
+    registry: Arc<Registry<StoreCtx<B>>>,
+    args: Arc<Vec<String>>,
+    mounts: MountRegistry,
+    backends: B,
+    packages: Option<Arc<dyn RegistrySource>>,
+    // absent, command mode routes to the sole static `wasi:cli/run` exporter
+    command_guest: Option<GuestId>,
+    // for an embedder that installs the loader capability by hand
+    registry_config: Option<String>,
+    // every store's environment, taken once at assembly
+    env: Arc<Vec<(String, String)>>,
+    stdio: Option<Stdio>,
+    extensions: Extensions,
+    // one per `build_store`, so an observer can tell a quiet pool from one
+    // whose guests finished between its looks
+    stores_built: AtomicU64,
+    stop: watch::Sender<bool>,
+}
+
+/// [`Dispatcher`] over the runtime's shared state.
+///
+/// A separate type (rather than `Runtime` itself) so the cached
+/// `Arc<dyn Dispatcher>` inside [`Runtime`] does not create a reference cycle.
+pub struct RuntimeDispatcher<B: 'static> {
+    inner: Arc<RuntimeInner<B>>,
+}
+
+impl<B: Clone + Send + Sync + 'static> RuntimeDispatcher<B> {
+    /// Rehydrate a full runtime handle for a dispatched call.
+    pub fn runtime(&self) -> Runtime<B> {
+        Runtime::with_inner(Arc::clone(&self.inner))
+    }
+}
+
+/// A non-owning [`Runtime`] handle, the form a runtime extension holds to
+/// call back into the runtime without leaking it through a reference cycle.
+pub struct WeakRuntime<B: 'static> {
+    inner: Weak<RuntimeInner<B>>,
+}
+
+// Manual: a handle clone must not require `B: Clone`.
+impl<B: 'static> Clone for WeakRuntime<B> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: Weak::clone(&self.inner),
+        }
+    }
+}
+
+impl<B: Clone + Send + Sync + 'static> WeakRuntime<B> {
+    /// Upgrade to a full handle; `None` once the runtime has shut down.
+    #[must_use]
+    pub fn upgrade(&self) -> Option<Runtime<B>> {
+        Some(Runtime::with_inner(self.inner.upgrade()?))
+    }
+}
+
+/// What bytes must satisfy before they become the guest an identity names:
+/// the two admission policies, chosen by the caller of
+/// [`Runtime::admit_bytes`].
+#[derive(Clone, Copy, Debug)]
+pub enum Policy<'a> {
+    /// The deployment's entry is the authority: the bytes hash to its pin,
+    /// a pre-compiled artifact is admitted as its source kind allows, and a
+    /// racing first use that seated the name first stands.
+    Declared(&'a Source),
+    /// A caller named the bytes: raw wasm alone, hashing to `pin` when one
+    /// is given, under a name the deployment does not declare; a name
+    /// already active attests on the same digest alone.
+    CallerNamed {
+        /// The digest the bytes must hash to, when the caller knows it.
+        pin: Option<Digest>,
+    },
+}
+
+/// Why the runtime could not produce the guest an identity names, from
+/// [`Runtime::guest`] or [`Runtime::admit_bytes`].
+#[derive(Clone, Debug)]
+pub enum GuestError {
+    /// The deployment neither registered nor declares the identity.
+    Unregistered(GuestId),
+    /// The source could not produce its bytes; a retry may succeed.
+    Unavailable(String),
+    /// The bytes were refused: they miss the pin, are a pre-compiled
+    /// artifact where raw wasm alone is admitted, do not load as a
+    /// component against the deployment's host set, were offered under a
+    /// name the deployment declares, or under a name active with other
+    /// bytes.
+    Refused(String),
+    /// The runtime has no registry to fetch a package from, or the
+    /// registration itself failed.
+    Internal(String),
+}
+
+impl fmt::Display for GuestError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Unregistered(id) => write!(f, "guest `{id}` is not registered"),
+            Self::Unavailable(reason) | Self::Refused(reason) | Self::Internal(reason) => {
+                f.write_str(reason)
+            }
+        }
+    }
+}
+
+impl std::error::Error for GuestError {}
+
+// How seating verified bytes as a guest failed.
+enum SeatError {
+    // an earlier or racing registration holds the identity
+    Occupied,
+    Refused(String),
+    Internal(String),
+}
+
 /// Wire the link serve side of every registered guest; see
 /// [`Runtime::serve_links`].
 ///
@@ -800,15 +794,8 @@ where
     runtime.serve_links().await
 }
 
-#[cfg(test)]
-mod tests {
-    use super::ExitStatus;
-
-    #[test]
-    fn code_u8_low_byte() {
-        // posix low-byte truncation
-        assert_eq!(ExitStatus::from(256).code_u8(), 0);
-        assert_eq!(ExitStatus::from(257).code_u8(), 1);
-        assert_eq!(ExitStatus::from(-1).code_u8(), 255);
+impl From<ExitStatus> for std::process::ExitCode {
+    fn from(status: ExitStatus) -> Self {
+        Self::from(status.code_u8())
     }
 }

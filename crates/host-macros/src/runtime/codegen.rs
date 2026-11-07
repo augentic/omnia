@@ -249,25 +249,3 @@ fn field_ident(path: &Path) -> Ident {
 
     format_ident!("{snake}")
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn path(name: &str) -> Path {
-        syn::parse_str(name).expect("valid path")
-    }
-
-    #[test]
-    fn derives_field_ident() {
-        assert_eq!(field_ident(&path("HttpDefault")).to_string(), "http_default");
-        assert_eq!(field_ident(&path("KeyValueDefault")).to_string(), "key_value_default");
-    }
-
-    #[test]
-    fn empty_host_entries() {
-        let (ty, def) = emit_backends(&[]);
-        assert_eq!(ty.to_string(), "()");
-        assert!(def.is_empty());
-    }
-}

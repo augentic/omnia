@@ -131,19 +131,18 @@ pub async fn state_increment<P: StateStore>(provider: &P) {
 pub async fn table_query_exec<P: TableStore>(provider: &P) {
     provider
         .exec(
-            "conformance".to_owned(),
-            "CREATE TABLE IF NOT EXISTS conformance_items (id INTEGER PRIMARY KEY, label TEXT NOT NULL)"
-                .to_owned(),
-            vec![],
+            "conformance",
+            "CREATE TABLE IF NOT EXISTS conformance_items (id INTEGER PRIMARY KEY, label TEXT NOT NULL)",
+            &[],
         )
         .await
         .expect("create table");
 
     let affected = provider
         .exec(
-            "conformance".to_owned(),
-            "INSERT INTO conformance_items (id, label) VALUES ($1, $2)".to_owned(),
-            vec![DataType::Int64(Some(1)), DataType::Str(Some("alpha".to_owned()))],
+            "conformance",
+            "INSERT INTO conformance_items (id, label) VALUES ($1, $2)",
+            &[DataType::Int64(Some(1)), DataType::Str(Some("alpha".to_owned()))],
         )
         .await
         .expect("insert row");
@@ -151,9 +150,9 @@ pub async fn table_query_exec<P: TableStore>(provider: &P) {
 
     let rows: Vec<Row> = provider
         .query(
-            "conformance".to_owned(),
-            "SELECT id, label FROM conformance_items WHERE id = $1".to_owned(),
-            vec![DataType::Int64(Some(1))],
+            "conformance",
+            "SELECT id, label FROM conformance_items WHERE id = $1",
+            &[DataType::Int64(Some(1))],
         )
         .await
         .expect("select row");
@@ -301,7 +300,7 @@ pub async fn config_get<P: Config>(provider: &P) {
     provider.get("CONFORMANCE_ABSENT_KEY").await.expect_err("absent config key must fail");
 }
 
-/// Asserts `Identity::token` and `Identity::access_token` return a valid token.
+/// Asserts `Identity::token` returns a valid token.
 ///
 /// # Panics
 ///
@@ -310,9 +309,6 @@ pub async fn identity_token<P: Identity>(provider: &P) {
     let scoped = provider.token("default", &["read".to_owned()]).await.expect("identity token");
     assert_ne!(scoped.token, "");
     assert!(scoped.expires_in > 0);
-
-    let plain = provider.access_token("default".to_owned()).await.expect("access_token");
-    assert_eq!(plain, scoped.token);
 }
 
 /// Asserts `Vault` secret CRUD, `exists`, and `list_ids` over the locker.

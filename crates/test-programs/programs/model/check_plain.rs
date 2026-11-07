@@ -9,7 +9,7 @@ use omnia_sdk::WasiProvider;
 use omnia_sdk::model::{CHECK_TOOL, Model as _, Request};
 use test_programs::user;
 
-omnia_sdk::command!(scenario);
+omnia_sdk::api::command::export!(scenario);
 
 async fn scenario() {
     let request = Request::builder().messages(vec![user("hi")]).check(true).build();

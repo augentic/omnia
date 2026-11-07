@@ -83,15 +83,6 @@ pub struct Backends<
     pub websocket: WebSocketDefault,
 }
 
-/// The empty `omnia:vcs` slot: no backend, so no deployment links `WasiVcs`
-/// over it.
-///
-/// `omnia:vcs` ships no in-memory default, since a repository is a tree on
-/// disk; a scenario that drives it sets a backend with
-/// [`Backends::vcs`].
-#[derive(Clone, Copy, Debug, Default)]
-pub struct NoVcs;
-
 impl Backends {
     /// Every default, freshly constructed from nothing in the environment.
     ///
@@ -353,6 +344,33 @@ impl<M, K, B, D, S, V, G, I, O, C> Backends<M, K, B, D, S, V, G, I, O, C> {
     }
 }
 
+impl<M, K, B, D, S, V, G, I, O, C> Provides<WasiVcs> for Backends<M, K, B, D, S, V, G, I, O, C>
+where
+    M: ModelClient + Clone,
+    K: KeyValueClient + Clone,
+    B: BlobStoreClient + Clone,
+    D: DocStoreClient + Clone,
+    S: SqlClient + Clone,
+    V: VaultClient + Clone,
+    G: MessagingClient + Clone,
+    I: IdentityClient + Clone,
+    O: OtelClient + Clone,
+    C: VcsClient + Clone,
+{
+    fn borrow(&mut self) -> <WasiVcs as HostCtx>::Borrow<'_> {
+        &mut self.vcs
+    }
+}
+
+/// The empty `omnia:vcs` slot: no backend, so no deployment links `WasiVcs`
+/// over it.
+///
+/// `omnia:vcs` ships no in-memory default, since a repository is a tree on
+/// disk; a scenario that drives it sets a backend with
+/// [`Backends::vcs`].
+#[derive(Clone, Copy, Debug, Default)]
+pub struct NoVcs;
+
 /// One `Provides` impl per host, each yielding the named field's borrow.
 ///
 /// Every impl carries the full set of bounds over the slots that have a
@@ -398,22 +416,4 @@ provides! {
     WasiSql => sql,
     WasiVault => vault,
     WasiWebSocket => websocket,
-}
-
-impl<M, K, B, D, S, V, G, I, O, C> Provides<WasiVcs> for Backends<M, K, B, D, S, V, G, I, O, C>
-where
-    M: ModelClient + Clone,
-    K: KeyValueClient + Clone,
-    B: BlobStoreClient + Clone,
-    D: DocStoreClient + Clone,
-    S: SqlClient + Clone,
-    V: VaultClient + Clone,
-    G: MessagingClient + Clone,
-    I: IdentityClient + Clone,
-    O: OtelClient + Clone,
-    C: VcsClient + Clone,
-{
-    fn borrow(&mut self) -> <WasiVcs as HostCtx>::Borrow<'_> {
-        &mut self.vcs
-    }
 }

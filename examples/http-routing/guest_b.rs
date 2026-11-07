@@ -10,7 +10,6 @@ use wasip3::exports::http::handler::Guest;
 use wasip3::http::types::{ErrorCode, Request, Response};
 
 struct GuestB;
-wasip3::http::service::export!(GuestB);
 
 impl Guest for GuestB {
     async fn handle(request: Request) -> Result<Response, ErrorCode> {
@@ -18,6 +17,7 @@ impl Guest for GuestB {
         omnia_wasi_http::serve(router, request).await
     }
 }
+wasip3::http::service::export!(GuestB);
 
 async fn respond() -> &'static str {
     "http-routing example: guest b\n"

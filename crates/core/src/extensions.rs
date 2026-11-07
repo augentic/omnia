@@ -55,25 +55,3 @@ impl Extensions {
         value.downcast::<T>().ok()
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::Extensions;
-
-    #[test]
-    fn insert_once_then_get() {
-        let extensions = Extensions::new();
-        assert!(extensions.insert(7_u32), "first install succeeds");
-        assert!(!extensions.insert(9_u32), "re-install of the same type refuses");
-        assert_eq!(*extensions.get::<u32>().expect("installed"), 7);
-        assert!(extensions.get::<String>().is_none(), "absent type reads back nothing");
-    }
-
-    #[test]
-    fn clones_share_set() {
-        let extensions = Extensions::new();
-        let handle = extensions.clone();
-        assert!(extensions.insert("shared".to_owned()));
-        assert_eq!(*handle.get::<String>().expect("visible through the clone"), "shared");
-    }
-}

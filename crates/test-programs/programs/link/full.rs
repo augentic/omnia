@@ -3,14 +3,7 @@
 
 #![cfg(target_arch = "wasm32")]
 
-wit_bindgen::generate!({
-    world: "full",
-    path: "wit",
-});
-
 struct Full;
-
-export!(Full);
 
 impl Guest for Full {
     fn poke(message: String) -> String {
@@ -21,3 +14,10 @@ impl Guest for Full {
         self::omnia_test::link::ops::ping_async("echoer".to_owned(), message).await
     }
 }
+
+wit_bindgen::generate!({
+    world: "full",
+    path: "wit",
+});
+
+export!(Full);

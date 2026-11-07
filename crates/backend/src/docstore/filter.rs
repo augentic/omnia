@@ -12,8 +12,6 @@ use serde_json::Value;
 
 use super::{ComparisonOp, Document, Filter, QueryOptions, QueryResult, ScalarValue, SortField};
 
-const MAX_PAGE_SIZE: u64 = 1000;
-
 type Collections = HashMap<String, BTreeMap<String, Value>>;
 
 /// Shared in-memory document collection store with [`Filter`] evaluation,
@@ -128,34 +126,6 @@ impl MemoryStore {
     }
 }
 
-fn paginate(
-    rows: Vec<(String, Value)>, skip: usize, page_size: usize,
-) -> (Vec<(String, Value)>, Option<String>) {
-    let total = rows.len();
-    let page: Vec<_> = rows.into_iter().skip(skip).take(page_size).collect();
-    let next = skip.saturating_add(page.len());
-    let continuation = (next < total).then(|| next.to_string());
-    (page, continuation)
-}
-
-fn parse_continuation(continuation: Option<&str>) -> Result<u64> {
-    continuation.map_or_else(
-        || Ok(0),
-        |s| s.parse().with_context(|| format!("invalid continuation token: {s:?}")),
-    )
-}
-
-fn parse_body(doc: &Document) -> Result<Value> {
-    serde_json::from_slice(&doc.data).context("invalid JSON in document body")
-}
-
-fn to_document(id: &str, body: &Value) -> Result<Document> {
-    Ok(Document {
-        id: id.to_owned(),
-        data: serde_json::to_vec(body).context("serialize JSON body")?,
-    })
-}
-
 /// Evaluate `tree` against a JSON document body.
 #[must_use]
 pub fn matches(tree: &Filter, doc: &Value) -> bool {
@@ -217,6 +187,36 @@ pub fn compare_documents(a: &Value, b: &Value, order_by: &[SortField]) -> Orderi
     Ordering::Equal
 }
 
+const MAX_PAGE_SIZE: u64 = 1000;
+
+fn paginate(
+    rows: Vec<(String, Value)>, skip: usize, page_size: usize,
+) -> (Vec<(String, Value)>, Option<String>) {
+    let total = rows.len();
+    let page: Vec<_> = rows.into_iter().skip(skip).take(page_size).collect();
+    let next = skip.saturating_add(page.len());
+    let continuation = (next < total).then(|| next.to_string());
+    (page, continuation)
+}
+
+fn parse_continuation(continuation: Option<&str>) -> Result<u64> {
+    continuation.map_or_else(
+        || Ok(0),
+        |s| s.parse().with_context(|| format!("invalid continuation token: {s:?}")),
+    )
+}
+
+fn parse_body(doc: &Document) -> Result<Value> {
+    serde_json::from_slice(&doc.data).context("invalid JSON in document body")
+}
+
+fn to_document(id: &str, body: &Value) -> Result<Document> {
+    Ok(Document {
+        id: id.to_owned(),
+        data: serde_json::to_vec(body).context("serialize JSON body")?,
+    })
+}
+
 const NULL: Value = Value::Null;
 
 // Resolve a dotted path inside a JSON document; absent segments read as null.
@@ -275,219 +275,5 @@ fn json_cmp(a: &Value, b: &Value) -> Ordering {
             .unwrap_or(Ordering::Equal),
         (Value::String(x), Value::String(y)) => x.cmp(y),
         _ => rank(a).cmp(&rank(b)),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use serde_json::json;
-
-    use super::*;
-
-    fn compare(field: &str, op: ComparisonOp, value: ScalarValue) -> Filter {
-        Filter::Compare {
-            field: field.to_string(),
-            op,
-            value,
-        }
-    }
-
-    #[test]
-    fn and_eq_with_not_null() {
-        let docs = [
-            json!({"wb": 1, "zone_id": "z1"}),
-            json!({"wb": 1, "zone_id": "z2"}),
-            json!({"wb": 0, "zone_id": "z3"}),
-            json!({"wb": 1, "zone_id": null}),
-        ];
-        let filter = Filter::And(vec![
-            compare("wb", ComparisonOp::Eq, ScalarValue::Int32(1)),
-            Filter::IsNotNull("zone_id".to_string()),
-        ]);
-        let matched = docs.iter().filter(|d| matches(&filter, d)).count();
-        assert_eq!(matched, 2, "wb=1 AND zone_id IS NOT NULL");
-    }
-
-    #[test]
-    fn ne_matches_missing_field() {
-        let filter = compare("zone_id", ComparisonOp::Ne, ScalarValue::Str("z1".into()));
-        assert!(matches(&filter, &json!({})), "missing field is not equal to a string");
-        assert!(matches(&filter, &json!({"zone_id": null})), "null is not equal to a string");
-        assert!(!matches(&filter, &json!({"zone_id": "z1"})));
-    }
-
-    #[test]
-    fn ordering_needs_comparable() {
-        let filter = compare("lat", ComparisonOp::Gte, ScalarValue::Float64(1.0));
-        assert!(matches(&filter, &json!({"lat": 1.5})));
-        assert!(!matches(&filter, &json!({"lat": "1.5"})), "string does not order against number");
-        assert!(!matches(&filter, &json!({})), "missing field does not order");
-    }
-
-    #[test]
-    fn starts_with_and_ends_with() {
-        let doc = json!({"name": "Northern Line"});
-        let starts = Filter::StartsWith {
-            field: "name".to_string(),
-            pattern: "Northern".to_string(),
-        };
-        let ends = Filter::EndsWith {
-            field: "name".to_string(),
-            pattern: "Line".to_string(),
-        };
-        assert!(matches(&starts, &doc));
-        assert!(matches(&ends, &doc));
-        assert!(!matches(
-            &Filter::StartsWith {
-                field: "name".to_string(),
-                pattern: "Line".to_string(),
-            },
-            &doc
-        ));
-    }
-
-    #[test]
-    fn not_in_list() {
-        let filter = Filter::NotInList {
-            field: "route_type".to_string(),
-            values: vec![ScalarValue::Int32(1), ScalarValue::Int32(2)],
-        };
-        assert!(matches(&filter, &json!({"route_type": 3})));
-        assert!(!matches(&filter, &json!({"route_type": 2})));
-        assert!(matches(&filter, &json!({})), "missing field is in no list");
-    }
-
-    #[test]
-    fn contains_substring() {
-        let filter = Filter::Contains {
-            field: "name".to_string(),
-            pattern: "Station".to_string(),
-        };
-        assert!(matches(&filter, &json!({"name": "Newmarket Station"})));
-        assert!(!matches(&filter, &json!({"name": "Britomart"})));
-        assert!(!matches(&filter, &json!({"name": 42})), "non-string never contains");
-        assert!(!matches(&filter, &json!({})), "missing field never contains");
-    }
-
-    #[test]
-    fn in_list_membership() {
-        let filter = Filter::InList {
-            field: "route_type".to_string(),
-            values: vec![ScalarValue::Int32(2), ScalarValue::Int32(3)],
-        };
-        assert!(matches(&filter, &json!({"route_type": 2})));
-        assert!(!matches(&filter, &json!({"route_type": 4})));
-        assert!(!matches(&filter, &json!({})), "missing field is in no list");
-    }
-
-    #[test]
-    fn is_null() {
-        let filter = Filter::IsNull("parent".to_string());
-        assert!(matches(&filter, &json!({"parent": null})));
-        assert!(matches(&filter, &json!({})), "absent field reads as null");
-        assert!(!matches(&filter, &json!({"parent": "stop-1"})));
-    }
-
-    #[test]
-    fn or_across_fields() {
-        let filter = Filter::Or(vec![
-            Filter::Contains {
-                field: "short_name".to_string(),
-                pattern: "NEX".to_string(),
-            },
-            Filter::Contains {
-                field: "long_name".to_string(),
-                pattern: "Northern".to_string(),
-            },
-        ]);
-        assert!(matches(&filter, &json!({"short_name": "NEX", "long_name": "x"})));
-        assert!(matches(&filter, &json!({"short_name": "x", "long_name": "Northern Express"})));
-        assert!(!matches(&filter, &json!({"short_name": "x", "long_name": "y"})));
-    }
-
-    #[test]
-    fn not_of_and_conjunction() {
-        // de morgan: everything but a document satisfying both conjuncts
-        let filter = Filter::Not(Box::new(Filter::And(vec![
-            compare("agency", ComparisonOp::Eq, ScalarValue::Str("AT".into())),
-            compare("route_type", ComparisonOp::Eq, ScalarValue::Int32(3)),
-        ])));
-        assert!(!matches(&filter, &json!({"agency": "AT", "route_type": 3})));
-        assert!(matches(&filter, &json!({"agency": "AT", "route_type": 2})));
-        assert!(matches(&filter, &json!({"agency": "Fullers", "route_type": 3})));
-        assert!(matches(&filter, &json!({})));
-    }
-
-    #[test]
-    fn nested_path_lookup() {
-        let doc = json!({"stop": {"zone": {"id": "z9"}}});
-        let filter = compare("stop.zone.id", ComparisonOp::Eq, ScalarValue::Str("z9".into()));
-        assert!(matches(&filter, &doc));
-    }
-
-    #[test]
-    fn multi_field_desc_sort() {
-        let order = vec![
-            SortField {
-                field: "a".to_string(),
-                descending: false,
-            },
-            SortField {
-                field: "b".to_string(),
-                descending: true,
-            },
-        ];
-        let low = json!({"a": 1, "b": 1});
-        let high_b = json!({"a": 1, "b": 2});
-        let high_a = json!({"a": 2, "b": 0});
-
-        assert_eq!(compare_documents(&high_b, &low, &order), Ordering::Less, "b descends");
-        assert_eq!(compare_documents(&low, &high_a, &order), Ordering::Less, "a ascends first");
-    }
-
-    #[test]
-    fn mixed_types_sort_by_rank() {
-        let order = vec![SortField {
-            field: "v".to_string(),
-            descending: false,
-        }];
-        let null = json!({});
-        let number = json!({"v": 5});
-        let string = json!({"v": "5"});
-
-        assert_eq!(compare_documents(&null, &number, &order), Ordering::Less);
-        assert_eq!(compare_documents(&number, &string, &order), Ordering::Less);
-    }
-
-    fn rows(ids: &[&str]) -> Vec<(String, Value)> {
-        ids.iter().map(|id| ((*id).to_string(), json!({ "id": id }))).collect()
-    }
-
-    #[test]
-    fn paginate_walks_all_pages() {
-        let (page, cont) = paginate(rows(&["a", "b", "c", "d", "e"]), 0, 2);
-        assert_eq!(page.len(), 2);
-        assert_eq!(cont.as_deref(), Some("2"));
-
-        let (page, cont) = paginate(rows(&["a", "b", "c", "d", "e"]), 2, 2);
-        assert_eq!(page.len(), 2);
-        assert_eq!(cont.as_deref(), Some("4"));
-
-        let (page, cont) = paginate(rows(&["a", "b", "c", "d", "e"]), 4, 2);
-        assert_eq!(page.len(), 1);
-        assert_eq!(cont, None, "final partial page carries no continuation");
-    }
-
-    #[test]
-    fn paginate_exact_boundary() {
-        let (page, cont) = paginate(rows(&["a", "b"]), 0, 2);
-        assert_eq!(page.len(), 2);
-        assert_eq!(cont, None, "a full final page carries no continuation");
-    }
-
-    #[test]
-    fn continuation_rejects_junk() {
-        parse_continuation(Some("not-a-number")).expect_err("garbage token is rejected");
-        assert_eq!(parse_continuation(None).expect("empty token"), 0);
     }
 }

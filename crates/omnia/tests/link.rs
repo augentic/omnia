@@ -183,7 +183,7 @@ async fn link_full() {
 // registering `full` afterwards must polyfill the missing `ping-async` on the
 // linker clone.
 #[tokio::test]
-async fn link_full_registered_late() {
+async fn registered_late() {
     let runtime =
         boot(&[("echoer", test_programs::LINK_ECHOER), ("partial", test_programs::LINK_PARTIAL)])
             .await
@@ -206,7 +206,7 @@ async fn link_full_registered_late() {
 // through the `unsafe` `Verified::trusted`, the embedder's word that the
 // artifact came from its own toolchain.
 #[tokio::test]
-async fn register_refuses_precompiled() {
+async fn refuse_precompiled() {
     let runtime =
         boot(&[("echoer", test_programs::LINK_ECHOER), ("partial", test_programs::LINK_PARTIAL)])
             .await
@@ -239,7 +239,7 @@ async fn register_refuses_precompiled() {
 // `register` and `admit` are refused under it with nothing seated, and the
 // first use that follows still reaches the entry's own bytes.
 #[tokio::test]
-async fn register_declared_refused() {
+async fn declared_refused() {
     let full = std::fs::read(test_programs::LINK_FULL).expect("reading the full guest");
     let manifest = Manifest::new()
         .guest(GuestEntry::new("full", full.clone()))
@@ -313,6 +313,40 @@ async fn link_skewed() {
     let text = format!("{err:#}");
     for needle in ["echoer", "full", "omnia-test:link/ops", "ping"] {
         assert!(text.contains(needle), "`{needle}` missing from: {text}");
+    }
+}
+
+// Store-bound handles (resources, futures, streams) cannot cross the link
+// seam; pre-instantiation rejects a guest importing one before any call.
+#[tokio::test]
+async fn link_refuses_handles() {
+    for (wat, kind) in [
+        (
+            r#"(component (import "acme:bad/ops" (instance
+                (export "r" (type $r (sub resource)))
+                (export "take" (func (param "r" (own $r))))
+            )))"#,
+            "resource",
+        ),
+        (
+            r#"(component (import "acme:bad/ops" (instance
+                (export "wait" (func (result (future u32))))
+            )))"#,
+            "future",
+        ),
+        (
+            r#"(component (import "acme:bad/ops" (instance
+                (export "read" (func (param "s" (stream u8))))
+            )))"#,
+            "stream",
+        ),
+    ] {
+        let manifest = Manifest::new().guest(GuestEntry::new("bad", wat.as_bytes().to_vec()));
+        let Err(err) = assemble(manifest, |builder| builder).await else {
+            panic!("handle signature ({kind}) must be refused at assembly");
+        };
+        let text = format!("{err:#}");
+        assert!(text.contains(kind), "expected `{kind}` in `{text}`");
     }
 }
 

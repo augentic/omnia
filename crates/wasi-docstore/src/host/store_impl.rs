@@ -9,6 +9,20 @@ use crate::host::generated::omnia::docstore::store::{
 use crate::host::generated::omnia::docstore::types::SortField as WitSortField;
 use crate::host::{Document, QueryOptions, Result, SortField, WasiDocStore, WasiDocStoreView};
 
+fn from_wit_document(doc: WitDocument) -> Document {
+    Document {
+        id: doc.id,
+        data: doc.data,
+    }
+}
+
+fn to_wit_document(doc: Document) -> WitDocument {
+    WitDocument {
+        id: doc.id,
+        data: doc.data,
+    }
+}
+
 impl<T> HostWithStore<T> for WasiDocStore {
     async fn get(
         accessor: &Accessor<T, Self>, collection: String, id: String,
@@ -73,17 +87,3 @@ impl<T> HostWithStore<T> for WasiDocStore {
 }
 
 impl StoreHost for WasiDocStoreView<'_> {}
-
-fn from_wit_document(doc: WitDocument) -> Document {
-    Document {
-        id: doc.id,
-        data: doc.data,
-    }
-}
-
-fn to_wit_document(doc: Document) -> WitDocument {
-    WitDocument {
-        id: doc.id,
-        data: doc.data,
-    }
-}

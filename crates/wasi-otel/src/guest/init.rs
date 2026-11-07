@@ -14,8 +14,6 @@ use tracing_subscriber::{EnvFilter, Layer as _, Registry};
 use crate::guest::generated::omnia::otel::{resource, types};
 use crate::guest::{metrics, tracing};
 
-static TELEMETRY: OnceLock<Option<Telemetry>> = OnceLock::new();
-
 /// Wrap the provided `inner` function with telemetry support.
 ///
 /// The first `scope` in an instance initializes telemetry before calling the
@@ -98,3 +96,5 @@ fn report(err: &anyhow::Error) {
 fn telemetry() -> Option<&'static Telemetry> {
     TELEMETRY.get()?.as_ref()
 }
+
+static TELEMETRY: OnceLock<Option<Telemetry>> = OnceLock::new();

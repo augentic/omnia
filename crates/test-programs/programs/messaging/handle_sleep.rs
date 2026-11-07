@@ -10,7 +10,6 @@ use omnia_wasi_messaging::incoming_handler::Guest;
 use omnia_wasi_messaging::types::{Error, Message};
 
 struct Messaging;
-omnia_wasi_messaging::export!(Messaging with_types_in omnia_wasi_messaging);
 
 impl Guest for Messaging {
     async fn handle(_message: Message) -> Result<(), Error> {
@@ -21,3 +20,4 @@ impl Guest for Messaging {
         Ok(())
     }
 }
+omnia_wasi_messaging::export!(Messaging with_types_in omnia_wasi_messaging);

@@ -50,10 +50,10 @@ async fn keyvalue_bucket() {
 }
 
 #[tokio::test]
-async fn keyvalue_set_with_ttl_expires() {
+async fn keyvalue_ttl_expires() {
     let backends = Backends::defaults().await;
 
-    run_guest(test_programs::KEYVALUE_SET_WITH_TTL_EXPIRES, backends.clone()).await;
+    run_guest(test_programs::KEYVALUE_TTL_EXPIRES, backends.clone()).await;
 
     // Raw bytes landed without an envelope; the expired key is gone.
     let bucket = backends.keyvalue.open_bucket("bucket".to_owned()).await.expect("bucket");

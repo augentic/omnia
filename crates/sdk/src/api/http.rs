@@ -1,127 +1,40 @@
-//! Typed HTTP routing over application handlers.
+//! HTTP handlers over plain axum.
 //!
-//! Routes are plain [`axum::routing::MethodRouter`]s over a [`Client`] state:
-//! register them on an [`axum::Router`], then supply exactly one
-//! provider-owning [`Client`] via `with_state`. [`handle_with`] is the general
-//! constructor, pairing a [`MethodFilter`] with a decode/encode codec; the
-//! per-verb constructors ([`get`], [`post`], [`put`], [`patch`], [`delete`])
-//! are JSON conveniences over it. Omnia creates one component instance per
-//! HTTP request, so construct the router and client inside the WASI HTTP
-//! export's `handle` method; axum route-state clones share that client's
-//! provider allocation, and durable state belongs in host-side capabilities.
+//! A route is an ordinary axum handler on an `axum::Router` whose state is
+//! one provider-owning [`Client`]. The handler reaches its capabilities
+//! through the [`Context`] extractor, reads its input with axum's `Path`,
+//! `Query`, and `Json` extractors, and answers a `Result` whose error is an
+//! [`Error`](crate::Error), the JSON [`ErrorBody`] at its status; `?` on an
+//! `anyhow::Error` reaches the same envelope. A domain error with a wire shape
+//! of its own implements `IntoResponse` itself. A module builds its routes
+//! and topics on a [`Handlers`](crate::api::Handlers) of its own and the
+//! guest merges them (`Handlers::from([..])` or
+//! [`Handlers::merge`](crate::api::Handlers::merge)) into its one
+//! [`api::Router`](crate::api::Router) with `with_state(Client::new(provider))`.
+//! [`export!`] binds the router fn as the guest's `wasi:http` handler and
+//! serves each request inside the `handler` span [`trace`] opens.
 
 use std::convert::Infallible;
 use std::future::{Future, ready};
+use std::sync::Arc;
 
-use axum::body::Bytes;
-use axum::extract::{FromRequestParts, RawPathParams, RawQuery, State};
-use axum::response::{IntoResponse, Json, Response};
-pub use axum::routing::MethodFilter;
-use axum::routing::{self, MethodRouter};
-use http::header::CONTENT_TYPE;
+use axum::Json;
+use axum::extract::{FromRef, FromRequestParts, MatchedPath, Request};
+use axum::middleware::Next;
+use axum::response::{IntoResponse, Response};
+use http::HeaderMap;
 use http::request::Parts;
-use http::{HeaderMap, HeaderValue, StatusCode};
-use serde::Serialize;
-use serde::de::DeserializeOwned;
+use tracing::Instrument as _;
 
-pub use crate::api::DecodeError;
-use crate::api::{Client, Encoded, ErrorBody, Handler, Metadata};
+use crate::api::{Client, Context, ErrorBody, Metadata};
 
-/// Result type for HTTP handlers.
-pub type HttpResult<T, E = HttpError> = Result<T, E>;
-
-impl From<DecodeError> for HttpError {
-    fn from(error: DecodeError) -> Self {
-        crate::Error::BadRequest {
-            code: "invalid_request".to_string(),
-            description: error.description().to_owned(),
-        }
-        .into()
-    }
-}
-
-/// An HTTP error response.
-#[derive(Debug)]
-pub struct HttpError {
-    status: StatusCode,
-    error: String,
-    body: Option<(HeaderValue, Vec<u8>)>,
-}
-
-impl HttpError {
-    /// Create a plain-text HTTP error.
-    #[must_use]
-    pub fn new(status: StatusCode, message: impl Into<String>) -> Self {
-        Self {
-            status,
-            error: message.into(),
-            body: None,
-        }
-    }
-
-    /// Create an HTTP error carrying a preformatted wire body.
-    #[must_use]
-    pub const fn with_body(status: StatusCode, content_type: HeaderValue, body: Vec<u8>) -> Self {
-        Self {
-            status,
-            error: String::new(),
-            body: Some((content_type, body)),
-        }
-    }
-}
-
-// Carries the same `error` discriminant every transport emits, so a client
-// classifies failures identically over HTTP and the command line.
-impl From<crate::Error> for HttpError {
-    fn from(error: crate::Error) -> Self {
-        let body =
-            serde_json::to_vec(&ErrorBody::from(&error)).expect("a two-string struct serializes");
-        Self::with_body(error.status(), HeaderValue::from_static("application/json"), body)
-    }
-}
-
-impl From<anyhow::Error> for HttpError {
-    fn from(error: anyhow::Error) -> Self {
-        if error.downcast_ref::<crate::Error>().is_some() {
-            let error: crate::Error = error.into();
-            return Self::from(error);
-        }
-
-        Self::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("{error}, caused by: {}", error.root_cause()),
-        )
-    }
-}
-
-impl IntoResponse for HttpError {
-    fn into_response(self) -> Response {
-        match self.body {
-            Some((content_type, body)) => {
-                (self.status, [(CONTENT_TYPE, content_type)], body).into_response()
-            }
-            None => (self.status, self.error).into_response(),
-        }
-    }
-}
-
-impl IntoResponse for Encoded {
-    fn into_response(self) -> Response {
-        (StatusCode::OK, [(CONTENT_TYPE, HeaderValue::from_static(self.media_type))], self.bytes)
-            .into_response()
-    }
-}
-
-/// Serve one WASI HTTP request through a finished [`axum::Router`].
-#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
-pub use omnia_wasi_http::serve;
-
-/// Wires a finished [`axum::Router`] as the guest's `wasi:http/incoming-handler` export.
-///
-/// Instrumented with an `http_guest_handle` span on `wasm32`; expands to nothing on native targets.
+#[doc(hidden)]
 #[macro_export]
-macro_rules! http {
-    ($router:expr) => {
+macro_rules! __export_http {
+    ($router:path $(,)?) => {
+        $crate::api::http::export!($router, $crate::WasiProvider);
+    };
+    ($router:path, $provider:expr $(,)?) => {
         #[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
         const _: () = {
             use $crate::omnia_wasi_otel;
@@ -138,270 +51,112 @@ macro_rules! http {
                     $crate::wasip3::http::types::Response,
                     $crate::wasip3::http::types::ErrorCode,
                 > {
-                    $crate::api::http::serve($router, request).await
+                    let router = $crate::axum::Router::layer(
+                        $crate::axum::Router::from($router($provider)),
+                        $crate::axum::middleware::from_fn($crate::api::http::trace),
+                    );
+                    $crate::api::http::serve(router, request).await
                 }
             }
         };
     };
 }
 
-/// A borrowed raw-request view handed to route decoders.
-#[derive(Debug)]
-pub struct RawRequest<'a> {
-    /// Path parameters in path order.
-    pub path_params: &'a [(String, String)],
+/// Bind a router fn as the guest's `wasi:http` export.
+///
+/// Calls the router fn on each request with [`WasiProvider`](crate::WasiProvider),
+/// or with the provider expression passed as a second argument, and serves the
+/// request through the resulting router inside the `handler` span [`trace`]
+/// opens. Expands to nothing on native targets, so the same crate's tests
+/// build the router natively.
+///
+/// ```rust,ignore
+/// use omnia_sdk::api::http;
+///
+/// http::export!(http_router);
+/// ```
+#[doc(inline)]
+pub use crate::__export_http as export;
 
-    /// The raw query string, when present.
-    pub query: Option<&'a str>,
-
-    /// The request headers.
-    pub headers: &'a HeaderMap,
-
-    /// The raw request body (empty for typical GETs).
-    pub body: &'a [u8],
+/// Serve a request inside a `handler` span carrying its request and
+/// correlation ids, its method, and its route.
+///
+/// Apply with `axum::middleware::from_fn(trace)`; [`export!`] applies it to
+/// the router it exports. The ids the span carries are the ones the
+/// [`Metadata`] and [`Context`] extractors hand the handler, a minted request
+/// id included. The `route` is the template the router matched, such as
+/// `/items/{id}`; a request no route matched carries none.
+pub async fn trace(mut request: Request, next: Next) -> Response {
+    let metadata = Metadata::from_headers(request.headers());
+    let span = tracing::info_span!(
+        "handler",
+        request_id = metadata.request_id.as_deref(),
+        correlation_id = metadata.correlation_id.as_deref(),
+        method = request.method().as_str(),
+        route = request.extensions().get::<MatchedPath>().map(MatchedPath::as_str),
+    );
+    request.extensions_mut().insert(metadata);
+    next.run(request).instrument(span).await
 }
 
+/// Serve one WASI HTTP request through a finished [`axum::Router`].
+#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
+pub use omnia_wasi_http::serve;
+
+impl Metadata {
+    /// Build metadata from HTTP request headers: `x-request-id`,
+    /// `x-correlation-id`, `x-causation-id`, and `x-tenant`.
+    ///
+    /// HTTP's carrier for the values the command line reads from the
+    /// environment; a missing request id is minted as on every transport.
+    #[must_use]
+    pub fn from_headers(headers: &HeaderMap) -> Self {
+        Self::from_lookup(|name| {
+            headers
+                .get(format!("x-{name}"))
+                .and_then(|value| value.to_str().ok())
+                .map(str::to_owned)
+        })
+    }
+}
+
+// Reads the metadata `trace` stored, so a request id minted there is minted once.
 impl<S: Send + Sync> FromRequestParts<S> for Metadata {
     type Rejection = Infallible;
 
     fn from_request_parts(
         parts: &mut Parts, _state: &S,
-    ) -> impl Future<Output = Result<Self, Self::Rejection>> {
-        let metadata = Self::from_lookup(|name| {
-            parts
-                .headers
-                .get(format!("x-{name}"))
-                .and_then(|value| value.to_str().ok())
-                .map(str::to_owned)
-        });
-        ready(Ok(metadata))
+    ) -> impl Future<Output = Result<Self, Self::Rejection>> + Send {
+        ready(Ok(parts
+            .extensions
+            .get::<Self>()
+            .cloned()
+            .unwrap_or_else(|| Self::from_headers(&parts.headers))))
     }
 }
 
-/// Create a route for the filtered methods with a custom decoder and encoder.
-///
-/// The decoder's error is anything `Into<HttpError>`: a [`DecodeError`] is
-/// a 400, while an [`Error`](crate::Error) classifies the refusal (a 404 for
-/// an unroutable path parameter, say). A closure using `?` names its return
-/// type, as below, so the error type is not left to inference.
-///
-/// ```rust,ignore
-/// use axum::response::IntoResponse;
-/// use omnia_sdk::api::{Client, Context};
-/// use omnia_sdk::api::http::{DecodeError, MethodFilter, RawRequest, handle_with};
-///
-/// async fn import_text(input: ImportText, context: Context<Provider>) -> Result<String, Error> {
-///     // ...
-/// }
-///
-/// let router = axum::Router::new()
-///     .route(
-///         "/import",
-///         handle_with(
-///             MethodFilter::POST.or(MethodFilter::PUT),
-///             import_text,
-///             |raw: RawRequest<'_>| -> Result<ImportText, DecodeError> {
-///                 let text = std::str::from_utf8(raw.body)
-///                     .map_err(|error| DecodeError::new(format!("body is not utf-8: {error}")))?;
-///                 Ok(ImportText { text: text.to_owned() })
-///             },
-///             |output: String| output.into_response(),
-///         ),
-///     )
-///     .with_state(Client::new("acme", Provider));
-/// ```
-pub fn handle_with<F, P, I, D, DE, E>(
-    filter: MethodFilter, handler: F, decode: D, encode: E,
-) -> MethodRouter<Client<P>>
+impl<P, S> FromRequestParts<S> for Context<P>
 where
-    F: Handler<P, I>,
-    F::Error: Into<HttpError>,
-    I: Send + 'static,
-    D: Fn(RawRequest<'_>) -> Result<I, DE> + Clone + Send + Sync + 'static,
-    DE: Into<HttpError>,
-    E: Fn(F::Output) -> Response + Clone + Send + Sync + 'static,
     P: Send + Sync + 'static,
+    S: Send + Sync,
+    Client<P>: FromRef<S>,
 {
-    routing::on(
-        filter,
-        move |state: State<Client<P>>,
-              params: RawPathParams,
-              query: RawQuery,
-              headers: HeaderMap,
-              metadata: Metadata,
-              body: Bytes| {
-            dispatch(
-                (handler.clone(), decode.clone(), encode.clone()),
-                state,
-                params,
-                query,
-                headers,
-                metadata,
-                body,
-            )
-        },
-    )
-}
+    type Rejection = Infallible;
 
-/// Create a GET route decoding path and query parameters as JSON input.
-pub fn get<F, P, I>(handler: F) -> MethodRouter<Client<P>>
-where
-    F: Handler<P, I>,
-    F::Output: Serialize,
-    F::Error: Into<HttpError>,
-    I: DeserializeOwned + Send + 'static,
-    P: Send + Sync + 'static,
-{
-    json_query(MethodFilter::GET, handler)
-}
-
-/// Create a DELETE route decoding path and query parameters as JSON input.
-pub fn delete<F, P, I>(handler: F) -> MethodRouter<Client<P>>
-where
-    F: Handler<P, I>,
-    F::Output: Serialize,
-    F::Error: Into<HttpError>,
-    I: DeserializeOwned + Send + 'static,
-    P: Send + Sync + 'static,
-{
-    json_query(MethodFilter::DELETE, handler)
-}
-
-/// Create a POST route decoding a JSON body merged with path parameters.
-pub fn post<F, P, I>(handler: F) -> MethodRouter<Client<P>>
-where
-    F: Handler<P, I>,
-    F::Output: Serialize,
-    F::Error: Into<HttpError>,
-    I: DeserializeOwned + Send + 'static,
-    P: Send + Sync + 'static,
-{
-    json_body(MethodFilter::POST, handler)
-}
-
-/// Create a PUT route decoding a JSON body merged with path parameters.
-pub fn put<F, P, I>(handler: F) -> MethodRouter<Client<P>>
-where
-    F: Handler<P, I>,
-    F::Output: Serialize,
-    F::Error: Into<HttpError>,
-    I: DeserializeOwned + Send + 'static,
-    P: Send + Sync + 'static,
-{
-    json_body(MethodFilter::PUT, handler)
-}
-
-/// Create a PATCH route decoding a JSON body merged with path parameters.
-pub fn patch<F, P, I>(handler: F) -> MethodRouter<Client<P>>
-where
-    F: Handler<P, I>,
-    F::Output: Serialize,
-    F::Error: Into<HttpError>,
-    I: DeserializeOwned + Send + 'static,
-    P: Send + Sync + 'static,
-{
-    json_body(MethodFilter::PATCH, handler)
-}
-
-fn json_query<F, P, I>(filter: MethodFilter, handler: F) -> MethodRouter<Client<P>>
-where
-    F: Handler<P, I>,
-    F::Output: Serialize,
-    F::Error: Into<HttpError>,
-    I: DeserializeOwned + Send + 'static,
-    P: Send + Sync + 'static,
-{
-    handle_with(
-        filter,
-        handler,
-        |raw: RawRequest<'_>| query_input::<I>(raw.path_params, raw.query),
-        json_response,
-    )
-}
-
-fn json_body<F, P, I>(filter: MethodFilter, handler: F) -> MethodRouter<Client<P>>
-where
-    F: Handler<P, I>,
-    F::Output: Serialize,
-    F::Error: Into<HttpError>,
-    I: DeserializeOwned + Send + 'static,
-    P: Send + Sync + 'static,
-{
-    handle_with(
-        filter,
-        handler,
-        |raw: RawRequest<'_>| body_input::<I>(raw.path_params, raw.body),
-        json_response,
-    )
-}
-
-fn json_response<T: Serialize>(output: T) -> Response {
-    Json(output).into_response()
-}
-
-async fn dispatch<F, P, I, D, DE, E>(
-    (handler, decode, encode): (F, D, E), State(client): State<Client<P>>, params: RawPathParams,
-    RawQuery(query): RawQuery, headers: HeaderMap, metadata: Metadata, body: Bytes,
-) -> Response
-where
-    F: Handler<P, I>,
-    F::Error: Into<HttpError>,
-    D: Fn(RawRequest<'_>) -> Result<I, DE>,
-    DE: Into<HttpError>,
-    E: Fn(F::Output) -> Response,
-    P: Send + Sync + 'static,
-{
-    let path_params: Vec<(String, String)> =
-        params.iter().map(|(key, value)| (key.to_owned(), value.to_owned())).collect();
-    let raw = RawRequest {
-        path_params: &path_params,
-        query: query.as_deref(),
-        headers: &headers,
-        body: &body,
-    };
-    let input = match decode(raw) {
-        Ok(input) => input,
-        Err(error) => return Into::<HttpError>::into(error).into_response(),
-    };
-    match client.call(handler, input, &metadata).await {
-        Ok(output) => encode(output),
-        Err(error) => Into::<HttpError>::into(error).into_response(),
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let client = Client::from_ref(state);
+        let metadata = Metadata::from_request_parts(parts, state).await?;
+        Ok(Self {
+            provider: Arc::clone(&client.provider),
+            metadata,
+        })
     }
 }
 
-fn invalid(description: String) -> DecodeError {
-    DecodeError::new(description)
-}
-
-fn query_input<T: DeserializeOwned>(
-    params: &[(String, String)], query: Option<&str>,
-) -> Result<T, DecodeError> {
-    let mut pairs: Vec<(String, String)> = params.to_vec();
-    if let Some(query) = query {
-        let parsed: Vec<(String, String)> = serde_urlencoded::from_str(query)
-            .map_err(|error| invalid(format!("malformed query string: {error}")))?;
-        pairs.extend(parsed);
+// Carries the same `error` discriminant every transport emits, so a client
+// classifies failures identically over HTTP and the command line.
+impl IntoResponse for crate::Error {
+    fn into_response(self) -> Response {
+        (self.status(), Json(ErrorBody::from(&self))).into_response()
     }
-    let encoded = serde_urlencoded::to_string(&pairs)
-        .map_err(|error| invalid(format!("cannot encode request parameters: {error}")))?;
-    serde_urlencoded::from_str(&encoded)
-        .map_err(|error| invalid(format!("invalid request parameters: {error}")))
-}
-
-fn body_input<T: DeserializeOwned>(
-    params: &[(String, String)], body: &[u8],
-) -> Result<T, DecodeError> {
-    let mut value = if body.is_empty() {
-        serde_json::Value::Object(serde_json::Map::new())
-    } else {
-        serde_json::from_slice(body)
-            .map_err(|error| invalid(format!("malformed JSON body: {error}")))?
-    };
-    let serde_json::Value::Object(object) = &mut value else {
-        return Err(invalid("the request body must be a JSON object".to_string()));
-    };
-    for (key, param) in params {
-        object.insert(key.clone(), serde_json::Value::String(param.clone()));
-    }
-    serde_json::from_value(value).map_err(|error| invalid(format!("invalid request body: {error}")))
 }

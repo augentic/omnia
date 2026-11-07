@@ -17,14 +17,14 @@ use wasip3::filesystem::preopens;
 
 struct CliGuest;
 
-wasip3::cli::command::export!(CliGuest);
-
 impl Guest for CliGuest {
     async fn run() -> Result<(), ()> {
         println!("{}", default_completion().await);
         Ok(())
     }
 }
+
+wasip3::cli::command::export!(CliGuest);
 
 fn render(outcome: Result<omnia_sdk::model::Reply, omnia_sdk::model::Error>) -> String {
     match outcome {

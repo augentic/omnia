@@ -8,42 +8,6 @@ use crate::host::generated::wasi::sql::readwrite::{
 use crate::host::generated::wasi::sql::types::{DataType as WitDataType, Field as WitField};
 use crate::host::{DataType, Field, Row, WasiSql, WasiSqlView};
 
-impl<T> HostWithStore<T> for WasiSql {
-    async fn query(
-        accessor: &Accessor<T, Self>, c: Resource<Connection>, q: Resource<Statement>,
-    ) -> wasmtime::Result<Result<Vec<WitRow>, Resource<Error>>> {
-        let connection = get_connection(accessor, &c).map_err(wasmtime::Error::from_anyhow)?;
-        let statement = get_statement(accessor, &q).map_err(wasmtime::Error::from_anyhow)?;
-
-        let (query, params) = (statement.query.clone(), statement.params.clone());
-
-        let result = match connection.query(query, params).await {
-            Ok(rows) => Ok(rows.into_iter().map(to_wit_row).collect()),
-            Err(err) => Err(accessor.with(|mut store| store.get().table.push(Error::from(err)))?),
-        };
-
-        Ok(result)
-    }
-
-    async fn exec(
-        accessor: &Accessor<T, Self>, c: Resource<Connection>, q: Resource<Statement>,
-    ) -> wasmtime::Result<Result<u32, Resource<Error>>> {
-        let connection = get_connection(accessor, &c).map_err(wasmtime::Error::from_anyhow)?;
-        let statement = get_statement(accessor, &q).map_err(wasmtime::Error::from_anyhow)?;
-
-        let (query, params) = (statement.query.clone(), statement.params.clone());
-
-        let result = match connection.exec(query, params).await {
-            Ok(rows) => Ok(rows),
-            Err(err) => Err(accessor.with(|mut store| store.get().table.push(Error::from(err)))?),
-        };
-
-        Ok(result)
-    }
-}
-
-impl Host for WasiSqlView<'_> {}
-
 pub fn get_connection<T>(
     accessor: &Accessor<T, WasiSql>, self_: &Resource<ConnectionProxy>,
 ) -> Result<ConnectionProxy> {
@@ -86,3 +50,39 @@ fn to_wit_data_type(dt: DataType) -> WitDataType {
         DataType::Binary(v) => WitDataType::Binary(v),
     }
 }
+
+impl<T> HostWithStore<T> for WasiSql {
+    async fn query(
+        accessor: &Accessor<T, Self>, c: Resource<Connection>, q: Resource<Statement>,
+    ) -> wasmtime::Result<Result<Vec<WitRow>, Resource<Error>>> {
+        let connection = get_connection(accessor, &c).map_err(wasmtime::Error::from_anyhow)?;
+        let statement = get_statement(accessor, &q).map_err(wasmtime::Error::from_anyhow)?;
+
+        let (query, params) = (statement.query.clone(), statement.params.clone());
+
+        let result = match connection.query(query, params).await {
+            Ok(rows) => Ok(rows.into_iter().map(to_wit_row).collect()),
+            Err(err) => Err(accessor.with(|mut store| store.get().table.push(Error::from(err)))?),
+        };
+
+        Ok(result)
+    }
+
+    async fn exec(
+        accessor: &Accessor<T, Self>, c: Resource<Connection>, q: Resource<Statement>,
+    ) -> wasmtime::Result<Result<u32, Resource<Error>>> {
+        let connection = get_connection(accessor, &c).map_err(wasmtime::Error::from_anyhow)?;
+        let statement = get_statement(accessor, &q).map_err(wasmtime::Error::from_anyhow)?;
+
+        let (query, params) = (statement.query.clone(), statement.params.clone());
+
+        let result = match connection.exec(query, params).await {
+            Ok(rows) => Ok(rows),
+            Err(err) => Err(accessor.with(|mut store| store.get().table.push(Error::from(err)))?),
+        };
+
+        Ok(result)
+    }
+}
+
+impl Host for WasiSqlView<'_> {}

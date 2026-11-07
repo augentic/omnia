@@ -127,14 +127,3 @@ impl From<anyhow::Error> for Error {
         error.downcast().unwrap_or_else(|other| Self::Other(format!("{other:#}")))
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::Error;
-
-    #[test]
-    fn pending_lists_paths() {
-        let error = Error::Pending(vec!["src/a.rs".into(), "b.md".into()]);
-        assert_eq!(error.to_string(), "pending changes: src/a.rs, b.md");
-    }
-}

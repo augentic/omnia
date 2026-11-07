@@ -9,6 +9,31 @@ use crate::host::generated::omnia::vcs::store::{
 };
 use crate::host::{Entry, Intent, Merged, Result, Rule, Strategy, WasiVcs, WasiVcsView};
 
+fn from_wit_rule(rule: WitRule) -> Rule {
+    Rule {
+        paths: rule.paths,
+        strategy: match rule.strategy {
+            WitStrategy::Union => Strategy::Union,
+            WitStrategy::Ours => Strategy::Ours,
+            WitStrategy::Theirs => Strategy::Theirs,
+        },
+    }
+}
+
+fn to_wit_merged(merged: Merged) -> WitMerged {
+    WitMerged {
+        commit: merged.commit,
+        conflicts: merged.conflicts,
+    }
+}
+
+fn to_wit_entry(entry: Entry) -> WitEntry {
+    WitEntry {
+        id: entry.id,
+        message: entry.message,
+    }
+}
+
 impl<T> HostWithStore<T> for WasiVcs
 where
     T: HasMounts,
@@ -77,28 +102,3 @@ where
 }
 
 impl Host for WasiVcsView<'_> {}
-
-fn from_wit_rule(rule: WitRule) -> Rule {
-    Rule {
-        paths: rule.paths,
-        strategy: match rule.strategy {
-            WitStrategy::Union => Strategy::Union,
-            WitStrategy::Ours => Strategy::Ours,
-            WitStrategy::Theirs => Strategy::Theirs,
-        },
-    }
-}
-
-fn to_wit_merged(merged: Merged) -> WitMerged {
-    WitMerged {
-        commit: merged.commit,
-        conflicts: merged.conflicts,
-    }
-}
-
-fn to_wit_entry(entry: Entry) -> WitEntry {
-    WitEntry {
-        id: entry.id,
-        message: entry.message,
-    }
-}

@@ -7,7 +7,7 @@ use test_programs::raw_request;
 use wasip3::filesystem::preopens;
 use wasip3::filesystem::types::{DescriptorFlags, OpenFlags, PathFlags};
 
-omnia_sdk::command!(scenario);
+omnia_sdk::api::command::export!(scenario);
 
 async fn scenario() {
     let directories = preopens::get_directories();

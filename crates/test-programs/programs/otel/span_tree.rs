@@ -9,7 +9,7 @@ use opentelemetry::KeyValue;
 use opentelemetry::trace::{TraceContextExt as _, Tracer as _};
 use tracing::{Instrument as _, Level};
 
-omnia_sdk::command!(scenario);
+omnia_sdk::api::command::export!(scenario);
 
 async fn scenario() {
     parent().await;
@@ -27,7 +27,15 @@ async fn parent() {
 
     // The entered parent is the current OpenTelemetry context, so the API
     // span parents to it without any explicit wiring.
+    let link_context = opentelemetry::trace::SpanContext::new(
+        opentelemetry::trace::TraceId::from_bytes([1; 16]),
+        opentelemetry::trace::SpanId::from_bytes([2; 8]),
+        opentelemetry::trace::TraceFlags::SAMPLED,
+        true,
+        "vendor=opaque,other=value".parse().expect("valid tracestate"),
+    );
     opentelemetry::global::tracer("guest").in_span("api", |cx| {
         cx.span().set_attribute(KeyValue::new("kind", "direct"));
+        cx.span().add_link(link_context, vec![]);
     });
 }

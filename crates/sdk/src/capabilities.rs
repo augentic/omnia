@@ -9,6 +9,17 @@
 //! by `#[omnia_guest_macros::capability]`) with a blanket forwarding impl and
 //! implementations for `Arc<P>`, `&P`, and `Box<P>`, so `#[derive(Provider)]`
 //! and pointer wrappers delegate without repeating method signatures.
+//!
+//! A `<Capability>Ext` trait ([`StateStoreExt`], [`ConfigExt`], ...) holds the
+//! caller-side codecs and parsers over a capability's primitives. It is
+//! blanket-implemented for every implementor and never implemented by hand, so
+//! one encoding holds across providers. Its methods return `anyhow::Result`
+//! like the primitives they wrap; [`HttpRequestExt::fetch_json`] alone returns
+//! [`crate::Result`], since it also maps a non-2xx status to
+//! [`Error::BadGateway`](crate::Error::BadGateway).
+//!
+//! [`Capabilities`] is every capability trait at once, the bound a fn generic
+//! over the whole provider takes.
 
 mod blob;
 mod broadcast;
@@ -33,20 +44,20 @@ pub use blob::{BlobStore, ContainerMetadata, ObjectMetadata};
 pub use broadcast::Broadcast;
 #[doc(hidden)]
 pub use broadcast::HasBroadcast;
-pub use config::Config;
 #[doc(hidden)]
 pub use config::HasConfig;
-#[cfg(feature = "docstore")]
-pub use document::DocumentStore;
+pub use config::{Config, ConfigExt};
 #[cfg(feature = "docstore")]
 #[doc(hidden)]
 pub use document::HasDocumentStore;
+#[cfg(feature = "docstore")]
+pub use document::{DocumentStore, DocumentStoreExt};
 #[doc(hidden)]
 pub use http::HasHttpRequest;
-pub use http::HttpRequest;
+pub use http::{HttpRequest, HttpRequestExt};
 #[doc(hidden)]
 pub use identity::HasIdentity;
-pub use identity::{AccessToken, Identity};
+pub use identity::{AccessToken, Identity, IdentityExt};
 #[doc(hidden)]
 pub use messaging::HasPublish;
 pub use messaging::{Message, Publish};
@@ -60,12 +71,12 @@ pub use plugins::HasPlugins;
 pub use plugins::Plugins;
 #[doc(hidden)]
 pub use state::HasStateStore;
-pub use state::{CasError, StateStore};
+pub use state::{CasError, StateStore, StateStoreExt};
 #[cfg(feature = "sql")]
 #[doc(hidden)]
 pub use table::HasTableStore;
 #[cfg(feature = "sql")]
-pub use table::TableStore;
+pub use table::{TableStore, TableStoreExt};
 #[doc(hidden)]
 pub use vault::HasVault;
 pub use vault::Vault;
@@ -79,3 +90,76 @@ pub use vcs::Vcs;
 /// Delegates to the `omnia-wasi-*` guest bindings on `wasm32-wasip2`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct WasiProvider;
+
+// `#[cfg]` cannot gate one supertrait, so each feature set names the traits
+// it adds to the always-on list.
+macro_rules! capabilities {
+    ($($gated:ident),*) => {
+        /// Every capability trait at once, with the `Send + Sync + 'static` a
+        /// provider needs.
+        ///
+        /// A fn generic over the whole provider takes this bound in place of
+        /// listing every capability trait: a module's
+        /// `handlers<P: Capabilities>() -> Handlers<P>`, or the root router
+        /// fn a transport `export!` binds. A handler still bounds its own `P`
+        /// on the capabilities it reaches. [`WasiProvider`] satisfies it on
+        /// `wasm32`, as does the `omnia_test::guest` provider natively.
+        /// `DocumentStore` and `TableStore` are included under the `docstore`
+        /// and `sql` features.
+        ///
+        /// Blanket-implemented for every such provider; never implemented by
+        /// hand.
+        pub trait Capabilities:
+            BlobStore
+            + Broadcast
+            + Config
+            + HttpRequest
+            + Identity
+            + Model
+            + Plugins
+            + Publish
+            + StateStore
+            + Vault
+            + Vcs
+            $(+ $gated)*
+            + Send
+            + Sync
+            + 'static
+        {
+        }
+
+        impl<P> Capabilities for P where
+            P: BlobStore
+                + Broadcast
+                + Config
+                + HttpRequest
+                + Identity
+                + Model
+                + Plugins
+                + Publish
+                + StateStore
+                + Vault
+                + Vcs
+                $(+ $gated)*
+                + Send
+                + Sync
+                + 'static
+        {
+        }
+    };
+}
+
+cfg_select! {
+    all(feature = "docstore", feature = "sql") => {
+        capabilities!(DocumentStore, TableStore);
+    }
+    feature = "docstore" => {
+        capabilities!(DocumentStore);
+    }
+    feature = "sql" => {
+        capabilities!(TableStore);
+    }
+    _ => {
+        capabilities!();
+    }
+}

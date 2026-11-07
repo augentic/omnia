@@ -23,10 +23,6 @@ use opentelemetry_proto::tonic::metrics::v1::{
 use opentelemetry_proto::tonic::trace::v1::Span;
 use opentelemetry_proto::tonic::trace::v1::status::StatusCode;
 
-// Every guest program in `crates/test-programs` must have a matching test
-// here; a new program without one fails to compile.
-test_programs::foreach_otel!();
-
 #[derive(Clone, Debug)]
 struct Backends(Recording);
 
@@ -79,6 +75,22 @@ impl Recording {
     }
 }
 
+impl OtelClient for Recording {
+    fn export_traces(&self, request: ExportTraceServiceRequest) -> FutureResult<()> {
+        self.traces.lock().expect("traces lock").push(request);
+        async { Ok(()) }.boxed()
+    }
+
+    fn export_metrics(&self, request: ExportMetricsServiceRequest) -> FutureResult<()> {
+        self.metrics.lock().expect("metrics lock").push(request);
+        async { Ok(()) }.boxed()
+    }
+}
+
+// Every guest program in `crates/test-programs` must have a matching test
+// here; a new program without one fails to compile.
+test_programs::foreach_otel!();
+
 fn attribute<'a>(
     attributes: &'a [opentelemetry_proto::tonic::common::v1::KeyValue], key: &str,
 ) -> Option<&'a AnyValue> {
@@ -110,18 +122,6 @@ fn histogram_point<'a>(metrics: &'a [Metric], name: &str) -> &'a HistogramDataPo
     point
 }
 
-impl OtelClient for Recording {
-    fn export_traces(&self, request: ExportTraceServiceRequest) -> FutureResult<()> {
-        self.traces.lock().expect("traces lock").push(request);
-        async { Ok(()) }.boxed()
-    }
-
-    fn export_metrics(&self, request: ExportMetricsServiceRequest) -> FutureResult<()> {
-        self.metrics.lock().expect("metrics lock").push(request);
-        async { Ok(()) }.boxed()
-    }
-}
-
 async fn run_guest(wasm: &str) -> Recording {
     run(Deployment::new().guest("guest", wasm), wasm).await
 }
@@ -150,16 +150,16 @@ async fn run(deployment: Deployment, label: &str) -> Recording {
 }
 
 #[tokio::test]
-async fn otel_instrumented_handler() {
-    let recording = run_guest(test_programs::OTEL_INSTRUMENTED_HANDLER).await;
-    assert_eq!(recording.span_names(), ["traced"]);
+async fn otel_instrumented() {
+    let recording = run_guest(test_programs::OTEL_INSTRUMENTED).await;
+    assert_eq!(recording.span_names(), ["sync_traced", "traced"]);
     // no metrics recorded, so the flush skips the export rather than send an empty one
     assert!(recording.metrics.lock().expect("metrics lock").is_empty());
 }
 
 #[tokio::test]
-async fn otel_spawned_task_pending() {
-    let recording = run_guest(test_programs::OTEL_SPAWNED_TASK_PENDING).await;
+async fn otel_spawn_pending() {
+    let recording = run_guest(test_programs::OTEL_SPAWN_PENDING).await;
     assert_eq!(recording.span_names(), ["traced"]);
 }
 
@@ -187,11 +187,14 @@ async fn otel_span_tree() {
     let (api_scope, api) = find("api");
 
     // The `tracing` bridge's spans sit in the layer's scope; the API span in
-    // the tracer's own.
+    // the tracer's own. Spans sharing a scope are grouped into one `ScopeSpans`.
     assert_eq!(
         (parent_scope.as_str(), child_scope.as_str(), api_scope.as_str()),
         ("global", "global", "guest")
     );
+    let traces = recording.traces.lock().expect("traces lock");
+    assert_eq!(traces[0].resource_spans[0].scope_spans.len(), 2);
+    drop(traces);
 
     // One trace: the host's, which re-parents the guest's root to its live
     // span and leaves the children under their guest parent.
@@ -213,9 +216,15 @@ async fn otel_span_tree() {
     assert_eq!(child.status.as_ref().map(|s| s.code), Some(StatusCode::Error as i32));
     assert_eq!(parent.status.as_ref().map(|s| s.code), Some(StatusCode::Unset as i32));
 
-    // The API span's attribute set through `TraceContextExt`.
+    // The API span's attribute and link trace_state set through `TraceContextExt`.
     assert_eq!(attribute(&api.attributes, "kind"), Some(&AnyValue::StringValue("direct".into())));
     assert_eq!(api.status.as_ref().map(|s| s.code), Some(StatusCode::Unset as i32));
+    let [link] = api.links.as_slice() else {
+        panic!("one link on `api`, got {:?}", api.links);
+    };
+    assert_eq!(link.trace_id, [1; 16]);
+    assert_eq!(link.span_id, [2; 8]);
+    assert_eq!(link.trace_state, "vendor=opaque,other=value");
 }
 
 #[tokio::test]

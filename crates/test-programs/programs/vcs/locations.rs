@@ -13,7 +13,7 @@ use omnia_wasi_vcs::{store, workspace};
 use wasip3::filesystem::preopens;
 use wasip3::filesystem::types::{Descriptor, DescriptorFlags, OpenFlags, PathFlags};
 
-omnia_sdk::command!(scenario);
+omnia_sdk::api::command::export!(scenario);
 
 fn preopen<'a>(directories: &'a [(Descriptor, String)], wanted: &str) -> &'a Descriptor {
     directories
@@ -56,10 +56,10 @@ async fn scenario() {
     refused(error, "not an authorized mount");
 
     // a subpath that leaves the root, or starts at it
-    let error = store::head(at(root, "../escape")).await.expect_err("escaping subpath refused");
-    refused(error, "not a plain relative path");
-    let error = store::head(at(root, "/abs")).await.expect_err("absolute subpath refused");
-    refused(error, "not a plain relative path");
+    for bad in ["../escape", "/abs", "a\\b", "a//b", ".", "..", "a/../b", "./a", "a/"] {
+        let error = store::head(at(root, bad)).await.expect_err("non-plain subpath refused");
+        refused(error, "not a plain relative path");
+    }
 
     // a read-only mount answers a read and refuses a mutation
     assert_eq!(store::head(at(readonly, "")).await.expect("read on a read-only mount"), "head-sha");

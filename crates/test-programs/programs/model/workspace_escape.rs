@@ -7,7 +7,7 @@ use omnia_wasi_model::{completion, wit_stream};
 use test_programs::raw_request;
 use wasip3::filesystem::preopens;
 
-omnia_sdk::command!(scenario);
+omnia_sdk::api::command::export!(scenario);
 
 async fn scenario() {
     let directories = preopens::get_directories();

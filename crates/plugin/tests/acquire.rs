@@ -15,17 +15,17 @@ use omnia_plugin::{
 use tempfile::TempDir;
 use wasm_pkg_client::{Config, Registry};
 
+#[derive(serde::Serialize)]
+struct LocalBackendConfig {
+    root: PathBuf,
+}
+
 const PACKAGE: &str = "test:adapter@1.0.0";
 // the file the store keeps `PACKAGE` under
 const STORED: &str = "test_adapter@1.0.0.wasm";
 const DEFAULT_REGISTRY: &str = "registry.test";
 // A closed local port: connection refused immediately, no network reached.
 const UNROUTABLE_REGISTRY: &str = "127.0.0.1:1";
-
-#[derive(serde::Serialize)]
-struct LocalBackendConfig {
-    root: PathBuf,
-}
 
 fn stage(root: &Path, package: &str, bytes: &[u8]) {
     let (name, version) = package.split_once('@').expect("test packages pin versions");
@@ -138,7 +138,7 @@ async fn stored_without_registry() {
 // Only the `namespace_name@version.wasm` spelling is a stored release: the
 // `:` spelling, the bare name, and wkg's temporary files are never read.
 #[tokio::test]
-async fn off_reference_names_unread() {
+async fn off_ref_unread() {
     let store = TempDir::new().expect("store dir");
     for name in ["test:adapter@1.0.0.wasm", "adapter.wasm", ".wkg-get-test_adapter@1.0.0.wasm"] {
         std::fs::write(store.path().join(name), b"off-reference bytes").expect("writing a file");

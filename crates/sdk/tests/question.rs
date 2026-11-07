@@ -13,6 +13,70 @@ struct Verdict {
     findings: Vec<String>,
 }
 
+// strips `check` before delegating: a backend ignoring the flag
+struct Unchecked(ScriptedModel);
+
+impl omnia_sdk::Model for Unchecked {
+    fn complete(
+        &self, request: omnia_sdk::model::Request,
+    ) -> impl Future<Output = Result<omnia_sdk::model::Reply, Error>> + Send {
+        self.0.complete(request)
+    }
+
+    fn complete_with<H, F>(
+        &self, request: omnia_sdk::model::Request, handler: H,
+    ) -> impl Future<Output = Result<omnia_sdk::model::Reply, Error>> + Send
+    where
+        H: FnMut(ToolCall) -> F + Send,
+        F: Future<Output = Result<String, String>> + Send,
+    {
+        self.0.complete_with(
+            omnia_sdk::model::Request {
+                check: false,
+                ..request
+            },
+            handler,
+        )
+    }
+}
+
+// offers one candidate to `check` and replies with it whatever the verdict
+struct Heedless(&'static str);
+
+impl omnia_sdk::Model for Heedless {
+    fn complete(
+        &self, _request: omnia_sdk::model::Request,
+    ) -> impl Future<Output = Result<omnia_sdk::model::Reply, Error>> + Send {
+        std::future::ready(Ok(self.reply()))
+    }
+
+    async fn complete_with<H, F>(
+        &self, _request: omnia_sdk::model::Request, mut handler: H,
+    ) -> Result<omnia_sdk::model::Reply, Error>
+    where
+        H: FnMut(ToolCall) -> F + Send,
+        F: Future<Output = Result<String, String>> + Send,
+    {
+        let verdict = handler(ToolCall {
+            id: "check-1".into(),
+            name: "check".into(),
+            arguments: self.0.into(),
+        })
+        .await;
+        assert!(verdict.is_err(), "the scenario's candidate is one the check rejects");
+        Ok(self.reply())
+    }
+}
+
+impl Heedless {
+    fn reply(&self) -> omnia_sdk::model::Reply {
+        omnia_sdk::model::Reply {
+            answer: self.0.to_owned(),
+            usage: None,
+        }
+    }
+}
+
 fn question() -> Question<Verdict> {
     Question::new("verdict").system("judge")
 }
@@ -32,7 +96,10 @@ fn strict(verdict: &Verdict) -> Result<(), Vec<String>> {
 #[tokio::test]
 async fn accepted() {
     let model = ScriptedModel::answering([r#"{"verdict":"pass","findings":[]}"#]);
-    let verdict = question().ask(&model, "judge this", None, strict).await.expect("a verdict");
+    let question = question().schema(|schema| {
+        schema["properties"]["verdict"]["enum"] = serde_json::json!(["pass", "fail"]);
+    });
+    let verdict = question.ask(&model, "judge this", None, strict).await.expect("a verdict");
     assert_eq!(verdict.verdict, "pass");
 
     let seen = model.seen().remove(0);
@@ -138,12 +205,19 @@ async fn other_tools() {
         }],
     );
     let tools: Tools = Box::new(|call: ToolCall| {
-        Box::pin(async move { Ok(format!("looked up {}", call.arguments)) })
+        Box::pin(async move {
+            #[derive(Deserialize)]
+            struct LookupArgs {
+                id: u32,
+            }
+            let LookupArgs { id } = call.arguments().expect("valid tool arguments");
+            Ok(format!("looked up {id}"))
+        })
     });
     question().ask(&model, "judge this", Some(tools), strict).await.expect("a verdict");
     let exchanges = model.exchanges();
     assert_eq!(exchanges[0].tool, "lookup");
-    assert_eq!(exchanges[0].outcome, Ok(r#"looked up {"id":1}"#.into()));
+    assert_eq!(exchanges[0].outcome, Ok("looked up 1".into()));
     assert_eq!(exchanges[1].tool, "check");
 }
 
@@ -160,68 +234,4 @@ async fn refuse_tool_call() {
     question().ask(&model, "judge this", None, strict).await.expect("a verdict");
     let refusal = model.exchanges()[0].outcome.clone().expect_err("no handler");
     assert!(refusal.contains("tool `lookup` has no handler"), "{refusal}");
-}
-
-// strips `check` before delegating: a backend ignoring the flag
-struct Unchecked(ScriptedModel);
-
-impl omnia_sdk::Model for Unchecked {
-    fn complete(
-        &self, request: omnia_sdk::model::Request,
-    ) -> impl Future<Output = Result<omnia_sdk::model::Reply, Error>> + Send {
-        self.0.complete(request)
-    }
-
-    fn complete_with<H, F>(
-        &self, request: omnia_sdk::model::Request, handler: H,
-    ) -> impl Future<Output = Result<omnia_sdk::model::Reply, Error>> + Send
-    where
-        H: FnMut(ToolCall) -> F + Send,
-        F: Future<Output = Result<String, String>> + Send,
-    {
-        self.0.complete_with(
-            omnia_sdk::model::Request {
-                check: false,
-                ..request
-            },
-            handler,
-        )
-    }
-}
-
-// offers one candidate to `check` and replies with it whatever the verdict
-struct Heedless(&'static str);
-
-impl omnia_sdk::Model for Heedless {
-    fn complete(
-        &self, _request: omnia_sdk::model::Request,
-    ) -> impl Future<Output = Result<omnia_sdk::model::Reply, Error>> + Send {
-        std::future::ready(Ok(self.reply()))
-    }
-
-    async fn complete_with<H, F>(
-        &self, _request: omnia_sdk::model::Request, mut handler: H,
-    ) -> Result<omnia_sdk::model::Reply, Error>
-    where
-        H: FnMut(ToolCall) -> F + Send,
-        F: Future<Output = Result<String, String>> + Send,
-    {
-        let verdict = handler(ToolCall {
-            id: "check-1".into(),
-            name: "check".into(),
-            arguments: self.0.into(),
-        })
-        .await;
-        assert!(verdict.is_err(), "the scenario's candidate is one the check rejects");
-        Ok(self.reply())
-    }
-}
-
-impl Heedless {
-    fn reply(&self) -> omnia_sdk::model::Reply {
-        omnia_sdk::model::Reply {
-            answer: self.0.to_owned(),
-            usage: None,
-        }
-    }
 }

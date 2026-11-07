@@ -17,6 +17,39 @@ use crate::host::generated::omnia::otel::tracing::{self as wasi, HostWithStore};
 use crate::host::types_impl::{datetime_nanos, decode_id};
 use crate::{WasiOtel, WasiOtelView};
 
+pub fn resource_spans(
+    spans: Vec<wasi::SpanData>, resource: &opentelemetry_sdk::Resource,
+) -> Vec<ResourceSpans> {
+    // Linear scan: an export carries a handful of scopes, and the generated types have no `Hash`.
+    let mut scope_spans: Vec<ScopeSpans> = Vec::new();
+    for span in spans {
+        let schema_url = span.instrumentation_scope.schema_url.clone().unwrap_or_default();
+        let scope = InstrumentationScope::from(span.instrumentation_scope.clone());
+        if let Some(group) = scope_spans
+            .iter_mut()
+            .find(|group| group.scope.as_ref() == Some(&scope) && group.schema_url == schema_url)
+        {
+            group.spans.push(span.into());
+        } else {
+            scope_spans.push(ScopeSpans {
+                scope: Some(scope),
+                schema_url,
+                spans: vec![span.into()],
+            });
+        }
+    }
+
+    vec![ResourceSpans {
+        resource: Some(Resource {
+            attributes: resource.iter().map(Into::into).collect(),
+            dropped_attributes_count: 0,
+            entity_refs: vec![],
+        }),
+        scope_spans,
+        schema_url: resource.schema_url().map(Into::into).unwrap_or_default(),
+    }]
+}
+
 impl<T> HostWithStore<T> for WasiOtel {
     async fn export(
         accessor: &Accessor<T, Self>, mut span_data: Vec<wasi::SpanData>,
@@ -62,39 +95,6 @@ impl<T> HostWithStore<T> for WasiOtel {
 }
 
 impl wasi::Host for WasiOtelView<'_> {}
-
-pub fn resource_spans(
-    spans: Vec<wasi::SpanData>, resource: &opentelemetry_sdk::Resource,
-) -> Vec<ResourceSpans> {
-    // Linear scan: an export carries a handful of scopes, and the generated types have no `Hash`.
-    let mut scope_spans: Vec<ScopeSpans> = Vec::new();
-    for span in spans {
-        let schema_url = span.instrumentation_scope.schema_url.clone().unwrap_or_default();
-        let scope = InstrumentationScope::from(span.instrumentation_scope.clone());
-        if let Some(group) = scope_spans
-            .iter_mut()
-            .find(|group| group.scope.as_ref() == Some(&scope) && group.schema_url == schema_url)
-        {
-            group.spans.push(span.into());
-        } else {
-            scope_spans.push(ScopeSpans {
-                scope: Some(scope),
-                schema_url,
-                spans: vec![span.into()],
-            });
-        }
-    }
-
-    vec![ResourceSpans {
-        resource: Some(Resource {
-            attributes: resource.iter().map(Into::into).collect(),
-            dropped_attributes_count: 0,
-            entity_refs: vec![],
-        }),
-        scope_spans,
-        schema_url: resource.schema_url().map(Into::into).unwrap_or_default(),
-    }]
-}
 
 impl From<wasi::SpanData> for Span {
     fn from(span: wasi::SpanData) -> Self {
@@ -166,74 +166,5 @@ impl From<wasi::Status> for Status {
                 message: String::new(),
             },
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use opentelemetry::KeyValue;
-
-    use super::*;
-
-    fn span(scope: &str, schema_url: Option<&str>) -> wasi::SpanData {
-        let epoch = wasi::Datetime {
-            seconds: 0,
-            nanoseconds: 0,
-        };
-        wasi::SpanData {
-            span_context: wasi::SpanContext {
-                trace_id: String::new(),
-                span_id: String::new(),
-                trace_flags: wasi::TraceFlags::empty(),
-                is_remote: false,
-                trace_state: Vec::new(),
-            },
-            parent_span_id: String::new(),
-            span_kind: wasi::SpanKind::Internal,
-            name: scope.to_string(),
-            start_time: epoch,
-            end_time: epoch,
-            attributes: Vec::new(),
-            events: Vec::new(),
-            links: Vec::new(),
-            status: wasi::Status::Unset,
-            instrumentation_scope: wasi::InstrumentationScope {
-                name: scope.to_string(),
-                version: None,
-                schema_url: schema_url.map(str::to_string),
-                attributes: Vec::new(),
-            },
-            dropped_attributes: 0,
-            dropped_events: 0,
-            dropped_links: 0,
-        }
-    }
-
-    #[test]
-    fn resource_spans_groups_by_scope() {
-        let resource = opentelemetry_sdk::Resource::builder_empty()
-            .with_schema_url(std::iter::empty::<KeyValue>(), "https://resource")
-            .build();
-        let spans =
-            vec![span("a", Some("https://a")), span("b", None), span("a", Some("https://a"))];
-
-        let exported = resource_spans(spans, &resource);
-        let [resource_spans] = exported.as_slice() else {
-            panic!("one resource, got {}", exported.len());
-        };
-        assert_eq!(resource_spans.schema_url, "https://resource");
-
-        let scope = |name: &str| {
-            resource_spans
-                .scope_spans
-                .iter()
-                .find(|group| group.scope.as_ref().is_some_and(|scope| scope.name == name))
-                .unwrap_or_else(|| panic!("scope `{name}` exported"))
-        };
-        assert_eq!(resource_spans.scope_spans.len(), 2);
-        assert_eq!(scope("a").spans.len(), 2);
-        // the scope's own schema url, not the resource's
-        assert_eq!(scope("a").schema_url, "https://a");
-        assert_eq!(scope("b").schema_url, "");
     }
 }

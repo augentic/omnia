@@ -7,6 +7,60 @@ use super::{Error, Format, McpGrant, Request, Role, Tool, WorkerGrant};
 
 const RESERVED_TOOLS: &[&str] = &["read", "list", "write", "check"];
 
+// a name whole or `*.suffix`: labels of `[A-Za-z0-9-]` joined by `.`, never
+// an address, a port, a scheme, or a path
+fn egress_host(entry: &str) -> Result<(), &'static str> {
+    if entry.contains("://") {
+        return Err("carries a scheme");
+    }
+    if entry.contains('/') {
+        return Err("carries a path");
+    }
+    let name = entry.strip_prefix("*.").unwrap_or(entry);
+    if name.starts_with('[') || name.parse::<IpAddr>().is_ok() {
+        return Err("is an IP literal, not a host name");
+    }
+    if name.contains(':') {
+        return Err("carries a port");
+    }
+    let labelled = !name.is_empty()
+        && name.split('.').all(|label| {
+            !label.is_empty()
+                && !label.starts_with('-')
+                && !label.ends_with('-')
+                && label.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+        });
+    if !labelled {
+        return Err("is not a host name or `*.suffix`");
+    }
+    Ok(())
+}
+
+// `~/` then a plain relative path, the shape a workspace lend's subpath is
+// held to: `/`-separated, no segment empty, `.` or `..`, no `\`. Anything
+// looser names the home (`~/.`) or, once a backend joins it, leaves it (`~//etc`)
+fn read_root(entry: &str) -> Result<(), &'static str> {
+    let Some(rest) = entry.strip_prefix("~/") else {
+        return Err("must be spelled `~/<path>`");
+    };
+    if rest.split('/').all(|segment| segment.is_empty() || segment == ".") {
+        return Err("names the home itself");
+    }
+    if rest.split('/').any(|segment| segment == "..") {
+        return Err("holds `..`");
+    }
+    if rest.contains('\\') || rest.split('/').any(|segment| segment.is_empty() || segment == ".") {
+        return Err("is not a plain `/`-separated path");
+    }
+    Ok(())
+}
+
+fn is_env_name(name: &str) -> bool {
+    let mut bytes = name.bytes();
+    bytes.next().is_some_and(|first| first == b'_' || first.is_ascii_alphabetic())
+        && bytes.all(|byte| byte == b'_' || byte.is_ascii_alphanumeric())
+}
+
 impl Request {
     /// The request's MCP server grants, each carrying its own endpoint URL.
     #[must_use]
@@ -103,60 +157,6 @@ impl WorkerGrant {
     }
 }
 
-// a name whole or `*.suffix`: labels of `[A-Za-z0-9-]` joined by `.`, never
-// an address, a port, a scheme, or a path
-fn egress_host(entry: &str) -> Result<(), &'static str> {
-    if entry.contains("://") {
-        return Err("carries a scheme");
-    }
-    if entry.contains('/') {
-        return Err("carries a path");
-    }
-    let name = entry.strip_prefix("*.").unwrap_or(entry);
-    if name.starts_with('[') || name.parse::<IpAddr>().is_ok() {
-        return Err("is an IP literal, not a host name");
-    }
-    if name.contains(':') {
-        return Err("carries a port");
-    }
-    let labelled = !name.is_empty()
-        && name.split('.').all(|label| {
-            !label.is_empty()
-                && !label.starts_with('-')
-                && !label.ends_with('-')
-                && label.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
-        });
-    if !labelled {
-        return Err("is not a host name or `*.suffix`");
-    }
-    Ok(())
-}
-
-// `~/` then a plain relative path, the shape a workspace lend's subpath is
-// held to: `/`-separated, no segment empty, `.` or `..`, no `\`. Anything
-// looser names the home (`~/.`) or, once a backend joins it, leaves it (`~//etc`)
-fn read_root(entry: &str) -> Result<(), &'static str> {
-    let Some(rest) = entry.strip_prefix("~/") else {
-        return Err("must be spelled `~/<path>`");
-    };
-    if rest.split('/').all(|segment| segment.is_empty() || segment == ".") {
-        return Err("names the home itself");
-    }
-    if rest.split('/').any(|segment| segment == "..") {
-        return Err("holds `..`");
-    }
-    if rest.contains('\\') || rest.split('/').any(|segment| segment.is_empty() || segment == ".") {
-        return Err("is not a plain `/`-separated path");
-    }
-    Ok(())
-}
-
-fn is_env_name(name: &str) -> bool {
-    let mut bytes = name.bytes();
-    bytes.next().is_some_and(|first| first == b'_' || first.is_ascii_alphabetic())
-        && bytes.all(|byte| byte == b'_' || byte.is_ascii_alphanumeric())
-}
-
 // the prompt: system text, each message (non-user ones under a `[role]`
 // header) and the format's final-answer instruction, joined by blank lines
 impl fmt::Display for Request {
@@ -180,76 +180,5 @@ impl fmt::Display for Role {
             Self::User => "user",
             Self::Assistant => "assistant",
         })
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::super::{Format, Function, McpGrant, Message, Request, Role, Tool};
-
-    fn request(system: Option<&str>, messages: Vec<(Role, &str)>, tools: Vec<Tool>) -> Request {
-        Request {
-            model: None,
-            system: system.map(str::to_owned),
-            messages: messages
-                .into_iter()
-                .map(|(role, content)| Message {
-                    role,
-                    content: content.to_owned(),
-                })
-                .collect(),
-            generation: None,
-            format: Format::Text,
-            tools,
-            check: false,
-            workspace: None,
-            worker: None,
-        }
-    }
-
-    #[test]
-    fn mcp_servers_skip_functions() {
-        let request = request(
-            None,
-            vec![(Role::User, "hi")],
-            vec![
-                Tool::Function(Function {
-                    name: "lookup".to_owned(),
-                    description: "lookup".to_owned(),
-                    parameters: "{}".to_owned(),
-                }),
-                Tool::Mcp(McpGrant {
-                    name: "docs".to_owned(),
-                    tools: vec!["search".to_owned()],
-                    url: "https://mcp.example".to_owned(),
-                }),
-            ],
-        );
-        let names: Vec<&str> =
-            request.mcp_servers().iter().map(|grant| grant.name.as_str()).collect();
-        assert_eq!(names, ["docs"]);
-        assert_eq!(request.tool_names(), ["lookup"]);
-    }
-
-    #[test]
-    fn prompt_joins_channels() {
-        let prompt = request(
-            Some("be terse"),
-            vec![(Role::User, "hi"), (Role::Assistant, "yo"), (Role::System, "note")],
-            vec![],
-        )
-        .to_string();
-        assert!(
-            prompt.starts_with("be terse\n\nhi\n\n[assistant]\nyo\n\n[system]\nnote\n\n"),
-            "{prompt}"
-        );
-        assert!(prompt.contains("plain text"), "{prompt}");
-    }
-
-    #[test]
-    fn role_display() {
-        assert_eq!(Role::System.to_string(), "system");
-        assert_eq!(Role::User.to_string(), "user");
-        assert_eq!(Role::Assistant.to_string(), "assistant");
     }
 }

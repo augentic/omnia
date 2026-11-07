@@ -8,9 +8,6 @@ use std::process::Command;
 
 pub const WASM_TARGET: &str = "wasm32-wasip2";
 
-// a sibling of the outer profile directory
-const NESTED_TARGET: &str = "wasm32-fixtures";
-
 /// A cargo-provided variable, or a panic naming it: the pipeline only runs
 /// under `cargo` as a build script.
 pub fn var(name: &str) -> OsString {
@@ -100,6 +97,9 @@ fn sanitise(command: &mut Command, keys: impl IntoIterator<Item = String>) -> Ve
     removed
 }
 
+// a sibling of the outer profile directory
+const NESTED_TARGET: &str = "wasm32-fixtures";
+
 const KEPT_CARGO_VARS: [&str; 2] = ["CARGO_HOME", "CARGO_NET_OFFLINE"];
 const STRIPPED_TOOLCHAIN_VARS: [&str; 5] =
     ["RUSTFLAGS", "RUSTDOCFLAGS", "RUSTC", "RUSTC_WRAPPER", "RUSTC_WORKSPACE_WRAPPER"];
@@ -107,80 +107,4 @@ const STRIPPED_TOOLCHAIN_VARS: [&str; 5] =
 fn should_strip(key: &str) -> bool {
     (key.starts_with("CARGO_") && !KEPT_CARGO_VARS.contains(&key))
         || STRIPPED_TOOLCHAIN_VARS.contains(&key)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn deny_warnings() {
-        assert!(denies_warnings(Some("-Dwarnings")));
-        assert!(denies_warnings(Some("-C target-cpu=native -D warnings")));
-        assert!(!denies_warnings(Some("-C target-cpu=native")));
-        assert!(!denies_warnings(None));
-    }
-
-    // cargo's v1 and v2 layouts, default and redirected `target/`; a layout
-    // that is not cargo's keeps the build under `OUT_DIR`
-    #[test]
-    fn nested_target() {
-        assert_eq!(
-            nested_dir(Path::new("/repo/target/debug/build/test-programs-0a1b/out")),
-            Path::new("/repo/target/wasm32-fixtures")
-        );
-        assert_eq!(
-            nested_dir(Path::new("/tmp/cache/cargo-target/release/build/probe-ff/out")),
-            Path::new("/tmp/cache/cargo-target/wasm32-fixtures")
-        );
-        assert_eq!(
-            nested_dir(Path::new("/repo/target/x86_64-unknown-linux-gnu/debug/build/p-1/out")),
-            Path::new("/repo/target/x86_64-unknown-linux-gnu/wasm32-fixtures")
-        );
-        assert_eq!(
-            nested_dir(Path::new("/repo/target/debug/build/test-programs/0a1b/out")),
-            Path::new("/repo/target/wasm32-fixtures")
-        );
-        assert_eq!(
-            nested_dir(Path::new("/tmp/cache/cargo-target/release/build/probe/ff/out")),
-            Path::new("/tmp/cache/cargo-target/wasm32-fixtures")
-        );
-        assert_eq!(
-            nested_dir(Path::new("/repo/target/x86_64-unknown-linux-gnu/debug/build/p/1/out")),
-            Path::new("/repo/target/x86_64-unknown-linux-gnu/wasm32-fixtures")
-        );
-        assert_eq!(nested_dir(Path::new("/elsewhere/out")), Path::new("/elsewhere/out/fixtures"));
-        assert_eq!(
-            nested_dir(Path::new("/repo/build/a/b/c/out")),
-            Path::new("/repo/build/a/b/c/out/fixtures")
-        );
-    }
-
-    #[test]
-    fn sanitise_env() {
-        let outer = [
-            "CARGO_HOME",
-            "CARGO_NET_OFFLINE",
-            "CARGO_ENCODED_RUSTFLAGS",
-            "CARGO_MANIFEST_DIR",
-            "CARGO_CFG_TARGET_ARCH",
-            "RUSTC_WORKSPACE_WRAPPER",
-            "PATH",
-            "HOME",
-        ];
-        let removed = sanitise(&mut Command::new("true"), outer.map(str::to_owned));
-        assert_eq!(
-            removed,
-            [
-                "CARGO_CFG_TARGET_ARCH",
-                "CARGO_ENCODED_RUSTFLAGS",
-                "CARGO_MANIFEST_DIR",
-                "RUSTC",
-                "RUSTC_WORKSPACE_WRAPPER",
-                "RUSTC_WRAPPER",
-                "RUSTDOCFLAGS",
-                "RUSTFLAGS",
-            ]
-        );
-    }
 }

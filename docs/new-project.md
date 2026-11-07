@@ -50,7 +50,7 @@ edition = "2024"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-axum = { version = "0.8", default-features = false, features = ["json"] }
+axum = { version = "0.8", default-features = false, features = ["json", "query"] }
 omnia-sdk = "0.38"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -58,24 +58,21 @@ serde_json = "1"
 
 ```rust
 // guest/src/lib.rs
-use axum::Router;
-use omnia_sdk::api::http::{get, post};
-use omnia_sdk::api::{Client, Context};
-use omnia_sdk::{Error, WasiProvider};
+use axum::extract::Query;
+use axum::routing::get;
+use axum::{Json, Router};
+use omnia_sdk::Error;
+use omnia_sdk::api::{Client, Context, http};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-pub fn router<P>(provider: P) -> Router
-where
-    P: Clone + Send + Sync + 'static,
-{
+pub fn http_router<P: Send + Sync + 'static>(provider: P) -> Router {
     Router::new()
-        .route("/", get(hello))
-        .route("/", post(echo))
-        .with_state(Client::new("my-guest", provider))
+        .route("/", get(hello).post(echo))
+        .with_state(Client::new(provider))
 }
 
-omnia_sdk::http!(router(WasiProvider));
+http::export!(http_router);
 
 #[derive(Deserialize)]
 struct Hello {
@@ -87,19 +84,23 @@ struct Reply {
     message: String,
 }
 
-async fn hello<P>(input: Hello, _context: Context<P>) -> Result<Reply, Error> {
-    let target = input.name.as_deref().unwrap_or("from the guest");
-    Ok(Reply {
+async fn hello<P: Send + Sync + 'static>(
+    context: Context<P>, Query(input): Query<Hello>,
+) -> Result<Json<Reply>, Error> {
+    let target = input.name.or(context.metadata.tenant).unwrap_or_else(|| "world".to_string());
+    Ok(Json(Reply {
         message: format!("hello {target}"),
-    })
+    }))
 }
 
-async fn echo<P>(body: Value, _context: Context<P>) -> Result<Value, Error> {
-    Ok(json!({ "echo": body }))
+async fn echo(Json(body): Json<Value>) -> Result<Json<Value>, Error> {
+    Ok(Json(json!({ "echo": body })))
 }
 ```
 
-`omnia_sdk::http!` expands to the `wasi:http/incoming-handler` export (instrumented with an OpenTelemetry span) on `wasm32-wasip2` and to nothing on native targets. Because `omnia-sdk` re-exports `wasip3`, `wit-bindgen`, `omnia-wasi-http`, and `omnia-wasi-otel` internally for the macro expansion, your guest `Cargo.toml` does not need to pin `wasip3` or `wit-bindgen` directly (avoiding version-mismatch deadlocks — see [Troubleshooting](troubleshooting.md#outbound-http-or-spawned-work-inside-a-handler-deadlocks)).
+The handlers are plain axum handlers. `Context<P>` is an extractor over the `Client` in the router state: it carries the provider the handler's capability bounds name and the request's metadata (`x-request-id`, `x-tenant`, and friends). A handler that needs none of that, like `echo`, takes only axum's own extractors. An `omnia_sdk::Error` answers the JSON `{"error","message"}` envelope at its status.
+
+`http::export!(http_router)` expands to the `wasi:http/incoming-handler` export (instrumented with an OpenTelemetry span) on `wasm32-wasip2` and to nothing on native targets; a guest that also consumes messages or runs as a command adds `messaging::export!(..)` or `command::export!(..)` beside it. Because `omnia-sdk` re-exports `wasip3`, `wit-bindgen`, `omnia-wasi-http`, and `omnia-wasi-otel` internally for the macro expansion, your guest `Cargo.toml` does not need to pin `wasip3` or `wit-bindgen` directly (avoiding version-mismatch deadlocks — see [Troubleshooting](troubleshooting.md#outbound-http-or-spawned-work-inside-a-handler-deadlocks)).
 
 ## The host crate
 
@@ -131,7 +132,7 @@ omnia::runtime!({
 });
 ```
 
-`WasiHttp` serves incoming requests and provides outbound HTTP, while `WasiOtel` backs the `http_guest_handle` span emitted by `omnia_sdk::http!`.
+`WasiHttp` serves incoming requests and provides outbound HTTP, while `WasiOtel` backs the `http_guest_handle` span emitted by the HTTP export.
 
 That dependency list is complete. `omnia` is the facade over the runtime — the crates behind it (`omnia-core`, `omnia-link`, `omnia-plugin`) are never named in a host's `Cargo.toml` or source, even when the deployment declares a `link:` or `plugin:` block or a hand-written `Backend`; everything the macro emits resolves through `omnia::…`, and it re-exports `anyhow` (`omnia::anyhow::Result`) and `futures` (`omnia::futures::future::BoxFuture`) for the `Backend`/`Wiring` and plugin-store signatures that speak them.
 

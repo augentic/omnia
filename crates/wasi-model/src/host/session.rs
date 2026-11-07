@@ -22,8 +22,6 @@ use crate::host::generated::omnia::model::completion::{
 };
 use crate::host::workspace::Workspace;
 
-const CALL_QUEUE: usize = 8;
-
 /// Shared state for one completion session: the calls bridge, the pending
 /// calls awaiting results, the call budget, and the first typed
 /// host-enforcement failure.
@@ -37,33 +35,6 @@ impl Debug for ToolSession {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ToolSession").field("limits", &self.limits).finish_non_exhaustive()
     }
-}
-
-struct Inner {
-    calls: Option<mpsc::Sender<ToolCall>>,
-    pending: HashMap<String, oneshot::Sender<ToolOutcome>>,
-    remaining: u32,
-    next_id: u64,
-    error: Option<Error>,
-}
-
-impl Inner {
-    fn record(&mut self, error: Error) -> anyhow::Error {
-        let hard = anyhow!(match &error {
-            Error::InvalidRequest(detail) => format!("invalid request: {detail}"),
-            Error::BudgetExhausted(detail) => format!("budget exhausted: {detail}"),
-            Error::ToolFailed(detail) => format!("tool failed: {detail}"),
-            Error::Backend(detail) => format!("backend failure: {detail}"),
-        });
-        self.error.get_or_insert(error);
-        hard
-    }
-}
-
-struct PendingCall {
-    id: String,
-    calls: mpsc::Sender<ToolCall>,
-    result: oneshot::Receiver<ToolOutcome>,
 }
 
 impl ToolSession {
@@ -255,6 +226,33 @@ impl ToolSession {
     }
 }
 
+struct Inner {
+    calls: Option<mpsc::Sender<ToolCall>>,
+    pending: HashMap<String, oneshot::Sender<ToolOutcome>>,
+    remaining: u32,
+    next_id: u64,
+    error: Option<Error>,
+}
+
+impl Inner {
+    fn record(&mut self, error: Error) -> anyhow::Error {
+        let hard = anyhow!(match &error {
+            Error::InvalidRequest(detail) => format!("invalid request: {detail}"),
+            Error::BudgetExhausted(detail) => format!("budget exhausted: {detail}"),
+            Error::ToolFailed(detail) => format!("tool failed: {detail}"),
+            Error::Backend(detail) => format!("backend failure: {detail}"),
+        });
+        self.error.get_or_insert(error);
+        hard
+    }
+}
+
+struct PendingCall {
+    id: String,
+    calls: mpsc::Sender<ToolCall>,
+    result: oneshot::Receiver<ToolOutcome>,
+}
+
 struct SessionClose {
     state: Arc<ToolSession>,
 }
@@ -430,3 +428,5 @@ impl<D> StreamConsumer<D> for ResultsConsumer {
         Poll::Ready(Ok(StreamResult::Completed))
     }
 }
+
+const CALL_QUEUE: usize = 8;

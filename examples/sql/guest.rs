@@ -3,17 +3,17 @@
 //! Demonstrates the WASI SQL interface: opening connections, preparing
 //! parameterized statements (`$1`, `$2`, ...) for schema creation, and
 //! running hand-written CRUD SQL through the `TableStore` capability with
-//! row-to-struct mapping over `Row` fields.
+//! rows decoded into a record type through `FromRow`.
 
 #![cfg(target_arch = "wasm32")]
 
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Context, Result, anyhow};
 use axum::extract::Path;
 use axum::routing::{delete, get};
 use axum::{Json, Router};
 use chrono::Utc;
-use omnia_sdk::sql::{DataType, Row};
-use omnia_sdk::{HttpResult, TableStore, WasiProvider};
+use omnia_sdk::sql::{DataType, FromRow};
+use omnia_sdk::{TableStore, TableStoreExt as _, WasiProvider};
 use omnia_wasi_sql::readwrite;
 use omnia_wasi_sql::types::{Connection, Statement};
 use serde::{Deserialize, Serialize};
@@ -23,7 +23,6 @@ use wasip3::exports::http::handler::Guest;
 use wasip3::http::types::{ErrorCode, Request, Response};
 
 struct Http;
-wasip3::http::service::export!(Http);
 
 impl Guest for Http {
     #[omnia_wasi_otel::instrument(name = "http_guest_handle", level = Level::DEBUG)]
@@ -35,30 +34,48 @@ impl Guest for Http {
     }
 }
 
+// Row mapping
+
+#[derive(Debug, Clone, Serialize, FromRow)]
+struct Agency {
+    agency_id: i64,
+    name: String,
+    url: Option<String>,
+    timezone: Option<String>,
+    created_at: String,
+}
+
+// Request types
+
+#[derive(Debug, Deserialize)]
+struct CreateAgencyRequest {
+    agency_id: i64,
+    name: String,
+    url: Option<String>,
+    timezone: Option<String>,
+}
+wasip3::http::service::export!(Http);
+
 #[axum::debug_handler]
 #[omnia_wasi_otel::instrument]
-async fn list_agencies() -> HttpResult<Json<Value>> {
+async fn list_agencies() -> omnia_sdk::Result<Json<Value>> {
     ensure_schema().await?;
 
-    let rows = WasiProvider
-        .query(
-            "db".to_string(),
-            "SELECT agency_id, name, url, timezone, created_at FROM agency ORDER BY created_at DESC"
-                .to_string(),
-            vec![],
+    let agencies: Vec<Agency> = WasiProvider
+        .query_as(
+            "db",
+            "SELECT agency_id, name, url, timezone, created_at FROM agency ORDER BY created_at DESC",
+            &[],
         )
         .await
         .context("executing query")?;
-
-    let agencies =
-        rows.iter().map(Agency::from_row).collect::<Result<Vec<_>>>().context("mapping rows")?;
 
     Ok(Json(json!({ "agencies": agencies })))
 }
 
 #[axum::debug_handler]
 #[omnia_wasi_otel::instrument]
-async fn create_agency(Json(req): Json<CreateAgencyRequest>) -> HttpResult<Json<Value>> {
+async fn create_agency(Json(req): Json<CreateAgencyRequest>) -> omnia_sdk::Result<Json<Value>> {
     ensure_schema().await?;
 
     let agency = Agency {
@@ -71,11 +88,10 @@ async fn create_agency(Json(req): Json<CreateAgencyRequest>) -> HttpResult<Json<
 
     WasiProvider
         .exec(
-            "db".to_string(),
+            "db",
             "INSERT INTO agency (agency_id, name, url, timezone, created_at) \
-             VALUES ($1, $2, $3, $4, $5)"
-                .to_string(),
-            vec![
+             VALUES ($1, $2, $3, $4, $5)",
+            &[
                 DataType::Int64(Some(agency.agency_id)),
                 DataType::Str(Some(agency.name.clone())),
                 DataType::Str(agency.url.clone()),
@@ -92,15 +108,11 @@ async fn create_agency(Json(req): Json<CreateAgencyRequest>) -> HttpResult<Json<
 // zero affected rows means it did not exist
 #[axum::debug_handler]
 #[omnia_wasi_otel::instrument]
-async fn delete_agency(Path(id): Path<i64>) -> HttpResult<Json<Value>> {
+async fn delete_agency(Path(id): Path<i64>) -> omnia_sdk::Result<Json<Value>> {
     ensure_schema().await?;
 
     let rows_affected = WasiProvider
-        .exec(
-            "db".to_string(),
-            "DELETE FROM agency WHERE agency_id = $1".to_string(),
-            vec![DataType::Int64(Some(id))],
-        )
+        .exec("db", "DELETE FROM agency WHERE agency_id = $1", &[DataType::Int64(Some(id))])
         .await
         .context("deleting agency")?;
 
@@ -134,65 +146,4 @@ async fn ensure_schema() -> Result<()> {
         .map_err(|e| anyhow!("creating agency table: {}", e.trace()))?;
 
     Ok(())
-}
-
-// Row mapping
-
-#[derive(Debug, Clone, Serialize)]
-struct Agency {
-    agency_id: i64,
-    name: String,
-    url: Option<String>,
-    timezone: Option<String>,
-    created_at: String,
-}
-
-impl Agency {
-    fn from_row(row: &Row) -> Result<Self> {
-        Ok(Self {
-            agency_id: int(field(row, "agency_id")?)?,
-            name: text(field(row, "name")?)?,
-            url: nullable_text(field(row, "url")?)?,
-            timezone: nullable_text(field(row, "timezone")?)?,
-            created_at: text(field(row, "created_at")?)?,
-        })
-    }
-}
-
-fn field<'a>(row: &'a Row, name: &str) -> Result<&'a DataType> {
-    row.fields
-        .iter()
-        .find(|f| f.name == name)
-        .map(|f| &f.value)
-        .ok_or_else(|| anyhow!("missing column `{name}`"))
-}
-
-fn int(value: &DataType) -> Result<i64> {
-    match value {
-        DataType::Int64(Some(v)) => Ok(*v),
-        DataType::Int32(Some(v)) => Ok(i64::from(*v)),
-        other => bail!("expected integer, got {other:?}"),
-    }
-}
-
-fn text(value: &DataType) -> Result<String> {
-    nullable_text(value)?.ok_or_else(|| anyhow!("unexpected NULL"))
-}
-
-// The default backend reports NULL as `Str(None)` regardless of column type.
-fn nullable_text(value: &DataType) -> Result<Option<String>> {
-    match value {
-        DataType::Str(v) => Ok(v.clone()),
-        other => bail!("expected text, got {other:?}"),
-    }
-}
-
-// Request types
-
-#[derive(Debug, Deserialize)]
-struct CreateAgencyRequest {
-    agency_id: i64,
-    name: String,
-    url: Option<String>,
-    timezone: Option<String>,
 }

@@ -18,15 +18,6 @@ use futures::future::ready;
 use omnia_core::{ChainCtx, FreshCall, FutureResult, GuestId, StoreFactory, call_fresh};
 use wasmtime::component::{ComponentExportIndex, InstancePre, Val};
 
-/// Delivers one call to a resolved target.
-pub trait RouteInvoke: Send + Sync {
-    /// Invoke `interface`/`func` on the target with `args` at `ctx` in its
-    /// dispatch chain, bounded by `bound` when given.
-    fn invoke(
-        &self, interface: &str, func: &str, args: Vec<Val>, ctx: ChainCtx, bound: Option<Duration>,
-    ) -> FutureResult<Vec<Val>>;
-}
-
 /// One linked export, resolved once on the component rather than per call.
 pub struct Linked {
     pub export: ComponentExportIndex,
@@ -39,6 +30,15 @@ pub struct Route<T: 'static> {
     pub factory: StoreFactory<T>,
     pub instance_pre: InstancePre<T>,
     pub funcs: HashMap<Box<str>, HashMap<Box<str>, Linked>>,
+}
+
+/// Delivers one call to a resolved target.
+pub trait RouteInvoke: Send + Sync {
+    /// Invoke `interface`/`func` on the target with `args` at `ctx` in its
+    /// dispatch chain, bounded by `bound` when given.
+    fn invoke(
+        &self, interface: &str, func: &str, args: Vec<Val>, ctx: ChainCtx, bound: Option<Duration>,
+    ) -> FutureResult<Vec<Val>>;
 }
 
 impl<T: Send + 'static> RouteInvoke for Route<T> {
@@ -74,14 +74,6 @@ impl<T: Send + 'static> RouteInvoke for Route<T> {
 #[derive(Clone, Default)]
 pub struct Routes {
     inner: Arc<RwLock<RouteTable>>,
-}
-
-// Every served guest is recorded, linked or not, so `resolve` can tell "not
-// registered" from "registered but exports nothing linked".
-#[derive(Default)]
-struct RouteTable {
-    pending: HashMap<GuestId, Option<Arc<dyn RouteInvoke>>>,
-    live: HashMap<GuestId, Option<Arc<dyn RouteInvoke>>>,
 }
 
 impl Routes {
@@ -172,4 +164,12 @@ impl Routes {
     pub fn resolve(&self, target: &GuestId, interface: &str) -> Result<Arc<dyn RouteInvoke>> {
         self.lookup(target, interface)?.ok_or_else(|| anyhow!("guest `{target}` is not registered"))
     }
+}
+
+// Every served guest is recorded, linked or not, so `resolve` can tell "not
+// registered" from "registered but exports nothing linked".
+#[derive(Default)]
+struct RouteTable {
+    pending: HashMap<GuestId, Option<Arc<dyn RouteInvoke>>>,
+    live: HashMap<GuestId, Option<Arc<dyn RouteInvoke>>>,
 }

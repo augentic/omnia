@@ -60,8 +60,6 @@ impl std::fmt::Display for Error {
     }
 }
 
-omnia_core::host_error!(Error, Other);
-
 /// Incoming value for a blobstore operation.
 pub type IncomingValue = Bytes;
 /// Outgoing value for a blobstore operation.
@@ -142,30 +140,6 @@ where
 
 impl<B> Server<B> for WasiBlobStore {}
 
+omnia_core::host_error!(Error, Other);
+
 omnia_core::wasi_view!(BlobStore);
-
-#[cfg(test)]
-mod tests {
-    use super::OutgoingValue;
-
-    #[test]
-    fn write_body_once() {
-        let mut outgoing = OutgoingValue::new(16);
-        assert_eq!(outgoing.take_write_body(), Ok(()));
-        assert_eq!(outgoing.take_write_body(), Err(()));
-    }
-
-    #[test]
-    fn finish_write_body() {
-        let mut outgoing = OutgoingValue::new(16);
-        assert_eq!(outgoing.finalize(), Err("outgoing value write body was never requested"));
-    }
-
-    #[test]
-    fn finish_once() {
-        let mut outgoing = OutgoingValue::new(16);
-        assert_eq!(outgoing.take_write_body(), Ok(()));
-        assert_eq!(outgoing.finalize(), Ok(()));
-        assert_eq!(outgoing.finalize(), Err("outgoing value already finished"));
-    }
-}

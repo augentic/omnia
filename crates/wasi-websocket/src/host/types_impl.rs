@@ -6,6 +6,18 @@ pub use crate::host::generated::omnia::websocket::types::{
 use crate::host::resource::{ClientProxy, Event};
 use crate::host::{Result, WasiWebSocket, WasiWebSocketView};
 
+pub fn get_client<T>(
+    accessor: &Accessor<T, WasiWebSocket>, self_: &Resource<ClientProxy>,
+) -> Result<ClientProxy> {
+    Ok(omnia_core::get_cloned(accessor, self_)?)
+}
+
+pub fn get_event<T>(
+    accessor: &Accessor<T, WasiWebSocket>, self_: &Resource<Event>,
+) -> Result<Event> {
+    Ok(omnia_core::get_cloned(accessor, self_)?)
+}
+
 impl<T> HostClientWithStore<T> for WasiWebSocket {
     async fn connect(accessor: &Accessor<T, Self>, _name: String) -> Result<Resource<ClientProxy>> {
         let socket = accessor.with(|mut store| store.get().client.endpoint()).await?;
@@ -51,15 +63,3 @@ impl Host for WasiWebSocketView<'_> {
 }
 impl HostClient for WasiWebSocketView<'_> {}
 impl HostEvent for WasiWebSocketView<'_> {}
-
-pub fn get_client<T>(
-    accessor: &Accessor<T, WasiWebSocket>, self_: &Resource<ClientProxy>,
-) -> Result<ClientProxy> {
-    Ok(omnia_core::get_cloned(accessor, self_)?)
-}
-
-pub fn get_event<T>(
-    accessor: &Accessor<T, WasiWebSocket>, self_: &Resource<Event>,
-) -> Result<Event> {
-    Ok(omnia_core::get_cloned(accessor, self_)?)
-}

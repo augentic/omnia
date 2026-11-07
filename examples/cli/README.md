@@ -1,9 +1,11 @@
 # CLI Command Example
 
-Demonstrates a `wasi:cli/command` guest on the command façade: `parse`
-classifies clap argv, `Command::call` projects each verb (decode →
-`Client::call` → encode) onto a `Response`, and `command!` binds `main` as
-the `wasi:cli/run` export.
+Demonstrates a `wasi:cli/command` guest on the one router: `Handlers::command`
+registers each subcommand over its `clap::Args` input, `Router::run`
+dispatches argv (decode → handler → encode) onto a `Response`, and
+`command::export!(command_router, ..)` binds `command_router` as the
+`wasi:cli/run` export. The input types' doc comments are the `--help` text,
+and `--version` answers the crate version the export stamps.
 
 ## Quick Start
 
@@ -36,8 +38,8 @@ cargo run --example cli -- run ./target/wasm32-wasip2/debug/examples/cli_wasm.wa
 
 ## Output format
 
-Every verb takes a global `--format text|json` (default `text`). Text goes
-through the verb's render fn; JSON is the handler output, pretty-printed:
+Every verb takes a global `--format text|json` (default `text`). Text is the
+output type's `Render` impl; JSON is the handler output, pretty-printed:
 
 ```bash
 $ make example cli -- --format json greet Ada

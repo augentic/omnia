@@ -32,18 +32,6 @@ pub struct Script<Req, Turn> {
     inner: Arc<Inner<Req, Turn>>,
 }
 
-struct Inner<Req, Turn> {
-    turns: Mutex<VecDeque<Turn>>,
-    seen: Mutex<Vec<Req>>,
-    fallback: OnceLock<Fallback<Turn>>,
-    // Requests that found the script exhausted with no fallback, answered
-    // softly by `try_next`; reported by `assert_exhausted` and the drop check.
-    overruns: AtomicUsize,
-    // Set once `assert_exhausted` has reported, so the drop check does not
-    // fail the same test a second time.
-    checked: AtomicBool,
-}
-
 impl<Req, Turn> Clone for Script<Req, Turn> {
     fn clone(&self) -> Self {
         Self {
@@ -198,6 +186,18 @@ impl<Req, Turn> Script<Req, Turn> {
     }
 }
 
+struct Inner<Req, Turn> {
+    turns: Mutex<VecDeque<Turn>>,
+    seen: Mutex<Vec<Req>>,
+    fallback: OnceLock<Fallback<Turn>>,
+    // Requests that found the script exhausted with no fallback, answered
+    // softly by `try_next`; reported by `assert_exhausted` and the drop check.
+    overruns: AtomicUsize,
+    // Set once `assert_exhausted` has reported, so the drop check does not
+    // fail the same test a second time.
+    checked: AtomicBool,
+}
+
 // The last handle dropping with turns left or overruns is a forgotten
 // assertion; a panic already unwinding must not be masked, since a panic
 // during unwinding aborts the process.
@@ -247,6 +247,38 @@ pub struct Seen {
 // never a meaningful setting, so total equality holds.
 impl Eq for Seen {}
 
+#[cfg(feature = "backend")]
+impl From<&omnia_backend::model::Request> for Seen {
+    fn from(request: &omnia_backend::model::Request) -> Self {
+        use omnia_backend::model::{Format, Tool};
+
+        Self {
+            system: request.system.clone(),
+            messages: request.messages.iter().map(|message| message.content.clone()).collect(),
+            format: match &request.format {
+                Format::Text => SeenFormat::Text,
+                Format::Json => SeenFormat::Json,
+                Format::Schema(schema) => SeenFormat::Schema {
+                    name: schema.name.clone(),
+                    schema: schema.schema.clone(),
+                },
+            },
+            tools: request
+                .tools
+                .iter()
+                .map(|tool| match tool {
+                    Tool::Function(function) => function.name.clone(),
+                    Tool::Mcp(mcp) => mcp.name.clone(),
+                })
+                .collect(),
+            temperature: request.generation.as_ref().and_then(|generation| generation.temperature),
+            workspace: request.workspace.clone(),
+            worker: request.worker.as_ref().map(SeenWorker::from),
+            check: request.check,
+        }
+    }
+}
+
 /// The worker grant a recorded request carried, field for field.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SeenWorker {
@@ -256,6 +288,28 @@ pub struct SeenWorker {
     pub read: Vec<String>,
     /// The variables set for the worker.
     pub env: Vec<(String, String)>,
+}
+
+#[cfg(feature = "backend")]
+impl From<&omnia_backend::model::WorkerGrant> for SeenWorker {
+    fn from(grant: &omnia_backend::model::WorkerGrant) -> Self {
+        Self {
+            egress: grant.egress.clone(),
+            read: grant.read.clone(),
+            env: grant.env.clone(),
+        }
+    }
+}
+
+#[cfg(feature = "backend")]
+impl From<omnia_backend::model::WorkerGrant> for SeenWorker {
+    fn from(grant: omnia_backend::model::WorkerGrant) -> Self {
+        Self {
+            egress: grant.egress,
+            read: grant.read,
+            env: grant.env,
+        }
+    }
 }
 
 /// The output shape a recorded request asked for.
@@ -291,58 +345,4 @@ pub struct Exchange {
     pub arguments: String,
     /// The answer; `Err` is the tool's model-visible failure text.
     pub outcome: Result<String, String>,
-}
-
-#[cfg(feature = "backend")]
-impl From<&omnia_backend::model::Request> for Seen {
-    fn from(request: &omnia_backend::model::Request) -> Self {
-        use omnia_backend::model::{Format, Tool};
-
-        Self {
-            system: request.system.clone(),
-            messages: request.messages.iter().map(|message| message.content.clone()).collect(),
-            format: match &request.format {
-                Format::Text => SeenFormat::Text,
-                Format::Json => SeenFormat::Json,
-                Format::Schema(schema) => SeenFormat::Schema {
-                    name: schema.name.clone(),
-                    schema: schema.schema.clone(),
-                },
-            },
-            tools: request
-                .tools
-                .iter()
-                .map(|tool| match tool {
-                    Tool::Function(function) => function.name.clone(),
-                    Tool::Mcp(mcp) => mcp.name.clone(),
-                })
-                .collect(),
-            temperature: request.generation.as_ref().and_then(|generation| generation.temperature),
-            workspace: request.workspace.clone(),
-            worker: request.worker.as_ref().map(SeenWorker::from),
-            check: request.check,
-        }
-    }
-}
-
-#[cfg(feature = "backend")]
-impl From<&omnia_backend::model::WorkerGrant> for SeenWorker {
-    fn from(grant: &omnia_backend::model::WorkerGrant) -> Self {
-        Self {
-            egress: grant.egress.clone(),
-            read: grant.read.clone(),
-            env: grant.env.clone(),
-        }
-    }
-}
-
-#[cfg(feature = "backend")]
-impl From<omnia_backend::model::WorkerGrant> for SeenWorker {
-    fn from(grant: omnia_backend::model::WorkerGrant) -> Self {
-        Self {
-            egress: grant.egress,
-            read: grant.read,
-            env: grant.env,
-        }
-    }
 }

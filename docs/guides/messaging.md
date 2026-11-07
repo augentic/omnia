@@ -29,22 +29,20 @@ Metadata and content type travel with the message; on Kafka, `add_metadata("key"
 Messaging is a **trigger**: the host (`WasiMessaging`) subscribes to topics and delivers each message to the guest's exported handler, instantiating a fresh guest instance per message:
 
 ```rust,noplayground
-use omnia_sdk::api::messaging::{Router, consume};
-use omnia_sdk::api::{Client, Context};
+use omnia_sdk::api::{Client, Context, Handlers, Router};
 use omnia_wasi_messaging::types::{Error, Message};
 
 pub struct Messaging;
 omnia_wasi_messaging::export!(Messaging with_types_in omnia_wasi_messaging);
 
 async fn create_order(
-    input: CreateOrder, context: Context<MyProvider>,
+    context: Context<MyProvider>, input: CreateOrder,
 ) -> Result<(), omnia_sdk::Error> {
     // ...
 }
 
 fn router() -> Router<MyProvider> {
-    Router::new(Client::new("acme", MyProvider))
-        .route("orders.created", consume(create_order))
+    Handlers::new().topic("orders.created", create_order).with_state(Client::new(MyProvider))
 }
 
 impl omnia_wasi_messaging::incoming_handler::Guest for Messaging {
@@ -54,9 +52,9 @@ impl omnia_wasi_messaging::incoming_handler::Guest for Messaging {
 }
 ```
 
-The guest router matches registered topics exactly; broker subscription patterns remain host configuration (`KAFKA_TOPICS`, `NATS_TOPICS`). `consume` decodes JSON and returns `Ok(())` for successful handler output. The current WIT handler returns only `result<_, error>`: the host logs and counts a returned `error.other`, a trap, and a timeout alike, and the backend decides what each means for the message — the in-memory default and NATS are finished with it, while Kafka ends its consumer so the process restarts and the record is redelivered (see the [`omnia-kafka` README](https://github.com/augentic/omnia-backends/tree/main/crates/kafka)). In multi-guest deployments, each guest's `routes.messaging` patterns select it by NATS-style topic match — see [Multi-Guest Deployments](multi-guest-deployments.md#routing-inbound-traffic).
+The guest router matches registered topics exactly; broker subscription patterns and any environment topic prefix remain host configuration (`KAFKA_TOPICS` / `KAFKA_TOPIC_PREFIX`, `NATS_TOPICS` / `NATS_TOPIC_PREFIX`). `topic` decodes JSON and returns `Ok(())` for successful handler output. The current WIT handler returns only `result<_, error>`: the host logs and counts a returned `error.other`, a trap, and a timeout alike, and the backend decides what each means for the message — the in-memory default and NATS are finished with it, while Kafka ends its consumer so the process restarts and the record is redelivered (see the [`omnia-kafka` README](https://github.com/augentic/omnia-backends/tree/main/crates/kafka)). In multi-guest deployments, each guest's `routes.messaging` patterns select it by NATS-style topic match — see [Multi-Guest Deployments](multi-guest-deployments.md#routing-inbound-traffic).
 
-For non-JSON payloads, register the route with `consume_with(handler, decode)` instead: the decoder `Fn(&Delivery) -> Result<I, DecodeError>` sees the whole delivery (payload, `content_type`, metadata), and a decode failure rejects the message just as malformed JSON does under `consume`.
+For non-JSON payloads, register the route with `topic_with(topic, handler, decode)` instead: the decoder `Fn(&Delivery) -> Result<I, DecodeError>` sees the whole delivery (payload, `content_type`, metadata), and a decode failure rejects the message just as malformed JSON does under `topic`.
 
 ## Request-reply
 
@@ -98,8 +96,8 @@ A single guest can export both the HTTP handler and the messaging handler — a 
 | Backend | Notes |
 | ------- | ----- |
 | `MessagingDefault` (in-tree) | In-process broadcast; delivery only within the runtime process |
-| `omnia-kafka` | Apache Kafka; `KAFKA_BROKERS`, `COMPONENT`, `KAFKA_TOPICS`, `KAFKA_CONSUMER_GROUP`, SASL via `KAFKA_USERNAME`/`KAFKA_PASSWORD`, optional Schema Registry (`KAFKA_REGISTRY_URL`) |
-| `omnia-nats` | NATS core; `NATS_ADDR`, `NATS_TOPICS`, NKey auth via `NATS_JWT`/`NATS_SEED` |
+| `omnia-kafka` | Apache Kafka; `KAFKA_BROKERS`, `COMPONENT`, `KAFKA_TOPICS`, `KAFKA_TOPIC_PREFIX`, `KAFKA_CONSUMER_GROUP`, SASL via `KAFKA_USERNAME`/`KAFKA_PASSWORD`, optional Schema Registry (`KAFKA_REGISTRY_URL`) |
+| `omnia-nats` | NATS core; `NATS_ADDR`, `NATS_TOPICS`, `NATS_TOPIC_PREFIX`, NKey auth via `NATS_JWT`/`NATS_SEED` |
 
 Semantics to keep in mind when moving from the default to a broker: the in-memory backend is at-most-once within one process, while Kafka/NATS bring their own delivery, ordering, and consumer-group semantics. Guest code is unchanged, but handlers should be idempotent if the production broker can redeliver.
 

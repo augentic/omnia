@@ -6,7 +6,7 @@
 
 use omnia_sdk::{Config, WasiProvider};
 
-omnia_sdk::command!(scenario);
+omnia_sdk::api::command::export!(scenario);
 
 async fn scenario() {
     assert_eq!(WasiProvider.get("GREETING").await.expect("seeded key"), "hello");

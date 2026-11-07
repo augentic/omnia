@@ -18,7 +18,6 @@ use anyhow::Context;
 use axum::routing::post;
 use axum::{Json, Router};
 use bytes::Bytes;
-use omnia_sdk::HttpResult;
 use omnia_wasi_keyvalue::atomics::{self, Cas, CasError};
 use omnia_wasi_keyvalue::store;
 use serde_json::{Value, json};
@@ -27,7 +26,6 @@ use wasip3::exports::http::handler::Guest;
 use wasip3::http::types::{ErrorCode, Request, Response};
 
 struct Http;
-wasip3::http::service::export!(Http);
 
 impl Guest for Http {
     #[omnia_wasi_otel::instrument(name = "http_guest_handle", level = Level::INFO)]
@@ -36,9 +34,10 @@ impl Guest for Http {
         omnia_wasi_http::serve(router, request).await
     }
 }
+wasip3::http::service::export!(Http);
 
 #[omnia_wasi_otel::instrument]
-async fn handler(body: Bytes) -> HttpResult<Json<Value>> {
+async fn handler(body: Bytes) -> omnia_sdk::Result<Json<Value>> {
     let bucket = store::open("omnia_bucket".to_string()).await.context("opening bucket")?;
 
     bucket.set("my_key".to_string(), body.to_vec()).await.context("storing data")?;

@@ -1,5 +1,5 @@
 //! The command façade's exit plumbing through the real runtime: the status a
-//! `command!` guest's `Response` carries is the status the host observes.
+//! command guest's `Response` carries is the status the host observes.
 
 #![cfg(not(target_arch = "wasm32"))]
 
@@ -58,4 +58,34 @@ async fn command_captured() {
     assert_eq!(run.status.code_u8(), 2);
     assert_eq!(run.stdout, "", "a refusal writes nothing to stdout");
     assert!(run.stderr.contains("refused as not found"), "the envelope: {}", run.stderr);
+}
+
+// `command::export!` stamps the guest crate's version and description where
+// the router set none; `test-programs` shares the workspace version.
+#[tokio::test]
+async fn command_package_defaults() {
+    async fn captured(args: &[&str]) -> omnia_test::host::Run {
+        Deployment::new()
+            .guest("cli", test_programs::COMMAND_EXIT_MAP)
+            .args(args.iter().copied())
+            .captured()
+            .run(Backends::defaults().await, |deployment| {
+                deployment.host::<WasiOtel, Backends>()?;
+                Ok(())
+            })
+            .await
+            .expect("deployment runs")
+    }
+
+    let run = captured(&["--version"]).await;
+    assert_eq!(run.status.code_u8(), 0);
+    assert_eq!(run.stdout, format!("exit-map {}\n", env!("CARGO_PKG_VERSION")));
+
+    let run = captured(&["--help"]).await;
+    assert_eq!(run.status.code_u8(), 0);
+    assert!(
+        run.stdout.starts_with("Guest scenario programs driven by the e2e test suites"),
+        "the crate description opens help: {}",
+        run.stdout
+    );
 }

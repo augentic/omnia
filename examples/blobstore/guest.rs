@@ -19,7 +19,6 @@ use anyhow::anyhow;
 use axum::routing::post;
 use axum::{Json, Router};
 use bytes::Bytes;
-use omnia_sdk::HttpResult;
 use omnia_wasi_blobstore::blobstore;
 use omnia_wasi_blobstore::types::{IncomingValue, OutgoingValue};
 use serde_json::Value;
@@ -28,7 +27,6 @@ use wasip3::exports::http::handler::Guest;
 use wasip3::http::types::{ErrorCode, Request, Response};
 
 struct Http;
-wasip3::http::service::export!(Http);
 
 impl Guest for Http {
     #[omnia_wasi_otel::instrument(name = "http_guest_handle", level = Level::DEBUG)]
@@ -37,9 +35,10 @@ impl Guest for Http {
         omnia_wasi_http::serve(router, request).await
     }
 }
+wasip3::http::service::export!(Http);
 
 #[omnia_wasi_otel::instrument]
-async fn handler(body: Bytes) -> HttpResult<Json<Value>> {
+async fn handler(body: Bytes) -> omnia_sdk::Result<Json<Value>> {
     // create an outgoing value to hold the data we want to store
     let outgoing = OutgoingValue::new_outgoing_value();
     {

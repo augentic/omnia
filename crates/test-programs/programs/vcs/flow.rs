@@ -9,7 +9,7 @@ use omnia_sdk::WasiProvider;
 use omnia_sdk::vcs::{Change, ChangeKind, CloneOptions, Entry, Error, Rule, Strategy, Vcs as _};
 use wasip3::filesystem::preopens;
 
-omnia_sdk::command!(scenario);
+omnia_sdk::api::command::export!(scenario);
 
 async fn scenario() {
     assert!(preopens::get_directories().iter().any(|(_, name)| name == "."), "host must mount `.`");

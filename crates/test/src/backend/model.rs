@@ -9,8 +9,6 @@ use omnia_backend::model::{Answer, Error, Limits, ModelClient, Request, ToolHost
 
 use crate::{Exchange, Script, Seen};
 
-const CHECK_TOOL: &str = "check";
-
 /// One step a scripted turn drives through the session before answering.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Step {
@@ -319,8 +317,9 @@ impl ModelClient for ScriptedModel {
         let this = self.clone();
         async move {
             loop {
-                let turn = this.turn(&request)?;
+                let mut turn = this.turn(&request)?;
                 this.drive(&tool_host, turn.steps).await?;
+                turn.answer.answer = request.format.candidate(&turn.answer.answer);
                 if !request.check {
                     return Ok(turn.answer);
                 }
@@ -349,3 +348,5 @@ impl ModelClient for ScriptedModel {
         self.limits
     }
 }
+
+const CHECK_TOOL: &str = "check";

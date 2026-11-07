@@ -37,7 +37,8 @@ backend = [
     "omnia-backend/model",
     "omnia-backend/vcs",
 ]
-# Native doubles for the `omnia_sdk` capability traits, plus the `Provider` that bundles them.
+# Native doubles for the `omnia_sdk` capability traits, plus the `Provider` that bundles them
+# and the `send`/`deliver` router drivers.
 # `omnia-sdk/sql` and `omnia-sdk/docstore` carry the `TableStore` and
 # `DocumentStore` traits the `ScriptedTables` and `MemoryDocs` doubles implement.
 guest = [
@@ -56,6 +57,7 @@ guest = [
     "dep:omnia-sdk",
     "omnia-sdk/sql",
     "omnia-sdk/docstore",
+    "dep:tower",
 ]
 # The component runtime harness: `Deployment`, `Backends`, `ScriptedModel`, `ScriptedVcs`, `Scratch`.
 host = [
@@ -117,6 +119,7 @@ tempfile = { workspace = true, optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { workspace = true, features = ["time"], optional = true }
+tower = { workspace = true, features = ["util"], optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 anyhow.workspace = true
@@ -125,7 +128,7 @@ bytes.workspace = true
 http.workspace = true
 http-body-util.workspace = true
 omnia = { path = "../omnia" }
-omnia-sdk = { path = "../sdk", default-features = false }
+omnia-sdk = { path = "../sdk", default-features = false, features = ["http"] }
 omnia-wasi-blobstore = { path = "../wasi-blobstore" }
 omnia-wasi-config = { path = "../wasi-config" }
 omnia-wasi-keyvalue = { path = "../wasi-keyvalue" }
@@ -144,6 +147,10 @@ required-features = ["guest"]
 
 [[test]]
 name = "guest_stores"
+required-features = ["guest"]
+
+[[test]]
+name = "guest_router"
 required-features = ["guest"]
 
 [[test]]

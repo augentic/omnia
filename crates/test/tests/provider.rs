@@ -24,7 +24,7 @@ async fn provider_seeds() {
     provider.storage.insert_state("seen", b"1");
 
     assert_eq!(Config::get(&provider, "region").await.expect("config"), "eu");
-    assert_eq!(provider.access_token("svc".into()).await.expect("token"), "tok");
+    assert_eq!(provider.token("svc", &[]).await.expect("token").token, "tok");
     assert_eq!(StateStore::get(&provider, "seen").await.expect("state"), Some(b"1".to_vec()));
     BlobStore::put(&provider, "c", "o", b"blob").await.expect("blob");
     assert_eq!(

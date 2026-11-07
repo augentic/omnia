@@ -299,7 +299,7 @@ async fn loader_defaulting() {
 }
 
 #[tokio::test]
-async fn loader_scripted_refusal_wins() {
+async fn scripted_refusal() {
     let loader = ScriptedLoader::default()
         .declare("tool")
         .digest("tool", digest("ab"))

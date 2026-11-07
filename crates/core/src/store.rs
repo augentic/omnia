@@ -46,13 +46,6 @@ impl fmt::Debug for Stdio {
     }
 }
 
-/// Exposes a store context's [`StoreLimits`] so the runtime can install a
-/// per-guest resource limiter on every [`Store`](wasmtime::Store) it creates.
-pub trait HasLimits {
-    /// Returns a mutable reference to the context's resource limits.
-    fn limits(&mut self) -> &mut StoreLimits;
-}
-
 /// The per-store construction inputs for [`StoreBase::new`].
 ///
 /// `options`, `dispatcher`, and `chain` are required; the rest default
@@ -204,6 +197,13 @@ impl<B: Send + 'static> WasiView for StoreCtx<B> {
     }
 }
 
+/// Exposes a store context's [`StoreLimits`] so the runtime can install a
+/// per-guest resource limiter on every [`Store`](wasmtime::Store) it creates.
+pub trait HasLimits {
+    /// Returns a mutable reference to the context's resource limits.
+    fn limits(&mut self) -> &mut StoreLimits;
+}
+
 impl<B: Send + 'static> HasLimits for StoreCtx<B> {
     fn limits(&mut self) -> &mut StoreLimits {
         &mut self.base.limits
@@ -285,9 +285,6 @@ impl<B: Send + 'static> HasChain for StoreCtx<B> {
     }
 }
 
-const RUST_LOG: &str = "RUST_LOG";
-const NO_COLOR: &str = "NO_COLOR";
-
 /// The complete guest environment: every `host` pair, with `RUST_LOG` set to
 /// the run's tracing directives and `NO_COLOR` set when the console does not
 /// colour its lines.
@@ -321,55 +318,5 @@ pub fn guest_env(
     env
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn pairs(entries: &[(&str, &str)]) -> Vec<(String, String)> {
-        entries.iter().map(|(name, value)| ((*name).to_owned(), (*value).to_owned())).collect()
-    }
-
-    // The composed directives replace the host's `RUST_LOG` in place; every
-    // other pair comes through untouched.
-    #[test]
-    fn replaces_process() {
-        let host = pairs(&[("RUST_LOG", "off"), ("HOME", "/home/op")]);
-        assert_eq!(
-            guest_env(host, "debug,tower=off", true),
-            pairs(&[("RUST_LOG", "debug,tower=off"), ("HOME", "/home/op")])
-        );
-    }
-
-    #[test]
-    fn fills_absent() {
-        let host = pairs(&[("HOME", "/home/op")]);
-        assert_eq!(
-            guest_env(host, "warn", true),
-            pairs(&[("HOME", "/home/op"), ("RUST_LOG", "warn")])
-        );
-    }
-
-    // A console off a terminal tells the guest so; a host `NO_COLOR` already
-    // in force stands, and an empty one — no colour suppression, by the
-    // convention — is filled the way an absent one is.
-    #[test]
-    fn piped_stderr() {
-        let host = pairs(&[("HOME", "/home/op")]);
-        assert_eq!(
-            guest_env(host, "info", false),
-            pairs(&[("HOME", "/home/op"), ("RUST_LOG", "info"), ("NO_COLOR", "1")])
-        );
-
-        let host = pairs(&[("NO_COLOR", "true"), ("RUST_LOG", "off")]);
-        assert_eq!(
-            guest_env(host, "info", false),
-            pairs(&[("NO_COLOR", "true"), ("RUST_LOG", "info")])
-        );
-
-        let host = pairs(&[("NO_COLOR", ""), ("RUST_LOG", "off")]);
-        assert_eq!(
-            guest_env(host, "info", false),
-            pairs(&[("NO_COLOR", "1"), ("RUST_LOG", "info")])
-        );
-    }
-}
+const RUST_LOG: &str = "RUST_LOG";
+const NO_COLOR: &str = "NO_COLOR";

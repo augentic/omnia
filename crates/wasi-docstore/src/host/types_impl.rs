@@ -12,6 +12,54 @@ use crate::host::{ComparisonOp, Filter, ScalarValue, WasiDocStore, WasiDocStoreV
 const MAX_FILTER_DEPTH: usize = 5;
 const MAX_IN_LIST_SIZE: usize = 100;
 
+fn combine<T>(
+    mut host: Access<'_, T, WasiDocStore>, filters: Vec<Resource<FilterProxy>>, verb: &str,
+    node: fn(Vec<Filter>) -> Filter,
+) -> wasmtime::Result<Resource<FilterProxy>> {
+    wasmtime::ensure!(!filters.is_empty(), "{verb} requires at least one child");
+    let mut children = Vec::with_capacity(filters.len());
+    for r in filters {
+        let fp = host.get().table.delete(r)?;
+        children.push(fp.0);
+    }
+    let tree = node(children);
+    check_depth(&tree)?;
+    Ok(host.get().table.push(FilterProxy(tree))?)
+}
+
+fn check_depth(tree: &Filter) -> wasmtime::Result<()> {
+    let depth = tree.depth();
+    wasmtime::ensure!(
+        depth <= MAX_FILTER_DEPTH,
+        "filter tree depth {depth} exceeds maximum of {MAX_FILTER_DEPTH}"
+    );
+    Ok(())
+}
+
+const fn from_wit_op(op: WitComparisonOp) -> ComparisonOp {
+    match op {
+        WitComparisonOp::Eq => ComparisonOp::Eq,
+        WitComparisonOp::Ne => ComparisonOp::Ne,
+        WitComparisonOp::Gt => ComparisonOp::Gt,
+        WitComparisonOp::Gte => ComparisonOp::Gte,
+        WitComparisonOp::Lt => ComparisonOp::Lt,
+        WitComparisonOp::Lte => ComparisonOp::Lte,
+    }
+}
+
+fn from_wit_value(v: WitScalarValue) -> ScalarValue {
+    match v {
+        WitScalarValue::Null => ScalarValue::Null,
+        WitScalarValue::Boolean(b) => ScalarValue::Bool(b),
+        WitScalarValue::Int32(i) => ScalarValue::Int32(i),
+        WitScalarValue::Int64(i) => ScalarValue::Int64(i),
+        WitScalarValue::Float64(f) => ScalarValue::Float64(f),
+        WitScalarValue::Str(s) => ScalarValue::Str(s),
+        WitScalarValue::Binary(b) => ScalarValue::Binary(b),
+        WitScalarValue::Timestamp(t) => ScalarValue::Timestamp(t),
+    }
+}
+
 impl<T> HostFilterWithStore<T> for WasiDocStore {
     fn compare(
         mut host: Access<'_, T, Self>, field: String, op: WitComparisonOp, value: WitScalarValue,
@@ -120,53 +168,5 @@ impl HostFilter for WasiDocStoreView<'_> {}
 impl TypesHost for WasiDocStoreView<'_> {
     fn convert_error(&mut self, err: Error) -> wasmtime::Result<Error> {
         Ok(err)
-    }
-}
-
-fn combine<T>(
-    mut host: Access<'_, T, WasiDocStore>, filters: Vec<Resource<FilterProxy>>, verb: &str,
-    node: fn(Vec<Filter>) -> Filter,
-) -> wasmtime::Result<Resource<FilterProxy>> {
-    wasmtime::ensure!(!filters.is_empty(), "{verb} requires at least one child");
-    let mut children = Vec::with_capacity(filters.len());
-    for r in filters {
-        let fp = host.get().table.delete(r)?;
-        children.push(fp.0);
-    }
-    let tree = node(children);
-    check_depth(&tree)?;
-    Ok(host.get().table.push(FilterProxy(tree))?)
-}
-
-fn check_depth(tree: &Filter) -> wasmtime::Result<()> {
-    let depth = tree.depth();
-    wasmtime::ensure!(
-        depth <= MAX_FILTER_DEPTH,
-        "filter tree depth {depth} exceeds maximum of {MAX_FILTER_DEPTH}"
-    );
-    Ok(())
-}
-
-const fn from_wit_op(op: WitComparisonOp) -> ComparisonOp {
-    match op {
-        WitComparisonOp::Eq => ComparisonOp::Eq,
-        WitComparisonOp::Ne => ComparisonOp::Ne,
-        WitComparisonOp::Gt => ComparisonOp::Gt,
-        WitComparisonOp::Gte => ComparisonOp::Gte,
-        WitComparisonOp::Lt => ComparisonOp::Lt,
-        WitComparisonOp::Lte => ComparisonOp::Lte,
-    }
-}
-
-fn from_wit_value(v: WitScalarValue) -> ScalarValue {
-    match v {
-        WitScalarValue::Null => ScalarValue::Null,
-        WitScalarValue::Boolean(b) => ScalarValue::Bool(b),
-        WitScalarValue::Int32(i) => ScalarValue::Int32(i),
-        WitScalarValue::Int64(i) => ScalarValue::Int64(i),
-        WitScalarValue::Float64(f) => ScalarValue::Float64(f),
-        WitScalarValue::Str(s) => ScalarValue::Str(s),
-        WitScalarValue::Binary(b) => ScalarValue::Binary(b),
-        WitScalarValue::Timestamp(t) => ScalarValue::Timestamp(t),
     }
 }

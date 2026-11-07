@@ -3,32 +3,13 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
+pub use config::ConnectOptions;
 use futures::FutureExt as _;
 use omnia_backend::sql::{Connection, DataType, Field, Row, SqlClient};
 use omnia_core::{Connect, FromEnv, FutureResult};
 use rusqlite::types::ValueRef;
 use rusqlite::{Connection as SqliteConnection, params_from_iter};
 use tracing::instrument;
-
-#[expect(missing_docs, reason = "`FromEnv` has no docs")]
-mod config {
-    use fromenv::FromEnv;
-
-    /// Options used to connect to the SQL database.
-    #[derive(Debug, Clone, FromEnv)]
-    pub struct ConnectOptions {
-        /// The `SQLite` database URI (`SQL_DATABASE`, default: one shared in-memory database).
-        #[env(from = "SQL_DATABASE", default = "file::memory:?cache=shared")]
-        pub database: String,
-    }
-}
-pub use config::ConnectOptions;
-
-impl FromEnv for ConnectOptions {
-    fn load_env() -> Result<Self> {
-        Self::from_env().finalize().context("issue loading connection options")
-    }
-}
 
 /// Default `SQLite`-backed implementation of [`SqlClient`].
 #[derive(Debug, Clone)]
@@ -86,7 +67,7 @@ impl Connection for SqliteConn {
                 let mut stmt = conn.prepare(&query).context("failed to prepare statement")?;
 
                 let column_names: Vec<String> =
-                    stmt.column_names().iter().map(ToString::to_string).collect();
+                    stmt.column_names().map(ToString::to_string).collect();
 
                 let mut rows = stmt
                     .query(params_from_iter(rusqlite_params.iter()))
@@ -150,6 +131,25 @@ impl Connection for SqliteConn {
     }
 }
 
+#[expect(missing_docs, reason = "`FromEnv` has no docs")]
+mod config {
+    use fromenv::FromEnv;
+
+    /// Options used to connect to the SQL database.
+    #[derive(Debug, Clone, FromEnv)]
+    pub struct ConnectOptions {
+        /// The `SQLite` database URI (`SQL_DATABASE`, default: one shared in-memory database).
+        #[env(from = "SQL_DATABASE", default = "file::memory:?cache=shared")]
+        pub database: String,
+    }
+}
+
+impl FromEnv for ConnectOptions {
+    fn load_env() -> Result<Self> {
+        Self::from_env().finalize().context("issue loading connection options")
+    }
+}
+
 // A `u64` is stored as its raw bits, the `SQLite` convention: its integers
 // are always signed 64-bit, and readers reinterpret.
 fn to_sqlite(dt: &DataType) -> rusqlite::types::Value {
@@ -178,23 +178,5 @@ fn from_sqlite(value: ValueRef) -> Result<DataType> {
             Ok(DataType::Str(Some(s.to_string())))
         }
         ValueRef::Blob(b) => Ok(DataType::Binary(Some(b.to_vec()))),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn u64_stores_raw_bits() {
-        assert_eq!(
-            to_sqlite(&DataType::Uint64(Some(u64::MAX))),
-            rusqlite::types::Value::Integer(-1)
-        );
-    }
-
-    #[test]
-    fn invalid_utf8_rejected() {
-        from_sqlite(ValueRef::Text(&[0xff])).unwrap_err();
     }
 }

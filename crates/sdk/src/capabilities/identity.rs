@@ -6,17 +6,14 @@ use anyhow::Result;
 pub use omnia_backend::identity::AccessToken;
 
 /// Interacts with identity providers to obtain access tokens.
+///
+/// The bare token string under default scopes is [`IdentityExt`].
 #[omnia_guest_macros::capability]
 pub trait Identity: Send + Sync {
     /// Obtain an access token for `identity` scoped to `scopes`.
     fn token(
         &self, identity: &str, scopes: &[String],
     ) -> impl Future<Output = Result<AccessToken>> + Send;
-
-    /// Get an access token string for the specified identity with default scopes.
-    fn access_token(&self, identity: String) -> impl Future<Output = Result<String>> + Send {
-        async move { Ok(self.token(&identity, &[]).await?.token) }
-    }
 }
 
 #[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
@@ -32,3 +29,15 @@ impl Identity for crate::WasiProvider {
         })
     }
 }
+
+/// Token shorthands over any [`Identity`].
+///
+/// Blanket-implemented for every [`Identity`]; never implemented by hand.
+pub trait IdentityExt: Identity {
+    /// Get an access token string for `identity` with default scopes.
+    fn access_token(&self, identity: &str) -> impl Future<Output = Result<String>> + Send {
+        async move { Ok(self.token(identity, &[]).await?.token) }
+    }
+}
+
+impl<P: Identity + ?Sized> IdentityExt for P {}

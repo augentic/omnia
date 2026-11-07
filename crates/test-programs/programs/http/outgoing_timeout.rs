@@ -13,7 +13,7 @@ use wasip3::http::types::{ErrorCode, RequestOptions};
 use wasip3::http_compat::{IncomingMessage as _, RequestOptionsExtension, http_into_wasi_request};
 use wasip3::wit_future;
 
-omnia_sdk::command!(scenario);
+omnia_sdk::api::command::export!(scenario);
 
 // nanoseconds, as `wasi:clocks` spells a duration
 const TIMEOUT: u64 = 200_000_000;

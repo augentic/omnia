@@ -56,8 +56,8 @@ Every backend reads its connection settings from environment variables at startu
 | Backend | Key variables |
 | ------- | ------------- |
 | Redis | `REDIS_URL` (default `redis://localhost:6379`), `REDIS_MAX_RETRIES` |
-| NATS | `NATS_ADDR`, `NATS_TOPICS`, `NATS_JWT`/`NATS_SEED` |
-| Kafka | `KAFKA_BROKERS`, `COMPONENT`, `KAFKA_TOPICS`, `KAFKA_CONSUMER_GROUP`, `KAFKA_USERNAME`/`KAFKA_PASSWORD`, `KAFKA_REGISTRY_URL` |
+| NATS | `NATS_ADDR`, `NATS_TOPICS`, `NATS_TOPIC_PREFIX`, `NATS_JWT`/`NATS_SEED` |
+| Kafka | `KAFKA_BROKERS`, `COMPONENT`, `KAFKA_TOPICS`, `KAFKA_TOPIC_PREFIX`, `KAFKA_CONSUMER_GROUP`, `KAFKA_USERNAME`/`KAFKA_PASSWORD`, `KAFKA_REGISTRY_URL` |
 | PostgreSQL | `POSTGRES_URL`, `POSTGRES_POOL_SIZE`; named pools via `POSTGRES_POOLS` + `POSTGRES_URL__<NAME>` |
 | MongoDB | `MONGODB_URL` (must include a default database) |
 | Azure Blob | `AZURE_BLOB_ENDPOINT`; service-principal via `AZURE_TENANT_ID`/`AZURE_CLIENT_ID`/`AZURE_CLIENT_SECRET`, else `az login` |

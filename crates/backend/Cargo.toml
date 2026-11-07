@@ -20,7 +20,7 @@ default = []
 
 blobstore = ["dep:bytes"]
 config = []
-docstore = ["dep:chrono", "dep:serde_json"]
+docstore = ["dep:chrono", "dep:serde", "dep:serde_json"]
 identity = []
 keyvalue = []
 messaging = ["dep:thiserror", "dep:tokio"]

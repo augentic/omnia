@@ -5,22 +5,6 @@ use quote::{ToTokens, format_ident, quote};
 use syn::punctuated::Punctuated;
 use syn::{Data, DeriveInput, Error, Field, Fields, Ident, Result, Token, Type};
 
-const CAPABILITIES: &[&str] = &[
-    "BlobStore",
-    "Broadcast",
-    "Config",
-    "DocumentStore",
-    "HttpRequest",
-    "Identity",
-    "Model",
-    "Plugins",
-    "Publish",
-    "StateStore",
-    "TableStore",
-    "Vault",
-    "Vcs",
-];
-
 pub fn to_snake_case(name: &str) -> String {
     let mut snake = String::with_capacity(name.len() + 4);
     for (i, ch) in name.chars().enumerate() {
@@ -163,3 +147,19 @@ fn parse_fields(fields: &Punctuated<Field, Token![,]>) -> Result<Vec<(Ident, &Id
     }
     Ok(assigned)
 }
+
+const CAPABILITIES: &[&str] = &[
+    "BlobStore",
+    "Broadcast",
+    "Config",
+    "DocumentStore",
+    "HttpRequest",
+    "Identity",
+    "Model",
+    "Plugins",
+    "Publish",
+    "StateStore",
+    "TableStore",
+    "Vault",
+    "Vcs",
+];

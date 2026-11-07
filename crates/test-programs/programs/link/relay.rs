@@ -4,14 +4,7 @@
 
 #![cfg(target_arch = "wasm32")]
 
-wit_bindgen::generate!({
-    world: "relay",
-    path: "wit",
-});
-
 struct Relay;
-
-export!(Relay);
 
 impl exports::omnia_test::link::ops::Guest for Relay {
     fn ping(target: String, message: String) -> String {
@@ -32,3 +25,10 @@ impl exports::omnia_test::link::ops::Guest for Relay {
         }
     }
 }
+
+wit_bindgen::generate!({
+    world: "relay",
+    path: "wit",
+});
+
+export!(Relay);

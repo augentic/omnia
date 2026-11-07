@@ -76,15 +76,15 @@ A [guest entry](#guest-entry) whose component is not compiled into the runtime �
 
 ### Handler contract
 
-The transport-neutral unit of guest application logic: an `async fn(I, Context<P>) -> Result<O, E>` invoked through `Client::call(handler, input, &metadata)`. The HTTP router, the messaging router, and the command façade are adapters that decode a transport event into `I` and encode the result back; the handler never knows which one called it. See [Writing Guests](guides/writing-guests.md#the-handler-contract).
+The transport-neutral unit of guest application logic: an `async fn(Context<P>, I) -> Result<O, E>`, registered on a `Handlers<P>` and invoked by the closed `Router`'s dispatch over the `Client` in its state. The messaging router and the command façade are adapters that decode a transport event into `I` and encode the result back; an HTTP route is a plain axum handler that takes the same `Context<P>` as an extractor over that `Client`. A unit test calls the fn directly with `Context::new(provider, metadata)`. See [Writing Guests](guides/writing-guests.md#the-handler-contract).
 
 ### Command façade
 
-`omnia_sdk::api::command`, the command-line adapter over the handler contract: `parse` classifies argv into the clap grammar or one of clap's own responses (`Parsed`), `Command::new(&client, &metadata, format).call(handler, decode, render)` projects one verb (decode → `Client::call` → encode) onto a `Response { stdout, stderr, exit }`, and `command!(main)` binds the entry as the `wasi:cli/run` export, writing the channels at that boundary. The clap-backed parts ship behind the `command` cargo feature. Distinct from the host-side **`omnia-cli`** crate, which is the `run` grammar of a host binary.
+`omnia_sdk::api::command`, the command-line adapter over the handler contract: `Handlers::command(name, handler)` registers a subcommand beside a module's paths and topics, the closed `Router` `run`s argv (clap decode → handler → encode in the selected `command::Format`, the output's `command::Render` form as text) onto a `Response { stdout, stderr, exit }`, and `command::export!(command_router)` binds the router fn as the `wasi:cli/run` export, writing the channels at that boundary. `parse` and `Command::call` are the same pieces for a hand-written clap grammar. The clap-backed parts ship behind the `command` cargo feature. Distinct from the host-side **`omnia-cli`** crate, which is the `run` grammar of a host binary.
 
 ### Failure envelope
 
-What a command reports on stderr when a verb fails: the `Failure` type wrapping an `omnia_sdk::Error` plus an optional remedy hint. As text, `error[<code>]: <message>` then `hint: <hint>`; as JSON, flat `{"error","message","exit-code","hint"?}`. Its `error` and `message` are the transport-neutral `api::ErrorBody` that `HttpError::from(Error)` also emits as a JSON body, so one discriminant identifies a failure over HTTP and over a shell.
+What a command reports on stderr when a verb fails: the `Failure` type wrapping an `omnia_sdk::Error` plus an optional remedy hint. As text, `error[<code>]: <message>` then `hint: <hint>`; as JSON, flat `{"error","message","exit-code","hint"?}`. Its `error` and `message` are the transport-neutral `api::ErrorBody` that `Error::into_response` also emits as a JSON body, so one discriminant identifies a failure over HTTP and over a shell.
 
 ### Exit map
 

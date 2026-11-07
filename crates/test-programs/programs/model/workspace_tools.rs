@@ -8,7 +8,7 @@ use omnia_sdk::model::{Model as _, Request};
 use test_programs::user;
 use wasip3::filesystem::preopens;
 
-omnia_sdk::command!(scenario);
+omnia_sdk::api::command::export!(scenario);
 
 async fn scenario() {
     assert!(preopens::get_directories().iter().any(|(_, name)| name == "."), "host must mount `.`");
@@ -18,5 +18,5 @@ async fn scenario() {
         .await
         .expect("workspace tools answer");
     // seed.txt content, then the sorted listing after the backend's write.
-    assert_eq!(reply.answer, "hello:out.txt,seed.txt");
+    assert_eq!(reply.answer, "hello:docs,out.txt,seed.txt");
 }

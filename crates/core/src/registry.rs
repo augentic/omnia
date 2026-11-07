@@ -203,28 +203,6 @@ pub struct Registry<T: 'static> {
     seam: Arc<dyn LinkSeam<T>>,
 }
 
-/// Inputs to [`Registry::assemble`].
-pub struct RegistryParts<T: 'static> {
-    /// The shared engine.
-    pub engine: Engine,
-    /// The linker every guest pre-instantiates against, hosts linked.
-    pub linker: Linker<T>,
-    /// Runtime options.
-    pub options: RuntimeOptions,
-    /// The guests loaded at boot.
-    pub loaded: Vec<LoadedGuest>,
-    /// The deployment's other guests, each loaded from its source at first
-    /// use.
-    pub declared: Vec<Source>,
-    /// Per-trigger inbound route tables.
-    pub routes: Routes,
-    /// The guest→guest link seam.
-    pub seam: Arc<dyn LinkSeam<T>>,
-    /// Whether a deployment with no guests assembles (a dynamic deployment
-    /// registers them later).
-    pub allow_empty: bool,
-}
-
 impl<T: WasiView + 'static> Registry<T> {
     /// Assemble a registry from a linked deployment's parts: polyfill link
     /// imports through the seam, pre-instantiate every loaded guest, table
@@ -447,6 +425,28 @@ impl<T: 'static> Registry<T> {
         let _lifecycle = self.lifecycle_read();
         self.guests.read().unwrap_or_else(PoisonError::into_inner).is_empty()
     }
+}
+
+/// Inputs to [`Registry::assemble`].
+pub struct RegistryParts<T: 'static> {
+    /// The shared engine.
+    pub engine: Engine,
+    /// The linker every guest pre-instantiates against, hosts linked.
+    pub linker: Linker<T>,
+    /// Runtime options.
+    pub options: RuntimeOptions,
+    /// The guests loaded at boot.
+    pub loaded: Vec<LoadedGuest>,
+    /// The deployment's other guests, each loaded from its source at first
+    /// use.
+    pub declared: Vec<Source>,
+    /// Per-trigger inbound route tables.
+    pub routes: Routes,
+    /// The guest→guest link seam.
+    pub seam: Arc<dyn LinkSeam<T>>,
+    /// Whether a deployment with no guests assembles (a dynamic deployment
+    /// registers them later).
+    pub allow_empty: bool,
 }
 
 /// Why [`Registry::publish`] refused a late guest; `Occupied` is distinct so

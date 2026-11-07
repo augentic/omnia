@@ -128,7 +128,7 @@ impl Config for MapConfig {
 ///
 /// # tokio::runtime::Runtime::new().unwrap().block_on(async {
 /// let identity = FixedIdentity::new("tok");
-/// assert_eq!(identity.access_token("svc".into()).await.unwrap(), "tok");
+/// assert_eq!(identity.token("svc", &[]).await.unwrap().token, "tok");
 /// assert_eq!(identity.asked(), ["svc"]);
 /// # });
 /// ```

@@ -17,7 +17,7 @@ The SDK defines thirteen capability traits, each implemented by `WasiProvider` o
 
 | Capability | WASI Host Backing | Test Double | Composition |
 | --- | --- | --- | --- |
-| `StateStore`, `Publish`, `Config`, `BlobStore` | `omnia-wasi-{keyvalue,messaging,config,blobstore}` | `Memory`, `Sink`, `MapConfig` | `omnia-extensions` decorators / adapters |
+| `StateStore`, `Publish`, `Config`, `BlobStore` | `omnia-wasi-{keyvalue,messaging,config,blobstore}` | `Memory`, `Sink`, `MapConfig` | `omnia-ext` decorators / adapters |
 | `HttpRequest` | `omnia-wasi-http` | `MatchedHttp` | `omnia_http_cache::HttpCache<H, S>` decorator |
 | `TableStore` | `omnia-wasi-sql` | `ScriptedTables` | `omnia-orm` query builders |
 | `DocumentStore`, `Identity`, `Vault`, `Broadcast` | `omnia-wasi-{docstore,identity,vault,websocket}` | `MemoryDocs`, `FixedIdentity`, `Memory`, `Sink` | — |
@@ -43,7 +43,7 @@ Every row of the portable contract is verified by a generic scenario function in
 | `BlobStore` | Opaque bytes in are bytes out; missing object is `Ok(None)` on `get`; inclusive `get_range`, metadata, container ops, derived ops (`has`, `delete_objects`, `clear`, `copy_object`, `move_object`) | `wasi:blobstore` | `omnia-azure-blob` (404 -> `Ok(None)`), `omnia-nats`, `omnia-mongodb` (`bson::Binary`), `omnia-filesystem`, `BlobStoreDefault` | `conformance::blobstore_objects` |
 | `Publish` | At-least-once delivery to the exact topic with headers preserved | `wasi:messaging/producer` | `omnia-kafka`, `omnia-nats`, `MessagingDefault` | `conformance::publish_send` |
 | `Config` | `get(key)` returns the string value, or an error when absent | `wasi:config/store` | `ConfigDefault` (process environment or seeded map) | `conformance::config_get` |
-| `Identity` | `token(identity, scopes)` returns `AccessToken { token, expires_in }`; `access_token(identity)` is a defaulted convenience | `omnia:identity/credentials` | `omnia-azure-id`; `IdentityDefault` (`OAuth2`); `IdentityStub` | `conformance::identity_token` |
+| `Identity` | `token(identity, scopes)` returns `AccessToken { token, expires_in }` | `omnia:identity/credentials` | `omnia-azure-id`; `IdentityDefault` (`OAuth2`); `IdentityStub` | `conformance::identity_token` |
 | `Vault` | `get`, `set`, `delete`, `exists`, and `list_ids` over the secret locker | `omnia:vault/vault` | `omnia-azure-vault`; `VaultDefault` | `conformance::vault_locker` |
 | `HttpRequest` | `fetch(Request<T>)` returns `Response<Bytes>`; a `Client-Cert` header is validated and stripped | `wasi:http` | `HttpDefault` (`reqwest` pool + `Client-Cert` validation); no `*Client` contract, the host is the client | `conformance::http_fetch` |
 | `Broadcast` | `send(name, data, sockets)` reaches connected WebSocket peers | `omnia:websocket/client` | `WebSocketDefault` | `conformance::broadcast_send` |
@@ -65,21 +65,22 @@ Domain handler crates depend on `omnia-sdk` alone and expose transport routers g
 
 ### 1. Standard WASI component (`WasiProvider`)
 
-In the guest root crate (`src/lib.rs`), wire the HTTP and messaging routers to `omnia_sdk::WasiProvider` with `omnia_sdk::http!` and `omnia_sdk::messaging!`:
+In the guest root crate (`src/lib.rs`), wire the guest's router to `omnia_sdk::WasiProvider` with each transport's `export!`:
 
 ```rust,ignore
-pub use self::messaging::messaging_router;
-pub use self::routes::router;
+use omnia_sdk::api::{Router, http, messaging};
 
-omnia_sdk::http!(router(omnia_sdk::WasiProvider));
-omnia_sdk::messaging!(messaging_router(omnia_sdk::WasiProvider));
+pub fn router<P: Capabilities>(provider: P) -> Router<P> { /* .. */ }
+
+http::export!(router);
+messaging::export!(router);
 ```
 
-Both macros expand to the `#[omnia_wasi_otel::instrument]`-scoped WASI export on `all(target_arch = "wasm32", target_os = "wasi")` and to nothing on native targets, so `cargo nextest` compiles the guest library natively against `omnia_test::guest::Provider` without pulling `wasmtime` or `omnia-wasi-*` into the native dependency graph.
+Each invocation expands to the `#[omnia_wasi_otel::instrument]`-scoped WASI export on `all(target_arch = "wasm32", target_os = "wasi")` and to nothing on native targets, so `cargo nextest` compiles the guest library natively against `omnia_test::guest::Provider` without pulling `wasmtime` or `omnia-wasi-*` into the native dependency graph.
 
 ### 2. Overriding capabilities with `#[derive(omnia_sdk::Provider)]`
 
-A guest that overrides one or more capabilities — for example, wrapping outbound HTTP in `omnia_http_cache::HttpCache` — derives `Provider` and delegates the remaining capabilities to `WasiProvider`:
+A guest that overrides one or more capabilities — for example, wrapping outbound HTTP in `omnia_http_cache::HttpCache` — derives `Provider`, delegates the remaining capabilities to `WasiProvider`, and passes the provider as the second argument to `export!`:
 
 ```rust,ignore
 #[derive(Clone, Default, omnia_sdk::Provider)]
@@ -90,7 +91,7 @@ struct Cached {
     wasi: WasiProvider,
 }
 
-omnia_sdk::http!(router(Cached::default()));
+http::export!(http_router, Cached::default());
 ```
 
 ---

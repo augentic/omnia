@@ -53,6 +53,9 @@ where
 
 impl<B> Server<B> for WasiConfig {}
 
+omnia_core::host_error!(Error, Upstream);
+omnia_core::wasi_view!(Config);
+
 impl StoreHost for WasiConfigView<'_> {
     async fn get(&mut self, key: String) -> Result<Option<String>> {
         Ok(self.client.get(key).await?)
@@ -66,6 +69,3 @@ impl StoreHost for WasiConfigView<'_> {
         Ok(err)
     }
 }
-
-omnia_core::host_error!(Error, Upstream);
-omnia_core::wasi_view!(Config);

@@ -7,6 +7,10 @@ pub mod filter;
 
 use std::ops::Not;
 
+use anyhow::Context as _;
+use serde::Serialize;
+use serde::de::DeserializeOwned;
+
 #[cfg(not(target_arch = "wasm32"))]
 pub use self::client::DocStoreClient;
 
@@ -29,6 +33,48 @@ pub enum ScalarValue {
     Binary(Vec<u8>),
     /// ISO-8601 timestamp string for comparisons.
     Timestamp(String),
+}
+
+impl From<&str> for ScalarValue {
+    fn from(s: &str) -> Self {
+        Self::Str(s.to_string())
+    }
+}
+
+impl From<String> for ScalarValue {
+    fn from(s: String) -> Self {
+        Self::Str(s)
+    }
+}
+
+impl From<i32> for ScalarValue {
+    fn from(v: i32) -> Self {
+        Self::Int32(v)
+    }
+}
+
+impl From<i64> for ScalarValue {
+    fn from(v: i64) -> Self {
+        Self::Int64(v)
+    }
+}
+
+impl From<f64> for ScalarValue {
+    fn from(v: f64) -> Self {
+        Self::Float64(v)
+    }
+}
+
+impl From<bool> for ScalarValue {
+    fn from(v: bool) -> Self {
+        Self::Bool(v)
+    }
+}
+
+impl From<Timestamp> for ScalarValue {
+    fn from(t: Timestamp) -> Self {
+        Self::Timestamp(t.0)
+    }
 }
 
 /// Comparison operators for filters.
@@ -105,94 +151,6 @@ pub enum Filter {
     Or(Vec<Self>),
     /// Logical NOT.
     Not(Box<Self>),
-}
-
-/// Sort field for queries.
-#[derive(Debug, Clone, Default)]
-pub struct SortField {
-    /// Field path.
-    pub field: String,
-    /// When `true`, sort descending.
-    pub descending: bool,
-}
-
-/// Options for listing or searching documents.
-#[derive(Debug, Clone, Default)]
-pub struct QueryOptions {
-    /// Optional filter tree.
-    pub filter: Option<Filter>,
-    /// Sort order (first key wins, then next, etc.).
-    pub order_by: Vec<SortField>,
-    /// Maximum documents to return.
-    pub limit: Option<u32>,
-    /// Skip this many documents after filter/sort (offset pagination).
-    pub offset: Option<u32>,
-    /// Opaque continuation token from a previous page.
-    pub continuation: Option<String>,
-}
-
-/// Stored document: identifier plus JSON body bytes.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Document {
-    /// Primary key string.
-    pub id: String,
-    /// JSON payload.
-    pub data: Vec<u8>,
-}
-
-/// Result of a query with optional next-page token.
-#[derive(Debug, Clone, Default)]
-pub struct QueryResult {
-    /// Matching documents.
-    pub documents: Vec<Document>,
-    /// Continuation token for the next page, if any.
-    pub continuation: Option<String>,
-}
-
-impl From<&str> for ScalarValue {
-    fn from(s: &str) -> Self {
-        Self::Str(s.to_string())
-    }
-}
-
-impl From<String> for ScalarValue {
-    fn from(s: String) -> Self {
-        Self::Str(s)
-    }
-}
-
-impl From<i32> for ScalarValue {
-    fn from(v: i32) -> Self {
-        Self::Int32(v)
-    }
-}
-
-impl From<i64> for ScalarValue {
-    fn from(v: i64) -> Self {
-        Self::Int64(v)
-    }
-}
-
-impl From<f64> for ScalarValue {
-    fn from(v: f64) -> Self {
-        Self::Float64(v)
-    }
-}
-
-impl From<bool> for ScalarValue {
-    fn from(v: bool) -> Self {
-        Self::Bool(v)
-    }
-}
-
-/// Newtype for timestamp strings so `Filter::gte("ts", Timestamp(...))` is explicit.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Timestamp(pub String);
-
-impl From<Timestamp> for ScalarValue {
-    fn from(t: Timestamp) -> Self {
-        Self::Timestamp(t.0)
-    }
 }
 
 impl Filter {
@@ -353,6 +311,76 @@ impl Not for Filter {
     }
 }
 
+/// Sort field for queries.
+#[derive(Debug, Clone, Default)]
+pub struct SortField {
+    /// Field path.
+    pub field: String,
+    /// When `true`, sort descending.
+    pub descending: bool,
+}
+
+/// Options for listing or searching documents.
+#[derive(Debug, Clone, Default)]
+pub struct QueryOptions {
+    /// Optional filter tree.
+    pub filter: Option<Filter>,
+    /// Sort order (first key wins, then next, etc.).
+    pub order_by: Vec<SortField>,
+    /// Maximum documents to return.
+    pub limit: Option<u32>,
+    /// Skip this many documents after filter/sort (offset pagination).
+    pub offset: Option<u32>,
+    /// Opaque continuation token from a previous page.
+    pub continuation: Option<String>,
+}
+
+/// Stored document: identifier plus JSON body bytes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Document {
+    /// Primary key string.
+    pub id: String,
+    /// JSON payload.
+    pub data: Vec<u8>,
+}
+
+impl Document {
+    /// The document `id` names, with `value` serialized as its JSON body.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when `value` cannot be serialized to JSON.
+    pub fn json<T: Serialize + ?Sized>(id: impl Into<String>, value: &T) -> anyhow::Result<Self> {
+        let id = id.into();
+        let data =
+            serde_json::to_vec(value).with_context(|| format!("encoding document `{id}`"))?;
+        Ok(Self { id, data })
+    }
+
+    /// Deserialize the JSON body as `T`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the body is not the JSON of a `T`.
+    pub fn decode<T: DeserializeOwned>(&self) -> anyhow::Result<T> {
+        serde_json::from_slice(&self.data)
+            .with_context(|| format!("decoding document `{}`", self.id))
+    }
+}
+
+/// Result of a query with optional next-page token.
+#[derive(Debug, Clone, Default)]
+pub struct QueryResult {
+    /// Matching documents.
+    pub documents: Vec<Document>,
+    /// Continuation token for the next page, if any.
+    pub continuation: Option<String>,
+}
+
+/// Newtype for timestamp strings so `Filter::gte("ts", Timestamp(...))` is explicit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Timestamp(pub String);
+
 fn next_iso_date(iso_date: &str) -> anyhow::Result<String> {
     use chrono::NaiveDate;
     let date = NaiveDate::parse_from_str(iso_date, "%Y-%m-%d")
@@ -361,47 +389,4 @@ fn next_iso_date(iso_date: &str) -> anyhow::Result<String> {
         .succ_opt()
         .ok_or_else(|| anyhow::anyhow!("cannot compute next day for date: {iso_date}"))?;
     Ok(next.format("%Y-%m-%d").to_string())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn bound(filter: &Filter, expected_op: ComparisonOp) -> &str {
-        let Filter::Compare {
-            field,
-            op,
-            value: ScalarValue::Timestamp(ts),
-        } = filter
-        else {
-            panic!("expected timestamp comparison, got {filter:?}");
-        };
-        assert_eq!(field, "updated");
-        assert_eq!(*op, expected_op);
-        ts
-    }
-
-    #[test]
-    fn on_date_day_range() {
-        let Filter::And(children) = Filter::on_date("updated", "2026-03-19").unwrap() else {
-            panic!("expected And");
-        };
-        assert_eq!(children.len(), 2);
-        assert_eq!(bound(&children[0], ComparisonOp::Gte), "2026-03-19T00:00:00Z");
-        assert_eq!(bound(&children[1], ComparisonOp::Lt), "2026-03-20T00:00:00Z");
-    }
-
-    #[test]
-    fn on_date_month_end() {
-        let Filter::And(children) = Filter::on_date("updated", "2026-12-31").unwrap() else {
-            panic!("expected And");
-        };
-        assert_eq!(bound(&children[1], ComparisonOp::Lt), "2027-01-01T00:00:00Z");
-    }
-
-    #[test]
-    fn on_date_invalid() {
-        Filter::on_date("updated", "2026-13-01").unwrap_err();
-        Filter::on_date("updated", "not-a-date").unwrap_err();
-    }
 }

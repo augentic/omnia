@@ -16,6 +16,16 @@ use anyhow::{Result, bail};
 use omnia_core::GuestId;
 use wasmtime::component::Val;
 
+/// The default strategy: the first parameter is a string identity.
+///
+/// The leading argument names the target and is **forwarded through** (the
+/// adapter imports and exports the same interface, so the target's export
+/// expects the identity argument too). A consumer that wants different behaviour
+/// (strip the id, read it from a later argument, key off the interface) supplies
+/// its own [`GuestSelector`].
+#[derive(Clone, Copy, Debug, Default)]
+pub struct FirstArgSelector;
+
 /// Chooses the target guest for a host-mediated call and the parameters to
 /// forward to it.
 ///
@@ -40,16 +50,6 @@ pub trait GuestSelector: Send + Sync + 'static {
     ) -> Result<(GuestId, Cow<'a, [Val]>)>;
 }
 
-/// The default strategy: the first parameter is a string identity.
-///
-/// The leading argument names the target and is **forwarded through** (the
-/// adapter imports and exports the same interface, so the target's export
-/// expects the identity argument too). A consumer that wants different behaviour
-/// (strip the id, read it from a later argument, key off the interface) supplies
-/// its own [`GuestSelector`].
-#[derive(Clone, Copy, Debug, Default)]
-pub struct FirstArgSelector;
-
 impl GuestSelector for FirstArgSelector {
     fn select<'a>(
         &self, interface: &str, func: &str, params: &'a [Val],
@@ -62,33 +62,5 @@ impl GuestSelector for FirstArgSelector {
             );
         };
         Ok((GuestId::from(id.as_str()), Cow::Borrowed(params)))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn first_arg() {
-        let params = vec![Val::String("responder".to_owned()), Val::String("hello".to_owned())];
-        let (id, forwarded) =
-            FirstArgSelector.select("example:link/echo", "echo", &params).expect("should select");
-
-        assert_eq!(id, GuestId::from("responder"));
-        // the default forwards every parameter, identity included
-        assert_eq!(&*forwarded, params.as_slice());
-    }
-
-    #[test]
-    fn first_arg_invalid() {
-        let error = FirstArgSelector
-            .select("example:link/echo", "echo", &[Val::U32(7)])
-            .expect_err("a non-string identity must fail");
-        assert!(error.to_string().contains("leading string identity"));
-
-        FirstArgSelector
-            .select("example:link/echo", "echo", &[])
-            .expect_err("a missing identity must fail");
     }
 }

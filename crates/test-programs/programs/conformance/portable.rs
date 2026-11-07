@@ -6,7 +6,7 @@
 use omnia_sdk::{Config, WasiProvider};
 use omnia_test::conformance;
 
-omnia_sdk::command!(scenario);
+omnia_sdk::api::command::export!(scenario);
 
 async fn scenario() {
     conformance::state_get_set_delete(&WasiProvider).await;

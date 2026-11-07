@@ -22,27 +22,6 @@ use omnia_wasi_vcs::{
 };
 use parking_lot::Mutex;
 
-// Every guest program in `crates/test-programs` must have a matching test
-// here; a new program without one fails to compile.
-test_programs::foreach_vcs!();
-
-// ------------------------------------------------------------------------
-// Harness
-// ------------------------------------------------------------------------
-
-async fn run_guest(wasm: &str, mounts: Vec<Mount>) -> Recorder {
-    let recorder = Recorder::default();
-    let backends = Backends::defaults().await.vcs(recorder.clone());
-    let status = Deployment::new()
-        .guest("guest", wasm)
-        .mounts(mounts)
-        .run_host::<WasiVcs, _>(backends)
-        .await
-        .expect("guest runs");
-    assert_eq!(status, ExitStatus::SUCCESS, "guest `{wasm}` failed");
-    recorder
-}
-
 // ------------------------------------------------------------------------
 // Scenario backend
 // ------------------------------------------------------------------------
@@ -67,26 +46,6 @@ impl Recorder {
     fn calls(&self) -> Vec<String> {
         self.calls.lock().clone()
     }
-}
-
-fn shown(path: &Path) -> String {
-    path.display().to_string()
-}
-
-// The place's path is informational; the handle it holds must be the very
-// directory that path names, so a backend working through it works there.
-fn held(place: &Place) -> String {
-    let by_handle = place.dir().dir_metadata().expect("place handle metadata");
-    let by_path = Dir::open_ambient_dir(place.path(), ambient_authority())
-        .and_then(|dir| dir.dir_metadata())
-        .expect("place path opens");
-    assert_eq!(
-        (by_handle.dev(), by_handle.ino()),
-        (by_path.dev(), by_path.ino()),
-        "place handle is the directory at `{}`",
-        place.path().display()
-    );
-    shown(place.path())
 }
 
 impl VcsClient for Recorder {
@@ -240,6 +199,47 @@ impl VcsClient for Recorder {
         }
         .boxed()
     }
+}
+
+// Every guest program in `crates/test-programs` must have a matching test
+// here; a new program without one fails to compile.
+test_programs::foreach_vcs!();
+
+// ------------------------------------------------------------------------
+// Harness
+// ------------------------------------------------------------------------
+
+async fn run_guest(wasm: &str, mounts: Vec<Mount>) -> Recorder {
+    let recorder = Recorder::default();
+    let backends = Backends::defaults().await.vcs(recorder.clone());
+    let status = Deployment::new()
+        .guest("guest", wasm)
+        .mounts(mounts)
+        .run_host::<WasiVcs, _>(backends)
+        .await
+        .expect("guest runs");
+    assert_eq!(status, ExitStatus::SUCCESS, "guest `{wasm}` failed");
+    recorder
+}
+
+fn shown(path: &Path) -> String {
+    path.display().to_string()
+}
+
+// The place's path is informational; the handle it holds must be the very
+// directory that path names, so a backend working through it works there.
+fn held(place: &Place) -> String {
+    let by_handle = place.dir().dir_metadata().expect("place handle metadata");
+    let by_path = Dir::open_ambient_dir(place.path(), ambient_authority())
+        .and_then(|dir| dir.dir_metadata())
+        .expect("place path opens");
+    assert_eq!(
+        (by_handle.dev(), by_handle.ino()),
+        (by_path.dev(), by_path.ino()),
+        "place handle is the directory at `{}`",
+        place.path().display()
+    );
+    shown(place.path())
 }
 
 // ------------------------------------------------------------------------

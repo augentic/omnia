@@ -29,6 +29,33 @@ use omnia_wasi_vcs::WasiVcs;
 use omnia_wasi_websocket::WasiWebSocket;
 use tokio::net::TcpListener;
 
+// notes every bucket opened, then hands the call to the default it wraps
+#[derive(Clone, Debug)]
+struct RecordingKeyValue {
+    inner: KeyValueDefault,
+    opened: Arc<Mutex<Vec<String>>>,
+}
+
+impl KeyValueClient for RecordingKeyValue {
+    fn open_bucket(&self, identifier: String) -> FutureResult<Arc<dyn Bucket>> {
+        self.opened.lock().expect("opened buckets").push(identifier.clone());
+        self.inner.open_bucket(identifier)
+    }
+}
+
+type WasiBackends = Backends<
+    ModelDefault,
+    KeyValueDefault,
+    BlobStoreDefault,
+    DocStoreDefault,
+    SqlDefault,
+    VaultDefault,
+    MessagingDefault,
+    IdentityStub,
+    OtelDefault,
+    ScriptedVcs,
+>;
+
 test_programs::foreach_conformance!();
 
 // A production `runtime!` as an embedder would write it: the compiled-in
@@ -240,20 +267,6 @@ async fn pinned_path_guest() {
     assert!(format!("{error:#}").contains("not its declared digest"), "{error:#}");
 }
 
-// notes every bucket opened, then hands the call to the default it wraps
-#[derive(Clone, Debug)]
-struct RecordingKeyValue {
-    inner: KeyValueDefault,
-    opened: Arc<Mutex<Vec<String>>>,
-}
-
-impl KeyValueClient for RecordingKeyValue {
-    fn open_bucket(&self, identifier: String) -> FutureResult<Arc<dyn Bucket>> {
-        self.opened.lock().expect("opened buckets").push(identifier.clone());
-        self.inner.open_bucket(identifier)
-    }
-}
-
 #[tokio::test]
 async fn swapped_keyvalue() {
     let defaults = Backends::defaults().await;
@@ -308,19 +321,6 @@ fn scratch_mounts() {
     assert_eq!(scratch.mount_as("project", false).name, "project");
     assert_eq!(mount.path, scratch.path());
 }
-
-type WasiBackends = Backends<
-    ModelDefault,
-    KeyValueDefault,
-    BlobStoreDefault,
-    DocStoreDefault,
-    SqlDefault,
-    VaultDefault,
-    MessagingDefault,
-    IdentityStub,
-    OtelDefault,
-    ScriptedVcs,
->;
 
 async fn serve_origin() -> String {
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind loopback");

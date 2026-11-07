@@ -6,6 +6,9 @@ mod error;
 #[cfg(feature = "http")]
 pub mod mcp;
 
+pub use crate::capabilities::*;
+pub use crate::error::*;
+
 /// Blobstore metadata value types.
 pub mod blobstore {
     pub use omnia_backend::blobstore::{ContainerMetadata, ObjectMetadata};
@@ -30,10 +33,11 @@ pub mod keyvalue {
     pub use omnia_backend::keyvalue::BUCKET;
 }
 
-/// SQL table value types.
+/// SQL table value types and typed row decoding.
 #[cfg(feature = "sql")]
 pub mod sql {
-    pub use omnia_backend::sql::{DataType, Field, Row};
+    pub use omnia_backend::sql::{ColumnError, DataType, Field, FromColumn, FromRow, Row};
+    pub use omnia_guest_macros::FromRow;
 }
 
 /// Secret vault wire constants.
@@ -44,7 +48,7 @@ pub mod vault {
 #[cfg(feature = "http")]
 #[doc(hidden)]
 pub use axum;
-pub use omnia_guest_macros::Provider;
+pub use omnia_guest_macros::{Provider, Settings};
 #[doc(hidden)]
 pub mod http {
     pub use ::http::*;
@@ -57,8 +61,3 @@ pub use {
     omnia_wasi_blobstore, omnia_wasi_http, omnia_wasi_identity, omnia_wasi_keyvalue,
     omnia_wasi_messaging, omnia_wasi_otel, omnia_wasi_vault, omnia_wasi_vcs, wasip3, wit_bindgen,
 };
-
-#[cfg(feature = "http")]
-pub use crate::api::http::{HttpError, HttpResult};
-pub use crate::capabilities::*;
-pub use crate::error::*;

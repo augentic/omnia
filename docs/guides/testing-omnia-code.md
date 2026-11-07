@@ -33,7 +33,7 @@ The target gate on the dev line is the canonical shape for a guest crate: handle
 A guest wires its routers to `omnia_sdk::WasiProvider`, which implements every capability trait over the WASI bindings on `wasm32`:
 
 ```rust,ignore
-omnia_sdk::http!(router(omnia_sdk::WasiProvider));
+omnia_sdk::api::http::export!(http_router);
 ```
 
 A test runs the same handler against `omnia_test::guest::Provider`, which implements every capability trait over one `pub` field per double, each seeded through a consuming builder of the same name:
@@ -56,6 +56,8 @@ async fn device_site_header() {
 ```
 
 The handler's own bounds pick out the capabilities it touches, so a test seeds only those fields and leaves the rest at their defaults. `StateStore`, `BlobStore`, and `Vault` share one `storage` field — one `Memory` serves all three, the shape a production provider's storage backend has. The full field/double table is on the struct's rustdoc: `MapConfig`, `MatchedHttp`, `FixedIdentity`, `Sink` (for `Publish` and `Broadcast`), `Memory`, `MemoryDocs`, `ScriptedTables`, `ScriptedModel` (for `Model`), `ScriptedLoader` (for `Plugins`), and `ScriptedVcs` (for `Vcs`).
+
+A test that drives the router rather than a handler builds it once, `handlers().with_state(Client::new(provider.clone()))`, and runs one request through it with `omnia_test::guest::send(&router, request)`, which answers the reply with its body collected, or one delivery with `omnia_test::guest::deliver(&router, topic, payload)`.
 
 Every capability trait is also implemented for `Arc<T>`, `&T`, and `Box<T>`, so a handler bounded on `P: StateStore` accepts `Arc<Memory>` directly.
 

@@ -36,8 +36,6 @@ use super::WasiHttp;
 /// The streaming body of a response produced by [`HttpHandler::handle`].
 pub type OutgoingBody = UnsyncBoxBody<Bytes, anyhow::Error>;
 
-const HTTP_ADDR: &str = "0.0.0.0:8080";
-
 #[instrument("http-server", skip(state))]
 pub async fn run<B>(state: &Runtime<B>) -> Result<()>
 where
@@ -313,6 +311,38 @@ where
     }
 }
 
+// The sender drops once the body is consumed (or the wrapper dropped); its
+// receiver keeps `run_concurrent` alive while hyper streams the response.
+struct BodyDoneWrapper<B> {
+    body: B,
+    _tx: oneshot::Sender<()>,
+}
+
+impl<B> Body for BodyDoneWrapper<B>
+where
+    B: Body + Unpin,
+{
+    type Data = B::Data;
+    type Error = B::Error;
+
+    fn poll_frame(
+        self: Pin<&mut Self>, cx: &mut TaskContext<'_>,
+    ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
+        let inner = Pin::new(&mut self.get_mut().body);
+        inner.poll_frame(cx)
+    }
+
+    fn size_hint(&self) -> SizeHint {
+        self.body.size_hint()
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.body.is_end_stream()
+    }
+}
+
+const HTTP_ADDR: &str = "0.0.0.0:8080";
+
 // rebuild the uri with scheme and authority set, so they reach the guest
 fn fix_request<T>(request: http::Request<T>) -> Result<http::Request<T>> {
     let p_and_q =
@@ -356,36 +386,6 @@ fn fix_request<T>(request: http::Request<T>) -> Result<http::Request<T>> {
     let request = http::Request::from_parts(parts, body);
 
     Ok(request)
-}
-
-// The sender drops once the body is consumed (or the wrapper dropped); its
-// receiver keeps `run_concurrent` alive while hyper streams the response.
-struct BodyDoneWrapper<B> {
-    body: B,
-    _tx: oneshot::Sender<()>,
-}
-
-impl<B> Body for BodyDoneWrapper<B>
-where
-    B: Body + Unpin,
-{
-    type Data = B::Data;
-    type Error = B::Error;
-
-    fn poll_frame(
-        self: Pin<&mut Self>, cx: &mut TaskContext<'_>,
-    ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
-        let inner = Pin::new(&mut self.get_mut().body);
-        inner.poll_frame(cx)
-    }
-
-    fn size_hint(&self) -> SizeHint {
-        self.body.size_hint()
-    }
-
-    fn is_end_stream(&self) -> bool {
-        self.body.is_end_stream()
-    }
 }
 
 const BODY: &str = r"<!doctype html>

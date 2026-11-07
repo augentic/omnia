@@ -1,4 +1,4 @@
-//! An instrumented function's span reaches the host: `command!` owns the
+//! An instrumented function's span reaches the host: `command::export!` owns the
 //! telemetry lifecycle here, so `traced` records into it and the flush at
 //! the end of the run exports the span.
 
@@ -6,7 +6,7 @@
 
 use tracing::Level;
 
-omnia_sdk::command!(scenario);
+omnia_sdk::api::command::export!(scenario);
 
 async fn scenario() {
     traced().await;
@@ -15,4 +15,9 @@ async fn scenario() {
 // ERROR-level: the span must pass the guest's default `EnvFilter` (the test
 // environment sets no `RUST_LOG`).
 #[omnia_wasi_otel::instrument(level = Level::ERROR)]
-async fn traced() {}
+async fn traced() {
+    sync_traced();
+}
+
+#[omnia_wasi_otel::instrument(level = Level::ERROR)]
+fn sync_traced() {}
