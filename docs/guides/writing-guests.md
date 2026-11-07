@@ -66,13 +66,15 @@ async fn create_item<P>(
     context: Context<P>, Json(input): Json<CreateItem>,
 ) -> Result<Json<ItemReply>, Error>
 where
-    P: Config + StateStore + 'static,
+    P: Config + StateStore,
 {
     // context.config() and context.state() are the capabilities in the fn's bounds
 }
 ```
 
 A **messaging or command handler** is an `async fn(Context<P>, I) -> Result<O, E>` named for the operation, taking the context first as an HTTP handler does and the input DTO by value. Every fn of that shape is a `Handler<P, I>` through a blanket impl, as is any `Clone` closure of it — so a closure can carry configuration into a route. Implementing `Handler<P, I>` by hand on a local non-fn type is the escape hatch for the rare case a fn cannot express. To unit-test a fn that takes a context without a `Client` or a router, build its context with `Context::new(provider, metadata)`.
+
+On either transport a handler's bound on `P` is the capability traits it reaches and nothing more. The `Send + Sync + 'static` the routers need belong to the fn that registers the handler, which `Handlers<P>` carries and `omnia_sdk::Capabilities` (every capability trait plus those three) states in one name for a fn generic over the whole provider.
 
 Logic shared by an HTTP route and a topic lives in a plain fn both call: the axum handler extracts and hands over, the messaging handler decodes and hands over.
 
@@ -93,11 +95,11 @@ omnia_sdk::api::http::export!(http_router);
 
 One `Handlers<P>` maps every transport's events onto handlers: an HTTP route is registered through axum's own `get`/`post`/`put`/`patch`/`delete` (`route`), a messaging topic by exact name (`topic`), and a CLI subcommand by name (`command`), and `with_state(Client::new(provider))` closes them into the one `Router<P>`. Each transport's `export!` macro (`http::export!`, `messaging::export!`, or `command::export!`) binds its WASI export, calling the router fn with `WasiProvider` (or a custom provider passed as a second argument), and expands to the `#[omnia_wasi_otel::instrument]`-scoped export on `wasm32` and to nothing on native targets. The HTTP export also layers `api::http::trace`, which serves each request inside a `handler` span carrying the request and correlation ids, the method, and the matched route; a native test can layer it with `axum::middleware::from_fn(trace)`. A delivery and a subcommand run inside the same span through the router's dispatch, which names the `topic` or the `command`.
 
-Messaging uses `api::Router` and `topic("items.created", item_created)`; topic matching is exact. A module registers its HTTP routes and topics on an `api::Handlers<P>` of its own, with no client, and the guest merges each (`Handlers::from([..])` or `Router::merge`) and closes the whole into its one `api::Router<P>` with `Handlers::with_state`; a path or topic registered twice panics where the two meet. `topic` decodes JSON; `topic_with(topic, handler, decode)` takes a decoder `Fn(&Delivery) -> Result<I, DecodeError>` over the whole `Delivery` for any other wire format.
+Messaging is `topic("items.created", item_created)` on the same `Handlers<P>`; topic matching is exact. A module registers its HTTP routes and topics on an `api::Handlers<P>` of its own, with no client, and the guest merges each (`Handlers::from([..])` or `Handlers::merge`) and closes the whole into its one `api::Router<P>` with `Handlers::with_state`, the router's only constructor; a path or topic registered twice panics where the two meet. `topic` decodes JSON; `topic_with(topic, handler, decode)` takes a decoder `Fn(&Delivery) -> Result<I, DecodeError>` over the whole `Delivery` for any other wire format.
 
 ### Errors
 
-An HTTP handler's error is anything `IntoResponse`. An `omnia_sdk::Error` (`bad_request!`, `not_found!`, `server_error!`, `bad_gateway!`) becomes the JSON `api::ErrorBody` (`{"error","message"}`) at the variant's status, the same envelope the command transport writes to stderr; `?` on an `anyhow::Error` or a `serde_json::Error` converts into it. A domain error with its own wire shape (another status, another content type such as an XML fault) implements `IntoResponse` itself and delegates its host-failure variant to `omnia_sdk::Error::into_response`. A malformed body or query is refused by axum's extractor before the handler runs (`400`, or `415` without `Content-Type: application/json`).
+An HTTP handler's error is anything `IntoResponse`. An `omnia_sdk::Error` becomes the JSON `api::ErrorBody` (`{"error","message"}`) at the variant's status, the same envelope the command transport writes to stderr; `?` on an `anyhow::Error` or a `serde_json::Error` converts into it. The macros `bad_request!`, `not_found!`, `server_error!`, and `bad_gateway!` build a variant under its default code; `Error::bad_request(code, description)` and its siblings name the code, for a specification's own reason code (`"segment_unknown"`). A domain error with its own wire shape (another status, another content type such as an XML fault) implements `IntoResponse` itself and delegates its host-failure variant to `omnia_sdk::Error::into_response`. A malformed body or query is refused by axum's extractor before the handler runs (`400`, or `415` without `Content-Type: application/json`).
 
 ## HTTP handlers
 
@@ -172,16 +174,13 @@ When writing `wasm32`-only code (as in `examples/`), you can also call the `omni
 
 ## Handling incoming messages
 
-A guest can export a messaging handler alongside (or instead of) an HTTP handler. Build an `omnia_sdk::api::Router` over your provider and export it with `messaging::export!`:
+A guest can export a messaging handler alongside (or instead of) an HTTP handler. Register the topics on a `Handlers<P>`, close it over your provider, and export the router fn with `messaging::export!`:
 
 ```rust,noplayground
-use omnia_sdk::api::{Client, Router, messaging};
+use omnia_sdk::api::{Client, Handlers, Router, messaging};
 
-pub fn messaging_router<P>(provider: P) -> Router<P>
-where
-    P: StateStore + Clone + Send + Sync + 'static,
-{
-    Router::new(Client::new(provider)).topic("items.created", on_item_created)
+pub fn messaging_router<P: StateStore + 'static>(provider: P) -> Router<P> {
+    Handlers::new().topic("items.created", on_item_created).with_state(Client::new(provider))
 }
 
 messaging::export!(messaging_router);
@@ -204,14 +203,15 @@ impl omnia_wasi_messaging::incoming_handler::Guest for Messaging {
 
 ## Command-mode guests
 
-For run-once workloads (jobs, CLIs, agent tasks), `omnia_sdk::api::command` is the command-line transport over the [handler contract](#the-handler-contract). A subcommand is one more handler on the same `Handlers<P>` a module registers its paths and topics on: `command(name, handler)` adds it, the root merges the modules (`Handlers::from([..])` or `Handlers::merge`), and `with_state(Client::new(provider))` closes the whole into the `Router<P>` that `run`s argv. The clap-backed parts (`Handlers::command`, the router's program methods and `run`, `parse`, `completions`, the `clap::ValueEnum` derive on `Format`) sit behind the `command` cargo feature (`omnia-sdk = { version = "...", features = ["command"] }`); the low-level `Command` projector needs no feature.
+For run-once workloads (jobs, CLIs, agent tasks), `omnia_sdk::api::command` is the command-line transport over the [handler contract](#the-handler-contract). A subcommand is one more handler on the same `Handlers<P>` a module registers its paths and topics on: `command(name, handler)` adds it, the root merges the modules (`Handlers::from([..])` or `Handlers::merge`), and `with_state(Client::new(provider))` closes the whole into the `Router<P>` that `run`s argv. The clap-backed parts (`Handlers::command`, the router's program methods and `run`, `parse`, `completions`, the `clap::ValueEnum` derive on `command::Format`) sit behind the `command` cargo feature (`omnia-sdk = { version = "...", features = ["command"] }`); the low-level `Command` projector needs no feature.
 
 ```rust,noplayground
 use std::fmt;
 
 use clap::Args;
 use omnia_sdk::Error;
-use omnia_sdk::api::{Client, Context, Handlers, Render, Router, command};
+use omnia_sdk::api::command::{self, Render};
+use omnia_sdk::api::{Client, Context, Handlers, Router};
 use serde::Serialize;
 
 /// Sync items from a source.
@@ -248,9 +248,9 @@ command::export!(command_router, MyProvider);
 
 The pieces, in the order argv flows through them:
 
-- **`Handlers::command(name, handler)`** registers a subcommand whose input implements `clap::Args` (`()` included) and whose output implements `Serialize` and `Render`; the input's doc comments are its help text, the struct's for the subcommand and each field's for its argument. **`command_with(subcommand, handler, decode)`** takes a `clap::Command` and a decoder `Fn(&ArgMatches) -> Result<I, DecodeError>` for any other grammar, as `topic_with` does for a wire format; a decoder's refusal is a `bad_request` envelope. The closed `Router` declares global `--format text|json` and `-v`/`--verbose` / `-q`/`--quiet` (`Verbosity`), answers `--help` and `--version` on stdout at exit 0, and renders clap usage errors on stderr at `USAGE_EXIT` (64, `EX_USAGE`). `Router::completions(shell)` (or `completions::<App>(shell, name)` for a custom grammar) produces a shell-completion script as a `Response`; `Shell` is re-exported from `clap_complete`.
+- **`Handlers::command(name, handler)`** registers a subcommand whose input implements `clap::Args` (`()` included) and whose output implements `Serialize` and `command::Render`; the input's doc comments are its help text, the struct's for the subcommand and each field's for its argument. **`command_with(subcommand, handler, decode)`** takes a `clap::Command` and a decoder `Fn(&ArgMatches) -> Result<I, DecodeError>` for any other grammar, as `topic_with` does for a wire format; a decoder's refusal is a `bad_request` envelope. The closed `Router` declares global `--format text|json` and `-v`/`--verbose` / `-q`/`--quiet` (`Verbosity`), answers `--help` and `--version` on stdout at exit 0, and renders clap usage errors on stderr at `USAGE_EXIT` (64, `EX_USAGE`). `Router::completions(shell)` (or `completions::<App>(shell, name)` for a custom grammar) produces a shell-completion script as a `Response`; `Shell` is re-exported from `clap_complete`.
 - **The program** is the router: `--version` answers the guest crate's `CARGO_PKG_VERSION` and `--help` opens with its `CARGO_PKG_DESCRIPTION`, both stamped by `command::export!`; `Router::name` (default `argv[0]`), `version`, `about`, and `env_prefix` override them, and `Router::hints(|error| ..)` attaches a remedy hint to every failure that carries none.
-- **`Command::new(&client, &metadata, format)`** is the underlying projector the router dispatches through, and the escape hatch for a hand-written clap grammar: `parse::<App>(argv) -> Parsed` classifies argv, and `command.call(handler, input)` runs one verb through `Client::call`, encoding a success body in the selected `Format` onto stdout at exit 0 — `Format::Text` is the output's `Render` form, `Format::Json` the output pretty-printed with a trailing newline.
+- **`Command::new(&client, &metadata, format)`** is the underlying projector the router dispatches through, and the escape hatch for a hand-written clap grammar: `parse::<App>(argv) -> Parsed` classifies argv, and `command.call(handler, input)` runs one verb through `Client::call`, encoding a success body in the selected `command::Format` onto stdout at exit 0 — `Format::Text` is the output's `Render` form, `Format::Json` the output pretty-printed with a trailing newline.
 - **`Response { stdout, stderr, exit }`** buffers both channels. `command::export!(command_router)` binds a router fn (or a zero-argument `async fn` returning `IntoExit`) as the `wasi:cli/run` export and writes the channels at that boundary through `IntoExit`: a `BrokenPipe` on either channel (a reader that went away) keeps the response's own exit, any other refused channel exits 3. Because the channels are whole buffers, a command that must stream writes to the process channels itself and returns `Result<(), u8>` or `()`, which the export also accepts; a guest that needs its own export writes the raw `wasip3` export and calls `command::execute_wasi` itself.
 - **`Metadata::from_env(prefix)`** reads `<PREFIX>_REQUEST_ID`, `<PREFIX>_CORRELATION_ID`, `<PREFIX>_CAUSATION_ID`, and `<PREFIX>_TENANT` from the environment (`Router::run` derives the default prefix from the program name, or `.env_prefix(..)` sets it; `run_with` takes explicit metadata). A missing request id is minted from `wasi:random`, as on every transport, so a command invocation is as observable as an HTTP request: the router runs the verb in a `handler` span carrying the request and correlation ids and the `command`.
 
@@ -258,8 +258,8 @@ The pieces, in the order argv flows through them:
 
 A decode or handler error becomes a `Failure` envelope on stderr, in the same `Format` as a success body, and the process exits with `Error::exit_code()`:
 
-| Error class | `error` (from the macros) | Exit | HTTP status |
-| ----------- | ------------------------- | ---- | ----------- |
+| Error class | `error` (the macros' default code) | Exit | HTTP status |
+| ----------- | ---------------------------------- | ---- | ----------- |
 | `BadRequest` | `bad_request` | 1 | 400 |
 | `NotFound` | `not_found` | 2 | 404 |
 | `ServerError` | `server_error` | 3 | 500 |

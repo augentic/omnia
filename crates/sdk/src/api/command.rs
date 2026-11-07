@@ -23,8 +23,8 @@
 //! use std::fmt;
 //!
 //! use clap::Args;
-//! use omnia_sdk::api::command;
-//! use omnia_sdk::api::{Client, Context, Handlers, Render, Router};
+//! use omnia_sdk::api::command::{self, Render};
+//! use omnia_sdk::api::{Client, Context, Handlers, Router};
 //! use serde::Serialize;
 //!
 //! /// Greet someone by name.
@@ -62,7 +62,7 @@ use std::sync::Arc;
 
 use serde::{Serialize, Serializer};
 
-use crate::api::{Client, ErrorBody, Format, Handler, Metadata, Render};
+use crate::api::{Client, ErrorBody, Handler, Metadata};
 
 #[doc(hidden)]
 #[macro_export]
@@ -190,6 +190,85 @@ impl IntoExit for () {
 impl IntoExit for Result<(), u8> {
     fn into_exit(self) -> Result<(), u8> {
         self
+    }
+}
+
+/// The wire format a handler output is encoded into: the body's [`Render`]
+/// form as text, its [`Serialize`] form as JSON.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "command", derive(clap::ValueEnum))]
+pub enum Format {
+    /// Human-readable text.
+    Text,
+
+    /// Pretty-printed JSON with a trailing newline.
+    Json,
+}
+
+impl Format {
+    /// Encode a body: its [`Render`] form for [`Format::Text`], its
+    /// [`Serialize`] form for [`Format::Json`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if `body` fails to render (a `String` sink never does) or to
+    /// serialize; both are invariant violations for a derived DTO encoded
+    /// into memory, not runtime conditions.
+    pub fn encode<T: Serialize + Render>(self, body: &T) -> Encoded {
+        match self {
+            Self::Text => {
+                let mut out = String::new();
+                body.render(&mut out).expect("a String sink never fails");
+                Encoded {
+                    bytes: out.into_bytes(),
+                    media_type: "text/plain; charset=utf-8",
+                }
+            }
+            Self::Json => {
+                let mut bytes = serde_json::to_vec_pretty(body).expect("a derived DTO serializes");
+                bytes.push(b'\n');
+                Encoded {
+                    bytes,
+                    media_type: "application/json",
+                }
+            }
+        }
+    }
+}
+
+/// An encoded body with its media type.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Encoded {
+    /// The encoded body bytes.
+    pub bytes: Vec<u8>,
+
+    /// The media type describing `bytes`.
+    pub media_type: &'static str,
+}
+
+/// The text form of a body, for [`Format::Text`].
+///
+/// [`Serialize`] gives a handler output its JSON form; this gives it the
+/// line-oriented one a command writes to stdout. `()` renders nothing and
+/// `String` renders itself followed by a newline.
+pub trait Render {
+    /// Write the text form to `out`.
+    ///
+    /// # Errors
+    ///
+    /// Propagates the sink's formatting failure.
+    fn render(&self, out: &mut dyn fmt::Write) -> fmt::Result;
+}
+
+impl Render for () {
+    fn render(&self, _out: &mut dyn fmt::Write) -> fmt::Result {
+        Ok(())
+    }
+}
+
+impl Render for String {
+    fn render(&self, out: &mut dyn fmt::Write) -> fmt::Result {
+        writeln!(out, "{self}")
     }
 }
 

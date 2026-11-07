@@ -70,14 +70,14 @@ Each entry pairs a **WASI host** (the interface guests see, e.g. `WasiKeyValue`)
 
 ## Step 4: Use a stateful capability
 
-In application handlers, capabilities are traits on `context.provider()` (implemented by `WasiProvider` in the guest and by `omnia_test::guest::Provider` in native tests), such as `StateStore` for key-value storage:
+In application handlers, capabilities are traits the context's accessors borrow the provider as (implemented by `WasiProvider` in the guest and by `omnia_test::guest::Provider` in native tests), such as `StateStore` for key-value storage through `context.state()`:
 
 ```rust,noplayground
-async fn store_item<P: StateStore + 'static>(
+async fn store_item<P: StateStore>(
     context: Context<P>, Json(input): Json<ItemInput>,
 ) -> Result<Json<ItemReply>, Error> {
-    context.provider().set("my_key", input.body.as_bytes(), None).await?;
-    let res = context.provider().get("my_key").await?;
+    context.state().set("my_key", input.body.as_bytes(), None).await?;
+    let res = context.state().get("my_key").await?;
     tracing::debug!("found val: {res:?}");
     // ...
 }

@@ -6,7 +6,7 @@ use std::future::{Ready, ready};
 use std::sync::{Arc, Mutex};
 
 use omnia_sdk::api::messaging::{Delivery, DeliveryError};
-use omnia_sdk::api::{Client, Context, DecodeError, Handlers, Router};
+use omnia_sdk::api::{Client, Context, DecodeError, Handlers};
 use serde::{Deserialize, Serialize};
 
 use self::support::{Spans, fields};
@@ -53,7 +53,7 @@ fn delivery(topic: Option<&str>, payload: &[u8]) -> Delivery {
 
 #[tokio::test]
 async fn messaging_exact_topic() {
-    let router = Router::new(Client::new(())).topic("events.created", echo);
+    let router = Handlers::new().topic("events.created", echo).with_state(Client::new(()));
 
     router
         .handle(delivery(Some("events.created"), br#"{"name":"message","count":2}"#))
@@ -67,7 +67,7 @@ async fn messaging_exact_topic() {
 
 #[tokio::test]
 async fn messaging_failures() {
-    let router = Router::new(Client::new(())).topic("events", echo);
+    let router = Handlers::new().topic("events", echo).with_state(Client::new(()));
 
     assert_eq!(
         router.handle(delivery(None, br#"{"name":"message"}"#)).await,
@@ -82,7 +82,7 @@ async fn messaging_failures() {
 #[tokio::test]
 async fn topic_span() {
     let (spans, _guard) = Spans::install();
-    let router = Router::new(Client::new(())).topic("events.created", echo);
+    let router = Handlers::new().topic("events.created", echo).with_state(Client::new(()));
     let delivery = Delivery {
         topic: Some("events.created".to_string()),
         payload: br#"{"name":"message"}"#.to_vec(),
@@ -108,7 +108,7 @@ async fn topic_span() {
 #[tokio::test]
 async fn rejected_delivery_span() {
     let (spans, _guard) = Spans::install();
-    let router = Router::new(Client::new(())).topic("events.created", echo);
+    let router = Handlers::new().topic("events.created", echo).with_state(Client::new(()));
     let delivery = Delivery {
         topic: Some("events.created".to_string()),
         payload: b"not-json".to_vec(),
@@ -133,16 +133,15 @@ async fn rejected_delivery_span() {
 #[test]
 #[should_panic(expected = "duplicate messaging topic")]
 fn dup_topic() {
-    let _router = Router::new(Client::new(())).topic("events", echo).topic("events", echo);
+    let _handlers = Handlers::<()>::new().topic("events", echo).topic("events", echo);
 }
 
 #[tokio::test]
 async fn messaging_merged_routes() {
     let created = Handlers::new().topic("events.created", echo);
     let deleted = Handlers::new().topic("events.deleted", echo);
-    let router = Router::new(Client::new(()))
-        .merge(Handlers::from([created, deleted]))
-        .topic("events.updated", echo);
+    let updated = Handlers::new().topic("events.updated", echo);
+    let router = Handlers::from([created, deleted, updated]).with_state(Client::new(()));
 
     for topic in ["events.created", "events.deleted", "events.updated"] {
         router
@@ -167,14 +166,6 @@ fn dup_topic_across() {
         Handlers::<()>::new().topic("events", echo).merge(Handlers::new().topic("events", echo));
 }
 
-#[test]
-#[should_panic(expected = "duplicate messaging topic `events`")]
-fn dup_topic_merged() {
-    let _router = Router::new(Client::new(()))
-        .topic("events", echo)
-        .merge(Handlers::new().topic("events", echo));
-}
-
 fn raw_text<P: Send + Sync + 'static>(
     _context: Context<P>, input: RawText,
 ) -> Ready<Result<String, omnia_sdk::Error>> {
@@ -183,14 +174,15 @@ fn raw_text<P: Send + Sync + 'static>(
 
 #[tokio::test]
 async fn topic_with_raw_payload() {
-    let router =
-        Router::new(Client::new(())).topic_with("events.raw", raw_text, |delivery: &Delivery| {
+    let router = Handlers::new()
+        .topic_with("events.raw", raw_text, |delivery: &Delivery| {
             std::str::from_utf8(&delivery.payload)
                 .map(|text| RawText {
                     text: text.to_owned(),
                 })
                 .map_err(|error| DecodeError::new(format!("payload is not utf-8: {error}")))
-        });
+        })
+        .with_state(Client::new(()));
 
     router
         .handle(delivery(Some("events.raw"), b"not-json"))
@@ -208,7 +200,7 @@ async fn tenant_metadata() {
             ready(Ok::<(), omnia_sdk::Error>(()))
         }
     };
-    let router = Router::new(Client::new(())).topic("events", record);
+    let router = Handlers::new().topic("events", record).with_state(Client::new(()));
 
     router
         .handle(delivery(Some("events"), br#"{"name":"message"}"#))

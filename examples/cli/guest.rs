@@ -14,7 +14,8 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use clap::{Args, ValueEnum};
-use omnia_sdk::api::{Client, Context, Handlers, Render, Router, command};
+use omnia_sdk::api::command::{self, Render};
+use omnia_sdk::api::{Client, Context, Handlers, Router};
 use omnia_sdk::{Error, bad_gateway, bad_request, not_found, server_error};
 use serde::Serialize;
 

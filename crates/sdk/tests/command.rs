@@ -11,9 +11,10 @@ use std::future::{Ready, ready};
 
 use clap::{Args, Parser, Subcommand};
 use omnia_sdk::api::command::{
-    Command, Failure, IntoExit, Parsed, Response, Shell, USAGE_EXIT, Verbosity, completions, parse,
+    Command, Failure, Format, IntoExit, Parsed, Render, Response, Shell, USAGE_EXIT, Verbosity,
+    completions, parse,
 };
-use omnia_sdk::api::{Client, Context, DecodeError, Format, Handlers, Metadata, Render, Router};
+use omnia_sdk::api::{Client, Context, DecodeError, Handlers, Metadata};
 use omnia_sdk::{bad_request, not_found};
 use serde::{Deserialize, Serialize};
 
@@ -65,6 +66,26 @@ impl Render for Greeting {
 #[derive(Args, Debug, Deserialize)]
 struct Lookup {
     id: String,
+}
+
+#[test]
+fn format_encode() {
+    let greeting = Greeting {
+        text: "hello, ada".to_string(),
+    };
+
+    let text = Format::Text.encode(&greeting);
+    assert_eq!(text.media_type, "text/plain; charset=utf-8");
+    assert_eq!(text.bytes, b"hello, ada\n");
+
+    let json = Format::Json.encode(&greeting);
+    assert_eq!(json.media_type, "application/json");
+    let json = String::from_utf8(json.bytes).expect("json is utf-8");
+    assert!(json.ends_with('\n'));
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&json).expect("decode json"),
+        serde_json::json!({ "text": "hello, ada" })
+    );
 }
 
 #[test]
@@ -323,9 +344,9 @@ async fn hints_apply_by_error() {
 async fn merged_commands() {
     let greeting = Handlers::new().command("greet", greet);
     let looking = Handlers::new().command("lookup", lookup);
-    let router = Handlers::from([greeting, looking])
+    let pinging = Handlers::new().command("ping", ping);
+    let router = Handlers::from([greeting, looking, pinging])
         .with_state(Client::new(()))
-        .command("ping", ping)
         .name("app")
         .version("1.2.3")
         .about("Greets people")
@@ -445,7 +466,7 @@ async fn command_with_decoder() {
 #[test]
 #[should_panic(expected = "duplicate command `greet`")]
 fn duplicate_command() {
-    let _router = Router::new(Client::new(())).command("greet", greet).command("greet", greet);
+    let _handlers = Handlers::<()>::new().command("greet", greet).command("greet", greet);
 }
 
 #[cfg(feature = "http")]

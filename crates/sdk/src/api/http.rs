@@ -78,9 +78,6 @@ macro_rules! __export_http {
 #[doc(inline)]
 pub use crate::__export_http as export;
 
-/// A finished `axum::Router` ready to serve requests, or one over state `S`.
-pub type Router<S = ()> = axum::Router<S>;
-
 /// Serve a request inside a `handler` span carrying its request and
 /// correlation ids, its method, and its route.
 ///

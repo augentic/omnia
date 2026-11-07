@@ -51,7 +51,7 @@ pub mod http;
 pub mod messaging;
 
 #[cfg(feature = "command")]
-use self::command::{Commands, Failure, Program, Response, Shell};
+use self::command::{Commands, Failure, Program, Render, Response, Shell};
 use self::messaging::{Delivery, DeliveryError, Topics};
 
 /// An input that could not be decoded into handler input.
@@ -99,85 +99,6 @@ impl From<&crate::Error> for ErrorBody {
             error: error.code(),
             message: error.description(),
         }
-    }
-}
-
-/// The wire format a handler output is encoded into: the body's [`Render`]
-/// form as text, its [`Serialize`] form as JSON.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-#[cfg_attr(feature = "command", derive(clap::ValueEnum))]
-pub enum Format {
-    /// Human-readable text.
-    Text,
-
-    /// Pretty-printed JSON with a trailing newline.
-    Json,
-}
-
-impl Format {
-    /// Encode a body: its [`Render`] form for [`Format::Text`], its
-    /// [`Serialize`] form for [`Format::Json`].
-    ///
-    /// # Panics
-    ///
-    /// Panics if `body` fails to render (a `String` sink never does) or to
-    /// serialize; both are invariant violations for a derived DTO encoded
-    /// into memory, not runtime conditions.
-    pub fn encode<T: Serialize + Render>(self, body: &T) -> Encoded {
-        match self {
-            Self::Text => {
-                let mut out = String::new();
-                body.render(&mut out).expect("a String sink never fails");
-                Encoded {
-                    bytes: out.into_bytes(),
-                    media_type: "text/plain; charset=utf-8",
-                }
-            }
-            Self::Json => {
-                let mut bytes = serde_json::to_vec_pretty(body).expect("a derived DTO serializes");
-                bytes.push(b'\n');
-                Encoded {
-                    bytes,
-                    media_type: "application/json",
-                }
-            }
-        }
-    }
-}
-
-/// An encoded body with its media type.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Encoded {
-    /// The encoded body bytes.
-    pub bytes: Vec<u8>,
-
-    /// The media type describing `bytes`.
-    pub media_type: &'static str,
-}
-
-/// The text form of a body, for [`Format::Text`].
-///
-/// [`Serialize`] gives a handler output its JSON form; this gives it the
-/// line-oriented one a command writes to stdout. `()` renders nothing and
-/// `String` renders itself followed by a newline.
-pub trait Render {
-    /// Write the text form to `out`.
-    ///
-    /// # Errors
-    ///
-    /// Propagates the sink's formatting failure.
-    fn render(&self, out: &mut dyn fmt::Write) -> fmt::Result;
-}
-
-impl Render for () {
-    fn render(&self, _out: &mut dyn fmt::Write) -> fmt::Result {
-        Ok(())
-    }
-}
-
-impl Render for String {
-    fn render(&self, out: &mut dyn fmt::Write) -> fmt::Result {
-        writeln!(out, "{self}")
     }
 }
 
@@ -498,8 +419,8 @@ impl<P: Send + Sync + 'static> Handlers<P> {
     /// through [`clap::Args`].
     ///
     /// The input's doc comment is the subcommand's `--help` text; the
-    /// output's [`Serialize`] and [`Render`] forms answer `--format json` and
-    /// `--format text`.
+    /// output's [`Serialize`] and [`Render`] forms answer
+    /// `--format json` and `--format text`.
     ///
     /// # Panics
     ///
@@ -611,11 +532,13 @@ impl<P: Send + Sync + 'static> From<Handlers<P>> for axum::Router<Client<P>> {
 /// A finished router backed by a [`Client`], ready to serve HTTP requests,
 /// dispatch messaging deliveries, and run argv.
 ///
-/// With the `command` feature the router is also the program clap shows
-/// around its subcommands: [`name`](Self::name), [`version`](Self::version),
-/// [`about`](Self::about), and [`env_prefix`](Self::env_prefix) set what
-/// `--help`, `--version`, and [`Metadata::from_env`] read, and
-/// [`hints`](Self::hints) the remedy every failure may carry.
+/// [`Handlers::with_state`] is the one way to build it: every route, topic,
+/// and subcommand is registered on a [`Handlers`] first. With the `command`
+/// feature the router is also the program clap shows around its subcommands:
+/// [`name`](Self::name), [`version`](Self::version), [`about`](Self::about),
+/// and [`env_prefix`](Self::env_prefix) set what `--help`, `--version`, and
+/// [`Metadata::from_env`] read, and [`hints`](Self::hints) the remedy every
+/// failure may carry.
 #[must_use = "a router serves nothing until it handles a request or delivery or runs argv"]
 pub struct Router<P: Send + Sync + 'static = ()> {
     client: Client<P>,
@@ -627,22 +550,6 @@ pub struct Router<P: Send + Sync + 'static = ()> {
 }
 
 impl<P: Send + Sync + 'static> Router<P> {
-    /// Create an empty router backed by a client.
-    pub fn new(client: Client<P>) -> Self {
-        Handlers::new().with_state(client)
-    }
-
-    /// Register a [`MethodRouter`] at `path`.
-    ///
-    /// # Panics
-    ///
-    /// Panics when `path` overlaps an existing route for the same method.
-    #[cfg(feature = "http")]
-    pub fn route(mut self, path: &str, method_router: MethodRouter<Client<P>>) -> Self {
-        self.http = self.http.route(path, method_router.with_state(self.client.clone()));
-        self
-    }
-
     /// Apply a [`tower::Layer`] to every HTTP route on this router.
     #[cfg(feature = "http")]
     pub fn layer<L>(mut self, layer: L) -> Self
@@ -657,72 +564,6 @@ impl<P: Send + Sync + 'static> Router<P> {
         <L::Service as tower::Service<::http::Request<axum::body::Body>>>::Future: Send + 'static,
     {
         self.http = self.http.layer(layer);
-        self
-    }
-
-    /// Register one handler for one exact topic, decoding the payload as JSON.
-    ///
-    /// # Panics
-    ///
-    /// Panics when the topic is empty or already registered.
-    pub fn topic<F, I>(mut self, topic: impl Into<String>, handler: F) -> Self
-    where
-        F: Handler<P, I>,
-        I: DeserializeOwned + Send + 'static,
-    {
-        self.topics = self.topics.route(topic, handler);
-        self
-    }
-
-    /// Register one handler for one exact topic with a decoder over the whole delivery.
-    ///
-    /// # Panics
-    ///
-    /// Panics when the topic is empty or already registered.
-    pub fn topic_with<F, I, D>(mut self, topic: impl Into<String>, handler: F, decode: D) -> Self
-    where
-        F: Handler<P, I>,
-        I: Send + 'static,
-        D: Fn(&Delivery) -> Result<I, DecodeError> + Send + Sync + 'static,
-    {
-        self.topics = self.topics.route_with(topic, handler, decode);
-        self
-    }
-
-    /// Register one handler for one subcommand, decoding its arguments
-    /// through [`clap::Args`].
-    ///
-    /// # Panics
-    ///
-    /// Panics when `name` is empty or already registered.
-    #[cfg(feature = "command")]
-    pub fn command<F, I>(mut self, name: impl Into<String>, handler: F) -> Self
-    where
-        F: Handler<P, I>,
-        F::Output: Serialize + Render,
-        F::Error: Into<Failure>,
-        I: clap::Args + Send + 'static,
-    {
-        self.program.commands = self.program.commands.route(name, handler);
-        self
-    }
-
-    /// Register one handler for one [`clap::Command`] subcommand with a
-    /// decoder over its [`clap::ArgMatches`].
-    ///
-    /// # Panics
-    ///
-    /// Panics when the subcommand's name is empty or already registered.
-    #[cfg(feature = "command")]
-    pub fn command_with<F, I, D>(mut self, command: clap::Command, handler: F, decode: D) -> Self
-    where
-        F: Handler<P, I>,
-        F::Output: Serialize + Render,
-        F::Error: Into<Failure>,
-        I: Send + 'static,
-        D: Fn(&clap::ArgMatches) -> Result<I, DecodeError> + Send + Sync + 'static,
-    {
-        self.program.commands = self.program.commands.route_with(command, handler, decode);
         self
     }
 
@@ -771,25 +612,6 @@ impl<P: Send + Sync + 'static> Router<P> {
         mut self, hint: impl Fn(&crate::Error) -> Option<Cow<'static, str>> + Send + Sync + 'static,
     ) -> Self {
         self.program.hint = Some(Arc::new(hint));
-        self
-    }
-
-    /// Take every route, topic, and subcommand of `handlers`.
-    ///
-    /// # Panics
-    ///
-    /// Panics when a path of `handlers` overlaps an existing route for the same
-    /// method, or a topic or subcommand of `handlers` is already registered.
-    pub fn merge(mut self, handlers: Handlers<P>) -> Self {
-        #[cfg(feature = "http")]
-        {
-            self.http = self.http.merge(handlers.http.with_state(self.client.clone()));
-        }
-        self.topics = self.topics.merge(handlers.topics);
-        #[cfg(feature = "command")]
-        {
-            self.program.commands = self.program.commands.merge(handlers.commands);
-        }
         self
     }
 

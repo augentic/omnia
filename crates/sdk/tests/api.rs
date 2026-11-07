@@ -15,7 +15,7 @@ use axum::routing::get;
 use http::header::CONTENT_TYPE;
 use http::{Request, StatusCode};
 use omnia_sdk::api::http::trace;
-use omnia_sdk::api::{Client, Context, ErrorBody, Format, Handlers, Metadata, Render, Router};
+use omnia_sdk::api::{Client, Context, ErrorBody, Handlers, Metadata, Router};
 use omnia_sdk::{Config, StateStore, not_found};
 use omnia_test::guest::{self, MapConfig, Provider};
 use serde::{Deserialize, Serialize};
@@ -54,13 +54,7 @@ struct ProviderObservation {
     call: usize,
 }
 
-#[derive(Debug, Serialize)]
-struct Summary {
-    name: String,
-    count: u32,
-}
-
-fn echo<P: Send + Sync + 'static>(
+fn echo<P: Send + Sync>(
     context: Context<P>, input: EchoInput,
 ) -> Ready<Result<EchoOutput, omnia_sdk::Error>> {
     ready(Ok(EchoOutput {
@@ -73,7 +67,7 @@ fn echo<P: Send + Sync + 'static>(
     }))
 }
 
-async fn echo_route<P: Send + Sync + 'static>(
+async fn echo_route<P: Send + Sync>(
     context: Context<P>, Query(input): Query<EchoInput>,
 ) -> Result<Json<EchoOutput>, omnia_sdk::Error> {
     echo(context, input).await.map(Json)
@@ -352,33 +346,6 @@ async fn anyhow_error_body() {
     assert_eq!(body.error, "server_error");
     assert!(body.message.contains("could not save"), "the context is kept: {}", body.message);
     assert!(body.message.contains("disk full"), "the cause is kept: {}", body.message);
-}
-
-impl Render for Summary {
-    fn render(&self, out: &mut dyn std::fmt::Write) -> std::fmt::Result {
-        write!(out, "{} x{}", self.name, self.count)
-    }
-}
-
-#[test]
-fn format_encode() {
-    let summary = Summary {
-        name: "widget".to_string(),
-        count: 3,
-    };
-
-    let text = Format::Text.encode(&summary);
-    assert_eq!(text.media_type, "text/plain; charset=utf-8");
-    assert_eq!(text.bytes, b"widget x3");
-
-    let json = Format::Json.encode(&summary);
-    assert_eq!(json.media_type, "application/json");
-    let json = String::from_utf8(json.bytes).expect("json is utf-8");
-    assert!(json.ends_with('\n'));
-    assert_eq!(
-        serde_json::from_str::<serde_json::Value>(&json).expect("decode json"),
-        serde_json::json!({ "name": "widget", "count": 3 })
-    );
 }
 
 #[test]
