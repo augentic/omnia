@@ -30,8 +30,8 @@ use std::fmt::Debug;
 pub use default_impl::VaultDefault;
 pub use omnia_backend::vault::{Locker, VaultClient};
 pub use omnia_core::FutureResult;
-use omnia_core::{Host, Server, StoreView};
-use wasmtime::component::{HasData, Linker};
+use omnia_core::{Host, HostCtx, Server, StoreView};
+use wasmtime::component::Linker;
 
 use self::generated::omnia::vault::vault;
 use crate::host::generated::Error;
@@ -41,12 +41,8 @@ pub use crate::host::resource::*;
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Host-side service for `wasi:vault`.
-#[derive(Debug)]
+#[derive(Debug, HostCtx)]
 pub struct WasiVault;
-
-impl HasData for WasiVault {
-    type Data<'a> = WasiVaultView<'a>;
-}
 
 impl<T> Host<T> for WasiVault
 where
@@ -60,4 +56,3 @@ where
 impl<B> Server<B> for WasiVault {}
 
 omnia_core::host_error!(Error, Other);
-omnia_core::wasi_view!(Vault);

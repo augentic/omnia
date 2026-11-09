@@ -39,8 +39,8 @@ pub use omnia_backend::vcs::{
     Change, ChangeKind, CloneOptions, Entry, Error, Merged, Place, Rule, Strategy, VcsClient,
 };
 pub use omnia_core::FutureResult;
-use omnia_core::{HasMounts, Host, Server, StoreView};
-use wasmtime::component::{Access, Accessor, HasData, Linker};
+use omnia_core::{HasMounts, Host, HostCtx, Server, StoreView};
+use wasmtime::component::{Access, Accessor, Linker};
 
 pub use self::generated::omnia::vcs::types::Error as WitError;
 use self::generated::omnia::vcs::types::{Host as TypesHost, Location};
@@ -51,12 +51,8 @@ use self::location::Intent;
 pub type Result<T> = std::result::Result<T, WitError>;
 
 /// Host-side service for `omnia:vcs`.
-#[derive(Debug)]
+#[derive(Debug, HostCtx)]
 pub struct WasiVcs;
-
-impl HasData for WasiVcs {
-    type Data<'a> = WasiVcsView<'a>;
-}
 
 impl<T> Host<T> for WasiVcs
 where
@@ -111,7 +107,6 @@ fn to_wit_error(err: Error) -> WitError {
 
 // An untyped host failure is an `other` error at the boundary.
 omnia_core::host_error!(WitError, Other);
-omnia_core::wasi_view!(Vcs);
 
 impl TypesHost for WasiVcsView<'_> {
     fn convert_error(&mut self, err: WitError) -> wasmtime::Result<WitError> {

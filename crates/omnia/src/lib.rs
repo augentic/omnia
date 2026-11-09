@@ -29,10 +29,10 @@ pub use omnia_core::{
     Proxy, Registry, RegistryParts, RegistrySource, ResolvedPreopen, Routes, Runtime,
     RuntimeOptions, RuntimeParts, Server, Source, SourceSpec, Stdio, StoreBase, StoreConfig,
     StoreCtx, StoreFactory, StoreView, Telemetry, TriggerRouter, Verified, WeakRuntime, get_cloned,
-    host_error, serve_links, telemetry, wasi_view,
+    host_error, serve_links, telemetry,
 };
 #[doc(hidden)]
-pub use omnia_core::{pastey, tokio, wasmtime, wasmtime_wasi};
+pub use omnia_core::{tokio, wasmtime, wasmtime_wasi};
 #[doc(inline)]
 pub use omnia_host_macros::runtime;
 #[cfg(feature = "link")]

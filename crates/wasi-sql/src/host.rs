@@ -36,8 +36,8 @@ use std::fmt::Debug;
 pub use default_impl::{ConnectOptions, SqlDefault};
 pub use omnia_backend::sql::{Connection, DataType, Field, Row, SqlClient};
 pub use omnia_core::FutureResult;
-use omnia_core::{Host, Server, StoreView};
-use wasmtime::component::{HasData, Linker};
+use omnia_core::{Host, HostCtx, Server, StoreView};
+use wasmtime::component::Linker;
 
 use self::generated::wasi::sql::{readwrite, types};
 pub use crate::host::resource::*;
@@ -59,12 +59,8 @@ impl Error {
 }
 
 /// Host-side service for `wasi:sql`.
-#[derive(Debug)]
+#[derive(Debug, HostCtx)]
 pub struct WasiSql;
-
-impl HasData for WasiSql {
-    type Data<'a> = WasiSqlView<'a>;
-}
 
 impl<T> Host<T> for WasiSql
 where
@@ -79,5 +75,3 @@ where
 impl<B> Server<B> for WasiSql {}
 
 omnia_core::host_error!(Error, Other);
-
-omnia_core::wasi_view!(Sql);

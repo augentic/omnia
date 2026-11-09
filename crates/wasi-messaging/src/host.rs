@@ -40,8 +40,8 @@ pub use omnia_backend::messaging::{
     RequestOptions, Subscriptions, dispatch,
 };
 pub use omnia_core::FutureResult;
-use omnia_core::{Host, Runtime, Server, StoreCtx, StoreView};
-use wasmtime::component::{HasData, Linker};
+use omnia_core::{Host, HostCtx, Runtime, Server, StoreCtx, StoreView};
+use wasmtime::component::Linker;
 
 pub use self::generated::MessagingRequestReply;
 use self::generated::wasi::messaging::types::Error as WitError;
@@ -53,12 +53,8 @@ pub use self::server::MessagingHandler;
 pub type Result<T> = std::result::Result<T, WitError>;
 
 /// Host-side service for `wasi:messaging`.
-#[derive(Debug)]
+#[derive(Debug, HostCtx)]
 pub struct WasiMessaging;
-
-impl HasData for WasiMessaging {
-    type Data<'a> = WasiMessagingView<'a>;
-}
 
 impl<T> Host<T> for WasiMessaging
 where
@@ -82,4 +78,3 @@ where
 }
 
 omnia_core::host_error!(WitError, Other);
-omnia_core::wasi_view!(Messaging);

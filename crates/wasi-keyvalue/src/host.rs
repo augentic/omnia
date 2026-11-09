@@ -35,8 +35,8 @@ use std::fmt::Debug;
 pub use default_impl::KeyValueDefault;
 pub use omnia_backend::keyvalue::{Bucket, KeyValueClient};
 pub use omnia_core::FutureResult;
-use omnia_core::{Host, Server, StoreView};
-use wasmtime::component::{HasData, Linker};
+use omnia_core::{Host, HostCtx, Server, StoreView};
+use wasmtime::component::Linker;
 
 use self::generated::omnia::keyvalue::ttl;
 use self::generated::wasi::keyvalue::store::Error;
@@ -47,12 +47,8 @@ pub use self::resource::*;
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Host-side service for `wasi:keyvalue`.
-#[derive(Debug)]
+#[derive(Debug, HostCtx)]
 pub struct WasiKeyValue;
-
-impl HasData for WasiKeyValue {
-    type Data<'a> = WasiKeyValueView<'a>;
-}
 
 impl<T> Host<T> for WasiKeyValue
 where
@@ -69,4 +65,3 @@ where
 impl<B> Server<B> for WasiKeyValue {}
 
 omnia_core::host_error!(Error, Other);
-omnia_core::wasi_view!(KeyValue);

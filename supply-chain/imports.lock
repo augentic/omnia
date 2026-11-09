@@ -1810,12 +1810,6 @@ criteria = "safe-to-deploy"
 version = "0.2.19"
 notes = "As advertised: a numeric library. The only `unsafe` is from some float-to-int conversions, which seems expected."
 
-[[audits.bytecode-alliance.audits.pastey]]
-who = "Chris Fallin <chris@cfallin.org>"
-criteria = "safe-to-deploy"
-version = "0.2.1"
-notes = "No unsafe code."
-
 [[audits.bytecode-alliance.audits.percent-encoding]]
 who = "Alex Crichton <alex@alexcrichton.com>"
 criteria = "safe-to-deploy"
@@ -2569,12 +2563,6 @@ who = "Lars Eggert <lars@eggert.org>"
 criteria = "safe-to-deploy"
 delta = "0.1.0 -> 0.2.0"
 notes = "Revision only removes code"
-aggregated-from = "https://raw.githubusercontent.com/mozilla-firefox/firefox/main/supply-chain/audits.toml"
-
-[[audits.mozilla.audits.pastey]]
-who = "Lars Eggert <lars@eggert.org>"
-criteria = "safe-to-deploy"
-delta = "0.2.1 -> 0.2.3"
 aggregated-from = "https://raw.githubusercontent.com/mozilla-firefox/firefox/main/supply-chain/audits.toml"
 
 [[audits.mozilla.audits.percent-encoding]]

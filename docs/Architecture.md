@@ -85,7 +85,7 @@ Layers 1 and 2 form the **runtime core** — domain-agnostic infrastructure that
 `omnia-core` is the live-runtime SDK a capability crate targets. Depend on it directly only when building another capability crate. It provides:
 
 - **Runtime handle**: `Runtime<B>` over `StoreCtx<B>`, assembled from `RuntimeParts`; `Registry` holds pre-instantiated guests beside the declared sources not yet loaded, and `Runtime::guest` is the one seam every use resolves through — a declared guest loads there on its first use
-- **Core traits**: `Host`, `Server`, `Connect` (re-exported from `omnia-backend`)
+- **Core traits**: `Host`, `Server`, `Connect` (re-exported from `omnia-backend`); `HostCtx`, `Provides`, and `StoreView`, the seam between a host and the bundle that serves it (see [Extending Omnia](#extending-omnia))
 - **Link seam**: the `LinkSeam` trait and `NoLinks` no-op the registry drives; guest→guest linking itself lives in `omnia-link` (`InProcessLinks`)
 - **Host→guest dispatch**: `Dispatcher`, a named-target call through `call_fresh` (the same primitive guest→guest links use)
 - **Telemetry**: `Telemetry`, the host's `tracing` subscriber — console logging with the OTLP span and metric exporters beneath it — and `telemetry::{flush, resource}` over the providers it publishes
@@ -248,7 +248,30 @@ Production backends live in the sibling [`omnia-backends`](https://github.com/au
 
 ## Extending Omnia
 
-**Adding a WASI interface**: create `crates/wasi-<name>/` with the standard layout, define the WIT world in `wit/`, add the `<Name>Client` trait in `omnia-backend`, implement guest bindings in `src/guest.rs` and the host (plus `<Name>Default`) in `src/host/`, and create an example. Unit-test deterministic logic (including the default backend against its `XxxClient`); do not add tests that compile or instantiate a WASM guest (see the [testing policy](guides/testing-policy.md)).
+A host and a backend meet through three `omnia-core` traits, with a macro generating each side. For the `runtime!` row `WasiKeyValue: Redis`:
+
+```text
+Redis: Connect + KeyValueClient          the backend the deployment connects
+   |  runtime!: Backends { redis } and impl Provides<WasiKeyValue> for Backends
+   v
+StoreCtx<Backends>                       one per guest store
+   |  StoreView<WasiKeyValue>, the library blanket:
+   |  WasiKeyValue::view(backends.borrow(), &mut base.table)
+   v
+WasiKeyValueView { client, table }       #[derive(HostCtx)]: the host's HasData::Data
+   |  bindgen Host* impls on the view; Host::add_to_linker(linker, T::view)
+   v
+wasmtime Linker                          wasi:keyvalue/* resolved for the guest
+```
+
+A backend implements the `<Name>Client` contract and never sees the view; a host implements the WIT functions on the view and never sees the bundle. `runtime!` supplies the bundle's `Provides` impl per row, `#[derive(HostCtx)]` supplies the host's borrow and view, and the `StoreView` blanket on `StoreCtx` joins them.
+
+**Adding a WASI interface**: create `crates/wasi-<name>/` with the standard layout, define the WIT world in `wit/`, and add the `<Name>Client` trait (plus any resource traits) to `omnia-backend`. Then, in the crate:
+
+- `src/host.rs` binds the world with `wasmtime::component::bindgen!`, declares `#[derive(Debug, HostCtx)] pub struct Wasi<Name>;` with `<Name>Client` in scope, implements `Host<T> where T: StoreView<Self>` to call each generated `add_to_linker(linker, T::view)`, implements `Server<B>` (the no-op default, for a capability host), and maps host failures with `host_error!`.
+- `src/host/*_impl.rs` implement the generated `Host*` traits on `Wasi<Name>View<'_>`, reaching the backend through `.client` and WIT resources through `.table`.
+- `src/host/default_impl.rs` is `<Name>Default`, the in-tree backend; `src/guest.rs` holds the guest bindings.
+- A `test-programs` program and its paired e2e row prove the interface from a real guest (see the [testing policy](guides/testing-policy.md)); unit tests cover only deterministic logic no guest boundary reaches.
 
 **Adding a backend**: create a crate (usually in the `omnia-backends` repo), implement `Connect` with a `FromEnv`-derived `ConnectOptions`, implement the `XxxClient` trait(s) for the interfaces it serves, and add `#[ignore]`-gated live tests. No runtime-core changes are required — backends plug in through the `runtime!` host map.
 

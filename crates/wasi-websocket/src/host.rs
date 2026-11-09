@@ -38,8 +38,8 @@ use std::fmt::Debug;
 pub use default_impl::{ConnectOptions, WebSocketDefault};
 pub use omnia_backend::websocket::{Endpoint, Event, Events, WebSocketClient};
 pub use omnia_core::FutureResult;
-use omnia_core::{Host, Runtime, Server, StoreCtx, StoreView};
-use wasmtime::component::{HasData, Linker};
+use omnia_core::{Host, HostCtx, Runtime, Server, StoreCtx, StoreView};
+use wasmtime::component::Linker;
 
 pub use self::generated::Duplex;
 pub use self::generated::omnia::websocket::types::Error;
@@ -51,12 +51,8 @@ pub use self::server::WebSocketHandler;
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Host-side service for `wasi:websocket`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, HostCtx)]
 pub struct WasiWebSocket;
-
-impl HasData for WasiWebSocket {
-    type Data<'a> = WasiWebSocketView<'a>;
-}
 
 impl<T> Host<T> for WasiWebSocket
 where
@@ -79,4 +75,3 @@ where
 }
 
 omnia_core::host_error!(Error, Other);
-omnia_core::wasi_view!(WebSocket);

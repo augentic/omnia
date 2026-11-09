@@ -34,8 +34,8 @@ pub use omnia_backend::docstore::{
     SortField,
 };
 pub use omnia_core::FutureResult;
-use omnia_core::{Host, Server, StoreView};
-use wasmtime::component::{HasData, Linker};
+use omnia_core::{Host, HostCtx, Server, StoreView};
+use wasmtime::component::Linker;
 
 pub use self::generated::omnia::docstore::types::Error;
 use self::generated::omnia::docstore::{store, types};
@@ -45,12 +45,8 @@ pub use self::resource::*;
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Host-side service for `omnia:docstore`.
-#[derive(Debug)]
+#[derive(Debug, HostCtx)]
 pub struct WasiDocStore;
-
-impl HasData for WasiDocStore {
-    type Data<'a> = WasiDocStoreView<'a>;
-}
 
 impl<T> Host<T> for WasiDocStore
 where
@@ -65,4 +61,3 @@ where
 impl<B> Server<B> for WasiDocStore {}
 
 omnia_core::host_error!(Error, Other);
-omnia_core::wasi_view!(DocStore);

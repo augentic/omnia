@@ -50,6 +50,38 @@ pub trait Server<B>: Debug + Sync + Send {
 /// [`HasData::Data`] view from that borrow plus the store's resource table.
 /// The `runtime!` macro never derives names from the host type — everything
 /// it needs rides these associated items.
+///
+/// A host over one `<Service>Client` derives the impl with
+/// [`#[derive(HostCtx)]`](derive@crate::HostCtx), which also emits the
+/// `Wasi<Service>View` it assembles and the [`HasData`] impl naming it.
+/// Combined with a bundle `B: Provides<Self>`, [`StoreCtx<B>`](crate::StoreCtx)
+/// satisfies [`StoreView<Self>`](crate::StoreView) through the blanket impl.
+/// A host with another borrow shape, such as `WasiHttp`, implements it by hand.
+///
+/// # Examples
+///
+/// ```
+/// use omnia_core::{HostCtx, Provides, StoreCtx, StoreView};
+///
+/// pub trait FooClient {}
+///
+/// /// Host-side service for `omnia:foo`.
+/// #[derive(Debug, HostCtx)]
+/// pub struct WasiFoo;
+///
+/// struct Backends<C>(C);
+///
+/// impl<C: FooClient + Send> Provides<WasiFoo> for Backends<C> {
+///     fn borrow(&mut self) -> &mut dyn FooClient {
+///         &mut self.0
+///     }
+/// }
+///
+/// fn assert_store_view<T: StoreView<WasiFoo>>() {}
+/// fn check<C: FooClient + Send + 'static>() {
+///     assert_store_view::<StoreCtx<Backends<C>>>();
+/// }
+/// ```
 pub trait HostCtx: HasData {
     /// What this host borrows from the backend bundle.
     type Borrow<'a>;
@@ -98,10 +130,9 @@ impl<T: ?Sized> Deref for Proxy<T> {
 
 /// Access to the store's resource table from a WASI view.
 ///
-/// Implemented by the `Wasi<Service>View` types the [`wasi_view!`] macro
-/// generates, enabling the generic [`get_cloned`] table lookup.
-///
-/// [`wasi_view!`]: crate::wasi_view
+/// Implemented by the `Wasi<Service>View` types
+/// [`#[derive(HostCtx)]`](derive@crate::HostCtx) generates, enabling the
+/// generic [`get_cloned`] table lookup.
 pub trait HasTable {
     /// The store's resource table.
     fn table(&mut self) -> &mut ResourceTable;

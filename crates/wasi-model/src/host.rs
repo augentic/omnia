@@ -40,8 +40,8 @@ pub use omnia_backend::model::{
     ToolTurn, Transcript, Usage, WorkerGrant,
 };
 pub use omnia_core::FutureResult;
-use omnia_core::{HasMounts, Host, Server, StoreView};
-use wasmtime::component::{HasData, Linker};
+use omnia_core::{HasMounts, Host, HostCtx, Server, StoreView};
+use wasmtime::component::Linker;
 
 use self::generated::omnia::model::completion;
 pub use self::generated::omnia::model::completion::{Error as WitError, Grants, WorkspaceGrant};
@@ -50,12 +50,8 @@ pub use self::generated::omnia::model::completion::{Error as WitError, Grants, W
 pub type Result<T> = std::result::Result<T, WitError>;
 
 /// Host-side service for `wasi:model`.
-#[derive(Debug)]
+#[derive(Debug, HostCtx)]
 pub struct WasiModel;
-
-impl HasData for WasiModel {
-    type Data<'a> = WasiModelView<'a>;
-}
 
 impl<T> Host<T> for WasiModel
 where
@@ -70,4 +66,3 @@ impl<B> Server<B> for WasiModel {}
 
 // An untyped host failure is a `backend` error at the boundary.
 omnia_core::host_error!(WitError, Backend);
-omnia_core::wasi_view!(Model);

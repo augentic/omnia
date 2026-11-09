@@ -36,9 +36,9 @@ pub use bytes::Bytes;
 pub use default_impl::BlobStoreDefault;
 pub use omnia_backend::blobstore::{BlobStoreClient, Container, ContainerMetadata, ObjectMetadata};
 pub use omnia_core::FutureResult;
-use omnia_core::{Host, Server, StoreView};
+use omnia_core::{Host, HostCtx, Server, StoreView};
 pub use resource::*;
-use wasmtime::component::{HasData, Linker};
+use wasmtime::component::Linker;
 use wasmtime_wasi::p2::pipe::MemoryOutputPipe;
 
 use self::generated::wasi::blobstore::{blobstore, container, types};
@@ -120,12 +120,8 @@ impl StreamObjectNames {
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Host-side service for `wasi:blobstore`.
-#[derive(Debug)]
+#[derive(Debug, HostCtx)]
 pub struct WasiBlobStore;
-
-impl HasData for WasiBlobStore {
-    type Data<'a> = WasiBlobStoreView<'a>;
-}
 
 impl<T> Host<T> for WasiBlobStore
 where
@@ -141,5 +137,3 @@ where
 impl<B> Server<B> for WasiBlobStore {}
 
 omnia_core::host_error!(Error, Other);
-
-omnia_core::wasi_view!(BlobStore);

@@ -34,9 +34,9 @@ use std::fmt::Debug;
 pub use default_impl::{ConnectOptions, IdentityDefault};
 pub use omnia_backend::identity::{AccessToken, Identity, IdentityClient};
 pub use omnia_core::FutureResult;
-use omnia_core::{Host, Server, StoreView};
+use omnia_core::{Host, HostCtx, Server, StoreView};
 pub use stub_impl::IdentityStub;
-use wasmtime::component::{HasData, Linker};
+use wasmtime::component::Linker;
 
 use self::generated::omnia::identity::credentials;
 pub use self::resource::*;
@@ -46,12 +46,8 @@ use crate::host::generated::Error;
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Host-side service for `wasi:identity`.
-#[derive(Debug)]
+#[derive(Debug, HostCtx)]
 pub struct WasiIdentity;
-
-impl HasData for WasiIdentity {
-    type Data<'a> = WasiIdentityView<'a>;
-}
 
 impl<T> Host<T> for WasiIdentity
 where
@@ -65,4 +61,3 @@ where
 impl<B> Server<B> for WasiIdentity {}
 
 omnia_core::host_error!(Error, InternalFailure);
-omnia_core::wasi_view!(Identity);

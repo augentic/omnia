@@ -26,8 +26,8 @@ use std::fmt::Debug;
 pub use default_impl::ConfigDefault;
 pub use omnia_backend::config::ConfigClient;
 pub use omnia_core::FutureResult;
-use omnia_core::{Host, Server, StoreView};
-use wasmtime::component::{HasData, Linker};
+use omnia_core::{Host, HostCtx, Server, StoreView};
+use wasmtime::component::Linker;
 
 use self::generated::wasi::config::store::{self, Error, Host as StoreHost};
 
@@ -35,12 +35,8 @@ use self::generated::wasi::config::store::{self, Error, Host as StoreHost};
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Host-side service for `wasi:config`.
-#[derive(Debug)]
+#[derive(Debug, HostCtx)]
 pub struct WasiConfig;
-
-impl HasData for WasiConfig {
-    type Data<'a> = WasiConfigView<'a>;
-}
 
 impl<T> Host<T> for WasiConfig
 where
@@ -54,7 +50,6 @@ where
 impl<B> Server<B> for WasiConfig {}
 
 omnia_core::host_error!(Error, Upstream);
-omnia_core::wasi_view!(Config);
 
 impl StoreHost for WasiConfigView<'_> {
     async fn get(&mut self, key: String) -> Result<Option<String>> {

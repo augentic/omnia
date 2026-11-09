@@ -1,0 +1,5 @@
+error: `#[derive(HostCtx)]` expects a type named `Wasi<Service>`
+ --> tests/ui/not_a_wasi_host.rs:4:12
+  |
+4 | pub struct Foo;
+  |            ^^^
