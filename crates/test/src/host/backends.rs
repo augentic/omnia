@@ -393,7 +393,7 @@ macro_rules! provides {
                 G: MessagingClient + Clone,
                 I: IdentityClient + Clone,
                 O: OtelClient + Clone,
-                C: Clone + Send,
+                C: Clone + Send + Sync,
             {
                 fn borrow(&mut self) -> <$host as HostCtx>::Borrow<'_> {
                     &mut self.$field
