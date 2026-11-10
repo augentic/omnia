@@ -219,7 +219,7 @@ version = "0.2.17"
 criteria = "safe-to-deploy"
 
 [[exemptions.crc32fast]]
-version = "1.5.4"
+version = "1.5.5"
 criteria = "safe-to-deploy"
 
 [[exemptions.crossbeam-channel]]
@@ -347,7 +347,7 @@ version = "2.5.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.fixedbitset]]
-version = "0.5.7"
+version = "0.5.9"
 criteria = "safe-to-deploy"
 
 [[exemptions.flagset]]
@@ -471,7 +471,7 @@ version = "0.10.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.itoa]]
-version = "1.0.18"
+version = "1.0.19"
 criteria = "safe-to-deploy"
 
 [[exemptions.jni]]
@@ -719,7 +719,7 @@ version = "0.17.14"
 criteria = "safe-to-deploy"
 
 [[exemptions.rsqlite-vfs]]
-version = "0.1.1"
+version = "0.2.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.rusqlite]]
@@ -843,7 +843,7 @@ version = "0.8.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.sqlite-wasm-rs]]
-version = "0.5.5"
+version = "0.6.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.stable_deref_trait]]
@@ -971,7 +971,7 @@ version = "0.2.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.uuid]]
-version = "1.29.1"
+version = "1.29.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.version_check]]
