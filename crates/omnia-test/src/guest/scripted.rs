@@ -37,7 +37,7 @@ impl Turn {
 /// Each turn is a success or a typed failure and may carry scripted tool
 /// calls: `complete_with` feeds them to the handler and records each
 /// exchange before the turn's result returns. A call past the script panics;
-/// [`Scripted::then`] opts into a fallback instead.
+/// [`ScriptedModel::then`] opts into a fallback instead.
 ///
 /// A request with `check` set plays the backend's loop: each scripted turn
 /// is one candidate, offered to the handler as the reserved `check` call and
@@ -47,10 +47,10 @@ impl Turn {
 ///
 /// ```
 /// use omnia_sdk::model::{Message, Model as _, Request, Role};
-/// use omnia_test::guest::Scripted;
+/// use omnia_test::guest::ScriptedModel;
 ///
 /// # tokio::runtime::Runtime::new().unwrap().block_on(async {
-/// let model = Scripted::answering(["four"]);
+/// let model = ScriptedModel::answering(["four"]);
 /// let request = Request::builder()
 ///     .messages(vec![Message {
 ///         role: Role::User,
@@ -63,18 +63,18 @@ impl Turn {
 /// # });
 /// ```
 #[derive(Clone, Debug)]
-pub struct Scripted {
+pub struct ScriptedModel {
     script: Script<Request, Turn>,
     exchanges: Arc<Mutex<Vec<Exchange>>>,
 }
 
-impl Default for Scripted {
+impl Default for ScriptedModel {
     fn default() -> Self {
         Self::new([])
     }
 }
 
-impl Scripted {
+impl ScriptedModel {
     /// A script of ordered completion results.
     pub fn new(results: impl IntoIterator<Item = Result<Reply, Error>>) -> Self {
         Self {
@@ -157,7 +157,7 @@ impl Scripted {
 }
 
 // panics when the script is exhausted without a fallback
-impl Model for Scripted {
+impl Model for ScriptedModel {
     fn complete(&self, request: Request) -> impl Future<Output = Result<Reply, Error>> + Send {
         // a single-shot completion has no handler, so tool calls or a check are a harness bug
         assert!(!request.check, "a check requires complete_with");
@@ -321,16 +321,6 @@ pub struct ScriptedLoader {
     inner: Arc<LoaderInner>,
 }
 
-#[derive(Debug, Default)]
-struct LoaderInner {
-    declared: Mutex<BTreeSet<String>>,
-    digests: Mutex<BTreeMap<String, Digest>>,
-    exports: Mutex<BTreeMap<String, Vec<String>>>,
-    default: Mutex<Option<Digest>>,
-    refusals: Mutex<BTreeMap<String, plugins::Error>>,
-    loads: Mutex<Vec<(Location, Option<Digest>)>>,
-}
-
 impl ScriptedLoader {
     /// Declares the guest `name`, so a [`Location::Declared`] load of it
     /// resolves.
@@ -454,6 +444,16 @@ impl Plugins for ScriptedLoader {
     ) -> impl Future<Output = Result<Plugin, plugins::Error>> + Send {
         ready(self.resolve(from, digest))
     }
+}
+
+#[derive(Debug, Default)]
+struct LoaderInner {
+    declared: Mutex<BTreeSet<String>>,
+    digests: Mutex<BTreeMap<String, Digest>>,
+    exports: Mutex<BTreeMap<String, Vec<String>>>,
+    default: Mutex<Option<Digest>>,
+    refusals: Mutex<BTreeMap<String, plugins::Error>>,
+    loads: Mutex<Vec<(Location, Option<Digest>)>>,
 }
 
 // A well-formed, name-specific pin for loads no scenario scripted, so two

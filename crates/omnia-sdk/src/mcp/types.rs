@@ -1,7 +1,5 @@
 //! Model Context Protocol schema types, mirroring the MCP wire format.
 
-use std::fmt;
-
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -173,7 +171,8 @@ impl ResourceContents {
 }
 
 /// A JSON-RPC error returned for a protocol-level failure.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("MCP error {code}: {message}")]
 pub struct McpError {
     /// JSON-RPC error code.
     pub code: i32,
@@ -224,11 +223,3 @@ impl McpError {
         }
     }
 }
-
-impl fmt::Display for McpError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "MCP error {}: {}", self.code, self.message)
-    }
-}
-
-impl std::error::Error for McpError {}

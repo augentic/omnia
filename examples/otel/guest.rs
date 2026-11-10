@@ -9,7 +9,6 @@
 use axum::routing::post;
 use axum::{Json, Router};
 use http::Method;
-use omnia_sdk::HttpResult;
 use opentelemetry::trace::{TraceContextExt, Tracer};
 use opentelemetry::{KeyValue, global};
 use serde_json::{Value, json};
@@ -69,7 +68,7 @@ impl Guest for Http {
 
 #[axum::debug_handler]
 #[omnia_wasi_otel::instrument]
-async fn handler(Json(body): Json<Value>) -> HttpResult<Json<Value>> {
+async fn handler(Json(body): Json<Value>) -> omnia_sdk::Result<Json<Value>> {
     tracing::info!("handling request: {:?}", body);
     Ok(Json(json!({
         "message": "Hello, World!",
@@ -78,6 +77,6 @@ async fn handler(Json(body): Json<Value>) -> HttpResult<Json<Value>> {
 }
 
 // cors preflight
-async fn handle_options() -> HttpResult<()> {
+async fn handle_options() -> omnia_sdk::Result<()> {
     Ok(())
 }

@@ -64,7 +64,7 @@ impl Completion {
 
 /// A FIFO model backend recording every request and session exchange.
 ///
-/// The host-side counterpart of the guest `Scripted` double: answers are
+/// The host-side counterpart of the guest `ScriptedModel` double: answers are
 /// strings (or full [`Answer`]s) the `omnia:model` host hands to the guest
 /// unvalidated, and a turn may drive declared tools and the host-injected
 /// workspace tools through the session before answering. A request with

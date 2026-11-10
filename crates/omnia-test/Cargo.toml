@@ -19,7 +19,8 @@ workspace = true
 # No default: a consumer names the rung it uses, and a build-dependency line
 # that forgets `default-features = false` still pulls nothing but `std`.
 default = []
-# Native doubles for the `omnia_sdk` capability traits, plus the `Provider` that bundles them.
+# Native doubles for the `omnia_sdk` capability traits, plus the `Provider` that bundles them
+# and the `send`/`deliver` router drivers.
 # `omnia-sdk/sql` and `omnia-sdk/docstore` carry the `TableStore` and
 # `DocumentStore` traits the `ScriptedTables` and `MemoryDocs` doubles implement.
 guest = [
@@ -32,7 +33,7 @@ guest = [
     "omnia-sdk/sql",
     "omnia-sdk/docstore",
     "dep:omnia-wasi-docstore",
-    "dep:omnia-wasi-sql",
+    "dep:tower",
 ]
 # The component runtime harness: `Deployment`, `Backends`, `ScriptedModel`, `Scratch`.
 host = [
@@ -84,14 +85,16 @@ omnia-wasi-vault = { workspace = true, optional = true }
 omnia-wasi-vcs = { workspace = true, optional = true }
 omnia-wasi-websocket = { workspace = true, optional = true }
 tempfile = { workspace = true, optional = true }
+tower = { workspace = true, features = ["util"], optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 anyhow.workspace = true
+axum.workspace = true
 bytes.workspace = true
 http.workspace = true
 http-body-util.workspace = true
 omnia = { path = "../omnia" }
-omnia-sdk = { path = "../omnia-sdk", default-features = false }
+omnia-sdk = { path = "../omnia-sdk", default-features = false, features = ["http"] }
 omnia-wasi-blobstore = { path = "../wasi-blobstore" }
 omnia-wasi-config = { path = "../wasi-config" }
 omnia-wasi-keyvalue = { path = "../wasi-keyvalue" }
@@ -115,6 +118,10 @@ required-features = ["guest"]
 
 [[test]]
 name = "guest_stores"
+required-features = ["guest"]
+
+[[test]]
+name = "guest_router"
 required-features = ["guest"]
 
 [[test]]

@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use anyhow::{Context as _, Result, bail};
 use omnia::wasmtime::component::Val;
 use omnia::{Digest, ExitStatus, GuestEntry, GuestId, Runtime, StoreCtx};
-use omnia_test::host::{Backends, Deployment, ScriptedModel, scratch};
+use omnia_test::host::{Backends, Deployment, STATE_BUCKET, ScriptedModel, scratch};
 use omnia_test::{Exchange, SeenFormat};
 use omnia_wasi_blobstore::WasiBlobstoreCtx as _;
 use omnia_wasi_keyvalue::{Bucket, FutureResult, KeyValueDefault, WasiKeyValue, WasiKeyValueCtx};
@@ -272,10 +272,18 @@ async fn swapped_keyvalue() {
 #[tokio::test]
 async fn host_handles() {
     let backends = Backends::defaults().await;
-    let bucket = backends.keyvalue.open_bucket("cache".to_owned()).await.expect("bucket");
+    let bucket = backends.keyvalue.open_bucket(STATE_BUCKET.to_owned()).await.expect("bucket");
     bucket.set("k".to_owned(), b"v".to_vec()).await.expect("set");
     assert_eq!(backends.state("k").await, Some(b"v".to_vec()));
     assert_eq!(backends.state("missing").await, None);
+
+    // a value the guest set with a TTL, in the envelope its cache writes
+    let live = br#"{"value":[119],"expires_at":4102444800}"#;
+    bucket.set("ttl".to_owned(), live.to_vec()).await.expect("set");
+    assert_eq!(backends.state("ttl").await, Some(b"w".to_vec()));
+    let expired = br#"{"value":[119],"expires_at":0}"#;
+    bucket.set("expired".to_owned(), expired.to_vec()).await.expect("set");
+    assert_eq!(backends.state("expired").await, None);
 
     let container = backends.blobstore.create_container("c".to_owned()).await.expect("container");
     container.write_data("o".to_owned(), b"bytes".to_vec().into()).await.expect("write");

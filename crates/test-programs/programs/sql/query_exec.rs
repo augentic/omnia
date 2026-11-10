@@ -9,7 +9,7 @@
 use omnia_wasi_sql::readwrite::{exec, query};
 use omnia_wasi_sql::types::{Connection, DataType, Row, Statement};
 
-omnia_sdk::command!(scenario);
+omnia_sdk::api::command::export!(scenario);
 
 const CREATED: &str = "2024-01-02T03:04:05Z";
 

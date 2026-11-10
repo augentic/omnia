@@ -1,43 +1,26 @@
 //! `Provider`: every capability double bundled into one provider.
 
-use std::any::Any;
-use std::error::Error;
-use std::future::Future;
-
-use anyhow::Result;
-use bytes::Bytes;
-use http_body::Body;
-use omnia_sdk::document_store::{Document, QueryOptions, QueryResult};
-use omnia_sdk::{
-    BlobStore, Broadcast, CasError, Config, ContainerMetadata, DocumentStore, HttpRequest,
-    Identity, Message, Model, ObjectMetadata, Plugins, Publish, StateStore, TableStore, model,
-    plugins,
-};
-use omnia_wasi_sql::{DataType, Row};
-
 use crate::guest::{
-    FixedIdentity, MapConfig, MatchedHttp, Memory, MemoryDocs, Scripted, ScriptedLoader,
-    ScriptedTables, Sink,
+    FixedIdentity, MapConfig, MatchedHttp, Memory, MemoryDocs, ScriptedLoader, ScriptedModel,
+    ScriptedTables, ScriptedVcs, Sink,
 };
 
 /// A provider holding one default double per capability.
 ///
 /// Each capability impl delegates to the `pub` field named for it, seeded
-/// through a consuming builder of the same name. `StateStore` and `BlobStore`
-/// share the one `storage` field, as one [`Memory`] serves both — the shape a
-/// production provider's single storage backend has. No `Vcs` double ships:
-/// a handler over version control scripts its own provider, since a
-/// repository is a tree on disk and no in-memory value stands for one.
+/// through a consuming builder of the same name. `StateStore`, `BlobStore`,
+/// and `Vault` share the one `storage` field, as one [`Memory`] serves all
+/// three — the shape a production provider's storage backend has.
 ///
 /// ```rust
 /// use omnia_sdk::model::{Model as _, Request};
 /// use omnia_sdk::{Config, StateStore as _};
-/// use omnia_test::guest::{MapConfig, Provider, Scripted};
+/// use omnia_test::guest::{MapConfig, Provider, ScriptedModel};
 ///
 /// # tokio::runtime::Runtime::new().unwrap().block_on(async {
 /// let provider = Provider::default()
 ///     .config(MapConfig::default().with([("region", "eu")]))
-///     .model(Scripted::answering(["ok"]));
+///     .model(ScriptedModel::answering(["ok"]));
 /// provider.storage.insert_state("seen", b"1");
 ///
 /// assert_eq!(Config::get(&provider, "region").await.unwrap(), "eu");
@@ -46,28 +29,41 @@ use crate::guest::{
 /// assert_eq!(provider.storage.state("seen"), Some(b"1".to_vec()));
 /// # });
 /// ```
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, omnia_sdk::Provider)]
 pub struct Provider {
     /// The `Config` double.
+    #[provider(Config)]
     pub config: MapConfig,
     /// The `HttpRequest` double.
+    #[provider(HttpRequest)]
     pub http: MatchedHttp,
     /// The `Identity` double.
+    #[provider(Identity)]
     pub identity: FixedIdentity,
     /// The `Publish` double.
+    #[provider(Publish)]
     pub publish: Sink,
     /// The `Broadcast` double.
+    #[provider(Broadcast)]
     pub broadcast: Sink,
-    /// The `StateStore` / `BlobStore` double: one shared `Memory`.
+    /// The `StateStore` / `BlobStore` / `Vault` double: one shared `Memory`.
+    #[provider(StateStore, BlobStore, Vault)]
     pub storage: Memory,
     /// The `DocumentStore` double.
+    #[provider(DocumentStore)]
     pub docs: MemoryDocs,
     /// The `TableStore` double.
+    #[provider(TableStore)]
     pub tables: ScriptedTables,
     /// The `Model` double.
-    pub model: Scripted,
+    #[provider(Model)]
+    pub model: ScriptedModel,
     /// The `Plugins` double.
+    #[provider(Plugins)]
     pub plugins: ScriptedLoader,
+    /// The `Vcs` double.
+    #[provider(Vcs)]
+    pub vcs: ScriptedVcs,
 }
 
 impl Provider {
@@ -129,7 +125,7 @@ impl Provider {
 
     /// Replaces the `model` double.
     #[must_use]
-    pub fn model(mut self, model: Scripted) -> Self {
+    pub fn model(mut self, model: ScriptedModel) -> Self {
         self.model = model;
         self
     }
@@ -140,188 +136,11 @@ impl Provider {
         self.plugins = plugins;
         self
     }
-}
 
-// Several capabilities share method names (`get`, `send`, `delete`, `put`,
-// `query`), so every delegation is a fully qualified trait call.
-
-impl Config for Provider {
-    fn get(&self, key: &str) -> impl Future<Output = Result<String>> + Send {
-        Config::get(&self.config, key)
-    }
-}
-
-impl HttpRequest for Provider {
-    fn fetch<T>(
-        &self, request: http::Request<T>,
-    ) -> impl Future<Output = Result<http::Response<Bytes>>> + Send
-    where
-        T: Body + Any + Send,
-        T::Data: Into<Vec<u8>>,
-        T::Error: Into<Box<dyn Error + Send + Sync + 'static>>,
-    {
-        HttpRequest::fetch(&self.http, request)
-    }
-}
-
-impl Identity for Provider {
-    fn access_token(&self, identity: String) -> impl Future<Output = Result<String>> + Send {
-        Identity::access_token(&self.identity, identity)
-    }
-}
-
-impl Publish for Provider {
-    fn send(&self, topic: &str, message: &Message) -> impl Future<Output = Result<()>> + Send {
-        Publish::send(&self.publish, topic, message)
-    }
-}
-
-impl Broadcast for Provider {
-    fn send(
-        &self, name: &str, data: &[u8], sockets: Option<Vec<String>>,
-    ) -> impl Future<Output = Result<()>> + Send {
-        Broadcast::send(&self.broadcast, name, data, sockets)
-    }
-}
-
-impl StateStore for Provider {
-    fn get(&self, key: &str) -> impl Future<Output = Result<Option<Vec<u8>>>> + Send {
-        StateStore::get(&self.storage, key)
-    }
-
-    fn set(
-        &self, key: &str, value: &[u8], ttl_secs: Option<u64>,
-    ) -> impl Future<Output = Result<Option<Vec<u8>>>> + Send {
-        StateStore::set(&self.storage, key, value, ttl_secs)
-    }
-
-    fn delete(&self, key: &str) -> impl Future<Output = Result<()>> + Send {
-        StateStore::delete(&self.storage, key)
-    }
-
-    fn cas(
-        &self, key: &str, expected: Option<&[u8]>, value: &[u8],
-    ) -> impl Future<Output = Result<(), CasError>> + Send {
-        StateStore::cas(&self.storage, key, expected, value)
-    }
-
-    fn increment(&self, key: &str, delta: i64) -> impl Future<Output = Result<i64>> + Send {
-        StateStore::increment(&self.storage, key, delta)
-    }
-}
-
-impl BlobStore for Provider {
-    fn get(
-        &self, container: &str, name: &str,
-    ) -> impl Future<Output = Result<Option<Vec<u8>>>> + Send {
-        BlobStore::get(&self.storage, container, name)
-    }
-
-    fn put(
-        &self, container: &str, name: &str, data: &[u8],
-    ) -> impl Future<Output = Result<()>> + Send {
-        BlobStore::put(&self.storage, container, name, data)
-    }
-
-    fn delete(&self, container: &str, name: &str) -> impl Future<Output = Result<()>> + Send {
-        BlobStore::delete(&self.storage, container, name)
-    }
-
-    fn list(&self, container: &str) -> impl Future<Output = Result<Vec<String>>> + Send {
-        BlobStore::list(&self.storage, container)
-    }
-
-    fn get_range(
-        &self, container: &str, name: &str, start: u64, end: u64,
-    ) -> impl Future<Output = Result<Vec<u8>>> + Send {
-        BlobStore::get_range(&self.storage, container, name, start, end)
-    }
-
-    fn object_info(
-        &self, container: &str, name: &str,
-    ) -> impl Future<Output = Result<ObjectMetadata>> + Send {
-        BlobStore::object_info(&self.storage, container, name)
-    }
-
-    fn create_container(&self, name: &str) -> impl Future<Output = Result<()>> + Send {
-        BlobStore::create_container(&self.storage, name)
-    }
-
-    fn delete_container(&self, name: &str) -> impl Future<Output = Result<()>> + Send {
-        BlobStore::delete_container(&self.storage, name)
-    }
-
-    fn container_exists(&self, name: &str) -> impl Future<Output = Result<bool>> + Send {
-        BlobStore::container_exists(&self.storage, name)
-    }
-
-    fn container_info(
-        &self, container: &str,
-    ) -> impl Future<Output = Result<ContainerMetadata>> + Send {
-        BlobStore::container_info(&self.storage, container)
-    }
-}
-
-impl DocumentStore for Provider {
-    fn get(&self, store: &str, id: &str) -> impl Future<Output = Result<Option<Document>>> + Send {
-        DocumentStore::get(&self.docs, store, id)
-    }
-
-    fn insert(&self, store: &str, doc: &Document) -> impl Future<Output = Result<()>> + Send {
-        DocumentStore::insert(&self.docs, store, doc)
-    }
-
-    fn put(&self, store: &str, doc: &Document) -> impl Future<Output = Result<()>> + Send {
-        DocumentStore::put(&self.docs, store, doc)
-    }
-
-    fn delete(&self, store: &str, id: &str) -> impl Future<Output = Result<bool>> + Send {
-        DocumentStore::delete(&self.docs, store, id)
-    }
-
-    fn query(
-        &self, store: &str, options: QueryOptions,
-    ) -> impl Future<Output = Result<QueryResult>> + Send {
-        DocumentStore::query(&self.docs, store, options)
-    }
-}
-
-impl TableStore for Provider {
-    fn query(
-        &self, conn_name: String, query: String, params: Vec<DataType>,
-    ) -> impl Future<Output = Result<Vec<Row>>> + Send {
-        TableStore::query(&self.tables, conn_name, query, params)
-    }
-
-    fn exec(
-        &self, conn_name: String, query: String, params: Vec<DataType>,
-    ) -> impl Future<Output = Result<u32>> + Send {
-        TableStore::exec(&self.tables, conn_name, query, params)
-    }
-}
-
-impl Model for Provider {
-    fn complete(
-        &self, request: model::Request,
-    ) -> impl Future<Output = Result<model::Reply, model::Error>> + Send {
-        Model::complete(&self.model, request)
-    }
-
-    fn complete_with<H, F>(
-        &self, request: model::Request, handler: H,
-    ) -> impl Future<Output = Result<model::Reply, model::Error>> + Send
-    where
-        H: FnMut(model::ToolCall) -> F + Send,
-        F: Future<Output = Result<String, String>> + Send,
-    {
-        Model::complete_with(&self.model, request, handler)
-    }
-}
-
-impl Plugins for Provider {
-    fn load(
-        &self, from: &plugins::Location, digest: Option<&plugins::Digest>,
-    ) -> impl Future<Output = Result<plugins::Plugin, plugins::Error>> + Send {
-        Plugins::load(&self.plugins, from, digest)
+    /// Replaces the `vcs` double.
+    #[must_use]
+    pub fn vcs(mut self, vcs: ScriptedVcs) -> Self {
+        self.vcs = vcs;
+        self
     }
 }

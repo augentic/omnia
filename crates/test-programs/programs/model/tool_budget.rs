@@ -2,16 +2,17 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_sdk::model::{Error, Model as _, Request, WasiModel};
+use omnia_sdk::WasiProvider;
+use omnia_sdk::model::{Error, Model as _, Request};
 use test_programs::{lookup, user};
 
-omnia_sdk::command!(scenario);
+omnia_sdk::api::command::export!(scenario);
 
 async fn scenario() {
     let request = Request::builder().messages(vec![user("hi")]).tools(vec![lookup()]).build();
 
     let mut seen = 0_u32;
-    let error = WasiModel
+    let error = WasiProvider
         .complete_with(request, |_call| {
             seen += 1;
             async { Ok::<_, String>("42".to_owned()) }

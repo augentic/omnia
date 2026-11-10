@@ -4,9 +4,7 @@ use std::future::Future;
 
 use anyhow::Result;
 use omnia_sdk::DocumentStore;
-use omnia_sdk::document_store::{
-    ComparisonOp, Document, Filter, QueryOptions, QueryResult, ScalarValue,
-};
+use omnia_sdk::docstore::{ComparisonOp, Document, Filter, QueryOptions, QueryResult, ScalarValue};
 use omnia_wasi_docstore::{DocStoreDefault, FilterTree, QueryOpts, WasiDocStoreCtx};
 
 // The host-side twins of the guest domain types.
@@ -24,7 +22,7 @@ mod host {
 ///
 /// ```
 /// use omnia_sdk::DocumentStore as _;
-/// use omnia_sdk::document_store::{Document, Filter, QueryOptions};
+/// use omnia_sdk::docstore::{Document, Filter, QueryOptions};
 /// use omnia_test::guest::MemoryDocs;
 ///
 /// # tokio::runtime::Runtime::new().unwrap().block_on(async {

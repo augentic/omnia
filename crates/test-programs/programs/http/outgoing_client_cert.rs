@@ -6,20 +6,16 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_sdk::Config;
 use omnia_sdk::http::{Method, Request, StatusCode};
+use omnia_sdk::{Config, WasiProvider};
 
-omnia_sdk::command!(scenario);
-
-struct WasiConfig;
-
-impl Config for WasiConfig {}
+omnia_sdk::api::command::export!(scenario);
 
 async fn scenario() {
-    let origin = WasiConfig.get("ORIGIN").await.expect("ORIGIN seeded");
-    let client_cert = WasiConfig.get("CLIENT_CERT_OK").await.expect("CLIENT_CERT_OK seeded");
+    let origin = WasiProvider.get("ORIGIN").await.expect("ORIGIN seeded");
+    let client_cert = WasiProvider.get("CLIENT_CERT_OK").await.expect("CLIENT_CERT_OK seeded");
     let server_cert =
-        WasiConfig.get("CLIENT_CERT_SERVER").await.expect("CLIENT_CERT_SERVER seeded");
+        WasiProvider.get("CLIENT_CERT_SERVER").await.expect("CLIENT_CERT_SERVER seeded");
 
     let request = Request::builder()
         .method(Method::GET)

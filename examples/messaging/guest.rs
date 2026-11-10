@@ -25,7 +25,6 @@ use axum::routing::post;
 use axum::{Json, Router};
 use bytes::Bytes;
 use http_body_util::Full;
-use omnia_sdk::HttpResult;
 use omnia_wasi_messaging::types::{Client, Error, Message};
 use omnia_wasi_messaging::{producer, request_reply};
 use serde_json::{Value, json};
@@ -45,7 +44,7 @@ impl Guest for Http {
     }
 }
 
-async fn pub_sub(Json(body): Json<Value>) -> HttpResult<Json<Value>> {
+async fn pub_sub(Json(body): Json<Value>) -> omnia_sdk::Result<Json<Value>> {
     tracing::debug!("sending message to topic 'a'");
 
     let client =
@@ -61,7 +60,7 @@ async fn pub_sub(Json(body): Json<Value>) -> HttpResult<Json<Value>> {
     Ok(Json(json!({"message": "message published"})))
 }
 
-async fn request_reply_handler(body: Bytes) -> HttpResult<Json<Value>> {
+async fn request_reply_handler(body: Bytes) -> omnia_sdk::Result<Json<Value>> {
     let client =
         Client::connect("default".to_string()).await.map_err(|e| anyhow!("connect: {e}"))?;
     let message = Message::new(&body);

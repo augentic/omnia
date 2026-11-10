@@ -30,14 +30,10 @@ The target gate on the dev line is the canonical shape for a guest crate: handle
 
 ## Handler rung: `omnia_test::guest::Provider`
 
-A guest declares its production provider as one struct with an empty impl per capability it needs; on `wasm32` each impl picks up the WASI-backed default bodies.
+A guest wires its routers to `omnia_sdk::WasiProvider`, which implements every capability trait over the WASI bindings on `wasm32`:
 
 ```rust,ignore
-/// The connector's capabilities, on the WASI defaults.
-struct Provider;
-
-impl Config for Provider {}
-impl Publish for Provider {}
+omnia_sdk::api::http::export!(http_router);
 ```
 
 A test runs the same handler against `omnia_test::guest::Provider`, which implements every capability trait over one `pub` field per double, each seeded through a consuming builder of the same name:
@@ -59,7 +55,9 @@ async fn device_site_header() {
 }
 ```
 
-The handler's own bounds pick out the capabilities it touches, so a test seeds only those fields and leaves the rest at their defaults. `StateStore` and `BlobStore` share one `storage` field — one `Memory` serves both, the shape a production provider's single storage backend has. The full field/double table is on the struct's rustdoc: `MapConfig`, `MatchedHttp`, `FixedIdentity`, `Sink` (for `Publish` and `Broadcast`), `Memory`, `MemoryDocs`, `ScriptedTables`, `Scripted` (for `Model`), `ScriptedLoader` (for `Plugins`).
+The handler's own bounds pick out the capabilities it touches, so a test seeds only those fields and leaves the rest at their defaults. `StateStore`, `BlobStore`, and `Vault` share one `storage` field — one `Memory` serves all three, the shape a production provider's storage backend has. The full field/double table is on the struct's rustdoc: `MapConfig`, `MatchedHttp`, `FixedIdentity`, `Sink` (for `Publish` and `Broadcast`), `Memory`, `MemoryDocs`, `ScriptedTables`, `ScriptedModel` (for `Model`), `ScriptedLoader` (for `Plugins`), and `ScriptedVcs` (for `Vcs`).
+
+A test that drives the router rather than a handler builds it once, `handlers().with_state(Client::new(provider.clone()))`, and runs one request through it with `omnia_test::guest::send(&router, request)`, which answers the reply with its body collected, or one delivery with `omnia_test::guest::deliver(&router, topic, payload)`.
 
 Every capability trait is also implemented for `Arc<T>`, `&T`, and `Box<T>`, so a handler bounded on `P: StateStore` accepts `Arc<Memory>` directly.
 
@@ -100,7 +98,7 @@ The generated `main` and `run` stay untouched; the test reaches the same hosts t
 
 ### `Backends`
 
-`Backends::defaults()` is deterministic: it reads no environment variable and opens no socket. Config answers from the map seeded by `Backends::config([("KEY", "value")])` alone, the websocket backend serves no listener, and the HTTP client and `SQLite` connection (one private `:memory:` database per bundle) are built from fixed options. Every swappable host is a type parameter of `Backends` defaulting to its in-memory backend, with a consuming setter of the same name: `Backends::model(m)` swaps in any `WasiModelCtx`, and `keyvalue`, `blobstore`, `docstore`, `sql`, `vault`, `messaging`, `identity`, and `otel` take any backend of theirs — a production backend crate's client, or a recording wrapper around the default — so the same guests run over it. `ScriptedModel` is the scripted model, sharing its `Script` core with the handler rung's `Scripted` so a script reads identically at both rungs. Each scripted completion may run tool calls and workspace `read`/`write`/`list` steps ahead of its answer, recording every exchange; an overrun answers the guest softly and fails the test at `assert_exhausted()`.
+`Backends::defaults()` is deterministic: it reads no environment variable and opens no socket. Config answers from the map seeded by `Backends::config([("KEY", "value")])` alone, the websocket backend serves no listener, and the HTTP client and `SQLite` connection (one private `:memory:` database per bundle) are built from fixed options. Every swappable host is a type parameter of `Backends` defaulting to its in-memory backend, with a consuming setter of the same name: `Backends::model(m)` swaps in any `WasiModelCtx`, and `keyvalue`, `blobstore`, `docstore`, `sql`, `vault`, `messaging`, `identity`, and `otel` take any backend of theirs — a production backend crate's client, or a recording wrapper around the default — so the same guests run over it. `ScriptedModel` is the scripted model, sharing its `Script` core with the handler rung's `ScriptedModel` so a script reads identically at both rungs. Each scripted completion may run tool calls and workspace `read`/`write`/`list` steps ahead of its answer, recording every exchange; an overrun answers the guest softly and fails the test at `assert_exhausted()`.
 
 ## Fixture rung: `Components` in `build.rs`
 

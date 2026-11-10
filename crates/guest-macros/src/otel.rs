@@ -11,14 +11,14 @@ pub fn body(attrs: Attributes, item_fn: &ItemFn) -> proc_macro2::TokenStream {
 
     let span_name = attrs.name.unwrap_or_else(|| LitStr::new(&name.to_string(), name.span()));
     // Routed through `omnia_wasi_otel` so callers need no direct `tracing` dependency.
-    let tracing = quote! { ::omnia_wasi_otel::__private::tracing };
+    let tracing = quote! { omnia_wasi_otel::__private::tracing };
     let level =
         attrs.level.map_or_else(|| quote! { #tracing::Level::INFO }, |level| quote! {#level});
 
     // The closure defers `span!` until `scope` has initialized telemetry.
     if item_fn.sig.asyncness.is_some() {
         quote! {
-            ::omnia_wasi_otel::scope(move || #tracing::Instrument::instrument(
+            omnia_wasi_otel::scope(move || #tracing::Instrument::instrument(
                 async move #block,
                 #tracing::span!(#level, #span_name)
             )).await
@@ -66,7 +66,7 @@ mod tests {
         let out = body(Attributes::default(), &item_fn).to_string();
         assert!(out.contains("Instrument"), "async body must use Instrument: {out}");
         assert!(
-            out.starts_with(":: omnia_wasi_otel :: scope (move ||") && out.ends_with(") . await"),
+            out.starts_with("omnia_wasi_otel :: scope (move ||") && out.ends_with(") . await"),
             "async body must run inside an awaited telemetry scope: {out}"
         );
     }

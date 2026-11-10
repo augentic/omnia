@@ -44,23 +44,21 @@ The pool name (`"db"` here) is what the backend resolves: the SQLite default ign
 
 ## The `TableStore` capability
 
-`omnia_sdk::TableStore` wraps the open/prepare/execute sequence behind two methods: `query` returns rows, `exec` returns the affected-row count. Both take the pool name, the SQL text, and the `$n` parameters as `DataType` values. On `wasm32` the default method bodies call the WASI bindings, so a guest provider is a unit struct with an empty impl:
+`omnia_sdk::TableStore` wraps the open/prepare/execute sequence behind two methods: `query` returns rows, `exec` returns the affected-row count. Both take the pool name, the SQL text, and the `$n` parameters as a slice of `DataType` values. On `wasm32`, `omnia_sdk::WasiProvider` implements `TableStore` over the WASI bindings:
 
-```rust
-struct Provider;
-impl TableStore for Provider {}
+```rust,noplayground
+use omnia_sdk::{TableStore, WasiProvider};
 ```
 
 Insert with bound parameters — `DataType::Str(None)` binds a NULL:
 
 ```rust,noplayground
-Provider
+WasiProvider
     .exec(
-        "db".to_string(),
+        "db",
         "INSERT INTO agency (agency_id, name, url, timezone, created_at) \
-         VALUES ($1, $2, $3, $4, $5)"
-            .to_string(),
-        vec![
+         VALUES ($1, $2, $3, $4, $5)",
+        &[
             DataType::Int64(Some(agency.agency_id)),
             DataType::Str(Some(agency.name.clone())),
             DataType::Str(agency.url.clone()),
@@ -75,12 +73,8 @@ Provider
 Delete, checking the affected-row count for a not-found result:
 
 ```rust,noplayground
-let rows_affected = Provider
-    .exec(
-        "db".to_string(),
-        "DELETE FROM agency WHERE agency_id = $1".to_string(),
-        vec![DataType::Int64(Some(id))],
-    )
+let rows_affected = WasiProvider
+    .exec("db", "DELETE FROM agency WHERE agency_id = $1", &[DataType::Int64(Some(id))])
     .await
     .context("deleting agency")?;
 
@@ -91,63 +85,39 @@ if rows_affected == 0 {
 
 ### Mapping rows
 
-`query` returns `Vec<Row>`; each `Row` carries `fields`, a list of `Field { name, value }` in column order. Look columns up by name and match on the `DataType` variant:
+`query` returns `Vec<Row>`; each `Row` carries `fields`, a list of `Field { name, value }` in column order. `Row::get` reads one column by name as a Rust type — an integer, float, boolean, string, or binary scalar, or `Option` of one for a nullable column — and fails with a `ColumnError` when the column is absent, holds `NULL` for a non-`Option` type, or has another `DataType`:
 
 ```rust,noplayground
-let rows = Provider
-    .query(
-        "db".to_string(),
-        "SELECT agency_id, name, url, timezone, created_at FROM agency ORDER BY created_at DESC"
-            .to_string(),
-        vec![],
+let name: String = row.get("name")?;
+let url: Option<String> = row.get("url")?;
+```
+
+A record type derives `FromRow` to read every field from the column of the same name, and `query_as` (from `TableStoreExt`, blanket-implemented for every `TableStore`) runs a query and decodes each row:
+
+```rust,noplayground
+use omnia_sdk::TableStoreExt as _;
+use omnia_sdk::sql::FromRow;
+
+#[derive(Debug, Clone, Serialize, FromRow)]
+struct Agency {
+    agency_id: i64,
+    name: String,
+    url: Option<String>,
+    timezone: Option<String>,
+    created_at: String,
+}
+
+let agencies: Vec<Agency> = WasiProvider
+    .query_as(
+        "db",
+        "SELECT agency_id, name, url, timezone, created_at FROM agency ORDER BY created_at DESC",
+        &[],
     )
     .await
     .context("executing query")?;
-
-let agencies = rows.iter().map(Agency::from_row).collect::<Result<Vec<_>>>()?;
 ```
 
-```rust,noplayground
-impl Agency {
-    fn from_row(row: &Row) -> Result<Self> {
-        Ok(Self {
-            agency_id: int(field(row, "agency_id")?)?,
-            name: text(field(row, "name")?)?,
-            url: nullable_text(field(row, "url")?)?,
-            timezone: nullable_text(field(row, "timezone")?)?,
-            created_at: text(field(row, "created_at")?)?,
-        })
-    }
-}
-
-fn field<'a>(row: &'a Row, name: &str) -> Result<&'a DataType> {
-    row.fields
-        .iter()
-        .find(|f| f.name == name)
-        .map(|f| &f.value)
-        .ok_or_else(|| anyhow!("missing column `{name}`"))
-}
-
-fn int(value: &DataType) -> Result<i64> {
-    match value {
-        DataType::Int64(Some(v)) => Ok(*v),
-        DataType::Int32(Some(v)) => Ok(i64::from(*v)),
-        other => bail!("expected integer, got {other:?}"),
-    }
-}
-
-fn text(value: &DataType) -> Result<String> {
-    nullable_text(value)?.ok_or_else(|| anyhow!("unexpected NULL"))
-}
-
-// The default backend reports NULL as `Str(None)` regardless of column type.
-fn nullable_text(value: &DataType) -> Result<Option<String>> {
-    match value {
-        DataType::Str(v) => Ok(v.clone()),
-        other => bail!("expected text, got {other:?}"),
-    }
-}
-```
+Conversions only widen (`Int32` reads as `i64`, `Float` as `f64`), and the default backend reports NULL as `Str(None)` regardless of column type, which `Option<T>` reads as `None` like any other `NULL`.
 
 Because `TableStore` is a trait, handlers written against `P: TableStore` run unchanged natively against `omnia_test::guest::Provider`, which scripts the rows and counts each statement returns — see [Testing Omnia-Based Code](testing-omnia-code.md).
 

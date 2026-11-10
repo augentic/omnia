@@ -4,9 +4,9 @@
 //! one record that cannot cross off `wasm32` is the `grants.workspace`
 //! descriptor lend — a `wasi:filesystem` resource that only exists on
 //! `wasm32` — so a guest names the directory with the plain
-//! [`Request::workspace`] path and the `wasm32` default body resolves it
-//! against the guest's preopens at the call site, by the lend rule every
-//! lending capability shares: the longest preopen whose name prefixes the
+//! [`Request::workspace`] path and [`WasiProvider`](crate::WasiProvider)
+//! resolves it against the guest's preopens at the call site, by the lend rule
+//! every lending capability shares: the longest preopen whose name prefixes the
 //! path becomes the lent root descriptor and the remainder rides as the
 //! grant's subpath.
 //!
@@ -20,6 +20,7 @@ mod question;
 
 use std::future::Future;
 
+use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
 
 pub use self::question::{Findings, Question, ToolFuture, Tools};
@@ -58,10 +59,9 @@ pub struct Request {
     pub check: bool,
     /// Deployment-local path of the directory to lend through
     /// `grants.workspace`, giving the backend (and any spawned agent) that
-    /// directory. On `wasm32` the path must sit on (or beneath) a preopen —
-    /// `"."` lends the shared project mount, `"/mount/sub"` lends a
-    /// subdirectory of `/mount`. Off `wasm32` it is a host path the
-    /// provider consumes directly. `None` lends nothing.
+    /// directory. The path must sit on (or beneath) a preopen: `"."` lends
+    /// the shared project mount, `"/mount/sub"` lends a subdirectory of
+    /// `/mount`. Test doubles observe the raw string. `None` lends nothing.
     #[builder(into)]
     pub workspace: Option<String>,
     /// What the worker a backend runs for this completion may reach beyond
@@ -178,6 +178,21 @@ pub struct SchemaFormat {
     pub schema: String,
 }
 
+impl SchemaFormat {
+    /// `T`'s JSON Schema (draft 2020-12) under `name`.
+    #[must_use]
+    pub fn of<T: JsonSchema>(name: &str) -> Self {
+        Self {
+            name: name.to_owned(),
+            schema: schema_of::<T>(),
+        }
+    }
+}
+
+fn schema_of<T: JsonSchema>() -> String {
+    schemars::schema_for!(T).to_value().to_string()
+}
+
 /// A tool offered to the model: a guest-declared function or an MCP server
 /// grant carrying its own endpoint URL.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -201,6 +216,18 @@ pub struct Function {
     /// JSON Schema for the tool's arguments object.
     #[builder(into)]
     pub parameters: String,
+}
+
+impl Function {
+    /// A function tool whose parameters are `T`'s JSON Schema.
+    #[must_use]
+    pub fn of<T: JsonSchema>(name: &str, description: &str) -> Self {
+        Self {
+            name: name.to_owned(),
+            description: description.to_owned(),
+            parameters: schema_of::<T>(),
+        }
+    }
 }
 
 /// Remote MCP server offered to the model for this completion.
@@ -258,6 +285,12 @@ pub enum Error {
     Backend(String),
 }
 
+impl From<anyhow::Error> for Error {
+    fn from(error: anyhow::Error) -> Self {
+        error.downcast().unwrap_or_else(|other| Self::Backend(format!("{other:#}")))
+    }
+}
+
 /// One tool invocation the model asked the guest to run, delivered to the
 /// [`Model::complete_with`] handler.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -285,157 +318,107 @@ impl ToolCall {
 
 /// Prompt completion (Omnia Model).
 ///
-/// Default WASM implementations delegate to `omnia:model/completion` via
-/// `omnia-wasi-model`, opening the completion session and answering the
-/// model's tool calls with the supplied closure; off `wasm32` the signatures
-/// are bare so hosts and tests supply their own provider.
+/// [`WasiProvider`](crate::WasiProvider) delegates to `omnia:model/completion`
+/// via `omnia-wasi-model`, opening the completion session and answering the
+/// model's tool calls with the supplied closure.
+#[omnia_guest_macros::capability]
 pub trait Model: Send + Sync {
-    cfg_select! {
-        not(target_arch = "wasm32") => {
-            /// Single-shot completion returning one reply. Any tool call the model
-            /// issues fails back to it; declare tools (or set `check`) and answer
-            /// them through [`Model::complete_with`] instead.
-            fn complete(
-                &self, request: Request,
-            ) -> impl Future<Output = Result<Reply, Error>> + Send;
-
-            /// Completion with a tool closure: the model's tool calls arrive as
-            /// [`ToolCall`] values answered serially by `handler` (over the caller's
-            /// own locals and authority), and each result feeds the same model turn.
-            /// Results correlate by id, so parallel handling stays available through
-            /// the raw `omnia_wasi_model::completion` session bindings.
-            fn complete_with<H, F>(
-                &self, request: Request, handler: H,
-            ) -> impl Future<Output = Result<Reply, Error>> + Send
-            where
-                H: FnMut(ToolCall) -> F + Send,
-                F: Future<Output = Result<String, String>> + Send;
-        }
-        _ => {
-            /// Single-shot completion returning one reply. Any tool call the model
-            /// issues fails back to it; declare tools (or set `check`) and answer
-            /// them through [`Model::complete_with`] instead.
-            fn complete(
-                &self, request: Request,
-            ) -> impl Future<Output = Result<Reply, Error>> + Send {
-                self.complete_with(request, |call: ToolCall| async move {
-                    Err::<String, String>(format!(
-                        "tool `{}` has no handler: answer tool calls with complete_with",
-                        call.name
-                    ))
-                })
-            }
-
-            /// Completion with a tool closure: the model's tool calls arrive as
-            /// [`ToolCall`] values answered serially by `handler` (over the caller's
-            /// own locals and authority), and each result feeds the same model turn.
-            /// Results correlate by id, so parallel handling stays available through
-            /// the raw `omnia_wasi_model::completion` session bindings.
-            fn complete_with<H, F>(
-                &self, request: Request, mut handler: H,
-            ) -> impl Future<Output = Result<Reply, Error>> + Send
-            where
-                H: FnMut(ToolCall) -> F + Send,
-                F: Future<Output = Result<String, String>> + Send,
-            {
-                use omnia_wasi_model::{completion, wit_stream};
-                use wasip3::filesystem::preopens;
-
-                use super::lend::resolve_lend;
-
-                async move {
-                    // the lent workspace borrows a descriptor, so the table outlives `create`
-                    let directories = if request.workspace.is_some() {
-                        preopens::get_directories()
-                    } else {
-                        vec![]
-                    };
-                    let workspace = match request.workspace.as_deref() {
-                        None => None,
-                        Some(path) => match resolve_lend(&directories, path) {
-                            Some((root, subpath)) => Some(completion::WorkspaceGrant {
-                                root,
-                                subpath: subpath.to_string(),
-                            }),
-                            None => {
-                                return Err(Error::InvalidRequest(format!(
-                                    "workspace lend `{path}` matches no preopen"
-                                )));
-                            }
-                        },
-                    };
-
-                    let wire = completion::Request {
-                        model: request.model,
-                        system: request.system,
-                        messages: request.messages.into_iter().map(Into::into).collect(),
-                        generation: request.generation.map(Into::into),
-                        format: request.format.into(),
-                        tools: request.tools.into_iter().map(Into::into).collect(),
-                        grants: completion::Grants {
-                            workspace,
-                            worker: request.worker.map(Into::into),
-                        },
-                        check: request.check,
-                    };
-
-                    let (mut results, results_rx) = wit_stream::new();
-                    let session =
-                        completion::create(wire, results_rx).await.map_err(Error::from)?;
-                    let completion::Session { mut calls, reply } = session;
-
-                    // serial by design: each result feeds the same model turn; a rejected
-                    // write means the host stopped reading, and the closed stream ends the loop
-                    let calls_loop = async {
-                        while let Some(call) = calls.next().await {
-                            let id = call.id.clone();
-                            let output = handler(ToolCall {
-                                id: call.id,
-                                name: call.name,
-                                arguments: call.arguments,
-                            })
-                            .await;
-                            let _ = results.write_one(completion::ToolResult { id, output }).await;
-                        }
-                    };
-
-                    // the host always resolves the reply, so the join cannot hang
-                    let ((), outcome) =
-                        futures::join!(calls_loop, std::future::IntoFuture::into_future(reply));
-                    outcome.map(Into::into).map_err(Into::into)
-                }
-            }
-        }
-    }
-}
-
-delegate_deref!(Model {
+    /// Single-shot completion returning one reply. Any tool call the model
+    /// issues fails back to it; declare tools (or set `check`) and answer
+    /// them through [`Model::complete_with`] instead.
     fn complete(&self, request: Request) -> impl Future<Output = Result<Reply, Error>> + Send {
-        (**self).complete(request)
+        self.complete_with(request, |call: ToolCall| async move {
+            Err::<String, String>(format!(
+                "tool `{}` has no handler: answer tool calls with complete_with",
+                call.name
+            ))
+        })
     }
 
+    /// Completion with a tool closure: the model's tool calls arrive as
+    /// [`ToolCall`] values answered serially by `handler` (over the caller's
+    /// own locals and authority), and each result feeds the same model turn.
+    /// Results correlate by id, so parallel handling stays available through
+    /// the raw `omnia_wasi_model::completion` session bindings.
     fn complete_with<H, F>(
         &self, request: Request, handler: H,
     ) -> impl Future<Output = Result<Reply, Error>> + Send
     where
         H: FnMut(ToolCall) -> F + Send,
+        F: Future<Output = Result<String, String>> + Send;
+}
+
+#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
+impl Model for crate::WasiProvider {
+    async fn complete_with<H, F>(&self, request: Request, mut handler: H) -> Result<Reply, Error>
+    where
+        H: FnMut(ToolCall) -> F + Send,
         F: Future<Output = Result<String, String>> + Send,
     {
-        (**self).complete_with(request, handler)
+        use omnia_wasi_model::{completion, wit_stream};
+        use wasip3::filesystem::preopens;
+
+        use super::lend::resolve_lend;
+
+        // the lent workspace borrows a descriptor, so the table outlives `create`
+        let directories =
+            if request.workspace.is_some() { preopens::get_directories() } else { vec![] };
+        let workspace = match request.workspace.as_deref() {
+            None => None,
+            Some(path) => match resolve_lend(&directories, path) {
+                Some((root, subpath)) => Some(completion::WorkspaceGrant {
+                    root,
+                    subpath: subpath.to_string(),
+                }),
+                None => {
+                    return Err(Error::InvalidRequest(format!(
+                        "workspace lend `{path}` matches no preopen"
+                    )));
+                }
+            },
+        };
+
+        let wire = completion::Request {
+            model: request.model,
+            system: request.system,
+            messages: request.messages.into_iter().map(Into::into).collect(),
+            generation: request.generation.map(Into::into),
+            format: request.format.into(),
+            tools: request.tools.into_iter().map(Into::into).collect(),
+            grants: completion::Grants {
+                workspace,
+                worker: request.worker.map(Into::into),
+            },
+            check: request.check,
+        };
+
+        let (mut results, results_rx) = wit_stream::new();
+        let session = completion::create(wire, results_rx).await.map_err(Error::from)?;
+        let completion::Session { mut calls, reply } = session;
+
+        // serial by design: each result feeds the same model turn; a rejected
+        // write means the host stopped reading, and the closed stream ends the loop
+        let calls_loop = async {
+            while let Some(call) = calls.next().await {
+                let id = call.id.clone();
+                let output = handler(ToolCall {
+                    id: call.id,
+                    name: call.name,
+                    arguments: call.arguments,
+                })
+                .await;
+                let _ = results.write_one(completion::ToolResult { id, output }).await;
+            }
+        };
+
+        // the host always resolves the reply, so the join cannot hang
+        let ((), outcome) = futures::join!(calls_loop, std::future::IntoFuture::into_future(reply));
+        outcome.map(Into::into).map_err(Into::into)
     }
-});
-
-/// The WASI-backed provider a `wasm32` guest hands its wasm-free core; the
-/// default method body carries the whole delegation.
-#[cfg(target_arch = "wasm32")]
-#[derive(Clone, Copy, Debug)]
-pub struct WasiModel;
-
-#[cfg(target_arch = "wasm32")]
-impl Model for WasiModel {}
+}
 
 // conversions between the target-independent records above and the bindings
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
 mod wire {
     use omnia_wasi_model::completion;
 

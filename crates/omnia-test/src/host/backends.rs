@@ -23,7 +23,7 @@ use omnia_wasi_websocket::{WasiWebSocket, WebSocketDefault};
 use super::ScriptedModel;
 
 /// The keyvalue bucket `omnia_sdk`'s wasm32 `StateStore` opens.
-pub const STATE_BUCKET: &str = "cache";
+pub const STATE_BUCKET: &str = "state";
 
 /// Every host's default backend as one bundle, each swappable for another
 /// backend of its host — the model for a [`ScriptedModel`], a store for a

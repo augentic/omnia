@@ -11,8 +11,8 @@ use anyhow::{Context, Result, anyhow};
 use axum::extract::{Path, Query};
 use axum::routing::get;
 use axum::{Json, Router};
-use omnia_sdk::document_store::{Document, Filter, QueryOptions, SortField};
-use omnia_sdk::{DocumentStore, HttpResult};
+use omnia_sdk::docstore::{Document, Filter, QueryOptions, SortField};
+use omnia_sdk::{DocumentStore, WasiProvider};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tracing::Level;
@@ -59,19 +59,19 @@ struct StopQuery {
 
 #[axum::debug_handler]
 #[omnia_wasi_otel::instrument]
-async fn create_stop(Json(req): Json<CreateStopRequest>) -> HttpResult<Json<Value>> {
+async fn create_stop(Json(req): Json<CreateStopRequest>) -> omnia_sdk::Result<Json<Value>> {
     let doc = Document {
         id: req.id.clone(),
         data: serde_json::to_vec(&req.stop).context("serializing stop")?,
     };
-    Provider.insert("stops", &doc).await.context("inserting stop")?;
+    WasiProvider.insert("stops", &doc).await.context("inserting stop")?;
     Ok(Json(json!({ "stop": req.stop, "id": req.id })))
 }
 
 #[axum::debug_handler]
 #[omnia_wasi_otel::instrument]
-async fn get_stop(Path(id): Path<String>) -> HttpResult<Json<Value>> {
-    let doc = Provider
+async fn get_stop(Path(id): Path<String>) -> omnia_sdk::Result<Json<Value>> {
+    let doc = WasiProvider
         .get("stops", &id)
         .await
         .context("fetching stop")?
@@ -82,19 +82,21 @@ async fn get_stop(Path(id): Path<String>) -> HttpResult<Json<Value>> {
 
 #[axum::debug_handler]
 #[omnia_wasi_otel::instrument]
-async fn upsert_stop(Path(id): Path<String>, Json(stop): Json<Stop>) -> HttpResult<Json<Value>> {
+async fn upsert_stop(
+    Path(id): Path<String>, Json(stop): Json<Stop>,
+) -> omnia_sdk::Result<Json<Value>> {
     let doc = Document {
         id: id.clone(),
         data: serde_json::to_vec(&stop).context("serializing stop")?,
     };
-    Provider.put("stops", &doc).await.context("upserting stop")?;
+    WasiProvider.put("stops", &doc).await.context("upserting stop")?;
     Ok(Json(json!({ "id": id, "stop": stop })))
 }
 
 #[axum::debug_handler]
 #[omnia_wasi_otel::instrument]
-async fn delete_stop(Path(id): Path<String>) -> HttpResult<Json<Value>> {
-    let removed = Provider.delete("stops", &id).await.context("deleting stop")?;
+async fn delete_stop(Path(id): Path<String>) -> omnia_sdk::Result<Json<Value>> {
+    let removed = WasiProvider.delete("stops", &id).await.context("deleting stop")?;
     if !removed {
         return Err(anyhow!("stop not found").into());
     }
@@ -103,7 +105,7 @@ async fn delete_stop(Path(id): Path<String>) -> HttpResult<Json<Value>> {
 
 #[axum::debug_handler]
 #[omnia_wasi_otel::instrument]
-async fn list_stops(Query(p): Query<StopQuery>) -> HttpResult<Json<Value>> {
+async fn list_stops(Query(p): Query<StopQuery>) -> omnia_sdk::Result<Json<Value>> {
     let mut filters = Vec::new();
 
     if let Some(q) = &p.q {
@@ -121,7 +123,7 @@ async fn list_stops(Query(p): Query<StopQuery>) -> HttpResult<Json<Value>> {
 
     let filter = if filters.is_empty() { None } else { Some(Filter::and(filters)) };
 
-    let result = Provider
+    let result = WasiProvider
         .query(
             "stops",
             QueryOptions {
@@ -152,7 +154,3 @@ async fn list_stops(Query(p): Query<StopQuery>) -> HttpResult<Json<Value>> {
         .collect::<Result<Vec<_>>>()?;
     Ok(Json(json!({ "stops": stops, "continuation": result.continuation })))
 }
-
-struct Provider;
-
-impl DocumentStore for Provider {}

@@ -1,35 +1,21 @@
-//! A `wasi:http/incoming-handler` guest behind an `omnia_sdk::api::http`
-//! router: the one route echoes a `message` taken from the JSON body (POST)
-//! or the query string (GET), alongside the request id the transport
-//! metadata carried in. The handler first asserts the host's request
-//! normalisation reached it: scheme and authority filled from `Host`.
+//! A `wasi:http/incoming-handler` guest behind `http::export!`, plain axum
+//! handlers, and `WasiProvider`: the one route echoes a `message` taken from
+//! the JSON body (POST) or the query string (GET), alongside the request id
+//! the `Context` extractor carried in. Middleware first asserts the host's
+//! request normalisation reached it: scheme and authority filled from `Host`.
 
 #![cfg(target_arch = "wasm32")]
 
 use axum::Router;
+use axum::body::Body;
+use axum::extract::{Json, Query};
+use axum::http::Request;
+use axum::http::uri::Authority;
+use axum::middleware::map_request;
+use axum::routing::get;
 use omnia_sdk::Error;
-use omnia_sdk::api::http::{get, post};
-use omnia_sdk::api::{Client, Context};
+use omnia_sdk::api::{Client, Context, http};
 use serde::{Deserialize, Serialize};
-use wasip3::exports::http::handler::Guest;
-use wasip3::http::types::{ErrorCode, Request, Response, Scheme};
-
-struct HttpGuest;
-wasip3::http::service::export!(HttpGuest);
-
-impl Guest for HttpGuest {
-    async fn handle(request: Request) -> Result<Response, ErrorCode> {
-        assert!(matches!(request.get_scheme(), Some(Scheme::Http)));
-        assert_eq!(request.get_authority().as_deref(), Some("echo.test"));
-
-        let router = Router::new()
-            .route("/echo", get(echo).merge(post(echo)))
-            .with_state(Client::new("test-programs", Provider));
-        omnia_wasi_http::serve(router, request).await
-    }
-}
-
-struct Provider;
 
 #[derive(Deserialize)]
 struct Input {
@@ -42,10 +28,37 @@ struct Echo {
     request_id: String,
 }
 
-async fn echo(input: Input, context: Context<Provider>) -> Result<Echo, Error> {
+http::export!(router);
+
+fn router<P: Send + Sync + 'static>(provider: P) -> Router {
+    Router::new()
+        .route("/echo", get(echo_get).post(echo_post))
+        .layer(map_request(check_uri))
+        .with_state(Client::new(provider))
+}
+
+async fn check_uri(request: Request<Body>) -> Request<Body> {
+    assert_eq!(request.uri().scheme_str(), Some("http"));
+    assert_eq!(request.uri().authority().map(Authority::as_str), Some("echo.test"));
+    request
+}
+
+async fn echo_get<P: Send + Sync + 'static>(
+    context: Context<P>, Query(input): Query<Input>,
+) -> Result<Json<Echo>, Error> {
+    echo(input, context)
+}
+
+async fn echo_post<P: Send + Sync + 'static>(
+    context: Context<P>, Json(input): Json<Input>,
+) -> Result<Json<Echo>, Error> {
+    echo(input, context)
+}
+
+fn echo<P>(input: Input, context: Context<P>) -> Result<Json<Echo>, Error> {
     let request_id = context.metadata.request_id.expect("http metadata always carries an id");
-    Ok(Echo {
+    Ok(Json(Echo {
         message: input.message,
         request_id,
-    })
+    }))
 }

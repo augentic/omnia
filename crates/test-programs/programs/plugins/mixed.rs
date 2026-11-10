@@ -10,20 +10,21 @@ wit_bindgen::generate!({
     generate_all,
 });
 
-use omnia_sdk::plugins::{Location, Plugins as _, WasiPlugins};
+use omnia_sdk::WasiProvider;
+use omnia_sdk::plugins::{Location, Plugins as _};
 use omnia_test::link::ops;
 
-omnia_sdk::command!(scenario);
+omnia_sdk::api::command::export!(scenario);
 
 async fn scenario() {
     let echoer = Location::Declared("echoer".to_owned());
-    let target = WasiPlugins.load(&echoer, None).await.expect("a link target loads");
+    let target = WasiProvider.load(&echoer, None).await.expect("a link target loads");
     assert_eq!(target.id(), "echoer");
 
     let answer = ops::ping(target.id(), "hi");
     assert_eq!(answer, "echoer pong: hi");
 
     let handler = Location::Declared("handler".to_owned());
-    let handler = WasiPlugins.load(&handler, None).await.expect("a host-only handler loads");
+    let handler = WasiProvider.load(&handler, None).await.expect("a host-only handler loads");
     assert_eq!(handler.id(), "handler");
 }

@@ -218,9 +218,9 @@ impl<Req, Turn> Drop for Inner<Req, Turn> {
 
 /// One recorded model request, as both rungs see it.
 ///
-/// The union of what guest and host scenarios assert on: the guest
-/// `Scripted` and the host `ScriptedModel` project their own request types
-/// into this record so a scenario reads identically wherever it runs.
+/// The union of what guest and host scenarios assert on: the guest and the
+/// host `ScriptedModel` project their own request types into this record so
+/// a scenario reads identically wherever it runs.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Seen {
     /// The system prompt.

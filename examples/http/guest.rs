@@ -10,7 +10,6 @@
 
 use axum::routing::get;
 use axum::{Json, Router};
-use omnia_sdk::HttpResult;
 use serde_json::{Value, json};
 use tracing::Level;
 use wasip3::exports::http::handler::Guest;
@@ -28,14 +27,14 @@ impl Guest for HttpGuest {
 }
 
 #[omnia_wasi_otel::instrument]
-async fn echo_get() -> HttpResult<Json<Value>> {
+async fn echo_get() -> omnia_sdk::Result<Json<Value>> {
     Ok(Json(json!({
         "message": "Hello from echo_get!"
     })))
 }
 
 #[omnia_wasi_otel::instrument]
-async fn echo_post(Json(body): Json<Value>) -> HttpResult<Json<Value>> {
+async fn echo_post(Json(body): Json<Value>) -> omnia_sdk::Result<Json<Value>> {
     Ok(Json(json!({
         "message": "Hello from echo_post!",
         "request": body

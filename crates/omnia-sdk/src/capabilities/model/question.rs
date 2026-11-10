@@ -18,8 +18,8 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 use super::{
-    CHECK_TOOL, Error, Format, Function, Message, Model, Request, Role, SchemaFormat, Tool,
-    ToolCall, WorkerGrant,
+    CHECK_TOOL, Error, Format, Message, Model, Request, Role, SchemaFormat, Tool, ToolCall,
+    WorkerGrant,
 };
 
 /// What a check found wrong with a candidate, one finding per line of the
@@ -233,95 +233,4 @@ fn default_correction(previous: &str, findings: &[String]) -> String {
          complete answer that resolves every finding.",
         findings.join("\n")
     )
-}
-
-impl SchemaFormat {
-    /// `T`'s JSON Schema (draft 2020-12) under `name`.
-    #[must_use]
-    pub fn of<T: JsonSchema>(name: &str) -> Self {
-        Self {
-            name: name.to_owned(),
-            schema: schema_of::<T>(),
-        }
-    }
-}
-
-impl Function {
-    /// A function tool whose parameters are `T`'s JSON Schema.
-    #[must_use]
-    pub fn of<T: JsonSchema>(name: &str, description: &str) -> Self {
-        Self {
-            name: name.to_owned(),
-            description: description.to_owned(),
-            parameters: schema_of::<T>(),
-        }
-    }
-}
-
-fn schema_of<T: JsonSchema>() -> String {
-    schemars::schema_for!(T).to_value().to_string()
-}
-
-#[cfg(test)]
-mod tests {
-    use schemars::JsonSchema;
-    use serde::Deserialize;
-    use serde_json::{Value, json};
-
-    use super::{Question, default_correction};
-    use crate::model::{Format, Function, SchemaFormat, ToolCall};
-
-    #[derive(Debug, Deserialize, JsonSchema)]
-    struct Verdict {
-        verdict: String,
-    }
-
-    #[test]
-    fn schema_of_type() {
-        let format = SchemaFormat::of::<Verdict>("verdict");
-        assert_eq!(format.name, "verdict");
-        let schema: Value = serde_json::from_str(&format.schema).expect("schema is JSON");
-        assert_eq!(schema["properties"]["verdict"]["type"], json!("string"));
-        assert_eq!(schema["required"], json!(["verdict"]));
-    }
-
-    #[test]
-    fn function_of_type() {
-        let function = Function::of::<Verdict>("judge", "judge a claim");
-        assert_eq!(function.name, "judge");
-        let schema: Value = serde_json::from_str(&function.parameters).expect("schema is JSON");
-        assert!(schema["properties"]["verdict"].is_object());
-    }
-
-    #[test]
-    fn tool_call_arguments() {
-        let call = ToolCall {
-            id: "call-1".to_owned(),
-            name: "judge".to_owned(),
-            arguments: r#"{"verdict":"pass"}"#.to_owned(),
-        };
-        assert_eq!(call.arguments::<Verdict>().expect("valid arguments").verdict, "pass");
-        let error = call.arguments::<Vec<u8>>().expect_err("an object is not an array");
-        assert!(error.starts_with("invalid arguments"), "{error}");
-    }
-
-    #[test]
-    fn schema_hint() {
-        let question = Question::<Verdict>::new("verdict")
-            .schema(|schema| schema["properties"]["verdict"]["enum"] = json!(["pass", "fail"]));
-        let Format::Schema(spec) = &question.request().format else {
-            panic!("a question steers by schema");
-        };
-        let schema: Value = serde_json::from_str(&spec.schema).expect("schema is JSON");
-        assert_eq!(schema["properties"]["verdict"]["enum"], json!(["pass", "fail"]));
-        assert!(question.request().check);
-    }
-
-    #[test]
-    fn correction_template() {
-        let text =
-            default_correction("{}", &["missing verdict".to_owned(), "too short".to_owned()]);
-        assert!(text.starts_with("## Previous answer (rejected)\n\n{}\n\n## Findings\n\n"));
-        assert!(text.contains("missing verdict\ntoo short"), "{text}");
-    }
 }

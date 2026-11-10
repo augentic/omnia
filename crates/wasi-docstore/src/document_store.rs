@@ -7,6 +7,10 @@
 
 use std::ops::Not;
 
+use anyhow::Context as _;
+use serde::Serialize;
+use serde::de::DeserializeOwned;
+
 /// Scalar values for filter comparisons.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ScalarValue {
@@ -129,12 +133,36 @@ pub struct QueryOptions {
 }
 
 /// Stored document: identifier plus JSON body bytes.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Document {
     /// Primary key string.
     pub id: String,
     /// JSON payload.
     pub data: Vec<u8>,
+}
+
+impl Document {
+    /// The document `id` names, with `value` serialized as its JSON body.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when `value` cannot be serialized to JSON.
+    pub fn json<T: Serialize + ?Sized>(id: impl Into<String>, value: &T) -> anyhow::Result<Self> {
+        let id = id.into();
+        let data =
+            serde_json::to_vec(value).with_context(|| format!("encoding document `{id}`"))?;
+        Ok(Self { id, data })
+    }
+
+    /// Deserialize the JSON body as `T`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the body is not the JSON of a `T`.
+    pub fn decode<T: DeserializeOwned>(&self) -> anyhow::Result<T> {
+        serde_json::from_slice(&self.data)
+            .with_context(|| format!("decoding document `{}`", self.id))
+    }
 }
 
 /// Result of a query with optional next-page token.
@@ -327,6 +355,18 @@ impl Filter {
         let start = format!("{iso_date}T00:00:00Z");
         let end = format!("{next}T00:00:00Z");
         Ok(Self::And(vec![Self::gte(field, Timestamp(start)), Self::lt(field, Timestamp(end))]))
+    }
+
+    /// Maximum nesting depth of the filter tree.
+    #[must_use]
+    pub fn depth(&self) -> usize {
+        match self {
+            Self::And(children) | Self::Or(children) => {
+                1 + children.iter().map(Self::depth).max().unwrap_or(0)
+            }
+            Self::Not(inner) => 1 + inner.depth(),
+            _ => 1,
+        }
     }
 }
 

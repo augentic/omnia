@@ -1,16 +1,18 @@
-//! The scripted pair at the handler rung: `Scripted` as a `Model`,
-//! `ScriptedLoader` as a `Plugins` loader.
+//! The scripted doubles at the handler rung: `ScriptedModel` as a `Model`,
+//! `ScriptedLoader` as a `Plugins` loader, and `ScriptedVcs` as a `Vcs`.
 
 #![cfg(not(target_arch = "wasm32"))]
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::path::Path;
 
 use omnia_sdk::model::{
     Error, Format, Function, Message, Model, Request, Role, SchemaFormat, Tool, ToolCall,
     WorkerGrant,
 };
 use omnia_sdk::plugins::{self, Digest, Location, Plugins};
-use omnia_test::guest::{Scripted, ScriptedLoader, function_tools};
+use omnia_sdk::vcs::{self, Vcs};
+use omnia_test::guest::{ScriptedLoader, ScriptedModel, ScriptedVcs, VcsTurn, function_tools};
 use omnia_test::{Exchange, SeenFormat, SeenWorker};
 
 fn user(content: &str) -> Request {
@@ -36,7 +38,7 @@ fn digest(fill: &str) -> Digest {
 
 #[tokio::test]
 async fn answers_in_order() {
-    let model = Scripted::answering(["first", "second"]);
+    let model = ScriptedModel::answering(["first", "second"]);
     assert_eq!(model.complete(user("a")).await.expect("reply").answer, "first");
     assert_eq!(model.complete(user("b")).await.expect("reply").answer, "second");
 
@@ -50,13 +52,13 @@ async fn answers_in_order() {
 
 #[tokio::test]
 async fn scripted_failures() {
-    let model = Scripted::new([Err(Error::BudgetExhausted("cap".into()))]);
+    let model = ScriptedModel::new([Err(Error::BudgetExhausted("cap".into()))]);
     assert_eq!(model.complete(user("a")).await, Err(Error::BudgetExhausted("cap".into())));
 }
 
 #[tokio::test]
 async fn complete_with_calls() {
-    let model = Scripted::answering(["done"])
+    let model = ScriptedModel::answering(["done"])
         .calling(0, [call("lookup", r#"{"id":1}"#), call("write", "{}")]);
 
     let reply = model
@@ -106,7 +108,7 @@ async fn judge(call: ToolCall) -> Result<String, String> {
 
 #[tokio::test]
 async fn check_accepts() {
-    let model = Scripted::answering(["ok"]);
+    let model = ScriptedModel::answering(["ok"]);
     let reply = model.complete_with(checked("go"), judge).await.expect("reply");
     assert_eq!(reply.answer, "ok");
     assert_eq!(
@@ -122,7 +124,7 @@ async fn check_accepts() {
 
 #[tokio::test]
 async fn check_corrects() {
-    let model = Scripted::answering(["bad", "ok"]);
+    let model = ScriptedModel::answering(["bad", "ok"]);
     let reply = model.complete_with(checked("go"), judge).await.expect("reply");
     assert_eq!(reply.answer, "ok");
     let exchanges = model.exchanges();
@@ -135,7 +137,7 @@ async fn check_corrects() {
 
 #[tokio::test]
 async fn check_exhausts() {
-    let model = Scripted::answering(["bad", "worse"]);
+    let model = ScriptedModel::answering(["bad", "worse"]);
     let error = model.complete_with(checked("go"), judge).await.expect_err("never accepted");
     assert_eq!(error, Error::BudgetExhausted("no: worse".into()));
     model.assert_exhausted();
@@ -143,7 +145,7 @@ async fn check_exhausts() {
 
 #[tokio::test]
 async fn check_skips_failed() {
-    let model = Scripted::new([Err(Error::Backend("offline".into()))]);
+    let model = ScriptedModel::new([Err(Error::Backend("offline".into()))]);
     let error = model.complete_with(checked("go"), judge).await.expect_err("backend failed");
     assert_eq!(error, Error::Backend("offline".into()));
     assert!(model.exchanges().is_empty(), "a failed turn has no candidate to check");
@@ -151,35 +153,35 @@ async fn check_skips_failed() {
 
 #[test]
 fn complete_rejects_check() {
-    let model = Scripted::default();
+    let model = ScriptedModel::default();
     let result = catch_unwind(AssertUnwindSafe(|| drop(model.complete(checked("a")))));
     assert!(result.is_err(), "complete must refuse a check request");
 }
 
 #[tokio::test]
 async fn complete_rejects_calls() {
-    let model = Scripted::answering(["x"]).calling(0, [call("t", "{}")]);
+    let model = ScriptedModel::answering(["x"]).calling(0, [call("t", "{}")]);
     let result = catch_unwind(AssertUnwindSafe(|| model.complete(user("a"))));
     assert!(result.is_err(), "complete must refuse scripted tool calls");
 }
 
 #[tokio::test]
 async fn then_answers() {
-    let model = Scripted::answering(["one"]).then(|| Err(Error::Backend("offline".into())));
+    let model = ScriptedModel::answering(["one"]).then(|| Err(Error::Backend("offline".into())));
     assert_eq!(model.complete(user("a")).await.expect("reply").answer, "one");
     assert_eq!(model.complete(user("b")).await, Err(Error::Backend("offline".into())));
 }
 
 #[test]
 fn unscripted() {
-    let model = Scripted::default();
+    let model = ScriptedModel::default();
     let result = catch_unwind(AssertUnwindSafe(|| drop(model.complete(user("a")))));
     assert!(result.is_err(), "an empty script panics on first use");
 }
 
 #[tokio::test]
 async fn seen() {
-    let model = Scripted::answering(["{}"]);
+    let model = ScriptedModel::answering(["{}"]);
     let request = Request::builder()
         .system("be terse")
         .messages(vec![Message {
@@ -297,7 +299,7 @@ async fn loader_defaulting() {
 }
 
 #[tokio::test]
-async fn loader_scripted_refusal_wins() {
+async fn scripted_refusal() {
     let loader = ScriptedLoader::default()
         .declare("tool")
         .digest("tool", digest("ab"))
@@ -305,5 +307,33 @@ async fn loader_scripted_refusal_wins() {
     assert_eq!(
         loader.load(&declared("tool"), None).await,
         Err(plugins::Error::Unavailable("registry down".into()))
+    );
+}
+
+#[tokio::test]
+async fn vcs_turns_and_seen() {
+    let vcs = ScriptedVcs::new([
+        Ok(VcsTurn::Revision("sha:main".to_owned())),
+        Ok(VcsTurn::Commit(Some("sha:c1".to_owned()))),
+        Err(vcs::Error::NotFound("missing".to_owned())),
+    ]);
+    assert_eq!(vcs.resolve(".", "main").await.expect("resolve"), "sha:main");
+    assert_eq!(vcs.commit("./work", "feat").await.expect("commit"), Some("sha:c1".to_owned()));
+    assert_eq!(vcs.head("./work").await, Err(vcs::Error::NotFound("missing".to_owned())));
+    vcs.assert_exhausted();
+
+    let seen = vcs.seen();
+    assert_eq!(seen.len(), 3);
+    assert_eq!(
+        (seen[0].op, seen[0].path.as_path(), &seen[0].args[..]),
+        ("resolve", Path::new("."), &["main".to_owned()][..])
+    );
+    assert_eq!(
+        (seen[1].op, seen[1].path.as_path(), &seen[1].args[..]),
+        ("commit", Path::new("./work"), &["feat".to_owned()][..])
+    );
+    assert_eq!(
+        (seen[2].op, seen[2].path.as_path(), &seen[2].args[..]),
+        ("head", Path::new("./work"), &[][..])
     );
 }

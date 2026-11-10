@@ -3,91 +3,68 @@
 use std::future::Future;
 
 use anyhow::Result;
+use serde::de::DeserializeOwned;
 
-use crate::document_store::{Document, QueryOptions, QueryResult};
+use crate::docstore::{Document, QueryOptions, QueryResult};
 
 /// Document storage (`wasi:docstore`).
 ///
-/// Default WASM implementations delegate to `wasi:docstore` via `omnia-wasi-docstore`.
+/// [`WasiProvider`](crate::WasiProvider) delegates to `wasi:docstore` via
+/// `omnia-wasi-docstore`. Typed reads of a document body are
+/// [`DocumentStoreExt`].
+#[omnia_guest_macros::capability]
 pub trait DocumentStore: Send + Sync {
-    cfg_select! {
-        not(target_arch = "wasm32") => {
-            /// Fetch a document by id.
-            fn get(
-                &self, store: &str, id: &str,
-            ) -> impl Future<Output = Result<Option<Document>>> + Send;
+    /// Fetch a document by id.
+    fn get(&self, store: &str, id: &str) -> impl Future<Output = Result<Option<Document>>> + Send;
 
-            /// Insert a new document (fails if the id already exists).
-            fn insert(
-                &self, store: &str, doc: &Document,
-            ) -> impl Future<Output = Result<()>> + Send;
+    /// Insert a new document (fails if the id already exists).
+    fn insert(&self, store: &str, doc: &Document) -> impl Future<Output = Result<()>> + Send;
 
-            /// Upsert a document by id.
-            fn put(&self, store: &str, doc: &Document) -> impl Future<Output = Result<()>> + Send;
+    /// Upsert a document by id.
+    fn put(&self, store: &str, doc: &Document) -> impl Future<Output = Result<()>> + Send;
 
-            /// Delete a document by id. Returns whether a document was removed.
-            fn delete(&self, store: &str, id: &str) -> impl Future<Output = Result<bool>> + Send;
+    /// Delete a document by id. Returns whether a document was removed.
+    fn delete(&self, store: &str, id: &str) -> impl Future<Output = Result<bool>> + Send;
 
-            /// Query documents in a collection.
-            fn query(
-                &self, store: &str, options: QueryOptions,
-            ) -> impl Future<Output = Result<QueryResult>> + Send;
-        }
-        _ => {
-            /// Fetch a document by id.
-            fn get(
-                &self, store: &str, id: &str,
-            ) -> impl Future<Output = Result<Option<Document>>> + Send {
-                async move { omnia_wasi_docstore::store::get(store, id).await }
-            }
+    /// Query documents in a collection.
+    fn query(
+        &self, store: &str, options: QueryOptions,
+    ) -> impl Future<Output = Result<QueryResult>> + Send;
+}
 
-            /// Insert a new document (fails if the id already exists).
-            fn insert(
-                &self, store: &str, doc: &Document,
-            ) -> impl Future<Output = Result<()>> + Send {
-                async move { omnia_wasi_docstore::store::insert(store, doc).await }
-            }
+#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
+impl DocumentStore for crate::WasiProvider {
+    async fn get(&self, store: &str, id: &str) -> Result<Option<Document>> {
+        omnia_wasi_docstore::store::get(store, id).await
+    }
 
-            /// Upsert a document by id.
-            fn put(&self, store: &str, doc: &Document) -> impl Future<Output = Result<()>> + Send {
-                async move { omnia_wasi_docstore::store::put(store, doc).await }
-            }
+    async fn insert(&self, store: &str, doc: &Document) -> Result<()> {
+        omnia_wasi_docstore::store::insert(store, doc).await
+    }
 
-            /// Delete a document by id. Returns whether a document was removed.
-            fn delete(&self, store: &str, id: &str) -> impl Future<Output = Result<bool>> + Send {
-                async move { omnia_wasi_docstore::store::delete(store, id).await }
-            }
+    async fn put(&self, store: &str, doc: &Document) -> Result<()> {
+        omnia_wasi_docstore::store::put(store, doc).await
+    }
 
-            /// Query documents in a collection.
-            fn query(
-                &self, store: &str, options: QueryOptions,
-            ) -> impl Future<Output = Result<QueryResult>> + Send {
-                async move { omnia_wasi_docstore::store::query(store, options).await }
-            }
-        }
+    async fn delete(&self, store: &str, id: &str) -> Result<bool> {
+        omnia_wasi_docstore::store::delete(store, id).await
+    }
+
+    async fn query(&self, store: &str, options: QueryOptions) -> Result<QueryResult> {
+        omnia_wasi_docstore::store::query(store, options).await
     }
 }
 
-delegate_deref!(DocumentStore {
-    fn get(&self, store: &str, id: &str) -> impl Future<Output = Result<Option<Document>>> + Send {
-        (**self).get(store, id)
+/// Typed reads over any [`DocumentStore`].
+///
+/// Blanket-implemented for every [`DocumentStore`]; never implemented by hand.
+pub trait DocumentStoreExt: DocumentStore {
+    /// Fetch a document by id and decode its JSON body as `T`.
+    fn get_as<T: DeserializeOwned>(
+        &self, store: &str, id: &str,
+    ) -> impl Future<Output = Result<Option<T>>> + Send {
+        async move { self.get(store, id).await?.map(|document| document.decode()).transpose() }
     }
+}
 
-    fn insert(&self, store: &str, doc: &Document) -> impl Future<Output = Result<()>> + Send {
-        (**self).insert(store, doc)
-    }
-
-    fn put(&self, store: &str, doc: &Document) -> impl Future<Output = Result<()>> + Send {
-        (**self).put(store, doc)
-    }
-
-    fn delete(&self, store: &str, id: &str) -> impl Future<Output = Result<bool>> + Send {
-        (**self).delete(store, id)
-    }
-
-    fn query(
-        &self, store: &str, options: QueryOptions,
-    ) -> impl Future<Output = Result<QueryResult>> + Send {
-        (**self).query(store, options)
-    }
-});
+impl<P: DocumentStore + ?Sized> DocumentStoreExt for P {}

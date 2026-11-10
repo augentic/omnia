@@ -10,7 +10,6 @@ use axum::routing::get;
 use bytes::Bytes;
 use http::Method;
 use http_body_util::Empty;
-use omnia_sdk::HttpResult;
 use tracing::Level;
 use wasip3::exports::http::handler::Guest;
 use wasip3::http::types::{ErrorCode, Request, Response};
@@ -27,7 +26,7 @@ impl Guest for HttpGuest {
 }
 
 #[omnia_wasi_otel::instrument]
-async fn origin_sm() -> HttpResult<impl IntoResponse> {
+async fn origin_sm() -> omnia_sdk::Result<impl IntoResponse> {
     tracing::info!("fetching from origin-sm");
 
     let request = http::Request::builder()

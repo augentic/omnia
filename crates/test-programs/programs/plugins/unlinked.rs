@@ -12,14 +12,15 @@ wit_bindgen::generate!({
     generate_all,
 });
 
-use omnia_sdk::plugins::{Location, Plugins as _, WasiPlugins};
+use omnia_sdk::WasiProvider;
+use omnia_sdk::plugins::{Location, Plugins as _};
 use omnia_test::link::ops;
 
-omnia_sdk::command!(scenario);
+omnia_sdk::api::command::export!(scenario);
 
 async fn scenario() {
     let noseam = Location::Declared("noseam".to_owned());
-    let plugin = WasiPlugins.load(&noseam, None).await.expect("an unlinked component loads");
+    let plugin = WasiProvider.load(&noseam, None).await.expect("an unlinked component loads");
     assert_eq!(plugin.id(), "noseam");
 
     // Never returns: the target serves no `ops`, so the link call traps.

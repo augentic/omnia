@@ -15,9 +15,9 @@ use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
 mod generated {
-    #![allow(missing_docs, clippy::same_length_and_capacity, reason = "wit-bindgen output")]
+    #![expect(clippy::same_length_and_capacity, reason = "wit-bindgen output")]
 
     wit_bindgen::generate!({
         world: "imports",
@@ -25,9 +25,6 @@ mod generated {
         generate_all,
     });
 }
-
-const SCHEME: &str = "sha256:";
-const HEX_LEN: usize = 64;
 
 /// A validated `sha256:<hex>` content digest, canonicalized to lowercase.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -65,12 +62,6 @@ impl TryFrom<String> for Digest {
 
     fn try_from(digest: String) -> Result<Self, Error> {
         digest.parse()
-    }
-}
-
-impl From<Digest> for String {
-    fn from(digest: Digest) -> Self {
-        digest.0
     }
 }
 
@@ -241,69 +232,41 @@ impl From<Error> for crate::Error {
 
 /// Plugin loading (Omnia Plugins).
 ///
-/// The default WASM implementation delegates to `omnia:plugins/loader`; off
-/// `wasm32` the signature is bare so native suites script loads.
+/// [`WasiProvider`](crate::WasiProvider) delegates to `omnia:plugins/loader`.
+#[omnia_guest_macros::capability]
 pub trait Plugins: Send + Sync {
-    cfg_select! {
-        not(target_arch = "wasm32") => {
-            /// Ensure the guest `from` names is active and return its handle, held
-            /// to `digest` when one is given; idempotent on (name, digest).
-            ///
-            /// # Errors
-            ///
-            /// Returns the loader's typed refusal ([`Error`]) when the deployment's
-            /// grant does not serve the location, or the host cannot acquire,
-            /// verify, validate, or register the bytes.
-            fn load(
-                &self, from: &Location, digest: Option<&Digest>,
-            ) -> impl Future<Output = Result<Plugin, Error>> + Send;
-        }
-        _ => {
-            /// Ensure the guest `from` names is active and return its handle, held
-            /// to `digest` when one is given; idempotent on (name, digest).
-            ///
-            /// # Errors
-            ///
-            /// Returns the loader's typed refusal ([`Error`]) when the deployment's
-            /// grant does not serve the location, or the host cannot acquire,
-            /// verify, validate, or register the bytes.
-            fn load(
-                &self, from: &Location, digest: Option<&Digest>,
-            ) -> impl Future<Output = Result<Plugin, Error>> + Send {
-                use generated::omnia::plugins::loader;
+    /// Ensure the guest `from` names is active and return its handle, held
+    /// to `digest` when one is given; idempotent on (name, digest).
+    ///
+    /// # Errors
+    ///
+    /// Returns the loader's typed refusal ([`Error`]) when the deployment's
+    /// grant does not serve the location, or the host cannot acquire,
+    /// verify, validate, or register the bytes.
+    fn load(
+        &self, from: &Location, digest: Option<&Digest>,
+    ) -> impl Future<Output = Result<Plugin, Error>> + Send;
+}
 
-                let from = loader::Location::from(from);
-                let digest = digest.map(ToString::to_string);
-                async move {
-                    let loaded = loader::load(from, digest).await?;
-                    let digest = loaded.digest.parse().map_err(|error: Error| {
-                        Error::Internal(format!("host reported a malformed digest: {error}"))
-                    })?;
-                    Ok(Plugin::new(loaded.id, digest, loaded.exports))
-                }
-            }
-        }
+#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
+impl Plugins for crate::WasiProvider {
+    async fn load(&self, from: &Location, digest: Option<&Digest>) -> Result<Plugin, Error> {
+        use generated::omnia::plugins::loader;
+
+        let from = loader::Location::from(from);
+        let digest = digest.map(ToString::to_string);
+        let loaded = loader::load(from, digest).await?;
+        let digest = loaded.digest.parse().map_err(|error: Error| {
+            Error::Internal(format!("host reported a malformed digest: {error}"))
+        })?;
+        Ok(Plugin::new(loaded.id, digest, loaded.exports))
     }
 }
 
-delegate_deref!(Plugins {
-    fn load(
-        &self, from: &Location, digest: Option<&Digest>,
-    ) -> impl Future<Output = Result<Plugin, Error>> + Send {
-        (**self).load(from, digest)
-    }
-});
+const SCHEME: &str = "sha256:";
+const HEX_LEN: usize = 64;
 
-/// The WASI-backed provider a `wasm32` guest hands its wasm-free core; the
-/// default method body carries the whole delegation.
-#[cfg(target_arch = "wasm32")]
-#[derive(Clone, Copy, Debug)]
-pub struct WasiPlugins;
-
-#[cfg(target_arch = "wasm32")]
-impl Plugins for WasiPlugins {}
-
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
 mod wire {
     use super::generated::omnia::plugins::loader;
     use super::{Error, Location};
@@ -332,56 +295,8 @@ mod wire {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{Digest, Error};
-
-    #[test]
-    fn digest_canonicalizes_case() {
-        let parsed: Digest =
-            format!("sha256:{}", "AB".repeat(32)).parse().expect("uppercase hex accepted");
-        assert_eq!(parsed.as_str(), format!("sha256:{}", "ab".repeat(32)));
-    }
-
-    #[test]
-    fn digest_malformed() {
-        for digest in [
-            format!("sha512:{}", "ab".repeat(32)),
-            "sha256:abcd".into(),
-            format!("sha256:{}", "zz".repeat(32)),
-        ] {
-            let error = digest.parse::<Digest>().expect_err("malformed digest refused");
-            assert!(matches!(error, Error::Refused(_)), "{digest} refused");
-        }
-    }
-
-    #[test]
-    fn digest_serde() {
-        let json = format!("\"sha256:{}\"", "ab".repeat(32));
-        let parsed: Digest = serde_json::from_str(&json).expect("valid digest deserializes");
-        assert_eq!(serde_json::to_string(&parsed).expect("serializes"), json);
-        serde_json::from_str::<Digest>("\"sha256:abcd\"").expect_err("malformed digest refused");
-    }
-
-    #[test]
-    fn taxonomy_mapping() {
-        let cases = [
-            (Error::Refused("r".into()), "refused"),
-            (Error::Unavailable("u".into()), "unavailable"),
-            (Error::Internal("x".into()), "internal"),
-        ];
-        for (error, code) in cases {
-            let mapped = crate::Error::from(error.clone());
-            assert_eq!(mapped.code(), code);
-            match error {
-                Error::Unavailable(_) => {
-                    assert!(matches!(mapped, crate::Error::BadGateway { .. }));
-                }
-                Error::Internal(_) => {
-                    assert!(matches!(mapped, crate::Error::ServerError { .. }));
-                }
-                Error::Refused(_) => assert!(matches!(mapped, crate::Error::BadRequest { .. })),
-            }
-        }
+impl From<Digest> for String {
+    fn from(digest: Digest) -> Self {
+        digest.0
     }
 }

@@ -8,7 +8,6 @@
 use anyhow::anyhow;
 use axum::routing::get;
 use axum::{Json, Router};
-use omnia_sdk::HttpResult;
 use omnia_wasi_config::store as config;
 use serde_json::{Value, json};
 use wasip3::exports::http::handler::Guest;
@@ -25,7 +24,7 @@ impl Guest for HttpGuest {
 }
 
 #[omnia_wasi_otel::instrument]
-async fn config_get() -> HttpResult<Json<Value>> {
+async fn config_get() -> omnia_sdk::Result<Json<Value>> {
     let config = config::get_all().map_err(|e| anyhow!("getting config: {e:?}"))?;
 
     Ok(Json(json!({

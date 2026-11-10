@@ -2,11 +2,15 @@
 
 //! Procedural attributes for Omnia guests.
 
+mod capability;
+mod from_row;
 mod otel;
+mod provider;
+mod settings;
 
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{ItemFn, meta, parse_macro_input};
+use syn::{DeriveInput, ItemFn, ItemTrait, meta, parse_macro_input};
 
 /// Instruments a function using the `[wasi_otel::instrument]` function.
 ///
@@ -36,4 +40,52 @@ pub fn instrument(args: TokenStream, item: TokenStream) -> TokenStream {
     };
 
     TokenStream::from(new_fn)
+}
+
+/// Emits the `Has<Cap>` accessor trait, blanket forwarding impl, and pointer
+/// impls (`Arc<P>`, `&P`, `Box<P>`) for an `omnia_sdk` capability trait.
+#[proc_macro_attribute]
+pub fn capability(_args: TokenStream, item: TokenStream) -> TokenStream {
+    let item_trait = parse_macro_input!(item as ItemTrait);
+    match capability::expand(&item_trait) {
+        Ok(tokens) => TokenStream::from(tokens),
+        Err(err) => TokenStream::from(err.into_compile_error()),
+    }
+}
+
+/// Derives `omnia_sdk` capability traits by delegating each named capability to
+/// the struct field annotated with `#[provider(Capability, ...)]`.
+#[proc_macro_derive(Provider, attributes(provider))]
+pub fn derive_provider(item: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(item as DeriveInput);
+    match provider::expand(&input) {
+        Ok(tokens) => TokenStream::from(tokens),
+        Err(err) => TokenStream::from(err.into_compile_error()),
+    }
+}
+
+/// Derives a `KEYS` list and an `async fn load(config)` that reads every field
+/// of a named-field struct from `omnia_sdk::Config` through
+/// `omnia_sdk::ConfigExt::get_parsed`.
+///
+/// A field's key is its name upper-cased behind the struct's
+/// `#[setting(prefix = "..")]`, or the literal in `#[setting(key = "..")]`.
+#[proc_macro_derive(Settings, attributes(setting))]
+pub fn derive_settings(item: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(item as DeriveInput);
+    match settings::expand(&input) {
+        Ok(tokens) => TokenStream::from(tokens),
+        Err(err) => TokenStream::from(err.into_compile_error()),
+    }
+}
+
+/// Derives `omnia_sdk::sql::FromRow` for a named-field struct, reading each
+/// field from the column of the same name through `Row::get`.
+#[proc_macro_derive(FromRow)]
+pub fn derive_from_row(item: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(item as DeriveInput);
+    match from_row::expand(&input) {
+        Ok(tokens) => TokenStream::from(tokens),
+        Err(err) => TokenStream::from(err.into_compile_error()),
+    }
 }

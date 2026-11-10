@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use omnia_sdk::TableStore;
-use omnia_wasi_sql::{DataType, Row};
+use omnia_sdk::sql::{DataType, Row};
 
 /// A statement predicate over the SQL text and its bound parameters.
 pub type Predicate = Arc<dyn Fn(&str, &[DataType]) -> bool + Send + Sync>;
@@ -44,11 +44,8 @@ struct Inner {
 /// # tokio::runtime::Runtime::new().unwrap().block_on(async {
 /// let tables = ScriptedTables::default()
 ///     .on_exec(|sql, params| sql.starts_with("INSERT") && params.len() == 1, 1);
-/// let params = vec![omnia_wasi_sql::DataType::Str(Some("ann".into()))];
-/// assert_eq!(
-///     tables.exec("db".into(), "INSERT INTO t VALUES (?)".into(), params).await.unwrap(),
-///     1
-/// );
+/// let params = [omnia_sdk::sql::DataType::Str(Some("ann".into()))];
+/// assert_eq!(tables.exec("db", "INSERT INTO t VALUES (?)", &params).await.unwrap(), 1);
 /// assert_eq!(tables.statements()[0].sql, "INSERT INTO t VALUES (?)");
 /// # });
 /// ```
@@ -112,11 +109,11 @@ impl ScriptedTables {
         self.inner.statements.lock().expect("statements lock").clone()
     }
 
-    fn record(&self, connection: String, sql: String, params: Vec<DataType>) -> Statement {
+    fn record(&self, connection: &str, sql: &str, params: &[DataType]) -> Statement {
         let statement = Statement {
-            connection,
-            sql,
-            params,
+            connection: connection.to_owned(),
+            sql: sql.to_owned(),
+            params: params.to_vec(),
         };
         self.inner.statements.lock().expect("statements lock").push(statement.clone());
         statement
@@ -135,7 +132,7 @@ impl ScriptedTables {
 // panics when no rule matches the statement
 impl TableStore for ScriptedTables {
     fn query(
-        &self, conn_name: String, query: String, params: Vec<DataType>,
+        &self, conn_name: &str, query: &str, params: &[DataType],
     ) -> impl Future<Output = Result<Vec<Row>>> + Send {
         let statement = self.record(conn_name, query, params);
         let rows = Self::first_match(&self.inner.queries, &statement).unwrap_or_else(|| {
@@ -145,7 +142,7 @@ impl TableStore for ScriptedTables {
     }
 
     fn exec(
-        &self, conn_name: String, query: String, params: Vec<DataType>,
+        &self, conn_name: &str, query: &str, params: &[DataType],
     ) -> impl Future<Output = Result<u32>> + Send {
         let statement = self.record(conn_name, query, params);
         let affected = Self::first_match(&self.inner.execs, &statement).unwrap_or_else(|| {

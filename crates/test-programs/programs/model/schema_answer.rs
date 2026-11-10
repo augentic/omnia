@@ -3,10 +3,11 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_sdk::model::{Format, Model as _, Request, SchemaFormat, WasiModel};
+use omnia_sdk::WasiProvider;
+use omnia_sdk::model::{Format, Model as _, Request, SchemaFormat};
 use test_programs::{VERDICT_SCHEMA, user};
 
-omnia_sdk::command!(scenario);
+omnia_sdk::api::command::export!(scenario);
 
 async fn scenario() {
     let request = Request::builder()
@@ -16,6 +17,6 @@ async fn scenario() {
         ))
         .build();
 
-    let reply = WasiModel.complete(request).await.expect("the answer passes through");
+    let reply = WasiProvider.complete(request).await.expect("the answer passes through");
     assert_eq!(reply.answer, r#"{"verdict":"pass"}"#);
 }

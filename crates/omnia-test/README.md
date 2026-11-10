@@ -12,7 +12,7 @@ features.
 
 There is no default feature: a consumer names the rung it uses. All three
 share one `Script` core, so a scripted model reads the same at the handler
-rung (`guest::Scripted`) and the component rung (`host::ScriptedModel`). The
+rung (`guest::ScriptedModel`) and the component rung (`host::ScriptedModel`). The
 walk-through is [Testing Omnia-Based Code](https://github.com/augentic/omnia/blob/main/docs/guides/testing-omnia-code.md).
 
 ## Depending on it

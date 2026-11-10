@@ -59,7 +59,7 @@ The [`examples/`](examples/README.md) directory contains a complete working gues
 | [`omnia-cli`](crates/omnia-cli)                 | Leaf `run` grammar — clap plus argv-precedence; selected by omnia's `cli` feature |
 | [`omnia-compile`](crates/omnia-compile)         | Leaf ahead-of-time compiler — `CompileOptions` and `compile`, over wasmtime alone; its Cranelift backend is what omnia's `jit` feature turns on |
 | [`omnia-sdk`](crates/omnia-sdk)                 | Guest SDK — `Handler`/`Client`/`Context`, HTTP/messaging routers and the command façade, errors, capabilities, and MCP support |
-| [`omnia-guest-macros`](crates/guest-macros)     | `#[instrument]` observability attribute for guests                                         |
+| [`omnia-guest-macros`](crates/guest-macros)     | `#[instrument]` observability attribute and `#[derive(Provider)]` for guests               |
 | [`omnia-host-macros`](crates/host-macros)       | `runtime!` proc-macro for host runtime generation                                          |
 | [`omnia-wasi-blobstore`](crates/wasi-blobstore) | wasi:blobstore host and guest bindings                                                     |
 | [`omnia-wasi-config`](crates/wasi-config)       | wasi:config host and guest bindings                                                        |

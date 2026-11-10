@@ -1,22 +1,25 @@
 //! Provider capabilities: the host services a guest's provider can call.
 //!
-//! Each capability is a trait whose methods carry WASI-backed default bodies on
-//! `wasm32` (delegating to the matching `omnia-wasi-*` binding) and bare
-//! signatures off `wasm32`, so hosts and tests can supply their own.
+//! Each capability is a target-neutral trait implemented by [`WasiProvider`] on
+//! `wasm32` (delegating to the matching `omnia-wasi-*` binding), by
+//! `omnia_test::guest` doubles in native handler tests, and by capability
+//! decorators composed via `#[derive(Provider)]`.
 //!
-//! Every capability is also implemented for `Arc<T>`, `&T`, and `Box<T>`
-//! where `T` implements it, so a provider may hold a capability behind a
-//! pointer and a `P: Capability` bound accepts one.
-
-// The pointer impls delegate on both targets: an empty impl would hand a
-// wrapped provider the WASI defaults in place of its own overrides.
-macro_rules! delegate_deref {
-    ($trait:ident { $($body:tt)* }) => {
-        impl<P: $trait + ?Sized> $trait for ::std::sync::Arc<P> { $($body)* }
-        impl<P: $trait + ?Sized> $trait for &P { $($body)* }
-        impl<P: $trait + ?Sized> $trait for ::std::boxed::Box<P> { $($body)* }
-    };
-}
+//! Every capability has a companion `Has<Capability>` accessor trait (emitted
+//! by `#[omnia_guest_macros::capability]`) with a blanket forwarding impl and
+//! implementations for `Arc<P>`, `&P`, and `Box<P>`, so `#[derive(Provider)]`
+//! and pointer wrappers delegate without repeating method signatures.
+//!
+//! A `<Capability>Ext` trait ([`StateStoreExt`], [`ConfigExt`], ...) holds the
+//! caller-side codecs and parsers over a capability's primitives. It is
+//! blanket-implemented for every implementor and never implemented by hand, so
+//! one encoding holds across providers. Its methods return `anyhow::Result`
+//! like the primitives they wrap; [`HttpRequestExt::fetch_json`] alone returns
+//! [`crate::Result`], since it also maps a non-2xx status to
+//! [`Error::BadGateway`](crate::Error::BadGateway).
+//!
+//! [`Capabilities`] is every capability trait at once, the bound a fn generic
+//! over the whole provider takes.
 
 mod blob;
 mod broadcast;
@@ -32,28 +35,131 @@ pub mod plugins;
 mod state;
 #[cfg(feature = "sql")]
 mod table;
+mod vault;
 pub mod vcs;
 
-pub use blob::{BlobStore, BlobStoreExt, ContainerMetadata, ObjectMetadata};
+#[doc(hidden)]
+pub use blob::HasBlobStore;
+pub use blob::{BlobStore, ContainerMetadata, ObjectMetadata};
 pub use broadcast::Broadcast;
-pub use config::Config;
+#[doc(hidden)]
+pub use broadcast::HasBroadcast;
+#[doc(hidden)]
+pub use config::HasConfig;
+pub use config::{Config, ConfigExt};
 #[cfg(feature = "docstore")]
-pub use document::DocumentStore;
-pub use http::HttpRequest;
-pub use identity::Identity;
+#[doc(hidden)]
+pub use document::HasDocumentStore;
+#[cfg(feature = "docstore")]
+pub use document::{DocumentStore, DocumentStoreExt};
+#[doc(hidden)]
+pub use http::HasHttpRequest;
+pub use http::{HttpRequest, HttpRequestExt};
+#[doc(hidden)]
+pub use identity::HasIdentity;
+pub use identity::{AccessToken, Identity, IdentityExt};
+#[doc(hidden)]
+pub use messaging::HasPublish;
 pub use messaging::{Message, Publish};
+#[doc(hidden)]
+pub use model::HasModel;
 // Generic model wire names stay scoped to the model capability.
 pub use model::Model;
-#[cfg(target_arch = "wasm32")]
-pub use model::WasiModel;
+#[doc(hidden)]
+pub use plugins::HasPlugins;
 // Loader request names stay scoped to the plugins capability.
 pub use plugins::Plugins;
-#[cfg(target_arch = "wasm32")]
-pub use plugins::WasiPlugins;
-pub use state::{CasError, StateStore};
+#[doc(hidden)]
+pub use state::HasStateStore;
+pub use state::{CasError, StateStore, StateStoreExt};
 #[cfg(feature = "sql")]
-pub use table::TableStore;
+#[doc(hidden)]
+pub use table::HasTableStore;
+#[cfg(feature = "sql")]
+pub use table::{TableStore, TableStoreExt};
+#[doc(hidden)]
+pub use vault::HasVault;
+pub use vault::Vault;
+#[doc(hidden)]
+pub use vcs::HasVcs;
 // Version-control wire names stay scoped to the vcs capability.
 pub use vcs::Vcs;
-#[cfg(target_arch = "wasm32")]
-pub use vcs::WasiVcs;
+
+/// Zero-sized WASI provider implementing every capability trait on `wasm32`.
+///
+/// Delegates to the `omnia-wasi-*` guest bindings on `wasm32-wasip2`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct WasiProvider;
+
+// `#[cfg]` cannot gate one supertrait, so each feature set names the traits
+// it adds to the always-on list.
+macro_rules! capabilities {
+    ($($gated:ident),*) => {
+        /// Every capability trait at once, with the `Send + Sync + 'static` a
+        /// provider needs.
+        ///
+        /// A fn generic over the whole provider takes this bound in place of
+        /// listing every capability trait: a module's
+        /// `handlers<P: Capabilities>() -> Handlers<P>`, or the root router
+        /// fn a transport `export!` binds. A handler still bounds its own `P`
+        /// on the capabilities it reaches. [`WasiProvider`] satisfies it on
+        /// `wasm32`, as does the `omnia_test::guest` provider natively.
+        /// `DocumentStore` and `TableStore` are included under the `docstore`
+        /// and `sql` features.
+        ///
+        /// Blanket-implemented for every such provider; never implemented by
+        /// hand.
+        pub trait Capabilities:
+            BlobStore
+            + Broadcast
+            + Config
+            + HttpRequest
+            + Identity
+            + Model
+            + Plugins
+            + Publish
+            + StateStore
+            + Vault
+            + Vcs
+            $(+ $gated)*
+            + Send
+            + Sync
+            + 'static
+        {
+        }
+
+        impl<P> Capabilities for P where
+            P: BlobStore
+                + Broadcast
+                + Config
+                + HttpRequest
+                + Identity
+                + Model
+                + Plugins
+                + Publish
+                + StateStore
+                + Vault
+                + Vcs
+                $(+ $gated)*
+                + Send
+                + Sync
+                + 'static
+        {
+        }
+    };
+}
+
+cfg_select! {
+    all(feature = "docstore", feature = "sql") => {
+        capabilities!(DocumentStore, TableStore);
+    }
+    feature = "docstore" => {
+        capabilities!(DocumentStore);
+    }
+    feature = "sql" => {
+        capabilities!(TableStore);
+    }
+    _ => {
+        capabilities!();
+    }
+}
