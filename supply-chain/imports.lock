@@ -734,8 +734,8 @@ user-login = "alexcrichton"
 user-name = "Alex Crichton"
 
 [[publisher.wasip3]]
-version = "0.9.0+wasi-0.3.0"
-when = "2026-09-10"
+version = "0.10.0+wasi-0.3.2"
+when = "2026-10-27"
 user-id = 1
 user-login = "alexcrichton"
 user-name = "Alex Crichton"
@@ -790,13 +790,13 @@ when = "2026-10-02"
 trusted-publisher = "github:bytecodealliance/wasm-tools"
 
 [[publisher.wasm-metadata]]
-version = "0.259.0"
-when = "2026-09-10"
+version = "0.261.0"
+when = "2026-10-02"
 trusted-publisher = "github:bytecodealliance/wasm-tools"
 
 [[publisher.wasm-metadata]]
-version = "0.261.0"
-when = "2026-10-02"
+version = "0.262.0"
+when = "2026-10-13"
 trusted-publisher = "github:bytecodealliance/wasm-tools"
 
 [[publisher.wasmparser]]
@@ -1149,23 +1149,23 @@ when = "2026-04-17"
 trusted-publisher = "github:bytecodealliance/wit-bindgen"
 
 [[publisher.wit-bindgen]]
-version = "0.62.0"
-when = "2026-09-10"
+version = "0.63.0"
+when = "2026-10-14"
 trusted-publisher = "github:bytecodealliance/wit-bindgen"
 
 [[publisher.wit-bindgen-core]]
-version = "0.62.0"
-when = "2026-09-10"
+version = "0.63.0"
+when = "2026-10-14"
 trusted-publisher = "github:bytecodealliance/wit-bindgen"
 
 [[publisher.wit-bindgen-rust]]
-version = "0.62.0"
-when = "2026-09-10"
+version = "0.63.0"
+when = "2026-10-14"
 trusted-publisher = "github:bytecodealliance/wit-bindgen"
 
 [[publisher.wit-bindgen-rust-macro]]
-version = "0.62.0"
-when = "2026-09-10"
+version = "0.63.0"
+when = "2026-10-14"
 trusted-publisher = "github:bytecodealliance/wit-bindgen"
 
 [[publisher.wit-component]]
@@ -1179,13 +1179,13 @@ when = "2026-10-02"
 trusted-publisher = "github:bytecodealliance/wasm-tools"
 
 [[publisher.wit-component]]
-version = "0.259.0"
-when = "2026-09-10"
+version = "0.261.0"
+when = "2026-10-02"
 trusted-publisher = "github:bytecodealliance/wasm-tools"
 
 [[publisher.wit-component]]
-version = "0.261.0"
-when = "2026-10-02"
+version = "0.262.0"
+when = "2026-10-13"
 trusted-publisher = "github:bytecodealliance/wasm-tools"
 
 [[publisher.wit-parser]]
@@ -1199,13 +1199,13 @@ when = "2026-10-02"
 trusted-publisher = "github:bytecodealliance/wasm-tools"
 
 [[publisher.wit-parser]]
-version = "0.259.0"
-when = "2026-09-10"
+version = "0.261.0"
+when = "2026-10-02"
 trusted-publisher = "github:bytecodealliance/wasm-tools"
 
 [[publisher.wit-parser]]
-version = "0.261.0"
-when = "2026-10-02"
+version = "0.262.0"
+when = "2026-10-13"
 trusted-publisher = "github:bytecodealliance/wasm-tools"
 
 [audits.augentic.audits]

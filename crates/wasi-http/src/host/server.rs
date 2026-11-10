@@ -3,7 +3,9 @@
 use std::clone::Clone;
 use std::convert::Infallible;
 use std::env;
-use std::pin::Pin;
+use std::fmt::Debug;
+use std::future::Future;
+use std::pin::{Pin, pin};
 use std::sync::Arc;
 use std::task::{Context as TaskContext, Poll};
 
@@ -15,11 +17,13 @@ use http_body_util::combinators::UnsyncBoxBody;
 use http_body_util::{BodyExt, Full};
 use hyper::body::{Body, Frame, SizeHint};
 use hyper::header::{FORWARDED, HOST};
-use hyper::server::conn::http1;
 use hyper::service::service_fn;
-use omnia_core::{HttpRoutes, Provides, Runtime, StoreCtx, TriggerRouter};
+use hyper_util::rt::TokioExecutor;
+use hyper_util::server::conn::auto;
+use omnia_core::{Backends, HttpRoutes, Provides, Runtime, StoreCtx, TriggerRouter};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
+use tokio::task::JoinSet;
 use tokio::time::timeout;
 use tracing::{Instrument, info_span, instrument};
 use wasmtime::AsContextMut as _;
@@ -50,54 +54,78 @@ where
     tracing::info!("{} http server listening on: {addr}", handler.component);
 
     // built once, cloned per connection
-    let http1 = http1::Builder::new();
+    let builder = auto::Builder::new(TokioExecutor::new());
+    let mut connections = JoinSet::new();
 
     // listen for requests until terminated
     loop {
-        let (stream, _) = match listener.accept().await {
-            Ok(conn) => conn,
-            Err(error) => {
-                // a transient accept error must not tear down the server
-                tracing::error!(%error, "accept error");
-                continue;
-            }
+        let (stream, _) = tokio::select! {
+            () = state.stopped() => break,
+            Some(_) = connections.join_next(), if !connections.is_empty() => continue,
+            accepted = listener.accept() => match accepted {
+                Ok(conn) => conn,
+                Err(error) => {
+                    // a transient accept error must not tear down the server
+                    tracing::error!(%error, "accept error");
+                    continue;
+                }
+            },
         };
         if let Err(error) = stream.set_nodelay(true) {
             tracing::warn!(%error, "failed to set TCP_NODELAY");
         }
         let stream = TokioIo::new(stream);
         let handler = handler.clone();
-        let http1 = http1.clone();
+        let builder = builder.clone();
+        let state = state.clone();
 
-        tokio::spawn(async move {
-            if let Err(e) = http1
-                .serve_connection(
-                    stream,
-                    service_fn(move |request| {
-                        let handler = handler.clone();
-                        async move {
-                            let response = handler.handle(request).await.unwrap_or_else(|e| {
-                                tracing::error!("Error proxying request: {e}");
-                                internal_error()
-                            });
+        connections.spawn(async move {
+            let service = service_fn(move |request| {
+                let handler = handler.clone();
+                async move {
+                    let response = handler.handle(request).await.unwrap_or_else(|e| {
+                        tracing::error!("Error proxying request: {e}");
+                        internal_error()
+                    });
 
-                            // track server error responses
-                            if response.status() >= StatusCode::INTERNAL_SERVER_ERROR {
-                                tracing::error!(
-                                    monotonic_counter.processing_errors = 1,
-                                    service = %handler.component,
-                                    error = format!("{response:?}"),
-                                );
-                            }
-                            Ok::<_, Infallible>(response)
-                        }
-                    }),
-                )
-                .await
-            {
-                tracing::error!("connection error: {e:?}");
-            }
+                    // track server error responses
+                    if response.status() >= StatusCode::INTERNAL_SERVER_ERROR {
+                        tracing::error!(
+                            monotonic_counter.processing_errors = 1,
+                            service = %handler.component,
+                            error = format!("{response:?}"),
+                        );
+                    }
+                    Ok::<_, Infallible>(response)
+                }
+            });
+            let conn = builder.serve_connection_with_upgrades(stream, service);
+            drive_connection(conn, &state, auto::UpgradeableConnection::graceful_shutdown).await;
         });
+    }
+
+    drop(listener);
+    while connections.join_next().await.is_some() {}
+    Ok(())
+}
+
+async fn drive_connection<B, F, G, E>(conn: F, state: &Runtime<B>, graceful: G)
+where
+    B: Backends,
+    F: Future<Output = std::result::Result<(), E>>,
+    E: Debug,
+    G: FnOnce(Pin<&mut F>),
+{
+    let mut conn = pin!(conn);
+    let result = tokio::select! {
+        result = conn.as_mut() => result,
+        () = state.stopped() => {
+            graceful(conn.as_mut());
+            conn.await
+        }
+    };
+    if let Err(e) = result {
+        tracing::error!("connection error: {e:?}");
     }
 }
 
@@ -143,11 +171,11 @@ where
 
     /// Forward a request to the routed guest and return its response.
     ///
-    /// The request is normalised first (scheme and authority from `Host` or
-    /// `Forwarded`). Outcomes the handler can answer itself come back as
-    /// responses: a request without either header `400`, an unrouted path
-    /// `404`, and a guest that times out, cannot be loaded at its first use,
-    /// or is no longer registered `500`.
+    /// The request is normalised first (scheme and authority from `Forwarded`,
+    /// the URI, or `Host`). Outcomes the handler can answer itself come back as
+    /// responses: a request with no authority `400`, an unrouted path `404`,
+    /// and a guest that times out, cannot be loaded at its first use, or is no
+    /// longer registered `500`.
     ///
     /// # Errors
     ///
@@ -288,9 +316,9 @@ fn view<B: Provides<WasiHttp>>(store: &mut StoreCtx<B>) -> WasiHttpCtxView<'_> {
 }
 
 // rebuild the uri with scheme and authority set, so they reach the guest
-fn fix_request<T>(mut request: http::Request<T>) -> Result<http::Request<T>> {
-    let uri = request.uri_mut();
-    let p_and_q = uri.path_and_query().map_or_else(|| PathAndQuery::from_static("/"), Clone::clone);
+fn fix_request<T>(request: http::Request<T>) -> Result<http::Request<T>> {
+    let p_and_q =
+        request.uri().path_and_query().map_or_else(|| PathAndQuery::from_static("/"), Clone::clone);
     let mut uri_builder = Uri::builder().path_and_query(p_and_q);
 
     if let Some(forwarded) = request.headers().get(FORWARDED) {
@@ -312,12 +340,17 @@ fn fix_request<T>(mut request: http::Request<T>) -> Result<http::Request<T>> {
         }
         uri_builder = uri_builder.scheme(scheme);
     } else {
-        // running locally
-        let Some(host) = request.headers().get(HOST) else {
-            return Err(anyhow!("missing host header"));
+        // running locally: authority from the URI (HTTP/2 `:authority` or
+        // absolute-form HTTP/1.1), falling back to the `Host` header
+        let scheme = request.uri().scheme_str().unwrap_or("http");
+        let authority = match request.uri().authority() {
+            Some(authority) => authority.as_str(),
+            None => match request.headers().get(HOST) {
+                Some(host) => host.to_str()?,
+                None => return Err(anyhow!("missing authority in URI and host header")),
+            },
         };
-        uri_builder = uri_builder.authority(host.to_str()?);
-        uri_builder = uri_builder.scheme("http");
+        uri_builder = uri_builder.authority(authority).scheme(scheme);
     }
 
     let (mut parts, body) = request.into_parts();

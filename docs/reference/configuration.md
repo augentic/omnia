@@ -64,12 +64,13 @@ Two further compile-affecting options trade artifact size against introspection:
 
 ### Default backends
 
-| Variable                                                             | Default                 | Used by                      |
-| -------------------------------------------------------------------- | ----------------------- | ---------------------------- |
-| `HTTP_ADDR`                                                          | `0.0.0.0:8080`          | `HttpDefault` inbound server |
-| `WEBSOCKET_ADDR`                                                     | `0.0.0.0:80`            | `WebSocketDefault` server    |
-| `SQL_DATABASE`                                                       | shared in-memory SQLite | `SqlDefault`                 |
-| `IDENTITY_CLIENT_ID`, `IDENTITY_CLIENT_SECRET`, `IDENTITY_TOKEN_URL` | unset                   | `IdentityDefault` OAuth flow |
+| Variable                                                             | Default                 | Used by                       |
+| -------------------------------------------------------------------- | ----------------------- | ----------------------------- |
+| `HTTP_ADDR`                                                          | `0.0.0.0:8080`          | `HttpDefault` inbound server  |
+| `HTTP_CONNECT_TIMEOUT`                                               | `10` (seconds)          | `HttpDefault` outbound client |
+| `WEBSOCKET_ADDR`                                                     | `0.0.0.0:80`            | `WebSocketDefault` server     |
+| `SQL_DATABASE`                                                       | shared in-memory SQLite | `SqlDefault`                  |
+| `IDENTITY_CLIENT_ID`, `IDENTITY_CLIENT_SECRET`, `IDENTITY_TOKEN_URL` | unset                   | `IdentityDefault` OAuth flow  |
 
 Production backend variables (Redis, Kafka, Azure, ...) are listed in [Production Backends](../guides/production-backends.md#configuration) and each backend crate's README.
 

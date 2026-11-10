@@ -8,7 +8,7 @@ package omnia:vcs@0.1.0;
 /// no host path reaches a guest. A working copy carries no branch: it sits on
 /// a sealed commit and holds pending changes until `commit` seals them.
 interface types {
-    use wasi:filesystem/types@0.3.0.{descriptor};
+    use wasi:filesystem/types@0.3.2.{descriptor};
 
     /// A place beneath an authorised mount: the `workspace-grant` idiom. The
     /// host resolves it against the mount registry, so nothing outside a

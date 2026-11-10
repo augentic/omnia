@@ -45,6 +45,9 @@ Unreleased
   `#[host_ctx(client = WasiXCtx)]` and makes `HostView<'a, dyn WasiXCtx>`
   the host's `HasData::Data`. The bindgen `Host*` impls go on
   `HostView<'_, dyn WasiXCtx>`, and reach the backend through `client`.
+- `Runtime::stop` and `Runtime::stopped`. A trigger server waits on
+  `stopped` to stop accepting work and drain. `Runtime::shutdown` stops
+  the runtime too.
 
 ### Changed
 
@@ -95,6 +98,15 @@ Unreleased
 - `runtime!` names each backend field by its row's position, so two
   backends whose paths end in the same name (`keyvalue::Client`,
   `model::Client`) no longer share a field.
+- The HTTP trigger serves HTTP/1.1 and HTTP/2 on one listener. On stop it
+  accepts no new connection and lets each open one finish its requests.
+- A server-mode deployment drains on the first `SIGINT` or `SIGTERM`, and
+  exits on the second.
+- Without a `Forwarded` header, the HTTP trigger takes a request's scheme
+  and authority from its URI before the `Host` header, so an HTTP/2
+  request needs no `Host`.
+- Guests link `wasip3` 0.10 and `wit-bindgen` 0.63. `omnia:model` and
+  `omnia:vcs` use `wasi:filesystem` and `wasi:clocks` at 0.3.2.
 
 ### Removed
 

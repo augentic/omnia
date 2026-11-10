@@ -8,4 +8,4 @@ A `location` is the `workspace-grant` idiom of `omnia:model`: a borrowed mount-r
 
 ## Deps
 
-The `deps/` directory vendors the `wasi:filesystem` and `wasi:clocks` packages at version `0.3.0` (p3) — the versions the runtime serves via `wasmtime_wasi::p3::add_to_linker` — so the `location` `borrow<descriptor>` resolves, via the host `bindgen!` `with:` remap onto `wasmtime_wasi::p3::bindings`, to the same `Descriptor` resource the runtime already owns. They are copied verbatim from `wasmtime-wasi`'s `src/p3/wit/deps`, as `wasi-model` vendors them.
+The `deps/` directory vendors the `wasi:filesystem` and `wasi:clocks` packages at version `0.3.2` (p3) — on the `0.3` semver track the runtime serves via `wasmtime_wasi::p3::add_to_linker` — so the `location` `borrow<descriptor>` resolves, via the host `bindgen!` `with:` remap onto `wasmtime_wasi::p3::bindings`, to the same `Descriptor` resource the runtime already owns. They are copied verbatim from `wasmtime-wasi`'s `src/p3/wit/deps`, as `wasi-model` vendors them.

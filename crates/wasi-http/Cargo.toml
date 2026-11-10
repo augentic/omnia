@@ -29,13 +29,14 @@ fromenv.workspace = true
 futures.workspace = true
 http-body-util.workspace = true
 hyper.workspace = true
+hyper-util = { workspace = true, features = ["server-auto", "tokio"] }
 # `rustls-no-provider` keeps TLS (and `Identity::from_pem`) without reqwest's
 # default `aws-lc-sys` provider — `ring` comes from the explicit rustls
 # dependency below. The default backend installs ring as the process provider
 # before building a client (see `host/default_impl.rs`).
 reqwest = { workspace = true, features = ["http2", "rustls-no-provider", "stream", "system-proxy"] }
 rustls.workspace = true
-tokio = { workspace = true, features = ["time"] }
+tokio = { workspace = true, features = ["macros", "net", "rt", "sync", "time"] }
 wasmtime = { workspace = true, features = ["component-model-async"] }
 wasmtime-wasi-http.workspace = true
 # Inspects the `Client-Cert` leaf (EKU, key usage, basic constraints,
