@@ -1,4 +1,4 @@
-//! End-to-end tests for `wasi:docstore`: every scenario runs a real guest
+//! End-to-end tests for `omnia:docstore`: every scenario runs a real guest
 //! component from `crates/test-programs` through the omnia runtime against
 //! the in-memory default. The guest asserts what it observes across the
 //! boundary (and traps on failure); the host side asserts what persisted in
@@ -8,7 +8,7 @@
 
 use omnia::ExitStatus;
 use omnia_test::host::{Backends, Deployment};
-use omnia_wasi_docstore::{WasiDocStore, WasiDocStoreCtx as _};
+use omnia_wasi_docstore::{DocStoreClient as _, WasiDocStore};
 use serde_json::{Value, json};
 
 // Every guest program in `crates/test-programs` must have a matching test

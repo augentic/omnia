@@ -7,7 +7,7 @@ use crate::host::generated::omnia::identity::credentials::{
 };
 use crate::host::generated::omnia::identity::types::Error;
 use crate::host::resource::IdentityProxy;
-use crate::host::{Result, WasiIdentity, WasiIdentityCtx};
+use crate::host::{IdentityClient, Result, WasiIdentity};
 
 impl<T> HostWithStore<T> for WasiIdentity {
     async fn get_identity(
@@ -37,5 +37,5 @@ impl<T> HostIdentityWithStore<T> for WasiIdentity {
     }
 }
 
-impl Host for HostView<'_, dyn WasiIdentityCtx> {}
-impl HostIdentity for HostView<'_, dyn WasiIdentityCtx> {}
+impl Host for HostView<'_, dyn IdentityClient> {}
+impl HostIdentity for HostView<'_, dyn IdentityClient> {}

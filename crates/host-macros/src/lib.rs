@@ -44,7 +44,7 @@ pub fn runtime(input: TokenStream) -> TokenStream {
 ///
 /// /// Host-side service for `wasi:keyvalue`.
 /// #[derive(Debug, HostCtx)]
-/// #[host_ctx(client = WasiKeyValueCtx)]
+/// #[host_ctx(client = KeyValueClient)]
 /// pub struct WasiKeyValue;
 ///
 /// impl<B: Provides<Self>> Host<B> for WasiKeyValue {

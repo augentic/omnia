@@ -40,7 +40,7 @@ pub use resource::*;
 use wasmtime::component::Linker;
 use wasmtime_wasi::p2::pipe::MemoryOutputPipe;
 
-pub use self::default_impl::BlobstoreDefault;
+pub use self::default_impl::BlobStoreDefault;
 pub use self::generated::wasi::blobstore::container::{ContainerMetadata, ObjectMetadata};
 use self::generated::wasi::blobstore::{blobstore, container, types};
 
@@ -124,10 +124,10 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 /// Host-side service for `wasi:blobstore`.
 #[derive(Debug, HostCtx)]
-#[host_ctx(client = WasiBlobstoreCtx)]
-pub struct WasiBlobstore;
+#[host_ctx(client = BlobStoreClient)]
+pub struct WasiBlobStore;
 
-impl<B: Provides<Self>> Host<B> for WasiBlobstore {
+impl<B: Provides<Self>> Host<B> for WasiBlobStore {
     fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
         blobstore::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
         container::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
@@ -135,11 +135,11 @@ impl<B: Provides<Self>> Host<B> for WasiBlobstore {
     }
 }
 
-/// A trait which provides internal WASI Blobstore context.
+/// Service contract for `wasi:blobstore` backends.
 ///
 /// This is implemented by the resource-specific provider of Blobstore
 /// functionality. For example, an in-memory store, or a Redis-backed store.
-pub trait WasiBlobstoreCtx: Debug + Send + Sync + 'static {
+pub trait BlobStoreClient: Debug + Send + Sync + 'static {
     /// Open a container.
     fn create_container(&self, name: String) -> FutureResult<Arc<dyn Container>>;
 

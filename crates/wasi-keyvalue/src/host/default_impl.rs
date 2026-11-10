@@ -8,10 +8,10 @@ use std::sync::{Arc, Mutex, Weak};
 use anyhow::{Context as _, Result, anyhow};
 use futures::FutureExt;
 use moka::sync::Cache;
-use omnia_core::Backend;
+use omnia_core::Connect;
 use tracing::instrument;
 
-use crate::host::WasiKeyValueCtx;
+use crate::host::KeyValueClient;
 use crate::host::resource::{Bucket, Cas, FutureResult};
 
 type BucketCache = Cache<String, Vec<u8>>;
@@ -29,7 +29,7 @@ impl std::fmt::Debug for KeyValueDefault {
     }
 }
 
-impl Backend for KeyValueDefault {
+impl Connect for KeyValueDefault {
     type ConnectOptions = omnia_core::NoOptions;
 
     #[instrument]
@@ -41,7 +41,7 @@ impl Backend for KeyValueDefault {
     }
 }
 
-impl WasiKeyValueCtx for KeyValueDefault {
+impl KeyValueClient for KeyValueDefault {
     fn open_bucket(&self, identifier: String) -> FutureResult<Arc<dyn Bucket>> {
         tracing::trace!("opening bucket: {identifier}");
 

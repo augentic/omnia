@@ -52,7 +52,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 /// Host-side service for `wasi:websocket`.
 #[derive(Clone, Debug, HostCtx)]
-#[host_ctx(client = WasiWebSocketCtx)]
+#[host_ctx(client = WebSocketClient)]
 pub struct WasiWebSocket;
 
 impl<B: Provides<Self>> Host<B> for WasiWebSocket {
@@ -66,20 +66,20 @@ impl<B: Provides<Self>> Host<B> for WasiWebSocket {
     }
 }
 
-/// A trait which provides internal WASI WebSocket context.
+/// Service contract for `omnia:websocket` backends.
 ///
 /// This is implemented by the resource-specific provider of WebSocket
 /// functionality.
 ///
 /// Event construction lives on the host's [`Event`] struct; backends only
-/// translate at the [`Client`] seam.
-pub trait WasiWebSocketCtx: Debug + Send + Sync + 'static {
-    /// Connect to the WebSocket service and return a socket.
+/// translate at the [`Endpoint`] seam.
+pub trait WebSocketClient: Debug + Send + Sync + 'static {
+    /// Open a WebSocket endpoint handle.
     ///
     /// # Errors
     ///
     /// Returns an error if the connection fails.
-    fn connect(&self) -> FutureResult<Arc<dyn Client>>;
+    fn endpoint(&self) -> FutureResult<Arc<dyn Endpoint>>;
 }
 
 omnia_core::host_error!(Error, Other);

@@ -8,7 +8,7 @@ mod types_impl;
 mod generated {
     #![allow(missing_docs, reason = "wasmtime bindgen output")]
 
-    pub use self::wasi::docstore::types::Error;
+    pub use self::omnia::docstore::types::Error;
     pub use super::FilterProxy;
 
     wasmtime::component::bindgen!({
@@ -18,10 +18,10 @@ mod generated {
             default: store | tracing | trappable,
         },
         with: {
-            "wasi:docstore/types.filter": FilterProxy,
+            "omnia:docstore/types.filter": FilterProxy,
         },
         trappable_error_type: {
-            "wasi:docstore/types.error" => Error,
+            "omnia:docstore/types.error" => Error,
         },
     });
 }
@@ -33,18 +33,18 @@ use omnia_core::{Host, HostCtx, Provides, StoreCtx};
 use wasmtime::component::Linker;
 
 pub use self::default_impl::DocStoreDefault;
-pub use self::generated::wasi::docstore::types::{
+pub use self::generated::omnia::docstore::types::{
     ComparisonOp, Document, Error, QueryResult, ScalarValue, SortField,
 };
-use self::generated::wasi::docstore::{store, types};
+use self::generated::omnia::docstore::{store, types};
 pub use self::resource::*;
 
 /// Result type for docstore operations.
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// Host-side service for `wasi:docstore`.
+/// Host-side service for `omnia:docstore`.
 #[derive(Debug, HostCtx)]
-#[host_ctx(client = WasiDocStoreCtx)]
+#[host_ctx(client = DocStoreClient)]
 pub struct WasiDocStore;
 
 impl<B: Provides<Self>> Host<B> for WasiDocStore {
@@ -54,12 +54,12 @@ impl<B: Provides<Self>> Host<B> for WasiDocStore {
     }
 }
 
-/// A trait which provides internal WASI `DocStore` context.
+/// Service contract for `omnia:docstore` backends.
 ///
 /// This is implemented by the resource-specific provider of `DocStore`
 /// functionality. For example, the in-memory default, or Azure Table
 /// Storage.
-pub trait WasiDocStoreCtx: Debug + Send + Sync + 'static {
+pub trait DocStoreClient: Debug + Send + Sync + 'static {
     /// Point read by primary id.
     fn get(&self, collection: String, id: String) -> FutureResult<Option<Document>>;
 

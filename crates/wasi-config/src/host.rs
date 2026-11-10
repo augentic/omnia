@@ -23,7 +23,7 @@ impl HasData for WasiConfig {
 // hand-written rather than `wasi_view!`-generated: the view is a shared
 // borrow over the backend's variables, with no resource table involved
 impl HostCtx for WasiConfig {
-    type Borrow<'a> = &'a dyn WasiConfigCtx;
+    type Borrow<'a> = &'a dyn ConfigClient;
 
     fn view<'a>(
         borrow: Self::Borrow<'a>, _table: &'a mut ResourceTable,
@@ -38,8 +38,8 @@ impl<B: Provides<Self>> Host<B> for WasiConfig {
     }
 }
 
-/// A trait which provides internal WASI Config context.
-pub trait WasiConfigCtx: Debug + Send + Sync + 'static {
+/// Service contract for `wasi:config` backends.
+pub trait ConfigClient: Debug + Send + Sync + 'static {
     /// Get the configuration variables.
     fn get_config(&self) -> &WasiConfigVariables;
 }

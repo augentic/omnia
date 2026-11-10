@@ -6,11 +6,11 @@ pub use crate::host::generated::wasi::messaging::types::{
     Error, Host, HostClient, HostClientWithStore, HostMessage, HostMessageWithStore, Topic,
 };
 use crate::host::resource::{ClientProxy, Message};
-use crate::host::{Result, WasiMessaging, WasiMessagingCtx};
+use crate::host::{MessagingClient, Result, WasiMessaging};
 
 impl<T> HostClientWithStore<T> for WasiMessaging {
     async fn connect(accessor: &Accessor<T, Self>, _name: String) -> Result<Resource<ClientProxy>> {
-        let client = accessor.with(|mut store| store.get().client.connect()).await?;
+        let client = accessor.with(|mut store| store.get().client.endpoint()).await?;
         let proxy = omnia_core::Proxy(client);
         Ok(accessor.with(|mut store| store.get().table.push(proxy))?)
     }
@@ -100,13 +100,13 @@ impl<T> HostMessageWithStore<T> for WasiMessaging {
     }
 }
 
-impl Host for HostView<'_, dyn WasiMessagingCtx> {
+impl Host for HostView<'_, dyn MessagingClient> {
     fn convert_error(&mut self, err: Error) -> wasmtime::Result<Error> {
         Ok(err)
     }
 }
-impl HostClient for HostView<'_, dyn WasiMessagingCtx> {}
-impl HostMessage for HostView<'_, dyn WasiMessagingCtx> {}
+impl HostClient for HostView<'_, dyn MessagingClient> {}
+impl HostMessage for HostView<'_, dyn MessagingClient> {}
 
 pub fn get_client<T>(
     accessor: &Accessor<T, WasiMessaging>, self_: &Resource<ClientProxy>,

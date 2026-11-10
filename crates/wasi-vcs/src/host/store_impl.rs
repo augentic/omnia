@@ -7,7 +7,7 @@ use crate::host::generated::omnia::vcs::store::{
     Entry, Host, HostWithStore, Location, Merged, Rule,
 };
 use crate::host::location::Intent;
-use crate::host::{Result, WasiVcs, WasiVcsCtx};
+use crate::host::{Result, VcsClient, WasiVcs};
 
 impl<B: Send + 'static> HostWithStore<StoreCtx<B>> for WasiVcs {
     async fn resolve(
@@ -71,4 +71,4 @@ impl<B: Send + 'static> HostWithStore<StoreCtx<B>> for WasiVcs {
     }
 }
 
-impl Host for HostView<'_, dyn WasiVcsCtx> {}
+impl Host for HostView<'_, dyn VcsClient> {}

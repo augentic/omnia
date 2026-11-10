@@ -37,7 +37,7 @@ omnia::runtime!({
 
 Each key is a **host type** from a `omnia-wasi-*` crate (`WasiHttp`, `WasiKeyValue`, ...); each value is a **backend type** implementing that interface's context trait — an in-tree default (`HttpDefault`, `KeyValueDefault`, ...) or a production client from the [`omnia-backends`](https://github.com/augentic/omnia-backends) repo.
 
-A backend may carry a connect-options expression — `WasiBlobstore: Filesystem(opts)` lowers to `Backend::connect_with(opts)` instead of the env-sourced `Backend::connect()`, compiling the configuration in. Rows sharing a backend type share one connection, so their options must be written identically on every row (or omitted on every row); empty parentheses are rejected.
+A backend may carry a connect-options expression — `WasiBlobStore: Filesystem(opts)` lowers to `Connect::connect_with(opts)` instead of the env-sourced `Connect::connect()`, compiling the configuration in. Rows sharing a backend type share one connection, so their options must be written identically on every row (or omitted on every row); empty parentheses are rejected.
 
 ## Configuration Format
 
@@ -138,7 +138,7 @@ use wasmtime::component::Linker;
 
 /// Host-side service for `wasi:keyvalue`.
 #[derive(Debug, HostCtx)]
-#[host_ctx(client = WasiKeyValueCtx)]
+#[host_ctx(client = KeyValueClient)]
 pub struct WasiKeyValue;
 
 impl<B: Provides<Self>> Host<B> for WasiKeyValue {
@@ -158,14 +158,14 @@ The type must be non-generic, carry exactly one `#[host_ctx(client = ..)]`, and 
 How the two halves meet at run time, for the row `WasiKeyValue: Redis`:
 
 ```text
-Redis: Backend + WasiKeyValueCtx         the backend the deployment connects
+Redis: Connect + KeyValueClient          the backend the deployment connects
    |  runtime!: Backends { backend_0 } and impl Provides<WasiKeyValue> for Backends
    v
 StoreCtx<Backends>                       one per guest store
    |  StoreCtx::view::<WasiKeyValue>():
    |  WasiKeyValue::view(backends.borrow(), &mut base.table)
    v
-HostView<'_, dyn WasiKeyValueCtx>        #[host_ctx(client = WasiKeyValueCtx)]: the host's HasData::Data
+HostView<'_, dyn KeyValueClient>         #[host_ctx(client = KeyValueClient)]: the host's HasData::Data
    |  bindgen Host* impls on the view; Host::add_to_linker(linker, StoreCtx::view::<Self>)
    v
 wasmtime Linker                          wasi:keyvalue/* resolved for the guest
@@ -192,7 +192,7 @@ mod full_runtime {
     use omnia_wasi_http::{HttpDefault, WasiHttp};
     use omnia_wasi_keyvalue::WasiKeyValue;
     use omnia_wasi_messaging::WasiMessaging;
-    use omnia_wasi_blobstore::WasiBlobstore;
+    use omnia_wasi_blobstore::WasiBlobStore;
     use omnia_wasi_otel::{OtelDefault, WasiOtel};
     use omnia_nats::Client as Nats;
 
@@ -202,7 +202,7 @@ mod full_runtime {
             WasiOtel: OtelDefault,
             WasiKeyValue: Nats,
             WasiMessaging: Nats,
-            WasiBlobstore: Nats,
+            WasiBlobStore: Nats,
         }
     });
 }
@@ -212,7 +212,7 @@ This provides:
 
 - **Better readability**: The configuration is explicit and self-documenting
 - **Less boilerplate**: No hand-written bundle, accessor impls, or entry point
-- **Type safety**: Backend types are checked against the host's context trait at compile time
+- **Type safety**: Backend types are checked against the host's `*Client` trait at compile time
 - **Flexibility**: Easy to create multiple runtime configurations in the same binary
 
 ## License

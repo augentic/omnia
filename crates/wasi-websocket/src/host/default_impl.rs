@@ -16,7 +16,7 @@ use futures::FutureExt;
 use futures_channel::mpsc;
 use futures_util::stream::TryStreamExt;
 use futures_util::{StreamExt, future, pin_mut};
-use omnia_core::{Backend, FutureResult};
+use omnia_core::{Connect, FutureResult};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::broadcast::{self, Sender};
 use tokio_stream::wrappers::BroadcastStream;
@@ -24,8 +24,8 @@ use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 use tokio_tungstenite::{WebSocketStream, accept_async};
 use tracing::instrument;
 
-use crate::host::WasiWebSocketCtx;
-use crate::host::resource::{Client, Event, Events};
+use crate::host::WebSocketClient;
+use crate::host::resource::{Endpoint, Event, Events};
 
 const MAX_CONNECTIONS: usize = 1024;
 const BROADCAST_CAPACITY: usize = 256;
@@ -55,7 +55,7 @@ pub struct WebSocketDefault {
     connections: ConnectionMap,
 }
 
-impl Backend for WebSocketDefault {
+impl Connect for WebSocketDefault {
     type ConnectOptions = ConnectOptions;
 
     #[instrument]
@@ -85,14 +85,14 @@ impl Default for WebSocketDefault {
     }
 }
 
-impl WasiWebSocketCtx for WebSocketDefault {
-    fn connect(&self) -> FutureResult<Arc<dyn Client>> {
+impl WebSocketClient for WebSocketDefault {
+    fn endpoint(&self) -> FutureResult<Arc<dyn Endpoint>> {
         let client = self.clone();
-        async move { Ok(Arc::new(client) as Arc<dyn Client>) }.boxed()
+        async move { Ok(Arc::new(client) as Arc<dyn Endpoint>) }.boxed()
     }
 }
 
-impl Client for WebSocketDefault {
+impl Endpoint for WebSocketDefault {
     fn events(&self) -> FutureResult<Events> {
         let stream = BroadcastStream::new(self.event_tx.subscribe());
 

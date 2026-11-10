@@ -39,8 +39,8 @@ pub struct Config {
 
 /// One `Host: Backend` wiring from the `hosts: { ... }` block, optionally
 /// carrying compiled-in connect options: `Host: Backend(options)` lowers to
-/// `Backend::connect_with(options)` instead of the env-sourced
-/// `Backend::connect()`.
+/// `Connect::connect_with(options)` instead of the env-sourced
+/// `Connect::connect()`.
 pub struct HostEntry {
     pub host: Path,
     pub backend: Path,

@@ -7,7 +7,7 @@ use crate::host::generated::wasi::keyvalue::store::{
 };
 use crate::host::resource::BucketProxy;
 use crate::host::store::{Host, HostBucket};
-use crate::host::{Result, WasiKeyValue, WasiKeyValueCtx};
+use crate::host::{KeyValueClient, Result, WasiKeyValue};
 
 impl<T> HostWithStore<T> for WasiKeyValue {
     async fn open(
@@ -67,13 +67,13 @@ impl<T> HostBucketWithStore<T> for WasiKeyValue {
     }
 }
 
-impl Host for HostView<'_, dyn WasiKeyValueCtx> {
+impl Host for HostView<'_, dyn KeyValueClient> {
     fn convert_error(&mut self, err: Error) -> wasmtime::Result<Error> {
         Ok(err)
     }
 }
 
-impl HostBucket for HostView<'_, dyn WasiKeyValueCtx> {}
+impl HostBucket for HostView<'_, dyn KeyValueClient> {}
 
 pub fn get_bucket<T>(
     accessor: &Accessor<T, WasiKeyValue>, self_: &Resource<BucketProxy>,

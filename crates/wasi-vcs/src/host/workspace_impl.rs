@@ -5,7 +5,7 @@ use wasmtime::component::Accessor;
 
 use crate::host::generated::omnia::vcs::workspace::{Change, Host, HostWithStore, Location};
 use crate::host::location::Intent;
-use crate::host::{Result, WasiVcs, WasiVcsCtx};
+use crate::host::{Result, VcsClient, WasiVcs};
 
 impl<B: Send + 'static> HostWithStore<StoreCtx<B>> for WasiVcs {
     async fn init(accessor: &Accessor<StoreCtx<B>, Self>, at: Location) -> Result<()> {
@@ -45,4 +45,4 @@ impl<B: Send + 'static> HostWithStore<StoreCtx<B>> for WasiVcs {
     }
 }
 
-impl Host for HostView<'_, dyn WasiVcsCtx> {}
+impl Host for HostView<'_, dyn VcsClient> {}

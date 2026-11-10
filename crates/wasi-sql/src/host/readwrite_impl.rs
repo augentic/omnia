@@ -6,7 +6,7 @@ use crate::ConnectionProxy;
 use crate::host::generated::wasi::sql::readwrite::{
     Connection, Error, Host, HostWithStore, Row, Statement,
 };
-use crate::host::{WasiSql, WasiSqlCtx};
+use crate::host::{SqlClient, WasiSql};
 
 impl<T> HostWithStore<T> for WasiSql {
     async fn query(
@@ -42,7 +42,7 @@ impl<T> HostWithStore<T> for WasiSql {
     }
 }
 
-impl Host for HostView<'_, dyn WasiSqlCtx> {}
+impl Host for HostView<'_, dyn SqlClient> {}
 
 pub fn get_connection<T>(
     accessor: &Accessor<T, WasiSql>, self_: &Resource<ConnectionProxy>,

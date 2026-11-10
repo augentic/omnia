@@ -1,11 +1,11 @@
-//! A FIFO-scripted `WasiModelCtx` recording every request.
+//! A FIFO-scripted `ModelClient` recording every request.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use futures::FutureExt as _;
 use omnia_wasi_model::{
-    Answer, Error, Format, FutureResult, Limits, Request, Tool, ToolHost, WasiModelCtx, WorkerGrant,
+    Answer, Error, Format, FutureResult, Limits, ModelClient, Request, Tool, ToolHost, WorkerGrant,
 };
 
 use crate::{Exchange, Script, Seen, SeenFormat, SeenWorker};
@@ -314,7 +314,7 @@ impl ScriptedModel {
     }
 }
 
-impl WasiModelCtx for ScriptedModel {
+impl ModelClient for ScriptedModel {
     fn complete(&self, request: Request, tool_host: Arc<dyn ToolHost>) -> FutureResult<Answer> {
         self.lent.lock().expect("lent lock").push(tool_host.local_path().map(Path::to_path_buf));
         let this = self.clone();

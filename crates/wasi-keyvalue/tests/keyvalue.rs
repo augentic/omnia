@@ -8,7 +8,7 @@
 
 use omnia::ExitStatus;
 use omnia_test::host::{Backends, Deployment};
-use omnia_wasi_keyvalue::{WasiKeyValue, WasiKeyValueCtx as _};
+use omnia_wasi_keyvalue::{KeyValueClient as _, WasiKeyValue};
 
 // Every guest program in `crates/test-programs` must have a matching test
 // here; a new program without one fails to compile.

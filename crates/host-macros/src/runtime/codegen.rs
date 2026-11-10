@@ -187,8 +187,8 @@ fn emit_backends(host_entries: &[HostEntry]) -> (TokenStream, TokenStream) {
         .iter()
         .map(|(ty, options)| {
             options.map_or_else(
-                || quote! { <#ty as Backend>::connect() },
-                |options| quote! { <#ty as Backend>::connect_with(#options) },
+                || quote! { <#ty as Connect>::connect() },
+                |options| quote! { <#ty as Connect>::connect_with(#options) },
             )
         })
         .collect();
@@ -202,7 +202,7 @@ fn emit_backends(host_entries: &[HostEntry]) -> (TokenStream, TokenStream) {
     (
         quote! { Backends },
         quote! {
-            use omnia::Backend;
+            use omnia::Connect;
 
             #[derive(Clone)]
             struct Backends {#(

@@ -12,7 +12,7 @@ Implements the `wasi:identity` WIT interface.
 
 ## Cargo features
 
-- `oauth` *(default)*: the `OAuth2` client-credentials default backend (`IdentityDefault`). Disable it (`default-features = false`) when supplying your own `WasiIdentityCtx` backend to skip compiling `oauth2` and its bundled HTTP/TLS stack.
+- `oauth` *(default)*: the `OAuth2` client-credentials default backend (`IdentityDefault`). Disable it (`default-features = false`) when supplying your own `IdentityClient` backend to skip compiling `oauth2` and its bundled HTTP/TLS stack.
 
 ## Configuration
 

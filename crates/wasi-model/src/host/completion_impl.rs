@@ -14,7 +14,7 @@ use crate::host::generated::omnia::model::completion::{
 use crate::host::session::{CallsProducer, ReplyTask, ResultsConsumer, SessionClose, ToolSession};
 use crate::host::tool_host::DirEntry;
 use crate::host::workspace::{self, Workspace};
-use crate::host::{Error, FutureResult, Request, ToolHost, ToolOutcome, WasiModel, WasiModelCtx};
+use crate::host::{Error, FutureResult, ModelClient, Request, ToolHost, ToolOutcome, WasiModel};
 
 impl<B: Send + 'static> HostWithStore<StoreCtx<B>> for WasiModel {
     fn create(
@@ -93,7 +93,7 @@ impl<B: Send + 'static> HostWithStore<StoreCtx<B>> for WasiModel {
     }
 }
 
-impl Host for HostView<'_, dyn WasiModelCtx> {
+impl Host for HostView<'_, dyn ModelClient> {
     fn convert_error(&mut self, err: Error) -> wasmtime::Result<Error> {
         Ok(err)
     }

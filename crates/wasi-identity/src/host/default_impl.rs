@@ -13,10 +13,10 @@ use oauth2::{
     ClientId, ClientSecret, EmptyExtraTokenFields, Scope, StandardTokenResponse,
     TokenResponse as _, TokenUrl,
 };
-use omnia_core::Backend;
+use omnia_core::Connect;
 use tracing::instrument;
 
-use crate::host::WasiIdentityCtx;
+use crate::host::IdentityClient;
 pub use crate::host::generated::omnia::identity::credentials::AccessToken;
 use crate::host::resource::{FutureResult, Identity};
 
@@ -57,7 +57,7 @@ pub struct IdentityDefault {
     token_manager: TokenManager,
 }
 
-impl Backend for IdentityDefault {
+impl Connect for IdentityDefault {
     type ConnectOptions = ConnectOptions;
 
     #[instrument]
@@ -67,7 +67,7 @@ impl Backend for IdentityDefault {
     }
 }
 
-impl WasiIdentityCtx for IdentityDefault {
+impl IdentityClient for IdentityDefault {
     fn get_identity(&self, _name: String) -> FutureResult<Arc<dyn Identity>> {
         tracing::debug!("getting identity");
         let token_manager = self.token_manager.clone();

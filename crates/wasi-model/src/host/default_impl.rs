@@ -8,25 +8,25 @@
 //! asks for a `check` gets exactly one: the echo has no second candidate, so
 //! a rejection is `budget-exhausted` carrying the guest's correction.
 //! Deployments bind a real backend (`omnia-genai`, `omnia-cursor`); tests
-//! define inline canned `WasiModelCtx` impls that return a fixed answer.
+//! define inline canned `ModelClient` impls that return a fixed answer.
 
 use std::fmt::Debug;
 use std::sync::Arc;
 
 use anyhow::{Result, anyhow};
 use futures::FutureExt as _;
-use omnia_core::Backend;
+use omnia_core::Connect;
 use serde_json::json;
 
 use crate::host::generated::omnia::model::completion::{Format, Request};
-use crate::host::{Answer, Error, FutureResult, ToolHost, WasiModelCtx};
+use crate::host::{Answer, Error, FutureResult, ModelClient, ToolHost};
 
 /// Echo default implementation of `wasi-model`: it starts without
 /// configuration and answers every completion with its own prompt.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ModelDefault;
 
-impl Backend for ModelDefault {
+impl Connect for ModelDefault {
     type ConnectOptions = omnia_core::NoOptions;
 
     fn connect_with(
@@ -36,7 +36,7 @@ impl Backend for ModelDefault {
     }
 }
 
-impl WasiModelCtx for ModelDefault {
+impl ModelClient for ModelDefault {
     fn complete(&self, request: Request, tool_host: Arc<dyn ToolHost>) -> FutureResult<Answer> {
         let answer = echo(&request);
         let check = request.check;

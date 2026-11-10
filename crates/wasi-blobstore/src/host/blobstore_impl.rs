@@ -4,13 +4,13 @@ use wasmtime::component::{Accessor, Resource};
 
 use crate::host::generated::wasi::blobstore::blobstore::{Host, HostWithStore, ObjectId};
 use crate::host::resource::ContainerProxy;
-use crate::host::{Error, Result, WasiBlobstore, WasiBlobstoreCtx};
+use crate::host::{BlobStoreClient, Error, Result, WasiBlobStore};
 
 fn same_object(src: &ObjectId, dest: &ObjectId) -> bool {
     src.container == dest.container && src.object == dest.object
 }
 
-impl<T> HostWithStore<T> for WasiBlobstore {
+impl<T> HostWithStore<T> for WasiBlobStore {
     async fn create_container(
         accessor: &Accessor<T, Self>, name: String,
     ) -> Result<Resource<ContainerProxy>> {
@@ -90,7 +90,7 @@ impl<T> HostWithStore<T> for WasiBlobstore {
 
 // returns the source container so `move_object` can delete the source after
 async fn copy<T>(
-    accessor: &Accessor<T, WasiBlobstore>, src: &ObjectId, dest: ObjectId,
+    accessor: &Accessor<T, WasiBlobStore>, src: &ObjectId, dest: ObjectId,
 ) -> Result<std::sync::Arc<dyn crate::host::resource::Container>> {
     let src_container = accessor
         .with(|mut store| store.get().client.get_container(src.container.clone()))
@@ -114,4 +114,4 @@ async fn copy<T>(
     Ok(src_container)
 }
 
-impl Host for HostView<'_, dyn WasiBlobstoreCtx> {}
+impl Host for HostView<'_, dyn BlobStoreClient> {}

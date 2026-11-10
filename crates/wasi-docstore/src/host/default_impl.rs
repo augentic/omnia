@@ -1,4 +1,4 @@
-//! Default in-memory implementation of [`WasiDocStoreCtx`](crate::host::WasiDocStoreCtx).
+//! Default in-memory implementation of [`DocStoreClient`](crate::host::DocStoreClient).
 //!
 //! Documents live in a clone-shared map of collections; state is process-local
 //! and lost on exit, matching the other in-memory defaults. Filters are
@@ -12,12 +12,12 @@ use std::sync::{Arc, RwLock};
 
 use anyhow::{Context, Result};
 use futures::FutureExt;
-use omnia_core::Backend;
+use omnia_core::Connect;
 use serde_json::Value;
 use tracing::instrument;
 
 use crate::host::resource::FilterTree;
-use crate::host::{Document, FutureResult, QueryOpts, QueryResult, WasiDocStoreCtx};
+use crate::host::{DocStoreClient, Document, FutureResult, QueryOpts, QueryResult};
 
 const MAX_PAGE_SIZE: u64 = 1000;
 
@@ -25,7 +25,7 @@ const MAX_PAGE_SIZE: u64 = 1000;
 // deterministic id-ascending base order).
 type Collections = HashMap<String, BTreeMap<String, Value>>;
 
-/// Default in-memory [`WasiDocStoreCtx`].
+/// Default in-memory [`DocStoreClient`].
 ///
 /// Clones share the same store, so a probe handle kept by a test observes the
 /// guest's writes.
@@ -40,7 +40,7 @@ impl std::fmt::Debug for DocStoreDefault {
     }
 }
 
-impl Backend for DocStoreDefault {
+impl Connect for DocStoreDefault {
     type ConnectOptions = omnia_core::NoOptions;
 
     #[instrument]
@@ -60,7 +60,7 @@ impl DocStoreDefault {
     }
 }
 
-impl WasiDocStoreCtx for DocStoreDefault {
+impl DocStoreClient for DocStoreDefault {
     fn get(&self, collection: String, id: String) -> FutureResult<Option<Document>> {
         let store = self.clone();
         async move {

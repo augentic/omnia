@@ -53,7 +53,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 /// Host-side service for `omnia:vcs`.
 #[derive(Debug, HostCtx)]
-#[host_ctx(client = WasiVcsCtx)]
+#[host_ctx(client = VcsClient)]
 pub struct WasiVcs;
 
 impl<B: Provides<Self>> Host<B> for WasiVcs {
@@ -108,7 +108,7 @@ impl WasiVcs {
 ///
 /// The transport operation `clone` is `clone_repo` here, since `clone(&self,
 /// ..)` would shadow [`Clone::clone`] on every backend that is `Clone`.
-pub trait WasiVcsCtx: Debug + Send + Sync + 'static {
+pub trait VcsClient: Debug + Send + Sync + 'static {
     /// The commit `revision` names in the repository at `repo`.
     fn resolve(&self, repo: Place, revision: String) -> FutureResult<String>;
 
@@ -166,7 +166,7 @@ pub trait WasiVcsCtx: Debug + Send + Sync + 'static {
     fn push(&self, repo: Place, remote: String, label: String) -> FutureResult<()>;
 }
 
-impl WasiVcsCtx for Box<dyn WasiVcsCtx> {
+impl VcsClient for Box<dyn VcsClient> {
     fn resolve(&self, repo: Place, revision: String) -> FutureResult<String> {
         (**self).resolve(repo, revision)
     }
@@ -234,7 +234,7 @@ impl WasiVcsCtx for Box<dyn WasiVcsCtx> {
     }
 }
 
-impl TypesHost for HostView<'_, dyn WasiVcsCtx> {
+impl TypesHost for HostView<'_, dyn VcsClient> {
     fn convert_error(&mut self, err: Error) -> wasmtime::Result<Error> {
         Ok(err)
     }

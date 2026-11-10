@@ -51,7 +51,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 /// Host-side service for `wasi:messaging`.
 #[derive(Debug, HostCtx)]
-#[host_ctx(client = WasiMessagingCtx)]
+#[host_ctx(client = MessagingClient)]
 pub struct WasiMessaging;
 
 impl<B: Provides<Self>> Host<B> for WasiMessaging {
@@ -66,20 +66,20 @@ impl<B: Provides<Self>> Host<B> for WasiMessaging {
     }
 }
 
-/// A trait which provides internal WASI Messaging context.
+/// Service contract for `wasi:messaging` backends.
 ///
 /// This is implemented by the resource-specific provider of messaging
 /// functionality. For example, a NATS, or a Kafka broker.
 ///
 /// Message construction and mutation live on the host's [`Message`] struct;
-/// backends only translate at the [`Client`] seam.
-pub trait WasiMessagingCtx: Debug + Send + Sync + 'static {
-    /// Connect to the messaging system and return a client proxy.
+/// backends only translate at the [`Endpoint`] seam.
+pub trait MessagingClient: Debug + Send + Sync + 'static {
+    /// Open a messaging endpoint handle.
     ///
     /// # Errors
     ///
     /// Returns an error if the connection fails.
-    fn connect(&self) -> FutureResult<Arc<dyn Client>>;
+    fn endpoint(&self) -> FutureResult<Arc<dyn Endpoint>>;
 }
 
 omnia_core::host_error!(Error, Other);

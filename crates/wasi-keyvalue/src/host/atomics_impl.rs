@@ -5,7 +5,7 @@ use anyhow::Context;
 use omnia_core::HostView;
 use wasmtime::component::{Access, Accessor, Resource};
 
-use crate::WasiKeyValueCtx;
+use crate::KeyValueClient;
 use crate::host::generated::wasi::keyvalue::atomics::{
     CasError, Host, HostCas, HostCasWithStore, HostWithStore,
 };
@@ -83,9 +83,9 @@ impl From<wasmtime::component::ResourceTableError> for CasError {
     }
 }
 
-impl Host for HostView<'_, dyn WasiKeyValueCtx> {
+impl Host for HostView<'_, dyn KeyValueClient> {
     fn convert_cas_error(&mut self, err: CasError) -> wasmtime::Result<CasError> {
         Ok(err)
     }
 }
-impl HostCas for HostView<'_, dyn WasiKeyValueCtx> {}
+impl HostCas for HostView<'_, dyn KeyValueClient> {}

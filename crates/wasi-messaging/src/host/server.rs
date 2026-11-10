@@ -9,7 +9,7 @@ use tracing::{Instrument, info_span, instrument};
 
 use crate::host::WasiMessaging;
 use crate::host::generated::MessagingRequestReplyIndices;
-use crate::host::resource::{Client, HandleError, Handler, Message};
+use crate::host::resource::{Endpoint, HandleError, Handler, Message};
 
 #[instrument("messaging-server", skip(state))]
 pub async fn run<B>(state: &Runtime<B>) -> Result<()>
@@ -34,7 +34,7 @@ where
 /// In-process `wasi:messaging/incoming-handler` dispatcher: routes a message
 /// to a guest by topic, instantiates it, and invokes the export.
 ///
-/// The server hands one to the backend's [`Client::consume`] as the
+/// The server hands one to the backend's [`Endpoint::consume`] as the
 /// [`Handler`]; tests drive it directly with a constructed [`Message`],
 /// bypassing the broker.
 #[derive(Clone)]
@@ -162,8 +162,8 @@ where
         returned.map_err(HandleError::Rejected)
     }
 
-    async fn client(&self) -> Result<Arc<dyn Client>> {
-        self.state.store().view::<WasiMessaging>().client.connect().await
+    async fn client(&self) -> Result<Arc<dyn Endpoint>> {
+        self.state.store().view::<WasiMessaging>().client.endpoint().await
     }
 }
 

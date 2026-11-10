@@ -5,7 +5,7 @@ use wasmtime::component::{Access, Accessor, Resource};
 use crate::host::generated::omnia::vault::vault::Error;
 use crate::host::resource::LockerProxy;
 use crate::host::vault::{Host, HostLocker, HostLockerWithStore, HostWithStore};
-use crate::host::{Result, WasiVault, WasiVaultCtx};
+use crate::host::{Result, VaultClient, WasiVault};
 
 impl<T> HostWithStore<T> for WasiVault {
     async fn open(
@@ -64,13 +64,13 @@ impl<T> HostLockerWithStore<T> for WasiVault {
     }
 }
 
-impl Host for HostView<'_, dyn WasiVaultCtx> {
+impl Host for HostView<'_, dyn VaultClient> {
     fn convert_error(&mut self, err: Error) -> wasmtime::Result<Error> {
         Ok(err)
     }
 }
 
-impl HostLocker for HostView<'_, dyn WasiVaultCtx> {}
+impl HostLocker for HostView<'_, dyn VaultClient> {}
 
 pub fn get_locker<T>(
     accessor: &Accessor<T, WasiVault>, self_: &Resource<LockerProxy>,

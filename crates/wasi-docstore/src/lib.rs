@@ -2,7 +2,7 @@
 
 //! # WASI `DocStore`
 //!
-//! This module implements a runtime service for `wasi:docstore`: a JSON
+//! This module implements a runtime service for `omnia:docstore`: a JSON
 //! document store with a backend-portable filter language.
 
 pub mod document_store;

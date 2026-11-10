@@ -7,9 +7,9 @@ use serde::de::DeserializeOwned;
 
 use crate::docstore::{Document, QueryOptions, QueryResult};
 
-/// Document storage (`wasi:docstore`).
+/// Document storage (`omnia:docstore`).
 ///
-/// [`WasiProvider`](crate::WasiProvider) delegates to `wasi:docstore` via
+/// [`WasiProvider`](crate::WasiProvider) delegates to `omnia:docstore` via
 /// `omnia-wasi-docstore`. Typed reads of a document body are
 /// [`DocumentStoreExt`].
 #[omnia_guest_macros::capability]

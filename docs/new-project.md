@@ -134,7 +134,7 @@ omnia::runtime!({
 
 `WasiHttp` serves incoming requests and provides outbound HTTP, while `WasiOtel` backs the `http_guest_handle` span emitted by the HTTP export.
 
-That dependency list is complete. `omnia` is the facade over the runtime — the crates behind it (`omnia-core`, `omnia-link`, `omnia-plugin`) are never named in a host's `Cargo.toml` or source, even when the deployment declares a `link:` or `plugin:` block or a hand-written `Backend`; everything the macro emits resolves through `omnia::…`, and it re-exports `anyhow` (`omnia::anyhow::Result`) and `futures` (`omnia::futures::future::BoxFuture`) for the `Backend`/`Wiring` and plugin-store signatures that speak them.
+That dependency list is complete. `omnia` is the facade over the runtime — the crates behind it (`omnia-core`, `omnia-link`, `omnia-plugin`) are never named in a host's `Cargo.toml` or source, even when the deployment declares a `link:` or `plugin:` block or a hand-written `Connect` impl; everything the macro emits resolves through `omnia::…`, and it re-exports `anyhow` (`omnia::anyhow::Result`) and `futures` (`omnia::futures::future::BoxFuture`) for the `Connect`/`Wiring` and plugin-store signatures that speak them.
 
 ## Build and run
 

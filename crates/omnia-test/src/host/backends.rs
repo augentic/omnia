@@ -3,20 +3,20 @@
 
 use std::sync::Arc;
 
-use omnia::{Backend as _, HostCtx, NoOptions, Provides};
-use omnia_wasi_blobstore::{BlobstoreDefault, WasiBlobstore, WasiBlobstoreCtx};
+use omnia::{Connect as _, HostCtx, NoOptions, Provides};
+use omnia_wasi_blobstore::{BlobStoreClient, BlobStoreDefault, WasiBlobStore};
 use omnia_wasi_config::wasmtime_wasi_config::WasiConfigVariables;
 use omnia_wasi_config::{ConfigDefault, WasiConfig};
-use omnia_wasi_docstore::{DocStoreDefault, WasiDocStore, WasiDocStoreCtx};
+use omnia_wasi_docstore::{DocStoreClient, DocStoreDefault, WasiDocStore};
 use omnia_wasi_http::{ConnectOptions as HttpOptions, HttpDefault, WasiHttp};
-use omnia_wasi_identity::{IdentityStub, WasiIdentity, WasiIdentityCtx};
-use omnia_wasi_keyvalue::{KeyValueDefault, WasiKeyValue, WasiKeyValueCtx};
-use omnia_wasi_messaging::{MessagingDefault, WasiMessaging, WasiMessagingCtx};
-use omnia_wasi_model::{ModelDefault, WasiModel, WasiModelCtx};
-use omnia_wasi_otel::{OtelDefault, WasiOtel, WasiOtelCtx};
-use omnia_wasi_sql::{ConnectOptions as SqlOptions, SqlDefault, WasiSql, WasiSqlCtx};
-use omnia_wasi_vault::{VaultDefault, WasiVault, WasiVaultCtx};
-use omnia_wasi_vcs::{WasiVcs, WasiVcsCtx};
+use omnia_wasi_identity::{IdentityClient, IdentityStub, WasiIdentity};
+use omnia_wasi_keyvalue::{KeyValueClient, KeyValueDefault, WasiKeyValue};
+use omnia_wasi_messaging::{MessagingClient, MessagingDefault, WasiMessaging};
+use omnia_wasi_model::{ModelClient, ModelDefault, WasiModel};
+use omnia_wasi_otel::{OtelClient, OtelDefault, WasiOtel};
+use omnia_wasi_sql::{ConnectOptions as SqlOptions, SqlClient, SqlDefault, WasiSql};
+use omnia_wasi_vault::{VaultClient, VaultDefault, WasiVault};
+use omnia_wasi_vcs::{VcsClient, WasiVcs};
 use omnia_wasi_websocket::{WasiWebSocket, WebSocketDefault};
 
 #[cfg(doc)]
@@ -52,7 +52,7 @@ pub const STATE_BUCKET: &str = "state";
 pub struct Backends<
     M = ModelDefault,
     K = KeyValueDefault,
-    B = BlobstoreDefault,
+    B = BlobStoreDefault,
     D = DocStoreDefault,
     S = SqlDefault,
     V = VaultDefault,
@@ -65,7 +65,7 @@ pub struct Backends<
     pub blobstore: B,
     /// Map-backed `wasi:config`, empty until seeded by [`Backends::config`].
     pub config: ConfigDefault,
-    /// The `wasi:docstore` backend.
+    /// The `omnia:docstore` backend.
     pub docstore: D,
     /// Outbound `wasi:http`.
     pub http: HttpDefault,
@@ -106,7 +106,7 @@ impl Backends {
     /// Panics if a default cannot be constructed.
     pub async fn defaults() -> Self {
         Self {
-            blobstore: BlobstoreDefault::connect_with(NoOptions)
+            blobstore: BlobStoreDefault::connect_with(NoOptions)
                 .await
                 .expect("in-memory blobstore"),
             config: config_from(WasiConfigVariables::new()),
@@ -148,11 +148,9 @@ impl<M, K, B, D, S, V, G, I, O, C> Backends<M, K, B, D, S, V, G, I, O, C> {
     }
 
     /// The same bundle answering completions with `model` — a
-    /// [`ScriptedModel`] or any other `WasiModelCtx`.
+    /// [`ScriptedModel`] or any other `ModelClient`.
     #[must_use]
-    pub fn model<N: WasiModelCtx + Clone>(
-        self, model: N,
-    ) -> Backends<N, K, B, D, S, V, G, I, O, C> {
+    pub fn model<N: ModelClient + Clone>(self, model: N) -> Backends<N, K, B, D, S, V, G, I, O, C> {
         Backends {
             blobstore: self.blobstore,
             config: self.config,
@@ -172,7 +170,7 @@ impl<M, K, B, D, S, V, G, I, O, C> Backends<M, K, B, D, S, V, G, I, O, C> {
 
     /// The same bundle serving `wasi:keyvalue` from `keyvalue`.
     #[must_use]
-    pub fn keyvalue<N: WasiKeyValueCtx + Clone>(
+    pub fn keyvalue<N: KeyValueClient + Clone>(
         self, keyvalue: N,
     ) -> Backends<M, N, B, D, S, V, G, I, O, C> {
         Backends {
@@ -194,7 +192,7 @@ impl<M, K, B, D, S, V, G, I, O, C> Backends<M, K, B, D, S, V, G, I, O, C> {
 
     /// The same bundle serving `wasi:blobstore` from `blobstore`.
     #[must_use]
-    pub fn blobstore<N: WasiBlobstoreCtx + Clone>(
+    pub fn blobstore<N: BlobStoreClient + Clone>(
         self, blobstore: N,
     ) -> Backends<M, K, N, D, S, V, G, I, O, C> {
         Backends {
@@ -214,9 +212,9 @@ impl<M, K, B, D, S, V, G, I, O, C> Backends<M, K, B, D, S, V, G, I, O, C> {
         }
     }
 
-    /// The same bundle serving `wasi:docstore` from `docstore`.
+    /// The same bundle serving `omnia:docstore` from `docstore`.
     #[must_use]
-    pub fn docstore<N: WasiDocStoreCtx + Clone>(
+    pub fn docstore<N: DocStoreClient + Clone>(
         self, docstore: N,
     ) -> Backends<M, K, B, N, S, V, G, I, O, C> {
         Backends {
@@ -238,7 +236,7 @@ impl<M, K, B, D, S, V, G, I, O, C> Backends<M, K, B, D, S, V, G, I, O, C> {
 
     /// The same bundle serving `wasi:sql` from `sql`.
     #[must_use]
-    pub fn sql<N: WasiSqlCtx + Clone>(self, sql: N) -> Backends<M, K, B, D, N, V, G, I, O, C> {
+    pub fn sql<N: SqlClient + Clone>(self, sql: N) -> Backends<M, K, B, D, N, V, G, I, O, C> {
         Backends {
             blobstore: self.blobstore,
             config: self.config,
@@ -258,9 +256,7 @@ impl<M, K, B, D, S, V, G, I, O, C> Backends<M, K, B, D, S, V, G, I, O, C> {
 
     /// The same bundle serving `wasi:vault` from `vault`.
     #[must_use]
-    pub fn vault<N: WasiVaultCtx + Clone>(
-        self, vault: N,
-    ) -> Backends<M, K, B, D, S, N, G, I, O, C> {
+    pub fn vault<N: VaultClient + Clone>(self, vault: N) -> Backends<M, K, B, D, S, N, G, I, O, C> {
         Backends {
             blobstore: self.blobstore,
             config: self.config,
@@ -280,7 +276,7 @@ impl<M, K, B, D, S, V, G, I, O, C> Backends<M, K, B, D, S, V, G, I, O, C> {
 
     /// The same bundle serving `wasi:messaging` from `messaging`.
     #[must_use]
-    pub fn messaging<N: WasiMessagingCtx + Clone>(
+    pub fn messaging<N: MessagingClient + Clone>(
         self, messaging: N,
     ) -> Backends<M, K, B, D, S, V, N, I, O, C> {
         Backends {
@@ -302,7 +298,7 @@ impl<M, K, B, D, S, V, G, I, O, C> Backends<M, K, B, D, S, V, G, I, O, C> {
 
     /// The same bundle serving `wasi:identity` from `identity`.
     #[must_use]
-    pub fn identity<N: WasiIdentityCtx + Clone>(
+    pub fn identity<N: IdentityClient + Clone>(
         self, identity: N,
     ) -> Backends<M, K, B, D, S, V, G, N, O, C> {
         Backends {
@@ -324,7 +320,7 @@ impl<M, K, B, D, S, V, G, I, O, C> Backends<M, K, B, D, S, V, G, I, O, C> {
 
     /// The same bundle serving `wasi:otel` from `otel`.
     #[must_use]
-    pub fn otel<N: WasiOtelCtx + Clone>(self, otel: N) -> Backends<M, K, B, D, S, V, G, I, N, C> {
+    pub fn otel<N: OtelClient + Clone>(self, otel: N) -> Backends<M, K, B, D, S, V, G, I, N, C> {
         Backends {
             blobstore: self.blobstore,
             config: self.config,
@@ -345,7 +341,7 @@ impl<M, K, B, D, S, V, G, I, O, C> Backends<M, K, B, D, S, V, G, I, O, C> {
     /// The same bundle serving `omnia:vcs` from `vcs`, the one slot with no
     /// default to replace.
     #[must_use]
-    pub fn vcs<N: WasiVcsCtx + Clone>(self, vcs: N) -> Backends<M, K, B, D, S, V, G, I, O, N> {
+    pub fn vcs<N: VcsClient + Clone>(self, vcs: N) -> Backends<M, K, B, D, S, V, G, I, O, N> {
         Backends {
             blobstore: self.blobstore,
             config: self.config,
@@ -383,15 +379,15 @@ macro_rules! provides {
             impl<M, K, B, D, S, V, G, I, O, C> Provides<$host>
                 for Backends<M, K, B, D, S, V, G, I, O, C>
             where
-                M: WasiModelCtx + Clone,
-                K: WasiKeyValueCtx + Clone,
-                B: WasiBlobstoreCtx + Clone,
-                D: WasiDocStoreCtx + Clone,
-                S: WasiSqlCtx + Clone,
-                V: WasiVaultCtx + Clone,
-                G: WasiMessagingCtx + Clone,
-                I: WasiIdentityCtx + Clone,
-                O: WasiOtelCtx + Clone,
+                M: ModelClient + Clone,
+                K: KeyValueClient + Clone,
+                B: BlobStoreClient + Clone,
+                D: DocStoreClient + Clone,
+                S: SqlClient + Clone,
+                V: VaultClient + Clone,
+                G: MessagingClient + Clone,
+                I: IdentityClient + Clone,
+                O: OtelClient + Clone,
                 C: Clone + Send + Sync + 'static,
             {
                 fn borrow(&mut self) -> <$host as HostCtx>::Borrow<'_> {
@@ -403,7 +399,7 @@ macro_rules! provides {
 }
 
 provides! {
-    WasiBlobstore => blobstore,
+    WasiBlobStore => blobstore,
     WasiConfig => config,
     WasiDocStore => docstore,
     WasiHttp => http,
@@ -419,16 +415,16 @@ provides! {
 
 impl<M, K, B, D, S, V, G, I, O, C> Provides<WasiVcs> for Backends<M, K, B, D, S, V, G, I, O, C>
 where
-    M: WasiModelCtx + Clone,
-    K: WasiKeyValueCtx + Clone,
-    B: WasiBlobstoreCtx + Clone,
-    D: WasiDocStoreCtx + Clone,
-    S: WasiSqlCtx + Clone,
-    V: WasiVaultCtx + Clone,
-    G: WasiMessagingCtx + Clone,
-    I: WasiIdentityCtx + Clone,
-    O: WasiOtelCtx + Clone,
-    C: WasiVcsCtx + Clone,
+    M: ModelClient + Clone,
+    K: KeyValueClient + Clone,
+    B: BlobStoreClient + Clone,
+    D: DocStoreClient + Clone,
+    S: SqlClient + Clone,
+    V: VaultClient + Clone,
+    G: MessagingClient + Clone,
+    I: IdentityClient + Clone,
+    O: OtelClient + Clone,
+    C: VcsClient + Clone,
 {
     fn borrow(&mut self) -> <WasiVcs as HostCtx>::Borrow<'_> {
         &mut self.vcs

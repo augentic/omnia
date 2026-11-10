@@ -150,6 +150,6 @@ where
     }
 
     async fn events(&self) -> Result<Events> {
-        self.state.store().view::<WasiWebSocket>().client.connect().await?.events().await
+        self.state.store().view::<WasiWebSocket>().client.endpoint().await?.events().await
     }
 }

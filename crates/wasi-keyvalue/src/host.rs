@@ -46,7 +46,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 /// Host-side service for `wasi:keyvalue`.
 #[derive(Debug, HostCtx)]
-#[host_ctx(client = WasiKeyValueCtx)]
+#[host_ctx(client = KeyValueClient)]
 pub struct WasiKeyValue;
 
 impl<B: Provides<Self>> Host<B> for WasiKeyValue {
@@ -57,11 +57,11 @@ impl<B: Provides<Self>> Host<B> for WasiKeyValue {
     }
 }
 
-/// A trait which provides internal WASI Key-Value context.
+/// Service contract for `wasi:keyvalue` backends.
 ///
 /// This is implemented by the resource-specific provider of Key-Value
 /// functionality. For example, an in-memory store, or a Redis-backed store.
-pub trait WasiKeyValueCtx: Debug + Send + Sync + 'static {
+pub trait KeyValueClient: Debug + Send + Sync + 'static {
     /// Open a bucket.
     fn open_bucket(&self, identifier: String) -> FutureResult<Arc<dyn Bucket>>;
 }

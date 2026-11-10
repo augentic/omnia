@@ -29,7 +29,7 @@ pub use self::digest::Digest;
 pub use self::dispatch::Dispatcher;
 pub use self::extensions::Extensions;
 pub use self::host::{
-    Backend, Backends, FromEnv, FutureResult, HasTable, Host, HostCtx, HostView, NoOptions,
+    Backends, Connect, FromEnv, FutureResult, HasTable, Host, HostCtx, HostView, NoOptions,
     Provides, Proxy, get_cloned,
 };
 pub use self::invoke::{FreshCall, InvokeError, call_fresh};

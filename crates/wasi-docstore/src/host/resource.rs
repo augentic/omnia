@@ -1,6 +1,6 @@
-//! Filter tree and resource proxy for `wasi:docstore` host bindings.
+//! Filter tree and resource proxy for `omnia:docstore` host bindings.
 
-use crate::host::generated::wasi::docstore::types::{ComparisonOp, ScalarValue};
+use crate::host::generated::omnia::docstore::types::{ComparisonOp, ScalarValue};
 
 /// Internal recursive filter representation built from WIT `filter` resource constructors.
 #[derive(Debug, Clone)]

@@ -1,6 +1,6 @@
 # DocStore Interface Reference
 
-Reference for the `wasi:docstore` interface (version `0.1.0`): the operations, the guest SDK types, the filter language and its host-enforced limits, and the backend matrix. The conceptual walk-through is in [Document Store](../guides/document-store.md); the authoritative WIT is [`crates/wasi-docstore/wit/docstore.wit`](../../crates/wasi-docstore/wit/docstore.wit).
+Reference for the `omnia:docstore` interface (version `0.1.0`): the operations, the guest SDK types, the filter language and its host-enforced limits, and the backend matrix. The conceptual walk-through is in [Document Store](../guides/document-store.md); the authoritative WIT is [`crates/wasi-docstore/wit/docstore.wit`](../../crates/wasi-docstore/wit/docstore.wit).
 
 - [Operations](#operations)
 - [Types](#types)

@@ -13,7 +13,7 @@ use futures::{Future, TryStreamExt};
 use http::{Request, Response};
 use http_body::{Body, Frame, SizeHint};
 use http_body_util::BodyExt;
-use omnia_core::Backend;
+use omnia_core::Connect;
 use tokio::time::Sleep;
 use tracing::instrument;
 use wasmtime::component::ResourceTable;
@@ -76,7 +76,7 @@ fn ensure_crypto_provider() {
     }
 }
 
-impl Backend for HttpDefault {
+impl Connect for HttpDefault {
     type ConnectOptions = ConnectOptions;
 
     #[instrument]

@@ -10,7 +10,7 @@ use std::time::Instant;
 use anyhow::Result;
 use omnia::{DeploymentBuilder, Runtime};
 use omnia_test::host::Backends;
-use omnia_wasi_blobstore::WasiBlobstore;
+use omnia_wasi_blobstore::WasiBlobStore;
 use omnia_wasi_config::WasiConfig;
 use omnia_wasi_docstore::WasiDocStore;
 use omnia_wasi_http::WasiHttp;
@@ -55,7 +55,7 @@ async fn main() -> Result<()> {
 async fn boot(backends: Backends) -> Result<Runtime<Backends>> {
     let mut deployment = DeploymentBuilder::new().dynamic().build::<Backends>().await?;
     deployment
-        .host::<WasiBlobstore>()?
+        .host::<WasiBlobStore>()?
         .host::<WasiDocStore>()?
         .host::<WasiKeyValue>()?
         .host::<WasiSql>()?

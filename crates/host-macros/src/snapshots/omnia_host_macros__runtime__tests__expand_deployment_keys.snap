@@ -7,7 +7,7 @@ mod runtime {
     use omnia::futures::future;
     use omnia::tokio;
     use super::*;
-    use omnia::Backend;
+    use omnia::Connect;
     #[derive(Clone)]
     struct Backends {
         backend_0: HttpDefault,
@@ -16,7 +16,7 @@ mod runtime {
     impl omnia::ConnectAll for Backends {
         async fn connect() -> Result<Self> {
             let (backend_0, backend_1) = tokio::try_join!(
-                < HttpDefault as Backend > ::connect(), < OtelDefault as Backend >
+                < HttpDefault as Connect > ::connect(), < OtelDefault as Connect >
                 ::connect(),
             )?;
             Ok(Self { backend_0, backend_1 })

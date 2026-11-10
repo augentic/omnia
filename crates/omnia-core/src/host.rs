@@ -1,7 +1,7 @@
 //! Traits implemented by WASI host crates (`wasi-*`).
 //!
 //! Each host crate provides a `WasiXxx` type implementing [`Host`] plus a
-//! default backend type implementing [`Backend`].
+//! default backend type implementing [`Connect`].
 
 use std::fmt::Debug;
 use std::future::Future;
@@ -35,7 +35,7 @@ impl<B: Clone + Send + Sync + 'static> Backends for B {}
 /// The `runtime!` macro runs every linked host uniformly. A long-lived
 /// trigger server (`WasiHttp`, `WasiMessaging`, `WasiWebSocket`) overrides
 /// [`run`](Self::run) to loop on its transport until shutdown; a capability
-/// host (`WasiKeyValue`, `WasiBlobstore`, `WasiOtel`) keeps the no-op
+/// host (`WasiKeyValue`, `WasiBlobStore`, `WasiOtel`) keeps the no-op
 /// default, which resolves at once.
 pub trait Host<B: Backends>: Send + Sync {
     /// Link the host's generated bindings into the deployment linker.
@@ -137,7 +137,7 @@ impl<C: ?Sized> HasTable for HostView<'_, C> {
 }
 
 /// Connect a host backend resource during runtime startup.
-pub trait Backend: Sized + Sync + Send {
+pub trait Connect: Sized + Sync + Send {
     /// The options used to connect to the backend.
     type ConnectOptions: FromEnv;
 
@@ -164,7 +164,7 @@ pub trait FromEnv: Sized {
     fn load_env() -> Result<Self>;
 }
 
-/// Connection options for a [`Backend`] that needs none.
+/// Connection options for a [`Connect`] that needs none.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct NoOptions;
 

@@ -35,7 +35,7 @@ use self::generated::omnia::otel::{metrics, resource, tracing, types};
 
 /// Host-side service for `wasi:otel`.
 #[derive(Debug, HostCtx)]
-#[host_ctx(client = WasiOtelCtx)]
+#[host_ctx(client = OtelClient)]
 pub struct WasiOtel;
 
 impl<B: Provides<Self>> Host<B> for WasiOtel {
@@ -47,11 +47,11 @@ impl<B: Provides<Self>> Host<B> for WasiOtel {
     }
 }
 
-/// A trait which provides internal WASI OpenTelemetry context.
+/// Service contract for `omnia:otel` backends.
 ///
 /// This is implemented by the resource-specific provider of OpenTelemetry
 /// functionality.
-pub trait WasiOtelCtx: Debug + Send + Sync + 'static {
+pub trait OtelClient: Debug + Send + Sync + 'static {
     /// Export traces using gRPC.
     ///
     /// Errors are logged but not propagated to prevent telemetry failures

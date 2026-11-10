@@ -15,7 +15,7 @@ use std::cmp::Ordering;
 
 use serde_json::Value;
 
-use crate::host::generated::wasi::docstore::types::{ComparisonOp, ScalarValue, SortField};
+use crate::host::generated::omnia::docstore::types::{ComparisonOp, ScalarValue, SortField};
 use crate::host::resource::FilterTree;
 
 /// Evaluate `tree` against a JSON document body.

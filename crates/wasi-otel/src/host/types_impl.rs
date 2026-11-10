@@ -2,10 +2,10 @@ use omnia_core::HostView;
 use opentelemetry::{Array, Key, Value};
 use opentelemetry_sdk::Resource;
 
-use crate::host::WasiOtelCtx;
+use crate::host::OtelClient;
 use crate::host::generated::omnia::otel::types;
 
-impl types::Host for HostView<'_, dyn WasiOtelCtx> {
+impl types::Host for HostView<'_, dyn OtelClient> {
     fn convert_error(&mut self, err: types::Error) -> wasmtime::Result<types::Error> {
         tracing::error!("{err}");
         Ok(err)

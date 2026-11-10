@@ -1,16 +1,16 @@
 //! Reading state back through the bundle's host handles after a run.
 
-use omnia_wasi_blobstore::WasiBlobstoreCtx;
-use omnia_wasi_keyvalue::{Cacheable, WasiKeyValueCtx};
+use omnia_wasi_blobstore::BlobStoreClient;
+use omnia_wasi_keyvalue::{Cacheable, KeyValueClient};
 
 use super::{Backends, STATE_BUCKET};
 
 impl<M, K, B, D, S, V, G, I, O, C> Backends<M, K, B, D, S, V, G, I, O, C>
 where
-    K: WasiKeyValueCtx,
-    B: WasiBlobstoreCtx,
+    K: KeyValueClient,
+    B: BlobStoreClient,
     // `&self` is held across the awaits below, so the rest of the bundle must
-    // be `Sync` for the futures to be `Send`; every `Wasi*Ctx` already is.
+    // be `Sync` for the futures to be `Send`; every `*Client` already is.
     M: Sync,
     D: Sync,
     S: Sync,

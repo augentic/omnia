@@ -1,4 +1,4 @@
-//! One collection walked end to end over the `wasi:docstore` guest SDK:
+//! One collection walked end to end over the `omnia:docstore` guest SDK:
 //! inserted bodies read back intact, a missing id reads as `None`, `put`
 //! both overwrites and creates, an unfiltered query lists every document in
 //! id order, a filtered query combines `and(compare, is-not-null)` with a

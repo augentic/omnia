@@ -16,8 +16,8 @@ use crate::host::generated::wasi::messaging::types;
 /// Stream of messages.
 pub type Subscriptions = Pin<Box<dyn Stream<Item = Message> + Send>>;
 
-/// Messaging client trait.
-pub trait Client: Debug + Send + Sync + 'static {
+/// Stateful handle to a messaging transport endpoint.
+pub trait Endpoint: Debug + Send + Sync + 'static {
     /// Deliver every incoming message to `handler` until the transport gives up.
     ///
     /// The backend owns the delivery loop: how many messages are with
@@ -44,8 +44,8 @@ pub trait Client: Debug + Send + Sync + 'static {
     ) -> FutureResult<Message>;
 }
 
-/// Proxy for a messaging client.
-pub type ClientProxy = omnia_core::Proxy<dyn Client>;
+/// Proxy for a messaging endpoint.
+pub type ClientProxy = omnia_core::Proxy<dyn Endpoint>;
 
 /// What a backend delivers each incoming message to.
 ///
@@ -114,7 +114,7 @@ fn reap(finished: Result<Result<(), HandleError>, JoinError>) -> anyhow::Result<
 /// A message crossing the messaging boundary.
 ///
 /// The host owns message state; backends translate to and from their wire
-/// representation at the `Client` seam. Non-exhaustive so a new field is not
+/// representation at the `Endpoint` seam. Non-exhaustive so a new field is not
 /// a breaking change: construct via [`Message::new`] and set fields directly.
 #[derive(Clone, Debug, Default)]
 #[non_exhaustive]

@@ -47,7 +47,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 /// Host-side service for `wasi:identity`.
 #[derive(Debug, HostCtx)]
-#[host_ctx(client = WasiIdentityCtx)]
+#[host_ctx(client = IdentityClient)]
 pub struct WasiIdentity;
 
 impl<B: Provides<Self>> Host<B> for WasiIdentity {
@@ -56,11 +56,11 @@ impl<B: Provides<Self>> Host<B> for WasiIdentity {
     }
 }
 
-/// A trait which provides internal WASI Identity context.
+/// Service contract for `omnia:identity` backends.
 ///
 /// This is implemented by the resource-specific provider of Identity
 /// functionality.
-pub trait WasiIdentityCtx: Debug + Send + Sync + 'static {
+pub trait IdentityClient: Debug + Send + Sync + 'static {
     /// Get the identity for the specified name.
     fn get_identity(&self, name: String) -> FutureResult<Arc<dyn Identity>>;
 }

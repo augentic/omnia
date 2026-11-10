@@ -5,7 +5,7 @@ use std::future::Future;
 use anyhow::Result;
 use omnia_sdk::DocumentStore;
 use omnia_sdk::docstore::{ComparisonOp, Document, Filter, QueryOptions, QueryResult, ScalarValue};
-use omnia_wasi_docstore::{DocStoreDefault, FilterTree, QueryOpts, WasiDocStoreCtx};
+use omnia_wasi_docstore::{DocStoreClient, DocStoreDefault, FilterTree, QueryOpts};
 
 // The host-side twins of the guest domain types.
 mod host {

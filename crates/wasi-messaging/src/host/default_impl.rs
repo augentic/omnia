@@ -10,14 +10,14 @@ use std::sync::Arc;
 use anyhow::Result;
 use futures::FutureExt;
 use futures::stream::StreamExt;
-use omnia_core::Backend;
+use omnia_core::Connect;
 use tokio::sync::broadcast::{self, Sender};
 use tokio_stream::wrappers::BroadcastStream;
 use tracing::instrument;
 
-use crate::host::WasiMessagingCtx;
+use crate::host::MessagingClient;
 use crate::host::resource::{
-    Client, FutureResult, Handler, Message, RequestOptions, Subscriptions, dispatch,
+    Endpoint, FutureResult, Handler, Message, RequestOptions, Subscriptions, dispatch,
 };
 
 /// Default implementation for `wasi:messaging`.
@@ -39,7 +39,7 @@ impl MessagingDefault {
     }
 }
 
-impl Backend for MessagingDefault {
+impl Connect for MessagingDefault {
     type ConnectOptions = omnia_core::NoOptions;
 
     #[instrument]
@@ -50,15 +50,15 @@ impl Backend for MessagingDefault {
     }
 }
 
-impl WasiMessagingCtx for MessagingDefault {
-    fn connect(&self) -> FutureResult<Arc<dyn Client>> {
+impl MessagingClient for MessagingDefault {
+    fn endpoint(&self) -> FutureResult<Arc<dyn Endpoint>> {
         tracing::trace!("connecting messaging client");
         let client = self.clone();
-        async move { Ok(Arc::new(client) as Arc<dyn Client>) }.boxed()
+        async move { Ok(Arc::new(client) as Arc<dyn Endpoint>) }.boxed()
     }
 }
 
-impl Client for MessagingDefault {
+impl Endpoint for MessagingDefault {
     // subscribed as called, so a message sent before the loop is first
     // polled still reaches the handler
     fn consume(&self, handler: Arc<dyn Handler>) -> FutureResult<()> {

@@ -9,7 +9,7 @@ use crate::host::generated::wasi::messaging::request_reply::{
 use crate::host::generated::wasi::messaging::types::Topic;
 use crate::host::resource::{ClientProxy, Message, RequestOptions};
 use crate::host::types_impl::{get_client, get_message};
-use crate::host::{Result, WasiMessaging, WasiMessagingCtx};
+use crate::host::{MessagingClient, Result, WasiMessaging};
 
 impl<T> HostWithStore<T> for WasiMessaging {
     async fn request(
@@ -34,7 +34,7 @@ impl<T> HostWithStore<T> for WasiMessaging {
         let reply_to = get_message(accessor, &reply_to)?;
         let Some(reply) = &reply_to.reply else { return Ok(()) };
 
-        let client = accessor.with(|mut store| store.get().client.connect()).await?;
+        let client = accessor.with(|mut store| store.get().client.endpoint()).await?;
         let message = get_message(accessor, &message)?;
 
         client.send(reply.topic.clone(), message).await?;
@@ -73,5 +73,5 @@ impl<T> HostRequestOptionsWithStore<T> for WasiMessaging {
     }
 }
 
-impl Host for HostView<'_, dyn WasiMessagingCtx> {}
-impl HostRequestOptions for HostView<'_, dyn WasiMessagingCtx> {}
+impl Host for HostView<'_, dyn MessagingClient> {}
+impl HostRequestOptions for HostView<'_, dyn MessagingClient> {}

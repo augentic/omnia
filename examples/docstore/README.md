@@ -1,6 +1,6 @@
 # DocStore Example
 
-Demonstrates `wasi:docstore` using the default in-memory backend: CRUD on a
+Demonstrates `omnia:docstore` using the default in-memory backend: CRUD on a
 single `stops` collection plus one query endpoint with filters, sorting,
 limits, and continuation-token pagination.
 

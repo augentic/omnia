@@ -1,13 +1,13 @@
 ---
 source: crates/host-macros/src/runtime.rs
-expression: "expand_pretty(quote!({\n    hosts:\n    {\n        WasiKeyValue: Filesystem(FilesystemOptions::at(\".omnia/storage\")),\n        WasiBlobstore: Filesystem(FilesystemOptions::at(\".omnia/storage\")),\n        WasiOtel: OtelDefault,\n    },\n}))"
+expression: "expand_pretty(quote!({\n    hosts:\n    {\n        WasiKeyValue: Filesystem(FilesystemOptions::at(\".omnia/storage\")),\n        WasiBlobStore: Filesystem(FilesystemOptions::at(\".omnia/storage\")),\n        WasiOtel: OtelDefault,\n    },\n}))"
 ---
 mod runtime {
     use omnia::anyhow::Result;
     use omnia::futures::future;
     use omnia::tokio;
     use super::*;
-    use omnia::Backend;
+    use omnia::Connect;
     #[derive(Clone)]
     struct Backends {
         backend_0: Filesystem,
@@ -16,9 +16,9 @@ mod runtime {
     impl omnia::ConnectAll for Backends {
         async fn connect() -> Result<Self> {
             let (backend_0, backend_1) = tokio::try_join!(
-                < Filesystem as Backend >
+                < Filesystem as Connect >
                 ::connect_with(FilesystemOptions::at(".omnia/storage")), < OtelDefault as
-                Backend > ::connect(),
+                Connect > ::connect(),
             )?;
             Ok(Self { backend_0, backend_1 })
         }
@@ -28,8 +28,8 @@ mod runtime {
             &mut self.backend_0
         }
     }
-    impl omnia::Provides<WasiBlobstore> for Backends {
-        fn borrow(&mut self) -> <WasiBlobstore as omnia::HostCtx>::Borrow<'_> {
+    impl omnia::Provides<WasiBlobStore> for Backends {
+        fn borrow(&mut self) -> <WasiBlobStore as omnia::HostCtx>::Borrow<'_> {
             &mut self.backend_0
         }
     }
@@ -46,19 +46,19 @@ mod runtime {
     where
         B: omnia::Backends,
         B: omnia::Provides<WasiKeyValue>,
-        B: omnia::Provides<WasiBlobstore>,
+        B: omnia::Provides<WasiBlobStore>,
         B: omnia::Provides<WasiOtel>,
     {
         fn link(deployment: &mut omnia::Deployment<B>) -> Result<()> {
             deployment.host::<WasiKeyValue>()?;
-            deployment.host::<WasiBlobstore>()?;
+            deployment.host::<WasiBlobStore>()?;
             deployment.host::<WasiOtel>()?;
             Ok(())
         }
         async fn serve(runtime: &omnia::Runtime<B>) -> Result<()> {
             let servers: Vec<future::BoxFuture<'_, Result<()>>> = vec![
                 Box::pin(< WasiKeyValue as omnia::Host < B >> ::run(runtime)), Box::pin(<
-                WasiBlobstore as omnia::Host < B >> ::run(runtime)), Box::pin(< WasiOtel
+                WasiBlobStore as omnia::Host < B >> ::run(runtime)), Box::pin(< WasiOtel
                 as omnia::Host < B >> ::run(runtime)),
             ];
             future::try_join_all(servers).await?;

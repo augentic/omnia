@@ -7,7 +7,7 @@ use crate::host::generated::wasi::sql::types::{
     HostErrorWithStore, HostStatement, HostStatementWithStore, Statement,
 };
 use crate::host::resource::ConnectionProxy;
-use crate::host::{WasiSql, WasiSqlCtx};
+use crate::host::{SqlClient, WasiSql};
 
 impl<T> HostConnectionWithStore<T> for WasiSql {
     async fn open(
@@ -63,12 +63,12 @@ impl<T> HostErrorWithStore<T> for WasiSql {
     }
 }
 
-impl Host for HostView<'_, dyn WasiSqlCtx> {
+impl Host for HostView<'_, dyn SqlClient> {
     fn convert_error(&mut self, err: Error) -> Result<Error, wasmtime::Error> {
         Ok(err)
     }
 }
 
-impl HostConnection for HostView<'_, dyn WasiSqlCtx> {}
-impl HostStatement for HostView<'_, dyn WasiSqlCtx> {}
-impl HostError for HostView<'_, dyn WasiSqlCtx> {}
+impl HostConnection for HostView<'_, dyn SqlClient> {}
+impl HostStatement for HostView<'_, dyn SqlClient> {}
+impl HostError for HostView<'_, dyn SqlClient> {}

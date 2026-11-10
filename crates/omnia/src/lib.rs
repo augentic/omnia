@@ -22,7 +22,7 @@ pub use omnia_cli::{Cli, Command, Parser};
 pub use omnia_compile as compile;
 #[doc(inline)]
 pub use omnia_core::{
-    AcquireError, Backend, Backends, ChainCtx, ChainPolicy, CliRoutes, CompileOptions, Digest,
+    AcquireError, Backends, ChainCtx, ChainPolicy, CliRoutes, CompileOptions, Connect, Digest,
     Dispatcher, ExitStatus, Extensions, FromEnv, FutureResult, Guest, GuestError, GuestId,
     HasTable, Host, HostCtx, HostView, HttpRoutes, LevelFilter, LinkSeam, MountRegistry, NoLinks,
     NoOptions, PatternRoutes, Policy, Provides, Proxy, Registry, RegistryParts, RegistrySource,
@@ -41,7 +41,7 @@ pub use omnia_link::{FirstArgSelector, GuestSelector, InProcessLinks, is_host};
 #[doc(inline)]
 pub use omnia_plugin::{
     FsStore, LoadError, Location, NoStore, PackageStore, Plugin, PluginLoader, Plugins, Reference,
-    RegistryClient, WasiPlugins, WasiPluginsCtxView,
+    RegistryClient, WasiPlugins, WasiPluginsView,
 };
 
 pub use self::deployment::{

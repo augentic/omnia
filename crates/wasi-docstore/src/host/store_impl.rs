@@ -1,12 +1,12 @@
-//! `wasi:docstore` `store` interface.
+//! `omnia:docstore` `store` interface.
 
 use omnia_core::HostView;
 use wasmtime::component::Accessor;
 
-use crate::host::generated::wasi::docstore::store::{
+use crate::host::generated::omnia::docstore::store::{
     Document, Host as StoreHost, HostWithStore, QueryOptions, QueryResult,
 };
-use crate::host::{QueryOpts, Result, WasiDocStore, WasiDocStoreCtx};
+use crate::host::{DocStoreClient, QueryOpts, Result, WasiDocStore};
 
 impl<T> HostWithStore<T> for WasiDocStore {
     async fn get(
@@ -60,4 +60,4 @@ impl<T> HostWithStore<T> for WasiDocStore {
     }
 }
 
-impl StoreHost for HostView<'_, dyn WasiDocStoreCtx> {}
+impl StoreHost for HostView<'_, dyn DocStoreClient> {}

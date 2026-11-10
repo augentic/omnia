@@ -139,7 +139,7 @@ mod tests {
         insta::assert_snapshot!(expand_pretty(quote!({
             hosts: {
                 WasiKeyValue: Filesystem(FilesystemOptions::at(".omnia/storage")),
-                WasiBlobstore: Filesystem(FilesystemOptions::at(".omnia/storage")),
+                WasiBlobStore: Filesystem(FilesystemOptions::at(".omnia/storage")),
                 WasiOtel: OtelDefault,
             },
         })));

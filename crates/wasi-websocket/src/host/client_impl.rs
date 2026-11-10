@@ -5,7 +5,7 @@ use crate::host::generated::omnia::websocket::client::{Host, HostWithStore};
 use crate::host::generated::omnia::websocket::types::SocketAddr;
 use crate::host::resource::{ClientProxy, Event};
 use crate::host::types_impl::{get_client, get_event};
-use crate::host::{Result, WasiWebSocket, WasiWebSocketCtx};
+use crate::host::{Result, WasiWebSocket, WebSocketClient};
 
 impl<T> HostWithStore<T> for WasiWebSocket {
     async fn send(
@@ -20,4 +20,4 @@ impl<T> HostWithStore<T> for WasiWebSocket {
     }
 }
 
-impl Host for HostView<'_, dyn WasiWebSocketCtx> {}
+impl Host for HostView<'_, dyn WebSocketClient> {}

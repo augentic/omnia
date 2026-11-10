@@ -42,9 +42,9 @@ Unreleased
 - `omnia_core::HostView<'a, C>`, the linker-facing view of a host over one
   client: `{ client: &'a C, table: &'a mut ResourceTable }`, with
   `HasTable`. `#[derive(HostCtx)]` names the client trait in
-  `#[host_ctx(client = WasiXCtx)]` and makes `HostView<'a, dyn WasiXCtx>`
+  `#[host_ctx(client = XClient)]` and makes `HostView<'a, dyn XClient>`
   the host's `HasData::Data`. The bindgen `Host*` impls go on
-  `HostView<'_, dyn WasiXCtx>`, and reach the backend through `client`.
+  `HostView<'_, dyn XClient>`, and reach the backend through `client`.
 - `Runtime::stop` and `Runtime::stopped`. A trigger server waits on
   `stopped` to stop accepting work and drain. `Runtime::shutdown` stops
   the runtime too.
@@ -107,6 +107,18 @@ Unreleased
   request needs no `Host`.
 - Guests link `wasip3` 0.10 and `wit-bindgen` 0.63. `omnia:model` and
   `omnia:vcs` use `wasi:filesystem` and `wasi:clocks` at 0.3.2.
+- `omnia::Backend` is `omnia::Connect`.
+- Each host's client trait is named for its interface: `Wasi<Name>Ctx` is
+  `<Name>Client`, as in `KeyValueClient`, `BlobStoreClient`, and
+  `ModelClient`.
+- `WasiBlobstore` and `BlobstoreDefault` are `WasiBlobStore` and
+  `BlobStoreDefault`. `omnia::WasiPluginsCtxView` is
+  `omnia::WasiPluginsView`.
+- The messaging and websocket resource trait `Client` is `Endpoint`, and
+  `MessagingClient::endpoint` and `WebSocketClient::endpoint` replace
+  `connect`. `ClientProxy` keeps its name.
+- The document store's WIT package is `omnia:docstore`, which was
+  `wasi:docstore`, so a guest built against `wasi:docstore` is rebuilt.
 
 ### Removed
 

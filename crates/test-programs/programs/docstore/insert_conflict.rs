@@ -1,4 +1,4 @@
-//! `insert` is create-only over the `wasi:docstore` guest SDK: a second
+//! `insert` is create-only over the `omnia:docstore` guest SDK: a second
 //! insert under the same id is refused with the host's reason and leaves the
 //! first body untouched, while `put` on that id is the sanctioned overwrite.
 

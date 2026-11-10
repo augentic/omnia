@@ -20,7 +20,7 @@ use wasmtime::component::Accessor;
 
 use crate::host::generated::omnia::otel::metrics::{self as wasi, HostWithStore};
 use crate::host::types_impl::{datetime_nanos, decode_id};
-use crate::host::{WasiOtel, WasiOtelCtx};
+use crate::host::{OtelClient, WasiOtel};
 
 impl<T> HostWithStore<T> for WasiOtel {
     async fn export(
@@ -38,7 +38,7 @@ impl<T> HostWithStore<T> for WasiOtel {
     }
 }
 
-impl wasi::Host for HostView<'_, dyn WasiOtelCtx> {}
+impl wasi::Host for HostView<'_, dyn OtelClient> {}
 
 omnia_core::host_error!(wasi::Error, InternalFailure);
 

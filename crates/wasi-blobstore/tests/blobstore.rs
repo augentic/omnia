@@ -8,7 +8,7 @@
 
 use omnia::ExitStatus;
 use omnia_test::host::{Backends, Deployment};
-use omnia_wasi_blobstore::{WasiBlobstore, WasiBlobstoreCtx as _};
+use omnia_wasi_blobstore::{BlobStoreClient as _, WasiBlobStore};
 
 // Every guest program in `crates/test-programs` must have a matching test
 // here; a new program without one fails to compile.
@@ -17,7 +17,7 @@ test_programs::foreach_blobstore!();
 async fn run_guest(wasm: &str, backends: Backends) {
     let status = Deployment::new()
         .guest("guest", wasm)
-        .run_host::<WasiBlobstore, _>(backends)
+        .run_host::<WasiBlobStore, _>(backends)
         .await
         .expect("guest runs");
     assert_eq!(status, ExitStatus::SUCCESS, "guest `{wasm}` failed");

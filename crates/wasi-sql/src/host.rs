@@ -63,7 +63,7 @@ omnia_core::host_error!(Error, Other);
 
 /// Host-side service for `wasi:sql`.
 #[derive(Debug, HostCtx)]
-#[host_ctx(client = WasiSqlCtx)]
+#[host_ctx(client = SqlClient)]
 pub struct WasiSql;
 
 impl<B: Provides<Self>> Host<B> for WasiSql {
@@ -73,11 +73,11 @@ impl<B: Provides<Self>> Host<B> for WasiSql {
     }
 }
 
-/// A trait which provides internal WASI SQL context.
+/// Service contract for `wasi:sql` backends.
 ///
 /// This is implemented by the resource-specific provider of SQL
 /// functionality. For example, `PostgreSQL`, `MySQL`, `SQLite`, etc.
-pub trait WasiSqlCtx: Debug + Send + Sync + 'static {
+pub trait SqlClient: Debug + Send + Sync + 'static {
     /// Open a connection to the database.
     fn open(&self, name: String) -> FutureResult<Arc<dyn Connection>>;
 }

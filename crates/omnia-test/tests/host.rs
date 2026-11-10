@@ -11,8 +11,8 @@ use omnia::wasmtime::component::Val;
 use omnia::{Digest, ExitStatus, GuestEntry, GuestId, Runtime};
 use omnia_test::host::{Backends, Deployment, STATE_BUCKET, ScriptedModel, scratch};
 use omnia_test::{Exchange, SeenFormat};
-use omnia_wasi_blobstore::WasiBlobstoreCtx as _;
-use omnia_wasi_keyvalue::{Bucket, FutureResult, KeyValueDefault, WasiKeyValue, WasiKeyValueCtx};
+use omnia_wasi_blobstore::BlobStoreClient as _;
+use omnia_wasi_keyvalue::{Bucket, FutureResult, KeyValueClient, KeyValueDefault, WasiKeyValue};
 use omnia_wasi_model::WasiModel;
 use omnia_wasi_otel::WasiOtel;
 
@@ -268,7 +268,7 @@ struct RecordingKeyValue {
     opened: Arc<Mutex<Vec<String>>>,
 }
 
-impl WasiKeyValueCtx for RecordingKeyValue {
+impl KeyValueClient for RecordingKeyValue {
     fn open_bucket(&self, identifier: String) -> FutureResult<Arc<dyn Bucket>> {
         self.opened.lock().expect("opened buckets").push(identifier.clone());
         self.inner.open_bucket(identifier)

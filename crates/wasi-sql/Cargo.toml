@@ -19,7 +19,7 @@ workspace = true
 default = ["sqlite"]
 
 # Enables the bundled-SQLite default backend (`SqlDefault`). Without it the
-# host surface stays; embedders supply their own `WasiSqlCtx`.
+# host surface stays; embedders supply their own `SqlClient`.
 sqlite = ["dep:fromenv", "dep:futures", "dep:parking_lot", "dep:rusqlite", "dep:tokio"]
 
 # host dependencies

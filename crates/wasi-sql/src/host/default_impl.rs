@@ -6,13 +6,13 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use futures::FutureExt;
-use omnia_core::Backend;
+use omnia_core::Connect;
 use rusqlite::types::ValueRef;
 use rusqlite::{Connection as SqliteConnection, params_from_iter};
 use tracing::instrument;
 
 use crate::host::resource::{Connection, FutureResult};
-use crate::host::{DataType, Field, Row, WasiSqlCtx};
+use crate::host::{DataType, Field, Row, SqlClient};
 
 #[expect(missing_docs, reason = "`FromEnv` has no docs")]
 mod config {
@@ -45,7 +45,7 @@ pub struct SqlDefault {
     conn: Arc<parking_lot::Mutex<SqliteConnection>>,
 }
 
-impl Backend for SqlDefault {
+impl Connect for SqlDefault {
     type ConnectOptions = ConnectOptions;
 
     #[instrument]
@@ -61,7 +61,7 @@ impl Backend for SqlDefault {
     }
 }
 
-impl WasiSqlCtx for SqlDefault {
+impl SqlClient for SqlDefault {
     fn open(&self, _name: String) -> FutureResult<Arc<dyn Connection>> {
         tracing::trace!("opening SQL connection");
         let conn = Arc::clone(&self.conn);

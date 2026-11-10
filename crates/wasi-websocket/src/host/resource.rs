@@ -7,9 +7,8 @@ use omnia_core::FutureResult;
 /// Stream of events.
 pub type Events = Pin<Box<dyn Stream<Item = Event> + Send>>;
 
-/// Providers implement the [`Client`] trait to allow the host to interact with
-/// backend WebSocket resources.
-pub trait Client: Debug + Send + Sync + 'static {
+/// Stateful handle to a WebSocket endpoint.
+pub trait Endpoint: Debug + Send + Sync + 'static {
     /// Subscribe to incoming events from WebSocket clients.
     fn events(&self) -> FutureResult<Events>;
 
@@ -17,13 +16,13 @@ pub trait Client: Debug + Send + Sync + 'static {
     fn send(&self, event: Event, sockets: Option<Vec<String>>) -> FutureResult<()>;
 }
 
-/// Proxy for a WebSocket server client.
-pub type ClientProxy = omnia_core::Proxy<dyn Client>;
+/// Proxy for a WebSocket server endpoint.
+pub type ClientProxy = omnia_core::Proxy<dyn Endpoint>;
 
 /// A WebSocket event crossing the boundary.
 ///
 /// The host owns event state; backends translate to and from their wire
-/// representation at the [`Client`] seam. Non-exhaustive so a new field is
+/// representation at the [`Endpoint`] seam. Non-exhaustive so a new field is
 /// not a breaking change: construct via [`Event::new`] and set fields
 /// directly.
 #[derive(Clone, Debug, Default)]

@@ -6,11 +6,11 @@ use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
 use anyhow::Result;
-use omnia_core::Backend;
+use omnia_core::Connect;
 use tracing::instrument;
 use wasmtime_wasi_config::WasiConfigVariables;
 
-use crate::WasiConfigCtx;
+use crate::ConfigClient;
 
 /// Default implementation for `wasi:config`.
 #[derive(Clone)]
@@ -25,7 +25,7 @@ impl Debug for ConfigDefault {
     }
 }
 
-impl Backend for ConfigDefault {
+impl Connect for ConfigDefault {
     type ConnectOptions = omnia_core::NoOptions;
 
     #[instrument]
@@ -38,7 +38,7 @@ impl Backend for ConfigDefault {
     }
 }
 
-impl WasiConfigCtx for ConfigDefault {
+impl ConfigClient for ConfigDefault {
     fn get_config(&self) -> &WasiConfigVariables {
         &self.config_vars
     }

@@ -6,18 +6,18 @@
 
 use anyhow::Result;
 use futures::FutureExt;
-use omnia_core::{Backend, FutureResult};
+use omnia_core::{Connect, FutureResult};
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
 use tracing::instrument;
 
-use crate::host::WasiOtelCtx;
+use crate::host::OtelClient;
 
 /// Default implementation for `wasi:otel`.
 #[derive(Debug, Clone)]
 pub struct OtelDefault;
 
-impl Backend for OtelDefault {
+impl Connect for OtelDefault {
     type ConnectOptions = omnia_core::NoOptions;
 
     // `skip_all`: recording the unit `NoOptions` would otherwise trip
@@ -31,7 +31,7 @@ impl Backend for OtelDefault {
 }
 
 // logs what it is handed, for development use only
-impl WasiOtelCtx for OtelDefault {
+impl OtelClient for OtelDefault {
     fn export_traces(&self, request: ExportTraceServiceRequest) -> FutureResult<()> {
         async move {
             let span_count = request

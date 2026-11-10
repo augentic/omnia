@@ -5,11 +5,11 @@ pub use crate::host::generated::omnia::websocket::types::{
     Error, Host, HostClient, HostClientWithStore, HostEvent, HostEventWithStore, SocketAddr,
 };
 use crate::host::resource::{ClientProxy, Event};
-use crate::host::{Result, WasiWebSocket, WasiWebSocketCtx};
+use crate::host::{Result, WasiWebSocket, WebSocketClient};
 
 impl<T> HostClientWithStore<T> for WasiWebSocket {
     async fn connect(accessor: &Accessor<T, Self>, _name: String) -> Result<Resource<ClientProxy>> {
-        let socket = accessor.with(|mut store| store.get().client.connect()).await?;
+        let socket = accessor.with(|mut store| store.get().client.endpoint()).await?;
         let proxy = omnia_core::Proxy(socket);
         Ok(accessor.with(|mut store| store.get().table.push(proxy))?)
     }
@@ -45,13 +45,13 @@ impl<T> HostEventWithStore<T> for WasiWebSocket {
     }
 }
 
-impl Host for HostView<'_, dyn WasiWebSocketCtx> {
+impl Host for HostView<'_, dyn WebSocketClient> {
     fn convert_error(&mut self, err: Error) -> wasmtime::Result<Error> {
         Ok(err)
     }
 }
-impl HostClient for HostView<'_, dyn WasiWebSocketCtx> {}
-impl HostEvent for HostView<'_, dyn WasiWebSocketCtx> {}
+impl HostClient for HostView<'_, dyn WebSocketClient> {}
+impl HostEvent for HostView<'_, dyn WebSocketClient> {}
 
 pub fn get_client<T>(
     accessor: &Accessor<T, WasiWebSocket>, self_: &Resource<ClientProxy>,

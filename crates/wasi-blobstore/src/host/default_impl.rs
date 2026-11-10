@@ -9,21 +9,21 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{Result, anyhow};
 use bytes::Bytes;
 use futures::FutureExt;
-use omnia_core::Backend;
+use omnia_core::Connect;
 use parking_lot::RwLock;
 use tracing::instrument;
 
-use crate::host::WasiBlobstoreCtx;
+use crate::host::BlobStoreClient;
 use crate::host::generated::wasi::blobstore::container::{ContainerMetadata, ObjectMetadata};
 use crate::host::resource::{Container, FutureResult};
 
 /// Default implementation for `wasi:blobstore`.
 #[derive(Debug, Clone)]
-pub struct BlobstoreDefault {
+pub struct BlobStoreDefault {
     store: Arc<RwLock<HashMap<String, InMemContainer>>>,
 }
 
-impl Backend for BlobstoreDefault {
+impl Connect for BlobStoreDefault {
     type ConnectOptions = omnia_core::NoOptions;
 
     #[instrument]
@@ -35,7 +35,7 @@ impl Backend for BlobstoreDefault {
     }
 }
 
-impl WasiBlobstoreCtx for BlobstoreDefault {
+impl BlobStoreClient for BlobStoreDefault {
     fn create_container(&self, name: String) -> FutureResult<Arc<dyn Container>> {
         tracing::trace!("creating container: {name}");
         let store = Arc::clone(&self.store);

@@ -43,7 +43,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 /// Host-side service for `wasi:vault`.
 #[derive(Debug, HostCtx)]
-#[host_ctx(client = WasiVaultCtx)]
+#[host_ctx(client = VaultClient)]
 pub struct WasiVault;
 
 impl<B: Provides<Self>> Host<B> for WasiVault {
@@ -52,11 +52,11 @@ impl<B: Provides<Self>> Host<B> for WasiVault {
     }
 }
 
-/// A trait which provides internal WASI Vault context.
+/// Service contract for `omnia:vault` backends.
 ///
 /// This is implemented by the resource-specific provider of Vault
 /// functionality.
-pub trait WasiVaultCtx: Debug + Send + Sync + 'static {
+pub trait VaultClient: Debug + Send + Sync + 'static {
     /// Open a locker.
     fn open_locker(&self, identifier: String) -> FutureResult<Arc<dyn Locker>>;
 }

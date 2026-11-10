@@ -5,7 +5,7 @@ use crate::host::generated::wasi::messaging::producer::{Host, HostWithStore};
 use crate::host::generated::wasi::messaging::types::Topic;
 use crate::host::resource::{ClientProxy, Message};
 use crate::host::types_impl::{get_client, get_message};
-use crate::host::{Result, WasiMessaging, WasiMessagingCtx};
+use crate::host::{MessagingClient, Result, WasiMessaging};
 
 impl<T> HostWithStore<T> for WasiMessaging {
     async fn send(
@@ -20,4 +20,4 @@ impl<T> HostWithStore<T> for WasiMessaging {
     }
 }
 
-impl Host for HostView<'_, dyn WasiMessagingCtx> {}
+impl Host for HostView<'_, dyn MessagingClient> {}

@@ -16,7 +16,7 @@ use wasmtime::component::Accessor;
 
 use crate::host::generated::omnia::otel::tracing::{self as wasi, HostWithStore};
 use crate::host::types_impl::{datetime_nanos, decode_id};
-use crate::{WasiOtel, WasiOtelCtx};
+use crate::{OtelClient, WasiOtel};
 
 impl<T> HostWithStore<T> for WasiOtel {
     async fn export(
@@ -62,7 +62,7 @@ impl<T> HostWithStore<T> for WasiOtel {
     }
 }
 
-impl wasi::Host for HostView<'_, dyn WasiOtelCtx> {}
+impl wasi::Host for HostView<'_, dyn OtelClient> {}
 
 pub fn resource_spans(
     spans: Vec<wasi::SpanData>, resource: &opentelemetry_sdk::Resource,

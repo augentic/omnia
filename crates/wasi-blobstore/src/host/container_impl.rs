@@ -9,10 +9,10 @@ use crate::host::generated::wasi::blobstore::container::{
 };
 use crate::host::resource::ContainerProxy;
 use crate::host::{
-    Error, IncomingValue, OutgoingValue, Result, StreamObjectNames, WasiBlobstore, WasiBlobstoreCtx,
+    BlobStoreClient, Error, IncomingValue, OutgoingValue, Result, StreamObjectNames, WasiBlobStore,
 };
 
-impl<T> HostContainerWithStore<T> for WasiBlobstore {
+impl<T> HostContainerWithStore<T> for WasiBlobStore {
     fn name(mut host: Access<'_, T, Self>, self_: Resource<ContainerProxy>) -> Result<String> {
         let container = host.get().table.get(&self_).context("Container not found")?;
         Ok(container.name().context("getting name")?)
@@ -117,7 +117,7 @@ impl<T> HostContainerWithStore<T> for WasiBlobstore {
     }
 }
 
-impl<T> HostStreamObjectNamesWithStore<T> for WasiBlobstore {
+impl<T> HostStreamObjectNamesWithStore<T> for WasiBlobStore {
     fn read_stream_object_names(
         accessor: &Accessor<T, Self>, self_: Resource<StreamObjectNames>, len: u64,
     ) -> impl std::future::Future<Output = Result<(Vec<String>, bool)>> {
@@ -156,12 +156,12 @@ impl<T> HostStreamObjectNamesWithStore<T> for WasiBlobstore {
     }
 }
 
-impl Host for HostView<'_, dyn WasiBlobstoreCtx> {}
-impl HostContainer for HostView<'_, dyn WasiBlobstoreCtx> {}
-impl HostStreamObjectNames for HostView<'_, dyn WasiBlobstoreCtx> {}
+impl Host for HostView<'_, dyn BlobStoreClient> {}
+impl HostContainer for HostView<'_, dyn BlobStoreClient> {}
+impl HostStreamObjectNames for HostView<'_, dyn BlobStoreClient> {}
 
 pub fn get_container<T>(
-    accessor: &Accessor<T, WasiBlobstore>, self_: &Resource<ContainerProxy>,
+    accessor: &Accessor<T, WasiBlobStore>, self_: &Resource<ContainerProxy>,
 ) -> Result<ContainerProxy> {
     Ok(omnia_core::get_cloned(accessor, self_).context("Container not found")?)
 }

@@ -12,8 +12,8 @@ use std::sync::{Arc, Mutex};
 use futures::FutureExt as _;
 use omnia::{ExitStatus, FutureResult, Provides};
 use omnia_test::host::Deployment;
-use omnia_wasi_identity::{AccessToken, Identity, WasiIdentity, WasiIdentityCtx};
-use omnia_wasi_otel::{OtelDefault, WasiOtel, WasiOtelCtx};
+use omnia_wasi_identity::{AccessToken, Identity, IdentityClient, WasiIdentity};
+use omnia_wasi_otel::{OtelClient, OtelDefault, WasiOtel};
 
 // Every guest program in `crates/test-programs` must have a matching test
 // here; a new program without one fails to compile.
@@ -35,13 +35,13 @@ impl Backends {
 }
 
 impl Provides<WasiIdentity> for Backends {
-    fn borrow(&mut self) -> &dyn WasiIdentityCtx {
+    fn borrow(&mut self) -> &dyn IdentityClient {
         &self.identity
     }
 }
 
 impl Provides<WasiOtel> for Backends {
-    fn borrow(&mut self) -> &dyn WasiOtelCtx {
+    fn borrow(&mut self) -> &dyn OtelClient {
         &self.otel
     }
 }
@@ -61,7 +61,7 @@ impl RecordingIdentity {
     }
 }
 
-impl WasiIdentityCtx for RecordingIdentity {
+impl IdentityClient for RecordingIdentity {
     fn get_identity(&self, name: String) -> FutureResult<Arc<dyn Identity>> {
         let requests = Arc::clone(&self.requests);
         async move {
