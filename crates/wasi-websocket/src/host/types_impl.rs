@@ -1,10 +1,11 @@
+use omnia_core::HostView;
 use wasmtime::component::{Access, Accessor, Resource};
 
 pub use crate::host::generated::omnia::websocket::types::{
     Error, Host, HostClient, HostClientWithStore, HostEvent, HostEventWithStore, SocketAddr,
 };
 use crate::host::resource::{ClientProxy, Event};
-use crate::host::{Result, WasiWebSocket, WasiWebSocketView};
+use crate::host::{Result, WasiWebSocket, WebSocketClient};
 
 pub fn get_client<T>(
     accessor: &Accessor<T, WasiWebSocket>, self_: &Resource<ClientProxy>,
@@ -30,7 +31,8 @@ impl<T> HostClientWithStore<T> for WasiWebSocket {
     }
 
     fn drop(mut accessor: Access<'_, T, Self>, rep: Resource<ClientProxy>) -> wasmtime::Result<()> {
-        Ok(accessor.get().table.delete(rep).map(|_| ())?)
+        accessor.get().table.delete(rep)?;
+        Ok(())
     }
 }
 
@@ -52,14 +54,15 @@ impl<T> HostEventWithStore<T> for WasiWebSocket {
     }
 
     fn drop(mut accessor: Access<'_, T, Self>, rep: Resource<Event>) -> wasmtime::Result<()> {
-        Ok(accessor.get().table.delete(rep).map(|_| ())?)
+        accessor.get().table.delete(rep)?;
+        Ok(())
     }
 }
 
-impl Host for WasiWebSocketView<'_> {
+impl Host for HostView<'_, dyn WebSocketClient> {
     fn convert_error(&mut self, err: Error) -> wasmtime::Result<Error> {
         Ok(err)
     }
 }
-impl HostClient for WasiWebSocketView<'_> {}
-impl HostEvent for WasiWebSocketView<'_> {}
+impl HostClient for HostView<'_, dyn WebSocketClient> {}
+impl HostEvent for HostView<'_, dyn WebSocketClient> {}

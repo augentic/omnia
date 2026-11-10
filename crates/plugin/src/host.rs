@@ -17,7 +17,7 @@ mod generated {
 
 use std::sync::Arc;
 
-use omnia_core::{Digest, HasExtensions, Host, Server};
+use omnia_core::{Backends, Digest, Host, StoreCtx};
 use wasmtime::component::{Accessor, HasData, Linker};
 
 use self::generated::Error;
@@ -35,18 +35,13 @@ impl HasData for WasiPlugins {
     type Data<'a> = WasiPluginsView;
 }
 
-impl<T> Host<T> for WasiPlugins
-where
-    T: HasExtensions + 'static,
-{
-    fn add_to_linker(linker: &mut Linker<T>) -> anyhow::Result<()> {
+impl<B: Backends> Host<B> for WasiPlugins {
+    fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
         Ok(loader::add_to_linker::<_, Self>(linker, |store| WasiPluginsView {
             plugins: store.extensions().get::<Plugins>(),
         })?)
     }
 }
-
-impl<B> Server<B> for WasiPlugins {}
 
 impl<T> loader::HostWithStore<T> for WasiPlugins {
     async fn load(

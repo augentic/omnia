@@ -11,12 +11,7 @@ mod tracing;
 
 // Bindings for the `wasi:otel` world.
 mod generated {
-    #![allow(
-        clippy::future_not_send,
-        clippy::collection_is_never_read,
-        clippy::same_length_and_capacity,
-        reason = "wit-bindgen output"
-    )]
+    #![expect(clippy::same_length_and_capacity, reason = "wit-bindgen output")]
 
     wit_bindgen::generate!({
         world: "imports",

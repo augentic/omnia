@@ -8,8 +8,8 @@
 //! router dispatches to `responder`, not to the file's stem. The router's
 //! import is unsatisfied by its own component and lies outside the runtime's
 //! own namespaces, so the host polyfills it on the shared linker and, at
-//! bootstrap, serves every guest's linked exports (`omnia::serve_links`, run
-//! by `Deployment::assemble`), so a dispatched call always finds the
+//! bootstrap, serves every guest's linked exports (`Runtime::serve_links`,
+//! run by `Deployment::assemble`), so a dispatched call always finds the
 //! responder's live route. Nothing declares the seam.
 //!
 //! The router exports a plain `run` rather than an HTTP/messaging trigger;

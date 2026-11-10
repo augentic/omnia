@@ -11,6 +11,7 @@ use wasmtime::component::{Val, types};
 
 use crate::FutureResult;
 use crate::chain::{ChainCtx, ChainPolicy};
+use crate::host::Backends;
 use crate::invoke::{FreshCall, call_fresh};
 use crate::registry::{Guest, GuestId};
 use crate::runtime::Runtime;
@@ -41,7 +42,7 @@ pub async fn dispatch<B>(
     args: Vec<Val>,
 ) -> Result<Vec<Val>>
 where
-    B: Clone + Send + Sync + 'static,
+    B: Backends,
 {
     // Plain records cross by value; a live handle never crosses.
     if let Some(kind) = args.iter().find_map(handle_kind) {
@@ -114,7 +115,7 @@ pub trait Dispatcher: Send + Sync + 'static {
     fn ensure(&self, id: &GuestId) -> FutureResult<()>;
 }
 
-impl<B: Clone + Send + Sync + 'static> Dispatcher for crate::runtime::RuntimeDispatcher<B> {
+impl<B: Backends> Dispatcher for crate::runtime::RuntimeDispatcher<B> {
     fn invoke(
         &self, caller: ChainCtx, target: GuestId, interface: Option<String>, func: String,
         args: Vec<Val>,
@@ -144,7 +145,7 @@ impl<B: Clone + Send + Sync + 'static> Dispatcher for crate::runtime::RuntimeDis
 
 // The unique exported interface carrying `func`; ambiguity is an error, never
 // a silent first match.
-fn find_interface<T: 'static>(guest: &Guest<T>, func: &str) -> Result<Box<str>> {
+fn find_interface<B: 'static>(guest: &Guest<B>, func: &str) -> Result<Box<str>> {
     let target = guest.id();
     let engine = guest.instance_pre().engine();
     let component_ty = guest.component().component_type();

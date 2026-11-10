@@ -6,8 +6,8 @@ use std::time::Duration;
 use anyhow::{Context as _, Result};
 use omnia::wasmtime_wasi::p2::pipe::MemoryOutputPipe;
 use omnia::{
-    DeploymentBuilder, ExitStatus, GuestEntry, Host, LevelFilter, Manifest, ManifestSource, Mode,
-    Mount, Provides, RegistryConfig, Runtime, Server, SourceSpec, Stdio, StoreCtx, Wiring,
+    Backends, DeploymentBuilder, ExitStatus, GuestEntry, Host, LevelFilter, Manifest,
+    ManifestSource, Mode, Mount, Provides, RegistryConfig, Runtime, SourceSpec, Stdio, Wiring,
 };
 use omnia_wasi_otel::WasiOtel;
 
@@ -242,17 +242,11 @@ impl Deployment {
     ///
     /// Returns an error if the deployment cannot be built, linked, or
     /// assembled.
-    pub async fn boot<B>(
-        &self, backends: B, link: impl FnOnce(&mut omnia::Deployment<StoreCtx<B>>) -> Result<()>,
-    ) -> Result<Runtime<B>>
-    where
-        B: Clone + Send + Sync + 'static,
-    {
-        let mut deployment = self
-            .builder(self.manifest()?)
-            .build::<StoreCtx<B>>()
-            .await
-            .context("building deployment")?;
+    pub async fn boot<B: Backends>(
+        &self, backends: B, link: impl FnOnce(&mut omnia::Deployment<B>) -> Result<()>,
+    ) -> Result<Runtime<B>> {
+        let mut deployment =
+            self.builder(self.manifest()?).build::<B>().await.context("building deployment")?;
         link(&mut deployment).context("linking hosts")?;
         deployment.assemble(backends).await
     }
@@ -263,12 +257,9 @@ impl Deployment {
     /// # Errors
     ///
     /// Same as [`Deployment::boot`], or if the guest traps without exiting.
-    pub async fn run<B>(
-        &self, backends: B, link: impl FnOnce(&mut omnia::Deployment<StoreCtx<B>>) -> Result<()>,
-    ) -> Result<ExitStatus>
-    where
-        B: Clone + Send + Sync + 'static,
-    {
+    pub async fn run<B: Backends>(
+        &self, backends: B, link: impl FnOnce(&mut omnia::Deployment<B>) -> Result<()>,
+    ) -> Result<ExitStatus> {
         let runtime = self.boot(backends, link).await?;
         let status = runtime.run_command().await;
         runtime.shutdown();
@@ -286,12 +277,12 @@ impl Deployment {
     /// Same as [`Deployment::run`].
     pub async fn run_host<H, B>(&self, backends: B) -> Result<ExitStatus>
     where
-        H: Host<StoreCtx<B>> + Server<B>,
-        B: Provides<WasiOtel> + Clone + Send + Sync + 'static,
+        H: Host<B>,
+        B: Backends + Provides<WasiOtel>,
     {
         self.run(backends, |deployment| {
-            deployment.host::<H, B>()?;
-            deployment.host::<WasiOtel, B>()?;
+            deployment.host::<H>()?;
+            deployment.host::<WasiOtel>()?;
             Ok(())
         })
         .await
@@ -308,9 +299,9 @@ impl Deployment {
     pub async fn run_with<H, B>(&self, backends: B) -> Result<ExitStatus>
     where
         H: Wiring<B>,
-        B: Clone + Send + Sync + 'static,
+        B: Backends,
     {
-        let deployment = self.builder(self.manifest()?).build::<StoreCtx<B>>().await?;
+        let deployment = self.builder(self.manifest()?).build::<B>().await?;
         omnia::run_with::<B, H>(deployment, backends).await
     }
 }
@@ -344,12 +335,9 @@ impl Captured {
     /// # Errors
     ///
     /// Same as [`Deployment::run`].
-    pub async fn run<B>(
-        &self, backends: B, link: impl FnOnce(&mut omnia::Deployment<StoreCtx<B>>) -> Result<()>,
-    ) -> Result<Run>
-    where
-        B: Clone + Send + Sync + 'static,
-    {
+    pub async fn run<B: Backends>(
+        &self, backends: B, link: impl FnOnce(&mut omnia::Deployment<B>) -> Result<()>,
+    ) -> Result<Run> {
         let status = self.deployment.run(backends, link).await?;
         Ok(self.collect(status))
     }
@@ -361,8 +349,8 @@ impl Captured {
     /// Same as [`Deployment::run_host`].
     pub async fn run_host<H, B>(&self, backends: B) -> Result<Run>
     where
-        H: Host<StoreCtx<B>> + Server<B>,
-        B: Provides<WasiOtel> + Clone + Send + Sync + 'static,
+        H: Host<B>,
+        B: Backends + Provides<WasiOtel>,
     {
         let status = self.deployment.run_host::<H, B>(backends).await?;
         Ok(self.collect(status))
@@ -376,7 +364,7 @@ impl Captured {
     pub async fn run_with<H, B>(&self, backends: B) -> Result<Run>
     where
         H: Wiring<B>,
-        B: Clone + Send + Sync + 'static,
+        B: Backends,
     {
         let status = self.deployment.run_with::<H, B>(backends).await?;
         Ok(self.collect(status))

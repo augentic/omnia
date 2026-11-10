@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures::{FutureExt as _, StreamExt as _};
-use omnia::{ExitStatus, GuestEntry, Host, Runtime, Server, StoreCtx};
+use omnia::{ExitStatus, GuestEntry, Host, Runtime};
 use omnia_test::host::{Backends, Deployment};
 use omnia_wasi_messaging::{
     Endpoint, Error, FutureResult, HandleError, Handler, Message, MessagingClient,
@@ -55,14 +55,14 @@ test_programs::foreach_messaging!();
 
 async fn boot<B>(deployment: &Deployment, backends: B) -> Runtime<B>
 where
-    B: Clone + Send + Sync + 'static,
-    WasiMessaging: Host<StoreCtx<B>> + Server<B>,
-    WasiOtel: Host<StoreCtx<B>> + Server<B>,
+    B: omnia::Backends,
+    WasiMessaging: Host<B>,
+    WasiOtel: Host<B>,
 {
     deployment
         .boot(backends, |deployment| {
-            deployment.host::<WasiMessaging, B>()?;
-            deployment.host::<WasiOtel, B>()?;
+            deployment.host::<WasiMessaging>()?;
+            deployment.host::<WasiOtel>()?;
             Ok(())
         })
         .await
@@ -254,7 +254,7 @@ async fn consumer_end_fails() {
     let backends = Backends::defaults().await.messaging(EndedBroker);
     let runtime = boot(&sole(test_programs::MESSAGING_PRODUCE_HANDLE), backends).await;
 
-    let error = WasiMessaging.run(&runtime).await.expect_err("an ended consumer fails the server");
+    let error = WasiMessaging::run(&runtime).await.expect_err("an ended consumer fails the server");
     assert!(format!("{error:#}").contains("consumer ended"), "unexpected error: {error:#}");
 
     runtime.shutdown();

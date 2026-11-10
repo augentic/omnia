@@ -1,12 +1,12 @@
 //! The `omnia:vcs/workspace` host bindings.
 
-use omnia_core::HasMounts;
+use omnia_core::{HostView, StoreCtx};
 use wasmtime::component::Accessor;
 
 use crate::host::generated::omnia::vcs::workspace::{
     Change as WitChange, ChangeKind as WitChangeKind, Host, HostWithStore, Location,
 };
-use crate::host::{Change, ChangeKind, Intent, Result, WasiVcs, WasiVcsView};
+use crate::host::{Change, ChangeKind, Intent, Result, VcsClient, WasiVcs};
 
 fn to_wit_change(change: Change) -> WitChange {
     WitChange {
@@ -19,11 +19,8 @@ fn to_wit_change(change: Change) -> WitChange {
     }
 }
 
-impl<T> HostWithStore<T> for WasiVcs
-where
-    T: HasMounts,
-{
-    async fn init(accessor: &Accessor<T, Self>, at: Location) -> Result<()> {
+impl<B: Send + 'static> HostWithStore<StoreCtx<B>> for WasiVcs {
+    async fn init(accessor: &Accessor<StoreCtx<B>, Self>, at: Location) -> Result<()> {
         Self::dispatch(accessor, |access| {
             let at = Self::locate(access, &at, Intent::Create)?;
             Ok(access.get().client.init(at))
@@ -32,7 +29,7 @@ where
     }
 
     async fn add(
-        accessor: &Accessor<T, Self>, repo: Location, at: Location, revision: String,
+        accessor: &Accessor<StoreCtx<B>, Self>, repo: Location, at: Location, revision: String,
     ) -> Result<()> {
         Self::dispatch(accessor, |access| {
             let repo = Self::locate(access, &repo, Intent::Mutate)?;
@@ -42,7 +39,7 @@ where
         .await
     }
 
-    async fn remove(accessor: &Accessor<T, Self>, at: Location) -> Result<()> {
+    async fn remove(accessor: &Accessor<StoreCtx<B>, Self>, at: Location) -> Result<()> {
         Self::dispatch(accessor, |access| {
             let at = Self::locate(access, &at, Intent::Mutate)?;
             Ok(access.get().client.remove(at))
@@ -50,7 +47,9 @@ where
         .await
     }
 
-    async fn pending(accessor: &Accessor<T, Self>, at: Location) -> Result<Vec<WitChange>> {
+    async fn pending(
+        accessor: &Accessor<StoreCtx<B>, Self>, at: Location,
+    ) -> Result<Vec<WitChange>> {
         let changes = Self::dispatch(accessor, |access| {
             let at = Self::locate(access, &at, Intent::Read)?;
             Ok(access.get().client.pending(at))
@@ -60,4 +59,4 @@ where
     }
 }
 
-impl Host for WasiVcsView<'_> {}
+impl Host for HostView<'_, dyn VcsClient> {}

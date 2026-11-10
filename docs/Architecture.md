@@ -79,13 +79,13 @@ Layers 1 and 2 form the **runtime core** — domain-agnostic infrastructure that
 `omnia` provides:
 
 - **Deployment pipeline**: `DeploymentBuilder` builds a `Deployment` from a `Manifest` (loaded from `omnia.toml`, synthesized from a single `.wasm`, or constructed programmatically)
-- **Lifecycle**: `Wiring`, `Backends`, `Mode`; `run` / `run_with` take a built `Deployment`, call `Deployment::assemble`, then drive command mode or the trigger servers
+- **Lifecycle**: `Wiring`, `ConnectAll`, `Mode`; `run` / `run_with` take a built `Deployment`, call `Deployment::assemble`, then drive command mode or the trigger servers
 - **Optional-crate composition**: `omnia-link` (guest-to-guest dispatch — every interface a guest imports outside the runtime's own `wasi:`/`omnia:` namespaces is relayed to the guest exporting it — behind the `link` feature; without it such an import fails at boot), `omnia-plugin` (the guest loader, `omnia:plugins/loader`, behind the `loader` feature; `Deployment::assemble` links its host and hands the runtime the registry client its `source.package` guests are acquired with — the `plugins.store` package store first, the `registries` routing after; a deployment declaring `plugins` or a package guest requires it; a loaded guest is raw wasm, or `omnia compile` output where the source admits it, and compiling the former needs `jit`), `omnia-cli` (the `run` grammar, behind the `cli` feature), and the `runtime!` macro. `link` and `loader` are independent: compiled-in guests may call each other; loaded guests may be host-only.
 
 `omnia-core` is the live-runtime SDK a capability crate targets. Depend on it directly only when building another capability crate. It provides:
 
 - **Runtime handle**: `Runtime<B>` over `StoreCtx<B>`, assembled from `RuntimeParts`; `Registry` holds pre-instantiated guests beside the declared sources not yet loaded, and `Runtime::guest` is the one seam every use resolves through — a declared guest loads there on its first use
-- **Core traits**: `Host`, `Server`, `Connect` (re-exported from `omnia-backend`); `HostCtx`, `Provides`, and `StoreView`, the seam between a host and the bundle that serves it (see [Extending Omnia](#extending-omnia))
+- **Core traits**: `Host`, `Connect` (re-exported from `omnia-backend`); `Backends`, the shape of the bundle every runtime type is generic over; `HostCtx`, `Provides`, and the `HostView` a host over one client implements its bindings on, the seam between a host and the bundle that serves it, joined by `StoreCtx::view` (see [Extending Omnia](#extending-omnia))
 - **Link seam**: the `LinkSeam` trait and `NoLinks` no-op the registry drives; guest→guest linking itself lives in `omnia-link` (`InProcessLinks`)
 - **Host→guest dispatch**: `Dispatcher`, a named-target call through `call_fresh` (the same primitive guest→guest links use)
 - **Telemetry**: `Telemetry`, the host's `tracing` subscriber — console logging with the OTLP span and metric exporters beneath it — and `telemetry::{flush, resource}` over the providers it publishes
@@ -96,15 +96,17 @@ Layers 1 and 2 form the **runtime core** — domain-agnostic infrastructure that
 Key traits:
 
 ```rust
-/// Implemented by all WASI hosts to link their functions into the shared linker.
-pub trait Host<T>: Debug + Sync + Send {
-    fn add_to_linker(linker: &mut Linker<T>) -> Result<()>;
-}
+/// The shape of a deployment's backend bundle, implemented for every type
+/// with it; the one bound `Runtime<B>`, `Host<B>`, and `Wiring<B>` put on `B`.
+pub trait Backends: Clone + Send + Sync + 'static {}
 
-/// Implemented by every WASI host; `run` is a no-op default that trigger
-/// servers (HTTP, messaging, WebSocket) override with their serve loop.
-pub trait Server<B>: Debug + Sync + Send {
-    fn run(&self, state: &Runtime<B>) -> impl Future<Output = Result<()>>;
+/// Implemented by every WASI host over the deployment's backend bundle `B`:
+/// `add_to_linker` links its functions into the shared linker, and `run` is
+/// a no-op default that trigger servers (HTTP, messaging, WebSocket)
+/// override with their serve loop.
+pub trait Host<B: Backends>: Sync + Send {
+    fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> Result<()>;
+    fn run(runtime: &Runtime<B>) -> impl Future<Output = Result<()>> + Send;
 }
 
 /// Implemented by backends for connection management.
@@ -171,7 +173,7 @@ omnia::runtime!({
 });
 ```
 
-The macro generates a `Backends` bundle (one connected backend per `Host: Backend` pair, with one uniform `omnia::Provides` impl per row wiring each backend into the library's generic `StoreView` blanket on `StoreCtx`), a `Wiring` implementation whose `link` runs on the `Deployment` before `assemble` and whose `serve` runs every host (capability hosts resolve immediately through `Server`'s no-op default; trigger servers loop until shutdown), and a `main` that delegates to `omnia::main`. The runtime itself is always the library type `omnia::Runtime<Backends>` over `omnia::StoreCtx<Backends>` — the macro emits wiring, not a runtime.
+The macro generates a `Backends` bundle (one connected backend per `Host: Backend` pair, with one uniform `omnia::Provides` impl per row handing each backend to `StoreCtx::view`), a `Wiring` implementation whose `link` runs on the `Deployment` before `assemble` and whose `serve` runs every host (capability hosts resolve immediately through `Host::run`'s no-op default; trigger servers loop until shutdown), and a `main` that delegates to `omnia::main`. The runtime itself is always the library type `omnia::Runtime<Backends>` over `omnia::StoreCtx<Backends>` — the macro emits wiring, not a runtime.
 
 ## The Guest Registry
 
@@ -252,24 +254,24 @@ A host and a backend meet through three `omnia-core` traits, with a macro genera
 
 ```text
 Redis: Connect + KeyValueClient          the backend the deployment connects
-   |  runtime!: Backends { redis } and impl Provides<WasiKeyValue> for Backends
+   |  runtime!: Backends { backend_0 } and impl Provides<WasiKeyValue> for Backends
    v
 StoreCtx<Backends>                       one per guest store
-   |  StoreView<WasiKeyValue>, the library blanket:
+   |  StoreCtx::view::<WasiKeyValue>():
    |  WasiKeyValue::view(backends.borrow(), &mut base.table)
    v
-WasiKeyValueView { client, table }       #[derive(HostCtx)]: the host's HasData::Data
-   |  bindgen Host* impls on the view; Host::add_to_linker(linker, T::view)
+HostView<'_, dyn KeyValueClient>         #[host_ctx(client = KeyValueClient)]: the host's HasData::Data
+   |  bindgen Host* impls on the view; Host::add_to_linker(linker, StoreCtx::view::<Self>)
    v
 wasmtime Linker                          wasi:keyvalue/* resolved for the guest
 ```
 
-A backend implements the `<Name>Client` contract and never sees the view; a host implements the WIT functions on the view and never sees the bundle. `runtime!` supplies the bundle's `Provides` impl per row, `#[derive(HostCtx)]` supplies the host's borrow and view, and the `StoreView` blanket on `StoreCtx` joins them.
+A backend implements the `<Name>Client` contract and never sees the view; a host implements the WIT functions on the view and never sees the bundle. `runtime!` supplies the bundle's `Provides` impl per row, `#[derive(HostCtx)]` supplies the host's borrow and view, and `StoreCtx::view` joins them.
 
 **Adding a WASI interface**: create `crates/wasi-<name>/` with the standard layout, define the WIT world in `wit/`, and add the `<Name>Client` trait (plus any resource traits) to `omnia-backend`. Then, in the crate:
 
-- `src/host.rs` binds the world with `wasmtime::component::bindgen!`, declares `#[derive(Debug, HostCtx)] pub struct Wasi<Name>;` with `<Name>Client` in scope, implements `Host<T> where T: StoreView<Self>` to call each generated `add_to_linker(linker, T::view)`, implements `Server<B>` (the no-op default, for a capability host), and maps host failures with `host_error!`.
-- `src/host/*_impl.rs` implement the generated `Host*` traits on `Wasi<Name>View<'_>`, reaching the backend through `.client` and WIT resources through `.table`.
+- `src/host.rs` binds the world with `wasmtime::component::bindgen!`, declares `#[derive(Debug, HostCtx)] #[host_ctx(client = <Name>Client)] pub struct Wasi<Name>;`, implements `Host<B>` as `impl<B: Backends + Provides<Self>>` to call each generated `add_to_linker(linker, StoreCtx::view::<Self>)` (a trigger host also overrides `run`), and maps host failures with `host_error!`.
+- `src/host/*_impl.rs` implement the generated `Host*` traits on `HostView<'_, dyn <Name>Client>`, reaching the backend through `.client` and WIT resources through `.table`.
 - `src/host/default_impl.rs` is `<Name>Default`, the in-tree backend; `src/guest.rs` holds the guest bindings.
 - A `test-programs` program and its paired e2e row prove the interface from a real guest (see the [testing policy](guides/testing-policy.md)); unit tests cover only deterministic logic no guest boundary reaches.
 

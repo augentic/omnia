@@ -1,4 +1,5 @@
 use anyhow::Result;
+use omnia_core::HostView;
 use wasmtime::component::{Accessor, Resource};
 
 use crate::ConnectionProxy;
@@ -6,7 +7,7 @@ use crate::host::generated::wasi::sql::readwrite::{
     Connection, Error, Host, HostWithStore, Row as WitRow, Statement,
 };
 use crate::host::generated::wasi::sql::types::{DataType as WitDataType, Field as WitField};
-use crate::host::{DataType, Field, Row, WasiSql, WasiSqlView};
+use crate::host::{DataType, Field, Row, SqlClient, WasiSql};
 
 pub fn get_connection<T>(
     accessor: &Accessor<T, WasiSql>, self_: &Resource<ConnectionProxy>,
@@ -85,4 +86,4 @@ impl<T> HostWithStore<T> for WasiSql {
     }
 }
 
-impl Host for WasiSqlView<'_> {}
+impl Host for HostView<'_, dyn SqlClient> {}

@@ -29,7 +29,7 @@ pub use self::chain::{ChainCtx, ChainPolicy};
 pub use self::digest::Digest;
 pub use self::dispatch::Dispatcher;
 pub use self::extensions::Extensions;
-pub use self::host::{HasTable, Host, HostCtx, Provides, Proxy, Server, get_cloned};
+pub use self::host::{Backends, HasTable, Host, HostCtx, HostView, Provides, Proxy, get_cloned};
 pub use self::invoke::{FreshCall, InvokeError, call_fresh};
 pub use self::mount::{Mount, MountRegistry, ResolvedPreopen};
 pub use self::options::RuntimeOptions;
@@ -37,15 +37,10 @@ pub use self::registry::{
     CliRoutes, Guest, GuestId, HttpRoutes, PatternRoutes, Registry, RegistryParts, Resolver,
     Routes, TriggerRouter,
 };
-pub use self::runtime::{
-    ExitStatus, GuestError, Policy, Runtime, RuntimeParts, WeakRuntime, serve_links,
-};
+pub use self::runtime::{ExitStatus, GuestError, Policy, Runtime, RuntimeParts, WeakRuntime};
 pub use self::seam::{LinkSeam, NoLinks, StoreFactory};
 pub use self::source::{AcquireError, LoadedGuest, RegistrySource, Source, SourceSpec, Verified};
-pub use self::store::{
-    HasChain, HasDispatcher, HasExtensions, HasLimits, HasMounts, Stdio, StoreBase, StoreConfig,
-    StoreCtx, StoreView,
-};
+pub use self::store::{Stdio, StoreBase, StoreConfig, StoreCtx};
 pub use self::telemetry::Telemetry;
 pub use self::value::handle_kind;
 

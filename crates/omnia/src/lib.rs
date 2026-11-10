@@ -22,14 +22,13 @@ pub use omnia_cli::{Cli, Command, Parser};
 pub use omnia_compile as compile;
 #[doc(inline)]
 pub use omnia_core::{
-    AcquireError, ChainCtx, ChainPolicy, CliRoutes, CompileOptions, Connect, Digest, Dispatcher,
-    ExitStatus, Extensions, FromEnv, FutureResult, Guest, GuestError, GuestId, HasChain,
-    HasDispatcher, HasExtensions, HasLimits, HasMounts, HasTable, Host, HostCtx, HttpRoutes,
-    LevelFilter, LinkSeam, MountRegistry, NoLinks, NoOptions, PatternRoutes, Policy, Provides,
-    Proxy, Registry, RegistryParts, RegistrySource, ResolvedPreopen, Routes, Runtime,
-    RuntimeOptions, RuntimeParts, Server, Source, SourceSpec, Stdio, StoreBase, StoreConfig,
-    StoreCtx, StoreFactory, StoreView, Telemetry, TriggerRouter, Verified, WeakRuntime, get_cloned,
-    host_error, serve_links, telemetry,
+    AcquireError, Backends, ChainCtx, ChainPolicy, CliRoutes, CompileOptions, Connect, Digest,
+    Dispatcher, ExitStatus, Extensions, FromEnv, FutureResult, Guest, GuestError, GuestId,
+    HasTable, Host, HostCtx, HostView, HttpRoutes, LevelFilter, LinkSeam, MountRegistry, NoLinks,
+    NoOptions, PatternRoutes, Policy, Provides, Proxy, Registry, RegistryParts, RegistrySource,
+    ResolvedPreopen, Routes, Runtime, RuntimeOptions, RuntimeParts, Source, SourceSpec, Stdio,
+    StoreBase, StoreConfig, StoreCtx, StoreFactory, Telemetry, TriggerRouter, Verified,
+    WeakRuntime, get_cloned, host_error, telemetry,
 };
 #[doc(hidden)]
 pub use omnia_core::{tokio, wasmtime, wasmtime_wasi};
@@ -46,11 +45,11 @@ pub use omnia_plugin::{
 };
 
 pub use self::deployment::{
-    Deployment, DeploymentBuilder, GuestEntry, GuestRoutes, LinkStore, Manifest, Mount,
-    PluginsConfig, RegistryConfig, Transport, TransportKind,
+    Deployment, DeploymentBuilder, GuestEntry, GuestRoutes, Manifest, Mount, PluginsConfig,
+    RegistryConfig, Transport, TransportKind,
 };
 #[doc(hidden)]
 pub use self::entry::{MainOptions, ManifestSource, main};
-pub use self::lifecycle::{Backends, Mode, Wiring};
+pub use self::lifecycle::{ConnectAll, Mode, Wiring};
 #[doc(hidden)]
 pub use self::lifecycle::{run, run_with};

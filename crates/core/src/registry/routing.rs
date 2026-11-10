@@ -21,6 +21,7 @@ use anyhow::{Result, bail};
 use wasmtime::component::InstancePre;
 
 use super::{GuestId, Registry};
+use crate::store::StoreCtx;
 
 /// Longest-prefix path matching: `/target/omnia` wins over `/target`.
 #[derive(Clone, Copy, Debug, Default)]
@@ -301,11 +302,11 @@ impl<R: Resolver> TriggerRouter<R> {
     /// Returns an error if `Router::build` rejects the capable set and
     /// table: a route names a guest that neither exports the handler nor is
     /// declared, or two or more guests export it with no routes.
-    pub fn build<T, I, E, F>(
-        registry: &Registry<T>, trigger: &str, table: R, mut probe: F,
+    pub fn build<B, I, E, F>(
+        registry: &Registry<B>, trigger: &str, table: R, mut probe: F,
     ) -> Result<Self>
     where
-        F: FnMut(&InstancePre<T>) -> Result<I, E>,
+        F: FnMut(&InstancePre<StoreCtx<B>>) -> Result<I, E>,
     {
         let capable: Vec<GuestId> = registry
             .guests()

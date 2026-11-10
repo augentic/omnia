@@ -23,7 +23,8 @@ use wasmtime_wasi_http::{
 
 use super::{HttpBorrow, client_cert};
 
-pub type FutureResult<T> = Box<dyn Future<Output = Result<T, HttpError>> + Send>;
+// the boxed future shape `WasiHttpHooks` speaks, distinct from `omnia_core::FutureResult`
+type HttpFuture<T> = Box<dyn Future<Output = Result<T, HttpError>> + Send>;
 pub use config::ConnectOptions;
 
 #[derive(Debug, Clone)]
@@ -174,10 +175,8 @@ impl WasiHttpHooks for HttpHooks {
     }
 
     fn send_request(
-        &mut self, request: Request<WasiBody>, options: Option<RequestOptions>,
-        fut: FutureResult<()>,
-    ) -> Box<dyn Future<Output = Result<(Response<WasiBody>, FutureResult<()>), HttpError>> + Send>
-    {
+        &mut self, request: Request<WasiBody>, options: Option<RequestOptions>, fut: HttpFuture<()>,
+    ) -> HttpFuture<(Response<WasiBody>, HttpFuture<()>)> {
         let clients = self.clients.clone();
 
         // guest-supplied timeouts from `wasi:http/types.request-options`

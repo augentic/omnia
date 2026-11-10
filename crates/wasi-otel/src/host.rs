@@ -27,25 +27,21 @@ use std::fmt::Debug;
 pub use default_impl::OtelDefault;
 pub use omnia_backend::otel::OtelClient;
 pub use omnia_core::FutureResult;
-use omnia_core::{Host, HostCtx, Server, StoreView};
+use omnia_core::{Backends, Host, HostCtx, Provides, StoreCtx};
 use wasmtime::component::Linker;
 
 use self::generated::omnia::otel::{metrics, resource, tracing, types};
 
-/// Host-side service for `wasi:otel`.
+/// Host-side service for `omnia:otel`.
 #[derive(Debug, HostCtx)]
+#[host_ctx(client = OtelClient)]
 pub struct WasiOtel;
 
-impl<T> Host<T> for WasiOtel
-where
-    T: StoreView<Self> + 'static,
-{
-    fn add_to_linker(linker: &mut Linker<T>) -> anyhow::Result<()> {
-        tracing::add_to_linker::<_, Self>(linker, T::view)?;
-        metrics::add_to_linker::<_, Self>(linker, T::view)?;
-        types::add_to_linker::<_, Self>(linker, T::view)?;
-        Ok(resource::add_to_linker::<_, Self>(linker, T::view)?)
+impl<B: Backends + Provides<Self>> Host<B> for WasiOtel {
+    fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
+        tracing::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
+        metrics::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
+        types::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
+        Ok(resource::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?)
     }
 }
-
-impl<B> Server<B> for WasiOtel {}

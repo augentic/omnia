@@ -1,4 +1,5 @@
 use anyhow::Context;
+use omnia_core::HostView;
 use wasmtime::component::{Access, Accessor, Resource};
 
 use crate::host::generated::wasi::keyvalue::store::{
@@ -6,7 +7,7 @@ use crate::host::generated::wasi::keyvalue::store::{
 };
 use crate::host::resource::BucketProxy;
 use crate::host::store::{Host, HostBucket};
-use crate::host::{Result, WasiKeyValue, WasiKeyValueView};
+use crate::host::{KeyValueClient, Result, WasiKeyValue};
 
 pub fn get_bucket<T>(
     accessor: &Accessor<T, WasiKeyValue>, self_: &Resource<BucketProxy>,
@@ -68,14 +69,15 @@ impl<T> HostBucketWithStore<T> for WasiKeyValue {
     }
 
     fn drop(mut accessor: Access<'_, T, Self>, rep: Resource<BucketProxy>) -> wasmtime::Result<()> {
-        Ok(accessor.get().table.delete(rep).map(|_| ())?)
+        accessor.get().table.delete(rep)?;
+        Ok(())
     }
 }
 
-impl Host for WasiKeyValueView<'_> {
+impl Host for HostView<'_, dyn KeyValueClient> {
     fn convert_error(&mut self, err: Error) -> wasmtime::Result<Error> {
         Ok(err)
     }
 }
 
-impl HostBucket for WasiKeyValueView<'_> {}
+impl HostBucket for HostView<'_, dyn KeyValueClient> {}

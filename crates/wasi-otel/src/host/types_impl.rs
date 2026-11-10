@@ -1,7 +1,8 @@
+use omnia_core::HostView;
 use opentelemetry::{Array, Key, Value};
 use opentelemetry_sdk::Resource;
 
-use crate::host::WasiOtelView;
+use crate::host::OtelClient;
 use crate::host::generated::omnia::otel::types;
 
 /// Hex-decode a guest-supplied trace/span id, warning (rather than silently
@@ -18,7 +19,7 @@ pub fn datetime_nanos(dt: types::Datetime) -> u64 {
     dt.seconds.saturating_mul(1_000_000_000).saturating_add(u64::from(dt.nanoseconds))
 }
 
-impl types::Host for WasiOtelView<'_> {
+impl types::Host for HostView<'_, dyn OtelClient> {
     fn convert_error(&mut self, err: types::Error) -> wasmtime::Result<types::Error> {
         tracing::error!("{err}");
         Ok(err)

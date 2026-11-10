@@ -1,5 +1,6 @@
 //! `omnia:docstore` `types` interface — `filter` resource constructors.
 
+use omnia_core::HostView;
 use wasmtime::component::{Access, Resource};
 
 use crate::host::generated::omnia::docstore::types::{
@@ -7,7 +8,7 @@ use crate::host::generated::omnia::docstore::types::{
     ScalarValue as WitScalarValue,
 };
 use crate::host::resource::FilterProxy;
-use crate::host::{ComparisonOp, Filter, ScalarValue, WasiDocStore, WasiDocStoreView};
+use crate::host::{ComparisonOp, DocStoreClient, Filter, ScalarValue, WasiDocStore};
 
 const MAX_FILTER_DEPTH: usize = 5;
 const MAX_IN_LIST_SIZE: usize = 100;
@@ -159,13 +160,14 @@ impl<T> HostFilterWithStore<T> for WasiDocStore {
     }
 
     fn drop(mut accessor: Access<'_, T, Self>, rep: Resource<FilterProxy>) -> wasmtime::Result<()> {
-        Ok(accessor.get().table.delete(rep).map(|_| ())?)
+        accessor.get().table.delete(rep)?;
+        Ok(())
     }
 }
 
-impl HostFilter for WasiDocStoreView<'_> {}
+impl HostFilter for HostView<'_, dyn DocStoreClient> {}
 
-impl TypesHost for WasiDocStoreView<'_> {
+impl TypesHost for HostView<'_, dyn DocStoreClient> {
     fn convert_error(&mut self, err: Error) -> wasmtime::Result<Error> {
         Ok(err)
     }

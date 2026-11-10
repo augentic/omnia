@@ -161,12 +161,20 @@ fn emit_manifest_builder(manifest: &ManifestSpec) -> TokenStream {
 fn emit_backends(host_entries: &[HostEntry]) -> (TokenStream, TokenStream) {
     // order-preserving dedup: a backend shared by non-adjacent hosts must not
     // emit two fields; parse validation made their options agree
-    let rows = host_entries.iter().map(|entry| (&entry.backend, entry.options.as_ref()));
-    let mut seen = std::collections::HashSet::new();
-    let backends: Vec<(&Path, Option<&Expr>)> =
-        rows.filter(|(backend, _)| seen.insert(path_key(backend))).collect();
+    let mut backends: Vec<(&Path, Option<&Expr>)> = Vec::new();
+    let mut slots: Vec<usize> = Vec::with_capacity(host_entries.len());
+    for entry in host_entries {
+        let key = path_key(&entry.backend);
+        let found = backends.iter().position(|(backend, _)| path_key(backend) == key);
+        slots.push(found.unwrap_or_else(|| {
+            backends.push((&entry.backend, entry.options.as_ref()));
+            backends.len() - 1
+        }));
+    }
 
-    let idents: Vec<Ident> = backends.iter().map(|(backend, _)| field_ident(backend)).collect();
+    // positional, so two backends sharing a type name never share a field
+    let idents: Vec<Ident> =
+        (0..backends.len()).map(|slot| format_ident!("backend_{slot}")).collect();
     let types: Vec<&Path> = backends.iter().map(|(backend, _)| *backend).collect();
 
     if idents.is_empty() {
@@ -187,7 +195,8 @@ fn emit_backends(host_entries: &[HostEntry]) -> (TokenStream, TokenStream) {
 
     let host_impls: Vec<TokenStream> = host_entries
         .iter()
-        .map(|entry| host_impl(&entry.host, &field_ident(&entry.backend)))
+        .zip(&slots)
+        .map(|(entry, slot)| host_impl(&entry.host, &idents[*slot]))
         .collect();
 
     (
@@ -200,7 +209,7 @@ fn emit_backends(host_entries: &[HostEntry]) -> (TokenStream, TokenStream) {
                 #idents: #types,
             )*}
 
-            impl omnia::Backends for Backends {
+            impl omnia::ConnectAll for Backends {
                 async fn connect() -> Result<Self> {
                     let (#(#idents,)*) = tokio::try_join!(
                         #(#connects,)*
@@ -228,24 +237,4 @@ fn host_impl(host: &Path, field: &Ident) -> TokenStream {
             }
         }
     }
-}
-
-fn field_ident(path: &Path) -> Ident {
-    let Some(segment) = path.segments.last() else {
-        return format_ident!("field");
-    };
-
-    let mut snake = String::new();
-    for ch in segment.ident.to_string().chars() {
-        if ch.is_uppercase() {
-            if !snake.is_empty() {
-                snake.push('_');
-            }
-            snake.extend(ch.to_lowercase());
-        } else {
-            snake.push(ch);
-        }
-    }
-
-    format_ident!("{snake}")
 }

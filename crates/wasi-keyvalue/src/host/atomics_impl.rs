@@ -2,16 +2,16 @@ use std::future::{self, Future};
 use std::sync::Arc;
 
 use anyhow::Context;
+use omnia_core::HostView;
 use wasmtime::component::{Access, Accessor, Resource};
 
-use crate::WasiKeyValueView;
 use crate::host::generated::wasi::keyvalue::atomics::{
     CasError, Host, HostCas, HostCasWithStore, HostWithStore,
 };
 use crate::host::generated::wasi::keyvalue::store::Error;
 use crate::host::resource::{BucketProxy, Cas};
 use crate::host::store_impl::get_bucket;
-use crate::host::{Result, WasiKeyValue};
+use crate::host::{KeyValueClient, Result, WasiKeyValue};
 
 impl<T> HostWithStore<T> for WasiKeyValue {
     async fn increment(
@@ -71,7 +71,8 @@ impl<T> HostCasWithStore<T> for WasiKeyValue {
     }
 
     fn drop(mut accessor: Access<'_, T, Self>, rep: Resource<Cas>) -> wasmtime::Result<()> {
-        Ok(accessor.get().table.delete(rep).map(|_| ())?)
+        accessor.get().table.delete(rep)?;
+        Ok(())
     }
 }
 
@@ -87,9 +88,9 @@ impl From<wasmtime::component::ResourceTableError> for CasError {
     }
 }
 
-impl Host for WasiKeyValueView<'_> {
+impl Host for HostView<'_, dyn KeyValueClient> {
     fn convert_cas_error(&mut self, err: CasError) -> wasmtime::Result<CasError> {
         Ok(err)
     }
 }
-impl HostCas for WasiKeyValueView<'_> {}
+impl HostCas for HostView<'_, dyn KeyValueClient> {}

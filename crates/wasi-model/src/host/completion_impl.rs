@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use futures::FutureExt as _;
-use omnia_core::HasMounts;
+use omnia_core::{HostView, StoreCtx};
 use wasmtime::component::{Accessor, FutureReader, StreamReader};
 
 use crate::host::generated::omnia::model::completion::{
@@ -16,8 +16,8 @@ use crate::host::generated::omnia::model::completion::{
 use crate::host::session::{CallsProducer, ReplyTask, ResultsConsumer, ToolSession};
 use crate::host::workspace::Workspace;
 use crate::host::{
-    Effort, Error, Format, Function, Generation, McpGrant, Message, Request, Role, SchemaFormat,
-    Tool, Usage, WasiModel, WasiModelView, WorkerGrant,
+    Effort, Error, Format, Function, Generation, McpGrant, Message, ModelClient, Request, Role,
+    SchemaFormat, Tool, Usage, WasiModel, WorkerGrant,
 };
 
 fn split_wit_request(req: WitRequest) -> (Request, Option<WorkspaceGrant>) {
@@ -113,12 +113,9 @@ fn to_wit_error(err: Error) -> WitError {
     }
 }
 
-impl<T> HostWithStore<T> for WasiModel
-where
-    T: HasMounts,
-{
+impl<B: Send + 'static> HostWithStore<StoreCtx<B>> for WasiModel {
     fn create(
-        accessor: &Accessor<T, Self>, wit_request: WitRequest,
+        accessor: &Accessor<StoreCtx<B>, Self>, wit_request: WitRequest,
         mut results: StreamReader<WitToolResult>,
     ) -> impl std::future::Future<Output = Result<Session, WitError>> {
         std::future::ready(accessor.with(|mut access| {
@@ -177,7 +174,7 @@ where
     }
 }
 
-impl Host for WasiModelView<'_> {
+impl Host for HostView<'_, dyn ModelClient> {
     fn convert_error(&mut self, err: WitError) -> wasmtime::Result<WitError> {
         Ok(err)
     }

@@ -8,13 +8,16 @@ use omnia_core::GuestError;
 
 /// Why a load was refused — the host mirror of the `omnia:plugins/loader`
 /// `error` variant.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum LoadError {
     /// The request or deployment is wrong and a retry cannot succeed.
+    #[error("refused: {0}")]
     Refused(String),
     /// The guest's source could not produce its bytes; a retry may succeed.
+    #[error("unavailable: {0}")]
     Unavailable(String),
     /// Loader misconfiguration or an internal registration failure.
+    #[error("internal: {0}")]
     Internal(String),
 }
 
@@ -28,18 +31,6 @@ impl LoadError {
         ))
     }
 }
-
-impl fmt::Display for LoadError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Refused(detail) => write!(f, "refused: {detail}"),
-            Self::Unavailable(detail) => write!(f, "unavailable: {detail}"),
-            Self::Internal(detail) => write!(f, "internal: {detail}"),
-        }
-    }
-}
-
-impl std::error::Error for LoadError {}
 
 impl From<GuestError> for LoadError {
     fn from(error: GuestError) -> Self {

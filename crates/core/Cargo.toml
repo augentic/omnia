@@ -49,6 +49,7 @@ opentelemetry-otlp = { workspace = true, features = ["grpc-tonic", "metrics", "t
 opentelemetry_sdk = { workspace = true, features = ["metrics", "trace"] }
 serde.workspace = true
 sha2.workspace = true
+thiserror.workspace = true
 tracing.workspace = true
 tracing-opentelemetry = { workspace = true, features = ["metrics"] }
 tracing-subscriber = { workspace = true, features = ["ansi", "smallvec"] }

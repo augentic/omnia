@@ -1,6 +1,6 @@
 use omnia_core::HostCtx;
 
 #[derive(HostCtx)]
-pub struct Foo;
+pub struct WasiFoo;
 
 fn main() {}

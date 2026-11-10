@@ -1,9 +1,10 @@
 use anyhow::Context;
+use omnia_core::HostView;
 use wasmtime::component::{Accessor, Resource};
 
 use crate::host::generated::wasi::blobstore::blobstore::{Host, HostWithStore, ObjectId};
 use crate::host::resource::ContainerProxy;
-use crate::host::{Error, Result, WasiBlobStore, WasiBlobStoreView};
+use crate::host::{BlobStoreClient, Error, Result, WasiBlobStore};
 
 fn same_object(src: &ObjectId, dest: &ObjectId) -> bool {
     src.container == dest.container && src.object == dest.object
@@ -113,4 +114,4 @@ impl<T> HostWithStore<T> for WasiBlobStore {
     }
 }
 
-impl Host for WasiBlobStoreView<'_> {}
+impl Host for HostView<'_, dyn BlobStoreClient> {}

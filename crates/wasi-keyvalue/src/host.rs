@@ -35,7 +35,7 @@ use std::fmt::Debug;
 pub use default_impl::KeyValueDefault;
 pub use omnia_backend::keyvalue::{Bucket, KeyValueClient};
 pub use omnia_core::FutureResult;
-use omnia_core::{Host, HostCtx, Server, StoreView};
+use omnia_core::{Backends, Host, HostCtx, Provides, StoreCtx};
 use wasmtime::component::Linker;
 
 use self::generated::omnia::keyvalue::ttl;
@@ -48,20 +48,16 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 /// Host-side service for `wasi:keyvalue`.
 #[derive(Debug, HostCtx)]
+#[host_ctx(client = KeyValueClient)]
 pub struct WasiKeyValue;
 
-impl<T> Host<T> for WasiKeyValue
-where
-    T: StoreView<Self> + 'static,
-{
-    fn add_to_linker(linker: &mut Linker<T>) -> anyhow::Result<()> {
-        store::add_to_linker::<_, Self>(linker, T::view)?;
-        atomics::add_to_linker::<_, Self>(linker, T::view)?;
-        batch::add_to_linker::<_, Self>(linker, T::view)?;
-        Ok(ttl::add_to_linker::<_, Self>(linker, T::view)?)
+impl<B: Backends + Provides<Self>> Host<B> for WasiKeyValue {
+    fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
+        store::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
+        atomics::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
+        batch::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
+        Ok(ttl::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?)
     }
 }
-
-impl<B> Server<B> for WasiKeyValue {}
 
 omnia_core::host_error!(Error, Other);

@@ -1,13 +1,13 @@
 //! The `omnia:vcs/store` host bindings.
 
-use omnia_core::HasMounts;
+use omnia_core::{HostView, StoreCtx};
 use wasmtime::component::Accessor;
 
 use crate::host::generated::omnia::vcs::store::{
     Entry as WitEntry, Host, HostWithStore, Location, Merged as WitMerged, Rule as WitRule,
     Strategy as WitStrategy,
 };
-use crate::host::{Entry, Intent, Merged, Result, Rule, Strategy, WasiVcs, WasiVcsView};
+use crate::host::{Entry, Intent, Merged, Result, Rule, Strategy, VcsClient, WasiVcs};
 
 fn from_wit_rule(rule: WitRule) -> Rule {
     Rule {
@@ -34,12 +34,9 @@ fn to_wit_entry(entry: Entry) -> WitEntry {
     }
 }
 
-impl<T> HostWithStore<T> for WasiVcs
-where
-    T: HasMounts,
-{
+impl<B: Send + 'static> HostWithStore<StoreCtx<B>> for WasiVcs {
     async fn resolve(
-        accessor: &Accessor<T, Self>, repo: Location, revision: String,
+        accessor: &Accessor<StoreCtx<B>, Self>, repo: Location, revision: String,
     ) -> Result<String> {
         Self::dispatch(accessor, |access| {
             let repo = Self::locate(access, &repo, Intent::Read)?;
@@ -49,7 +46,8 @@ where
     }
 
     async fn descends(
-        accessor: &Accessor<T, Self>, repo: Location, ancestor: String, descendant: String,
+        accessor: &Accessor<StoreCtx<B>, Self>, repo: Location, ancestor: String,
+        descendant: String,
     ) -> Result<bool> {
         Self::dispatch(accessor, |access| {
             let repo = Self::locate(access, &repo, Intent::Read)?;
@@ -58,7 +56,7 @@ where
         .await
     }
 
-    async fn head(accessor: &Accessor<T, Self>, at: Location) -> Result<String> {
+    async fn head(accessor: &Accessor<StoreCtx<B>, Self>, at: Location) -> Result<String> {
         Self::dispatch(accessor, |access| {
             let at = Self::locate(access, &at, Intent::Read)?;
             Ok(access.get().client.head(at))
@@ -67,7 +65,7 @@ where
     }
 
     async fn commit(
-        accessor: &Accessor<T, Self>, at: Location, message: String,
+        accessor: &Accessor<StoreCtx<B>, Self>, at: Location, message: String,
     ) -> Result<Option<String>> {
         Self::dispatch(accessor, |access| {
             let at = Self::locate(access, &at, Intent::Mutate)?;
@@ -77,7 +75,7 @@ where
     }
 
     async fn merge(
-        accessor: &Accessor<T, Self>, at: Location, revision: String, message: String,
+        accessor: &Accessor<StoreCtx<B>, Self>, at: Location, revision: String, message: String,
         policy: Vec<WitRule>,
     ) -> Result<WitMerged> {
         let policy = policy.into_iter().map(from_wit_rule).collect();
@@ -90,7 +88,7 @@ where
     }
 
     async fn log(
-        accessor: &Accessor<T, Self>, repo: Location, revision: String, base: String,
+        accessor: &Accessor<StoreCtx<B>, Self>, repo: Location, revision: String, base: String,
     ) -> Result<Vec<WitEntry>> {
         let entries = Self::dispatch(accessor, |access| {
             let repo = Self::locate(access, &repo, Intent::Read)?;
@@ -101,4 +99,4 @@ where
     }
 }
 
-impl Host for WasiVcsView<'_> {}
+impl Host for HostView<'_, dyn VcsClient> {}

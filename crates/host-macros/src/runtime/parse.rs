@@ -46,38 +46,52 @@ impl Parse for Config {
         let mut manifest_span: Option<Span> = None;
         let mut inline_span: Option<Span> = None;
 
-        let settings;
-        syn::braced!(settings in input);
-        let settings = Punctuated::<Opt, Token![,]>::parse_terminated(&settings)?;
-
-        let mut seen: Vec<&'static str> = Vec::new();
-        for setting in settings.into_pairs() {
-            let Opt { name, span, value } = setting.into_value();
-            if seen.contains(&name) {
-                return Err(syn::Error::new(span, format!("duplicate `{name}:` key")));
-            }
-            seen.push(name);
-            match value {
-                OptValue::Mode(m) => mode = m,
-                OptValue::Hosts(h) => host_entries = h,
-                OptValue::Manifest(m) => {
-                    manifest_file = Some(m);
+        parse_kv_block(input, |key, value| {
+            let span = key.span();
+            match key.to_string().as_str() {
+                "mode" => mode = parse_mode(value)?,
+                "hosts" => {
+                    let list;
+                    syn::braced!(list in value);
+                    host_entries = Punctuated::<HostEntry, Token![,]>::parse_terminated(&list)?
+                        .into_iter()
+                        .collect();
+                }
+                "manifest" => {
+                    manifest_file = Some(value.parse()?);
                     manifest_span = Some(span);
                 }
-                OptValue::Guests(g) => {
-                    manifest.guests = g;
+                "guests" => {
+                    manifest.guests = parse_bracketed_list(value)?;
                     inline_span.get_or_insert(span);
                 }
-                OptValue::Plugins(p) => {
-                    manifest.plugins = Some(p);
+                "plugins" => {
+                    manifest.plugins = Some(value.parse()?);
                     inline_span.get_or_insert(span);
                 }
-                OptValue::Mounts(m) => {
-                    manifest.mounts = m;
+                "mounts" => {
+                    manifest.mounts = parse_bracketed_list(value)?;
                     inline_span.get_or_insert(span);
+                }
+                // the retired top-level key, refused with its new home
+                "registries" => {
+                    return Err(syn::Error::new(
+                        span,
+                        "`registries:` moved under `plugins:`; write `plugins: { registries: ... }`",
+                    ));
+                }
+                other => {
+                    return Err(syn::Error::new(
+                        span,
+                        format!(
+                            "unknown runtime key `{other}`; expected `mode`, `hosts`, `manifest`, \
+                             `guests`, `plugins`, or `mounts`"
+                        ),
+                    ));
                 }
             }
-        }
+            Ok(())
+        })?;
 
         let config = Self {
             mode,
@@ -402,76 +416,7 @@ struct KeySpans {
     inline: Option<Span>,
 }
 
-// the span lets `Config::parse` reject a duplicate with a pointed diagnostic
-struct Opt {
-    name: &'static str,
-    span: Span,
-    value: OptValue,
-}
-
-impl Parse for Opt {
-    fn parse(input: ParseStream) -> Result<Self> {
-        let l = input.lookahead1();
-        let (name, span, value) = if l.peek(kw::mode) {
-            let key = input.parse::<kw::mode>()?;
-            input.parse::<Token![:]>()?;
-            ("mode", key.span, OptValue::Mode(parse_mode(input)?))
-        } else if l.peek(kw::hosts) {
-            let key = input.parse::<kw::hosts>()?;
-            input.parse::<Token![:]>()?;
-            let list;
-            syn::braced!(list in input);
-            ("hosts", key.span, OptValue::Hosts(parse_host_entries(&list)?))
-        } else if l.peek(kw::manifest) {
-            let key = input.parse::<kw::manifest>()?;
-            input.parse::<Token![:]>()?;
-            ("manifest", key.span, OptValue::Manifest(input.parse()?))
-        } else if l.peek(kw::guests) {
-            let key = input.parse::<kw::guests>()?;
-            input.parse::<Token![:]>()?;
-            ("guests", key.span, OptValue::Guests(parse_bracketed_list(input)?))
-        } else if l.peek(kw::plugins) {
-            let key = input.parse::<kw::plugins>()?;
-            input.parse::<Token![:]>()?;
-            ("plugins", key.span, OptValue::Plugins(input.parse()?))
-        } else if l.peek(kw::registries) {
-            // the retired top-level key, refused with its new home
-            let key = input.parse::<kw::registries>()?;
-            return Err(syn::Error::new(
-                key.span,
-                "`registries:` moved under `plugins:`; write `plugins: { registries: ... }`",
-            ));
-        } else if l.peek(kw::mounts) {
-            let key = input.parse::<kw::mounts>()?;
-            input.parse::<Token![:]>()?;
-            ("mounts", key.span, OptValue::Mounts(parse_bracketed_list(input)?))
-        } else {
-            return Err(l.error());
-        };
-        Ok(Self { name, span, value })
-    }
-}
-
-enum OptValue {
-    Mode(Mode),
-    Hosts(Vec<HostEntry>),
-    Manifest(Expr),
-    Guests(Vec<GuestSpec>),
-    Plugins(PluginsSpec),
-    Mounts(Vec<MountSpec>),
-}
-
 const DIGEST_LEN: usize = 32;
-
-mod kw {
-    syn::custom_keyword!(mode);
-    syn::custom_keyword!(hosts);
-    syn::custom_keyword!(manifest);
-    syn::custom_keyword!(guests);
-    syn::custom_keyword!(plugins);
-    syn::custom_keyword!(registries);
-    syn::custom_keyword!(mounts);
-}
 
 fn parse_mode(input: ParseStream) -> Result<Mode> {
     let ident: Ident = input.parse()?;
@@ -483,10 +428,6 @@ fn parse_mode(input: ParseStream) -> Result<Mode> {
             format!("expected `server` or `command`, got `{other}`"),
         )),
     }
-}
-
-fn parse_host_entries(input: ParseStream) -> Result<Vec<HostEntry>> {
-    Ok(Punctuated::<HostEntry, Token![,]>::parse_terminated(input)?.into_iter().collect())
 }
 
 fn parse_bracketed_list<T: Parse>(input: ParseStream) -> Result<Vec<T>> {

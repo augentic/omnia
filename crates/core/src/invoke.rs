@@ -11,14 +11,16 @@ use wasmtime::component::{ComponentExportIndex, InstancePre, Val};
 
 use crate::chain::ChainCtx;
 use crate::seam::StoreFactory;
+use crate::store::StoreCtx;
 use crate::value::handle_kind;
 
-/// Everything needed to instantiate a callee and invoke one of its exports.
-pub struct FreshCall<T: 'static> {
+/// Everything needed to instantiate a callee over the backend bundle `B` and
+/// invoke one of its exports.
+pub struct FreshCall<B: 'static> {
     /// Builds the callee's store.
-    pub factory: StoreFactory<T>,
+    pub factory: StoreFactory<B>,
     /// The callee's pre-instantiated component.
-    pub instance_pre: InstancePre<T>,
+    pub instance_pre: InstancePre<StoreCtx<B>>,
     /// The export to invoke, resolved once on the component rather than per call.
     pub export: ComponentExportIndex,
     /// Number of results the export returns.
@@ -81,8 +83,8 @@ impl<T> Drop for AbortOnDrop<T> {
 /// when a result carries a store-bound handle, [`InvokeError::Trap`] when
 /// instantiation, export resolution, or the call fails, and
 /// [`InvokeError::Join`] when the callee task panics or is cancelled.
-pub async fn call_fresh<T: Send + 'static>(
-    call: FreshCall<T>, args: Vec<Val>, ctx: ChainCtx, bound: Option<Duration>,
+pub async fn call_fresh<B: Send + 'static>(
+    call: FreshCall<B>, args: Vec<Val>, ctx: ChainCtx, bound: Option<Duration>,
 ) -> Result<Vec<Val>, InvokeError> {
     // own task, so the caller cannot starve the callee and an abandoned caller
     // aborts it; the bound wraps the whole call, as wasmtime's `run_concurrent`

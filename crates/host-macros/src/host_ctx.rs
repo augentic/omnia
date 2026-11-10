@@ -1,8 +1,8 @@
 //! `#[derive(HostCtx)]` expansion.
 
 use proc_macro2::TokenStream;
-use quote::{format_ident, quote};
-use syn::{DeriveInput, Error, Result};
+use quote::quote;
+use syn::{DeriveInput, Error, Path, Result, Token};
 
 pub fn expand(input: &DeriveInput) -> Result<TokenStream> {
     if !input.generics.params.is_empty() {
@@ -13,40 +13,11 @@ pub fn expand(input: &DeriveInput) -> Result<TokenStream> {
     }
 
     let host = &input.ident;
-    let name = host.to_string();
-    let stem = match name.strip_prefix("Wasi") {
-        Some(stem) if !stem.is_empty() => stem,
-        _ => {
-            return Err(Error::new_spanned(
-                host,
-                "`#[derive(HostCtx)]` expects a type named `Wasi<Service>`",
-            ));
-        }
-    };
-
-    let vis = &input.vis;
-    let view = format_ident!("Wasi{stem}View");
-    let client = format_ident!("{stem}Client");
-    let view_doc = format!("Borrowed view over a [`{client}`] and the store's resource table.");
-    let client_doc = format!("Mutable reference to the WASI {stem} client.");
+    let client = client_path(input)?;
 
     Ok(quote! {
-        #[doc = #view_doc]
-        #vis struct #view<'a> {
-            #[doc = #client_doc]
-            pub client: &'a mut dyn #client,
-            /// Mutable reference to the table used to manage resources.
-            pub table: &'a mut ::omnia_core::wasmtime_wasi::ResourceTable,
-        }
-
-        impl ::omnia_core::HasTable for #view<'_> {
-            fn table(&mut self) -> &mut ::omnia_core::wasmtime_wasi::ResourceTable {
-                self.table
-            }
-        }
-
         impl ::omnia_core::wasmtime::component::HasData for #host {
-            type Data<'a> = #view<'a>;
+            type Data<'a> = ::omnia_core::HostView<'a, dyn #client>;
         }
 
         impl ::omnia_core::HostCtx for #host {
@@ -56,8 +27,33 @@ pub fn expand(input: &DeriveInput) -> Result<TokenStream> {
                 borrow: Self::Borrow<'a>,
                 table: &'a mut ::omnia_core::wasmtime_wasi::ResourceTable,
             ) -> Self::Data<'a> {
-                #view { client: borrow, table }
+                ::omnia_core::HostView { client: borrow, table }
             }
         }
+    })
+}
+
+// The one `#[host_ctx(client = Path)]` attribute; absent, repeated, or any
+// other key is an error at the attribute.
+fn client_path(input: &DeriveInput) -> Result<Path> {
+    let mut client = None;
+    for attr in input.attrs.iter().filter(|attr| attr.path().is_ident("host_ctx")) {
+        attr.parse_nested_meta(|meta| {
+            if !meta.path.is_ident("client") {
+                return Err(meta.error("unknown `host_ctx` key; expected `client = <Trait>`"));
+            }
+            if client.is_some() {
+                return Err(meta.error("`client` is given more than once"));
+            }
+            meta.input.parse::<Token![=]>()?;
+            client = Some(meta.input.parse::<Path>()?);
+            Ok(())
+        })?;
+    }
+    client.ok_or_else(|| {
+        Error::new_spanned(
+            &input.ident,
+            "`#[derive(HostCtx)]` needs `#[host_ctx(client = <Trait>)]` naming the client trait",
+        )
     })
 }

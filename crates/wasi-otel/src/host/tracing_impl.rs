@@ -3,6 +3,7 @@
 use std::sync::Once;
 
 use anyhow::Result;
+use omnia_core::HostView;
 use opentelemetry::trace::{SpanId, TraceContextExt, TraceFlags};
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
 use opentelemetry_proto::tonic::common::v1::InstrumentationScope;
@@ -15,7 +16,7 @@ use wasmtime::component::Accessor;
 
 use crate::host::generated::omnia::otel::tracing::{self as wasi, HostWithStore};
 use crate::host::types_impl::{datetime_nanos, decode_id};
-use crate::{WasiOtel, WasiOtelView};
+use crate::{OtelClient, WasiOtel};
 
 pub fn resource_spans(
     spans: Vec<wasi::SpanData>, resource: &opentelemetry_sdk::Resource,
@@ -94,7 +95,7 @@ impl<T> HostWithStore<T> for WasiOtel {
     }
 }
 
-impl wasi::Host for WasiOtelView<'_> {}
+impl wasi::Host for HostView<'_, dyn OtelClient> {}
 
 impl From<wasi::SpanData> for Span {
     fn from(span: wasi::SpanData) -> Self {

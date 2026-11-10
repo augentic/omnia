@@ -11,7 +11,7 @@ mod session;
 mod workspace;
 
 mod generated {
-    #![allow(missing_docs, reason = "wasmtime bindgen output")]
+    #![expect(missing_docs, reason = "wasmtime bindgen output")]
 
     pub use self::omnia::model::completion::Error;
 
@@ -40,7 +40,7 @@ pub use omnia_backend::model::{
     ToolTurn, Transcript, Usage, WorkerGrant,
 };
 pub use omnia_core::FutureResult;
-use omnia_core::{HasMounts, Host, HostCtx, Server, StoreView};
+use omnia_core::{Backends, Host, HostCtx, Provides, StoreCtx};
 use wasmtime::component::Linker;
 
 use self::generated::omnia::model::completion;
@@ -49,20 +49,16 @@ pub use self::generated::omnia::model::completion::{Error as WitError, Grants, W
 /// Result type for model operations.
 pub type Result<T> = std::result::Result<T, WitError>;
 
-/// Host-side service for `wasi:model`.
+/// Host-side service for `omnia:model`.
 #[derive(Debug, HostCtx)]
+#[host_ctx(client = ModelClient)]
 pub struct WasiModel;
 
-impl<T> Host<T> for WasiModel
-where
-    T: StoreView<Self> + HasMounts + 'static,
-{
-    fn add_to_linker(linker: &mut Linker<T>) -> anyhow::Result<()> {
-        Ok(completion::add_to_linker::<_, Self>(linker, T::view)?)
+impl<B: Backends + Provides<Self>> Host<B> for WasiModel {
+    fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
+        Ok(completion::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?)
     }
 }
-
-impl<B> Server<B> for WasiModel {}
 
 // An untyped host failure is a `backend` error at the boundary.
 omnia_core::host_error!(WitError, Backend);

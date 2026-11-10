@@ -3,7 +3,7 @@ use std::sync::Arc;
 use anyhow::{Result, anyhow};
 use futures::FutureExt as _;
 use futures::future::BoxFuture;
-use omnia_core::{PatternRoutes, Runtime, StoreCtx, StoreView, TriggerRouter};
+use omnia_core::{Backends, PatternRoutes, Provides, Runtime, TriggerRouter};
 use tokio::sync::Semaphore;
 use tracing::{Instrument, info_span, instrument};
 
@@ -14,8 +14,7 @@ use crate::host::{Endpoint, HandleError, Handler, Message, WasiMessaging};
 #[instrument("messaging-server", skip(state))]
 pub async fn run<B>(state: &Runtime<B>) -> Result<()>
 where
-    B: Clone + Send + Sync + 'static,
-    StoreCtx<B>: StoreView<WasiMessaging>,
+    B: Backends + Provides<WasiMessaging>,
 {
     tracing::info!("starting messaging server for: {}", state.name());
 
@@ -41,8 +40,7 @@ where
 #[derive(Clone)]
 pub struct MessagingHandler<B>
 where
-    B: Clone + Send + Sync + 'static,
-    StoreCtx<B>: StoreView<WasiMessaging>,
+    B: Backends + Provides<WasiMessaging>,
 {
     state: Runtime<B>,
     component: Arc<str>,
@@ -54,8 +52,7 @@ where
 
 impl<B> MessagingHandler<B>
 where
-    B: Clone + Send + Sync + 'static,
-    StoreCtx<B>: StoreView<WasiMessaging>,
+    B: Backends + Provides<WasiMessaging>,
 {
     /// Build the handler over `runtime`'s registry; `None` when no guest
     /// exports the messaging handler (the trigger is inert).
@@ -136,7 +133,7 @@ where
 
         let mut store_data = self.state.store();
         let msg_res =
-            store_data.view().table.push(message).map_err(|error| {
+            store_data.view::<WasiMessaging>().table.push(message).map_err(|error| {
                 HandleError::Unavailable(format!("pushing the message: {error}"))
             })?;
         let mut store = self.state.build_store(store_data);
@@ -166,14 +163,13 @@ where
     }
 
     async fn client(&self) -> Result<Arc<dyn Endpoint>> {
-        self.state.store().view().client.endpoint().await
+        self.state.store().view::<WasiMessaging>().client.endpoint().await
     }
 }
 
 impl<B> Handler for MessagingHandler<B>
 where
-    B: Clone + Send + Sync + 'static,
-    StoreCtx<B>: StoreView<WasiMessaging>,
+    B: Backends + Provides<WasiMessaging>,
 {
     fn handle(&self, message: Message) -> BoxFuture<'static, Result<(), HandleError>> {
         let handler = self.clone();
