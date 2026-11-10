@@ -35,7 +35,7 @@ use std::fmt::Debug;
 pub use default_impl::KeyValueDefault;
 pub use omnia_backend::keyvalue::{Bucket, KeyValueClient};
 pub use omnia_core::FutureResult;
-use omnia_core::{Backends, Host, HostCtx, Provides, StoreCtx};
+use omnia_core::{Host, HostCtx, Provides, StoreCtx};
 use wasmtime::component::Linker;
 
 use self::generated::omnia::keyvalue::ttl;
@@ -51,7 +51,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[host_ctx(client = KeyValueClient)]
 pub struct WasiKeyValue;
 
-impl<B: Backends + Provides<Self>> Host<B> for WasiKeyValue {
+impl<B: Provides<Self>> Host<B> for WasiKeyValue {
     fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
         store::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
         atomics::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;

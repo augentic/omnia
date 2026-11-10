@@ -34,7 +34,7 @@ pub use omnia_backend::docstore::{
     SortField,
 };
 pub use omnia_core::FutureResult;
-use omnia_core::{Backends, Host, HostCtx, Provides, StoreCtx};
+use omnia_core::{Host, HostCtx, Provides, StoreCtx};
 use wasmtime::component::Linker;
 
 pub use self::generated::omnia::docstore::types::Error;
@@ -49,7 +49,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[host_ctx(client = DocStoreClient)]
 pub struct WasiDocStore;
 
-impl<B: Backends + Provides<Self>> Host<B> for WasiDocStore {
+impl<B: Provides<Self>> Host<B> for WasiDocStore {
     fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
         types::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
         Ok(store::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?)

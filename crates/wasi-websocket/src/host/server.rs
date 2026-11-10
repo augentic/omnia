@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
 use futures::StreamExt;
-use omnia_core::{Backends, PatternRoutes, Provides, Runtime, TriggerRouter};
+use omnia_core::{PatternRoutes, Provides, Runtime, TriggerRouter};
 use tracing::{Instrument, info_span, instrument};
 
 use crate::host::WasiWebSocket;
@@ -12,7 +12,7 @@ use crate::host::resource::{Event, Events};
 #[instrument("websocket-server", skip(state))]
 pub async fn run<B>(state: &Runtime<B>) -> Result<()>
 where
-    B: Backends + Provides<WasiWebSocket>,
+    B: Provides<WasiWebSocket>,
 {
     tracing::info!("starting websocket server for: {}", state.name());
 
@@ -51,7 +51,7 @@ where
 #[derive(Clone)]
 pub struct WebSocketHandler<B>
 where
-    B: Backends + Provides<WasiWebSocket>,
+    B: Provides<WasiWebSocket>,
 {
     state: Runtime<B>,
     component: String,
@@ -60,7 +60,7 @@ where
 
 impl<B> WebSocketHandler<B>
 where
-    B: Backends + Provides<WasiWebSocket>,
+    B: Provides<WasiWebSocket>,
 {
     /// Build the handler over `runtime`'s registry; `None` when no guest
     /// exports the websocket handler (the trigger is inert).

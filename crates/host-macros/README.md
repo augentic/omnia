@@ -135,7 +135,7 @@ All five are re-exported from the generated module as `pub use runtime::{Hooks, 
 `runtime!` generates the bundle's half of the seam. A host crate generates its half with `#[derive(HostCtx)]` on its host type, naming the client trait the host is over in `#[host_ctx(client = ..)]`; `omnia_core::HostCtx` names both the trait and the derive, so one import brings both:
 
 ```rust,ignore
-use omnia_core::{Backends, Host, HostCtx, Provides, StoreCtx};
+use omnia_core::{Host, HostCtx, Provides, StoreCtx};
 use wasmtime::component::Linker;
 
 pub use omnia_backend::keyvalue::KeyValueClient;
@@ -145,7 +145,7 @@ pub use omnia_backend::keyvalue::KeyValueClient;
 #[host_ctx(client = KeyValueClient)]
 pub struct WasiKeyValue;
 
-impl<B: Backends + Provides<Self>> Host<B> for WasiKeyValue {
+impl<B: Provides<Self>> Host<B> for WasiKeyValue {
     fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
         Ok(store::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?)
     }

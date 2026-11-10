@@ -40,7 +40,7 @@ pub use omnia_backend::messaging::{
     RequestOptions, Subscriptions, dispatch,
 };
 pub use omnia_core::FutureResult;
-use omnia_core::{Backends, Host, HostCtx, Provides, Runtime, StoreCtx};
+use omnia_core::{Host, HostCtx, Provides, Runtime, StoreCtx};
 use wasmtime::component::Linker;
 
 pub use self::generated::MessagingRequestReply;
@@ -57,7 +57,7 @@ pub type Result<T> = std::result::Result<T, WitError>;
 #[host_ctx(client = MessagingClient)]
 pub struct WasiMessaging;
 
-impl<B: Backends + Provides<Self>> Host<B> for WasiMessaging {
+impl<B: Provides<Self>> Host<B> for WasiMessaging {
     fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
         producer::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
         request_reply::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;

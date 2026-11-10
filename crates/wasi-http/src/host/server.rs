@@ -39,7 +39,7 @@ pub type OutgoingBody = UnsyncBoxBody<Bytes, anyhow::Error>;
 #[instrument("http-server", skip(state))]
 pub async fn run<B>(state: &Runtime<B>) -> Result<()>
 where
-    B: Backends + Provides<WasiHttp>,
+    B: Provides<WasiHttp>,
 {
     let Some(handler) = HttpHandler::new(state)? else {
         tracing::info!("no guest exports the http handler; http trigger inert");
@@ -135,7 +135,7 @@ where
 #[derive(Clone)]
 pub struct HttpHandler<B>
 where
-    B: Backends + Provides<WasiHttp>,
+    B: Provides<WasiHttp>,
 {
     state: Runtime<B>,
     component: Arc<str>,
@@ -144,7 +144,7 @@ where
 
 impl<B> HttpHandler<B>
 where
-    B: Backends + Provides<WasiHttp>,
+    B: Provides<WasiHttp>,
 {
     /// Build the handler over `runtime`'s registry; `None` when no guest
     /// exports the http handler (the trigger is inert).

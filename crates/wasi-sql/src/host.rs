@@ -34,7 +34,7 @@ use std::fmt::Debug;
 pub use default_impl::{ConnectOptions, SqlDefault};
 pub use omnia_backend::sql::{Connection, DataType, Field, Row, SqlClient};
 pub use omnia_core::FutureResult;
-use omnia_core::{Backends, Host, HostCtx, Provides, StoreCtx};
+use omnia_core::{Host, HostCtx, Provides, StoreCtx};
 use wasmtime::component::Linker;
 
 use self::generated::wasi::sql::{readwrite, types};
@@ -61,7 +61,7 @@ impl Error {
 #[host_ctx(client = SqlClient)]
 pub struct WasiSql;
 
-impl<B: Backends + Provides<Self>> Host<B> for WasiSql {
+impl<B: Provides<Self>> Host<B> for WasiSql {
     fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
         readwrite::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
         Ok(types::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?)

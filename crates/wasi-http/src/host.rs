@@ -10,7 +10,7 @@ use std::fmt::Debug;
 
 use anyhow::Result;
 pub use default_impl::{ConnectOptions, HttpDefault};
-use omnia_core::{Backends, Host, HostCtx, Provides, Runtime, StoreCtx};
+use omnia_core::{Host, HostCtx, Provides, Runtime, StoreCtx};
 pub use server::{HttpHandler, OutgoingBody};
 use wasmtime::component::{HasData, Linker, ResourceTable};
 use wasmtime_wasi_http::p3::bindings::http::{client, types};
@@ -40,7 +40,7 @@ impl HostCtx for WasiHttp {
     }
 }
 
-impl<B: Backends + Provides<Self>> Host<B> for WasiHttp {
+impl<B: Provides<Self>> Host<B> for WasiHttp {
     fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> Result<()> {
         client::add_to_linker::<_, wasmtime_wasi_http::WasiHttp>(linker, StoreCtx::view::<Self>)?;
         types::add_to_linker::<_, wasmtime_wasi_http::WasiHttp>(linker, StoreCtx::view::<Self>)?;

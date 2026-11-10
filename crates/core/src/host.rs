@@ -76,13 +76,15 @@ pub trait Host<B: Backends>: Send + Sync {
 ///
 /// struct Backends<C>(C);
 ///
-/// impl<C: FooClient + Send> Provides<WasiFoo> for Backends<C> {
+/// impl<C: FooClient + Send + Sync + 'static> Provides<WasiFoo> for Backends<C> {
 ///     fn borrow(&mut self) -> &mut dyn FooClient {
 ///         &mut self.0
 ///     }
 /// }
 ///
-/// fn view<C: FooClient + Send>(store: &mut StoreCtx<Backends<C>>) -> HostView<'_, dyn FooClient> {
+/// fn view<C: FooClient + Send + Sync + 'static>(
+///     store: &mut StoreCtx<Backends<C>>,
+/// ) -> HostView<'_, dyn FooClient> {
 ///     store.view::<WasiFoo>()
 /// }
 /// ```
@@ -95,12 +97,12 @@ pub trait HostCtx: HasData {
     fn view<'a>(borrow: Self::Borrow<'a>, table: &'a mut ResourceTable) -> Self::Data<'a>;
 }
 
-/// The one bundle-accessor trait: a backend bundle that yields host `H`'s
+/// The one bundle-accessor trait: a [`Backends`] bundle that yields host `H`'s
 /// borrow.
 ///
 /// `runtime!` deployments generate one impl per `hosts:` row; hand-built
 /// bundles implement it directly.
-pub trait Provides<H: HostCtx>: Send {
+pub trait Provides<H: HostCtx>: Backends {
     /// Borrow what host `H` needs from the bundle.
     fn borrow(&mut self) -> H::Borrow<'_>;
 }

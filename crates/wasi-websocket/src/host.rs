@@ -38,7 +38,7 @@ use std::fmt::Debug;
 pub use default_impl::{ConnectOptions, WebSocketDefault};
 pub use omnia_backend::websocket::{Endpoint, Event, Events, WebSocketClient};
 pub use omnia_core::FutureResult;
-use omnia_core::{Backends, Host, HostCtx, Provides, Runtime, StoreCtx};
+use omnia_core::{Host, HostCtx, Provides, Runtime, StoreCtx};
 use wasmtime::component::Linker;
 
 pub use self::generated::Duplex;
@@ -55,7 +55,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[host_ctx(client = WebSocketClient)]
 pub struct WasiWebSocket;
 
-impl<B: Backends + Provides<Self>> Host<B> for WasiWebSocket {
+impl<B: Provides<Self>> Host<B> for WasiWebSocket {
     fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
         client::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
         Ok(generated_types::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?)

@@ -24,7 +24,7 @@ use std::fmt::Debug;
 pub use default_impl::ConfigDefault;
 pub use omnia_backend::config::ConfigClient;
 pub use omnia_core::FutureResult;
-use omnia_core::{Backends, Host, HostCtx, HostView, Provides, StoreCtx};
+use omnia_core::{Host, HostCtx, HostView, Provides, StoreCtx};
 use wasmtime::component::Linker;
 
 use self::generated::wasi::config::store::{self, Error, Host as StoreHost};
@@ -37,7 +37,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[host_ctx(client = ConfigClient)]
 pub struct WasiConfig;
 
-impl<B: Backends + Provides<Self>> Host<B> for WasiConfig {
+impl<B: Provides<Self>> Host<B> for WasiConfig {
     fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
         Ok(store::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?)
     }

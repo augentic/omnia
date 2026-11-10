@@ -37,7 +37,7 @@ pub use omnia_backend::vcs::{
     Change, ChangeKind, CloneOptions, Entry, Error, Merged, Place, Rule, Strategy, VcsClient,
 };
 pub use omnia_core::FutureResult;
-use omnia_core::{Backends, Host, HostCtx, HostView, Provides, StoreCtx};
+use omnia_core::{Host, HostCtx, HostView, Provides, StoreCtx};
 use wasmtime::component::{Access, Accessor, Linker};
 
 pub use self::generated::omnia::vcs::types::Error as WitError;
@@ -53,7 +53,7 @@ pub type Result<T> = std::result::Result<T, WitError>;
 #[host_ctx(client = VcsClient)]
 pub struct WasiVcs;
 
-impl<B: Backends + Provides<Self>> Host<B> for WasiVcs {
+impl<B: Provides<Self>> Host<B> for WasiVcs {
     fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
         types::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
         store::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;

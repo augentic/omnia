@@ -278,7 +278,7 @@ impl Deployment {
     pub async fn run_host<H, B>(&self, backends: B) -> Result<ExitStatus>
     where
         H: Host<B>,
-        B: Backends + Provides<WasiOtel>,
+        B: Provides<WasiOtel>,
     {
         self.run(backends, |deployment| {
             deployment.host::<H>()?;
@@ -350,7 +350,7 @@ impl Captured {
     pub async fn run_host<H, B>(&self, backends: B) -> Result<Run>
     where
         H: Host<B>,
-        B: Backends + Provides<WasiOtel>,
+        B: Provides<WasiOtel>,
     {
         let status = self.deployment.run_host::<H, B>(backends).await?;
         Ok(self.collect(status))

@@ -52,7 +52,7 @@ pub fn runtime(input: TokenStream) -> TokenStream {
 ///
 /// ```rust,ignore
 /// pub use omnia_backend::keyvalue::KeyValueClient;
-/// use omnia_core::{Backends, Host, HostCtx, Provides, StoreCtx};
+/// use omnia_core::{Host, HostCtx, Provides, StoreCtx};
 /// use wasmtime::component::Linker;
 ///
 /// /// Host-side service for `wasi:keyvalue`.
@@ -60,7 +60,7 @@ pub fn runtime(input: TokenStream) -> TokenStream {
 /// #[host_ctx(client = KeyValueClient)]
 /// pub struct WasiKeyValue;
 ///
-/// impl<B: Backends + Provides<Self>> Host<B> for WasiKeyValue {
+/// impl<B: Provides<Self>> Host<B> for WasiKeyValue {
 ///     fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
 ///         Ok(store::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?)
 ///     }

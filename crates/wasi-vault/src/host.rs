@@ -30,7 +30,7 @@ use std::fmt::Debug;
 pub use default_impl::VaultDefault;
 pub use omnia_backend::vault::{Locker, VaultClient};
 pub use omnia_core::FutureResult;
-use omnia_core::{Backends, Host, HostCtx, Provides, StoreCtx};
+use omnia_core::{Host, HostCtx, Provides, StoreCtx};
 use wasmtime::component::Linker;
 
 use self::generated::omnia::vault::vault;
@@ -45,7 +45,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[host_ctx(client = VaultClient)]
 pub struct WasiVault;
 
-impl<B: Backends + Provides<Self>> Host<B> for WasiVault {
+impl<B: Provides<Self>> Host<B> for WasiVault {
     fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
         Ok(vault::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?)
     }

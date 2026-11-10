@@ -3,7 +3,7 @@ use std::sync::Arc;
 use anyhow::{Result, anyhow};
 use futures::FutureExt as _;
 use futures::future::BoxFuture;
-use omnia_core::{Backends, PatternRoutes, Provides, Runtime, TriggerRouter};
+use omnia_core::{PatternRoutes, Provides, Runtime, TriggerRouter};
 use tokio::sync::Semaphore;
 use tracing::{Instrument, info_span, instrument};
 
@@ -14,7 +14,7 @@ use crate::host::{Endpoint, HandleError, Handler, Message, WasiMessaging};
 #[instrument("messaging-server", skip(state))]
 pub async fn run<B>(state: &Runtime<B>) -> Result<()>
 where
-    B: Backends + Provides<WasiMessaging>,
+    B: Provides<WasiMessaging>,
 {
     tracing::info!("starting messaging server for: {}", state.name());
 
@@ -40,7 +40,7 @@ where
 #[derive(Clone)]
 pub struct MessagingHandler<B>
 where
-    B: Backends + Provides<WasiMessaging>,
+    B: Provides<WasiMessaging>,
 {
     state: Runtime<B>,
     component: Arc<str>,
@@ -52,7 +52,7 @@ where
 
 impl<B> MessagingHandler<B>
 where
-    B: Backends + Provides<WasiMessaging>,
+    B: Provides<WasiMessaging>,
 {
     /// Build the handler over `runtime`'s registry; `None` when no guest
     /// exports the messaging handler (the trigger is inert).
@@ -169,7 +169,7 @@ where
 
 impl<B> Handler for MessagingHandler<B>
 where
-    B: Backends + Provides<WasiMessaging>,
+    B: Provides<WasiMessaging>,
 {
     fn handle(&self, message: Message) -> BoxFuture<'static, Result<(), HandleError>> {
         let handler = self.clone();

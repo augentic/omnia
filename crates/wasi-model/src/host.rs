@@ -40,7 +40,7 @@ pub use omnia_backend::model::{
     ToolTurn, Transcript, Usage, WorkerGrant,
 };
 pub use omnia_core::FutureResult;
-use omnia_core::{Backends, Host, HostCtx, Provides, StoreCtx};
+use omnia_core::{Host, HostCtx, Provides, StoreCtx};
 use wasmtime::component::Linker;
 
 use self::generated::omnia::model::completion;
@@ -54,7 +54,7 @@ pub type Result<T> = std::result::Result<T, WitError>;
 #[host_ctx(client = ModelClient)]
 pub struct WasiModel;
 
-impl<B: Backends + Provides<Self>> Host<B> for WasiModel {
+impl<B: Provides<Self>> Host<B> for WasiModel {
     fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
         Ok(completion::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?)
     }
