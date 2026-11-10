@@ -713,7 +713,7 @@ end = "2027-10-03"
 
 [[trusted.tower-layer]]
 criteria = "safe-to-deploy"
-user-id = 10
+user-id = 10 # Carl Lerche (carllerche)
 start = "2019-04-27"
 end = "2027-10-03"
 
@@ -737,7 +737,7 @@ end = "2027-10-03"
 
 [[trusted.valuable]]
 criteria = "safe-to-deploy"
-user-id = 10
+user-id = 10 # Carl Lerche (carllerche)
 start = "2022-01-03"
 end = "2027-10-03"
 

@@ -84,7 +84,7 @@ sha2 = "0.11.1"
 syn = { version = "3.0.9", features = ["full"] }
 tempfile = "3.27.0"
 thiserror = "2.0.21"
-tokio = { version = "1.54.0", default-features = false }
+tokio = { version = "1.54.1", default-features = false }
 tokio-stream = { version = "0.1.19", features = ["sync"] }
 tokio-tungstenite = "0.30.0"
 tokio-util = { version = "0.7.20", features = ["codec"] }
@@ -95,10 +95,10 @@ tracing-opentelemetry = { version = "0.34.0", default-features = false }
 tracing-subscriber = { version = "0.3.23", default-features = false, features = ["env-filter", "fmt"] }
 wasip3 = { version = "0.9.0", features = ["http-compat"] }
 wasm-pkg-client = "0.16.1"
-wasmtime = { version = "50.0.0", default-features = false, features = ["anyhow", "component-model-bytes", "parallel-compilation"] }
-wasmtime-wasi = { version = "50.0.0", default-features = false, features = ["p2", "p3"] }
-wasmtime-wasi-config = "50.0.0"
-wasmtime-wasi-http = { version = "50.0.0", default-features = false, features = ["p3"] }
+wasmtime = { version = "50.0.1", default-features = false, features = ["anyhow", "component-model-bytes", "parallel-compilation"] }
+wasmtime-wasi = { version = "50.0.1", default-features = false, features = ["p2", "p3"] }
+wasmtime-wasi-config = "50.0.1"
+wasmtime-wasi-http = { version = "50.0.1", default-features = false, features = ["p3"] }
 # pinned to the wit-bindgen `wasip3` depends on: a guest links both, and a
 # newer wit-bindgen's `spawn_local` panics over the older task context
 wit-bindgen = { version = "0.62.0", features = ["async-spawn"] }
