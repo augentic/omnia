@@ -10,8 +10,7 @@ use anyhow::{Context as _, Result, bail};
 use axum::Router;
 use axum::routing::get;
 use omnia::wasmtime::component::Val;
-use omnia::{Digest, ExitStatus, GuestEntry, GuestId, Runtime};
-use omnia_backend::keyvalue::BUCKET;
+use omnia::{DeploymentBuilder, Digest, ExitStatus, GuestEntry, GuestId, Runtime};
 use omnia_test::host::{Backends, Deployment, ScriptedModel, ScriptedVcs, scratch};
 use omnia_test::{Exchange, SeenFormat};
 use omnia_wasi_blobstore::{BlobStoreClient as _, WasiBlobStore};
@@ -19,7 +18,9 @@ use omnia_wasi_config::WasiConfig;
 use omnia_wasi_docstore::WasiDocStore;
 use omnia_wasi_http::WasiHttp;
 use omnia_wasi_identity::WasiIdentity;
-use omnia_wasi_keyvalue::{Bucket, FutureResult, KeyValueClient, KeyValueDefault, WasiKeyValue};
+use omnia_wasi_keyvalue::{
+    BUCKET, Bucket, FutureResult, KeyValueClient, KeyValueDefault, WasiKeyValue,
+};
 use omnia_wasi_messaging::WasiMessaging;
 use omnia_wasi_model::WasiModel;
 use omnia_wasi_otel::WasiOtel;
@@ -101,6 +102,23 @@ mod same_named {
     });
 }
 
+// `production` in the list form: each backend names the hosts it serves, and
+// the keyvalue entry carries its connect options and narrows its hosts.
+mod production_list {
+    use omnia_wasi_keyvalue::{KeyValueDefault, WasiKeyValue};
+    use omnia_wasi_model::ModelDefault;
+    use omnia_wasi_otel::OtelDefault;
+
+    omnia::runtime!({
+        mode: command,
+        hosts: [
+            ModelDefault,
+            KeyValueDefault(omnia::NoOptions) for [WasiKeyValue],
+            OtelDefault,
+        ],
+    });
+}
+
 #[tokio::test]
 async fn runtime_overlay() {
     // The generated `main` and `run` stay untouched; the overlay reaches the
@@ -159,6 +177,53 @@ async fn same_named_backends() {
         .await
         .expect("deployment runs");
     assert_eq!(status, ExitStatus::SUCCESS);
+}
+
+#[tokio::test]
+async fn list_overlay() {
+    let _ = production_list::main;
+    let backends = Backends::defaults().await.model(ScriptedModel::answering(["second"]));
+    let status = Deployment::from(production_list::manifest())
+        .guest("echo", test_programs::MODEL_ECHO_TEXT)
+        .run_with::<production_list::Hooks, _>(backends.clone())
+        .await
+        .expect("deployment runs");
+    assert_eq!(status, ExitStatus::SUCCESS);
+
+    // the list's wiring linked `omnia:model` over the bundle handed in
+    assert_eq!(backends.model.seen().len(), 1);
+    backends.model.assert_exhausted();
+}
+
+// The generated `run` owns its tokio runtime, connects the list's backends,
+// and fills their slots; the guest's own assertions are the read-back.
+#[test]
+fn list_connected() {
+    let manifest = Deployment::new()
+        .guest("guest", test_programs::KEYVALUE_TTL_EXPIRES)
+        .manifest()
+        .expect("manifest");
+
+    let status =
+        production_list::run(DeploymentBuilder::new().manifest(manifest)).expect("deployment runs");
+
+    assert_eq!(status, ExitStatus::SUCCESS);
+}
+
+// Two list entries serving one host reach `Deployment::hosts` as two groups.
+#[tokio::test]
+async fn linked_twice() {
+    let error = Deployment::new()
+        .guest("guest", test_programs::KEYVALUE_TTL_EXPIRES)
+        .run(Backends::defaults().await, |deployment| {
+            deployment.hosts::<(WasiKeyValue, WasiOtel)>()?;
+            deployment.hosts::<(WasiKeyValue,)>()?;
+            Ok(())
+        })
+        .await
+        .expect_err("should refuse the second group");
+
+    assert!(format!("{error:#}").contains("two backends serve `wasi:keyvalue`"), "{error:#}");
 }
 
 #[tokio::test]

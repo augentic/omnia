@@ -6,10 +6,12 @@ use anyhow::{Context, Result};
 pub use config::ConnectOptions;
 use futures::FutureExt as _;
 use omnia_backend::sql::{Connection, DataType, Field, Row, SqlClient};
-use omnia_core::{Connect, FromEnv, FutureResult};
+use omnia_core::{Backend, Connect, FromEnv, FutureResult};
 use rusqlite::types::ValueRef;
 use rusqlite::{Connection as SqliteConnection, params_from_iter};
 use tracing::instrument;
+
+use crate::host::WasiSql;
 
 /// Default `SQLite`-backed implementation of [`SqlClient`].
 #[derive(Debug, Clone)]
@@ -30,6 +32,10 @@ impl Connect for SqlDefault {
 
         Ok(Self { conn })
     }
+}
+
+impl Backend for SqlDefault {
+    type Hosts = (WasiSql,);
 }
 
 impl SqlClient for SqlDefault {

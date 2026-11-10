@@ -103,7 +103,7 @@ Each symbol prefix in the workspace names one layer:
 - **`Wasi*` (`WasiKeyValue`, `WasiBlobStore`, `WasiSql`, ...)** — `wasmtime` linker hosts in `omnia-wasi-*` and `omnia-plugin`. Never referenced by guest handler code.
 - **`HostView<'a, dyn *Client>`** — the borrowed `(client, table)` store view of a `Wasi*` host, over the client trait its `#[host_ctx(client = ..)]` names.
 - **`WasiProvider`** — the single zero-sized guest provider in `omnia-sdk` implementing every capability trait on `wasm32`.
-- **`*Client` (`KeyValueClient`, `SqlClient`, ...)** — engine-free service contracts in `omnia-backend`, one per host that dispatches to a backend.
+- **`*Client` (`KeyValueClient`, `SqlClient`, ...)** — engine-free service contracts, one per host that dispatches to a backend. `KeyValueClient` lives in `omnia-wasi-keyvalue`, which builds without `wasmtime` when its `host` feature is off; the others live in `omnia-backend`.
 - **`*Default` (`KeyValueDefault`, `SqlDefault`, ...)** — in-memory or process default implementations in `omnia-wasi-*`.
-- **Wire constants (`omnia_backend::keyvalue::BUCKET`, `omnia_backend::vault::LOCKER`)** — defined once in `omnia-backend`, re-exported by `omnia-sdk`, and shared by `WasiProvider` and the test harness so keys and secrets land in the same bucket and locker.
+- **Wire constants (`omnia_wasi_keyvalue::BUCKET`, `omnia_backend::vault::LOCKER`)** — defined once beside their contract, re-exported by `omnia-sdk`, and shared by `WasiProvider` and the test harness so keys and secrets land in the same bucket and locker.
 - **SDK capability trait names (`StateStore`, `DocumentStore`, `TableStore`, `HttpRequest`, `Publish`, ...)** — kept distinct from domain nouns so handler UFCS never collides with `axum::extract::State`, `docstore::Document`, `sea_query::Table`, or the `http` crate.

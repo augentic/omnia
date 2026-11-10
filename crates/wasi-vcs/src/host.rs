@@ -53,6 +53,8 @@ pub type Result<T> = std::result::Result<T, WitError>;
 #[host_ctx(client = VcsClient)]
 pub struct WasiVcs;
 
+omnia_backend::capability!(WasiVcs, "omnia:vcs", VcsClient);
+
 impl<B: Provides<Self>> Host<B> for WasiVcs {
     fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
         types::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;

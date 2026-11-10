@@ -122,6 +122,8 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[host_ctx(client = BlobStoreClient)]
 pub struct WasiBlobStore;
 
+omnia_backend::capability!(WasiBlobStore, "wasi:blobstore", BlobStoreClient);
+
 impl<B: Provides<Self>> Host<B> for WasiBlobStore {
     fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
         blobstore::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;

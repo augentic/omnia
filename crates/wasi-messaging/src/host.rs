@@ -57,6 +57,8 @@ pub type Result<T> = std::result::Result<T, WitError>;
 #[host_ctx(client = MessagingClient)]
 pub struct WasiMessaging;
 
+omnia_backend::capability!(WasiMessaging, "wasi:messaging", MessagingClient);
+
 impl<B: Provides<Self>> Host<B> for WasiMessaging {
     fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
         producer::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;

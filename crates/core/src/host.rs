@@ -11,6 +11,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use wasmtime::component::{Accessor, HasData, Linker, Resource, ResourceTable, ResourceTableError};
 
+use crate::Capability;
 use crate::runtime::Runtime;
 use crate::store::StoreCtx;
 
@@ -33,6 +34,10 @@ impl<B: Clone + Send + Sync + 'static> Backends for B {}
 /// [`run`](Self::run) to loop on its transport until shutdown; a capability
 /// host (`WasiKeyValue`, `WasiBlobStore`, `WasiOtel`) keeps the no-op
 /// default, which resolves at once.
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` has no host side in this build",
+    note = "depend on the crate that defines `{Self}` with its `host` feature enabled"
+)]
 pub trait Host<B: Backends>: Send + Sync {
     /// Link the host's generated bindings into the deployment linker.
     ///
@@ -58,6 +63,7 @@ pub trait Host<B: Backends>: Send + Sync {
 /// A host over one client trait derives the impl with
 /// [`#[derive(HostCtx)]`](derive@crate::HostCtx), naming the trait in
 /// `#[host_ctx(client = ..)]`; its view is [`HostView`] over that trait object.
+/// The derive needs the host's [`capability!`](crate::capability) line beside it.
 /// Given a bundle `B: Provides<Self>`, [`StoreCtx::view`] assembles the view
 /// for every store. A host with another borrow shape, such as `WasiHttp`,
 /// implements it by hand.
@@ -67,12 +73,13 @@ pub trait Host<B: Backends>: Send + Sync {
 /// ```
 /// use omnia_core::{HostCtx, HostView, Provides, StoreCtx};
 ///
-/// pub trait FooClient {}
+/// pub trait FooClient: Send + Sync {}
 ///
 /// /// Host-side service for `omnia:foo`.
 /// #[derive(Debug, HostCtx)]
 /// #[host_ctx(client = FooClient)]
 /// pub struct WasiFoo;
+/// omnia_core::capability!(WasiFoo, "omnia:foo", FooClient);
 ///
 /// #[derive(Clone)]
 /// struct Backends<C: Clone>(C);
@@ -106,6 +113,15 @@ pub trait HostCtx: HasData {
 pub trait Provides<H: HostCtx>: Backends {
     /// Borrow what host `H` needs from the bundle.
     fn borrow(&mut self) -> H::Borrow<'_>;
+}
+
+/// A host whose entry in the backend bundle is its capability's slot.
+///
+/// [`Slots`](crate::Slots) provides every such host. A host that derives
+/// [`HostCtx`](derive@crate::HostCtx) gets the impl with it.
+pub trait SlotHost: HostCtx + Capability {
+    /// Borrows what the host needs from its slot.
+    fn lend(slot: &mut Self::Slot) -> Self::Borrow<'_>;
 }
 
 /// The linker-facing view of a host over one client: its backend and the

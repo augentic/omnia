@@ -30,6 +30,12 @@ pub fn expand(input: &DeriveInput) -> Result<TokenStream> {
                 ::omnia_core::HostView { client: borrow, table }
             }
         }
+
+        impl ::omnia_core::SlotHost for #host {
+            fn lend(slot: &mut ::std::sync::Arc<dyn #client>) -> &dyn #client {
+                &**slot
+            }
+        }
     })
 }
 

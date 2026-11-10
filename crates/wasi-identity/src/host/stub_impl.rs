@@ -5,7 +5,9 @@ use std::sync::Arc;
 use anyhow::Result;
 use futures::FutureExt as _;
 use omnia_backend::identity::{AccessToken, Identity, IdentityClient};
-use omnia_core::{Connect, FutureResult, NoOptions};
+use omnia_core::{Backend, Connect, FutureResult, NoOptions};
+
+use crate::host::WasiIdentity;
 
 /// Credential-free [`IdentityClient`] returning a fixed token.
 #[derive(Debug, Clone, Default)]
@@ -19,6 +21,10 @@ impl Connect for IdentityStub {
     ) -> impl std::future::Future<Output = Result<Self>> {
         std::future::ready(Ok(Self))
     }
+}
+
+impl Backend for IdentityStub {
+    type Hosts = (WasiIdentity,);
 }
 
 impl IdentityClient for IdentityStub {

@@ -1,8 +1,7 @@
 //! Reading state back through the bundle's host handles after a run.
 
-use omnia_backend::keyvalue::BUCKET;
 use omnia_wasi_blobstore::BlobStoreClient;
-use omnia_wasi_keyvalue::KeyValueClient;
+use omnia_wasi_keyvalue::{BUCKET, KeyValueClient};
 
 use super::Backends;
 

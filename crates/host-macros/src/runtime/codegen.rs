@@ -6,14 +6,14 @@ use proc_macro2::TokenStream;
 use quote::{ToTokens, format_ident, quote};
 use syn::{Expr, Ident, Path};
 
-use crate::runtime::parse::{Config, GuestSource, HostEntry, ManifestSpec, Mode};
+use crate::runtime::parse::{
+    BackendEntry, Config, GuestSource, HostEntry, Hosts, ManifestSpec, Mode,
+};
 
 // Token fragments needed to expand the runtime macro.
 pub struct Codegen {
     pub mode: Mode,
-    pub host_types: Vec<Path>,
-    pub backends_ty: TokenStream,
-    pub backends_def: TokenStream,
+    pub wiring: Wiring,
     pub main_options: TokenStream,
     /// The compiled-in `omnia::ManifestSource`; absent when the invocation
     /// declares neither `manifest:` nor inline manifest keys.
@@ -22,21 +22,109 @@ pub struct Codegen {
 
 impl From<&Config> for Codegen {
     fn from(config: &Config) -> Self {
-        let host_entries = &config.host_entries;
-        let host_types: Vec<Path> = host_entries.iter().map(|entry| entry.host.clone()).collect();
-
-        let (backends_ty, backends_def) = emit_backends(host_entries);
+        let wiring = match &config.hosts {
+            Hosts::List(entries) if !entries.is_empty() => Wiring::from_list(entries),
+            Hosts::List(_) => Wiring::from_map(&[]),
+            Hosts::Map(entries) => Wiring::from_map(entries),
+        };
 
         let manifest = emit_manifest(config);
         let main_options = emit_main_options(config, manifest.is_some());
 
         Self {
             mode: config.mode,
-            host_types,
-            backends_ty,
-            backends_def,
+            wiring,
             main_options,
             manifest,
+        }
+    }
+}
+
+// What the `hosts:` key expands to: the bundle and how `Hooks` wires it.
+pub struct Wiring {
+    /// The bundle's type, as `main` and `run` name it.
+    pub backends_ty: TokenStream,
+    /// The bundle's definition and its impls.
+    pub backends_def: TokenStream,
+    /// What `Hooks` asks of a bundle `B`, one where-predicate each.
+    pub bounds: Vec<TokenStream>,
+    /// Statements linking every host into `deployment`.
+    pub link: TokenStream,
+    /// An expression collecting every host's `run` future over `runtime`.
+    pub servers: TokenStream,
+}
+
+impl Wiring {
+    fn from_map(host_entries: &[HostEntry]) -> Self {
+        let hosts: Vec<&Path> = host_entries.iter().map(|entry| &entry.host).collect();
+        let (backends_ty, backends_def) = emit_backends(host_entries);
+
+        Self {
+            backends_ty,
+            backends_def,
+            bounds: hosts.iter().map(|host| quote! { B: omnia::Provides<#host> }).collect(),
+            link: quote! { #(deployment.host::<#hosts>()?;)* },
+            // capability hosts resolve at once through `Host::run`'s no-op default
+            servers: quote! {
+                vec![#(
+                    Box::pin(<#hosts as omnia::Host<B>>::run(runtime)),
+                )*]
+            },
+        }
+    }
+
+    fn from_list(entries: &[BackendEntry]) -> Self {
+        // positional, so two backends sharing a type name never share a name
+        let idents: Vec<Ident> =
+            (0..entries.len()).map(|slot| format_ident!("backend_{slot}")).collect();
+        let aliases: Vec<Ident> =
+            (0..entries.len()).map(|slot| format_ident!("Hosts{slot}")).collect();
+
+        // a bare entry serves every host its backend names
+        let tuples = entries.iter().map(|entry| {
+            let backend = &entry.backend;
+            entry.hosts.as_ref().map_or_else(
+                || quote! { <#backend as omnia::Backend>::Hosts },
+                |hosts| quote! { (#(#hosts,)*) },
+            )
+        });
+        let connects =
+            entries.iter().map(|entry| emit_connect(&entry.backend, entry.options.as_ref()));
+
+        Self {
+            backends_ty: quote! { Backends },
+            backends_def: quote! {
+                use omnia::Connect;
+
+                #(type #aliases = #tuples;)*
+
+                #[derive(Clone)]
+                struct Backends(omnia::Slots);
+
+                impl omnia::ConnectAll for Backends {
+                    async fn connect() -> Result<Self> {
+                        let (#(#idents,)*) = tokio::try_join!(
+                            #(#connects,)*
+                        )?;
+                        let mut slots = omnia::Slots::new();
+                        #(slots.add_as::<_, #aliases>(&#idents)?;)*
+                        Ok(Self(slots))
+                    }
+                }
+
+                impl<H: omnia::SlotHost> omnia::Provides<H> for Backends {
+                    fn borrow(&mut self) -> H::Borrow<'_> {
+                        <omnia::Slots as omnia::Provides<H>>::borrow(&mut self.0)
+                    }
+                }
+            },
+            bounds: aliases.iter().map(|alias| quote! { #alias: omnia::Link<B> }).collect(),
+            link: quote! { #(deployment.hosts::<#aliases>()?;)* },
+            servers: quote! {{
+                let mut servers = Vec::new();
+                #(<#aliases as omnia::Link<B>>::run(runtime, &mut servers);)*
+                servers
+            }},
         }
     }
 }
@@ -181,17 +269,8 @@ fn emit_backends(host_entries: &[HostEntry]) -> (TokenStream, TokenStream) {
         return (quote! { () }, quote! {});
     }
 
-    // `Host: Backend(options)` compiles the options in; a bare row connects
-    // from the environment.
-    let connects: Vec<TokenStream> = backends
-        .iter()
-        .map(|(ty, options)| {
-            options.map_or_else(
-                || quote! { <#ty as Connect>::connect() },
-                |options| quote! { <#ty as Connect>::connect_with(#options) },
-            )
-        })
-        .collect();
+    let connects: Vec<TokenStream> =
+        backends.iter().map(|(ty, options)| emit_connect(ty, *options)).collect();
 
     let host_impls: Vec<TokenStream> = host_entries
         .iter()
@@ -220,6 +299,15 @@ fn emit_backends(host_entries: &[HostEntry]) -> (TokenStream, TokenStream) {
 
             #(#host_impls)*
         },
+    )
+}
+
+// `Backend(options)` compiles the options in; a bare backend connects from
+// the environment
+fn emit_connect(backend: &Path, options: Option<&Expr>) -> TokenStream {
+    options.map_or_else(
+        || quote! { <#backend as Connect>::connect() },
+        |options| quote! { <#backend as Connect>::connect_with(#options) },
     )
 }
 

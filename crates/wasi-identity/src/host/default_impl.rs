@@ -15,8 +15,10 @@ use oauth2::{
     TokenResponse as _, TokenUrl,
 };
 use omnia_backend::identity::{AccessToken, Identity, IdentityClient};
-use omnia_core::{Connect, FromEnv, FutureResult};
+use omnia_core::{Backend, Connect, FromEnv, FutureResult};
 use tracing::instrument;
+
+use crate::host::WasiIdentity;
 
 type TokenResponse = StandardTokenResponse<EmptyExtraTokenFields, BasicTokenType>;
 pub use config::ConnectOptions;
@@ -35,6 +37,10 @@ impl Connect for IdentityDefault {
         let token_manager = TokenManager::new(options);
         Ok(Self { token_manager })
     }
+}
+
+impl Backend for IdentityDefault {
+    type Hosts = (WasiIdentity,);
 }
 
 impl IdentityClient for IdentityDefault {

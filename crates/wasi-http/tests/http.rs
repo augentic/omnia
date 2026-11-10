@@ -21,7 +21,7 @@ use http_body_util::{BodyExt as _, Full};
 use hyper::body::Incoming;
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
-use omnia::{ExitStatus, GuestEntry};
+use omnia::{ExitStatus, GuestEntry, Slots};
 use omnia_test::host::{Backends, Deployment};
 use omnia_wasi_config::WasiConfig;
 use omnia_wasi_http::{HttpHandler, WasiHttp};
@@ -198,14 +198,19 @@ test_programs::foreach_http!();
 
 const BODY: &[u8] = b"hello from origin";
 
+// The outgoing scenarios run on the slot bundle a list-form `runtime!`
+// builds, so the `wasi:http` slot serves a real guest.
 async fn run_guest(wasm: &str, backends: Backends) {
+    let mut slots = Slots::new();
+    slots.add(&backends.http).expect("http slot");
+    slots.add(&backends.config).expect("config slot");
+    slots.add(&backends.otel).expect("otel slot");
+
     // linked by hand: the guest reads the origin from `wasi:config`
     let status = Deployment::new()
         .guest("guest", wasm)
-        .run(backends, |deployment| {
-            deployment.host::<WasiHttp>()?;
-            deployment.host::<WasiConfig>()?;
-            deployment.host::<WasiOtel>()?;
+        .run(slots, |deployment| {
+            deployment.hosts::<(WasiHttp, WasiConfig, WasiOtel)>()?;
             Ok(())
         })
         .await

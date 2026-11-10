@@ -37,6 +37,8 @@ use self::generated::omnia::otel::{metrics, resource, tracing, types};
 #[host_ctx(client = OtelClient)]
 pub struct WasiOtel;
 
+omnia_backend::capability!(WasiOtel, "omnia:otel", OtelClient);
+
 impl<B: Provides<Self>> Host<B> for WasiOtel {
     fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
         tracing::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;

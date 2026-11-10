@@ -270,12 +270,12 @@ A backend implements the `<Name>Client` contract and never sees the view; a host
 
 **Adding a WASI interface**: create `crates/wasi-<name>/` with the standard layout, define the WIT world in `wit/`, and add the `<Name>Client` trait (plus any resource traits) to `omnia-backend`. Then, in the crate:
 
-- `src/host.rs` binds the world with `wasmtime::component::bindgen!`, declares `#[derive(Debug, HostCtx)] #[host_ctx(client = <Name>Client)] pub struct Wasi<Name>;`, implements `Host<B>` as `impl<B: Provides<Self>>` to call each generated `add_to_linker(linker, StoreCtx::view::<Self>)` (a trigger host also overrides `run`), and maps host failures with `host_error!`.
+- `src/host.rs` binds the world with `wasmtime::component::bindgen!`, declares `#[derive(Debug, HostCtx)] #[host_ctx(client = <Name>Client)] pub struct Wasi<Name>;` with `omnia_backend::capability!(Wasi<Name>, "<wit:package>", <Name>Client);` beside it, implements `Host<B>` as `impl<B: Provides<Self>>` to call each generated `add_to_linker(linker, StoreCtx::view::<Self>)` (a trigger host also overrides `run`), and maps host failures with `host_error!`.
 - `src/host/*_impl.rs` implement the generated `Host*` traits on `HostView<'_, dyn <Name>Client>`, reaching the backend through `.client` and WIT resources through `.table`.
-- `src/host/default_impl.rs` is `<Name>Default`, the in-tree backend; `src/guest.rs` holds the guest bindings.
+- `src/host/default_impl.rs` is `<Name>Default`, the in-tree backend, with `impl Backend for <Name>Default { type Hosts = (Wasi<Name>,); }` so a list-form `runtime!` can name it alone; `src/guest.rs` holds the guest bindings.
 - A `test-programs` program and its paired e2e row prove the interface from a real guest (see the [testing policy](guides/testing-policy.md)); unit tests cover only deterministic logic no guest boundary reaches.
 
-**Adding a backend**: create a crate (usually in the `omnia-backends` repo), implement `Connect` with a `FromEnv`-derived `ConnectOptions`, implement the `XxxClient` trait(s) for the interfaces it serves, and add `#[ignore]`-gated live tests. No runtime-core changes are required — backends plug in through the `runtime!` host map.
+**Adding a backend**: create a crate (usually in the `omnia-backends` repo), implement `Connect` with a `FromEnv`-derived `ConnectOptions`, implement the `XxxClient` trait(s) for the interfaces it serves, and add `#[ignore]`-gated live tests. No runtime-core changes are required — backends plug in through the `runtime!` host map, or through its host list once the backend names its hosts in `impl omnia::Backend`.
 
 ## Related Documentation
 

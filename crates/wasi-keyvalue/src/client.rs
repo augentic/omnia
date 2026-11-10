@@ -4,7 +4,8 @@ use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::FutureResult;
+use anyhow::{Context as _, Result, anyhow};
+use omnia_backend::FutureResult;
 
 /// Service contract for `wasi:keyvalue` backends.
 pub trait KeyValueClient: Debug + Send + Sync + 'static {
@@ -39,5 +40,24 @@ pub trait Bucket: Debug + Send + Sync + 'static {
     /// `Err(observed)` carrying the value currently stored.
     fn cas(
         &self, key: String, expected: Option<Vec<u8>>, value: Vec<u8>,
-    ) -> FutureResult<Result<(), Option<Vec<u8>>>>;
+    ) -> FutureResult<std::result::Result<(), Option<Vec<u8>>>>;
+}
+
+/// Add `delta` to an 8-byte big-endian signed integer (`None` starts at zero).
+///
+/// # Errors
+///
+/// Returns an error if `current` is `Some` and not 8 bytes, or if adding
+/// `delta` overflows `i64`.
+pub fn add_i64(current: Option<&[u8]>, delta: i64) -> Result<i64> {
+    let base = match current {
+        None => 0,
+        Some(value) => {
+            let bytes: [u8; 8] = value.try_into().map_err(|_len| {
+                anyhow!("value is {} bytes, not an 8-byte big-endian integer", value.len())
+            })?;
+            i64::from_be_bytes(bytes)
+        }
+    };
+    base.checked_add(delta).context("adding delta overflows i64")
 }

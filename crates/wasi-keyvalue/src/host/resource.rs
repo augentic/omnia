@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use omnia_backend::keyvalue::Bucket;
+use crate::Bucket;
 
 /// Proxy for a Key-Value bucket.
 pub type BucketProxy = omnia_core::Proxy<dyn Bucket>;

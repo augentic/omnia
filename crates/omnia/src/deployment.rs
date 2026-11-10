@@ -8,9 +8,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-#[cfg(feature = "loader")]
-use anyhow::bail;
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 pub use manifest::{
     GuestEntry, GuestRoutes, Manifest, Mount, PluginsConfig, RegistryConfig, Transport,
     TransportKind,
@@ -22,7 +20,7 @@ use omnia_core::RegistrySource;
 use omnia_core::wasmtime::component::Linker;
 use omnia_core::wasmtime::{Config, Engine};
 use omnia_core::{
-    Backends, GuestId, Host, LevelFilter, LinkSeam, LoadedGuest, MountRegistry, Registry,
+    Backends, GuestId, Host, LevelFilter, Link, LinkSeam, LoadedGuest, MountRegistry, Registry,
     RegistryParts, Routes, Runtime, RuntimeOptions, RuntimeParts, Source, SourceSpec, Stdio,
     StoreCtx, Telemetry, telemetry,
 };
@@ -272,6 +270,7 @@ impl DeploymentBuilder {
             name,
             engine,
             linker,
+            capabilities: Vec::new(),
             options,
             guests,
             declared,
@@ -303,6 +302,8 @@ pub struct Deployment<B: 'static> {
     name: String,
     engine: Engine,
     linker: Linker<StoreCtx<B>>,
+    // what `hosts` has linked, so a second backend for one is refused by name
+    capabilities: Vec<&'static str>,
     options: RuntimeOptions,
     guests: Vec<LoadedGuest>,
     // path and package guests, each loaded at first use
@@ -332,6 +333,23 @@ impl<B: Backends> Deployment<B> {
     /// Will fail if the host cannot be added to the Linker.
     pub fn host<H: Host<B>>(&mut self) -> Result<&mut Self> {
         H::add_to_linker(&mut self.linker)?;
+        Ok(self)
+    }
+
+    /// Link every host of the tuple `Hs`, the hosts one backend serves.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error naming the capability when an earlier call linked
+    /// one of the hosts, or the linking error from a host's bindings.
+    pub fn hosts<Hs: Link<B>>(&mut self) -> Result<&mut Self> {
+        for name in Hs::NAMES {
+            if self.capabilities.contains(name) {
+                bail!("two backends serve `{name}`");
+            }
+            self.capabilities.push(name);
+        }
+        Hs::link(&mut self.linker)?;
         Ok(self)
     }
 

@@ -37,6 +37,8 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[host_ctx(client = ConfigClient)]
 pub struct WasiConfig;
 
+omnia_backend::capability!(WasiConfig, "wasi:config", ConfigClient);
+
 impl<B: Provides<Self>> Host<B> for WasiConfig {
     fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
         Ok(store::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?)

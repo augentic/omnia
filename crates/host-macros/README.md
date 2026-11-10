@@ -41,6 +41,27 @@ Each key is a **host type** from a `omnia-wasi-*` crate (`WasiHttp`, `WasiKeyVal
 
 A backend may carry a connect-options expression — `WasiBlobStore: Filesystem(opts)` lowers to `Connect::connect_with(opts)` instead of the env-sourced `Connect::connect()`, compiling the configuration in. Rows sharing a backend type share one connection, so their options must be written identically on every row (or omitted on every row); empty parentheses are rejected.
 
+### List form
+
+`hosts:` also takes a list of backends, each naming the hosts it serves through `omnia::Backend::Hosts`:
+
+```rust,ignore
+use omnia_wasi_http::HttpDefault;
+use omnia_wasi_messaging::WasiMessaging;
+use omnia_wasi_otel::OtelDefault;
+
+omnia::runtime!({
+    hosts: [
+        HttpDefault,
+        OtelDefault,
+        Filesystem(FilesystemOptions::at(".omnia/storage")),
+        Nats for [WasiMessaging],
+    ]
+});
+```
+
+An entry is a backend, optionally `(options)`, optionally `for [Host, ..]` to serve only the hosts named. A backend is listed once. The [`runtime!` reference](https://github.com/augentic/omnia/blob/main/docs/reference/runtime-macro.md#list-form) has the full rules.
+
 ## Configuration Format
 
 ```rust,ignore
@@ -98,6 +119,8 @@ The macro generates a private `runtime` module containing:
 
 A `Clone` struct with one connected backend per declared `Host: Backend` wiring, plus its `omnia::ConnectAll` impl whose `connect()` connects every backend concurrently. Its shape makes it an `omnia::Backends`, the bound every runtime type puts on a bundle. A deployment that declares no backends uses the library's `()` bundle, so nothing is generated.
 
+The list form generates `struct Backends(omnia::Slots)` instead. Its `connect()` connects every entry concurrently, then fills the slots of each entry's hosts, and fails when two entries serve one host.
+
 ```rust,ignore
 #[derive(Clone)]
 struct Backends {
@@ -112,7 +135,9 @@ impl omnia::ConnectAll for Backends {
 
 ### Bundle accessor impls
 
-For each `hosts:` row, the macro emits one uniform `omnia::Provides<Host>` impl exposing the bundle's backend field; `omnia::StoreCtx::view` turns it into the host's linker-facing view. The impl is keyed by the host type itself — its `omnia::HostCtx` impl carries the borrow shape, so no names are derived from the host and third-party hosts wire the same way. That `HostCtx` impl is the seam's other half, which [`#[derive(HostCtx)]`](#the-host-side-derivehostctx) generates.
+The list form emits one impl, `impl<H: omnia::SlotHost> omnia::Provides<H> for Backends`, which lends each host its slot.
+
+For each `hosts:` row of the map form, the macro emits one uniform `omnia::Provides<Host>` impl exposing the bundle's backend field; `omnia::StoreCtx::view` turns it into the host's linker-facing view. The impl is keyed by the host type itself — its `omnia::HostCtx` impl carries the borrow shape, so no names are derived from the host and third-party hosts wire the same way. That `HostCtx` impl is the seam's other half, which [`#[derive(HostCtx)]`](#the-host-side-derivehostctx) generates.
 
 ### `main` entry point
 
@@ -138,12 +163,14 @@ All five are re-exported from the generated module as `pub use runtime::{Hooks, 
 use omnia_core::{Host, HostCtx, Provides, StoreCtx};
 use wasmtime::component::Linker;
 
-pub use omnia_backend::keyvalue::KeyValueClient;
+use crate::KeyValueClient;
 
 /// Host-side service for `wasi:keyvalue`.
 #[derive(Debug, HostCtx)]
 #[host_ctx(client = KeyValueClient)]
 pub struct WasiKeyValue;
+
+omnia_backend::capability!(WasiKeyValue, "wasi:keyvalue", KeyValueClient);
 
 impl<B: Provides<Self>> Host<B> for WasiKeyValue {
     fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
@@ -156,8 +183,9 @@ For a host over `<Service>Client` the derive emits:
 
 - **`wasmtime::component::HasData`** for the host, naming `omnia_core::HostView<'a, dyn <Service>Client>` as its `Data`: `pub struct HostView { pub client: &'a dyn <Service>Client, pub table: &'a mut ResourceTable }`, the borrowed view the bindgen `Host*` traits are implemented on. A host function reaches its backend through `client` and WIT resources through `table`; the view implements `omnia_core::HasTable`, so `omnia_core::get_cloned` looks a resource up on it.
 - **`omnia_core::HostCtx`** for the host — `Borrow<'a> = &'a dyn <Service>Client`, and `view` assembling the view from the borrow and the store's resource table.
+- **`omnia_core::SlotHost`** for the host — `lend` borrowing the client from the host's `Arc<dyn <Service>Client>` slot, so an `omnia::Slots` bundle serves it.
 
-The type must be non-generic, carry exactly one `#[host_ctx(client = ..)]`, and the crate must depend on `omnia-core`. A host with another borrow shape implements `HostCtx` by hand: `WasiHttp` borrows a `dyn HttpBorrow` and assembles the view type `wasmtime-wasi-http` owns.
+The type must be non-generic, carry exactly one `#[host_ctx(client = ..)]`, and the crate must depend on `omnia-core`. The `capability!` line beside it declares the slot `SlotHost` lends from, and the client trait must be `Send + Sync`. A crate that also builds without its host side puts the derive behind the feature, as `omnia-wasi-keyvalue` does: `#[cfg_attr(feature = "host", derive(omnia_core::HostCtx), host_ctx(client = KeyValueClient))]`. A host with another borrow shape implements `HostCtx` and `SlotHost` by hand: `WasiHttp` borrows a `dyn HttpBorrow` from an `HttpSlot` and assembles the view type `wasmtime-wasi-http` owns.
 
 How the two halves meet at run time, for the row `WasiKeyValue: Redis`:
 

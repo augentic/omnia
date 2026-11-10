@@ -22,13 +22,14 @@ pub use omnia_cli::{Cli, Command, Parser};
 pub use omnia_compile as compile;
 #[doc(inline)]
 pub use omnia_core::{
-    AcquireError, Backends, ChainCtx, ChainPolicy, CliRoutes, CompileOptions, Connect, Digest,
-    Dispatcher, ExitStatus, Extensions, FromEnv, FutureResult, Guest, GuestError, GuestId,
-    HasTable, Host, HostCtx, HostView, HttpRoutes, LevelFilter, LinkSeam, MountRegistry, NoLinks,
-    NoOptions, PatternRoutes, Policy, Provides, Proxy, Registry, RegistryParts, RegistrySource,
-    ResolvedPreopen, Routes, Runtime, RuntimeOptions, RuntimeParts, Source, SourceSpec, Stdio,
-    StoreBase, StoreConfig, StoreCtx, StoreFactory, Telemetry, TriggerRouter, Verified,
-    WeakRuntime, get_cloned, host_error, telemetry,
+    AcquireError, Backend, Backends, Capability, ChainCtx, ChainPolicy, CliRoutes, CompileOptions,
+    Connect, Digest, Dispatcher, ExitStatus, Extensions, Fill, FromEnv, FutureResult, Guest,
+    GuestError, GuestId, HasTable, Host, HostCtx, HostView, HttpRoutes, LevelFilter, Link,
+    LinkSeam, MountRegistry, NoLinks, NoOptions, PatternRoutes, Policy, Provides, Proxy, Registry,
+    RegistryParts, RegistrySource, ResolvedPreopen, Routes, Runtime, RuntimeOptions, RuntimeParts,
+    Serve, Serves, SlotHost, Slots, Source, SourceSpec, Stdio, StoreBase, StoreConfig, StoreCtx,
+    StoreFactory, Telemetry, TriggerRouter, Verified, WeakRuntime, capability, get_cloned,
+    host_error, telemetry,
 };
 #[doc(hidden)]
 pub use omnia_core::{tokio, wasmtime, wasmtime_wasi};

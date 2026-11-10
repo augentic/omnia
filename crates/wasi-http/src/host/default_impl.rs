@@ -13,7 +13,7 @@ use futures::{Future, TryStreamExt};
 use http::{Request, Response};
 use http_body::{Body, Frame, SizeHint};
 use http_body_util::BodyExt;
-use omnia_core::{Connect, FromEnv};
+use omnia_core::{Backend, Connect, FromEnv};
 use tokio::time::Sleep;
 use tracing::instrument;
 use wasmtime::component::ResourceTable;
@@ -21,7 +21,7 @@ use wasmtime_wasi_http::{
     Error as HttpError, RequestOptions, WasiBody, WasiHttpCtx, WasiHttpCtxView, WasiHttpHooks,
 };
 
-use super::{HttpBorrow, client_cert};
+use super::{HttpBorrow, WasiHttp, client_cert};
 
 // the boxed future shape `WasiHttpHooks` speaks, distinct from `omnia_core::FutureResult`
 type HttpFuture<T> = Box<dyn Future<Output = Result<T, HttpError>> + Send>;
@@ -47,6 +47,10 @@ impl HttpBorrow for HttpDefault {
             table,
         }
     }
+
+    fn fresh(&self) -> Box<dyn HttpBorrow> {
+        Box::new(self.clone())
+    }
 }
 
 impl Connect for HttpDefault {
@@ -62,6 +66,10 @@ impl Connect for HttpDefault {
             ctx: WasiHttpCtx::default(),
         })
     }
+}
+
+impl Backend for HttpDefault {
+    type Hosts = (WasiHttp,);
 }
 
 // The shared client and the ones built for a guest's own `connect-timeout`,

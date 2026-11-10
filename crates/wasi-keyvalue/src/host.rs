@@ -30,26 +30,18 @@ mod generated {
     });
 }
 
-use std::fmt::Debug;
-
 pub use default_impl::KeyValueDefault;
-pub use omnia_backend::keyvalue::{Bucket, KeyValueClient};
-pub use omnia_core::FutureResult;
-use omnia_core::{Host, HostCtx, Provides, StoreCtx};
+use omnia_core::{Host, Provides, StoreCtx};
 use wasmtime::component::Linker;
 
 use self::generated::omnia::keyvalue::ttl;
 use self::generated::wasi::keyvalue::store::Error;
 use self::generated::wasi::keyvalue::{atomics, batch, store};
 pub use self::resource::*;
+use crate::WasiKeyValue;
 
 /// Result type for key-value operations.
 pub type Result<T> = std::result::Result<T, Error>;
-
-/// Host-side service for `wasi:keyvalue`.
-#[derive(Debug, HostCtx)]
-#[host_ctx(client = KeyValueClient)]
-pub struct WasiKeyValue;
 
 impl<B: Provides<Self>> Host<B> for WasiKeyValue {
     fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {

@@ -10,13 +10,15 @@ use futures_channel::mpsc;
 use futures_util::stream::TryStreamExt;
 use futures_util::{StreamExt, future, pin_mut};
 use omnia_backend::websocket::{Endpoint, Event, Events, WebSocketClient};
-use omnia_core::{Connect, FromEnv, FutureResult};
+use omnia_core::{Backend, Connect, FromEnv, FutureResult};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::broadcast::{self, Sender};
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 use tokio_tungstenite::{WebSocketStream, accept_async};
 use tracing::instrument;
+
+use crate::host::WasiWebSocket;
 
 type ConnectionMap = Arc<DashMap<String, mpsc::Sender<Message>>>;
 
@@ -64,6 +66,10 @@ impl Connect for WebSocketDefault {
 
         Ok(websocket)
     }
+}
+
+impl Backend for WebSocketDefault {
+    type Hosts = (WasiWebSocket,);
 }
 
 impl Default for WebSocketDefault {

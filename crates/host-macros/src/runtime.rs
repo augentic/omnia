@@ -8,19 +8,24 @@ mod parse;
 use proc_macro2::TokenStream;
 use quote::quote;
 
-use crate::runtime::codegen::Codegen;
+use crate::runtime::codegen::{Codegen, Wiring};
 pub use crate::runtime::parse::Config;
 
 /// Generate the runtime module from a parsed [`Config`].
 pub fn expand(config: &Config) -> TokenStream {
     let Codegen {
         mode,
-        host_types,
-        backends_ty,
-        backends_def,
+        wiring,
         main_options,
         manifest,
     } = Codegen::from(config);
+    let Wiring {
+        backends_ty,
+        backends_def,
+        bounds,
+        link,
+        servers,
+    } = wiring;
 
     let mode = mode.tokens();
     let manifest = manifest
@@ -44,20 +49,15 @@ pub fn expand(config: &Config) -> TokenStream {
             impl<B> omnia::Wiring<B> for Hooks
             where
                 B: omnia::Backends,
-                #(B: omnia::Provides<#host_types>,)*
+                #(#bounds,)*
             {
                 fn link(deployment: &mut omnia::Deployment<B>) -> Result<()> {
-                    #(deployment.host::<#host_types>()?;)*
+                    #link
                     Ok(())
                 }
 
                 async fn serve(runtime: &omnia::Runtime<B>) -> Result<()> {
-                    // capability hosts resolve at once through `Host::run`'s no-op default
-                    let servers: Vec<future::BoxFuture<'_, Result<()>>> = vec![
-                        #(
-                            Box::pin(<#host_types as omnia::Host<B>>::run(runtime)),
-                        )*
-                    ];
+                    let servers: Vec<future::BoxFuture<'_, Result<()>>> = #servers;
                     future::try_join_all(servers).await?;
                     Ok(())
                 }

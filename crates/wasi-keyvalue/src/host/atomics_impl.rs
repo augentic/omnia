@@ -5,13 +5,14 @@ use anyhow::Context;
 use omnia_core::HostView;
 use wasmtime::component::{Access, Accessor, Resource};
 
+use crate::host::Result;
 use crate::host::generated::wasi::keyvalue::atomics::{
     CasError, Host, HostCas, HostCasWithStore, HostWithStore,
 };
 use crate::host::generated::wasi::keyvalue::store::Error;
 use crate::host::resource::{BucketProxy, Cas};
 use crate::host::store_impl::get_bucket;
-use crate::host::{KeyValueClient, Result, WasiKeyValue};
+use crate::{KeyValueClient, WasiKeyValue};
 
 impl<T> HostWithStore<T> for WasiKeyValue {
     async fn increment(

@@ -45,6 +45,8 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[host_ctx(client = VaultClient)]
 pub struct WasiVault;
 
+omnia_backend::capability!(WasiVault, "omnia:vault", VaultClient);
+
 impl<B: Provides<Self>> Host<B> for WasiVault {
     fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
         Ok(vault::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?)

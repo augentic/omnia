@@ -13,12 +13,15 @@ mod options;
 mod registry;
 mod runtime;
 mod seam;
+mod slots;
 mod source;
 mod store;
 pub mod telemetry;
 mod value;
 
-pub use omnia_backend::{Connect, FromEnv, FutureResult, NoOptions};
+pub use omnia_backend::{
+    Backend, Capability, Connect, FromEnv, FutureResult, NoOptions, Serve, Serves, capability,
+};
 pub use omnia_compile::CompileOptions;
 pub use omnia_host_macros::HostCtx;
 pub use tracing_subscriber::filter::LevelFilter;
@@ -29,7 +32,9 @@ pub use self::chain::{ChainCtx, ChainPolicy};
 pub use self::digest::Digest;
 pub use self::dispatch::Dispatcher;
 pub use self::extensions::Extensions;
-pub use self::host::{Backends, HasTable, Host, HostCtx, HostView, Provides, Proxy, get_cloned};
+pub use self::host::{
+    Backends, HasTable, Host, HostCtx, HostView, Provides, Proxy, SlotHost, get_cloned,
+};
 pub use self::invoke::{FreshCall, InvokeError, call_fresh};
 pub use self::mount::{Mount, MountRegistry, ResolvedPreopen};
 pub use self::options::RuntimeOptions;
@@ -39,6 +44,7 @@ pub use self::registry::{
 };
 pub use self::runtime::{ExitStatus, GuestError, Policy, Runtime, RuntimeParts, WeakRuntime};
 pub use self::seam::{LinkSeam, NoLinks, StoreFactory};
+pub use self::slots::{Fill, Link, Slots};
 pub use self::source::{AcquireError, LoadedGuest, RegistrySource, Source, SourceSpec, Verified};
 pub use self::store::{Stdio, StoreBase, StoreConfig, StoreCtx};
 pub use self::telemetry::Telemetry;

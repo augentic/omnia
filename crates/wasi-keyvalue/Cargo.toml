@@ -15,19 +15,27 @@ version.workspace = true
 [lints]
 workspace = true
 
+[features]
+default = ["host"]
+
+# The wasmtime host: `Host` for `WasiKeyValue` and the in-memory
+# `KeyValueDefault`. Without it a native build carries the contract alone
+# (`KeyValueClient`, `Bucket`, the `WasiKeyValue` marker), engine-free.
+host = ["dep:futures", "dep:moka", "dep:omnia-core", "dep:wasmtime", "dep:wasmtime-wasi"]
+
 # dependencies shared across host and guest
 [dependencies]
 anyhow.workspace = true
 tracing.workspace = true
 
-# host dependencies
+# contract and host dependencies
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-futures.workspace = true
-moka.workspace = true
-omnia-backend = { workspace = true, features = ["keyvalue"] }
-omnia-core.workspace = true
-wasmtime.workspace = true
-wasmtime-wasi.workspace = true
+futures = { workspace = true, optional = true }
+moka = { workspace = true, optional = true }
+omnia-backend.workspace = true
+omnia-core = { workspace = true, optional = true }
+wasmtime = { workspace = true, optional = true }
+wasmtime-wasi = { workspace = true, optional = true }
 
 # guest dependencies
 [target.'cfg(target_arch = "wasm32")'.dependencies]
