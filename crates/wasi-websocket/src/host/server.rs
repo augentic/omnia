@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
 use futures::StreamExt;
-use omnia_core::{PatternRoutes, Runtime, StoreCtx, StoreView, TriggerRouter};
+use omnia_core::{PatternRoutes, Provides, Runtime, TriggerRouter};
 use tracing::{Instrument, info_span, instrument};
 
 use crate::host::WasiWebSocket;
@@ -12,8 +12,7 @@ use crate::host::resource::{Event, Events};
 #[instrument("websocket-server", skip(state))]
 pub async fn run<B>(state: &Runtime<B>) -> Result<()>
 where
-    B: Clone + Send + Sync + 'static,
-    StoreCtx<B>: StoreView<WasiWebSocket>,
+    B: Provides<WasiWebSocket>,
 {
     tracing::info!("starting websocket server for: {}", state.name());
 
@@ -52,8 +51,7 @@ where
 #[derive(Clone)]
 pub struct WebSocketHandler<B>
 where
-    B: Clone + Send + Sync + 'static,
-    StoreCtx<B>: StoreView<WasiWebSocket>,
+    B: Provides<WasiWebSocket>,
 {
     state: Runtime<B>,
     component: String,
@@ -62,8 +60,7 @@ where
 
 impl<B> WebSocketHandler<B>
 where
-    B: Clone + Send + Sync + 'static,
-    StoreCtx<B>: StoreView<WasiWebSocket>,
+    B: Provides<WasiWebSocket>,
 {
     /// Build the handler over `runtime`'s registry; `None` when no guest
     /// exports the websocket handler (the trigger is inert).
@@ -126,7 +123,7 @@ where
 
         let mut store_data = self.state.store();
         let event_res = store_data
-            .view()
+            .view::<WasiWebSocket>()
             .table
             .push(event)
             .map_err(|e| anyhow!("failed to push event: {e}"))?;
@@ -153,6 +150,6 @@ where
     }
 
     async fn events(&self) -> Result<Events> {
-        self.state.store().view().client.endpoint().await?.events().await
+        self.state.store().view::<WasiWebSocket>().client.endpoint().await?.events().await
     }
 }

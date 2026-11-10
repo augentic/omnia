@@ -21,6 +21,7 @@ cap-std.workspace = true
 futures.workspace = true
 omnia-backend = { workspace = true, features = ["plugins"] }
 omnia-core.workspace = true
+thiserror.workspace = true
 tokio = { workspace = true, features = ["fs", "rt"] }
 tracing.workspace = true
 wasm-pkg-client.workspace = true

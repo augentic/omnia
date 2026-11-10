@@ -1,13 +1,13 @@
 use std::time::Duration;
 
 use anyhow::Context;
+use omnia_core::HostView;
 use wasmtime::component::{Accessor, Resource};
 
-use crate::WasiKeyValueView;
 use crate::host::generated::omnia::keyvalue::ttl::{Host, HostWithStore};
 use crate::host::resource::BucketProxy;
 use crate::host::store_impl::get_bucket;
-use crate::host::{Result, WasiKeyValue};
+use crate::host::{KeyValueClient, Result, WasiKeyValue};
 
 impl<T> HostWithStore<T> for WasiKeyValue {
     async fn set(
@@ -23,4 +23,4 @@ impl<T> HostWithStore<T> for WasiKeyValue {
     }
 }
 
-impl Host for WasiKeyValueView<'_> {}
+impl Host for HostView<'_, dyn KeyValueClient> {}

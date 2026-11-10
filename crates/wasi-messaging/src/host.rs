@@ -6,7 +6,7 @@ mod server;
 mod types_impl;
 
 mod generated {
-    #![allow(missing_docs, reason = "wasmtime bindgen output")]
+    #![expect(missing_docs, reason = "wasmtime bindgen output")]
 
     pub use wasi::messaging::types::Error;
 
@@ -40,8 +40,8 @@ pub use omnia_backend::messaging::{
     RequestOptions, Subscriptions, dispatch,
 };
 pub use omnia_core::FutureResult;
-use omnia_core::{Host, Runtime, Server, StoreCtx, StoreView};
-use wasmtime::component::{HasData, Linker};
+use omnia_core::{Host, HostCtx, Provides, Runtime, StoreCtx};
+use wasmtime::component::Linker;
 
 pub use self::generated::MessagingRequestReply;
 use self::generated::wasi::messaging::types::Error as WitError;
@@ -53,33 +53,20 @@ pub use self::server::MessagingHandler;
 pub type Result<T> = std::result::Result<T, WitError>;
 
 /// Host-side service for `wasi:messaging`.
-#[derive(Debug)]
+#[derive(Debug, HostCtx)]
+#[host_ctx(client = MessagingClient)]
 pub struct WasiMessaging;
 
-impl HasData for WasiMessaging {
-    type Data<'a> = WasiMessagingView<'a>;
-}
-
-impl<T> Host<T> for WasiMessaging
-where
-    T: StoreView<Self> + 'static,
-{
-    fn add_to_linker(linker: &mut Linker<T>) -> anyhow::Result<()> {
-        producer::add_to_linker::<_, Self>(linker, T::view)?;
-        request_reply::add_to_linker::<_, Self>(linker, T::view)?;
-        Ok(types::add_to_linker::<_, Self>(linker, T::view)?)
+impl<B: Provides<Self>> Host<B> for WasiMessaging {
+    fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
+        producer::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
+        request_reply::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
+        Ok(types::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?)
     }
-}
 
-impl<B> Server<B> for WasiMessaging
-where
-    B: Clone + Send + Sync + 'static,
-    StoreCtx<B>: StoreView<Self>,
-{
-    async fn run(&self, state: &Runtime<B>) -> anyhow::Result<()> {
-        server::run(state).await
+    async fn run(runtime: &Runtime<B>) -> anyhow::Result<()> {
+        server::run(runtime).await
     }
 }
 
 omnia_core::host_error!(WitError, Other);
-omnia_core::wasi_view!(Messaging);

@@ -1,4 +1,4 @@
-//! Deployment lifecycle: [`Backends`], [`Wiring`], [`run`], and [`run_with`].
+//! Deployment lifecycle: [`ConnectAll`], [`Wiring`], [`run`], and [`run_with`].
 
 use std::future::Future;
 use std::pin::pin;
@@ -7,17 +7,18 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, Result};
 use omnia_core::wasmtime::Engine;
-use omnia_core::{ExitStatus, LevelFilter, Runtime, StoreCtx, WeakRuntime};
+use omnia_core::{Backends, ExitStatus, LevelFilter, Runtime, WeakRuntime};
 
 use crate::{Deployment, DeploymentBuilder};
 
-/// A deployment's connected backend bundle, threaded into [`Runtime`].
+/// A backend bundle that connects itself from the environment, for the
+/// generated `main` to thread into [`Runtime`].
 ///
 /// The `runtime!` macro generates the concrete bundle (one field per declared
 /// backend) and this impl, whose [`connect`](Self::connect) connects every
 /// backend concurrently. A deployment that wires no backends uses the
 /// [`()`](unit) bundle below, so [`Runtime`] needs no special empty case.
-pub trait Backends: Clone + Send + Sync + 'static {
+pub trait ConnectAll: Backends {
     /// Connect every backend in the bundle.
     ///
     /// # Errors
@@ -27,7 +28,7 @@ pub trait Backends: Clone + Send + Sync + 'static {
 }
 
 // the zero-backend bundle: a deployment linking only backend-less hosts connects nothing
-impl Backends for () {
+impl ConnectAll for () {
     fn connect() -> impl Future<Output = Result<Self>> {
         std::future::ready(Ok(()))
     }
@@ -68,17 +69,17 @@ impl Mode {
 
 /// Host linking and trigger-server startup for a deployment.
 ///
-/// Bounded on the bundle's shape rather than on [`Backends`] so one wiring
+/// Bounded on the bundle's shape rather than on [`ConnectAll`] so one wiring
 /// serves both the connected production bundle and a bundle handed in ready
 /// (see [`run_with`]). The guest loader is not wired here: assembly links
 /// its host and installs its policy for every deployment alike.
-pub trait Wiring<B: Clone + Send + Sync + 'static> {
+pub trait Wiring<B: Backends> {
     /// Link every declared host into the deployment linker.
     ///
     /// # Errors
     ///
     /// Returns an error if a host cannot be added to the linker.
-    fn link(deployment: &mut Deployment<StoreCtx<B>>) -> Result<()>;
+    fn link(deployment: &mut Deployment<B>) -> Result<()>;
 
     /// Run every declared long-lived trigger server concurrently.
     fn serve(runtime: &Runtime<B>) -> impl std::future::Future<Output = Result<()>> + Send;
@@ -87,11 +88,11 @@ pub trait Wiring<B: Clone + Send + Sync + 'static> {
 /// Run a planned deployment builder to completion, reporting failures on stderr.
 pub async fn drive_main<B, H>(builder: DeploymentBuilder) -> ExitCode
 where
-    B: Backends,
+    B: ConnectAll,
     H: Wiring<B>,
 {
     match async {
-        let deployment = builder.build::<StoreCtx<B>>().await.context("building runtime")?;
+        let deployment = builder.build::<B>().await.context("building runtime")?;
         run::<B, H>(deployment).await
     }
     .await
@@ -115,9 +116,9 @@ pub fn report(error: &anyhow::Error) -> ExitCode {
 ///
 /// Returns an error if backends cannot connect, runtime state cannot be
 /// assembled, bootstrap fails, or a trigger server exits with an error.
-pub async fn run<B, H>(deployment: Deployment<StoreCtx<B>>) -> Result<ExitStatus>
+pub async fn run<B, H>(deployment: Deployment<B>) -> Result<ExitStatus>
 where
-    B: Backends,
+    B: ConnectAll,
     H: Wiring<B>,
 {
     let backends = B::connect().await.context("connecting backends")?;
@@ -132,11 +133,9 @@ where
 ///
 /// Returns an error if runtime state cannot be assembled, bootstrap fails, or
 /// a trigger server exits with an error.
-pub async fn run_with<B, H>(
-    mut deployment: Deployment<StoreCtx<B>>, backends: B,
-) -> Result<ExitStatus>
+pub async fn run_with<B, H>(mut deployment: Deployment<B>, backends: B) -> Result<ExitStatus>
 where
-    B: Clone + Send + Sync + 'static,
+    B: Backends,
     H: Wiring<B>,
 {
     let mode = deployment.mode();
@@ -147,7 +146,7 @@ where
 
 async fn finish<B, H>(runtime: Runtime<B>, mode: Mode) -> Result<ExitStatus>
 where
-    B: Clone + Send + Sync + 'static,
+    B: Backends,
     H: Wiring<B>,
 {
     // background tasks hold engine clones; aborted after the drive so a
@@ -263,12 +262,9 @@ fn sample_pool(engine: Engine, interval: Duration) -> Option<tokio::task::JoinHa
 
 // holds no engine clone: the runtime is reached through the weak handle each
 // look, so the task ends with the deployment rather than pinning its pool
-fn release_idle_pool<B>(
+fn release_idle_pool<B: Backends>(
     runtime: WeakRuntime<B>, after: Duration,
-) -> Option<tokio::task::JoinHandle<()>>
-where
-    B: Clone + Send + Sync + 'static,
-{
+) -> Option<tokio::task::JoinHandle<()>> {
     if after.is_zero() {
         return None;
     }

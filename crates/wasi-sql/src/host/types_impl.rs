@@ -1,4 +1,5 @@
 use anyhow::Result;
+use omnia_core::HostView;
 use wasmtime::component::{Access, Accessor, Resource};
 
 use crate::host::generated::wasi::sql::types::{
@@ -6,7 +7,7 @@ use crate::host::generated::wasi::sql::types::{
     HostError, HostErrorWithStore, HostStatement, HostStatementWithStore, Statement,
 };
 use crate::host::resource::ConnectionProxy;
-use crate::host::{DataType, WasiSql, WasiSqlView};
+use crate::host::{DataType, SqlClient, WasiSql};
 
 fn from_wit_data_type(dt: WitDataType) -> DataType {
     match dt {
@@ -45,7 +46,8 @@ impl<T> HostConnectionWithStore<T> for WasiSql {
     fn drop(
         mut accessor: Access<'_, T, Self>, rep: Resource<ConnectionProxy>,
     ) -> wasmtime::Result<()> {
-        accessor.get().table.delete(rep).map(|_| Ok(()))?
+        accessor.get().table.delete(rep)?;
+        Ok(())
     }
 }
 
@@ -67,7 +69,8 @@ impl<T> HostStatementWithStore<T> for WasiSql {
     }
 
     fn drop(mut accessor: Access<'_, T, Self>, rep: Resource<Statement>) -> wasmtime::Result<()> {
-        Ok(accessor.get().table.delete(rep).map(|_| ())?)
+        accessor.get().table.delete(rep)?;
+        Ok(())
     }
 }
 
@@ -78,16 +81,17 @@ impl<T> HostErrorWithStore<T> for WasiSql {
     }
 
     fn drop(mut accessor: Access<'_, T, Self>, rep: Resource<Error>) -> wasmtime::Result<()> {
-        Ok(accessor.get().table.delete(rep).map(|_| ())?)
+        accessor.get().table.delete(rep)?;
+        Ok(())
     }
 }
 
-impl Host for WasiSqlView<'_> {
+impl Host for HostView<'_, dyn SqlClient> {
     fn convert_error(&mut self, err: Error) -> Result<Error, wasmtime::Error> {
         Ok(err)
     }
 }
 
-impl HostConnection for WasiSqlView<'_> {}
-impl HostStatement for WasiSqlView<'_> {}
-impl HostError for WasiSqlView<'_> {}
+impl HostConnection for HostView<'_, dyn SqlClient> {}
+impl HostStatement for HostView<'_, dyn SqlClient> {}
+impl HostError for HostView<'_, dyn SqlClient> {}

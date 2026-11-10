@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 
 #[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
 mod generated {
-    #![allow(missing_docs, clippy::same_length_and_capacity, reason = "wit-bindgen output")]
+    #![expect(clippy::same_length_and_capacity, reason = "wit-bindgen output")]
 
     wit_bindgen::generate!({
         world: "imports",

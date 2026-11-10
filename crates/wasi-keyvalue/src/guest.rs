@@ -2,7 +2,7 @@
 
 // Bindings for the `wasi:keyvalue` and `omnia:keyvalue` worlds.
 mod generated {
-    #![allow(missing_docs, clippy::same_length_and_capacity, reason = "wit-bindgen output")]
+    #![expect(missing_docs, clippy::same_length_and_capacity, reason = "wit-bindgen output")]
     wit_bindgen::generate!({
         world: "imports",
         path: "wit",

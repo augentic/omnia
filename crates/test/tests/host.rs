@@ -10,21 +10,21 @@ use anyhow::{Context as _, Result, bail};
 use axum::Router;
 use axum::routing::get;
 use omnia::wasmtime::component::Val;
-use omnia::{Digest, ExitStatus, GuestEntry, GuestId, Runtime, StoreCtx};
+use omnia::{Digest, ExitStatus, GuestEntry, GuestId, Runtime};
 use omnia_backend::keyvalue::BUCKET;
 use omnia_test::host::{Backends, Deployment, ScriptedModel, ScriptedVcs, scratch};
 use omnia_test::{Exchange, SeenFormat};
-use omnia_wasi_blobstore::{BlobStoreClient as _, BlobStoreDefault, WasiBlobStore};
+use omnia_wasi_blobstore::{BlobStoreClient as _, WasiBlobStore};
 use omnia_wasi_config::WasiConfig;
-use omnia_wasi_docstore::{DocStoreDefault, WasiDocStore};
+use omnia_wasi_docstore::WasiDocStore;
 use omnia_wasi_http::WasiHttp;
-use omnia_wasi_identity::{IdentityStub, WasiIdentity};
+use omnia_wasi_identity::WasiIdentity;
 use omnia_wasi_keyvalue::{Bucket, FutureResult, KeyValueClient, KeyValueDefault, WasiKeyValue};
-use omnia_wasi_messaging::{MessagingDefault, WasiMessaging};
-use omnia_wasi_model::{ModelDefault, WasiModel};
-use omnia_wasi_otel::{OtelDefault, WasiOtel};
-use omnia_wasi_sql::{SqlDefault, WasiSql};
-use omnia_wasi_vault::{VaultDefault, WasiVault};
+use omnia_wasi_messaging::WasiMessaging;
+use omnia_wasi_model::WasiModel;
+use omnia_wasi_otel::WasiOtel;
+use omnia_wasi_sql::WasiSql;
+use omnia_wasi_vault::WasiVault;
 use omnia_wasi_vcs::WasiVcs;
 use omnia_wasi_websocket::WasiWebSocket;
 use tokio::net::TcpListener;
@@ -42,19 +42,6 @@ impl KeyValueClient for RecordingKeyValue {
         self.inner.open_bucket(identifier)
     }
 }
-
-type WasiBackends = Backends<
-    ModelDefault,
-    KeyValueDefault,
-    BlobStoreDefault,
-    DocStoreDefault,
-    SqlDefault,
-    VaultDefault,
-    MessagingDefault,
-    IdentityStub,
-    OtelDefault,
-    ScriptedVcs,
->;
 
 test_programs::foreach_conformance!();
 
@@ -87,6 +74,30 @@ mod production_plugins {
         mode: command,
         mounts: [{ name: ".", path: "/nonexistent/adapters" }],
         hosts: { WasiOtel: OtelDefault },
+    });
+}
+
+// Two backends reached through paths that end in the same name: the bundle's
+// fields are positional, so neither shadows the other.
+mod same_named {
+    use omnia_wasi_keyvalue::WasiKeyValue;
+    use omnia_wasi_model::WasiModel;
+    use omnia_wasi_otel::{OtelDefault, WasiOtel};
+
+    mod keyvalue {
+        pub use omnia_wasi_keyvalue::KeyValueDefault as Client;
+    }
+    mod model {
+        pub use omnia_wasi_model::ModelDefault as Client;
+    }
+
+    omnia::runtime!({
+        mode: command,
+        hosts: {
+            WasiKeyValue: keyvalue::Client,
+            WasiModel: model::Client,
+            WasiOtel: OtelDefault,
+        },
     });
 }
 
@@ -136,6 +147,18 @@ async fn overlay_mount() {
         .await
         .expect("deployment runs");
     assert_eq!(status, ExitStatus::SUCCESS, "the requester's assertions all held");
+}
+
+#[tokio::test]
+async fn same_named_backends() {
+    let _ = (same_named::main, same_named::run);
+    let backends = Backends::defaults().await.model(ScriptedModel::answering(["second"]));
+    let status = Deployment::from(same_named::manifest())
+        .guest("echo", test_programs::MODEL_ECHO_TEXT)
+        .run_with::<same_named::Hooks, _>(backends)
+        .await
+        .expect("deployment runs");
+    assert_eq!(status, ExitStatus::SUCCESS);
 }
 
 #[tokio::test]
@@ -230,7 +253,7 @@ async fn declared_guest() {
         .entry(GuestEntry::new("plugin", test_programs::LINK_ECHOER))
         .args(["declared", "plugin"])
         .run(Backends::defaults().await, |deployment| {
-            deployment.host::<WasiOtel, Backends>()?;
+            deployment.host::<WasiOtel>()?;
             Ok(())
         })
         .await
@@ -243,8 +266,8 @@ async fn declared_guest() {
 // runs, any other fails the run before the guest loads.
 #[tokio::test]
 async fn pinned_path_guest() {
-    fn otel_only(deployment: &mut omnia::Deployment<StoreCtx<Backends>>) -> Result<()> {
-        deployment.host::<WasiOtel, Backends>()?;
+    fn otel_only(deployment: &mut omnia::Deployment<Backends>) -> Result<()> {
+        deployment.host::<WasiOtel>()?;
         Ok(())
     }
     let bytes = std::fs::read(test_programs::COMMAND_EXIT_MAP).expect("reading the guest");
@@ -349,19 +372,19 @@ async fn conformance_portable() {
         .guest("conformance", test_programs::CONFORMANCE_PORTABLE)
         .mount(scratch.mount(false))
         .run(backends, |deployment| {
-            deployment.host::<WasiBlobStore, WasiBackends>()?;
-            deployment.host::<WasiConfig, WasiBackends>()?;
-            deployment.host::<WasiDocStore, WasiBackends>()?;
-            deployment.host::<WasiHttp, WasiBackends>()?;
-            deployment.host::<WasiIdentity, WasiBackends>()?;
-            deployment.host::<WasiKeyValue, WasiBackends>()?;
-            deployment.host::<WasiMessaging, WasiBackends>()?;
-            deployment.host::<WasiModel, WasiBackends>()?;
-            deployment.host::<WasiOtel, WasiBackends>()?;
-            deployment.host::<WasiSql, WasiBackends>()?;
-            deployment.host::<WasiVault, WasiBackends>()?;
-            deployment.host::<WasiVcs, WasiBackends>()?;
-            deployment.host::<WasiWebSocket, WasiBackends>()?;
+            deployment.host::<WasiBlobStore>()?;
+            deployment.host::<WasiConfig>()?;
+            deployment.host::<WasiDocStore>()?;
+            deployment.host::<WasiHttp>()?;
+            deployment.host::<WasiIdentity>()?;
+            deployment.host::<WasiKeyValue>()?;
+            deployment.host::<WasiMessaging>()?;
+            deployment.host::<WasiModel>()?;
+            deployment.host::<WasiOtel>()?;
+            deployment.host::<WasiSql>()?;
+            deployment.host::<WasiVault>()?;
+            deployment.host::<WasiVcs>()?;
+            deployment.host::<WasiWebSocket>()?;
             Ok(())
         })
         .await
@@ -370,10 +393,9 @@ async fn conformance_portable() {
     vcs.assert_exhausted();
 }
 
-async fn call<B>(runtime: &Runtime<B>, guest: &str, func: &str, message: &str) -> Result<String>
-where
-    B: Clone + Send + Sync + 'static,
-{
+async fn call<B: omnia::Backends>(
+    runtime: &Runtime<B>, guest: &str, func: &str, message: &str,
+) -> Result<String> {
     let entry = runtime
         .registry()
         .get(&GuestId::from(guest))

@@ -1,0 +1,5 @@
+error: `#[derive(HostCtx)]` needs `#[host_ctx(client = <Trait>)]` naming the client trait
+ --> tests/ui/missing_client.rs:4:12
+  |
+4 | pub struct WasiFoo;
+  |            ^^^^^^^

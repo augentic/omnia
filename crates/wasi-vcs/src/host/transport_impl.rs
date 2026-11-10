@@ -1,19 +1,16 @@
 //! The `omnia:vcs/transport` host bindings.
 
-use omnia_core::HasMounts;
+use omnia_core::{HostView, StoreCtx};
 use wasmtime::component::Accessor;
 
 use crate::host::generated::omnia::vcs::transport::{
     CloneOptions as WitCloneOptions, Host, HostWithStore, Location,
 };
-use crate::host::{CloneOptions, Intent, Result, WasiVcs, WasiVcsView};
+use crate::host::{CloneOptions, Intent, Result, VcsClient, WasiVcs};
 
-impl<T> HostWithStore<T> for WasiVcs
-where
-    T: HasMounts,
-{
+impl<B: Send + 'static> HostWithStore<StoreCtx<B>> for WasiVcs {
     async fn clone(
-        accessor: &Accessor<T, Self>, url: String, at: Location, options: WitCloneOptions,
+        accessor: &Accessor<StoreCtx<B>, Self>, url: String, at: Location, options: WitCloneOptions,
     ) -> Result<()> {
         let options = CloneOptions { depth: options.depth };
         Self::dispatch(accessor, |access| {
@@ -23,7 +20,9 @@ where
         .await
     }
 
-    async fn fetch(accessor: &Accessor<T, Self>, repo: Location, remote: String) -> Result<()> {
+    async fn fetch(
+        accessor: &Accessor<StoreCtx<B>, Self>, repo: Location, remote: String,
+    ) -> Result<()> {
         Self::dispatch(accessor, |access| {
             let repo = Self::locate(access, &repo, Intent::Mutate)?;
             Ok(access.get().client.fetch(repo, remote))
@@ -32,7 +31,7 @@ where
     }
 
     async fn label(
-        accessor: &Accessor<T, Self>, repo: Location, name: String, revision: String,
+        accessor: &Accessor<StoreCtx<B>, Self>, repo: Location, name: String, revision: String,
     ) -> Result<()> {
         Self::dispatch(accessor, |access| {
             let repo = Self::locate(access, &repo, Intent::Mutate)?;
@@ -42,7 +41,7 @@ where
     }
 
     async fn labelled(
-        accessor: &Accessor<T, Self>, repo: Location, name: String,
+        accessor: &Accessor<StoreCtx<B>, Self>, repo: Location, name: String,
     ) -> Result<String> {
         Self::dispatch(accessor, |access| {
             let repo = Self::locate(access, &repo, Intent::Read)?;
@@ -52,7 +51,7 @@ where
     }
 
     async fn fetched(
-        accessor: &Accessor<T, Self>, repo: Location, remote: String, name: String,
+        accessor: &Accessor<StoreCtx<B>, Self>, repo: Location, remote: String, name: String,
     ) -> Result<String> {
         Self::dispatch(accessor, |access| {
             let repo = Self::locate(access, &repo, Intent::Read)?;
@@ -62,7 +61,7 @@ where
     }
 
     async fn push(
-        accessor: &Accessor<T, Self>, repo: Location, remote: String, label: String,
+        accessor: &Accessor<StoreCtx<B>, Self>, repo: Location, remote: String, label: String,
     ) -> Result<()> {
         Self::dispatch(accessor, |access| {
             let repo = Self::locate(access, &repo, Intent::Mutate)?;
@@ -72,4 +71,4 @@ where
     }
 }
 
-impl Host for WasiVcsView<'_> {}
+impl Host for HostView<'_, dyn VcsClient> {}

@@ -6,9 +6,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::{Context as _, Result, anyhow, bail, ensure};
-use omnia_core::{
-    ChainCtx, ChainPolicy, Dispatcher, GuestId, HasChain, HasDispatcher, InvokeError, handle_kind,
-};
+use omnia_core::{ChainCtx, ChainPolicy, Dispatcher, GuestId, InvokeError, StoreCtx, handle_kind};
 use wasmtime::Engine;
 use wasmtime::component::{Linker, Type, Val, types};
 
@@ -49,7 +47,7 @@ struct Origin {
 }
 
 impl Origin {
-    fn of<T: HasChain + HasDispatcher>(data: &T) -> Self {
+    fn of<B>(data: &StoreCtx<B>) -> Self {
         Self {
             chain: data.chain(),
             dispatcher: data.dispatcher(),
@@ -86,8 +84,8 @@ impl Origin {
 /// Returns an error if a function's signature is not plain, two importers
 /// disagree on a function's asyncness, or a function cannot be defined on
 /// the linker.
-pub fn polyfill_component<T: HasChain + HasDispatcher + 'static>(
-    engine: &Engine, linker: &mut Linker<T>, id: &GuestId,
+pub fn polyfill_component<B: Send + 'static>(
+    engine: &Engine, linker: &mut Linker<StoreCtx<B>>, id: &GuestId,
     component: &wasmtime::component::Component, caller: &Arc<Caller>, wired: &mut WiredLinks,
 ) -> Result<()> {
     let component_ty = component.component_type();

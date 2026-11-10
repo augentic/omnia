@@ -7,7 +7,7 @@ use std::env;
 use std::process::ExitCode;
 
 pub use self::direct::{MainOptions, ManifestSource};
-use crate::{Backends, DeploymentBuilder, Wiring};
+use crate::{ConnectAll, DeploymentBuilder, Wiring};
 
 /// Entry point for generated `main` functions.
 ///
@@ -19,7 +19,7 @@ use crate::{Backends, DeploymentBuilder, Wiring};
 #[doc(hidden)]
 pub async fn main<B, H>(options: MainOptions) -> ExitCode
 where
-    B: Backends,
+    B: ConnectAll,
     H: Wiring<B>,
 {
     match builder(options) {

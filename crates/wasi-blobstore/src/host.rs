@@ -7,8 +7,6 @@ mod resource;
 mod types_impl;
 
 mod generated {
-    #![allow(missing_docs, reason = "wasmtime bindgen output")]
-
     pub use super::{ContainerProxy, Error, IncomingValue, OutgoingValue, StreamObjectNames};
 
     wasmtime::component::bindgen!({
@@ -36,9 +34,9 @@ pub use bytes::Bytes;
 pub use default_impl::BlobStoreDefault;
 pub use omnia_backend::blobstore::{BlobStoreClient, Container, ContainerMetadata, ObjectMetadata};
 pub use omnia_core::FutureResult;
-use omnia_core::{Host, Server, StoreView};
+use omnia_core::{Host, HostCtx, Provides, StoreCtx};
 pub use resource::*;
-use wasmtime::component::{HasData, Linker};
+use wasmtime::component::Linker;
 use wasmtime_wasi::p2::pipe::MemoryOutputPipe;
 
 use self::generated::wasi::blobstore::{blobstore, container, types};
@@ -120,26 +118,16 @@ impl StreamObjectNames {
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Host-side service for `wasi:blobstore`.
-#[derive(Debug)]
+#[derive(Debug, HostCtx)]
+#[host_ctx(client = BlobStoreClient)]
 pub struct WasiBlobStore;
 
-impl HasData for WasiBlobStore {
-    type Data<'a> = WasiBlobStoreView<'a>;
-}
-
-impl<T> Host<T> for WasiBlobStore
-where
-    T: StoreView<Self> + 'static,
-{
-    fn add_to_linker(linker: &mut Linker<T>) -> anyhow::Result<()> {
-        blobstore::add_to_linker::<_, Self>(linker, T::view)?;
-        container::add_to_linker::<_, Self>(linker, T::view)?;
-        Ok(types::add_to_linker::<_, Self>(linker, T::view)?)
+impl<B: Provides<Self>> Host<B> for WasiBlobStore {
+    fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
+        blobstore::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
+        container::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
+        Ok(types::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?)
     }
 }
 
-impl<B> Server<B> for WasiBlobStore {}
-
 omnia_core::host_error!(Error, Other);
-
-omnia_core::wasi_view!(BlobStore);

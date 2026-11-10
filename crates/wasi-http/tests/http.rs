@@ -203,9 +203,9 @@ async fn run_guest(wasm: &str, backends: Backends) {
     let status = Deployment::new()
         .guest("guest", wasm)
         .run(backends, |deployment| {
-            deployment.host::<WasiHttp, Backends>()?;
-            deployment.host::<WasiConfig, Backends>()?;
-            deployment.host::<WasiOtel, Backends>()?;
+            deployment.host::<WasiHttp>()?;
+            deployment.host::<WasiConfig>()?;
+            deployment.host::<WasiOtel>()?;
             Ok(())
         })
         .await
@@ -344,8 +344,8 @@ async fn http_incoming_echo() {
     let runtime = Deployment::new()
         .guest("guest", test_programs::HTTP_INCOMING_ECHO)
         .boot(Backends::defaults().await, |deployment| {
-            deployment.host::<WasiHttp, Backends>()?;
-            deployment.host::<WasiOtel, Backends>()?;
+            deployment.host::<WasiHttp>()?;
+            deployment.host::<WasiOtel>()?;
             Ok(())
         })
         .await
@@ -393,8 +393,8 @@ async fn http_incoming_echo() {
         .entry(GuestEntry::new("short", echo.clone()).route_http("/echo"))
         .entry(GuestEntry::new("long", echo.clone()).route_http("/echo/sub"))
         .boot(Backends::defaults().await, |deployment| {
-            deployment.host::<WasiHttp, Backends>()?;
-            deployment.host::<WasiOtel, Backends>()?;
+            deployment.host::<WasiHttp>()?;
+            deployment.host::<WasiOtel>()?;
             Ok(())
         })
         .await
@@ -420,8 +420,8 @@ async fn http_incoming_echo() {
         .entry(GuestEntry::new("a", echo.clone()))
         .entry(GuestEntry::new("b", echo))
         .boot(Backends::defaults().await, |deployment| {
-            deployment.host::<WasiHttp, Backends>()?;
-            deployment.host::<WasiOtel, Backends>()?;
+            deployment.host::<WasiHttp>()?;
+            deployment.host::<WasiOtel>()?;
             Ok(())
         })
         .await

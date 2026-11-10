@@ -81,8 +81,8 @@ async fn websocket_handler_echo() {
                 otel: OtelDefault,
             },
             |deployment| {
-                deployment.host::<WasiWebSocket, Backends>()?;
-                deployment.host::<WasiOtel, Backends>()?;
+                deployment.host::<WasiWebSocket>()?;
+                deployment.host::<WasiOtel>()?;
                 Ok(())
             },
         )

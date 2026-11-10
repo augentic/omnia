@@ -1,3 +1,4 @@
+use omnia_core::HostView;
 use wasmtime::component::{Access, Accessor, Resource};
 use wasmtime::error::Context;
 use wasmtime_wasi::p2::bindings::io::streams::{InputStream, OutputStream};
@@ -7,7 +8,7 @@ use crate::host::generated::wasi::blobstore::types::{
     Host, HostIncomingValue, HostIncomingValueWithStore, HostOutgoingValue,
     HostOutgoingValueWithStore, IncomingValueSyncBody,
 };
-use crate::host::{Error, IncomingValue, OutgoingValue, Result, WasiBlobStore, WasiBlobStoreView};
+use crate::host::{BlobStoreClient, Error, IncomingValue, OutgoingValue, Result, WasiBlobStore};
 
 impl<T> HostIncomingValueWithStore<T> for WasiBlobStore {
     fn incoming_value_consume_sync(
@@ -38,7 +39,8 @@ impl<T> HostIncomingValueWithStore<T> for WasiBlobStore {
     fn drop(
         mut accessor: Access<'_, T, Self>, rep: Resource<IncomingValue>,
     ) -> wasmtime::Result<()> {
-        Ok(accessor.get().table.delete(rep).map(|_| ())?)
+        accessor.get().table.delete(rep)?;
+        Ok(())
     }
 }
 
@@ -83,14 +85,15 @@ impl<T> HostOutgoingValueWithStore<T> for WasiBlobStore {
     fn drop(
         mut accessor: Access<'_, T, Self>, rep: Resource<OutgoingValue>,
     ) -> wasmtime::Result<()> {
-        Ok(accessor.get().table.delete(rep).map(|_| ())?)
+        accessor.get().table.delete(rep)?;
+        Ok(())
     }
 }
 
-impl Host for WasiBlobStoreView<'_> {
+impl Host for HostView<'_, dyn BlobStoreClient> {
     fn convert_error(&mut self, err: Error) -> wasmtime::Result<String> {
         Ok(err.to_string())
     }
 }
-impl HostIncomingValue for WasiBlobStoreView<'_> {}
-impl HostOutgoingValue for WasiBlobStoreView<'_> {}
+impl HostIncomingValue for HostView<'_, dyn BlobStoreClient> {}
+impl HostOutgoingValue for HostView<'_, dyn BlobStoreClient> {}

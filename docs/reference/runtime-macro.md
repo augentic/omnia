@@ -20,7 +20,7 @@ Each entry is a `Host: Backend` pair:
 - The **host** type (`WasiHttp`, `WasiKeyValue`, ...) is the interface implementation from an `omnia-wasi-*` crate. It links the WASI functions into the wasmtime linker and, for trigger interfaces, runs a server.
 - The **backend** type (`HttpDefault`, `KeyValueDefault`, or a production client such as `omnia_redis::Client`) is what the host delegates to. Every backend implements `omnia::Connect` and configures itself from environment variables at startup.
 
-The macro generates a `Backends` bundle (one connected backend per entry, with one `omnia::Provides` accessor impl per row), the wiring that links each host and runs every host's `Server::run` (a no-op for capability hosts; the serve loop for trigger hosts), and a `#[tokio::main] main` that parses the CLI (`run` subcommand) and drives the runtime.
+The macro generates a `Backends` bundle (one connected backend per entry, with one `omnia::Provides` accessor impl per row), the wiring that links each host and runs every host's `Host::run` (a no-op for capability hosts; the serve loop for trigger hosts), and a `#[tokio::main] main` that parses the CLI (`run` subcommand) and drives the runtime.
 
 ### Connect options
 

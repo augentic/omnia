@@ -20,7 +20,7 @@ use hyper::header::{FORWARDED, HOST};
 use hyper::service::service_fn;
 use hyper_util::rt::TokioExecutor;
 use hyper_util::server::conn::auto;
-use omnia_core::{HttpRoutes, Runtime, StoreCtx, StoreView, TriggerRouter};
+use omnia_core::{Backends, HttpRoutes, Provides, Runtime, StoreCtx, TriggerRouter};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio::task::JoinSet;
@@ -31,7 +31,7 @@ use wasmtime_wasi_http::io::TokioIo;
 use wasmtime_wasi_http::p3::bindings::ServiceIndices;
 use wasmtime_wasi_http::p3::bindings::http::types as wasi;
 
-use super::WasiHttp;
+use super::{WasiHttp, WasiHttpCtxView};
 
 /// The streaming body of a response produced by [`HttpHandler::handle`].
 pub type OutgoingBody = UnsyncBoxBody<Bytes, anyhow::Error>;
@@ -39,8 +39,7 @@ pub type OutgoingBody = UnsyncBoxBody<Bytes, anyhow::Error>;
 #[instrument("http-server", skip(state))]
 pub async fn run<B>(state: &Runtime<B>) -> Result<()>
 where
-    B: Clone + Send + Sync + 'static,
-    StoreCtx<B>: StoreView<WasiHttp>,
+    B: Provides<WasiHttp>,
 {
     let Some(handler) = HttpHandler::new(state)? else {
         tracing::info!("no guest exports the http handler; http trigger inert");
@@ -110,7 +109,7 @@ where
 
 async fn drive_connection<B, F, G, E>(conn: F, state: &Runtime<B>, graceful: G)
 where
-    B: Clone + Send + Sync + 'static,
+    B: Backends,
     F: Future<Output = std::result::Result<(), E>>,
     E: Debug,
     G: FnOnce(Pin<&mut F>),
@@ -136,8 +135,7 @@ where
 #[derive(Clone)]
 pub struct HttpHandler<B>
 where
-    B: Clone + Send + Sync + 'static,
-    StoreCtx<B>: StoreView<WasiHttp>,
+    B: Provides<WasiHttp>,
 {
     state: Runtime<B>,
     component: Arc<str>,
@@ -146,8 +144,7 @@ where
 
 impl<B> HttpHandler<B>
 where
-    B: Clone + Send + Sync + 'static,
-    StoreCtx<B>: StoreView<WasiHttp>,
+    B: Provides<WasiHttp>,
 {
     /// Build the handler over `runtime`'s registry; `None` when no guest
     /// exports the http handler (the trigger is inert).
@@ -235,11 +232,11 @@ where
                     let built = async move {
                         let (request, io) = store.with(|mut access| {
                             let mut cx = access.as_context_mut();
-                            wasi::Request::from_http(cx.data_mut().view().hooks, request)
+                            wasi::Request::from_http(view(cx.data_mut()).hooks, request)
                         });
                         let req = store
                             .with(|mut store| {
-                                store.as_context_mut().data_mut().view().table.push(request)
+                                view(store.as_context_mut().data_mut()).table.push(request)
                             })
                             .context("failed to push request to table")?;
 
@@ -252,13 +249,11 @@ where
                             .map_err(|e| anyhow!("guest error: {e}"))?;
                         let wasi_resp = store
                             .with(|mut store| {
-                                store.as_context_mut().data_mut().view().table.delete(res)
+                                view(store.as_context_mut().data_mut()).table.delete(res)
                             })
                             .context("failed to delete response from table")?;
                         store
-                            .with(|mut store| {
-                                wasi_resp.into_http_with_getter(&mut store, io, StoreView::view)
-                            })
+                            .with(|mut store| wasi_resp.into_http_with_getter(&mut store, io, view))
                             .map_err(|e| anyhow!("converting guest response: {e}"))
                     }
                     .await;
@@ -309,6 +304,10 @@ where
 
         Ok(response)
     }
+}
+
+fn view<B: Provides<WasiHttp>>(store: &mut StoreCtx<B>) -> WasiHttpCtxView<'_> {
+    store.view::<WasiHttp>()
 }
 
 // The sender drops once the body is consumed (or the wrapper dropped); its

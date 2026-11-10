@@ -3,7 +3,7 @@
 
 use futures::FutureExt as _;
 use futures::future::BoxFuture;
-use omnia_core::{Digest, GuestError, GuestId, Policy, SourceSpec, WeakRuntime};
+use omnia_core::{Backends, Digest, GuestError, GuestId, Policy, SourceSpec, WeakRuntime};
 
 use crate::loader::Plugin;
 
@@ -34,7 +34,7 @@ pub trait Admission: Send + Sync + 'static {
 }
 
 // Weak: a strong handle would cycle through the extension.
-impl<B: Clone + Send + Sync + 'static> Admission for WeakRuntime<B> {
+impl<B: Backends> Admission for WeakRuntime<B> {
     fn admits(&self, id: &GuestId) -> Result<(), GuestError> {
         live(self)?.admits(id, &Policy::CallerNamed { pin: None })
     }
@@ -67,8 +67,6 @@ impl<B: Clone + Send + Sync + 'static> Admission for WeakRuntime<B> {
     }
 }
 
-fn live<B: Clone + Send + Sync + 'static>(
-    weak: &WeakRuntime<B>,
-) -> Result<omnia_core::Runtime<B>, GuestError> {
+fn live<B: Backends>(weak: &WeakRuntime<B>) -> Result<omnia_core::Runtime<B>, GuestError> {
     weak.upgrade().ok_or_else(|| GuestError::Internal("the runtime has shut down".to_owned()))
 }

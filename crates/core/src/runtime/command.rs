@@ -9,8 +9,8 @@ use wasmtime_wasi::p3::bindings::{Command, CommandPre};
 
 use super::{ExitStatus, Runtime};
 use crate::chain::ChainCtx;
+use crate::host::Backends;
 use crate::registry::{Guest, GuestId, TriggerRouter};
-use crate::store::StoreCtx;
 
 /// Run the command guest once, after the [`Runtime`] is assembled.
 ///
@@ -25,10 +25,7 @@ use crate::store::StoreCtx;
 /// Returns an error if the explicit command guest is neither registered nor
 /// declared or fails to load, routing is ambiguous, the guest cannot be
 /// instantiated, or the command traps without a guest exit code.
-pub async fn drive<B>(runtime: &Runtime<B>) -> Result<ExitStatus>
-where
-    B: Clone + Send + Sync + 'static,
-{
+pub async fn drive<B: Backends>(runtime: &Runtime<B>) -> Result<ExitStatus> {
     if let Some(id) = runtime.command_guest() {
         let id = id.clone();
         let guest = runtime
@@ -59,12 +56,9 @@ where
     run_guest(runtime, guest_id, &guest).await
 }
 
-async fn run_guest<B>(
-    runtime: &Runtime<B>, guest_id: &GuestId, guest: &Arc<Guest<StoreCtx<B>>>,
-) -> Result<ExitStatus>
-where
-    B: Clone + Send + Sync + 'static,
-{
+async fn run_guest<B: Backends>(
+    runtime: &Runtime<B>, guest_id: &GuestId, guest: &Arc<Guest<B>>,
+) -> Result<ExitStatus> {
     tracing::debug!(guest = %guest_id, "running wasi:cli/run");
 
     // a command chain root: its link hops run uncapped, like the run itself

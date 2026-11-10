@@ -36,12 +36,16 @@ wasi-keyvalue/
 ├── src/
 │   ├── lib.rs          # cfg-gated guest vs host
 │   ├── guest.rs        # Guest-side bindings (wasm32)
+│   ├── host.rs         # bindgen!, #[derive(HostCtx)] WasiKeyValue, Host impl
 │   └── host/           # Host-side implementation (native)
-│       ├── mod.rs      # WasiKeyValue host type, Host/Server impls
-│       ├── default_impl.rs   # KeyValueDefault backend
-│       └── ...
+│       ├── store_impl.rs     # wasi:keyvalue/store Host* impls on HostView<'_, dyn KeyValueClient>
+│       ├── atomics_impl.rs   # ... one file per WIT interface
+│       ├── resource.rs       # BucketProxy and the other table-held resources
+│       └── default_impl.rs   # KeyValueDefault backend
 └── wit/                # WIT interface definitions (+ deps/)
 ```
+
+`host.rs` declares the host type and derives `HostCtx` on it with `#[host_ctx(client = KeyValueClient)]`, which emits the `HasData` and `HostCtx` impls that let a `runtime!` bundle serve it; its view is the library `HostView<'_, dyn KeyValueClient>` — `{ client, table }` — the `*_impl.rs` files implement the generated `Host*` traits on. See [Extending Omnia](../Architecture.md#extending-omnia) for the chain from backend to linker.
 
 ## Supporting crates
 
@@ -50,4 +54,4 @@ wasi-keyvalue/
 | `omnia` | Runtime core: engine, CLI, deployment, registry, dispatch, telemetry |
 | `omnia-sdk` | Guest SDK: `Handler`, `Client`, `Context`, the HTTP and messaging routers, the command façade (`parse`, `Command`, `Response`), each transport's `export!` macro, errors with their status/exit map, the `TableStore` and `DocumentStore` capabilities, and MCP. Features: `sql`, `docstore`, and `http` (default), `command` |
 | `omnia-guest-macros` | `#[instrument]` attribute |
-| `omnia-host-macros` | `runtime!` macro (use via `omnia::runtime!`) |
+| `omnia-host-macros` | `runtime!` macro (use via `omnia::runtime!`) and `#[derive(HostCtx)]` (use via `omnia_core::HostCtx`) |

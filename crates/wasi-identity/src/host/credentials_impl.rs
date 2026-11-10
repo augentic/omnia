@@ -1,4 +1,5 @@
 use anyhow::Context;
+use omnia_core::HostView;
 use wasmtime::component::{Access, Accessor, Resource};
 
 use crate::host::generated::omnia::identity::credentials::{
@@ -6,7 +7,7 @@ use crate::host::generated::omnia::identity::credentials::{
 };
 use crate::host::generated::omnia::identity::types::Error;
 use crate::host::resource::IdentityProxy;
-use crate::host::{Result, WasiIdentity, WasiIdentityView};
+use crate::host::{IdentityClient, Result, WasiIdentity};
 
 impl<T> HostWithStore<T> for WasiIdentity {
     async fn get_identity(
@@ -35,9 +36,10 @@ impl<T> HostIdentityWithStore<T> for WasiIdentity {
     fn drop(
         mut accessor: Access<'_, T, Self>, rep: Resource<IdentityProxy>,
     ) -> wasmtime::Result<()> {
-        Ok(accessor.get().table.delete(rep).map(|_| ())?)
+        accessor.get().table.delete(rep)?;
+        Ok(())
     }
 }
 
-impl Host for WasiIdentityView<'_> {}
-impl HostIdentity for WasiIdentityView<'_> {}
+impl Host for HostView<'_, dyn IdentityClient> {}
+impl HostIdentity for HostView<'_, dyn IdentityClient> {}

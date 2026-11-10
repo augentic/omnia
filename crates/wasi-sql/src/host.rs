@@ -9,8 +9,6 @@ mod resource;
 mod types_impl;
 
 mod generated {
-    #![allow(missing_docs, reason = "wasmtime bindgen output")]
-
     pub use super::{ConnectionProxy, Error, Statement};
 
     wasmtime::component::bindgen!({
@@ -36,8 +34,8 @@ use std::fmt::Debug;
 pub use default_impl::{ConnectOptions, SqlDefault};
 pub use omnia_backend::sql::{Connection, DataType, Field, Row, SqlClient};
 pub use omnia_core::FutureResult;
-use omnia_core::{Host, Server, StoreView};
-use wasmtime::component::{HasData, Linker};
+use omnia_core::{Host, HostCtx, Provides, StoreCtx};
+use wasmtime::component::Linker;
 
 use self::generated::wasi::sql::{readwrite, types};
 pub use crate::host::resource::*;
@@ -59,25 +57,15 @@ impl Error {
 }
 
 /// Host-side service for `wasi:sql`.
-#[derive(Debug)]
+#[derive(Debug, HostCtx)]
+#[host_ctx(client = SqlClient)]
 pub struct WasiSql;
 
-impl HasData for WasiSql {
-    type Data<'a> = WasiSqlView<'a>;
-}
-
-impl<T> Host<T> for WasiSql
-where
-    T: StoreView<Self> + 'static,
-{
-    fn add_to_linker(linker: &mut Linker<T>) -> anyhow::Result<()> {
-        readwrite::add_to_linker::<_, Self>(linker, T::view)?;
-        Ok(types::add_to_linker::<_, Self>(linker, T::view)?)
+impl<B: Provides<Self>> Host<B> for WasiSql {
+    fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
+        readwrite::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
+        Ok(types::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?)
     }
 }
 
-impl<B> Server<B> for WasiSql {}
-
 omnia_core::host_error!(Error, Other);
-
-omnia_core::wasi_view!(Sql);

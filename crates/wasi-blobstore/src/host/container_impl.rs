@@ -1,5 +1,6 @@
 use anyhow::Context;
 use bytes::Bytes;
+use omnia_core::HostView;
 use wasmtime::component::{Access, Accessor, Resource};
 
 use crate::host::generated::wasi::blobstore::container::{
@@ -8,8 +9,7 @@ use crate::host::generated::wasi::blobstore::container::{
 };
 use crate::host::resource::ContainerProxy;
 use crate::host::{
-    Error, IncomingValue, OutgoingValue, Result, StreamObjectNames, WasiBlobStore,
-    WasiBlobStoreView,
+    BlobStoreClient, Error, IncomingValue, OutgoingValue, Result, StreamObjectNames, WasiBlobStore,
 };
 
 pub fn get_container<T>(
@@ -129,7 +129,8 @@ impl<T> HostContainerWithStore<T> for WasiBlobStore {
     fn drop(
         mut accessor: Access<'_, T, Self>, rep: Resource<ContainerProxy>,
     ) -> wasmtime::Result<()> {
-        Ok(accessor.get().table.delete(rep).map(|_| ())?)
+        accessor.get().table.delete(rep)?;
+        Ok(())
     }
 }
 
@@ -168,10 +169,11 @@ impl<T> HostStreamObjectNamesWithStore<T> for WasiBlobStore {
     fn drop(
         mut accessor: Access<'_, T, Self>, rep: Resource<StreamObjectNames>,
     ) -> wasmtime::Result<()> {
-        Ok(accessor.get().table.delete(rep).map(|_| ())?)
+        accessor.get().table.delete(rep)?;
+        Ok(())
     }
 }
 
-impl Host for WasiBlobStoreView<'_> {}
-impl HostContainer for WasiBlobStoreView<'_> {}
-impl HostStreamObjectNames for WasiBlobStoreView<'_> {}
+impl Host for HostView<'_, dyn BlobStoreClient> {}
+impl HostContainer for HostView<'_, dyn BlobStoreClient> {}
+impl HostStreamObjectNames for HostView<'_, dyn BlobStoreClient> {}

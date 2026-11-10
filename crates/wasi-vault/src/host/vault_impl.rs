@@ -1,10 +1,11 @@
 use anyhow::Context;
+use omnia_core::HostView;
 use wasmtime::component::{Access, Accessor, Resource};
 
 use crate::host::generated::omnia::vault::vault::Error;
 use crate::host::resource::LockerProxy;
 use crate::host::vault::{Host, HostLocker, HostLockerWithStore, HostWithStore};
-use crate::host::{Result, WasiVault, WasiVaultView};
+use crate::host::{Result, VaultClient, WasiVault};
 
 pub fn get_locker<T>(
     accessor: &Accessor<T, WasiVault>, self_: &Resource<LockerProxy>,
@@ -60,19 +61,20 @@ impl<T> HostLockerWithStore<T> for WasiVault {
         accessor: &Accessor<T, Self>, self_: Resource<LockerProxy>,
     ) -> Result<Vec<String>> {
         let locker = get_locker(accessor, &self_)?;
-        let secret_ids = locker.list_ids().await.context("issue getting value")?;
+        let secret_ids = locker.list_ids().await.context("issue listing secret ids")?;
         Ok(secret_ids)
     }
 
     fn drop(mut accessor: Access<'_, T, Self>, rep: Resource<LockerProxy>) -> wasmtime::Result<()> {
-        accessor.get().table.delete(rep).map(|_| Ok(()))?
+        accessor.get().table.delete(rep)?;
+        Ok(())
     }
 }
 
-impl Host for WasiVaultView<'_> {
+impl Host for HostView<'_, dyn VaultClient> {
     fn convert_error(&mut self, err: Error) -> wasmtime::Result<Error> {
         Ok(err)
     }
 }
 
-impl HostLocker for WasiVaultView<'_> {}
+impl HostLocker for HostView<'_, dyn VaultClient> {}

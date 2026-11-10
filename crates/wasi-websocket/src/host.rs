@@ -9,7 +9,7 @@ mod server;
 mod types_impl;
 
 mod generated {
-    #![allow(missing_docs, reason = "wasmtime bindgen output")]
+    #![expect(missing_docs, reason = "wasmtime bindgen output")]
 
     pub use self::omnia::websocket::types::Error;
     pub use crate::host::resource::{ClientProxy, Event};
@@ -38,8 +38,8 @@ use std::fmt::Debug;
 pub use default_impl::{ConnectOptions, WebSocketDefault};
 pub use omnia_backend::websocket::{Endpoint, Event, Events, WebSocketClient};
 pub use omnia_core::FutureResult;
-use omnia_core::{Host, Runtime, Server, StoreCtx, StoreView};
-use wasmtime::component::{HasData, Linker};
+use omnia_core::{Host, HostCtx, Provides, Runtime, StoreCtx};
+use wasmtime::component::Linker;
 
 pub use self::generated::Duplex;
 pub use self::generated::omnia::websocket::types::Error;
@@ -50,33 +50,20 @@ pub use self::server::WebSocketHandler;
 /// Result type for WebSocket operations.
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// Host-side service for `wasi:websocket`.
-#[derive(Clone, Debug)]
+/// Host-side service for `omnia:websocket`.
+#[derive(Clone, Debug, HostCtx)]
+#[host_ctx(client = WebSocketClient)]
 pub struct WasiWebSocket;
 
-impl HasData for WasiWebSocket {
-    type Data<'a> = WasiWebSocketView<'a>;
-}
-
-impl<T> Host<T> for WasiWebSocket
-where
-    T: StoreView<Self> + 'static,
-{
-    fn add_to_linker(linker: &mut Linker<T>) -> anyhow::Result<()> {
-        client::add_to_linker::<_, Self>(linker, T::view)?;
-        Ok(generated_types::add_to_linker::<_, Self>(linker, T::view)?)
+impl<B: Provides<Self>> Host<B> for WasiWebSocket {
+    fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
+        client::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
+        Ok(generated_types::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?)
     }
-}
 
-impl<B> Server<B> for WasiWebSocket
-where
-    B: Clone + Send + Sync + 'static,
-    StoreCtx<B>: StoreView<Self>,
-{
-    async fn run(&self, state: &Runtime<B>) -> anyhow::Result<()> {
-        server::run(state).await
+    async fn run(runtime: &Runtime<B>) -> anyhow::Result<()> {
+        server::run(runtime).await
     }
 }
 
 omnia_core::host_error!(Error, Other);
-omnia_core::wasi_view!(WebSocket);

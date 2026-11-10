@@ -1,5 +1,6 @@
 //! `omnia:docstore` `store` interface.
 
+use omnia_core::HostView;
 use wasmtime::component::Accessor;
 
 use crate::host::generated::omnia::docstore::store::{
@@ -7,7 +8,7 @@ use crate::host::generated::omnia::docstore::store::{
     QueryResult as WitQueryResult,
 };
 use crate::host::generated::omnia::docstore::types::SortField as WitSortField;
-use crate::host::{Document, QueryOptions, Result, SortField, WasiDocStore, WasiDocStoreView};
+use crate::host::{DocStoreClient, Document, QueryOptions, Result, SortField, WasiDocStore};
 
 fn from_wit_document(doc: WitDocument) -> Document {
     Document {
@@ -86,4 +87,4 @@ impl<T> HostWithStore<T> for WasiDocStore {
     }
 }
 
-impl StoreHost for WasiDocStoreView<'_> {}
+impl StoreHost for HostView<'_, dyn DocStoreClient> {}

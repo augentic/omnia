@@ -34,9 +34,9 @@ use std::fmt::Debug;
 pub use default_impl::{ConnectOptions, IdentityDefault};
 pub use omnia_backend::identity::{AccessToken, Identity, IdentityClient};
 pub use omnia_core::FutureResult;
-use omnia_core::{Host, Server, StoreView};
+use omnia_core::{Host, HostCtx, Provides, StoreCtx};
 pub use stub_impl::IdentityStub;
-use wasmtime::component::{HasData, Linker};
+use wasmtime::component::Linker;
 
 use self::generated::omnia::identity::credentials;
 pub use self::resource::*;
@@ -45,24 +45,15 @@ use crate::host::generated::Error;
 /// Result type for identity operations.
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// Host-side service for `wasi:identity`.
-#[derive(Debug)]
+/// Host-side service for `omnia:identity`.
+#[derive(Debug, HostCtx)]
+#[host_ctx(client = IdentityClient)]
 pub struct WasiIdentity;
 
-impl HasData for WasiIdentity {
-    type Data<'a> = WasiIdentityView<'a>;
-}
-
-impl<T> Host<T> for WasiIdentity
-where
-    T: StoreView<Self> + 'static,
-{
-    fn add_to_linker(linker: &mut Linker<T>) -> anyhow::Result<()> {
-        Ok(credentials::add_to_linker::<_, Self>(linker, T::view)?)
+impl<B: Provides<Self>> Host<B> for WasiIdentity {
+    fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
+        Ok(credentials::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?)
     }
 }
 
-impl<B> Server<B> for WasiIdentity {}
-
 omnia_core::host_error!(Error, InternalFailure);
-omnia_core::wasi_view!(Identity);

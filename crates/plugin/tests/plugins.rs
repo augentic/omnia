@@ -21,7 +21,7 @@ use omnia::wasmtime::component::Val;
 use omnia::{
     AcquireError, ChainCtx, CompileOptions, DeploymentBuilder, Digest, ExitStatus, GuestEntry,
     GuestId, LoadError, Location, Manifest, Mode, Mount, NoStore, PluginLoader as _, PluginsConfig,
-    RegistryClient, RegistryConfig, RegistrySource, Runtime, SourceSpec, StoreCtx,
+    RegistryClient, RegistryConfig, RegistrySource, Runtime, SourceSpec,
 };
 use omnia_test::host::{Backends, Scratch, scratch};
 use omnia_wasi_otel::WasiOtel;
@@ -54,17 +54,15 @@ fn declared(name: &str) -> Location {
 
 // command mode; the loader host is assembly's, and the link seam is read
 // off the components
-async fn deployment(
-    manifest: Manifest, args: &[&str],
-) -> Result<omnia::Deployment<StoreCtx<Backends>>> {
+async fn deployment(manifest: Manifest, args: &[&str]) -> Result<omnia::Deployment<Backends>> {
     let mut deployment = DeploymentBuilder::new()
         .manifest(manifest)
         .mode(Mode::Command)
         .args(args.iter().map(|arg| (*arg).to_owned()).collect::<Vec<_>>())
-        .build::<StoreCtx<Backends>>()
+        .build::<Backends>()
         .await
         .context("building deployment")?;
-    deployment.host::<WasiOtel, Backends>()?;
+    deployment.host::<WasiOtel>()?;
     Ok(deployment)
 }
 

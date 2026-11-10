@@ -1,3 +1,4 @@
+use omnia_core::HostView;
 use wasmtime::component::{Access, Accessor, Resource};
 
 use crate::host::generated::wasi::messaging::types;
@@ -5,7 +6,7 @@ pub use crate::host::generated::wasi::messaging::types::{
     Error, Host, HostClient, HostClientWithStore, HostMessage, HostMessageWithStore, Topic,
 };
 use crate::host::resource::{ClientProxy, Message, from_wit_metadata, to_wit_metadata};
-use crate::host::{Result, WasiMessaging, WasiMessagingView};
+use crate::host::{MessagingClient, Result, WasiMessaging};
 
 pub fn get_client<T>(
     accessor: &Accessor<T, WasiMessaging>, self_: &Resource<ClientProxy>,
@@ -31,7 +32,8 @@ impl<T> HostClientWithStore<T> for WasiMessaging {
     }
 
     fn drop(mut accessor: Access<'_, T, Self>, rep: Resource<ClientProxy>) -> wasmtime::Result<()> {
-        Ok(accessor.get().table.delete(rep).map(|_| ())?)
+        accessor.get().table.delete(rep)?;
+        Ok(())
     }
 }
 
@@ -112,14 +114,15 @@ impl<T> HostMessageWithStore<T> for WasiMessaging {
     }
 
     fn drop(mut accessor: Access<'_, T, Self>, rep: Resource<Message>) -> wasmtime::Result<()> {
-        Ok(accessor.get().table.delete(rep).map(|_| ())?)
+        accessor.get().table.delete(rep)?;
+        Ok(())
     }
 }
 
-impl Host for WasiMessagingView<'_> {
+impl Host for HostView<'_, dyn MessagingClient> {
     fn convert_error(&mut self, err: Error) -> wasmtime::Result<Error> {
         Ok(err)
     }
 }
-impl HostClient for WasiMessagingView<'_> {}
-impl HostMessage for WasiMessagingView<'_> {}
+impl HostClient for HostView<'_, dyn MessagingClient> {}
+impl HostMessage for HostView<'_, dyn MessagingClient> {}

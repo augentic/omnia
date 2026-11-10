@@ -13,8 +13,6 @@ mod transport_impl;
 mod workspace_impl;
 
 mod generated {
-    #![allow(missing_docs, reason = "wasmtime bindgen output")]
-
     pub use self::omnia::vcs::types::Error;
 
     wasmtime::component::bindgen!({
@@ -39,8 +37,8 @@ pub use omnia_backend::vcs::{
     Change, ChangeKind, CloneOptions, Entry, Error, Merged, Place, Rule, Strategy, VcsClient,
 };
 pub use omnia_core::FutureResult;
-use omnia_core::{HasMounts, Host, Server, StoreView};
-use wasmtime::component::{Access, Accessor, HasData, Linker};
+use omnia_core::{Host, HostCtx, HostView, Provides, StoreCtx};
+use wasmtime::component::{Access, Accessor, Linker};
 
 pub use self::generated::omnia::vcs::types::Error as WitError;
 use self::generated::omnia::vcs::types::{Host as TypesHost, Location};
@@ -51,43 +49,32 @@ use self::location::Intent;
 pub type Result<T> = std::result::Result<T, WitError>;
 
 /// Host-side service for `omnia:vcs`.
-#[derive(Debug)]
+#[derive(Debug, HostCtx)]
+#[host_ctx(client = VcsClient)]
 pub struct WasiVcs;
 
-impl HasData for WasiVcs {
-    type Data<'a> = WasiVcsView<'a>;
-}
-
-impl<T> Host<T> for WasiVcs
-where
-    T: StoreView<Self> + HasMounts + 'static,
-{
-    fn add_to_linker(linker: &mut Linker<T>) -> anyhow::Result<()> {
-        types::add_to_linker::<_, Self>(linker, T::view)?;
-        store::add_to_linker::<_, Self>(linker, T::view)?;
-        workspace::add_to_linker::<_, Self>(linker, T::view)?;
-        Ok(transport::add_to_linker::<_, Self>(linker, T::view)?)
+impl<B: Provides<Self>> Host<B> for WasiVcs {
+    fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
+        types::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
+        store::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
+        workspace::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
+        Ok(transport::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?)
     }
 }
 
-impl<B> Server<B> for WasiVcs {}
-
 impl WasiVcs {
-    fn locate<T: HasMounts>(
-        access: &mut Access<'_, T, Self>, location: &Location, intent: Intent,
+    fn locate<B>(
+        access: &mut Access<'_, StoreCtx<B>, Self>, location: &Location, intent: Intent,
     ) -> Result<Place> {
         let mounts = access.data_mut().mounts();
         let descriptor = access.get().table.get(&location.root)?;
         location::resolve(descriptor, &mounts, location, intent).map_err(Self::lower)
     }
 
-    async fn dispatch<T, R>(
-        accessor: &Accessor<T, Self>,
-        op: impl FnOnce(&mut Access<'_, T, Self>) -> Result<FutureResult<R>>,
-    ) -> Result<R>
-    where
-        T: HasMounts,
-    {
+    async fn dispatch<B, R>(
+        accessor: &Accessor<StoreCtx<B>, Self>,
+        op: impl FnOnce(&mut Access<'_, StoreCtx<B>, Self>) -> Result<FutureResult<R>>,
+    ) -> Result<R> {
         let pending = accessor.with(|mut access| op(&mut access))?;
         pending.await.map_err(Self::lower)
     }
@@ -111,9 +98,8 @@ fn to_wit_error(err: Error) -> WitError {
 
 // An untyped host failure is an `other` error at the boundary.
 omnia_core::host_error!(WitError, Other);
-omnia_core::wasi_view!(Vcs);
 
-impl TypesHost for WasiVcsView<'_> {
+impl TypesHost for HostView<'_, dyn VcsClient> {
     fn convert_error(&mut self, err: WitError) -> wasmtime::Result<WitError> {
         Ok(err)
     }

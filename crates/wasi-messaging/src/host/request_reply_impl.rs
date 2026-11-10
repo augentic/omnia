@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use omnia_core::HostView;
 use wasmtime::component::{Access, Accessor, Resource};
 
 use crate::host::generated::wasi::messaging::request_reply::{
@@ -8,7 +9,7 @@ use crate::host::generated::wasi::messaging::request_reply::{
 use crate::host::generated::wasi::messaging::types::Topic;
 use crate::host::resource::{ClientProxy, Message, RequestOptions};
 use crate::host::types_impl::{get_client, get_message};
-use crate::host::{Result, WasiMessaging, WasiMessagingView};
+use crate::host::{MessagingClient, Result, WasiMessaging};
 
 impl<T> HostWithStore<T> for WasiMessaging {
     async fn request(
@@ -68,9 +69,10 @@ impl<T> HostRequestOptionsWithStore<T> for WasiMessaging {
     fn drop(
         mut accessor: Access<'_, T, Self>, rep: Resource<RequestOptions>,
     ) -> wasmtime::Result<()> {
-        Ok(accessor.get().table.delete(rep).map(|_| ())?)
+        accessor.get().table.delete(rep)?;
+        Ok(())
     }
 }
 
-impl Host for WasiMessagingView<'_> {}
-impl HostRequestOptions for WasiMessagingView<'_> {}
+impl Host for HostView<'_, dyn MessagingClient> {}
+impl HostRequestOptions for HostView<'_, dyn MessagingClient> {}

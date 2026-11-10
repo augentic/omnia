@@ -277,25 +277,16 @@ pub trait RegistrySource: Send + Sync + 'static {
 }
 
 /// Why a [`RegistrySource`] could not produce a package's bytes.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum AcquireError {
     /// Nothing routes the package, or the registry has no such release; a
     /// retry cannot succeed.
+    #[error("refused: {0}")]
     Refused(String),
     /// The registry could not produce the bytes; a retry may succeed.
+    #[error("unavailable: {0}")]
     Unavailable(String),
 }
-
-impl fmt::Display for AcquireError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Refused(detail) => write!(f, "refused: {detail}"),
-            Self::Unavailable(detail) => write!(f, "unavailable: {detail}"),
-        }
-    }
-}
-
-impl std::error::Error for AcquireError {}
 
 /// Component bytes admitted for loading, with their digest.
 ///
