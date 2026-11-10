@@ -9,6 +9,8 @@ mod resource;
 mod types_impl;
 
 mod generated {
+    #![allow(missing_docs, reason = "wasmtime bindgen output")]
+
     pub use super::{ConnectionProxy, Error, Statement};
 
     wasmtime::component::bindgen!({
@@ -29,15 +31,16 @@ mod generated {
 }
 
 use std::fmt::Debug;
+use std::sync::Arc;
 
-#[cfg(feature = "sqlite")]
-pub use default_impl::{ConnectOptions, SqlDefault};
-pub use omnia_backend::sql::{Connection, DataType, Field, Row, SqlClient};
 pub use omnia_core::FutureResult;
 use omnia_core::{Host, HostCtx, Provides, StoreCtx};
 use wasmtime::component::Linker;
 
 use self::generated::wasi::sql::{readwrite, types};
+#[cfg(feature = "sqlite")]
+pub use crate::host::default_impl::{ConnectOptions, SqlDefault};
+pub use crate::host::generated::wasi::sql::types::{DataType, Field, Row};
 pub use crate::host::resource::*;
 
 /// Host error backing the `wasi:sql` error resource.
@@ -56,6 +59,8 @@ impl Error {
     }
 }
 
+omnia_core::host_error!(Error, Other);
+
 /// Host-side service for `wasi:sql`.
 #[derive(Debug, HostCtx)]
 #[host_ctx(client = SqlClient)]
@@ -68,4 +73,11 @@ impl<B: Provides<Self>> Host<B> for WasiSql {
     }
 }
 
-omnia_core::host_error!(Error, Other);
+/// Service contract for `wasi:sql` backends.
+///
+/// This is implemented by the resource-specific provider of SQL
+/// functionality. For example, `PostgreSQL`, `MySQL`, `SQLite`, etc.
+pub trait SqlClient: Debug + Send + Sync + 'static {
+    /// Open a connection to the database.
+    fn open(&self, name: String) -> FutureResult<Arc<dyn Connection>>;
+}

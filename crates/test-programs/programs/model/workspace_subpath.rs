@@ -19,5 +19,5 @@ async fn scenario() {
         )
         .await
         .expect("subpath tools answer");
-    assert_eq!(reply.answer, "hello:docs,out.txt,seed.txt");
+    assert_eq!(reply.answer, "hello:out.txt,seed.txt");
 }

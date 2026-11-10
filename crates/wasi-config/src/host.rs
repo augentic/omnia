@@ -4,57 +4,42 @@
 
 mod default_impl;
 
-mod generated {
-    pub use self::wasi::config::store::Error;
-
-    wasmtime::component::bindgen!({
-        world: "imports",
-        path: "wit",
-        imports: {
-            default: async | tracing | trappable,
-        },
-        trappable_error_type: {
-            "wasi:config/store.error" => Error,
-        },
-    });
-}
-
 use std::fmt::Debug;
 
 pub use default_impl::ConfigDefault;
-pub use omnia_backend::config::ConfigClient;
-pub use omnia_core::FutureResult;
-use omnia_core::{Host, HostCtx, HostView, Provides, StoreCtx};
-use wasmtime::component::Linker;
-
-use self::generated::wasi::config::store::{self, Error, Host as StoreHost};
-
-/// Result type for config operations.
-pub type Result<T> = std::result::Result<T, Error>;
+use omnia_core::{Host, HostCtx, Provides, StoreCtx};
+use wasmtime::component::{HasData, Linker, ResourceTable};
+pub use wasmtime_wasi_config;
+use wasmtime_wasi_config::WasiConfigVariables;
 
 /// Host-side service for `wasi:config`.
-#[derive(Debug, HostCtx)]
-#[host_ctx(client = ConfigClient)]
+#[derive(Debug)]
 pub struct WasiConfig;
 
-impl<B: Provides<Self>> Host<B> for WasiConfig {
-    fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
-        Ok(store::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?)
+impl HasData for WasiConfig {
+    type Data<'a> = wasmtime_wasi_config::WasiConfig<'a>;
+}
+
+// hand-written rather than derived: the view is the one `wasmtime-wasi-config`
+// owns, built from the backend's variables with no resource table involved
+impl HostCtx for WasiConfig {
+    type Borrow<'a> = &'a dyn ConfigClient;
+
+    fn view<'a>(
+        borrow: Self::Borrow<'a>, _table: &'a mut ResourceTable,
+    ) -> wasmtime_wasi_config::WasiConfig<'a> {
+        wasmtime_wasi_config::WasiConfig::from(borrow.get_config())
     }
 }
 
-omnia_core::host_error!(Error, Upstream);
-
-impl StoreHost for HostView<'_, dyn ConfigClient> {
-    async fn get(&mut self, key: String) -> Result<Option<String>> {
-        Ok(self.client.get(key).await?)
+impl<B: Provides<Self>> Host<B> for WasiConfig {
+    fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
+        Ok(wasmtime_wasi_config::add_to_linker(linker, StoreCtx::view::<Self>)?)
     }
+}
 
-    async fn get_all(&mut self) -> Result<Vec<(String, String)>> {
-        Ok(self.client.get_all().await?)
-    }
-
-    fn convert_error(&mut self, err: Error) -> wasmtime::Result<Error> {
-        Ok(err)
-    }
+/// Service contract for `wasi:config` backends.
+pub trait ConfigClient: Debug + Send + Sync + 'static {
+    /// Get the configuration variables.
+    fn get_config(&self) -> &WasiConfigVariables;
 }

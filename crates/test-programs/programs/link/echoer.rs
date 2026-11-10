@@ -3,7 +3,14 @@
 
 #![cfg(target_arch = "wasm32")]
 
+wit_bindgen::generate!({
+    world: "echoer",
+    path: "wit",
+});
+
 struct Echoer;
+
+export!(Echoer);
 
 impl exports::omnia_test::link::ops::Guest for Echoer {
     fn ping(target: String, message: String) -> String {
@@ -14,10 +21,3 @@ impl exports::omnia_test::link::ops::Guest for Echoer {
         format!("{target} pong-async: {message}")
     }
 }
-
-wit_bindgen::generate!({
-    world: "echoer",
-    path: "wit",
-});
-
-export!(Echoer);

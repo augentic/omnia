@@ -39,8 +39,7 @@ impl<T> HostIncomingValueWithStore<T> for WasiBlobStore {
     fn drop(
         mut accessor: Access<'_, T, Self>, rep: Resource<IncomingValue>,
     ) -> wasmtime::Result<()> {
-        accessor.get().table.delete(rep)?;
-        Ok(())
+        Ok(accessor.get().table.delete(rep).map(|_| ())?)
     }
 }
 
@@ -85,8 +84,7 @@ impl<T> HostOutgoingValueWithStore<T> for WasiBlobStore {
     fn drop(
         mut accessor: Access<'_, T, Self>, rep: Resource<OutgoingValue>,
     ) -> wasmtime::Result<()> {
-        accessor.get().table.delete(rep)?;
-        Ok(())
+        Ok(accessor.get().table.delete(rep).map(|_| ())?)
     }
 }
 

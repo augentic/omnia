@@ -1,4 +1,15 @@
-use omnia_backend::identity::Identity;
+use std::fmt::Debug;
+
+pub use omnia_core::FutureResult;
+
+pub use crate::host::generated::omnia::identity::credentials::AccessToken;
+
+/// Providers implement the [`Identity`] trait to allow the host to
+/// interact with different backend identity providers.
+pub trait Identity: Debug + Send + Sync + 'static {
+    /// The name of the identity provider.
+    fn get_token(&self, scopes: Vec<String>) -> FutureResult<AccessToken>;
+}
 
 /// Represents an identity resource in the WASI Identity host.
 pub type IdentityProxy = omnia_core::Proxy<dyn Identity>;

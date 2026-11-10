@@ -9,12 +9,6 @@ use crate::host::resource::BucketProxy;
 use crate::host::store::{Host, HostBucket};
 use crate::host::{KeyValueClient, Result, WasiKeyValue};
 
-pub fn get_bucket<T>(
-    accessor: &Accessor<T, WasiKeyValue>, self_: &Resource<BucketProxy>,
-) -> Result<BucketProxy> {
-    omnia_core::get_cloned(accessor, self_).map_err(|_stale| Error::NoSuchStore)
-}
-
 impl<T> HostWithStore<T> for WasiKeyValue {
     async fn open(
         accessor: &Accessor<T, Self>, identifier: String,
@@ -38,7 +32,7 @@ impl<T> HostBucketWithStore<T> for WasiKeyValue {
         accessor: &Accessor<T, Self>, self_: Resource<BucketProxy>, key: String, value: Vec<u8>,
     ) -> Result<()> {
         let bucket = get_bucket(accessor, &self_)?;
-        bucket.set(key, value, None).await.context("issue setting value")?;
+        bucket.set(key, value).await.context("issue setting value")?;
         Ok(())
     }
 
@@ -69,8 +63,7 @@ impl<T> HostBucketWithStore<T> for WasiKeyValue {
     }
 
     fn drop(mut accessor: Access<'_, T, Self>, rep: Resource<BucketProxy>) -> wasmtime::Result<()> {
-        accessor.get().table.delete(rep)?;
-        Ok(())
+        Ok(accessor.get().table.delete(rep).map(|_| ())?)
     }
 }
 
@@ -81,3 +74,9 @@ impl Host for HostView<'_, dyn KeyValueClient> {
 }
 
 impl HostBucket for HostView<'_, dyn KeyValueClient> {}
+
+pub fn get_bucket<T>(
+    accessor: &Accessor<T, WasiKeyValue>, self_: &Resource<BucketProxy>,
+) -> Result<BucketProxy> {
+    omnia_core::get_cloned(accessor, self_).map_err(|_stale| Error::NoSuchStore)
+}

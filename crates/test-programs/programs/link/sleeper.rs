@@ -6,22 +6,12 @@
 
 use std::time::Duration;
 
-struct Sleeper;
-
-impl exports::omnia_test::link::ops::Guest for Sleeper {
-    fn ping(target: String, message: String) -> String {
-        respond(&target, &message)
-    }
-
-    async fn ping_async(target: String, message: String) -> String {
-        respond(&target, &message)
-    }
-}
-
 wit_bindgen::generate!({
     world: "sleeper",
     path: "wit",
 });
+
+struct Sleeper;
 
 export!(Sleeper);
 
@@ -32,4 +22,14 @@ fn respond(target: &str, message: &str) -> String {
         std::thread::sleep(Duration::from_secs(2));
     }
     format!("{target} woke: {message}")
+}
+
+impl exports::omnia_test::link::ops::Guest for Sleeper {
+    fn ping(target: String, message: String) -> String {
+        respond(&target, &message)
+    }
+
+    async fn ping_async(target: String, message: String) -> String {
+        respond(&target, &message)
+    }
 }

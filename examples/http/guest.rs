@@ -16,6 +16,7 @@ use wasip3::exports::http::handler::Guest;
 use wasip3::http::types::{ErrorCode, Request, Response};
 
 struct HttpGuest;
+wasip3::http::service::export!(HttpGuest);
 
 impl Guest for HttpGuest {
     #[omnia_wasi_otel::instrument(name = "http_guest_handle", level = Level::DEBUG)]
@@ -24,7 +25,6 @@ impl Guest for HttpGuest {
         omnia_wasi_http::serve(router, request).await
     }
 }
-wasip3::http::service::export!(HttpGuest);
 
 #[omnia_wasi_otel::instrument]
 async fn echo_get() -> omnia_sdk::Result<Json<Value>> {

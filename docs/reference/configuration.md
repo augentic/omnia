@@ -43,7 +43,7 @@ On the `run` grammar the flags are the host's, global to the command (`bin -v ru
 
 ### Instance pooling
 
-The pooling allocator recycles instance slots so per-request instantiation stays cheap. The table below lists the commonly tuned variables; the **complete** list (including the long tail of wasmtime mirrors) lives in `crates/core/src/options.rs`, where every field carries a doc comment naming its variable and default.
+The pooling allocator recycles instance slots so per-request instantiation stays cheap. The table below lists the commonly tuned variables; the **complete** list (including the long tail of wasmtime mirrors) lives in `crates/omnia-core/src/options.rs`, where every field carries a doc comment naming its variable and default.
 
 | Variable                     | Default                     | Meaning                                                       |
 | ---------------------------- | --------------------------- | ------------------------------------------------------------- |
@@ -54,7 +54,7 @@ The pooling allocator recycles instance slots so per-request instantiation stays
 | `POOL_METRICS_INTERVAL_MS`   | `5000`                      | Interval between pool-occupancy metric samples; `0` disables. |
 | `POOL_IDLE_RELEASE_MS`       | `0`                         | Idle time, from the last guest invocation, after which warm slots' resident memory is released to the OS; `0` disables. |
 
-Further tunables mirror wasmtime's pooling configuration one-to-one: `POOL_TOTAL_CORE_INSTANCES`, `POOL_TOTAL_MEMORIES`, `POOL_TOTAL_TABLES`, `POOL_TOTAL_STACKS`, `POOL_MEMORY_KEEP_RESIDENT`, `POOL_TABLE_KEEP_RESIDENT`, `POOL_ASYNC_STACK_KEEP_RESIDENT`, `POOL_DECOMMIT_BATCH_SIZE`, `POOL_PAGEMAP_SCAN`, per-component/per-module limits, and (with the `mpk` feature) `POOL_MEMORY_PROTECTION_KEYS`. See `crates/core/src/options.rs` for the authoritative list with doc comments.
+Further tunables mirror wasmtime's pooling configuration one-to-one: `POOL_TOTAL_CORE_INSTANCES`, `POOL_TOTAL_MEMORIES`, `POOL_TOTAL_TABLES`, `POOL_TOTAL_STACKS`, `POOL_MEMORY_KEEP_RESIDENT`, `POOL_TABLE_KEEP_RESIDENT`, `POOL_ASYNC_STACK_KEEP_RESIDENT`, `POOL_DECOMMIT_BATCH_SIZE`, `POOL_PAGEMAP_SCAN`, per-component/per-module limits, and (with the `mpk` feature) `POOL_MEMORY_PROTECTION_KEYS`. See `crates/omnia-core/src/options.rs` for the authoritative list with doc comments.
 
 ### Memory layout and artifacts (compile-affecting)
 
@@ -64,13 +64,13 @@ Two further compile-affecting options trade artifact size against introspection:
 
 ### Default backends
 
-| Variable                                                             | Default                 | Used by                      |
-| -------------------------------------------------------------------- | ----------------------- | ---------------------------- |
-| `HTTP_ADDR`                                                          | `0.0.0.0:8080`          | `HttpDefault` inbound server |
+| Variable                                                             | Default                 | Used by                       |
+| -------------------------------------------------------------------- | ----------------------- | ----------------------------- |
+| `HTTP_ADDR`                                                          | `0.0.0.0:8080`          | `HttpDefault` inbound server  |
 | `HTTP_CONNECT_TIMEOUT`                                               | `10` (seconds)          | `HttpDefault` outbound client |
-| `WEBSOCKET_ADDR`                                                     | `0.0.0.0:80`            | `WebSocketDefault` server    |
-| `SQL_DATABASE`                                                       | shared in-memory SQLite | `SqlDefault`                 |
-| `IDENTITY_CLIENT_ID`, `IDENTITY_CLIENT_SECRET`, `IDENTITY_TOKEN_URL` | unset                   | `IdentityDefault` OAuth flow |
+| `WEBSOCKET_ADDR`                                                     | `0.0.0.0:80`            | `WebSocketDefault` server     |
+| `SQL_DATABASE`                                                       | shared in-memory SQLite | `SqlDefault`                  |
+| `IDENTITY_CLIENT_ID`, `IDENTITY_CLIENT_SECRET`, `IDENTITY_TOKEN_URL` | unset                   | `IdentityDefault` OAuth flow  |
 
 Production backend variables (Redis, Kafka, Azure, ...) are listed in [Production Backends](../guides/production-backends.md#configuration) and each backend crate's README.
 

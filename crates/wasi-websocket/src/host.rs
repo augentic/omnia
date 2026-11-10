@@ -9,7 +9,7 @@ mod server;
 mod types_impl;
 
 mod generated {
-    #![expect(missing_docs, reason = "wasmtime bindgen output")]
+    #![allow(missing_docs, reason = "wasmtime bindgen output")]
 
     pub use self::omnia::websocket::types::Error;
     pub use crate::host::resource::{ClientProxy, Event};
@@ -34,13 +34,13 @@ mod generated {
 }
 
 use std::fmt::Debug;
+use std::sync::Arc;
 
-pub use default_impl::{ConnectOptions, WebSocketDefault};
-pub use omnia_backend::websocket::{Endpoint, Event, Events, WebSocketClient};
 pub use omnia_core::FutureResult;
 use omnia_core::{Host, HostCtx, Provides, Runtime, StoreCtx};
 use wasmtime::component::Linker;
 
+pub use self::default_impl::{ConnectOptions, WebSocketDefault};
 pub use self::generated::Duplex;
 pub use self::generated::omnia::websocket::types::Error;
 use self::generated::omnia::websocket::{client, types as generated_types};
@@ -50,7 +50,7 @@ pub use self::server::WebSocketHandler;
 /// Result type for WebSocket operations.
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// Host-side service for `omnia:websocket`.
+/// Host-side service for `wasi:websocket`.
 #[derive(Clone, Debug, HostCtx)]
 #[host_ctx(client = WebSocketClient)]
 pub struct WasiWebSocket;
@@ -64,6 +64,22 @@ impl<B: Provides<Self>> Host<B> for WasiWebSocket {
     async fn run(runtime: &Runtime<B>) -> anyhow::Result<()> {
         server::run(runtime).await
     }
+}
+
+/// Service contract for `omnia:websocket` backends.
+///
+/// This is implemented by the resource-specific provider of WebSocket
+/// functionality.
+///
+/// Event construction lives on the host's [`Event`] struct; backends only
+/// translate at the [`Endpoint`] seam.
+pub trait WebSocketClient: Debug + Send + Sync + 'static {
+    /// Open a WebSocket endpoint handle.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the connection fails.
+    fn endpoint(&self) -> FutureResult<Arc<dyn Endpoint>>;
 }
 
 omnia_core::host_error!(Error, Other);

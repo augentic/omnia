@@ -17,7 +17,6 @@ axum = { workspace = true, features = ["query"] }
 clap.workspace = true
 futures.workspace = true
 omnia-sdk = { workspace = true, features = ["command", "http"] }
-omnia-test = { workspace = true, features = ["conformance"] }
 omnia-wasi-blobstore.workspace = true
 omnia-wasi-config.workspace = true
 omnia-wasi-docstore.workspace = true
@@ -70,11 +69,6 @@ path = "programs/config/seeded.rs"
 crate-type = ["cdylib"]
 
 [[example]]
-name = "conformance_portable"
-path = "programs/conformance/portable.rs"
-crate-type = ["cdylib"]
-
-[[example]]
 name = "docstore_crud_query"
 path = "programs/docstore/crud_query.rs"
 crate-type = ["cdylib"]
@@ -85,13 +79,13 @@ path = "programs/docstore/insert_conflict.rs"
 crate-type = ["cdylib"]
 
 [[example]]
-name = "http_client_cert"
-path = "programs/http/client_cert.rs"
+name = "http_incoming_echo"
+path = "programs/http/incoming_echo.rs"
 crate-type = ["cdylib"]
 
 [[example]]
-name = "http_incoming_echo"
-path = "programs/http/incoming_echo.rs"
+name = "http_outgoing_client_cert"
+path = "programs/http/outgoing_client_cert.rs"
 crate-type = ["cdylib"]
 
 [[example]]
@@ -117,11 +111,6 @@ crate-type = ["cdylib"]
 [[example]]
 name = "keyvalue_bucket"
 path = "programs/keyvalue/bucket.rs"
-crate-type = ["cdylib"]
-
-[[example]]
-name = "keyvalue_ttl_expires"
-path = "programs/keyvalue/ttl_expires.rs"
 crate-type = ["cdylib"]
 
 [[example]]
@@ -210,6 +199,11 @@ path = "programs/model/echo_json.rs"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "model_echo_schema_rejected"
+path = "programs/model/echo_schema_rejected.rs"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "model_echo_text"
 path = "programs/model/echo_text.rs"
 crate-type = ["cdylib"]
@@ -220,8 +214,8 @@ path = "programs/model/invalid_request.rs"
 crate-type = ["cdylib"]
 
 [[example]]
-name = "model_ooo_results"
-path = "programs/model/ooo_results.rs"
+name = "model_out_of_order_results"
+path = "programs/model/out_of_order_results.rs"
 crate-type = ["cdylib"]
 
 [[example]]
@@ -237,11 +231,6 @@ crate-type = ["cdylib"]
 [[example]]
 name = "model_schema_answer"
 path = "programs/model/schema_answer.rs"
-crate-type = ["cdylib"]
-
-[[example]]
-name = "model_schema_rejected"
-path = "programs/model/schema_rejected.rs"
 crate-type = ["cdylib"]
 
 [[example]]
@@ -315,8 +304,8 @@ path = "programs/model/workspace_tools.rs"
 crate-type = ["cdylib"]
 
 [[example]]
-name = "model_ws_unauthorized"
-path = "programs/model/ws_unauthorized.rs"
+name = "model_workspace_unauthorized"
+path = "programs/model/workspace_unauthorized.rs"
 crate-type = ["cdylib"]
 
 [[example]]
@@ -325,8 +314,8 @@ path = "programs/otel/axum_handler.rs"
 crate-type = ["cdylib"]
 
 [[example]]
-name = "otel_instrumented"
-path = "programs/otel/instrumented.rs"
+name = "otel_instrumented_handler"
+path = "programs/otel/instrumented_handler.rs"
 crate-type = ["cdylib"]
 
 [[example]]
@@ -345,8 +334,8 @@ path = "programs/otel/span_tree.rs"
 crate-type = ["cdylib"]
 
 [[example]]
-name = "otel_spawn_pending"
-path = "programs/otel/spawn_pending.rs"
+name = "otel_spawned_task_pending"
+path = "programs/otel/spawned_task_pending.rs"
 crate-type = ["cdylib"]
 
 [[example]]

@@ -8,27 +8,15 @@ mod runtime;
 use proc_macro::TokenStream;
 use syn::{DeriveInput, parse_macro_input};
 
-/// Generates a host runtime from a map of `Host: Backend` pairs.
+/// Generates the runtime infrastructure based on the configuration.
 ///
-/// Each key is a host type from an `omnia-wasi-*` crate and each value a
-/// backend implementing that interface's context trait. The optional
-/// `mode:`, `manifest:`, and inline manifest keys are documented at the
-/// crate root.
-///
-/// # Examples
+/// # Example
 ///
 /// ```rust,ignore
-/// use omnia_wasi_http::{HttpDefault, WasiHttp};
-/// use omnia_wasi_keyvalue::WasiKeyValue;
-/// use omnia_wasi_otel::{OtelDefault, WasiOtel};
-/// use omnia_redis::Client as Redis;
-///
 /// omnia::runtime!({
-///     hosts: {
-///         WasiHttp: HttpDefault,
-///         WasiOtel: OtelDefault,
-///         WasiKeyValue: Redis,
-///     }
+///     omnia_wasi_http: WasiHttp,
+///     omnia_wasi_otel: DefaultOtel,
+///     omnia_wasi_blobstore: MongoDb,
 /// });
 /// ```
 #[proc_macro]
@@ -42,16 +30,18 @@ pub fn runtime(input: TokenStream) -> TokenStream {
 ///
 /// The derive emits `wasmtime::component::HasData` with
 /// `Data<'a> = omnia_core::HostView<'a, dyn Client>` and `omnia_core::HostCtx`
-/// with `Borrow<'a> = &'a mut dyn Client`. The host implements its bindgen
+/// with `Borrow<'a> = &'a dyn Client`. The host implements its bindgen
 /// `Host*` traits on `HostView<'_, dyn Client>`.
 ///
-/// The type must be non-generic, carry exactly one `#[host_ctx(client = ..)]`,
-/// and the crate must depend on `omnia-core`.
+/// The type must be non-generic and name exactly one `client`.
+///
+/// The emitted paths start at `::omnia_core`. A crate that reaches the derive
+/// through a re-export names that root in `crate`, as in
+/// `#[host_ctx(client = FooClient, crate = omnia)]`.
 ///
 /// # Examples
 ///
 /// ```rust,ignore
-/// pub use omnia_backend::keyvalue::KeyValueClient;
 /// use omnia_core::{Host, HostCtx, Provides, StoreCtx};
 /// use wasmtime::component::Linker;
 ///

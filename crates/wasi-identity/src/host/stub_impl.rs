@@ -1,18 +1,23 @@
-//! Credential-free stub implementation of [`IdentityClient`].
-
 use std::sync::Arc;
 
 use anyhow::Result;
-use futures::FutureExt as _;
-use omnia_backend::identity::{AccessToken, Identity, IdentityClient};
-use omnia_core::{Connect, FutureResult, NoOptions};
+use futures::FutureExt;
+use omnia_core::Connect;
 
-/// Credential-free [`IdentityClient`] returning a fixed token.
+use crate::host::IdentityClient;
+use crate::host::generated::omnia::identity::credentials::AccessToken;
+use crate::host::resource::{FutureResult, Identity};
+
+/// Credential-free `wasi:identity` backend returning a fixed token.
+///
+/// For tests and local development where no identity provider is available;
+/// production deployments use `IdentityDefault` (the `oauth` feature) or a
+/// backend crate.
 #[derive(Debug, Clone, Default)]
 pub struct IdentityStub;
 
 impl Connect for IdentityStub {
-    type ConnectOptions = NoOptions;
+    type ConnectOptions = omnia_core::NoOptions;
 
     fn connect_with(
         _options: Self::ConnectOptions,

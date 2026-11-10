@@ -1,62 +1,39 @@
-//! In-memory default implementation of [`KeyValueClient`].
+//! Default in-memory implementation for wasi-keyvalue
+//!
+//! This is a lightweight implementation for development use only.
 
 use std::collections::HashMap;
-use std::fmt::Debug;
 use std::sync::{Arc, Mutex, Weak};
-use std::time::{Duration, Instant};
 
-use anyhow::{Context as _, Result};
-use futures::FutureExt as _;
-use moka::Expiry;
+use anyhow::{Context as _, Result, anyhow};
+use futures::FutureExt;
 use moka::sync::Cache;
-use omnia_backend::keyvalue::{Bucket, KeyValueClient, add_i64};
-use omnia_core::{Connect, FutureResult, NoOptions};
+use omnia_core::Connect;
 use tracing::instrument;
 
-#[derive(Clone, Debug)]
-struct Entry {
-    bytes: Vec<u8>,
-    expires_at: Option<Instant>,
-}
+use crate::host::KeyValueClient;
+use crate::host::resource::{Bucket, Cas, FutureResult};
 
-struct EntryExpiry;
-
-impl Expiry<String, Entry> for EntryExpiry {
-    fn expire_after_create(
-        &self, _key: &String, value: &Entry, created_at: Instant,
-    ) -> Option<Duration> {
-        value.expires_at.map(|at| at.saturating_duration_since(created_at))
-    }
-
-    fn expire_after_update(
-        &self, _key: &String, value: &Entry, updated_at: Instant,
-        _duration_until_expiry: Option<Duration>,
-    ) -> Option<Duration> {
-        value.expires_at.map(|at| at.saturating_duration_since(updated_at))
-    }
-}
-
-type BucketCache = Cache<String, Entry>;
+type BucketCache = Cache<String, Vec<u8>>;
 type KeyLocks = Arc<Mutex<HashMap<String, Weak<Mutex<()>>>>>;
 
-/// Default in-memory implementation of [`KeyValueClient`].
+/// Default implementation for `wasi:keyvalue`.
 #[derive(Clone)]
 pub struct KeyValueDefault {
     store: Cache<String, InMemBucket>,
 }
 
-impl Debug for KeyValueDefault {
+impl std::fmt::Debug for KeyValueDefault {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("KeyValueDefault").finish_non_exhaustive()
     }
 }
 
 impl Connect for KeyValueDefault {
-    type ConnectOptions = NoOptions;
+    type ConnectOptions = omnia_core::NoOptions;
 
     #[instrument]
     async fn connect_with(options: Self::ConnectOptions) -> Result<Self> {
-        let _ = options;
         tracing::debug!("initializing in-memory key-value store");
         Ok(Self {
             store: Cache::builder().build(),
@@ -71,7 +48,7 @@ impl KeyValueClient for KeyValueDefault {
         // the lock registry lives with the bucket, so every handle shares its locks
         let bucket = self.store.get_with(identifier.clone(), || InMemBucket {
             name: identifier,
-            cache: Cache::builder().expire_after(EntryExpiry).build(),
+            cache: Cache::builder().build(),
             locks: Arc::default(),
         });
 
@@ -86,7 +63,7 @@ struct InMemBucket {
     locks: KeyLocks,
 }
 
-impl Debug for InMemBucket {
+impl std::fmt::Debug for InMemBucket {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("InMemBucket").field("name", &self.name).finish_non_exhaustive()
     }
@@ -112,22 +89,15 @@ impl InMemBucket {
 impl Bucket for InMemBucket {
     fn get(&self, key: String) -> FutureResult<Option<Vec<u8>>> {
         tracing::trace!("getting key: {key} from bucket: {}", self.name);
-        let result = self.cache.get(&key).map(|entry| entry.bytes);
+        let result = self.cache.get(&key);
         async move { Ok(result) }.boxed()
     }
 
-    fn set(&self, key: String, value: Vec<u8>, ttl: Option<Duration>) -> FutureResult<()> {
+    fn set(&self, key: String, value: Vec<u8>) -> FutureResult<()> {
         tracing::trace!("setting key: {key} in bucket: {}", self.name);
         let lock = self.key_lock(&key);
         let _guard = lock.lock().expect("key lock poisoned");
-        let expires_at = ttl.map(|d| Instant::now() + d);
-        self.cache.insert(
-            key,
-            Entry {
-                bytes: value,
-                expires_at,
-            },
-        );
+        self.cache.insert(key, value);
         async move { Ok(()) }.boxed()
     }
 
@@ -141,7 +111,7 @@ impl Bucket for InMemBucket {
 
     fn exists(&self, key: String) -> FutureResult<bool> {
         tracing::trace!("checking existence of key: {key} in bucket: {}", self.name);
-        let exists = self.cache.get(&key).is_some();
+        let exists = self.cache.contains_key(&key);
         async move { Ok(exists) }.boxed()
     }
 
@@ -157,48 +127,48 @@ impl Bucket for InMemBucket {
         let lock = self.key_lock(&key);
         let result = (|| {
             let _guard = lock.lock().expect("key lock poisoned");
-            let existing = self.cache.get(&key);
-            let incremented = add_i64(existing.as_ref().map(|entry| entry.bytes.as_slice()), delta)
+            let incremented = add_i64(self.cache.get(&key).as_deref(), delta)
                 .with_context(|| format!("incrementing `{key}` by {delta}"))?;
-            self.cache.insert(
-                key,
-                Entry {
-                    bytes: encode_i64(incremented),
-                    expires_at: existing.and_then(|entry| entry.expires_at),
-                },
-            );
+            self.cache.insert(key, encode_i64(incremented));
             Ok(incremented)
         })();
 
         async move { result }.boxed()
     }
 
-    fn cas(
-        &self, key: String, expected: Option<Vec<u8>>, value: Vec<u8>,
-    ) -> FutureResult<Result<(), Option<Vec<u8>>>> {
-        tracing::trace!("cas key: {key} in bucket: {}", self.name);
+    fn swap(&self, cas: Cas, value: Vec<u8>) -> FutureResult<Result<(), Cas>> {
+        tracing::trace!("swapping key: {} in bucket: {}", cas.key, self.name);
 
-        let lock = self.key_lock(&key);
+        let lock = self.key_lock(&cas.key);
         let result = {
             let _guard = lock.lock().expect("key lock poisoned");
-            let existing = self.cache.get(&key);
-            let observed = existing.as_ref().map(|entry| entry.bytes.clone());
-            if observed == expected {
-                self.cache.insert(
-                    key,
-                    Entry {
-                        bytes: value,
-                        expires_at: existing.and_then(|entry| entry.expires_at),
-                    },
-                );
+            let observed = self.cache.get(&cas.key);
+            if observed == cas.current {
+                self.cache.insert(cas.key, value);
                 Ok(())
             } else {
-                Err(observed)
+                Err(Cas {
+                    current: observed,
+                    ..cas
+                })
             }
         };
 
         async move { Ok(result) }.boxed()
     }
+}
+
+fn add_i64(current: Option<&[u8]>, delta: i64) -> anyhow::Result<i64> {
+    let base = match current {
+        None => 0,
+        Some(value) => {
+            let bytes: [u8; 8] = value.try_into().map_err(|_len| {
+                anyhow!("value is {} bytes, not an 8-byte big-endian integer", value.len())
+            })?;
+            i64::from_be_bytes(bytes)
+        }
+    };
+    base.checked_add(delta).context("adding delta overflows i64")
 }
 
 fn encode_i64(value: i64) -> Vec<u8> {

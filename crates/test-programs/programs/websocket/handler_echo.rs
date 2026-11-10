@@ -9,6 +9,7 @@ use omnia_wasi_websocket::handler::Guest;
 use omnia_wasi_websocket::types::{Client, Error, Event};
 
 struct WebSocket;
+omnia_wasi_websocket::export!(WebSocket);
 
 impl Guest for WebSocket {
     async fn handle(event: Event) -> Result<(), Error> {
@@ -19,4 +20,3 @@ impl Guest for WebSocket {
         client::send(&client, Event::new(b"pong"), None).await
     }
 }
-omnia_wasi_websocket::export!(WebSocket);

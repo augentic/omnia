@@ -10,7 +10,17 @@
 
 #![cfg(target_arch = "wasm32")]
 
+// `generate_all` also generates the `wasi:clocks` import bindings so the
+// `echo-slow` await is driven by this component's own async runtime.
+wit_bindgen::generate!({
+    world: "responder",
+    path: "guest-link/wit",
+    generate_all,
+});
+
 struct Extra;
+
+export!(Extra);
 
 impl exports::example::link::echo::Guest for Extra {
     fn echo(target: String, message: String) -> String {
@@ -22,13 +32,3 @@ impl exports::example::link::echo::Guest for Extra {
         format!("{target} echoes slowly from extra: {message}")
     }
 }
-
-// `generate_all` also generates the `wasi:clocks` import bindings so the
-// `echo-slow` await is driven by this component's own async runtime.
-wit_bindgen::generate!({
-    world: "responder",
-    path: "guest-link/wit",
-    generate_all,
-});
-
-export!(Extra);

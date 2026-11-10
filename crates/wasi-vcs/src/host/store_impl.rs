@@ -4,35 +4,10 @@ use omnia_core::{HostView, StoreCtx};
 use wasmtime::component::Accessor;
 
 use crate::host::generated::omnia::vcs::store::{
-    Entry as WitEntry, Host, HostWithStore, Location, Merged as WitMerged, Rule as WitRule,
-    Strategy as WitStrategy,
+    Entry, Host, HostWithStore, Location, Merged, Rule,
 };
-use crate::host::{Entry, Intent, Merged, Result, Rule, Strategy, VcsClient, WasiVcs};
-
-fn from_wit_rule(rule: WitRule) -> Rule {
-    Rule {
-        paths: rule.paths,
-        strategy: match rule.strategy {
-            WitStrategy::Union => Strategy::Union,
-            WitStrategy::Ours => Strategy::Ours,
-            WitStrategy::Theirs => Strategy::Theirs,
-        },
-    }
-}
-
-fn to_wit_merged(merged: Merged) -> WitMerged {
-    WitMerged {
-        commit: merged.commit,
-        conflicts: merged.conflicts,
-    }
-}
-
-fn to_wit_entry(entry: Entry) -> WitEntry {
-    WitEntry {
-        id: entry.id,
-        message: entry.message,
-    }
-}
+use crate::host::location::Intent;
+use crate::host::{Result, VcsClient, WasiVcs};
 
 impl<B: Send + 'static> HostWithStore<StoreCtx<B>> for WasiVcs {
     async fn resolve(
@@ -76,26 +51,23 @@ impl<B: Send + 'static> HostWithStore<StoreCtx<B>> for WasiVcs {
 
     async fn merge(
         accessor: &Accessor<StoreCtx<B>, Self>, at: Location, revision: String, message: String,
-        policy: Vec<WitRule>,
-    ) -> Result<WitMerged> {
-        let policy = policy.into_iter().map(from_wit_rule).collect();
-        let merged = Self::dispatch(accessor, |access| {
+        policy: Vec<Rule>,
+    ) -> Result<Merged> {
+        Self::dispatch(accessor, |access| {
             let at = Self::locate(access, &at, Intent::Mutate)?;
             Ok(access.get().client.merge(at, revision, message, policy))
         })
-        .await?;
-        Ok(to_wit_merged(merged))
+        .await
     }
 
     async fn log(
         accessor: &Accessor<StoreCtx<B>, Self>, repo: Location, revision: String, base: String,
-    ) -> Result<Vec<WitEntry>> {
-        let entries = Self::dispatch(accessor, |access| {
+    ) -> Result<Vec<Entry>> {
+        Self::dispatch(accessor, |access| {
             let repo = Self::locate(access, &repo, Intent::Read)?;
             Ok(access.get().client.log(repo, revision, base))
         })
-        .await?;
-        Ok(entries.into_iter().map(to_wit_entry).collect())
+        .await
     }
 }
 

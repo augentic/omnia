@@ -7,6 +7,7 @@ mod resource;
 mod vault_impl;
 
 mod generated {
+
     pub use self::omnia::vault::vault::Error;
     pub use super::LockerProxy;
 
@@ -26,21 +27,21 @@ mod generated {
 }
 
 use std::fmt::Debug;
+use std::sync::Arc;
 
-pub use default_impl::VaultDefault;
-pub use omnia_backend::vault::{Locker, VaultClient};
 pub use omnia_core::FutureResult;
 use omnia_core::{Host, HostCtx, Provides, StoreCtx};
 use wasmtime::component::Linker;
 
 use self::generated::omnia::vault::vault;
+pub use crate::host::default_impl::VaultDefault;
 use crate::host::generated::Error;
 pub use crate::host::resource::*;
 
-/// Result type for vault operations.
+/// Result type for  vault operations.
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// Host-side service for `omnia:vault`.
+/// Host-side service for `wasi:vault`.
 #[derive(Debug, HostCtx)]
 #[host_ctx(client = VaultClient)]
 pub struct WasiVault;
@@ -49,6 +50,15 @@ impl<B: Provides<Self>> Host<B> for WasiVault {
     fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
         Ok(vault::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?)
     }
+}
+
+/// Service contract for `omnia:vault` backends.
+///
+/// This is implemented by the resource-specific provider of Vault
+/// functionality.
+pub trait VaultClient: Debug + Send + Sync + 'static {
+    /// Open a locker.
+    fn open_locker(&self, identifier: String) -> FutureResult<Arc<dyn Locker>>;
 }
 
 omnia_core::host_error!(Error, Other);

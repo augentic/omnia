@@ -4,114 +4,142 @@ Unreleased
 
 ### Added
 
+- `omnia_sdk::WasiProvider`: one zero-sized provider that implements every
+  capability trait over the WASI bindings on `wasm32`. It replaces a guest's
+  provider struct with one empty impl per capability, and the `WasiModel`,
+  `WasiVcs`, and `WasiPlugins` handles.
+- `#[derive(Provider)]`, `#[derive(Settings)]`, and `#[derive(FromRow)]`,
+  re-exported by `omnia_sdk`:
+  - `Provider` composes a provider from one field per capability.
+  - `Settings` loads a part's required configuration in one call.
+  - `FromRow` decodes a SQL row into a record type.
 - `omnia_sdk::api::{Handlers, Router}`: a module registers its HTTP routes
   (`route`), messaging topics (`topic`, `topic_with`), and CLI subcommands
   (`command`, `command_with`, behind the `command` feature) on one
-  `Handlers<P>`, `From<[..; N]>` (or `merge`) merges them, and
-  `with_state(client)` closes the whole into the one `Router<P>` that
-  serves requests, handles deliveries, and `run`s argv. `with_state` is
-  the router's only constructor: `Router` registers nothing itself, and
-  keeps `layer`, the program methods, `handle`, and `run`.
-  `command::export!` binds a command router fn (with `WasiProvider` or a
-  custom provider) alongside a zero-argument `async fn` entry, stamping
-  the guest crate's `CARGO_PKG_VERSION` and `CARGO_PKG_DESCRIPTION` as
-  the program's `--version` and `--help` defaults.
-- `omnia_sdk::api::command::Render`: the text form of a handler output,
-  which `Format::Text` encodes (`()` and `String` implement it); `Failure`
-  renders its envelope through it.
-- `omnia_sdk::Capabilities`: every capability trait at once, with the
-  `Send + Sync + 'static` a provider needs, for a fn generic over the
-  whole provider (`handlers<P: Capabilities>() -> Handlers<P>`).
-  `DocumentStore` and `TableStore` join it under the `docstore` and `sql`
-  features.
+  `Handlers<P>`, and `with_state(Client::new(provider))` closes them into
+  the one `Router<P>`. `http::export!`, `messaging::export!`, and
+  `command::export!` bind the WASI exports. `command::export!` stamps the
+  guest crate's version and description as `--version` and `--help`.
+- `omnia_sdk::Capabilities`, every capability trait at once, and the
+  `Vault` capability.
+- Extension traits, blanket-implemented over each capability:
+  `ConfigExt::get_parsed`, `DocumentStoreExt::get_as`,
+  `HttpRequestExt::fetch_json`, `IdentityExt::access_token`,
+  `StateStoreExt::{get_json, set_json}`, and `TableStoreExt::query_as`.
 - `Error::{bad_request, not_found, server_error, bad_gateway}(code,
-  description)`: constructors that name the wire `error` code, for a
-  specification's own reason codes. The macros of the same names build
-  the variant under its default code (`bad_request`, ...).
-- `omnia_core::HostView<'a, C>`: the linker-facing view of a host over one
-  client, `{ client: &'a mut C, table: &'a mut ResourceTable }`, with
-  `HasTable`. `#[derive(HostCtx)]` names the client trait in
-  `#[host_ctx(client = XClient)]` and makes `HostView<'a, dyn XClient>`
-  the host's `HasData::Data`; the bindgen `Host*` impls go on
-  `HostView<'_, dyn XClient>`.
-- `omnia_core::Backends`: the shape of a deployment's backend bundle,
+  description)`, which name the wire `error` code.
+- `Document::{json, decode}` and `Filter::depth` in
+  `omnia_wasi_docstore::document_store`.
+- `omnia_test::guest::{send, deliver}`, which drive a router natively, and
+  `omnia_test::guest::ScriptedVcs`, a scripted `Vcs`.
+- `omnia_core::Backends`, the shape of a deployment's backend bundle:
   `Clone + Send + Sync + 'static`, implemented for every such type. It is
   the one bound `Runtime<B>`, `Host<B>`, `Wiring<B>`, and `Deployment<B>`
-  put on the bundle; a bundle that connects itself is `omnia::ConnectAll`.
-- `StoreCtx::{view, mounts, dispatcher, extensions, chain}`: the store's
+  put on the bundle.
+- `StoreCtx::{view, mounts, dispatcher, extensions, chain}`, the store's
   own accessors. `view::<H>()` assembles host `H`'s view for a bundle
   `B: Provides<H>`, and is the getter every `add_to_linker` passes.
-- `#[derive(thiserror::Error)]` on `GuestError`, `AcquireError`,
-  `LoadError`, `HandleError`, and `McpError`, with the same messages.
+- `omnia_core::HostView<'a, C>`, the linker-facing view of a host over one
+  client: `{ client: &'a C, table: &'a mut ResourceTable }`, with
+  `HasTable`. `#[derive(HostCtx)]` names the client trait in
+  `#[host_ctx(client = XClient)]` and makes `HostView<'a, dyn XClient>`
+  the host's `HasData::Data`. The bindgen `Host*` impls go on
+  `HostView<'_, dyn XClient>`, and reach the backend through `client`.
+  A crate that depends on `omnia` alone derives `omnia::HostCtx` with
+  `#[host_ctx(client = XClient, crate = omnia)]`.
+- `Runtime::stop` and `Runtime::stopped`. A trigger server waits on
+  `stopped` to stop accepting work and drain. `Runtime::shutdown` stops
+  the runtime too.
 
 ### Changed
 
+- A handler takes its `Context<P>` first and its input second. An HTTP
+  handler is a plain axum handler that takes `Context<P>` as an extractor
+  over the `Client` in the router state. `Client::new(provider)` takes no
+  owner. A handler that takes `Json<T>` answers `415` to a request without
+  `content-type: application/json`.
+- `omnia_sdk::Error` implements `IntoResponse`, so a handler answers
+  `omnia_sdk::Result<T>`. `HttpResult` and `HttpError` are gone.
+- `omnia_sdk::command!(main)` is `omnia_sdk::api::command::export!(main)`.
+- The value types live in the SDK's own modules:
+  - `omnia_sdk::docstore`, which was `omnia_sdk::document_store`.
+  - `omnia_sdk::sql` (`DataType`, `Row`, `Field`, `FromRow`,
+    `ColumnError`), which `omnia_wasi_sql` exported.
+  - `omnia_sdk::blobstore`, `omnia_sdk::identity::AccessToken`,
+    `omnia_sdk::keyvalue::BUCKET`, and `omnia_sdk::vault::LOCKER`.
+- `TableStore::{query, exec}` take `&str` and `&[DataType]`,
+  `StateStore::set` answers `()`, and `Identity::token(identity, scopes)`
+  answers an `AccessToken`.
+- `StateStore` opens the `state` bucket, which was `cache`. A value set
+  with a TTL is still stored in the guest-side `Cacheable` envelope, and
+  `omnia_test::host::Backends::state` reads through it.
+- `omnia_wasi_keyvalue::Cacheable` is at the crate root on every target,
+  and its `is_expired` is public.
+- `omnia_test::guest::Scripted` is `ScriptedModel`, and
+  `omnia_test::guest::Memory` implements `Vault`.
+- `WasiHttp` is its own `HostCtx` carrier, like every other host. A bundle
+  implements `Provides<WasiHttp>`, and `HttpBorrow` is
+  `omnia_wasi_http::HttpBorrow`. `runtime!` no longer matches a `hosts:`
+  row by the name `WasiHttp`, so an aliased row links.
 - `Host<B>` is over the backend bundle, no longer the store type, and
-  carries `run`: `add_to_linker(&mut Linker<StoreCtx<B>>)` plus a
-  `run(&Runtime<B>)` whose default resolves at once and which a trigger
-  host (`WasiHttp`, `WasiMessaging`, `WasiWebSocket`) overrides with its
-  serve loop. A host implements it once, `impl<B: Backends +
-  Provides<Self>> Host<B>`; a hand-built bundle needs no store trait.
+  carries `run`. `add_to_linker` takes a `&mut Linker<StoreCtx<B>>`, and
+  `run(&Runtime<B>)` resolves at once unless a trigger host (`WasiHttp`,
+  `WasiMessaging`, `WasiWebSocket`) overrides it with its serve loop. A
+  host implements it once, as `impl<B: Provides<Self>> Host<B>`.
 - `omnia::Backends`, the trait the generated bundle implements to connect
-  every backend, is `omnia::ConnectAll`; `Backends` now names the bundle
-  shape (`omnia_core::Backends`), and `ConnectAll: Backends`. `Host<B>`,
-  `Wiring<B>`, `Deployment<B>`, and the generic fns over a bundle bound it
-  `B: Backends` in place of `Clone + Send + Sync + 'static`.
+  every backend, is `omnia::ConnectAll`, and `ConnectAll: Backends`.
 - `Deployment<B>`, `DeploymentBuilder::build::<B>()`,
   `Deployment::host::<H>()`, and `Wiring::link(&mut Deployment<B>)` take
-  the bundle alone: `build::<StoreCtx<Backends>>()` is
+  the bundle alone. `build::<StoreCtx<Backends>>()` is
   `build::<Backends>()`, and `host::<WasiOtel, Backends>()` is
-  `host::<WasiOtel>()`. `omnia_test::host::Deployment::{boot, run}` hand
-  their closure a `&mut Deployment<B>`.
+  `host::<WasiOtel>()`.
 - `Registry<B>`, `RegistryParts<B>`, `Guest<B>`, `LinkSeam<B>`,
   `StoreFactory<B>`, and `FreshCall<B>` are over the bundle, each fixing
-  the store to `StoreCtx<B>`: `Registry<StoreCtx<Backends>>` is
-  `Registry<Backends>`, and `Runtime::registry` and `Runtime::guest`
+  the store to `StoreCtx<B>`. `Runtime::registry` and `Runtime::guest`
   return `&Registry<B>` and `Arc<Guest<B>>`.
 - `runtime!` names each backend field by its row's position, so two
   backends whose paths end in the same name (`keyvalue::Client`,
   `model::Client`) no longer share a field.
-
-- `command_with`'s decoder returns `DecodeError`, as `topic_with`'s does,
-  and `Command::call(handler, input)` takes the decoded input.
-  `Format::encode(body)` renders through `Render`, and `Failure` renders
-  its envelope through `Render` in place of `Failure::text`.
-- `api::Format` and `api::Encoded` are `api::command::Format` and
-  `api::command::Encoded`, beside `Render`; nothing outside the command
-  façade reads them.
-- A `serde_json::Error` converts into a `BadRequest` under the code
-  `bad_request`, no longer `serde_json`.
-- An HTTP handler bounds its `P` on the capability traits it reaches
-  alone: the `'static` axum needs is the router fn's, which `Handlers<P>`
-  carries, so `async fn handler<P: Config + StateStore>(context:
-  Context<P>, ..)` registers on either transport.
+- The HTTP trigger serves HTTP/1.1 and HTTP/2 on one listener. On stop it
+  accepts no new connection and lets each open one finish its requests.
+- A server-mode deployment drains on the first `SIGINT` or `SIGTERM`, and
+  exits on the second.
+- Without a `Forwarded` header, the HTTP trigger takes a request's scheme
+  and authority from its URI before the `Host` header, so an HTTP/2
+  request needs no `Host`.
+- Guests link `wasip3` 0.10 and `wit-bindgen` 0.63. `omnia:model` and
+  `omnia:vcs` use `wasi:filesystem` and `wasi:clocks` at 0.3.2.
+- `omnia::Backend` is `omnia::Connect`.
+- Each host's client trait is named for its interface: `Wasi<Name>Ctx` is
+  `<Name>Client`, as in `KeyValueClient`, `BlobStoreClient`, and
+  `ModelClient`.
+- `WasiBlobstore` and `BlobstoreDefault` are `WasiBlobStore` and
+  `BlobStoreDefault`. `omnia::WasiPluginsCtxView` is
+  `omnia::WasiPluginsView`.
+- The messaging and websocket resource trait `Client` is `Endpoint`, and
+  `MessagingClient::endpoint` and `WebSocketClient::endpoint` replace
+  `connect`. `ClientProxy` keeps its name.
+- The document store's WIT package is `omnia:docstore`, which was
+  `wasi:docstore`, so a guest built against `wasi:docstore` is rebuilt.
 
 ### Removed
 
-- `omnia_sdk::api::command::{Commands, Router}`: subcommands are
-  `Handlers::command(name, handler)` beside a module's paths and topics,
-  the output's `Render` impl replaces the per-verb render fn, and the
-  router's `run`/`run_with` replace `handle`/`handle_with`.
-  `Commands::map` has no successor.
-- `Router::{new, route, topic, topic_with, command, command_with, merge}`:
-  every handler is registered on a `Handlers<P>` and the router is built
-  by `Handlers::with_state` alone, so there is one way to register and
-  one to close. `Router::new(client).topic(..)` is
-  `Handlers::new().topic(..).with_state(client)`.
-- `omnia_sdk::api::http::Router`, the alias of `axum::Router`.
-- `Client::call`: a handler runs through the router's dispatch, inside its
-  `handler` span, and a unit test calls the fn directly over
-  `Context::new(provider, metadata)`.
-- `omnia_core::Server`: folded into `Host::run`.
-- `omnia_core::{StoreView, HasMounts, HasDispatcher, HasExtensions,
-  HasChain, HasLimits}` and `omnia::LinkStore`: `StoreCtx<B>` is the one
-  store type, so its inherent methods replace them; the generated
-  `Wasi*View` types are the one `omnia_core::HostView`.
-- `omnia_core::serve_links`: `Runtime::serve_links` is the one entry.
-- The 13 client-trait re-exports at `omnia_backend`'s root
-  (`omnia_backend::KeyValueClient`, ...): each lives in its module
-  (`omnia_backend::keyvalue::KeyValueClient`), as the `omnia-wasi-*`
-  crates re-export them.
+- `omnia_sdk::api::http::{get, post, put, patch, delete, handle_with}`,
+  `RawRequest`, and the `MethodFilter` re-export. A route is an axum
+  `MethodRouter` bound with `Handlers::route`.
+- `omnia_sdk::api::messaging::{consume, consume_with, Consume, Routes}`. A
+  topic is bound with `Handlers::topic` or `Handlers::topic_with`.
+- `Client::owner`.
+- `BlobStoreExt`.
+- `omnia::HttpCtx`, and the `WasiHttpView` re-export from `omnia_wasi_http`.
+- `omnia::Server`, folded into `Host::run`.
+- `omnia::{StoreView, HasMounts, HasDispatcher, HasExtensions, HasChain,
+  HasLimits, LinkStore}`. `StoreCtx<B>` is the one store type, and its
+  own methods replace them.
+- `omnia::serve_links`. `Runtime::serve_links` is the one entry.
+- `omnia::wasi_view!`, the `Wasi*CtxView` types it generated, and the
+  `omnia::pastey` re-export. A host derives `HostCtx`, and its view is
+  `HostView`.
 
 ---
 

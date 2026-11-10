@@ -1,22 +1,35 @@
-//! Default tungstenite-backed implementation of [`WebSocketClient`].
+//! Default implementation for wasi-websocket
+//!
+//! This implementation runs a real tungstenite WebSocket server that external
+//! clients can connect to. Incoming messages from WS clients are broadcast as
+//! events to the guest handler. Outbound events from the guest are sent to
+//! connected WS clients, optionally filtered by group.
+//!
+//! For production use, use a backend with proper WebSocket connection
+//! management and authentication.
 
-use std::fmt::Debug;
 use std::sync::Arc;
 
 use anyhow::{Context as _, Result, anyhow};
 use dashmap::DashMap;
-use futures::FutureExt as _;
+use futures::FutureExt;
 use futures_channel::mpsc;
 use futures_util::stream::TryStreamExt;
 use futures_util::{StreamExt, future, pin_mut};
-use omnia_backend::websocket::{Endpoint, Event, Events, WebSocketClient};
-use omnia_core::{Connect, FromEnv, FutureResult};
+use omnia_core::{Connect, FutureResult};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::broadcast::{self, Sender};
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 use tokio_tungstenite::{WebSocketStream, accept_async};
 use tracing::instrument;
+
+use crate::host::WebSocketClient;
+use crate::host::resource::{Endpoint, Event, Events};
+
+const MAX_CONNECTIONS: usize = 1024;
+const BROADCAST_CAPACITY: usize = 256;
+const CLIENT_CAPACITY: usize = 256;
 
 type ConnectionMap = Arc<DashMap<String, mpsc::Sender<Message>>>;
 
@@ -27,7 +40,7 @@ pub struct ConnectOptions {
     pub socket_addr: String,
 }
 
-impl FromEnv for ConnectOptions {
+impl omnia_core::FromEnv for ConnectOptions {
     fn load_env() -> Result<Self> {
         let socket_addr =
             std::env::var("WEBSOCKET_ADDR").unwrap_or_else(|_| "0.0.0.0:80".to_string());
@@ -35,7 +48,7 @@ impl FromEnv for ConnectOptions {
     }
 }
 
-/// Default tungstenite-backed implementation of [`WebSocketClient`].
+/// Default implementation for `wasi:websocket`.
 #[derive(Clone, Debug)]
 pub struct WebSocketDefault {
     event_tx: Sender<Event>,
@@ -165,9 +178,7 @@ impl WebSocketDefault {
             let server = self.clone();
             tokio::spawn(async move {
                 match accept_async(stream).await {
-                    Ok(ws_stream) => {
-                        server.handle_socket(ws_stream, sender_addr.to_string()).await;
-                    }
+                    Ok(ws_stream) => server.handle_socket(ws_stream, sender_addr.to_string()).await,
                     Err(e) => tracing::error!("handshake failed for {sender_addr}: {e}"),
                 }
             });
@@ -217,14 +228,13 @@ impl WebSocketDefault {
     }
 
     fn send_to_guest(&self, socket_addr: String, data: Vec<u8>) {
-        let mut event = Event::new(data);
-        event.socket_addr = Some(socket_addr);
+        let event = Event {
+            socket_addr: Some(socket_addr),
+            data,
+            route: None,
+        };
         if let Err(e) = self.event_tx.send(event) {
             tracing::warn!("issue sending WebSocket event: {e}");
         }
     }
 }
-
-const MAX_CONNECTIONS: usize = 1024;
-const BROADCAST_CAPACITY: usize = 256;
-const CLIENT_CAPACITY: usize = 256;

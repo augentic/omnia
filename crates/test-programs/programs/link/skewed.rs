@@ -4,7 +4,14 @@
 
 #![cfg(target_arch = "wasm32")]
 
+wit_bindgen::generate!({
+    world: "skewed",
+    path: "wit-skew",
+});
+
 struct Skewed;
+
+export!(Skewed);
 
 impl exports::omnia_test::link::ops::Guest for Skewed {
     fn ping(_target: String, message: String) -> u32 {
@@ -15,10 +22,3 @@ impl exports::omnia_test::link::ops::Guest for Skewed {
         message.len() as u32
     }
 }
-
-wit_bindgen::generate!({
-    world: "skewed",
-    path: "wit-skew",
-});
-
-export!(Skewed);

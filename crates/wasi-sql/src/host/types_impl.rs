@@ -3,28 +3,11 @@ use omnia_core::HostView;
 use wasmtime::component::{Access, Accessor, Resource};
 
 use crate::host::generated::wasi::sql::types::{
-    Connection, DataType as WitDataType, Error, Host, HostConnection, HostConnectionWithStore,
-    HostError, HostErrorWithStore, HostStatement, HostStatementWithStore, Statement,
+    Connection, DataType, Error, Host, HostConnection, HostConnectionWithStore, HostError,
+    HostErrorWithStore, HostStatement, HostStatementWithStore, Statement,
 };
 use crate::host::resource::ConnectionProxy;
-use crate::host::{DataType, SqlClient, WasiSql};
-
-fn from_wit_data_type(dt: WitDataType) -> DataType {
-    match dt {
-        WitDataType::Int32(v) => DataType::Int32(v),
-        WitDataType::Int64(v) => DataType::Int64(v),
-        WitDataType::Uint32(v) => DataType::Uint32(v),
-        WitDataType::Uint64(v) => DataType::Uint64(v),
-        WitDataType::Float(v) => DataType::Float(v),
-        WitDataType::Double(v) => DataType::Double(v),
-        WitDataType::Str(v) => DataType::Str(v),
-        WitDataType::Boolean(v) => DataType::Boolean(v),
-        WitDataType::Date(v) => DataType::Date(v),
-        WitDataType::Time(v) => DataType::Time(v),
-        WitDataType::Timestamp(v) => DataType::Timestamp(v),
-        WitDataType::Binary(v) => DataType::Binary(v),
-    }
-}
+use crate::host::{SqlClient, WasiSql};
 
 impl<T> HostConnectionWithStore<T> for WasiSql {
     async fn open(
@@ -46,20 +29,16 @@ impl<T> HostConnectionWithStore<T> for WasiSql {
     fn drop(
         mut accessor: Access<'_, T, Self>, rep: Resource<ConnectionProxy>,
     ) -> wasmtime::Result<()> {
-        accessor.get().table.delete(rep)?;
-        Ok(())
+        accessor.get().table.delete(rep).map(|_| Ok(()))?
     }
 }
 
 impl<T> HostStatementWithStore<T> for WasiSql {
     fn prepare(
-        accessor: &Accessor<T, Self>, query: String, params: Vec<WitDataType>,
+        accessor: &Accessor<T, Self>, query: String, params: Vec<DataType>,
     ) -> impl std::future::Future<Output = wasmtime::Result<Result<Resource<Statement>, Resource<Error>>>>
     {
-        let statement = Statement {
-            query,
-            params: params.into_iter().map(from_wit_data_type).collect(),
-        };
+        let statement = Statement { query, params };
         std::future::ready(
             accessor
                 .with(|mut store| store.get().table.push(statement))
@@ -69,8 +48,7 @@ impl<T> HostStatementWithStore<T> for WasiSql {
     }
 
     fn drop(mut accessor: Access<'_, T, Self>, rep: Resource<Statement>) -> wasmtime::Result<()> {
-        accessor.get().table.delete(rep)?;
-        Ok(())
+        Ok(accessor.get().table.delete(rep).map(|_| ())?)
     }
 }
 
@@ -81,8 +59,7 @@ impl<T> HostErrorWithStore<T> for WasiSql {
     }
 
     fn drop(mut accessor: Access<'_, T, Self>, rep: Resource<Error>) -> wasmtime::Result<()> {
-        accessor.get().table.delete(rep)?;
-        Ok(())
+        Ok(accessor.get().table.delete(rep).map(|_| ())?)
     }
 }
 

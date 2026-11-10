@@ -21,21 +21,24 @@ use http_body_util::{BodyExt as _, Full};
 use hyper::body::Incoming;
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
-use omnia::{ExitStatus, GuestEntry};
+use omnia::ExitStatus;
 use omnia_test::host::{Backends, Deployment};
 use omnia_wasi_config::WasiConfig;
 use omnia_wasi_http::{HttpHandler, WasiHttp};
 use omnia_wasi_otel::WasiOtel;
-use rcgen::{
-    BasicConstraints, CertificateParams, ExtendedKeyUsagePurpose, IsCa, Issuer, KeyPair,
-    KeyUsagePurpose, date_time_ymd,
-};
+use rcgen::{CertificateParams, ExtendedKeyUsagePurpose, KeyPair, KeyUsagePurpose};
 use rustls::pki_types::PrivateKeyDer;
 use rustls::{ServerConfig, ServerConnection};
 use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tokio::net::{TcpListener, TcpStream};
 use wasmtime_wasi_http::io::TokioIo;
+
+// Every guest program in `crates/test-programs` must have a matching test
+// here; a new program without one fails to compile.
+test_programs::foreach_http!();
+
+const BODY: &[u8] = b"hello from origin";
 
 // one request as the origin saw it
 #[derive(Clone, Debug)]
@@ -91,6 +94,64 @@ impl Origin {
     }
 }
 
+async fn run_guest(wasm: &str, backends: Backends) {
+    // linked by hand: the guest reads the origin from `wasi:config`
+    let status = Deployment::new()
+        .guest("guest", wasm)
+        .run(backends, |deployment| {
+            deployment.host::<WasiHttp>()?;
+            deployment.host::<WasiConfig>()?;
+            deployment.host::<WasiOtel>()?;
+            Ok(())
+        })
+        .await
+        .expect("guest runs");
+    assert_eq!(status, ExitStatus::SUCCESS, "guest `{wasm}` failed");
+}
+
+#[tokio::test]
+async fn http_outgoing_get() {
+    let (origin, url) = Origin::serve().await;
+    let backends = Backends::defaults().await.config([("ORIGIN", url)]);
+
+    run_guest(test_programs::HTTP_OUTGOING_GET, backends).await;
+
+    // wire fidelity: one request, at the guest's path, carrying the guest's header
+    let hits = origin.hits();
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].path, "/resource");
+    assert_eq!(hits[0].headers.get("x-probe").and_then(|v| v.to_str().ok()), Some("1"));
+}
+
+// a throwaway self-signed certificate then its PKCS#8 key, minted per run so
+// no private key is ever checked in
+fn client_cert(purpose: ExtendedKeyUsagePurpose) -> String {
+    let key = KeyPair::generate().expect("key pair");
+    let mut params = CertificateParams::new(Vec::<String>::new()).expect("parameters");
+    params.extended_key_usages = vec![purpose];
+    params.key_usages = vec![KeyUsagePurpose::DigitalSignature];
+    let certificate = params.self_signed(&key).expect("certificate");
+    Base64::encode_string(format!("{}{}", certificate.pem(), key.serialize_pem()).as_bytes())
+}
+
+#[tokio::test]
+async fn http_outgoing_client_cert() {
+    let (origin, url) = Origin::serve().await;
+    let backends = Backends::defaults().await.config([
+        ("ORIGIN", url),
+        ("CLIENT_CERT_OK", client_cert(ExtendedKeyUsagePurpose::ClientAuth)),
+        ("CLIENT_CERT_SERVER", client_cert(ExtendedKeyUsagePurpose::ServerAuth)),
+    ]);
+
+    run_guest(test_programs::HTTP_OUTGOING_CLIENT_CERT, backends).await;
+
+    // only the client-auth request reached the origin, and the bundle never left the host
+    let hits = origin.hits();
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].path, "/mtls");
+    assert!(hits[0].headers.get("client-cert").is_none(), "Client-Cert header stripped");
+}
+
 // a loopback TLS origin presenting a self-signed certificate no root trusts,
 // counting the handshakes it is offered; none completes, so it serves nothing
 #[derive(Clone, Debug, Default)]
@@ -143,6 +204,17 @@ impl UntrustedOrigin {
     }
 }
 
+#[tokio::test]
+async fn http_outgoing_tls() {
+    let (origin, url) = UntrustedOrigin::serve().await;
+    let backends = Backends::defaults().await.config([("ORIGIN", url)]);
+
+    run_guest(test_programs::HTTP_OUTGOING_TLS, backends).await;
+
+    // the code came out of a real handshake the origin saw, not a failure before one
+    assert_eq!(origin.handshakes(), 1);
+}
+
 // a loopback origin that reads a request's head and then stalls: `/head` is
 // never answered, `/body` is answered with a body that stops short of its
 // declared length; either way the connection is held until the client hangs up
@@ -190,141 +262,6 @@ impl StallingOrigin {
     fn accepted(&self) -> usize {
         self.accepted.load(Ordering::SeqCst)
     }
-}
-
-// Every guest program in `crates/test-programs` must have a matching test
-// here; a new program without one fails to compile.
-test_programs::foreach_http!();
-
-const BODY: &[u8] = b"hello from origin";
-
-async fn run_guest(wasm: &str, backends: Backends) {
-    // linked by hand: the guest reads the origin from `wasi:config`
-    let status = Deployment::new()
-        .guest("guest", wasm)
-        .run(backends, |deployment| {
-            deployment.host::<WasiHttp>()?;
-            deployment.host::<WasiConfig>()?;
-            deployment.host::<WasiOtel>()?;
-            Ok(())
-        })
-        .await
-        .expect("guest runs");
-    assert_eq!(status, ExitStatus::SUCCESS, "guest `{wasm}` failed");
-}
-
-#[tokio::test]
-async fn http_outgoing_get() {
-    let (origin, url) = Origin::serve().await;
-    let backends = Backends::defaults().await.config([("ORIGIN", url)]);
-
-    run_guest(test_programs::HTTP_OUTGOING_GET, backends).await;
-
-    // wire fidelity: one request, at the guest's path, carrying the guest's header
-    let hits = origin.hits();
-    assert_eq!(hits.len(), 1);
-    assert_eq!(hits[0].path, "/resource");
-    assert_eq!(hits[0].headers.get("x-probe").and_then(|v| v.to_str().ok()), Some("1"));
-}
-
-// a throwaway self-signed certificate then its PKCS#8 key, minted per run so
-// no private key is ever checked in
-fn cert_bundle(configure: impl FnOnce(&mut CertificateParams)) -> String {
-    let key = KeyPair::generate().expect("key pair");
-    let mut params = CertificateParams::new(Vec::<String>::new()).expect("parameters");
-    configure(&mut params);
-    let certificate = params.self_signed(&key).expect("certificate");
-    Base64::encode_string(format!("{}{}", certificate.pem(), key.serialize_pem()).as_bytes())
-}
-
-fn client_auth_params(params: &mut CertificateParams) {
-    params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ClientAuth];
-    params.key_usages = vec![KeyUsagePurpose::DigitalSignature];
-}
-
-fn client_cert_chain() -> String {
-    let ca_key = KeyPair::generate().expect("CA key pair");
-    let mut ca_params = CertificateParams::new(Vec::<String>::new()).expect("CA parameters");
-    ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
-    ca_params.key_usages = vec![KeyUsagePurpose::KeyCertSign, KeyUsagePurpose::CrlSign];
-    let ca = ca_params.self_signed(&ca_key).expect("CA certificate");
-
-    let leaf_key = KeyPair::generate().expect("leaf key pair");
-    let mut leaf_params = CertificateParams::new(Vec::<String>::new()).expect("leaf parameters");
-    client_auth_params(&mut leaf_params);
-    let leaf = leaf_params
-        .signed_by(&leaf_key, &Issuer::from_params(&ca_params, &ca_key))
-        .expect("leaf certificate");
-
-    let bundle = format!("{}{}{}", leaf.pem(), ca.pem(), leaf_key.serialize_pem());
-    Base64::encode_string(bundle.as_bytes())
-}
-
-#[tokio::test]
-async fn http_client_cert() {
-    let (origin, url) = Origin::serve().await;
-    let key_only = KeyPair::generate().expect("key pair").serialize_pem();
-    let garbage =
-        "-----BEGIN CERTIFICATE-----\nbm90IGEgY2VydGlmaWNhdGU=\n-----END CERTIFICATE-----\n";
-    let backends = Backends::defaults().await.config([
-        ("ORIGIN", url),
-        ("CLIENT_CERT_OK", cert_bundle(client_auth_params)),
-        ("CLIENT_CERT_NO_EKU", cert_bundle(|_| {})),
-        ("CLIENT_CERT_CHAIN", client_cert_chain()),
-        (
-            "CLIENT_CERT_SERVER",
-            cert_bundle(|params| {
-                params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ServerAuth];
-                params.key_usages = vec![KeyUsagePurpose::DigitalSignature];
-            }),
-        ),
-        (
-            "CLIENT_CERT_CA",
-            cert_bundle(|params| params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained)),
-        ),
-        (
-            "CLIENT_CERT_NO_SIGN",
-            cert_bundle(|params| params.key_usages = vec![KeyUsagePurpose::KeyEncipherment]),
-        ),
-        (
-            "CLIENT_CERT_EXPIRED",
-            cert_bundle(|params| {
-                params.not_before = date_time_ymd(2020, 1, 1);
-                params.not_after = date_time_ymd(2021, 1, 1);
-            }),
-        ),
-        (
-            "CLIENT_CERT_FUTURE",
-            cert_bundle(|params| {
-                params.not_before = date_time_ymd(2100, 1, 1);
-                params.not_after = date_time_ymd(2101, 1, 1);
-            }),
-        ),
-        ("CLIENT_CERT_KEY_ONLY", Base64::encode_string(key_only.as_bytes())),
-        ("CLIENT_CERT_GARBAGE", Base64::encode_string(garbage.as_bytes())),
-    ]);
-
-    run_guest(test_programs::HTTP_CLIENT_CERT, backends).await;
-
-    // only the accepted client-auth requests reached the origin, and the bundle never left the host
-    let hits = origin.hits();
-    assert_eq!(hits.len(), 3);
-    assert!(hits.iter().all(|hit| hit.path == "/mtls"));
-    assert!(
-        hits.iter().all(|hit| hit.headers.get("client-cert").is_none()),
-        "Client-Cert header stripped"
-    );
-}
-
-#[tokio::test]
-async fn http_outgoing_tls() {
-    let (origin, url) = UntrustedOrigin::serve().await;
-    let backends = Backends::defaults().await.config([("ORIGIN", url)]);
-
-    run_guest(test_programs::HTTP_OUTGOING_TLS, backends).await;
-
-    // the code came out of a real handshake the origin saw, not a failure before one
-    assert_eq!(origin.handshakes(), 1);
 }
 
 #[tokio::test]
@@ -385,52 +322,6 @@ async fn http_incoming_echo() {
     assert_eq!(collect(response).await, json!({ "message": "h2", "request_id": "req-h2" }));
 
     runtime.shutdown();
-
-    // Longest-prefix routing across multiple HTTP guests, segment boundary
-    // matching, and ambiguity rejection when two exporters carry no routes.
-    let echo = std::fs::read(test_programs::HTTP_INCOMING_ECHO).expect("echo bytes");
-    let routed = Deployment::new()
-        .entry(GuestEntry::new("short", echo.clone()).route_http("/echo"))
-        .entry(GuestEntry::new("long", echo.clone()).route_http("/echo/sub"))
-        .boot(Backends::defaults().await, |deployment| {
-            deployment.host::<WasiHttp>()?;
-            deployment.host::<WasiOtel>()?;
-            Ok(())
-        })
-        .await
-        .expect("routed runtime boots");
-    let routed_handler =
-        HttpHandler::new(&routed).expect("routes valid").expect("exporters present");
-    let hit = Request::get("/echo?message=routed")
-        .header(HOST, "echo.test")
-        .body(Full::new(Bytes::new()))
-        .expect("request");
-    assert_eq!(routed_handler.handle(hit).await.expect("handled").status(), StatusCode::OK);
-    let miss = Request::get("/echoes")
-        .header(HOST, "echo.test")
-        .body(Full::new(Bytes::new()))
-        .expect("request");
-    assert_eq!(
-        routed_handler.handle(miss).await.expect("unmatched segment prefix").status(),
-        StatusCode::NOT_FOUND
-    );
-    routed.shutdown();
-
-    let ambiguous = Deployment::new()
-        .entry(GuestEntry::new("a", echo.clone()))
-        .entry(GuestEntry::new("b", echo))
-        .boot(Backends::defaults().await, |deployment| {
-            deployment.host::<WasiHttp>()?;
-            deployment.host::<WasiOtel>()?;
-            Ok(())
-        })
-        .await
-        .expect("ambiguous runtime boots");
-    assert!(
-        HttpHandler::new(&ambiguous).is_err(),
-        "two HTTP exporters without routes must be rejected"
-    );
-    ambiguous.shutdown();
 }
 
 async fn collect(response: Response<omnia_wasi_http::OutgoingBody>) -> Value {

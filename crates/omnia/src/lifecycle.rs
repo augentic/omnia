@@ -350,3 +350,68 @@ impl IdleRelease {
         true
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::time::{Duration, Instant};
+
+    use super::IdleRelease;
+
+    const AFTER: Duration = Duration::from_secs(10);
+    // one tick short of `AFTER`
+    const ALMOST: Duration = Duration::from_millis(9_999);
+
+    #[test]
+    fn activity_between_ticks() {
+        let mut idle = IdleRelease::new(AFTER);
+        let start = Instant::now();
+        assert!(!idle.due(1, false, start));
+        assert!(!idle.due(1, false, start + AFTER / 2));
+
+        // a guest ran and finished between two looks, each of which saw no
+        // live instance: the spell restarts at the look that saw the count move
+        assert!(!idle.due(2, false, start + AFTER));
+        assert!(!idle.due(2, false, start + AFTER + ALMOST));
+        assert!(idle.due(2, false, start + 2 * AFTER));
+    }
+
+    #[test]
+    fn live_instance() {
+        let mut idle = IdleRelease::new(AFTER);
+        let start = Instant::now();
+        assert!(!idle.due(0, false, start));
+        assert!(!idle.due(0, true, start + AFTER / 2));
+
+        // idle begins at the first look after the instance is gone
+        assert!(!idle.due(0, false, start + AFTER));
+        assert!(!idle.due(0, false, start + AFTER + ALMOST));
+        assert!(idle.due(0, false, start + 2 * AFTER));
+    }
+
+    #[test]
+    fn idle_short_of_after() {
+        let mut idle = IdleRelease::new(AFTER);
+        let start = Instant::now();
+        assert!(!idle.due(0, false, start));
+        assert!(!idle.due(0, false, start + ALMOST));
+    }
+
+    #[test]
+    fn idle_past_after() {
+        let mut idle = IdleRelease::new(AFTER);
+        let start = Instant::now();
+        assert!(!idle.due(0, false, start));
+        assert!(idle.due(0, false, start + AFTER));
+
+        // the spell that released is over; the next waits `after` again
+        assert!(!idle.due(0, false, start + AFTER));
+        assert!(idle.due(0, false, start + 2 * AFTER));
+    }
+
+    #[test]
+    fn tick_within_after() {
+        assert_eq!(IdleRelease::new(AFTER).tick(), IdleRelease::TICK);
+        let short = Duration::from_millis(200);
+        assert_eq!(IdleRelease::new(short).tick(), short);
+    }
+}

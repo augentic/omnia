@@ -29,23 +29,23 @@ mod generated {
 }
 
 use std::fmt::Debug;
+use std::sync::Arc;
 
-#[cfg(feature = "oauth")]
-pub use default_impl::{ConnectOptions, IdentityDefault};
-pub use omnia_backend::identity::{AccessToken, Identity, IdentityClient};
 pub use omnia_core::FutureResult;
 use omnia_core::{Host, HostCtx, Provides, StoreCtx};
-pub use stub_impl::IdentityStub;
 use wasmtime::component::Linker;
 
+#[cfg(feature = "oauth")]
+pub use self::default_impl::IdentityDefault;
 use self::generated::omnia::identity::credentials;
 pub use self::resource::*;
+pub use self::stub_impl::IdentityStub;
 use crate::host::generated::Error;
 
 /// Result type for identity operations.
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// Host-side service for `omnia:identity`.
+/// Host-side service for `wasi:identity`.
 #[derive(Debug, HostCtx)]
 #[host_ctx(client = IdentityClient)]
 pub struct WasiIdentity;
@@ -54,6 +54,15 @@ impl<B: Provides<Self>> Host<B> for WasiIdentity {
     fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
         Ok(credentials::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?)
     }
+}
+
+/// Service contract for `omnia:identity` backends.
+///
+/// This is implemented by the resource-specific provider of Identity
+/// functionality.
+pub trait IdentityClient: Debug + Send + Sync + 'static {
+    /// Get the identity for the specified name.
+    fn get_identity(&self, name: String) -> FutureResult<Arc<dyn Identity>>;
 }
 
 omnia_core::host_error!(Error, InternalFailure);

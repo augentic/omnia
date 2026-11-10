@@ -1,4 +1,45 @@
-use omnia_backend::blobstore::Container;
+use std::fmt::Debug;
+
+use bytes::Bytes;
+pub use omnia_core::FutureResult;
+
+use crate::host::generated::wasi::blobstore::container::{ContainerMetadata, ObjectMetadata};
+
+/// Providers implement the [`Container`] trait to allow the host to
+/// interact with different backend containers.
+pub trait Container: Debug + Send + Sync + 'static {
+    /// The name of the container.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the container name cannot be retrieved.
+    fn name(&self) -> anyhow::Result<String>;
+
+    /// Returns the metadata for the container.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the container metadata cannot be retrieved.
+    fn info(&self) -> anyhow::Result<ContainerMetadata>;
+
+    /// Get the value associated with the key.
+    fn get_data(&self, name: String, _start: u64, _end: u64) -> FutureResult<Option<Bytes>>;
+
+    /// Set the value associated with the key.
+    fn write_data(&self, name: String, data: Bytes) -> FutureResult<()>;
+
+    /// List all objects in the container.
+    fn list_objects(&self) -> FutureResult<Vec<String>>;
+
+    /// Delete the value associated with the key.
+    fn delete_object(&self, name: String) -> FutureResult<()>;
+
+    /// Check if the object exists.
+    fn has_object(&self, name: String) -> FutureResult<bool>;
+
+    /// Get metadata for the specified object.
+    fn object_info(&self, name: String) -> FutureResult<ObjectMetadata>;
+}
 
 /// Proxy for a blobstore container.
 pub type ContainerProxy = omnia_core::Proxy<dyn Container>;

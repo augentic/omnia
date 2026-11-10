@@ -52,7 +52,7 @@ impl omnia_wasi_messaging::incoming_handler::Guest for Messaging {
 }
 ```
 
-The guest router matches registered topics exactly; broker subscription patterns and any environment topic prefix remain host configuration (`KAFKA_TOPICS` / `KAFKA_TOPIC_PREFIX`, `NATS_TOPICS` / `NATS_TOPIC_PREFIX`). `topic` decodes JSON and returns `Ok(())` for successful handler output. The current WIT handler returns only `result<_, error>`: the host logs and counts a returned `error.other`, a trap, and a timeout alike, and the backend decides what each means for the message — the in-memory default and NATS are finished with it, while Kafka ends its consumer so the process restarts and the record is redelivered (see the [`omnia-kafka` README](https://github.com/augentic/omnia-backends/tree/main/crates/kafka)). In multi-guest deployments, each guest's `routes.messaging` patterns select it by NATS-style topic match — see [Multi-Guest Deployments](multi-guest-deployments.md#routing-inbound-traffic).
+The guest router matches registered topics exactly; broker subscription patterns remain host configuration (`KAFKA_TOPICS`, `NATS_TOPICS`). `topic` decodes JSON and returns `Ok(())` for successful handler output. The current WIT handler returns only `result<_, error>`: the host logs and counts a returned `error.other`, a trap, and a timeout alike, and the backend decides what each means for the message — the in-memory default and NATS are finished with it, while Kafka ends its consumer so the process restarts and the record is redelivered (see the [`omnia-kafka` README](https://github.com/augentic/omnia-backends/tree/main/crates/kafka)). In multi-guest deployments, each guest's `routes.messaging` patterns select it by NATS-style topic match — see [Multi-Guest Deployments](multi-guest-deployments.md#routing-inbound-traffic).
 
 For non-JSON payloads, register the route with `topic_with(topic, handler, decode)` instead: the decoder `Fn(&Delivery) -> Result<I, DecodeError>` sees the whole delivery (payload, `content_type`, metadata), and a decode failure rejects the message just as malformed JSON does under `topic`.
 
@@ -96,8 +96,8 @@ A single guest can export both the HTTP handler and the messaging handler — a 
 | Backend | Notes |
 | ------- | ----- |
 | `MessagingDefault` (in-tree) | In-process broadcast; delivery only within the runtime process |
-| `omnia-kafka` | Apache Kafka; `KAFKA_BROKERS`, `COMPONENT`, `KAFKA_TOPICS`, `KAFKA_TOPIC_PREFIX`, `KAFKA_CONSUMER_GROUP`, SASL via `KAFKA_USERNAME`/`KAFKA_PASSWORD`, optional Schema Registry (`KAFKA_REGISTRY_URL`) |
-| `omnia-nats` | NATS core; `NATS_ADDR`, `NATS_TOPICS`, `NATS_TOPIC_PREFIX`, NKey auth via `NATS_JWT`/`NATS_SEED` |
+| `omnia-kafka` | Apache Kafka; `KAFKA_BROKERS`, `COMPONENT`, `KAFKA_TOPICS`, `KAFKA_CONSUMER_GROUP`, SASL via `KAFKA_USERNAME`/`KAFKA_PASSWORD`, optional Schema Registry (`KAFKA_REGISTRY_URL`) |
+| `omnia-nats` | NATS core; `NATS_ADDR`, `NATS_TOPICS`, NKey auth via `NATS_JWT`/`NATS_SEED` |
 
 Semantics to keep in mind when moving from the default to a broker: the in-memory backend is at-most-once within one process, while Kafka/NATS bring their own delivery, ordering, and consumer-group semantics. Guest code is unchanged, but handlers should be idempotent if the production broker can redeliver.
 

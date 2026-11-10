@@ -3,7 +3,7 @@ use omnia_core::HostView;
 use wasmtime::component::{Access, Accessor, Resource};
 
 use crate::host::generated::omnia::identity::credentials::{
-    AccessToken as WitAccessToken, Host, HostIdentity, HostIdentityWithStore, HostWithStore,
+    AccessToken, Host, HostIdentity, HostIdentityWithStore, HostWithStore,
 };
 use crate::host::generated::omnia::identity::types::Error;
 use crate::host::resource::IdentityProxy;
@@ -22,22 +22,18 @@ impl<T> HostWithStore<T> for WasiIdentity {
 impl<T> HostIdentityWithStore<T> for WasiIdentity {
     async fn get_token(
         accessor: &Accessor<T, Self>, self_: Resource<IdentityProxy>, scopes: Vec<String>,
-    ) -> Result<WitAccessToken> {
+    ) -> Result<AccessToken> {
         let identity =
             omnia_core::get_cloned(accessor, &self_).map_err(|_stale| Error::NoSuchIdentity)?;
 
         let token = identity.0.get_token(scopes).await.context("issue getting access token")?;
-        Ok(WitAccessToken {
-            token: token.token,
-            expires_in: token.expires_in,
-        })
+        Ok(token)
     }
 
     fn drop(
         mut accessor: Access<'_, T, Self>, rep: Resource<IdentityProxy>,
     ) -> wasmtime::Result<()> {
-        accessor.get().table.delete(rep)?;
-        Ok(())
+        Ok(accessor.get().table.delete(rep).map(|_| ())?)
     }
 }
 

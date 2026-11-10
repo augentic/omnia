@@ -3,16 +3,14 @@
 use omnia_core::{HostView, StoreCtx};
 use wasmtime::component::Accessor;
 
-use crate::host::generated::omnia::vcs::transport::{
-    CloneOptions as WitCloneOptions, Host, HostWithStore, Location,
-};
-use crate::host::{CloneOptions, Intent, Result, VcsClient, WasiVcs};
+use crate::host::generated::omnia::vcs::transport::{CloneOptions, Host, HostWithStore, Location};
+use crate::host::location::Intent;
+use crate::host::{Result, VcsClient, WasiVcs};
 
 impl<B: Send + 'static> HostWithStore<StoreCtx<B>> for WasiVcs {
     async fn clone(
-        accessor: &Accessor<StoreCtx<B>, Self>, url: String, at: Location, options: WitCloneOptions,
+        accessor: &Accessor<StoreCtx<B>, Self>, url: String, at: Location, options: CloneOptions,
     ) -> Result<()> {
-        let options = CloneOptions { depth: options.depth };
         Self::dispatch(accessor, |access| {
             let at = Self::locate(access, &at, Intent::Create)?;
             Ok(access.get().client.clone_repo(url, at, options))

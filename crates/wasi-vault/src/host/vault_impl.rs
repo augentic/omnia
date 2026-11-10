@@ -7,12 +7,6 @@ use crate::host::resource::LockerProxy;
 use crate::host::vault::{Host, HostLocker, HostLockerWithStore, HostWithStore};
 use crate::host::{Result, VaultClient, WasiVault};
 
-pub fn get_locker<T>(
-    accessor: &Accessor<T, WasiVault>, self_: &Resource<LockerProxy>,
-) -> Result<LockerProxy> {
-    Ok(omnia_core::get_cloned(accessor, self_)?)
-}
-
 impl<T> HostWithStore<T> for WasiVault {
     async fn open(
         accessor: &Accessor<T, Self>, locker_id: String,
@@ -61,13 +55,12 @@ impl<T> HostLockerWithStore<T> for WasiVault {
         accessor: &Accessor<T, Self>, self_: Resource<LockerProxy>,
     ) -> Result<Vec<String>> {
         let locker = get_locker(accessor, &self_)?;
-        let secret_ids = locker.list_ids().await.context("issue listing secret ids")?;
+        let secret_ids = locker.list_ids().await.context("issue getting value")?;
         Ok(secret_ids)
     }
 
     fn drop(mut accessor: Access<'_, T, Self>, rep: Resource<LockerProxy>) -> wasmtime::Result<()> {
-        accessor.get().table.delete(rep)?;
-        Ok(())
+        accessor.get().table.delete(rep).map(|_| Ok(()))?
     }
 }
 
@@ -78,3 +71,9 @@ impl Host for HostView<'_, dyn VaultClient> {
 }
 
 impl HostLocker for HostView<'_, dyn VaultClient> {}
+
+pub fn get_locker<T>(
+    accessor: &Accessor<T, WasiVault>, self_: &Resource<LockerProxy>,
+) -> Result<LockerProxy> {
+    Ok(omnia_core::get_cloned(accessor, self_)?)
+}

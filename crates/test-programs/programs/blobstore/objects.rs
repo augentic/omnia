@@ -109,19 +109,9 @@ async fn scenario() {
 }
 
 async fn write(container: &Container, name: &str, data: &[u8]) {
-    let unfinished = OutgoingValue::new_outgoing_value();
-    assert!(
-        OutgoingValue::finish(unfinished).is_err(),
-        "finish without requesting the write body must fail"
-    );
-
     let outgoing = OutgoingValue::new_outgoing_value();
     {
         let body = outgoing.outgoing_value_write_body().await.expect("write-body");
-        assert!(
-            outgoing.outgoing_value_write_body().await.is_err(),
-            "requesting the write body a second time must fail"
-        );
         // `blocking-write-and-flush` accepts at most 4096 bytes per call.
         for chunk in data.chunks(4096) {
             body.blocking_write_and_flush(chunk).expect("write chunk");

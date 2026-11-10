@@ -1,0 +1,126 @@
+---
+source: crates/host-macros/src/runtime.rs
+expression: "expand_pretty(quote!({\n    mode: command, guests:\n    [{ name: \"specify\", path: \"engine.wasm\", command: true },\n    { name: \"target:mock\", path: \"mock.wasm\" },], mounts:\n    [{ name: \"project\", path: project_root(), writable: true },\n    { name: \"store\", path: store_root(), writable: true },], hosts:\n    { WasiHttp: HttpDefault, WasiOtel: OtelDefault, }\n}))"
+---
+mod runtime {
+    use omnia::anyhow::Result;
+    use omnia::futures::future;
+    use omnia::tokio;
+    use super::*;
+    use omnia::Connect;
+    #[derive(Clone)]
+    struct Backends {
+        backend_0: HttpDefault,
+        backend_1: OtelDefault,
+    }
+    impl omnia::ConnectAll for Backends {
+        async fn connect() -> Result<Self> {
+            let (backend_0, backend_1) = tokio::try_join!(
+                < HttpDefault as Connect > ::connect(), < OtelDefault as Connect >
+                ::connect(),
+            )?;
+            Ok(Self { backend_0, backend_1 })
+        }
+    }
+    impl omnia::Provides<WasiHttp> for Backends {
+        fn borrow(&mut self) -> <WasiHttp as omnia::HostCtx>::Borrow<'_> {
+            &mut self.backend_0
+        }
+    }
+    impl omnia::Provides<WasiOtel> for Backends {
+        fn borrow(&mut self) -> <WasiOtel as omnia::HostCtx>::Borrow<'_> {
+            &mut self.backend_1
+        }
+    }
+    /// This runtime's host wiring, generic over the bundle carrying
+    /// its hosts' contexts: the compiled-in bundle under `main` and
+    /// `run`, any other under `run_with`.
+    pub struct Hooks;
+    impl<B> omnia::Wiring<B> for Hooks
+    where
+        B: omnia::Backends,
+        B: omnia::Provides<WasiHttp>,
+        B: omnia::Provides<WasiOtel>,
+    {
+        fn link(deployment: &mut omnia::Deployment<B>) -> Result<()> {
+            deployment.host::<WasiHttp>()?;
+            deployment.host::<WasiOtel>()?;
+            Ok(())
+        }
+        async fn serve(runtime: &omnia::Runtime<B>) -> Result<()> {
+            let servers: Vec<future::BoxFuture<'_, Result<()>>> = vec![
+                Box::pin(< WasiHttp as omnia::Host < B >> ::run(runtime)), Box::pin(<
+                WasiOtel as omnia::Host < B >> ::run(runtime)),
+            ];
+            future::try_join_all(servers).await?;
+            Ok(())
+        }
+    }
+    /// The deployment compiled in here (`manifest:` or the inline
+    /// manifest keys; empty when neither is declared), for an
+    /// embedder to overlay before `run_with`.
+    pub fn manifest() -> omnia::ManifestSource {
+        omnia::ManifestSource::Inline(
+            omnia::Manifest::new()
+                .guest(
+                    omnia::GuestEntry::new("specify", include_bytes!("engine.wasm"))
+                        .command(),
+                )
+                .guest(
+                    omnia::GuestEntry::new("target:mock", include_bytes!("mock.wasm")),
+                )
+                .mounts([
+                    omnia::Mount {
+                        name: ::std::string::String::from("project"),
+                        path: ::std::path::PathBuf::from(project_root()),
+                        writable: true,
+                    },
+                ])
+                .mounts([
+                    omnia::Mount {
+                        name: ::std::string::String::from("store"),
+                        path: ::std::path::PathBuf::from(store_root()),
+                        writable: true,
+                    },
+                ]),
+        )
+    }
+    /// Entry point: run the compiled-in deployment through this
+    /// runtime's hosts and backends (raw argv passthrough for a
+    /// command deployment compiled in here, otherwise the standard
+    /// `run` grammar).
+    #[tokio::main]
+    pub async fn main() -> ::std::process::ExitCode {
+        omnia::main::<
+            Backends,
+            Hooks,
+        >(
+                omnia::MainOptions::new(omnia::Mode::Command)
+                    .program_name(env!("CARGO_PKG_NAME"))
+                    .manifest(manifest()),
+            )
+            .await
+    }
+    /// Run one deployment through this runtime's hosts and backends,
+    /// blocking until the guest completes.
+    #[tokio::main]
+    pub async fn run(builder: omnia::DeploymentBuilder) -> Result<omnia::ExitStatus> {
+        let deployment = builder.mode(omnia::Mode::Command).build::<Backends>().await?;
+        omnia::run::<Backends, Hooks>(deployment).await
+    }
+    /// Run one deployment through this runtime's hosts over a bundle
+    /// already in hand — nothing connects.
+    pub async fn run_with<B>(
+        builder: omnia::DeploymentBuilder,
+        backends: B,
+    ) -> Result<omnia::ExitStatus>
+    where
+        B: omnia::Backends,
+        Hooks: omnia::Wiring<B>,
+    {
+        let deployment = builder.mode(omnia::Mode::Command).build::<B>().await?;
+        omnia::run_with::<B, Hooks>(deployment, backends).await
+    }
+}
+#[allow(unused_imports, reason = "a nested-module invocation uses only some re-exports")]
+pub use runtime::{Hooks, main, manifest, run, run_with};

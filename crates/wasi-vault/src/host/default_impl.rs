@@ -1,42 +1,48 @@
-//! In-memory default implementation of [`VaultClient`].
+//! Default in-memory implementation for wasi-vault
+//!
+//! This is a lightweight implementation for development use only.
 
 use std::collections::HashMap;
-use std::fmt::Debug;
 use std::sync::Arc;
 
 use anyhow::Result;
-use futures::FutureExt as _;
-use omnia_backend::vault::{Locker, VaultClient};
-use omnia_core::{Connect, FutureResult, NoOptions};
+use futures::FutureExt;
+use omnia_core::Connect;
 use tracing::instrument;
+
+use crate::host::VaultClient;
+use crate::host::resource::{FutureResult, Locker};
 
 type Store = Arc<parking_lot::RwLock<HashMap<String, HashMap<String, Vec<u8>>>>>;
 
-/// Default in-memory implementation of [`VaultClient`].
-#[derive(Debug, Clone, Default)]
+/// Default implementation for `wasi:vault`.
+#[derive(Debug, Clone)]
 pub struct VaultDefault {
+    // Using Arc for shared state across instances
     store: Store,
 }
 
 impl Connect for VaultDefault {
-    type ConnectOptions = NoOptions;
+    type ConnectOptions = omnia_core::NoOptions;
 
     #[instrument]
     async fn connect_with(options: Self::ConnectOptions) -> Result<Self> {
-        let _ = options;
         tracing::debug!("initializing in-memory vault");
-        Ok(Self::default())
+        Ok(Self {
+            store: Arc::new(parking_lot::RwLock::new(HashMap::new())),
+        })
     }
 }
 
 impl VaultClient for VaultDefault {
     fn open_locker(&self, identifier: String) -> FutureResult<Arc<dyn Locker>> {
-        tracing::trace!("opening locker: {identifier}");
+        tracing::trace!("opening locker: {}", identifier);
         let locker = InMemLocker {
             identifier: identifier.clone(),
             store: Arc::clone(&self.store),
         };
 
+        // ensure the locker exists in the store
         {
             let mut store = self.store.write();
             store.entry(identifier).or_default()

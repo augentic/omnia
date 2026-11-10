@@ -60,7 +60,7 @@ Guests normally call these through the `omnia_sdk::DocumentStore` trait (impleme
 
 ## Filters
 
-Filters reference fields *inside* the document JSON and compose into trees. On the guest side, build them with the `Filter` constructors from `omnia_sdk::docstore` (defined in [`crates/backend/src/docstore.rs`](../../crates/backend/src/docstore.rs)):
+Filters reference fields *inside* the document JSON and compose into trees. On the guest side, build them with the `Filter` constructors from `omnia_sdk::docstore` (defined in [`crates/wasi-docstore/src/document_store.rs`](../../crates/wasi-docstore/src/document_store.rs)):
 
 | Constructor | Predicate |
 | ----------- | --------- |

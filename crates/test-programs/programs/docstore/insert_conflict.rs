@@ -1,10 +1,10 @@
-//! `insert` is create-only over the `wasi:docstore` guest SDK: a second
+//! `insert` is create-only over the `omnia:docstore` guest SDK: a second
 //! insert under the same id is refused with the host's reason and leaves the
 //! first body untouched, while `put` on that id is the sanctioned overwrite.
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_wasi_docstore::docstore::Document;
+use omnia_wasi_docstore::document_store::Document;
 use omnia_wasi_docstore::store;
 
 omnia_sdk::api::command::export!(scenario);

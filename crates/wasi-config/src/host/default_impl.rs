@@ -1,62 +1,45 @@
-//! Process-environment and map default implementation of [`ConfigClient`].
+//! Default implementation for `wasi:config`, sourcing variables from the
+//! process environment.
 
-use std::collections::HashMap;
 use std::env;
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
 use anyhow::Result;
-use futures::FutureExt as _;
-use omnia_backend::config::ConfigClient;
-use omnia_core::{Connect, FutureResult, NoOptions};
+use omnia_core::Connect;
 use tracing::instrument;
+use wasmtime_wasi_config::WasiConfigVariables;
 
-/// Default implementation for `wasi:config`, sourcing variables from the
-/// process environment on [`Connect`] or from a seeded map.
-#[derive(Clone, Default)]
+use crate::ConfigClient;
+
+/// Default implementation for `wasi:config`.
+#[derive(Clone)]
 pub struct ConfigDefault {
-    vars: Arc<HashMap<String, String>>,
-}
-
-impl<K, V> FromIterator<(K, V)> for ConfigDefault
-where
-    K: Into<String>,
-    V: Into<String>,
-{
-    fn from_iter<I: IntoIterator<Item = (K, V)>>(vars: I) -> Self {
-        Self {
-            vars: Arc::new(vars.into_iter().map(|(k, v)| (k.into(), v.into())).collect()),
-        }
-    }
+    /// The configuration variables.
+    pub config_vars: Arc<WasiConfigVariables>,
 }
 
 impl Debug for ConfigDefault {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ConfigDefault").finish_non_exhaustive()
+        write!(f, "ConfigDefault")
     }
 }
 
 impl Connect for ConfigDefault {
-    type ConnectOptions = NoOptions;
+    type ConnectOptions = omnia_core::NoOptions;
 
     #[instrument]
     async fn connect_with(_: Self::ConnectOptions) -> Result<Self> {
+        let config_vars = env::vars().collect();
+
         Ok(Self {
-            vars: Arc::new(env::vars().collect()),
+            config_vars: Arc::new(config_vars),
         })
     }
 }
 
 impl ConfigClient for ConfigDefault {
-    fn get(&self, key: String) -> FutureResult<Option<String>> {
-        let value = self.vars.get(&key).cloned();
-        async move { Ok(value) }.boxed()
-    }
-
-    fn get_all(&self) -> FutureResult<Vec<(String, String)>> {
-        let mut pairs: Vec<(String, String)> =
-            self.vars.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-        pairs.sort_by(|a, b| a.0.cmp(&b.0));
-        async move { Ok(pairs) }.boxed()
+    fn get_config(&self) -> &WasiConfigVariables {
+        &self.config_vars
     }
 }

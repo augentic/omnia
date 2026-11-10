@@ -90,107 +90,40 @@ struct Scope {
     instruments: Vec<Arc<dyn Instrument>>,
 }
 
+impl Scope {
+    // A later build of the same instrument shares the series and keeps the
+    // first description and unit, as in the SDK.
+    fn series<A>(
+        &mut self, kind: Kind, name: Cow<'static, str>, description: Option<Cow<'static, str>>,
+        unit: Option<Cow<'static, str>>, aggregate: impl FnOnce(SystemTime) -> A,
+    ) -> Arc<Series<A>>
+    where
+        A: Aggregate,
+        A::Data: Into<wasi::AggregatedMetrics>,
+    {
+        let existing = self
+            .instruments
+            .iter()
+            .find(|instrument| instrument.kind() == kind && instrument.name() == name.as_ref())
+            .and_then(|instrument| Arc::clone(instrument).into_any().downcast::<Series<A>>().ok());
+        existing.unwrap_or_else(|| {
+            let series = Arc::new(Series {
+                kind,
+                name,
+                description: description.unwrap_or_default(),
+                unit: unit.unwrap_or_default(),
+                state: Mutex::new(aggregate(SystemTime::now())),
+            });
+            self.instruments.push(Arc::clone(&series) as Arc<dyn Instrument>);
+            series
+        })
+    }
+}
+
 #[derive(Debug)]
 struct Instruments {
     scope: InstrumentationScope,
     registry: Arc<Registry>,
-}
-
-// an instrument's identity within its scope
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Kind {
-    CounterU64,
-    CounterF64,
-    UpDownCounterI64,
-    UpDownCounterF64,
-    GaugeU64,
-    GaugeI64,
-    GaugeF64,
-    HistogramU64,
-    HistogramF64,
-}
-
-#[derive(Debug)]
-struct Series<A> {
-    kind: Kind,
-    name: Cow<'static, str>,
-    description: Cow<'static, str>,
-    unit: Cow<'static, str>,
-    state: Mutex<A>,
-}
-
-impl<A: Aggregate> SyncInstrument<A::Value> for Series<A> {
-    fn measure(&self, measurement: A::Value, attributes: &[KeyValue]) {
-        if let Ok(mut state) = self.state.lock() {
-            state.record(measurement, attributes);
-        }
-    }
-}
-
-trait Instrument: Any + fmt::Debug + Send + Sync {
-    fn kind(&self) -> Kind;
-    fn name(&self) -> &str;
-    fn collect(&self, now: SystemTime) -> Option<wasi::Metric>;
-    fn into_any(self: Arc<Self>) -> Arc<dyn Any + Send + Sync>;
-}
-
-impl<A> Instrument for Series<A>
-where
-    A: Aggregate,
-    A::Data: Into<wasi::AggregatedMetrics>,
-{
-    fn kind(&self) -> Kind {
-        self.kind
-    }
-
-    fn name(&self) -> &str {
-        &self.name
-    }
-
-    fn collect(&self, now: SystemTime) -> Option<wasi::Metric> {
-        let data = self.state.lock().ok()?.collect(now)?;
-        Some(wasi::Metric {
-            name: self.name.to_string(),
-            description: self.description.to_string(),
-            unit: self.unit.to_string(),
-            data: data.into(),
-        })
-    }
-
-    fn into_any(self: Arc<Self>) -> Arc<dyn Any + Send + Sync> {
-        self
-    }
-}
-
-// what a misconfigured builder yields
-#[derive(Debug)]
-struct Noop;
-
-impl<T> SyncInstrument<T> for Noop {
-    fn measure(&self, _: T, _: &[KeyValue]) {}
-}
-
-// a value type with its `aggregated-metrics` arm
-trait Number: Measurement + Into<wasi::DataValue> {
-    fn aggregated(data: wasi::MetricData) -> wasi::AggregatedMetrics;
-}
-
-impl Number for u64 {
-    fn aggregated(data: wasi::MetricData) -> wasi::AggregatedMetrics {
-        wasi::AggregatedMetrics::U64(data)
-    }
-}
-
-impl Number for i64 {
-    fn aggregated(data: wasi::MetricData) -> wasi::AggregatedMetrics {
-        wasi::AggregatedMetrics::S64(data)
-    }
-}
-
-impl Number for f64 {
-    fn aggregated(data: wasi::MetricData) -> wasi::AggregatedMetrics {
-        wasi::AggregatedMetrics::F64(data)
-    }
 }
 
 impl Instruments {
@@ -318,38 +251,101 @@ impl InstrumentProvider for Instruments {
     }
 }
 
-impl Scope {
-    // A later build of the same instrument shares the series and keeps the
-    // first description and unit, as in the SDK.
-    fn series<A>(
-        &mut self, kind: Kind, name: Cow<'static, str>, description: Option<Cow<'static, str>>,
-        unit: Option<Cow<'static, str>>, aggregate: impl FnOnce(SystemTime) -> A,
-    ) -> Arc<Series<A>>
-    where
-        A: Aggregate,
-        A::Data: Into<wasi::AggregatedMetrics>,
-    {
-        let existing = self
-            .instruments
-            .iter()
-            .find(|instrument| instrument.kind() == kind && instrument.name() == name.as_ref())
-            .and_then(|instrument| Arc::clone(instrument).into_any().downcast::<Series<A>>().ok());
-        existing.unwrap_or_else(|| {
-            let series = Arc::new(Series {
-                kind,
-                name,
-                description: description.unwrap_or_default(),
-                unit: unit.unwrap_or_default(),
-                state: Mutex::new(aggregate(SystemTime::now())),
-            });
-            self.instruments.push(Arc::clone(&series) as Arc<dyn Instrument>);
-            series
-        })
+// an instrument's identity within its scope
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Kind {
+    CounterU64,
+    CounterF64,
+    UpDownCounterI64,
+    UpDownCounterF64,
+    GaugeU64,
+    GaugeI64,
+    GaugeF64,
+    HistogramU64,
+    HistogramF64,
+}
+
+trait Instrument: Any + fmt::Debug + Send + Sync {
+    fn kind(&self) -> Kind;
+    fn name(&self) -> &str;
+    fn collect(&self, now: SystemTime) -> Option<wasi::Metric>;
+    fn into_any(self: Arc<Self>) -> Arc<dyn Any + Send + Sync>;
+}
+
+#[derive(Debug)]
+struct Series<A> {
+    kind: Kind,
+    name: Cow<'static, str>,
+    description: Cow<'static, str>,
+    unit: Cow<'static, str>,
+    state: Mutex<A>,
+}
+
+impl<A: Aggregate> SyncInstrument<A::Value> for Series<A> {
+    fn measure(&self, measurement: A::Value, attributes: &[KeyValue]) {
+        if let Ok(mut state) = self.state.lock() {
+            state.record(measurement, attributes);
+        }
     }
 }
 
-fn convert(attributes: Vec<KeyValue>) -> Vec<wasi::KeyValue> {
-    attributes.into_iter().map(Into::into).collect()
+impl<A> Instrument for Series<A>
+where
+    A: Aggregate,
+    A::Data: Into<wasi::AggregatedMetrics>,
+{
+    fn kind(&self) -> Kind {
+        self.kind
+    }
+
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn collect(&self, now: SystemTime) -> Option<wasi::Metric> {
+        let data = self.state.lock().ok()?.collect(now)?;
+        Some(wasi::Metric {
+            name: self.name.to_string(),
+            description: self.description.to_string(),
+            unit: self.unit.to_string(),
+            data: data.into(),
+        })
+    }
+
+    fn into_any(self: Arc<Self>) -> Arc<dyn Any + Send + Sync> {
+        self
+    }
+}
+
+// what a misconfigured builder yields
+#[derive(Debug)]
+struct Noop;
+
+impl<T> SyncInstrument<T> for Noop {
+    fn measure(&self, _: T, _: &[KeyValue]) {}
+}
+
+// a value type with its `aggregated-metrics` arm
+trait Number: Measurement + Into<wasi::DataValue> {
+    fn aggregated(data: wasi::MetricData) -> wasi::AggregatedMetrics;
+}
+
+impl Number for u64 {
+    fn aggregated(data: wasi::MetricData) -> wasi::AggregatedMetrics {
+        wasi::AggregatedMetrics::U64(data)
+    }
+}
+
+impl Number for i64 {
+    fn aggregated(data: wasi::MetricData) -> wasi::AggregatedMetrics {
+        wasi::AggregatedMetrics::S64(data)
+    }
+}
+
+impl Number for f64 {
+    fn aggregated(data: wasi::MetricData) -> wasi::AggregatedMetrics {
+        wasi::AggregatedMetrics::F64(data)
+    }
 }
 
 // One impl per source type so every value crosses the boundary as itself —
@@ -441,4 +437,8 @@ impl<T: Number> From<HistogramData<T>> for wasi::AggregatedMetrics {
             temporality: wasi::Temporality::Delta,
         }))
     }
+}
+
+fn convert(attributes: Vec<KeyValue>) -> Vec<wasi::KeyValue> {
+    attributes.into_iter().map(Into::into).collect()
 }

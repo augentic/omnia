@@ -28,7 +28,7 @@ fromenv = { workspace = true, optional = true }
 futures = { workspace = true, optional = true }
 omnia-core.workspace = true
 parking_lot = { workspace = true, optional = true }
-rusqlite = { workspace = true, optional = true }
+rusqlite = { version = "0.41.1", features = ["bundled"], optional = true }
 tokio = { workspace = true, features = ["rt"], optional = true }
 wasmtime.workspace = true
 wasmtime-wasi.workspace = true
@@ -36,7 +36,6 @@ wasmtime-wasi.workspace = true
 # shared dependencies
 [dependencies]
 anyhow.workspace = true
-omnia-backend = { workspace = true, features = ["sql"] }
 tracing.workspace = true
 
 # guest dependencies
@@ -45,6 +44,6 @@ wit-bindgen.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 omnia = { path = "../omnia" }
-omnia-test = { path = "../test", default-features = false, features = ["host"] }
+omnia-test = { path = "../omnia-test", default-features = false, features = ["host"] }
 test-programs.workspace = true
 tokio = { workspace = true, features = ["macros", "rt"] }

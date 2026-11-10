@@ -269,7 +269,7 @@ end = "2027-10-03"
 
 [[trusted.flate2]]
 criteria = "safe-to-deploy"
-user-id = 980
+user-id = 980 # Sebastian Thiel (Byron)
 start = "2023-08-15"
 end = "2027-10-03"
 
@@ -341,13 +341,13 @@ end = "2027-10-03"
 
 [[trusted.icu_properties]]
 criteria = "safe-to-deploy"
-user-id = 166196 # Robert Bastian (robertbastian)
+user-id = 166196
 start = "2023-01-26"
 end = "2026-12-11"
 
 [[trusted.icu_properties_data]]
 criteria = "safe-to-deploy"
-user-id = 166196 # Robert Bastian (robertbastian)
+user-id = 166196
 start = "2023-11-16"
 end = "2026-12-11"
 

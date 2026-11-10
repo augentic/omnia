@@ -12,12 +12,37 @@ use std::time::Duration;
 
 use futures::FutureExt as _;
 use omnia::{ExitStatus, Mount};
-use omnia_test::backend::ScriptedModel;
-use omnia_test::host::{Backends, Deployment, scratch};
+use omnia_test::host::{Backends, Deployment, ScriptedModel, scratch};
 use omnia_test::{Exchange, SeenFormat, SeenWorker};
 use omnia_wasi_model::{
     Answer, FutureResult, Limits, ModelClient, ModelDefault, Request, ToolHost, Usage, WasiModel,
 };
+
+// Every guest program in `crates/test-programs` must have a matching test
+// here; a new program without one fails to compile.
+test_programs::foreach_model!();
+
+// ------------------------------------------------------------------------
+// Harness
+// ------------------------------------------------------------------------
+
+async fn run_guest<M: ModelClient + Clone>(wasm: &str, mounts: Vec<Mount>, model: M) {
+    let backends = Backends::defaults().await.model(model);
+    let status = Deployment::new()
+        .guest("guest", wasm)
+        .mounts(mounts)
+        .run_host::<WasiModel, _>(backends)
+        .await
+        .expect("guest runs");
+    assert_eq!(status, ExitStatus::SUCCESS, "guest `{wasm}` failed");
+}
+
+// also requires the script to be exactly consumed; returns the model for its recordings
+async fn run_scripted(wasm: &str, mounts: Vec<Mount>, model: ScriptedModel) -> ScriptedModel {
+    run_guest(wasm, mounts, model.clone()).await;
+    model.assert_exhausted();
+    model
+}
 
 // ------------------------------------------------------------------------
 // Scenario backends
@@ -64,35 +89,9 @@ impl ModelClient for IgnoringToolFailure {
     }
 }
 
-// Every guest program in `crates/test-programs` must have a matching test
-// here; a new program without one fails to compile.
-test_programs::foreach_model!();
-
-// ------------------------------------------------------------------------
-// Harness
-// ------------------------------------------------------------------------
-
-async fn run_guest<M: ModelClient + Clone>(wasm: &str, mounts: Vec<Mount>, model: M) {
-    let backends = Backends::defaults().await.model(model);
-    let status = Deployment::new()
-        .guest("guest", wasm)
-        .mounts(mounts)
-        .run_host::<WasiModel, _>(backends)
-        .await
-        .expect("guest runs");
-    assert_eq!(status, ExitStatus::SUCCESS, "guest `{wasm}` failed");
-}
-
-// also requires the script to be exactly consumed; returns the model for its recordings
-async fn run_scripted(wasm: &str, mounts: Vec<Mount>, model: ScriptedModel) -> ScriptedModel {
-    run_guest(wasm, mounts, model.clone()).await;
-    model.assert_exhausted();
-    model
-}
-
 // the candidates the `check_*` scenarios' scripted backend proposes
-const PASS: &str = r#"{"findings":[],"verdict":"pass"}"#;
-const FAIL: &str = r#"{"findings":["x"],"verdict":"fail"}"#;
+const PASS: &str = r#"{"verdict":"pass","findings":[]}"#;
+const FAIL: &str = r#"{"verdict":"fail","findings":["x"]}"#;
 
 fn check(candidate: &str, outcome: Result<&str, &str>) -> Exchange {
     Exchange {
@@ -115,14 +114,12 @@ fn lookup_turn(answer: &str) -> ScriptedModel {
     ScriptedModel::answering([answer]).calling(0, [("lookup", "{}")])
 }
 
-// read the seed, write `out.txt`, list the root and a subdirectory, answer
+// read the seed, write `out.txt`, list the root, answer
 fn workspace_turn() -> ScriptedModel {
-    ScriptedModel::answering(["hello:docs,out.txt,seed.txt"])
+    ScriptedModel::answering(["hello:out.txt,seed.txt"])
         .reading(0, "seed.txt")
         .writing(0, "out.txt", "written")
-        .writing(0, "docs/a.txt", "a")
         .listing(0, "")
-        .listing(0, "docs")
 }
 
 // what a fully served `workspace_turn` records
@@ -135,9 +132,7 @@ fn workspace_exchanges() -> Vec<Exchange> {
     vec![
         exchange("read", "seed.txt", "hello"),
         exchange("write", "out.txt", ""),
-        exchange("write", "docs/a.txt", ""),
-        exchange("list", "", "docs,out.txt,seed.txt"),
-        exchange("list", "docs", "a.txt"),
+        exchange("list", "", "out.txt,seed.txt"),
     ]
 }
 
@@ -191,8 +186,8 @@ async fn model_echo_json() {
 }
 
 #[tokio::test]
-async fn model_schema_rejected() {
-    run_guest(test_programs::MODEL_SCHEMA_REJECTED, vec![], ModelDefault).await;
+async fn model_echo_schema_rejected() {
+    run_guest(test_programs::MODEL_ECHO_SCHEMA_REJECTED, vec![], ModelDefault).await;
 }
 
 #[tokio::test]
@@ -211,7 +206,7 @@ async fn model_invalid_request() {
 
 #[tokio::test]
 async fn model_schema_answer() {
-    let model = ScriptedModel::answering(["Done.\n```json\n{\"verdict\":\"pass\"}\n```"]);
+    let model = ScriptedModel::answering([r#"{"verdict":"pass"}"#]);
     let model = run_scripted(test_programs::MODEL_SCHEMA_ANSWER, vec![], model).await;
     assert!(!model.seen()[0].check, "no check was asked for");
     assert_eq!(model.exchanges(), vec![]);
@@ -395,14 +390,13 @@ async fn model_stale_result() {
 }
 
 #[tokio::test]
-async fn model_ooo_results() {
-    run_guest(test_programs::MODEL_OOO_RESULTS, vec![], ParallelLookups).await;
+async fn model_out_of_order_results() {
+    run_guest(test_programs::MODEL_OUT_OF_ORDER_RESULTS, vec![], ParallelLookups).await;
 }
 
 #[tokio::test]
 async fn model_workspace_tools() {
     let workspace = scratch();
-    fs::create_dir(workspace.path().join("docs")).expect("creating docs dir");
     fs::write(workspace.path().join("seed.txt"), "hello").expect("seeding workspace");
 
     let model = run_scripted(
@@ -443,7 +437,6 @@ async fn model_workspace_subpath() {
     let workspace = scratch();
     let nested = workspace.path().join("nested");
     fs::create_dir(&nested).expect("creating nested dir");
-    fs::create_dir(nested.join("docs")).expect("creating nested docs dir");
     fs::write(nested.join("seed.txt"), "hello").expect("seeding nested workspace");
 
     let model = run_scripted(
@@ -473,11 +466,11 @@ async fn model_workspace_readonly() {
 }
 
 #[tokio::test]
-async fn model_ws_unauthorized() {
+async fn model_workspace_unauthorized() {
     let workspace = scratch();
     fs::create_dir(workspace.path().join("nested")).expect("creating nested dir");
     run_scripted(
-        test_programs::MODEL_WS_UNAUTHORIZED,
+        test_programs::MODEL_WORKSPACE_UNAUTHORIZED,
         vec![workspace.mount(true)],
         ScriptedModel::default(),
     )

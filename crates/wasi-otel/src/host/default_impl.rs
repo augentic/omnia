@@ -1,20 +1,27 @@
-//! No-op default implementation of [`OtelClient`].
+//! Default no-op implementation for wasi-otel
+//!
+//! This is a lightweight implementation for development use only.
+//! It logs telemetry data but doesn't export it anywhere.
+//! For production use, use the `omnia-opentelemetry` backend.
 
 use anyhow::Result;
-use futures::FutureExt as _;
-use omnia_backend::otel::OtelClient;
-use omnia_core::{Connect, FutureResult, NoOptions};
+use futures::FutureExt;
+use omnia_core::{Connect, FutureResult};
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
 use tracing::instrument;
 
-/// Default no-op implementation of [`OtelClient`].
-#[derive(Debug, Clone, Default)]
+use crate::host::OtelClient;
+
+/// Default implementation for `wasi:otel`.
+#[derive(Debug, Clone)]
 pub struct OtelDefault;
 
 impl Connect for OtelDefault {
-    type ConnectOptions = NoOptions;
+    type ConnectOptions = omnia_core::NoOptions;
 
+    // `skip_all`: recording the unit `NoOptions` would otherwise trip
+    // `clippy::used_underscore_binding` on the expanded `_options`.
     #[instrument(skip_all)]
     async fn connect_with(_options: Self::ConnectOptions) -> Result<Self> {
         tracing::debug!("Initializing no-op OTel exporter");
@@ -23,6 +30,7 @@ impl Connect for OtelDefault {
     }
 }
 
+// logs what it is handed, for development use only
 impl OtelClient for OtelDefault {
     fn export_traces(&self, request: ExportTraceServiceRequest) -> FutureResult<()> {
         async move {

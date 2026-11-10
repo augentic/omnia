@@ -9,8 +9,6 @@ This crate provides the two macros that meet at the seam between a WASI host and
 - **`runtime!`**, for a deployment: generates the backend bundle, the linker wiring, and the entry point from a declarative map of which WASI interfaces and backends the runtime needs, instead of hand-writing them.
 - **`#[derive(HostCtx)]`**, for a host crate: generates the borrowed view a `Wasi<Service>` host assembles over its backend, so the bundle `runtime!` emits can serve it.
 
-A deployment reaches `runtime!` through `omnia`; a host crate reaches the derive through `omnia-core`. [The host side](#the-host-side-derivehostctx) shows how the two halves meet.
-
 ## Usage
 
 Add `omnia` to your dependencies (the `runtime!` macro is re-exported from the `omnia` crate):
@@ -37,7 +35,7 @@ omnia::runtime!({
 });
 ```
 
-Each key is a **host type** from a `omnia-wasi-*` crate (`WasiHttp`, `WasiKeyValue`, ...); each value is a **backend type** implementing that interface's `*Client` trait from `omnia-backend` — an in-tree default (`HttpDefault`, `KeyValueDefault`, ...) or a production client from the [`omnia-backends`](https://github.com/augentic/omnia-backends) repo.
+Each key is a **host type** from a `omnia-wasi-*` crate (`WasiHttp`, `WasiKeyValue`, ...); each value is a **backend type** implementing that interface's context trait — an in-tree default (`HttpDefault`, `KeyValueDefault`, ...) or a production client from the [`omnia-backends`](https://github.com/augentic/omnia-backends) repo.
 
 A backend may carry a connect-options expression — `WasiBlobStore: Filesystem(opts)` lowers to `Connect::connect_with(opts)` instead of the env-sourced `Connect::connect()`, compiling the configuration in. Rows sharing a backend type share one connection, so their options must be written identically on every row (or omitted on every row); empty parentheses are rejected.
 
@@ -96,7 +94,7 @@ The macro generates a private `runtime` module containing:
 
 ### `Backends` bundle
 
-A `Clone` struct with one connected backend per declared `Host: Backend` wiring, plus its `omnia::ConnectAll` impl whose `connect()` connects every backend concurrently. Its shape makes it an `omnia::Backends`, the bound every runtime type puts on a bundle. A deployment that declares no backends uses the library's `()` bundle, so nothing is generated.
+A `Clone` struct with one connected backend per declared `Host: Backend` wiring, plus its `omnia::ConnectAll` impl whose `connect()` connects every backend concurrently. Its shape makes it an `omnia::Backends`, the bound every runtime type puts on a bundle. Its fields are positional (`backend_0`, `backend_1`, ...), so two backends whose paths end in the same name never share one. A deployment that declares no backends uses the library's `()` bundle, so nothing is generated.
 
 ```rust,ignore
 #[derive(Clone)]
@@ -112,7 +110,7 @@ impl omnia::ConnectAll for Backends {
 
 ### Bundle accessor impls
 
-For each `hosts:` row, the macro emits one uniform `omnia::Provides<Host>` impl exposing the bundle's backend field; `omnia::StoreCtx::view` turns it into the host's linker-facing view. The impl is keyed by the host type itself — its `omnia::HostCtx` impl carries the borrow shape, so no names are derived from the host and third-party hosts wire the same way. That `HostCtx` impl is the seam's other half, which [`#[derive(HostCtx)]`](#the-host-side-derivehostctx) generates.
+For each `hosts:` row, the macro emits one uniform `omnia::Provides<Ctx>` impl exposing the bundle's backend field; `omnia::StoreCtx::view` turns it into the host's linker-facing view. The impl is keyed by the host type itself — its `omnia::HostCtx` impl carries the borrow shape, so no names are derived from the host and third-party hosts wire the same way.
 
 ### `main` entry point
 
@@ -138,8 +136,6 @@ All five are re-exported from the generated module as `pub use runtime::{Hooks, 
 use omnia_core::{Host, HostCtx, Provides, StoreCtx};
 use wasmtime::component::Linker;
 
-pub use omnia_backend::keyvalue::KeyValueClient;
-
 /// Host-side service for `wasi:keyvalue`.
 #[derive(Debug, HostCtx)]
 #[host_ctx(client = KeyValueClient)]
@@ -152,12 +148,20 @@ impl<B: Provides<Self>> Host<B> for WasiKeyValue {
 }
 ```
 
-For a host over `<Service>Client` the derive emits:
+For a host over `Wasi<Service>Ctx` the derive emits:
 
-- **`wasmtime::component::HasData`** for the host, naming `omnia_core::HostView<'a, dyn <Service>Client>` as its `Data`: `pub struct HostView { pub client: &'a mut dyn <Service>Client, pub table: &'a mut ResourceTable }`, the borrowed view the bindgen `Host*` traits are implemented on. A host function reaches its backend through `client` and WIT resources through `table`; the view implements `omnia_core::HasTable`, so `omnia_core::get_cloned` looks a resource up on it.
-- **`omnia_core::HostCtx`** for the host — `Borrow<'a> = &'a mut dyn <Service>Client`, and `view` assembling the view from the borrow and the store's resource table.
+- **`wasmtime::component::HasData`** for the host, naming `omnia_core::HostView<'a, dyn Wasi<Service>Ctx>` as its `Data`: `pub struct HostView { pub client: &'a dyn Wasi<Service>Ctx, pub table: &'a mut ResourceTable }`, the borrowed view the bindgen `Host*` traits are implemented on. A host function reaches its backend through `client` and WIT resources through `table`; the view implements `omnia_core::HasTable`, so `omnia_core::get_cloned` looks a resource up on it.
+- **`omnia_core::HostCtx`** for the host — `Borrow<'a> = &'a dyn Wasi<Service>Ctx`, and `view` assembling the view from the borrow and the store's resource table.
 
-The type must be non-generic, carry exactly one `#[host_ctx(client = ..)]`, and the crate must depend on `omnia-core`. A host with another borrow shape implements `HostCtx` by hand: `WasiHttp` borrows a `dyn HttpBorrow` and assembles the view type `wasmtime-wasi-http` owns.
+The type must be non-generic and name exactly one `client`. A host with another borrow shape implements `HostCtx` by hand: `WasiHttp` borrows a `dyn HttpBorrow` and assembles the view type `wasmtime-wasi-http` owns.
+
+The emitted paths start at `::omnia_core`, which a capability crate depends on directly. A deployment crate that defines a host of its own reaches the derive as `omnia::HostCtx` and names that root in `crate`:
+
+```rust,ignore
+#[derive(Debug, omnia::HostCtx)]
+#[host_ctx(client = FooClient, crate = omnia)]
+pub struct WasiFoo;
+```
 
 How the two halves meet at run time, for the row `WasiKeyValue: Redis`:
 

@@ -1,0 +1,394 @@
+//! A manifest-driven command deployment run over a backend bundle.
+
+use std::path::PathBuf;
+use std::time::Duration;
+
+use anyhow::{Context as _, Result};
+use omnia::wasmtime_wasi::p2::pipe::MemoryOutputPipe;
+use omnia::{
+    Backends, DeploymentBuilder, ExitStatus, GuestEntry, Host, LevelFilter, Manifest,
+    ManifestSource, Mode, Mount, Provides, RegistryConfig, Runtime, SourceSpec, Stdio, Wiring,
+};
+use omnia_wasi_otel::WasiOtel;
+
+/// One command-mode deployment: guests, mounts, arguments, the package
+/// store and registries, and the tracing level.
+///
+/// What guests call between themselves is read off their components,
+/// declared nowhere; `store` is where a package a guest names is kept, and
+/// `registries` the routing one the store lacks is fetched through.
+///
+/// Built from nothing, or as an overlay on the manifest a production
+/// `runtime!` compiled in (`Deployment::from(runtime::manifest())`): the
+/// builder methods add to that base, `command` re-marks its command guest,
+/// and a `mount` sharing a base mount's name replaces it (last wins), so a
+/// test serves the binary's `.` root from a scratch directory. Drive it
+/// through the generated wiring with [`run_with`](Self::run_with), or link
+/// hosts by hand with [`run`](Self::run); either way the guest loader is
+/// assembly's, and a guest added as an [`entry`](Self::entry) loads at its
+/// first use. [`captured`](Self::captured) reads back what the guests wrote
+/// to stdout and stderr beside the exit status.
+///
+/// ```no_run
+/// use omnia::{ExitStatus, GuestEntry};
+/// use omnia_test::host::{Backends, Deployment};
+///
+/// # async fn example(requester: &'static str, plugin: &'static str) -> anyhow::Result<()> {
+/// let status = Deployment::new()
+///     .guest("requester", requester)
+///     .entry(GuestEntry::new("plugin", plugin))
+///     .run(Backends::defaults().await, |_| Ok(()))
+///     .await?;
+/// assert_eq!(status, ExitStatus::SUCCESS);
+/// # Ok(())
+/// # }
+/// ```
+#[derive(Clone, Debug, Default)]
+pub struct Deployment {
+    base: Option<ManifestSource>,
+    guests: Vec<Entry>,
+    command: Option<String>,
+    mounts: Vec<Mount>,
+    args: Vec<String>,
+    store: Option<PathBuf>,
+    registries: Option<RegistryConfig>,
+    level: Option<LevelFilter>,
+    guest_timeout: Option<Duration>,
+    stdio: Option<Stdio>,
+}
+
+// One added through `guest` is read into bytes when the manifest is built,
+// so it loads at boot like the `runtime!` macro's embedded guests.
+#[derive(Clone, Debug)]
+struct Entry {
+    entry: GuestEntry,
+    embed: bool,
+}
+
+impl From<ManifestSource> for Deployment {
+    fn from(base: ManifestSource) -> Self {
+        Self {
+            base: Some(base),
+            ..Self::default()
+        }
+    }
+}
+
+impl Deployment {
+    /// An empty deployment.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Adds a guest under `name` that loads at boot: a component path is
+    /// read when the manifest is built, so it stands in for the bytes a
+    /// `runtime!` embeds.
+    #[must_use]
+    pub fn guest(mut self, name: impl Into<String>, source: impl Into<SourceSpec>) -> Self {
+        self.guests.push(Entry {
+            entry: GuestEntry::new(name, source),
+            embed: true,
+        });
+        self
+    }
+
+    /// Adds a `[[guest]]` entry as built — a path, pinned, or package
+    /// source, say — which loads as its source decides: embedded bytes at
+    /// boot, a path or package at first use.
+    #[must_use]
+    pub fn entry(mut self, entry: GuestEntry) -> Self {
+        self.guests.push(Entry { entry, embed: false });
+        self
+    }
+
+    /// Marks the guest `name` as the `wasi:cli/run` target (unmarking any
+    /// the base manifest marked); without it the sole exporter is the
+    /// catch-all.
+    #[must_use]
+    pub fn command(mut self, name: impl Into<String>) -> Self {
+        self.command = Some(name.into());
+        self
+    }
+
+    /// Preopens `mount` into the guest sandbox, replacing a base mount of
+    /// the same name.
+    #[must_use]
+    pub fn mount(mut self, mount: Mount) -> Self {
+        self.mounts.push(mount);
+        self
+    }
+
+    /// Preopens every mount into the guest sandbox.
+    #[must_use]
+    pub fn mounts(mut self, mounts: impl IntoIterator<Item = Mount>) -> Self {
+        self.mounts.extend(mounts);
+        self
+    }
+
+    /// The operator's arguments (the runtime supplies `argv[0]`).
+    #[must_use]
+    pub fn args<S: Into<String>>(mut self, args: impl IntoIterator<Item = S>) -> Self {
+        self.args.extend(args.into_iter().map(Into::into));
+        self
+    }
+
+    /// The package store every package a guest names is read from, and a
+    /// fetched one written to, replacing the base manifest's — a scratch
+    /// directory, so a test stages a release under its reference's file
+    /// name and nothing is fetched.
+    #[must_use]
+    pub fn store(mut self, root: impl Into<PathBuf>) -> Self {
+        self.store = Some(root.into());
+        self
+    }
+
+    /// The wasm-pkg configuration package sources are fetched through,
+    /// replacing the base manifest's.
+    #[must_use]
+    pub fn registries(mut self, config: impl Into<RegistryConfig>) -> Self {
+        self.registries = Some(config.into());
+        self
+    }
+
+    /// Captures every guest's stdout and stderr instead of inheriting the
+    /// test process's streams, so a run answers what the command wrote
+    /// beside its exit status.
+    #[must_use]
+    pub fn captured(self) -> Captured {
+        let stdout = MemoryOutputPipe::new(CAPTURE_BYTES);
+        let stderr = MemoryOutputPipe::new(CAPTURE_BYTES);
+        let deployment = Self {
+            stdio: Some(Stdio::new(stdout.clone(), stderr.clone())),
+            ..self
+        };
+        Captured {
+            deployment,
+            stdout,
+            stderr,
+        }
+    }
+
+    /// The tracing level for the run: the bare level of every guest's
+    /// `RUST_LOG`, whatever the test process sets, so a suite scripts a
+    /// guest's level without touching its own environment. The process
+    /// `RUST_LOG`'s targeted directives (`my_sdk=debug`) still reach the
+    /// guest on top, composed as the runtime composes them
+    /// (`omnia::telemetry::directives`).
+    ///
+    /// Unset, a guest keeps the process `RUST_LOG` and falls back to the
+    /// command-mode `info` when it sets none.
+    #[must_use]
+    pub const fn level(mut self, level: LevelFilter) -> Self {
+        self.level = Some(level);
+        self
+    }
+
+    /// The wall-clock cap on each trigger invocation, whatever the test
+    /// process sets in `GUEST_TIMEOUT_MS`, so a suite pins a hung guest
+    /// without waiting out the default.
+    #[must_use]
+    pub const fn guest_timeout(mut self, timeout: Duration) -> Self {
+        self.guest_timeout = Some(timeout);
+        self
+    }
+
+    /// The manifest this overlay describes.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a `manifest:` base manifest cannot be loaded, or
+    /// a [`guest`](Self::guest) path cannot be read.
+    pub fn manifest(&self) -> Result<Manifest> {
+        let base = self.base.clone().map(ManifestSource::into_manifest).transpose()?;
+        let mut manifest = base.unwrap_or_default().mounts(self.mounts.iter().cloned());
+        if let Some(store) = &self.store {
+            manifest = manifest.store(store.clone());
+        }
+        if let Some(registries) = &self.registries {
+            manifest = manifest.registries(registries.clone());
+        }
+        for Entry { entry, embed } in &self.guests {
+            let mut entry = entry.clone();
+            if *embed && let SourceSpec::Path(path) = &entry.source {
+                let bytes = std::fs::read(path).with_context(|| {
+                    format!("reading guest `{}` from {}", entry.name, path.display())
+                })?;
+                entry.source = bytes.into();
+            }
+            manifest = manifest.guest(entry);
+        }
+        if let Some(command) = &self.command {
+            for guest in &mut manifest.guests {
+                guest.command = guest.name == *command;
+            }
+        }
+        Ok(manifest)
+    }
+
+    fn builder(&self, manifest: Manifest) -> DeploymentBuilder {
+        let mut builder =
+            DeploymentBuilder::new().manifest(manifest).mode(Mode::Command).args(self.args.clone());
+        if let Some(level) = self.level {
+            builder = builder.level(level);
+        }
+        if let Some(timeout) = self.guest_timeout {
+            builder = builder.guest_timeout(timeout);
+        }
+        if let Some(stdio) = &self.stdio {
+            builder = builder.stdio(stdio.clone());
+        }
+        builder
+    }
+
+    /// Assembles the runtime by hand: builds the deployment, links the
+    /// caller's hosts through `link`, and assembles — which links the guest
+    /// loader, tables the guests that load at first use, and serves every
+    /// boot guest's linked exports.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the deployment cannot be built, linked, or
+    /// assembled.
+    pub async fn boot<B: Backends>(
+        &self, backends: B, link: impl FnOnce(&mut omnia::Deployment<B>) -> Result<()>,
+    ) -> Result<Runtime<B>> {
+        let mut deployment =
+            self.builder(self.manifest()?).build::<B>().await.context("building deployment")?;
+        link(&mut deployment).context("linking hosts")?;
+        deployment.assemble(backends).await
+    }
+
+    /// Boots by hand, drives the command guest once, and shuts the runtime
+    /// down.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Deployment::boot`], or if the guest traps without exiting.
+    pub async fn run<B: Backends>(
+        &self, backends: B, link: impl FnOnce(&mut omnia::Deployment<B>) -> Result<()>,
+    ) -> Result<ExitStatus> {
+        let runtime = self.boot(backends, link).await?;
+        let status = runtime.run_command().await;
+        runtime.shutdown();
+        status
+    }
+
+    /// [`Deployment::run`] linking the host under test, `H`, plus the
+    /// telemetry host every `omnia_sdk::command!` guest imports.
+    ///
+    /// A suite testing `WasiOtel` itself, or a bundle without an otel
+    /// backend, links by hand through [`run`](Self::run).
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Deployment::run`].
+    pub async fn run_host<H, B>(&self, backends: B) -> Result<ExitStatus>
+    where
+        H: Host<B>,
+        B: Provides<WasiOtel>,
+    {
+        self.run(backends, |deployment| {
+            deployment.host::<H>()?;
+            deployment.host::<WasiOtel>()?;
+            Ok(())
+        })
+        .await
+    }
+
+    /// Drives the command guest once through a production `runtime!`'s
+    /// wiring (`runtime::Hooks`) over `backends` — the same `link` and
+    /// `serve` the binary runs, connecting nothing.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the deployment cannot be built or assembled, or
+    /// the guest traps without exiting.
+    pub async fn run_with<H, B>(&self, backends: B) -> Result<ExitStatus>
+    where
+        H: Wiring<B>,
+        B: Backends,
+    {
+        let deployment = self.builder(self.manifest()?).build::<B>().await?;
+        omnia::run_with::<B, H>(deployment, backends).await
+    }
+}
+
+// generous, since a run past it traps the guest's write
+const CAPTURE_BYTES: usize = 64 << 20;
+
+/// A [`Deployment`] whose guests write to captured streams, from
+/// [`Deployment::captured`]; each run answers a [`Run`].
+#[derive(Clone, Debug)]
+pub struct Captured {
+    deployment: Deployment,
+    stdout: MemoryOutputPipe,
+    stderr: MemoryOutputPipe,
+}
+
+/// What one captured run produced.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Run {
+    /// The command guest's exit status.
+    pub status: ExitStatus,
+    /// Everything the guests wrote to stdout, lossily as UTF-8.
+    pub stdout: String,
+    /// Everything the guests wrote to stderr, lossily as UTF-8.
+    pub stderr: String,
+}
+
+impl Captured {
+    /// The deployment beneath, for its manifest or a hand-driven boot.
+    #[must_use]
+    pub const fn deployment(&self) -> &Deployment {
+        &self.deployment
+    }
+
+    /// [`Deployment::run`], answering the streams beside the status.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Deployment::run`].
+    pub async fn run<B: Backends>(
+        &self, backends: B, link: impl FnOnce(&mut omnia::Deployment<B>) -> Result<()>,
+    ) -> Result<Run> {
+        let status = self.deployment.run(backends, link).await?;
+        Ok(self.collect(status))
+    }
+
+    /// [`Deployment::run_host`], answering the streams beside the status.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Deployment::run_host`].
+    pub async fn run_host<H, B>(&self, backends: B) -> Result<Run>
+    where
+        H: Host<B>,
+        B: Provides<WasiOtel>,
+    {
+        let status = self.deployment.run_host::<H, B>(backends).await?;
+        Ok(self.collect(status))
+    }
+
+    /// [`Deployment::run_with`], answering the streams beside the status.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Deployment::run_with`].
+    pub async fn run_with<H, B>(&self, backends: B) -> Result<Run>
+    where
+        H: Wiring<B>,
+        B: Backends,
+    {
+        let status = self.deployment.run_with::<H, B>(backends).await?;
+        Ok(self.collect(status))
+    }
+
+    fn collect(&self, status: ExitStatus) -> Run {
+        Run {
+            status,
+            stdout: String::from_utf8_lossy(&self.stdout.contents()).into_owned(),
+            stderr: String::from_utf8_lossy(&self.stderr.contents()).into_owned(),
+        }
+    }
+}

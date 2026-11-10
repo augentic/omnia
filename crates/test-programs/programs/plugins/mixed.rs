@@ -12,8 +12,7 @@ wit_bindgen::generate!({
 
 use omnia_sdk::WasiProvider;
 use omnia_sdk::plugins::{Location, Plugins as _};
-
-use self::omnia_test::link::ops;
+use omnia_test::link::ops;
 
 omnia_sdk::api::command::export!(scenario);
 

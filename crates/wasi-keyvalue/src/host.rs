@@ -5,7 +5,6 @@ mod batch_impl;
 mod default_impl;
 mod resource;
 mod store_impl;
-mod ttl_impl;
 
 mod generated {
     pub use self::wasi::keyvalue::atomics::CasError;
@@ -31,14 +30,13 @@ mod generated {
 }
 
 use std::fmt::Debug;
+use std::sync::Arc;
 
-pub use default_impl::KeyValueDefault;
-pub use omnia_backend::keyvalue::{Bucket, KeyValueClient};
 pub use omnia_core::FutureResult;
 use omnia_core::{Host, HostCtx, Provides, StoreCtx};
 use wasmtime::component::Linker;
 
-use self::generated::omnia::keyvalue::ttl;
+pub use self::default_impl::KeyValueDefault;
 use self::generated::wasi::keyvalue::store::Error;
 use self::generated::wasi::keyvalue::{atomics, batch, store};
 pub use self::resource::*;
@@ -55,9 +53,17 @@ impl<B: Provides<Self>> Host<B> for WasiKeyValue {
     fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
         store::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
         atomics::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
-        batch::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
-        Ok(ttl::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?)
+        Ok(batch::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?)
     }
+}
+
+/// Service contract for `wasi:keyvalue` backends.
+///
+/// This is implemented by the resource-specific provider of Key-Value
+/// functionality. For example, an in-memory store, or a Redis-backed store.
+pub trait KeyValueClient: Debug + Send + Sync + 'static {
+    /// Open a bucket.
+    fn open_bucket(&self, identifier: String) -> FutureResult<Arc<dyn Bucket>>;
 }
 
 omnia_core::host_error!(Error, Other);

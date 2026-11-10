@@ -18,6 +18,7 @@ use wasip3::exports::http;
 use wasip3::http::types::{ErrorCode, Request, Response};
 
 struct HttpGuest;
+wasip3::http::service::export!(HttpGuest);
 
 impl http::handler::Guest for HttpGuest {
     async fn handle(request: Request) -> Result<Response, ErrorCode> {
@@ -25,16 +26,6 @@ impl http::handler::Guest for HttpGuest {
         omnia_wasi_http::serve(router, request).await
     }
 }
-
-struct WebSocket;
-
-impl omnia_wasi_websocket::handler::Guest for WebSocket {
-    async fn handle(event: Event) -> Result<(), Error> {
-        println!("received event: {event:?}");
-        Ok(())
-    }
-}
-wasip3::http::service::export!(HttpGuest);
 
 #[axum::debug_handler]
 async fn send_message(message: String) -> omnia_sdk::Result<Json<Value>> {
@@ -47,4 +38,13 @@ async fn send_message(message: String) -> omnia_sdk::Result<Json<Value>> {
     "message": "event sent"
     })))
 }
+
+struct WebSocket;
 omnia_wasi_websocket::export!(WebSocket);
+
+impl omnia_wasi_websocket::handler::Guest for WebSocket {
+    async fn handle(event: Event) -> Result<(), Error> {
+        println!("received event: {event:?}");
+        Ok(())
+    }
+}

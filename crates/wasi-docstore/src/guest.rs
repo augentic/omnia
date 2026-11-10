@@ -1,8 +1,8 @@
 //! # WASI `DocStore` Guest
 
-// Bindings for the `wasi:docstore` world.
+// Bindings for the `omnia:docstore` world.
 mod generated {
-    #![expect(clippy::same_length_and_capacity, reason = "wit-bindgen output")]
+    #![allow(missing_docs, clippy::same_length_and_capacity, reason = "wit-bindgen output")]
 
     wit_bindgen::generate!({
         world: "imports",

@@ -3,21 +3,21 @@
 
 #![cfg(target_arch = "wasm32")]
 
-struct Full;
-
-impl Guest for Full {
-    fn poke(message: String) -> String {
-        self::omnia_test::link::ops::ping("echoer", &message)
-    }
-
-    async fn poke_async(message: String) -> String {
-        self::omnia_test::link::ops::ping_async("echoer".to_owned(), message).await
-    }
-}
-
 wit_bindgen::generate!({
     world: "full",
     path: "wit",
 });
 
+struct Full;
+
 export!(Full);
+
+impl Guest for Full {
+    fn poke(message: String) -> String {
+        omnia_test::link::ops::ping("echoer", &message)
+    }
+
+    async fn poke_async(message: String) -> String {
+        omnia_test::link::ops::ping_async("echoer".to_owned(), message).await
+    }
+}

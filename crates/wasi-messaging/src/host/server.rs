@@ -7,9 +7,9 @@ use omnia_core::{PatternRoutes, Provides, Runtime, TriggerRouter};
 use tokio::sync::Semaphore;
 use tracing::{Instrument, info_span, instrument};
 
+use crate::host::WasiMessaging;
 use crate::host::generated::MessagingRequestReplyIndices;
-use crate::host::resource::from_wit_error;
-use crate::host::{Endpoint, HandleError, Handler, Message, WasiMessaging};
+use crate::host::resource::{Endpoint, HandleError, Handler, Message};
 
 #[instrument("messaging-server", skip(state))]
 pub async fn run<B>(state: &Runtime<B>) -> Result<()>
@@ -159,7 +159,7 @@ where
             .map_err(|_elapsed| HandleError::TimedOut(timeout))?;
         let returned =
             called.flatten().map_err(|trap| HandleError::Trapped(format!("{trap:#}")))?;
-        returned.map_err(|e| HandleError::Rejected(from_wit_error(e)))
+        returned.map_err(HandleError::Rejected)
     }
 
     async fn client(&self) -> Result<Arc<dyn Endpoint>> {

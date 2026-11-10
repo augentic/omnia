@@ -238,3 +238,29 @@ fn host_impl(host: &Path, field: &Ident) -> TokenStream {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(row: &str) -> HostEntry {
+        syn::parse_str(row).expect("valid host row")
+    }
+
+    #[test]
+    fn positional_fields() {
+        let entries = [entry("WasiKeyValue: keyvalue::Client"), entry("WasiModel: model::Client")];
+        let (ty, def) = emit_backends(&entries);
+        assert_eq!(ty.to_string(), "Backends");
+        let def = def.to_string();
+        assert!(def.contains("backend_0 : keyvalue :: Client"), "{def}");
+        assert!(def.contains("backend_1 : model :: Client"), "{def}");
+    }
+
+    #[test]
+    fn empty_host_entries() {
+        let (ty, def) = emit_backends(&[]);
+        assert_eq!(ty.to_string(), "()");
+        assert!(def.is_empty());
+    }
+}

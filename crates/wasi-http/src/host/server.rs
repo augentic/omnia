@@ -1,4 +1,4 @@
-//! # HTTP Server
+//! #HTTP Server
 
 use std::clone::Clone;
 use std::convert::Infallible;
@@ -35,6 +35,8 @@ use super::{WasiHttp, WasiHttpCtxView};
 
 /// The streaming body of a response produced by [`HttpHandler::handle`].
 pub type OutgoingBody = UnsyncBoxBody<Bytes, anyhow::Error>;
+
+const HTTP_ADDR: &str = "0.0.0.0:8080";
 
 #[instrument("http-server", skip(state))]
 pub async fn run<B>(state: &Runtime<B>) -> Result<()>
@@ -218,7 +220,8 @@ where
             })?;
 
         // instantiate the selected guest fresh (instance-per-call)
-        let mut store = self.state.build_store(self.state.store());
+        let store_data = self.state.store();
+        let mut store = self.state.build_store(store_data);
         let instance = self.state.instantiate(guest.instance_pre(), &mut store).await?;
         let service = indices.load(&mut store, &instance)?;
 
@@ -274,7 +277,9 @@ where
                                 _ = body_done_rx.await;
                             }
                         }
-                        Err(error) => _ = sender.send(Err(error)),
+                        Err(error) => {
+                            _ = sender.send(Err(error));
+                        }
                     }
 
                     anyhow::Ok(())
@@ -309,38 +314,6 @@ where
 fn view<B: Provides<WasiHttp>>(store: &mut StoreCtx<B>) -> WasiHttpCtxView<'_> {
     store.view::<WasiHttp>()
 }
-
-// The sender drops once the body is consumed (or the wrapper dropped); its
-// receiver keeps `run_concurrent` alive while hyper streams the response.
-struct BodyDoneWrapper<B> {
-    body: B,
-    _tx: oneshot::Sender<()>,
-}
-
-impl<B> Body for BodyDoneWrapper<B>
-where
-    B: Body + Unpin,
-{
-    type Data = B::Data;
-    type Error = B::Error;
-
-    fn poll_frame(
-        self: Pin<&mut Self>, cx: &mut TaskContext<'_>,
-    ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
-        let inner = Pin::new(&mut self.get_mut().body);
-        inner.poll_frame(cx)
-    }
-
-    fn size_hint(&self) -> SizeHint {
-        self.body.size_hint()
-    }
-
-    fn is_end_stream(&self) -> bool {
-        self.body.is_end_stream()
-    }
-}
-
-const HTTP_ADDR: &str = "0.0.0.0:8080";
 
 // rebuild the uri with scheme and authority set, so they reach the guest
 fn fix_request<T>(request: http::Request<T>) -> Result<http::Request<T>> {
@@ -385,6 +358,36 @@ fn fix_request<T>(request: http::Request<T>) -> Result<http::Request<T>> {
     let request = http::Request::from_parts(parts, body);
 
     Ok(request)
+}
+
+// The sender drops once the body is consumed (or the wrapper dropped); its
+// receiver keeps `run_concurrent` alive while hyper streams the response.
+struct BodyDoneWrapper<B> {
+    body: B,
+    _tx: oneshot::Sender<()>,
+}
+
+impl<B> Body for BodyDoneWrapper<B>
+where
+    B: Body + Unpin,
+{
+    type Data = B::Data;
+    type Error = B::Error;
+
+    fn poll_frame(
+        self: Pin<&mut Self>, cx: &mut TaskContext<'_>,
+    ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
+        let inner = Pin::new(&mut self.get_mut().body);
+        inner.poll_frame(cx)
+    }
+
+    fn size_hint(&self) -> SizeHint {
+        self.body.size_hint()
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.body.is_end_stream()
+    }
 }
 
 const BODY: &str = r"<!doctype html>

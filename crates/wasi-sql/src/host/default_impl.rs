@@ -1,19 +1,47 @@
-//! Default `SQLite`-backed implementation of [`SqlClient`].
+//! Default `SQLite` implementation for wasi-sql
+//!
+//! This is a lightweight implementation for development use only.
 
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-pub use config::ConnectOptions;
-use futures::FutureExt as _;
-use omnia_backend::sql::{Connection, DataType, Field, Row, SqlClient};
-use omnia_core::{Connect, FromEnv, FutureResult};
+use futures::FutureExt;
+use omnia_core::Connect;
 use rusqlite::types::ValueRef;
 use rusqlite::{Connection as SqliteConnection, params_from_iter};
 use tracing::instrument;
 
-/// Default `SQLite`-backed implementation of [`SqlClient`].
+use crate::host::resource::{Connection, FutureResult};
+use crate::host::{DataType, Field, Row, SqlClient};
+
+#[expect(missing_docs, reason = "`FromEnv` has no docs")]
+mod config {
+    use fromenv::FromEnv;
+
+    /// Options used to connect to the SQL database.
+    ///
+    /// This struct is used to load connection options from environment variables.
+    #[derive(Debug, Clone, FromEnv)]
+    pub struct ConnectOptions {
+        /// The `SQLite` database URI (`SQL_DATABASE`, default: one shared in-memory database).
+        #[env(from = "SQL_DATABASE", default = "file::memory:?cache=shared")]
+        pub database: String,
+    }
+}
+pub use config::ConnectOptions;
+
+impl omnia_core::FromEnv for ConnectOptions {
+    fn load_env() -> Result<Self> {
+        // `Self::from_env()` is the builder the `FromEnv` derive emits
+        Self::from_env().finalize().context("issue loading connection options")
+    }
+}
+
+/// Default implementation for `wasi:sql`.
 #[derive(Debug, Clone)]
 pub struct SqlDefault {
+    // Store the database path to create new connections on demand
+    // Mutex is necessary since rusqlite::Connection isn't `Sync`
     conn: Arc<parking_lot::Mutex<SqliteConnection>>,
 }
 
@@ -24,6 +52,7 @@ impl Connect for SqlDefault {
     async fn connect_with(options: Self::ConnectOptions) -> Result<Self> {
         tracing::debug!("initializing SQLite connection to: {}", options.database);
 
+        // open now, so a bad database path fails connect rather than the first query
         let conn = Arc::new(parking_lot::Mutex::new(
             SqliteConnection::open(&options.database).context("failed to open SQLite database")?,
         ));
@@ -60,6 +89,7 @@ impl Connection for SqliteConn {
         let conn = Arc::clone(&self.conn);
 
         async move {
+            // rusqlite blocks, and holds the mutex, so it never pins an executor thread
             tokio::task::spawn_blocking(move || {
                 let rusqlite_params: Vec<_> = params.iter().map(to_sqlite).collect();
 
@@ -112,6 +142,7 @@ impl Connection for SqliteConn {
         let conn = Arc::clone(&self.conn);
 
         async move {
+            // as `query`: keep the blocking work off the executor
             tokio::task::spawn_blocking(move || {
                 let rusqlite_params: Vec<_> = params.iter().map(to_sqlite).collect();
 
@@ -131,25 +162,6 @@ impl Connection for SqliteConn {
     }
 }
 
-#[expect(missing_docs, reason = "`FromEnv` has no docs")]
-mod config {
-    use fromenv::FromEnv;
-
-    /// Options used to connect to the SQL database.
-    #[derive(Debug, Clone, FromEnv)]
-    pub struct ConnectOptions {
-        /// The `SQLite` database URI (`SQL_DATABASE`, default: one shared in-memory database).
-        #[env(from = "SQL_DATABASE", default = "file::memory:?cache=shared")]
-        pub database: String,
-    }
-}
-
-impl FromEnv for ConnectOptions {
-    fn load_env() -> Result<Self> {
-        Self::from_env().finalize().context("issue loading connection options")
-    }
-}
-
 // A `u64` is stored as its raw bits, the `SQLite` convention: its integers
 // are always signed 64-bit, and readers reinterpret.
 fn to_sqlite(dt: &DataType) -> rusqlite::types::Value {
@@ -164,6 +176,7 @@ fn to_sqlite(dt: &DataType) -> rusqlite::types::Value {
         DataType::Str(Some(s)) => rusqlite::types::Value::Text(s.clone()),
         DataType::Binary(Some(b)) => rusqlite::types::Value::Blob(b.clone()),
         DataType::Timestamp(Some(ts)) => rusqlite::types::Value::Text(ts.clone()),
+        // every `None` variant
         _ => rusqlite::types::Value::Null,
     }
 }
@@ -178,5 +191,26 @@ fn from_sqlite(value: ValueRef) -> Result<DataType> {
             Ok(DataType::Str(Some(s.to_string())))
         }
         ValueRef::Blob(b) => Ok(DataType::Binary(Some(b.to_vec()))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // The obvious one-to-one mappings mirror the match arms; only the two
+    // conventions a reader could get wrong are pinned here.
+
+    #[test]
+    fn u64_stores_raw_bits() {
+        assert_eq!(
+            to_sqlite(&DataType::Uint64(Some(u64::MAX))),
+            rusqlite::types::Value::Integer(-1),
+        );
+    }
+
+    #[test]
+    fn invalid_utf8_rejected() {
+        from_sqlite(ValueRef::Text(&[0xff])).unwrap_err();
     }
 }

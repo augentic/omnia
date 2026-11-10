@@ -1,0 +1,75 @@
+[package]
+name = "omnia-sdk"
+description = "SDK for building WASI component applications with Omnia runtime support"
+readme = "README.md"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = ["sql", "docstore", "http"]
+
+# Enables the `TableStore` capability over `wasi:sql`.
+sql = ["dep:omnia-wasi-sql"]
+
+# Enables the `DocumentStore` capability and the `docstore` re-exports.
+docstore = ["dep:omnia-wasi-docstore"]
+
+# Enables the axum-backed `api::http` handler support and the `mcp` server.
+# The outbound `HttpRequest` capability and `Error::status()` need no feature.
+http = ["dep:axum", "dep:tower"]
+
+# Enables the clap-backed `api::command` façade (argv parsing, `--format`,
+# shell completions).
+command = ["dep:clap", "dep:clap_complete"]
+
+[dependencies]
+anyhow.workspace = true
+axum = { workspace = true, features = ["json", "matched-path", "query"], optional = true }
+bon.workspace = true
+bytes.workspace = true
+clap = { workspace = true, features = ["string"], optional = true }
+clap_complete = { workspace = true, optional = true }
+http.workspace = true
+http-body.workspace = true
+omnia-guest-macros.workspace = true
+omnia-wasi-docstore = { workspace = true, optional = true }
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tower = { workspace = true, optional = true }
+tracing.workspace = true
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+futures.workspace = true
+omnia-wasi-blobstore.workspace = true
+omnia-wasi-config.workspace = true
+omnia-wasi-http.workspace = true
+omnia-wasi-identity.workspace = true
+omnia-wasi-keyvalue.workspace = true
+omnia-wasi-messaging.workspace = true
+omnia-wasi-model.workspace = true
+omnia-wasi-otel.workspace = true
+omnia-wasi-sql = { workspace = true, optional = true }
+omnia-wasi-vault.workspace = true
+omnia-wasi-vcs.workspace = true
+omnia-wasi-websocket.workspace = true
+wasip3.workspace = true
+wit-bindgen.workspace = true
+
+[dev-dependencies]
+http-body-util.workspace = true
+tokio = { workspace = true, features = ["macros", "rt"] }
+tracing-subscriber.workspace = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+omnia-test = { path = "../omnia-test", default-features = false, features = ["guest"] }
+trybuild.workspace = true

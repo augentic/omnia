@@ -3,7 +3,7 @@
 // Bindings for the `wasi:websocket` world.
 // See (<https://github.com/augentic/wasi-websocket/>)
 mod generated {
-    #![expect(missing_docs, clippy::same_length_and_capacity, reason = "wit-bindgen output")]
+    #![allow(missing_docs, clippy::same_length_and_capacity, reason = "wit-bindgen output")]
 
     wit_bindgen::generate!({
         world: "duplex",

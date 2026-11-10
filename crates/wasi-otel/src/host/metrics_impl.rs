@@ -22,37 +22,6 @@ use crate::host::generated::omnia::otel::metrics::{self as wasi, HostWithStore};
 use crate::host::types_impl::{datetime_nanos, decode_id};
 use crate::host::{OtelClient, WasiOtel};
 
-omnia_core::host_error!(wasi::Error, InternalFailure);
-
-fn array_value<T>(items: Vec<T>, value: fn(T) -> Value) -> Value {
-    Value::ArrayValue(ArrayValue {
-        values: items
-            .into_iter()
-            .map(|item| AnyValue {
-                value: Some(value(item)),
-            })
-            .collect(),
-    })
-}
-
-// shared by the Gauge and Sum conversions
-fn number_dp(
-    attributes: Vec<wasi::KeyValue>, value: wasi::DataValue, exemplars: Vec<wasi::Exemplar>,
-    start_time_unix_nano: u64, time_unix_nano: u64,
-) -> NumberDataPoint {
-    NumberDataPoint {
-        attributes: attributes.into_iter().map(Into::into).collect(),
-        start_time_unix_nano,
-        time_unix_nano,
-        exemplars: exemplars.into_iter().map(Into::into).collect(),
-        flags: DATA_POINT_FLAGS_DO_NOT_USE,
-        value: Some(value.into()),
-    }
-}
-
-// The proto `DataPointFlags` default (`FLAG_NONE` / "do not use").
-const DATA_POINT_FLAGS_DO_NOT_USE: u32 = 0;
-
 impl<T> HostWithStore<T> for WasiOtel {
     async fn export(
         accessor: &Accessor<T, Self>, rm: wasi::ResourceMetrics,
@@ -70,6 +39,8 @@ impl<T> HostWithStore<T> for WasiOtel {
 }
 
 impl wasi::Host for HostView<'_, dyn OtelClient> {}
+
+omnia_core::host_error!(wasi::Error, InternalFailure);
 
 impl From<wasi::ResourceMetrics> for ExportMetricsServiceRequest {
     fn from(rm: wasi::ResourceMetrics) -> Self {
@@ -121,6 +92,17 @@ impl From<wasi::Value> for AnyValue {
     }
 }
 
+fn array_value<T>(items: Vec<T>, value: fn(T) -> Value) -> Value {
+    Value::ArrayValue(ArrayValue {
+        values: items
+            .into_iter()
+            .map(|item| AnyValue {
+                value: Some(value(item)),
+            })
+            .collect(),
+    })
+}
+
 impl From<wasi::ScopeMetrics> for ScopeMetrics {
     fn from(sm: wasi::ScopeMetrics) -> Self {
         let schema_url = sm.scope.clone().schema_url.unwrap_or_default();
@@ -168,6 +150,21 @@ impl From<wasi::MetricData> for MetricData {
             wasi::MetricData::Histogram(hist) => Self::Histogram(hist.into()),
             wasi::MetricData::ExponentialHistogram(hist) => Self::ExponentialHistogram(hist.into()),
         }
+    }
+}
+
+// shared by the Gauge and Sum conversions
+fn number_dp(
+    attributes: Vec<wasi::KeyValue>, value: wasi::DataValue, exemplars: Vec<wasi::Exemplar>,
+    start_time_unix_nano: u64, time_unix_nano: u64,
+) -> NumberDataPoint {
+    NumberDataPoint {
+        attributes: attributes.into_iter().map(Into::into).collect(),
+        start_time_unix_nano,
+        time_unix_nano,
+        exemplars: exemplars.into_iter().map(Into::into).collect(),
+        flags: DATA_POINT_FLAGS_DO_NOT_USE,
+        value: Some(value.into()),
     }
 }
 
@@ -317,5 +314,39 @@ impl From<wasi::Temporality> for AggregationTemporality {
 impl From<wasi::Temporality> for i32 {
     fn from(temporality: wasi::Temporality) -> Self {
         AggregationTemporality::from(temporality) as Self
+    }
+}
+
+// The proto `DataPointFlags` default (`FLAG_NONE` / "do not use").
+const DATA_POINT_FLAGS_DO_NOT_USE: u32 = 0;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn export_request_carries_schema_url_once() {
+        let rm = wasi::ResourceMetrics {
+            resource: wasi::Resource {
+                attributes: vec![wasi::KeyValue {
+                    key: "service.name".to_string(),
+                    value: wasi::Value::String("guest".to_string()),
+                }],
+                schema_url: Some("https://resource".to_string()),
+            },
+            scope_metrics: Vec::new(),
+        };
+
+        let request = ExportMetricsServiceRequest::from(rm);
+        let [resource_metrics] = request.resource_metrics.as_slice() else {
+            panic!("one resource, got {}", request.resource_metrics.len());
+        };
+        assert_eq!(resource_metrics.schema_url, "https://resource");
+        // the url is not doubled as a resource attribute
+        let attributes = &resource_metrics.resource.as_ref().expect("resource").attributes;
+        assert_eq!(
+            attributes.iter().map(|kv| kv.key.as_str()).collect::<Vec<_>>(),
+            ["service.name"]
+        );
     }
 }

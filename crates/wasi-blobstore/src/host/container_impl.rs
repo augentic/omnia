@@ -12,12 +12,6 @@ use crate::host::{
     BlobStoreClient, Error, IncomingValue, OutgoingValue, Result, StreamObjectNames, WasiBlobStore,
 };
 
-pub fn get_container<T>(
-    accessor: &Accessor<T, WasiBlobStore>, self_: &Resource<ContainerProxy>,
-) -> Result<ContainerProxy> {
-    Ok(omnia_core::get_cloned(accessor, self_).context("Container not found")?)
-}
-
 impl<T> HostContainerWithStore<T> for WasiBlobStore {
     fn name(mut host: Access<'_, T, Self>, self_: Resource<ContainerProxy>) -> Result<String> {
         let container = host.get().table.get(&self_).context("Container not found")?;
@@ -28,11 +22,7 @@ impl<T> HostContainerWithStore<T> for WasiBlobStore {
         mut host: Access<'_, T, Self>, self_: Resource<ContainerProxy>,
     ) -> Result<ContainerMetadata> {
         let container = host.get().table.get(&self_).context("Container not found")?;
-        let info = container.info().context("getting info")?;
-        Ok(ContainerMetadata {
-            name: info.name,
-            created_at: info.created_at,
-        })
+        Ok(container.info().context("getting info")?)
     }
 
     async fn get_data(
@@ -105,13 +95,7 @@ impl<T> HostContainerWithStore<T> for WasiBlobStore {
         accessor: &Accessor<T, Self>, self_: Resource<ContainerProxy>, name: String,
     ) -> Result<ObjectMetadata> {
         let container = get_container(accessor, &self_)?;
-        let info = container.object_info(name).await.context("getting object info")?;
-        Ok(ObjectMetadata {
-            name: info.name,
-            container: info.container,
-            created_at: info.created_at,
-            size: info.size,
-        })
+        Ok(container.object_info(name).await.context("getting object info")?)
     }
 
     async fn clear(accessor: &Accessor<T, Self>, self_: Resource<ContainerProxy>) -> Result<()> {
@@ -129,8 +113,7 @@ impl<T> HostContainerWithStore<T> for WasiBlobStore {
     fn drop(
         mut accessor: Access<'_, T, Self>, rep: Resource<ContainerProxy>,
     ) -> wasmtime::Result<()> {
-        accessor.get().table.delete(rep)?;
-        Ok(())
+        Ok(accessor.get().table.delete(rep).map(|_| ())?)
     }
 }
 
@@ -169,11 +152,16 @@ impl<T> HostStreamObjectNamesWithStore<T> for WasiBlobStore {
     fn drop(
         mut accessor: Access<'_, T, Self>, rep: Resource<StreamObjectNames>,
     ) -> wasmtime::Result<()> {
-        accessor.get().table.delete(rep)?;
-        Ok(())
+        Ok(accessor.get().table.delete(rep).map(|_| ())?)
     }
 }
 
 impl Host for HostView<'_, dyn BlobStoreClient> {}
 impl HostContainer for HostView<'_, dyn BlobStoreClient> {}
 impl HostStreamObjectNames for HostView<'_, dyn BlobStoreClient> {}
+
+pub fn get_container<T>(
+    accessor: &Accessor<T, WasiBlobStore>, self_: &Resource<ContainerProxy>,
+) -> Result<ContainerProxy> {
+    Ok(omnia_core::get_cloned(accessor, self_).context("Container not found")?)
+}

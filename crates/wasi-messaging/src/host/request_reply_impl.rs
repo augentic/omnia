@@ -69,8 +69,7 @@ impl<T> HostRequestOptionsWithStore<T> for WasiMessaging {
     fn drop(
         mut accessor: Access<'_, T, Self>, rep: Resource<RequestOptions>,
     ) -> wasmtime::Result<()> {
-        accessor.get().table.delete(rep)?;
-        Ok(())
+        Ok(accessor.get().table.delete(rep).map(|_| ())?)
     }
 }
 

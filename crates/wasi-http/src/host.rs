@@ -1,12 +1,10 @@
-//! # WASI HTTP Host
+//! #WASI HTTP Host
 //!
-//! This module implements a host-side service for `wasi:http`.
+//! This module implements a host-side service for `wasi:http`
 
-pub mod client_cert;
+mod client_cert;
 mod default_impl;
 mod server;
-
-use std::fmt::Debug;
 
 use anyhow::Result;
 pub use default_impl::{ConnectOptions, HttpDefault};

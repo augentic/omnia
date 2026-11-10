@@ -9,7 +9,18 @@ use omnia_wasi_messaging::incoming_handler::Guest;
 use omnia_wasi_messaging::types::{Client, Error, Message};
 use omnia_wasi_messaging::{producer, request_reply};
 
+omnia_sdk::api::command::export!(scenario);
+
+async fn scenario() {
+    let client = Client::connect("default".to_owned()).await.expect("connect");
+
+    let message = Message::new(b"order-1");
+    message.add_metadata("key", "value");
+    producer::send(&client, "orders".to_owned(), message).await.expect("send");
+}
+
 struct Messaging;
+omnia_wasi_messaging::export!(Messaging with_types_in omnia_wasi_messaging);
 
 impl Guest for Messaging {
     async fn handle(message: Message) -> Result<(), Error> {
@@ -21,14 +32,3 @@ impl Guest for Messaging {
         request_reply::reply(&message, Message::new(b"handled")).await
     }
 }
-
-omnia_sdk::api::command::export!(scenario);
-
-async fn scenario() {
-    let client = Client::connect("default".to_owned()).await.expect("connect");
-
-    let message = Message::new(b"order-1");
-    message.add_metadata("key", "value");
-    producer::send(&client, "orders".to_owned(), message).await.expect("send");
-}
-omnia_wasi_messaging::export!(Messaging with_types_in omnia_wasi_messaging);

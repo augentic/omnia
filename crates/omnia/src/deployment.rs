@@ -223,7 +223,7 @@ impl DeploymentBuilder {
         }
 
         // open every preopen once, so a misconfigured mount fails at startup
-        let mounts = MountRegistry::open(manifest.preopens())?;
+        let mounts = Arc::new(MountRegistry::open(manifest.preopens())?);
 
         // W^X: a store a guest could write through a mount loads nothing
         #[cfg(feature = "loader")]
@@ -310,7 +310,7 @@ pub struct Deployment<B: 'static> {
     routes: Routes,
     // `NoLinks` unless the `link` feature is on
     seam: Arc<dyn LinkSeam<B>>,
-    mounts: MountRegistry,
+    mounts: Arc<MountRegistry>,
     args: Arc<Vec<String>>,
     mode: Mode,
     allow_empty: bool,
@@ -322,6 +322,31 @@ pub struct Deployment<B: 'static> {
     // every store's `RUST_LOG`
     rust_log: String,
     stdio: Option<Stdio>,
+}
+
+cfg_select! {
+    feature = "loader" => {
+        #[derive(Default)]
+        struct Loader {
+            // the package store's root; `None` keeps nothing fetched
+            store: Option<PathBuf>,
+            // `None` installs a `RegistryClient` over the store and the deployment's `registries`
+            registry: Option<Arc<dyn RegistrySource>>,
+        }
+
+        impl Loader {
+            fn registry(&self, config: Option<&str>) -> Result<Arc<dyn RegistrySource>> {
+                if let Some(registry) = &self.registry {
+                    return Ok(Arc::clone(registry));
+                }
+                Ok(match &self.store {
+                    Some(root) => Arc::new(RegistryClient::from_toml(config, FsStore::open(root))?),
+                    None => Arc::new(RegistryClient::from_toml(config, NoStore)?),
+                })
+            }
+        }
+    }
+    _ => {}
 }
 
 impl<B: Backends> Deployment<B> {
@@ -371,8 +396,8 @@ impl<B: Backends> Deployment<B> {
 
     /// The mount registry built from the deployment's preopens.
     #[must_use]
-    pub fn mounts(&self) -> MountRegistry {
-        self.mounts.clone()
+    pub fn mounts(&self) -> Arc<MountRegistry> {
+        Arc::clone(&self.mounts)
     }
 
     /// Deployment drive mode.
@@ -446,7 +471,7 @@ impl<B: Backends> Deployment<B> {
         let runtime = Runtime::from_parts(RuntimeParts {
             name: Arc::from(deployment.name.as_str()),
             args: deployment.args.to_vec(),
-            mounts: deployment.mounts.clone(),
+            mounts: Arc::clone(&deployment.mounts),
             packages: cfg_select! {
                 feature = "loader" => Some(registry),
                 _ => None,
@@ -476,31 +501,6 @@ impl<B: Backends> Deployment<B> {
     }
 }
 
-cfg_select! {
-    feature = "loader" => {
-        #[derive(Default)]
-        struct Loader {
-            // the package store's root; `None` keeps nothing fetched
-            store: Option<PathBuf>,
-            // `None` installs a `RegistryClient` over the store and the deployment's `registries`
-            registry: Option<Arc<dyn RegistrySource>>,
-        }
-
-        impl Loader {
-            fn registry(&self, config: Option<&str>) -> Result<Arc<dyn RegistrySource>> {
-                if let Some(registry) = &self.registry {
-                    return Ok(Arc::clone(registry));
-                }
-                Ok(match &self.store {
-                    Some(root) => Arc::new(RegistryClient::from_toml(config, FsStore::open(root))?),
-                    None => Arc::new(RegistryClient::from_toml(config, NoStore)?),
-                })
-            }
-        }
-    }
-    _ => {}
-}
-
 // Build the shared engine, WASI-linked linker, and runtime options.
 fn engine_and_linker<B: Send + 'static>() -> Result<(Engine, Linker<StoreCtx<B>>, RuntimeOptions)> {
     let options = RuntimeOptions::load_env()?;
@@ -512,4 +512,40 @@ fn engine_and_linker<B: Send + 'static>() -> Result<(Engine, Linker<StoreCtx<B>>
     omnia_core::wasmtime_wasi::p3::add_to_linker(&mut linker)?;
 
     Ok((engine, linker, options))
+}
+
+#[cfg(test)]
+mod tests {
+    use omnia_core::RuntimeOptions;
+    use omnia_core::wasmtime::{Config, Engine};
+
+    #[test]
+    fn builds_pooling() {
+        // sized small so the reservation stays cheap
+        let options = RuntimeOptions {
+            pool_max_instances: 8,
+            pool_total_core_instances: 8,
+            pool_total_memories: 16,
+            pool_total_tables: 16,
+            pool_total_stacks: 8,
+            pool_max_memory_bytes: Some(1 << 20),
+            pool_max_memories_per_component: Some(4),
+            pool_max_tables_per_component: Some(4),
+            pool_max_memories_per_module: Some(2),
+            pool_max_tables_per_module: Some(2),
+            pool_decommit_batch_size: 8,
+            ..RuntimeOptions::load_env().expect("should load")
+        };
+        Engine::new(&Config::from(&options))
+            .expect("decoupled multi-memory pooling config should build an engine");
+    }
+
+    #[test]
+    fn builds_no_pooling() {
+        let options = RuntimeOptions {
+            pooling: false,
+            ..RuntimeOptions::load_env().expect("should load")
+        };
+        Engine::new(&Config::from(&options)).expect("non-pooling config should build an engine");
+    }
 }

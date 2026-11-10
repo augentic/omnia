@@ -2,10 +2,10 @@
 
 //! # WASI `DocStore`
 //!
-//! This module implements a runtime service for `wasi:docstore`: a JSON
+//! This module implements a runtime service for `omnia:docstore`: a JSON
 //! document store with a backend-portable filter language.
 
-pub use omnia_backend::docstore;
+pub mod document_store;
 
 cfg_select! {
     target_arch = "wasm32" => {

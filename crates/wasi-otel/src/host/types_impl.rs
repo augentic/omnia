@@ -5,20 +5,6 @@ use opentelemetry_sdk::Resource;
 use crate::host::OtelClient;
 use crate::host::generated::omnia::otel::types;
 
-/// Hex-decode a guest-supplied trace/span id, warning (rather than silently
-/// substituting an empty id) when the id is malformed.
-pub fn decode_id(id: &str) -> Vec<u8> {
-    hex::decode(id).unwrap_or_else(|error| {
-        tracing::warn!(%error, id, "malformed hex trace/span id; emitting empty id");
-        Vec::new()
-    })
-}
-
-pub fn datetime_nanos(dt: types::Datetime) -> u64 {
-    // Saturate: a timestamp past the year 2554 clamps instead of panicking or wrapping.
-    dt.seconds.saturating_mul(1_000_000_000).saturating_add(u64::from(dt.nanoseconds))
-}
-
 impl types::Host for HostView<'_, dyn OtelClient> {
     fn convert_error(&mut self, err: types::Error) -> wasmtime::Result<types::Error> {
         tracing::error!("{err}");
@@ -62,5 +48,53 @@ impl From<Value> for types::Value {
             },
             _ => Self::String(format!("{value:?}")),
         }
+    }
+}
+
+/// Hex-decode a guest-supplied trace/span id, warning (rather than silently
+/// substituting an empty id) when the id is malformed.
+pub fn decode_id(id: &str) -> Vec<u8> {
+    hex::decode(id).unwrap_or_else(|error| {
+        tracing::warn!(%error, id, "malformed hex trace/span id; emitting empty id");
+        Vec::new()
+    })
+}
+
+pub fn datetime_nanos(dt: types::Datetime) -> u64 {
+    // Saturate: a timestamp past the year 2554 clamps instead of panicking or wrapping.
+    dt.seconds.saturating_mul(1_000_000_000).saturating_add(u64::from(dt.nanoseconds))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn decode_id_hex() {
+        assert_eq!(decode_id("0af7651916cd43dd"), [0x0a, 0xf7, 0x65, 0x19, 0x16, 0xcd, 0x43, 0xdd]);
+    }
+
+    #[test]
+    fn decode_id_malformed() {
+        assert_eq!(decode_id("not-hex"), b"");
+        assert_eq!(decode_id("abc"), b"");
+    }
+
+    #[test]
+    fn datetime_nanos_combines() {
+        let dt = types::Datetime {
+            seconds: 3,
+            nanoseconds: 7,
+        };
+        assert_eq!(datetime_nanos(dt), 3_000_000_007);
+    }
+
+    #[test]
+    fn datetime_nanos_saturates() {
+        let dt = types::Datetime {
+            seconds: u64::MAX,
+            nanoseconds: 999_999_999,
+        };
+        assert_eq!(datetime_nanos(dt), u64::MAX);
     }
 }

@@ -15,6 +15,10 @@ use omnia_test::host::Deployment;
 use omnia_wasi_identity::{AccessToken, Identity, IdentityClient, WasiIdentity};
 use omnia_wasi_otel::{OtelClient, OtelDefault, WasiOtel};
 
+// Every guest program in `crates/test-programs` must have a matching test
+// here; a new program without one fails to compile.
+test_programs::foreach_identity!();
+
 #[derive(Clone, Debug)]
 struct Backends {
     identity: RecordingIdentity,
@@ -31,14 +35,14 @@ impl Backends {
 }
 
 impl Provides<WasiIdentity> for Backends {
-    fn borrow(&mut self) -> &mut dyn IdentityClient {
-        &mut self.identity
+    fn borrow(&mut self) -> &dyn IdentityClient {
+        &self.identity
     }
 }
 
 impl Provides<WasiOtel> for Backends {
-    fn borrow(&mut self) -> &mut dyn OtelClient {
-        &mut self.otel
+    fn borrow(&mut self) -> &dyn OtelClient {
+        &self.otel
     }
 }
 
@@ -88,10 +92,6 @@ impl Identity for Recorded {
         .boxed()
     }
 }
-
-// Every guest program in `crates/test-programs` must have a matching test
-// here; a new program without one fails to compile.
-test_programs::foreach_identity!();
 
 async fn run_guest(wasm: &str, backends: Backends) {
     let status = Deployment::new()

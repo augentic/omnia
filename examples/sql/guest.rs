@@ -23,6 +23,7 @@ use wasip3::exports::http::handler::Guest;
 use wasip3::http::types::{ErrorCode, Request, Response};
 
 struct Http;
+wasip3::http::service::export!(Http);
 
 impl Guest for Http {
     #[omnia_wasi_otel::instrument(name = "http_guest_handle", level = Level::DEBUG)]
@@ -33,28 +34,6 @@ impl Guest for Http {
         omnia_wasi_http::serve(router, request).await
     }
 }
-
-// Row mapping
-
-#[derive(Debug, Clone, Serialize, FromRow)]
-struct Agency {
-    agency_id: i64,
-    name: String,
-    url: Option<String>,
-    timezone: Option<String>,
-    created_at: String,
-}
-
-// Request types
-
-#[derive(Debug, Deserialize)]
-struct CreateAgencyRequest {
-    agency_id: i64,
-    name: String,
-    url: Option<String>,
-    timezone: Option<String>,
-}
-wasip3::http::service::export!(Http);
 
 #[axum::debug_handler]
 #[omnia_wasi_otel::instrument]
@@ -146,4 +125,25 @@ async fn ensure_schema() -> Result<()> {
         .map_err(|e| anyhow!("creating agency table: {}", e.trace()))?;
 
     Ok(())
+}
+
+// Row mapping
+
+#[derive(Debug, Clone, Serialize, FromRow)]
+struct Agency {
+    agency_id: i64,
+    name: String,
+    url: Option<String>,
+    timezone: Option<String>,
+    created_at: String,
+}
+
+// Request types
+
+#[derive(Debug, Deserialize)]
+struct CreateAgencyRequest {
+    agency_id: i64,
+    name: String,
+    url: Option<String>,
+    timezone: Option<String>,
 }

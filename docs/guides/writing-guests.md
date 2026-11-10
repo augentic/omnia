@@ -78,7 +78,7 @@ On either transport a handler's bound on `P` is the capability traits it reaches
 
 Logic shared by an HTTP route and a topic lives in a plain fn both call: the axum handler extracts and hands over, the messaging handler decodes and hands over.
 
-For a guest that runs on the WASI-backed capability defaults, `omnia_sdk::WasiProvider` is a zero-sized struct that implements every capability trait on `wasm32`. Native handler tests run the same handlers against `omnia_test::guest::Provider` (see [Provider Portability](portability.md) and [Testing Omnia-Based Code](testing-omnia-code.md)):
+For a guest that runs on the WASI-backed capability defaults, `omnia_sdk::WasiProvider` is a zero-sized struct that implements every capability trait on `wasm32`. Native handler tests run the same handlers against `omnia_test::guest::Provider` (see [Testing Omnia-Based Code](testing-omnia-code.md)):
 
 ```rust,noplayground
 pub fn http_router<P>(provider: P) -> axum::Router

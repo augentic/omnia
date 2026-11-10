@@ -1,10 +1,11 @@
 use omnia_core::HostView;
 use wasmtime::component::{Accessor, Resource};
 
+use crate::KeyValueClient;
 use crate::host::generated::wasi::keyvalue::batch::{Host, HostWithStore};
 use crate::host::resource::BucketProxy;
 use crate::host::store_impl::get_bucket;
-use crate::host::{KeyValueClient, Result, WasiKeyValue};
+use crate::host::{Result, WasiKeyValue};
 
 impl<T> HostWithStore<T> for WasiKeyValue {
     async fn get_many(
@@ -28,7 +29,7 @@ impl<T> HostWithStore<T> for WasiKeyValue {
     ) -> Result<()> {
         let bucket = get_bucket(accessor, &bucket)?;
         for (key, value) in key_values {
-            bucket.set(key, value, None).await?;
+            bucket.set(key, value).await?;
         }
         Ok(())
     }

@@ -16,7 +16,6 @@
 ## Core workflow
 
 - [Writing Guests](guides/writing-guests.md)
-- [Provider Portability](guides/portability.md)
 - [Composing a Runtime](guides/composing-a-runtime.md)
 - [Multi-Guest Deployments](guides/multi-guest-deployments.md)
 

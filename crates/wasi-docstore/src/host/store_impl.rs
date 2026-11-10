@@ -4,45 +4,25 @@ use omnia_core::HostView;
 use wasmtime::component::Accessor;
 
 use crate::host::generated::omnia::docstore::store::{
-    Document as WitDocument, Host as StoreHost, HostWithStore, QueryOptions as WitQueryOptions,
-    QueryResult as WitQueryResult,
+    Document, Host as StoreHost, HostWithStore, QueryOptions, QueryResult,
 };
-use crate::host::generated::omnia::docstore::types::SortField as WitSortField;
-use crate::host::{DocStoreClient, Document, QueryOptions, Result, SortField, WasiDocStore};
-
-fn from_wit_document(doc: WitDocument) -> Document {
-    Document {
-        id: doc.id,
-        data: doc.data,
-    }
-}
-
-fn to_wit_document(doc: Document) -> WitDocument {
-    WitDocument {
-        id: doc.id,
-        data: doc.data,
-    }
-}
+use crate::host::{DocStoreClient, QueryOpts, Result, WasiDocStore};
 
 impl<T> HostWithStore<T> for WasiDocStore {
     async fn get(
         accessor: &Accessor<T, Self>, collection: String, id: String,
-    ) -> Result<Option<WitDocument>> {
+    ) -> Result<Option<Document>> {
         let fut = accessor.with(|mut store| store.get().client.get(collection, id));
-        Ok(fut.await?.map(to_wit_document))
-    }
-
-    async fn insert(
-        accessor: &Accessor<T, Self>, collection: String, doc: WitDocument,
-    ) -> Result<()> {
-        let fut = accessor
-            .with(|mut store| store.get().client.insert(collection, from_wit_document(doc)));
         Ok(fut.await?)
     }
 
-    async fn put(accessor: &Accessor<T, Self>, collection: String, doc: WitDocument) -> Result<()> {
-        let fut =
-            accessor.with(|mut store| store.get().client.put(collection, from_wit_document(doc)));
+    async fn insert(accessor: &Accessor<T, Self>, collection: String, doc: Document) -> Result<()> {
+        let fut = accessor.with(|mut store| store.get().client.insert(collection, doc));
+        Ok(fut.await?)
+    }
+
+    async fn put(accessor: &Accessor<T, Self>, collection: String, doc: Document) -> Result<()> {
+        let fut = accessor.with(|mut store| store.get().client.put(collection, doc));
         Ok(fut.await?)
     }
 
@@ -52,9 +32,9 @@ impl<T> HostWithStore<T> for WasiDocStore {
     }
 
     async fn query(
-        accessor: &Accessor<T, Self>, collection: String, options: WitQueryOptions,
-    ) -> Result<WitQueryResult> {
-        let WitQueryOptions {
+        accessor: &Accessor<T, Self>, collection: String, options: QueryOptions,
+    ) -> Result<QueryResult> {
+        let QueryOptions {
             filter,
             order_by,
             limit,
@@ -62,28 +42,21 @@ impl<T> HostWithStore<T> for WasiDocStore {
             continuation,
         } = options;
 
-        let filter = filter
+        let filter_tree = filter
             .map(|res| accessor.with(|mut store| store.get().table.delete(res)))
             .transpose()?
             .map(|fp| fp.0);
 
-        let opts = QueryOptions {
-            filter,
-            order_by: order_by
-                .into_iter()
-                .map(|WitSortField { field, descending }| SortField { field, descending })
-                .collect(),
+        let opts = QueryOpts {
+            order_by,
             limit,
             offset,
             continuation,
         };
 
-        let fut = accessor.with(|mut store| store.get().client.query(collection, opts));
-        let result = fut.await?;
-        Ok(WitQueryResult {
-            documents: result.documents.into_iter().map(to_wit_document).collect(),
-            continuation: result.continuation,
-        })
+        let fut =
+            accessor.with(|mut store| store.get().client.query(collection, filter_tree, opts));
+        Ok(fut.await?)
     }
 }
 

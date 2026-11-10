@@ -1,6 +1,6 @@
 //! # DocStore Runtime (Default Backend)
 //!
-//! Host binary for the `wasi:docstore` example. Uses the in-memory default backend.
+//! Host binary for the `omnia:docstore` example. Uses the in-memory default backend.
 
 cfg_select! {
     not(target_arch = "wasm32") => {

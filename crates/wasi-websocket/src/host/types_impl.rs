@@ -7,18 +7,6 @@ pub use crate::host::generated::omnia::websocket::types::{
 use crate::host::resource::{ClientProxy, Event};
 use crate::host::{Result, WasiWebSocket, WebSocketClient};
 
-pub fn get_client<T>(
-    accessor: &Accessor<T, WasiWebSocket>, self_: &Resource<ClientProxy>,
-) -> Result<ClientProxy> {
-    Ok(omnia_core::get_cloned(accessor, self_)?)
-}
-
-pub fn get_event<T>(
-    accessor: &Accessor<T, WasiWebSocket>, self_: &Resource<Event>,
-) -> Result<Event> {
-    Ok(omnia_core::get_cloned(accessor, self_)?)
-}
-
 impl<T> HostClientWithStore<T> for WasiWebSocket {
     async fn connect(accessor: &Accessor<T, Self>, _name: String) -> Result<Resource<ClientProxy>> {
         let socket = accessor.with(|mut store| store.get().client.endpoint()).await?;
@@ -31,8 +19,7 @@ impl<T> HostClientWithStore<T> for WasiWebSocket {
     }
 
     fn drop(mut accessor: Access<'_, T, Self>, rep: Resource<ClientProxy>) -> wasmtime::Result<()> {
-        accessor.get().table.delete(rep)?;
-        Ok(())
+        Ok(accessor.get().table.delete(rep).map(|_| ())?)
     }
 }
 
@@ -54,8 +41,7 @@ impl<T> HostEventWithStore<T> for WasiWebSocket {
     }
 
     fn drop(mut accessor: Access<'_, T, Self>, rep: Resource<Event>) -> wasmtime::Result<()> {
-        accessor.get().table.delete(rep)?;
-        Ok(())
+        Ok(accessor.get().table.delete(rep).map(|_| ())?)
     }
 }
 
@@ -66,3 +52,15 @@ impl Host for HostView<'_, dyn WebSocketClient> {
 }
 impl HostClient for HostView<'_, dyn WebSocketClient> {}
 impl HostEvent for HostView<'_, dyn WebSocketClient> {}
+
+pub fn get_client<T>(
+    accessor: &Accessor<T, WasiWebSocket>, self_: &Resource<ClientProxy>,
+) -> Result<ClientProxy> {
+    Ok(omnia_core::get_cloned(accessor, self_)?)
+}
+
+pub fn get_event<T>(
+    accessor: &Accessor<T, WasiWebSocket>, self_: &Resource<Event>,
+) -> Result<Event> {
+    Ok(omnia_core::get_cloned(accessor, self_)?)
+}

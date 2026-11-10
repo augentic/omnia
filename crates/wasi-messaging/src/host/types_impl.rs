@@ -5,20 +5,8 @@ use crate::host::generated::wasi::messaging::types;
 pub use crate::host::generated::wasi::messaging::types::{
     Error, Host, HostClient, HostClientWithStore, HostMessage, HostMessageWithStore, Topic,
 };
-use crate::host::resource::{ClientProxy, Message, from_wit_metadata, to_wit_metadata};
+use crate::host::resource::{ClientProxy, Message};
 use crate::host::{MessagingClient, Result, WasiMessaging};
-
-pub fn get_client<T>(
-    accessor: &Accessor<T, WasiMessaging>, self_: &Resource<ClientProxy>,
-) -> Result<ClientProxy> {
-    Ok(omnia_core::get_cloned(accessor, self_)?)
-}
-
-pub fn get_message<T>(
-    accessor: &Accessor<T, WasiMessaging>, self_: &Resource<Message>,
-) -> Result<Message> {
-    Ok(omnia_core::get_cloned(accessor, self_)?)
-}
 
 impl<T> HostClientWithStore<T> for WasiMessaging {
     async fn connect(accessor: &Accessor<T, Self>, _name: String) -> Result<Resource<ClientProxy>> {
@@ -32,8 +20,7 @@ impl<T> HostClientWithStore<T> for WasiMessaging {
     }
 
     fn drop(mut accessor: Access<'_, T, Self>, rep: Resource<ClientProxy>) -> wasmtime::Result<()> {
-        accessor.get().table.delete(rep)?;
-        Ok(())
+        Ok(accessor.get().table.delete(rep).map(|_| ())?)
     }
 }
 
@@ -53,12 +40,7 @@ impl<T> HostMessageWithStore<T> for WasiMessaging {
         mut host: Access<'_, T, Self>, self_: Resource<Message>,
     ) -> wasmtime::Result<Option<String>> {
         let message = host.get().table.get(&self_)?;
-        Ok(message.metadata.as_ref().and_then(|md| {
-            md.inner
-                .iter()
-                .find(|(key, _)| key.eq_ignore_ascii_case("content-type"))
-                .map(|(_, value)| value.clone())
-        }))
+        Ok(message.metadata.as_ref().and_then(|md| md.get("content-type").cloned()))
     }
 
     fn set_content_type(
@@ -85,7 +67,7 @@ impl<T> HostMessageWithStore<T> for WasiMessaging {
         mut host: Access<'_, T, Self>, self_: Resource<Message>,
     ) -> wasmtime::Result<Option<types::Metadata>> {
         let message = host.get().table.get(&self_)?;
-        Ok(message.metadata.clone().map(to_wit_metadata))
+        Ok(message.metadata.clone().map(Into::into))
     }
 
     fn add_metadata(
@@ -99,7 +81,7 @@ impl<T> HostMessageWithStore<T> for WasiMessaging {
     fn set_metadata(
         mut host: Access<'_, T, Self>, self_: Resource<Message>, meta: types::Metadata,
     ) -> wasmtime::Result<()> {
-        host.get().table.get_mut(&self_)?.metadata = Some(from_wit_metadata(meta));
+        host.get().table.get_mut(&self_)?.metadata = Some(meta.into());
         Ok(())
     }
 
@@ -114,8 +96,7 @@ impl<T> HostMessageWithStore<T> for WasiMessaging {
     }
 
     fn drop(mut accessor: Access<'_, T, Self>, rep: Resource<Message>) -> wasmtime::Result<()> {
-        accessor.get().table.delete(rep)?;
-        Ok(())
+        Ok(accessor.get().table.delete(rep).map(|_| ())?)
     }
 }
 
@@ -126,3 +107,15 @@ impl Host for HostView<'_, dyn MessagingClient> {
 }
 impl HostClient for HostView<'_, dyn MessagingClient> {}
 impl HostMessage for HostView<'_, dyn MessagingClient> {}
+
+pub fn get_client<T>(
+    accessor: &Accessor<T, WasiMessaging>, self_: &Resource<ClientProxy>,
+) -> Result<ClientProxy> {
+    Ok(omnia_core::get_cloned(accessor, self_)?)
+}
+
+pub fn get_message<T>(
+    accessor: &Accessor<T, WasiMessaging>, self_: &Resource<Message>,
+) -> Result<Message> {
+    Ok(omnia_core::get_cloned(accessor, self_)?)
+}

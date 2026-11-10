@@ -7,6 +7,8 @@ mod resource;
 mod types_impl;
 
 mod generated {
+    #![allow(missing_docs, reason = "wasmtime bindgen output")]
+
     pub use super::{ContainerProxy, Error, IncomingValue, OutgoingValue, StreamObjectNames};
 
     wasmtime::component::bindgen!({
@@ -29,16 +31,17 @@ mod generated {
 }
 
 use std::fmt::Debug;
+use std::sync::Arc;
 
 pub use bytes::Bytes;
-pub use default_impl::BlobStoreDefault;
-pub use omnia_backend::blobstore::{BlobStoreClient, Container, ContainerMetadata, ObjectMetadata};
 pub use omnia_core::FutureResult;
 use omnia_core::{Host, HostCtx, Provides, StoreCtx};
 pub use resource::*;
 use wasmtime::component::Linker;
 use wasmtime_wasi::p2::pipe::MemoryOutputPipe;
 
+pub use self::default_impl::BlobStoreDefault;
+pub use self::generated::wasi::blobstore::container::{ContainerMetadata, ObjectMetadata};
 use self::generated::wasi::blobstore::{blobstore, container, types};
 
 /// Typed host error for `wasi:blobstore`, lowered to the WIT `error` string.
@@ -57,6 +60,8 @@ impl std::fmt::Display for Error {
         }
     }
 }
+
+omnia_core::host_error!(Error, Other);
 
 /// Incoming value for a blobstore operation.
 pub type IncomingValue = Bytes;
@@ -130,4 +135,46 @@ impl<B: Provides<Self>> Host<B> for WasiBlobStore {
     }
 }
 
-omnia_core::host_error!(Error, Other);
+/// Service contract for `wasi:blobstore` backends.
+///
+/// This is implemented by the resource-specific provider of Blobstore
+/// functionality. For example, an in-memory store, or a Redis-backed store.
+pub trait BlobStoreClient: Debug + Send + Sync + 'static {
+    /// Open a container.
+    fn create_container(&self, name: String) -> FutureResult<Arc<dyn Container>>;
+
+    /// Get a container.
+    fn get_container(&self, name: String) -> FutureResult<Arc<dyn Container>>;
+
+    /// Delete a container.
+    fn delete_container(&self, name: String) -> FutureResult<()>;
+
+    /// Check if a container exists.
+    fn container_exists(&self, name: String) -> FutureResult<bool>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::OutgoingValue;
+
+    #[test]
+    fn write_body_once() {
+        let mut outgoing = OutgoingValue::new(16);
+        assert_eq!(outgoing.take_write_body(), Ok(()));
+        assert_eq!(outgoing.take_write_body(), Err(()));
+    }
+
+    #[test]
+    fn finish_write_body() {
+        let mut outgoing = OutgoingValue::new(16);
+        assert_eq!(outgoing.finalize(), Err("outgoing value write body was never requested"));
+    }
+
+    #[test]
+    fn finish_once() {
+        let mut outgoing = OutgoingValue::new(16);
+        assert_eq!(outgoing.take_write_body(), Ok(()));
+        assert_eq!(outgoing.finalize(), Ok(()));
+        assert_eq!(outgoing.finalize(), Err("outgoing value already finished"));
+    }
+}

@@ -39,7 +39,7 @@ Each example directory has a `README.md` with test commands and example-specific
 | ------- | ------------ |
 | [`blobstore`](blobstore) | Object storage containers and blobs (`wasi:blobstore`) |
 | [`config`](config) | Reading runtime configuration (`wasi:config`) |
-| [`docstore`](docstore) | JSON documents with filters, sorting, and pagination (`wasi:docstore`) |
+| [`docstore`](docstore) | JSON documents with filters, sorting, and pagination (`omnia:docstore`) |
 | [`identity`](identity) | OAuth token acquisition (`wasi:identity`) |
 | [`messaging`](messaging) | Pub-sub, request-reply, and fan-out (`wasi:messaging`) |
 | [`model`](model) | Model completion across the `omnia:model` boundary with the scripted test double |

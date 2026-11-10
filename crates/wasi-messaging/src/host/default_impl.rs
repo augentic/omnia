@@ -1,19 +1,26 @@
-//! In-process broadcast default implementation of [`MessagingClient`].
+//! Default in-memory implementation for wasi-messaging
+//!
+//! This is a lightweight implementation for development use only. Messages
+//! fan out over a 32-slot [`tokio::sync::broadcast`] channel: a subscriber
+//! that falls more than 32 messages behind silently loses the overwritten
+//! messages (the lag error is filtered out of the subscription stream).
 
-use std::fmt::Debug;
 use std::sync::Arc;
 
 use anyhow::Result;
-use futures::{FutureExt as _, StreamExt as _};
-use omnia_backend::messaging::{
-    Endpoint, Handler, Message, MessagingClient, RequestOptions, Subscriptions, dispatch,
-};
-use omnia_core::{Connect, FutureResult, NoOptions};
+use futures::FutureExt;
+use futures::stream::StreamExt;
+use omnia_core::Connect;
 use tokio::sync::broadcast::{self, Sender};
 use tokio_stream::wrappers::BroadcastStream;
 use tracing::instrument;
 
-/// Default in-process broadcast implementation of [`MessagingClient`].
+use crate::host::MessagingClient;
+use crate::host::resource::{
+    Endpoint, FutureResult, Handler, Message, RequestOptions, Subscriptions, dispatch,
+};
+
+/// Default implementation for `wasi:messaging`.
 #[derive(Clone, Debug)]
 pub struct MessagingDefault {
     sender: Sender<Message>,
@@ -21,6 +28,10 @@ pub struct MessagingDefault {
 
 impl MessagingDefault {
     /// Every message published through this broker from now on.
+    ///
+    /// A broadcast receiver sees only what is sent after it subscribes, so
+    /// subscribe before the publisher runs. The stream ends when the last
+    /// clone of the broker is dropped.
     pub fn subscribe(&self) -> Subscriptions {
         tracing::debug!("subscribing to messages");
         let stream = BroadcastStream::new(self.sender.subscribe());
@@ -29,11 +40,10 @@ impl MessagingDefault {
 }
 
 impl Connect for MessagingDefault {
-    type ConnectOptions = NoOptions;
+    type ConnectOptions = omnia_core::NoOptions;
 
     #[instrument]
     async fn connect_with(options: Self::ConnectOptions) -> Result<Self> {
-        let _ = options;
         tracing::debug!("initializing in-memory messaging");
         let (sender, _) = broadcast::channel::<Message>(32);
         Ok(Self { sender })
@@ -42,13 +52,15 @@ impl Connect for MessagingDefault {
 
 impl MessagingClient for MessagingDefault {
     fn endpoint(&self) -> FutureResult<Arc<dyn Endpoint>> {
-        tracing::trace!("connecting messaging endpoint");
+        tracing::trace!("connecting messaging client");
         let client = self.clone();
         async move { Ok(Arc::new(client) as Arc<dyn Endpoint>) }.boxed()
     }
 }
 
 impl Endpoint for MessagingDefault {
+    // subscribed as called, so a message sent before the loop is first
+    // polled still reaches the handler
     fn consume(&self, handler: Arc<dyn Handler>) -> FutureResult<()> {
         dispatch(self.subscribe(), handler).boxed()
     }
@@ -59,6 +71,7 @@ impl Endpoint for MessagingDefault {
 
         async move {
             message.topic = topic;
+            // a broadcast send fails only without subscribers, a valid no-op
             let _ = sender.send(message);
             Ok(())
         }
@@ -72,12 +85,15 @@ impl Endpoint for MessagingDefault {
         let sender = self.sender.clone();
 
         async move {
+            // a canned reply: publish, then acknowledge without waiting
             message.topic = topic;
             let _ = sender.send(message);
 
-            let mut resp = Message::new(b"ACK".to_vec());
-            resp.topic = "response".to_string();
-            Ok(resp)
+            Ok(Message {
+                topic: "response".to_string(),
+                payload: b"ACK".to_vec(),
+                ..Message::default()
+            })
         }
         .boxed()
     }

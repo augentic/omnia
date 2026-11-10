@@ -70,3 +70,34 @@ fn materialize(
     };
     Ok(verbosity::levels(mode, plan.verbose, plan.quiet).apply(builder))
 }
+
+#[cfg(all(test, feature = "cli"))]
+mod tests {
+    use std::ffi::OsString;
+    use std::path::PathBuf;
+
+    use super::*;
+    use crate::Mode;
+
+    fn argv(args: &[&str]) -> Vec<OsString> {
+        args.iter().map(OsString::from).collect()
+    }
+
+    fn fatal(error: omnia_cli::PlanError) -> String {
+        match error {
+            omnia_cli::PlanError::Fatal(error) => format!("{error:#}"),
+            omnia_cli::PlanError::Usage(error) => {
+                panic!("expected a fatal error, got usage: {error}")
+            }
+        }
+    }
+
+    #[test]
+    fn compiled_path_load_failure() {
+        let options = MainOptions::new(Mode::Server)
+            .manifest(ManifestSource::Path(PathBuf::from("/nonexistent/omnia.toml")));
+        let error = materialize(options, argv(&["bin", "run"]), None)
+            .expect_err("a missing compiled-in manifest path must fail");
+        assert!(fatal(error).contains("reading manifest"));
+    }
+}
