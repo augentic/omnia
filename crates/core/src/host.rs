@@ -74,15 +74,16 @@ pub trait Host<B: Backends>: Send + Sync {
 /// #[host_ctx(client = FooClient)]
 /// pub struct WasiFoo;
 ///
-/// struct Backends<C>(C);
+/// #[derive(Clone)]
+/// struct Backends<C: Clone>(C);
 ///
-/// impl<C: FooClient + Send + Sync + 'static> Provides<WasiFoo> for Backends<C> {
+/// impl<C: FooClient + Clone + Send + Sync + 'static> Provides<WasiFoo> for Backends<C> {
 ///     fn borrow(&mut self) -> &mut dyn FooClient {
 ///         &mut self.0
 ///     }
 /// }
 ///
-/// fn view<C: FooClient + Send + Sync + 'static>(
+/// fn view<C: FooClient + Clone + Send + Sync + 'static>(
 ///     store: &mut StoreCtx<Backends<C>>,
 /// ) -> HostView<'_, dyn FooClient> {
 ///     store.view::<WasiFoo>()
