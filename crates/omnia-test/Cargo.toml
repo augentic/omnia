@@ -101,6 +101,11 @@ omnia-wasi-sql = { path = "../wasi-sql" }
 test-programs.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
+[[bench]]
+name = "store"
+harness = false
+required-features = ["host"]
+
 [[test]]
 name = "script"
 
