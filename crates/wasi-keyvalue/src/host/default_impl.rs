@@ -9,10 +9,9 @@ use anyhow::{Context as _, Result};
 use futures::FutureExt as _;
 use moka::Expiry;
 use moka::sync::Cache;
-use omnia_core::{Backend, Connect, FutureResult, NoOptions};
+use omnia_backend::keyvalue::{Bucket, KeyValueClient, add_i64};
+use omnia_core::{Connect, FutureResult, NoOptions};
 use tracing::instrument;
-
-use crate::{Bucket, KeyValueClient, WasiKeyValue, add_i64};
 
 #[derive(Clone, Debug)]
 struct Entry {
@@ -63,10 +62,6 @@ impl Connect for KeyValueDefault {
             store: Cache::builder().build(),
         })
     }
-}
-
-impl Backend for KeyValueDefault {
-    type Hosts = (WasiKeyValue,);
 }
 
 impl KeyValueClient for KeyValueDefault {

@@ -50,8 +50,6 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[host_ctx(client = IdentityClient)]
 pub struct WasiIdentity;
 
-omnia_backend::capability!(WasiIdentity, "omnia:identity", IdentityClient);
-
 impl<B: Provides<Self>> Host<B> for WasiIdentity {
     fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
         Ok(credentials::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?)

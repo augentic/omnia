@@ -115,9 +115,9 @@ impl StateStore for crate::WasiProvider {
 
 #[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
 async fn open_bucket() -> Result<omnia_wasi_keyvalue::store::Bucket> {
-    omnia_wasi_keyvalue::store::open(omnia_wasi_keyvalue::BUCKET.to_string())
+    omnia_wasi_keyvalue::store::open(omnia_backend::keyvalue::BUCKET.to_string())
         .await
-        .with_context(|| format!("opening bucket `{}`", omnia_wasi_keyvalue::BUCKET))
+        .with_context(|| format!("opening bucket `{}`", omnia_backend::keyvalue::BUCKET))
 }
 
 /// JSON codecs over any [`StateStore`].

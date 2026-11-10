@@ -54,8 +54,6 @@ pub type Result<T> = std::result::Result<T, WitError>;
 #[host_ctx(client = ModelClient)]
 pub struct WasiModel;
 
-omnia_backend::capability!(WasiModel, "omnia:model", ModelClient);
-
 impl<B: Provides<Self>> Host<B> for WasiModel {
     fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
         Ok(completion::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?)

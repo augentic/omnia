@@ -8,12 +8,10 @@ use futures::{FutureExt as _, StreamExt as _};
 use omnia_backend::messaging::{
     Endpoint, Handler, Message, MessagingClient, RequestOptions, Subscriptions, dispatch,
 };
-use omnia_core::{Backend, Connect, FutureResult, NoOptions};
+use omnia_core::{Connect, FutureResult, NoOptions};
 use tokio::sync::broadcast::{self, Sender};
 use tokio_stream::wrappers::BroadcastStream;
 use tracing::instrument;
-
-use crate::host::WasiMessaging;
 
 /// Default in-process broadcast implementation of [`MessagingClient`].
 #[derive(Clone, Debug)]
@@ -40,10 +38,6 @@ impl Connect for MessagingDefault {
         let (sender, _) = broadcast::channel::<Message>(32);
         Ok(Self { sender })
     }
-}
-
-impl Backend for MessagingDefault {
-    type Hosts = (WasiMessaging,);
 }
 
 impl MessagingClient for MessagingDefault {

@@ -2,13 +2,12 @@ use anyhow::Context;
 use omnia_core::HostView;
 use wasmtime::component::{Access, Accessor, Resource};
 
-use crate::host::Result;
 use crate::host::generated::wasi::keyvalue::store::{
     Error, HostBucketWithStore, HostWithStore, KeyResponse,
 };
 use crate::host::resource::BucketProxy;
 use crate::host::store::{Host, HostBucket};
-use crate::{KeyValueClient, WasiKeyValue};
+use crate::host::{KeyValueClient, Result, WasiKeyValue};
 
 pub fn get_bucket<T>(
     accessor: &Accessor<T, WasiKeyValue>, self_: &Resource<BucketProxy>,

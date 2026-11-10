@@ -30,7 +30,7 @@ pub mod identity {
 
 /// Key-value wire constants.
 pub mod keyvalue {
-    pub use omnia_wasi_keyvalue::BUCKET;
+    pub use omnia_backend::keyvalue::BUCKET;
 }
 
 /// SQL table value types and typed row decoding.

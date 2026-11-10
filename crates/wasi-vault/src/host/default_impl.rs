@@ -7,10 +7,8 @@ use std::sync::Arc;
 use anyhow::Result;
 use futures::FutureExt as _;
 use omnia_backend::vault::{Locker, VaultClient};
-use omnia_core::{Backend, Connect, FutureResult, NoOptions};
+use omnia_core::{Connect, FutureResult, NoOptions};
 use tracing::instrument;
-
-use crate::host::WasiVault;
 
 type Store = Arc<parking_lot::RwLock<HashMap<String, HashMap<String, Vec<u8>>>>>;
 
@@ -29,10 +27,6 @@ impl Connect for VaultDefault {
         tracing::debug!("initializing in-memory vault");
         Ok(Self::default())
     }
-}
-
-impl Backend for VaultDefault {
-    type Hosts = (WasiVault,);
 }
 
 impl VaultClient for VaultDefault {

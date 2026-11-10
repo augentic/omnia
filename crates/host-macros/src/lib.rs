@@ -8,13 +8,12 @@ mod runtime;
 use proc_macro::TokenStream;
 use syn::{DeriveInput, parse_macro_input};
 
-/// Generates a host runtime from a map of `Host: Backend` pairs, or a list
-/// of backends.
+/// Generates a host runtime from a map of `Host: Backend` pairs.
 ///
-/// In the map, each key is a host type from an `omnia-wasi-*` crate and each
-/// value a backend implementing that interface's context trait. In the list,
-/// each backend names the hosts it serves. The optional `mode:`, `manifest:`,
-/// and inline manifest keys are documented at the crate root.
+/// Each key is a host type from an `omnia-wasi-*` crate and each value a
+/// backend implementing that interface's context trait. The optional
+/// `mode:`, `manifest:`, and inline manifest keys are documented at the
+/// crate root.
 ///
 /// # Examples
 ///
@@ -42,28 +41,24 @@ pub fn runtime(input: TokenStream) -> TokenStream {
 /// `#[host_ctx(client = ..)]` names.
 ///
 /// The derive emits `wasmtime::component::HasData` with
-/// `Data<'a> = omnia_core::HostView<'a, dyn Client>`, `omnia_core::HostCtx`
-/// with `Borrow<'a> = &'a dyn Client`, and `omnia_core::SlotHost` over the
-/// slot `Arc<dyn Client>`. The host implements its bindgen `Host*` traits on
-/// `HostView<'_, dyn Client>`.
+/// `Data<'a> = omnia_core::HostView<'a, dyn Client>` and `omnia_core::HostCtx`
+/// with `Borrow<'a> = &'a dyn Client`. The host implements its bindgen
+/// `Host*` traits on `HostView<'_, dyn Client>`.
 ///
-/// The type must be non-generic, carry exactly one `#[host_ctx(client = ..)]`
-/// and a `capability!` line, and the crate must depend on `omnia-core`.
+/// The type must be non-generic, carry exactly one `#[host_ctx(client = ..)]`,
+/// and the crate must depend on `omnia-core`.
 ///
 /// # Examples
 ///
 /// ```rust,ignore
+/// pub use omnia_backend::keyvalue::KeyValueClient;
 /// use omnia_core::{Host, HostCtx, Provides, StoreCtx};
 /// use wasmtime::component::Linker;
-///
-/// use crate::KeyValueClient;
 ///
 /// /// Host-side service for `wasi:keyvalue`.
 /// #[derive(Debug, HostCtx)]
 /// #[host_ctx(client = KeyValueClient)]
 /// pub struct WasiKeyValue;
-///
-/// omnia_backend::capability!(WasiKeyValue, "wasi:keyvalue", KeyValueClient);
 ///
 /// impl<B: Provides<Self>> Host<B> for WasiKeyValue {
 ///     fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {

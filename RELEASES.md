@@ -43,30 +43,6 @@ Unreleased
   `B: Provides<H>`, and is the getter every `add_to_linker` passes.
 - `#[derive(thiserror::Error)]` on `GuestError`, `AcquireError`,
   `LoadError`, `HandleError`, and `McpError`, with the same messages.
-- `omnia_backend::{Capability, Serve, Serves, Backend}` and
-  `capability!`: a host marker type is a `Capability` with a `NAME` and
-  a `Slot`, and a backend names the hosts it serves in `Backend::Hosts`.
-  `capability!(Host, "wit:package", ClientTrait)` declares the capability
-  and lets every `ClientTrait + Clone` backend serve it. Every in-tree
-  default implements `Backend` for its host. All are re-exported from
-  `omnia-core` and `omnia`.
-- `omnia_core::{Slots, SlotHost, Fill, Link}`: `Slots` is a backend
-  bundle keyed by host type, filled by `add` (every host a backend names)
-  or `add_as` (a narrower tuple), and read back by `get`. It provides
-  every `SlotHost`, which `#[derive(HostCtx)]` now also implements.
-  `Fill` and `Link` are implemented for tuples of one to four hosts.
-- `Deployment::hosts::<(H1, H2)>()`: links a tuple of hosts, and refuses
-  a host an earlier call linked with an error naming the capability.
-- `runtime!` list form: `hosts: [Backend, Backend(options), Backend for
-  [Host, ..]]`. Each backend names its hosts, the generated bundle is an
-  `omnia::Slots`, and two entries serving one host fail at startup. The
-  map form is unchanged.
-- `omnia_wasi_http::HttpSlot`, the `wasi:http` slot, and
-  `HttpBorrow::fresh`, which clones the backend for another store.
-- `omnia-wasi-keyvalue` feature `host`, on by default: the wasmtime host
-  and `KeyValueDefault`. Without it a native build is the contract alone
-  (`KeyValueClient`, `Bucket`, `add_i64`, `BUCKET`, and the `WasiKeyValue`
-  marker) and depends on no engine crate.
 
 ### Changed
 
@@ -105,14 +81,6 @@ Unreleased
   façade reads them.
 - A `serde_json::Error` converts into a `BadRequest` under the code
   `bad_request`, no longer `serde_json`.
-- `#[derive(HostCtx)]` needs the host's `capability!` line beside it, and
-  the client trait it names must be `Send + Sync`.
-- `HttpBorrow: Send + Sync + 'static`, with the new required method
-  `fresh`.
-- `Host<B>` not being implemented reports that the host has no host side
-  in this build and points at the defining crate's `host` feature.
-- `omnia-sdk` depends on `omnia-wasi-keyvalue` on every target, without
-  its `host` feature on native ones.
 - An HTTP handler bounds its `P` on the capability traits it reaches
   alone: the `'static` axum needs is the router fn's, which `Handlers<P>`
   carries, so `async fn handler<P: Config + StateStore>(context:
@@ -142,11 +110,8 @@ Unreleased
 - `omnia_core::serve_links`: `Runtime::serve_links` is the one entry.
 - The 13 client-trait re-exports at `omnia_backend`'s root
   (`omnia_backend::KeyValueClient`, ...): each lives in its module
-  (`omnia_backend::sql::SqlClient`), as the `omnia-wasi-*` crates
-  re-export them.
-- `omnia_backend::keyvalue` and the `keyvalue` feature: `KeyValueClient`,
-  `Bucket`, `add_i64`, and `BUCKET` are `omnia-wasi-keyvalue`'s, at its
-  root. `omnia_sdk::keyvalue::BUCKET` is unchanged.
+  (`omnia_backend::keyvalue::KeyValueClient`), as the `omnia-wasi-*`
+  crates re-export them.
 
 ---
 

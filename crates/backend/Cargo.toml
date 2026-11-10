@@ -22,6 +22,7 @@ blobstore = ["dep:bytes"]
 config = []
 docstore = ["dep:chrono", "dep:serde", "dep:serde_json"]
 identity = []
+keyvalue = []
 messaging = ["dep:thiserror", "dep:tokio"]
 model = [
     "dep:bon",

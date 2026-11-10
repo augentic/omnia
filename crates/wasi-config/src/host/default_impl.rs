@@ -8,10 +8,8 @@ use std::sync::Arc;
 use anyhow::Result;
 use futures::FutureExt as _;
 use omnia_backend::config::ConfigClient;
-use omnia_core::{Backend, Connect, FutureResult, NoOptions};
+use omnia_core::{Connect, FutureResult, NoOptions};
 use tracing::instrument;
-
-use crate::host::WasiConfig;
 
 /// Default implementation for `wasi:config`, sourcing variables from the
 /// process environment on [`Connect`] or from a seeded map.
@@ -47,10 +45,6 @@ impl Connect for ConfigDefault {
             vars: Arc::new(env::vars().collect()),
         })
     }
-}
-
-impl Backend for ConfigDefault {
-    type Hosts = (WasiConfig,);
 }
 
 impl ConfigClient for ConfigDefault {

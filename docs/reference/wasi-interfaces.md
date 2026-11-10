@@ -34,11 +34,10 @@ Notes:
 ```text
 wasi-keyvalue/
 ├── src/
-│   ├── lib.rs          # cfg-gated faces; BUCKET, the WasiKeyValue marker, capability!
+│   ├── lib.rs          # cfg-gated guest vs host
 │   ├── guest.rs        # Guest-side bindings (wasm32)
-│   ├── client.rs       # KeyValueClient, Bucket: the engine-free contract (native)
-│   ├── host.rs         # bindgen!, Host impl (native, `host` feature)
-│   └── host/           # Host-side implementation (native, `host` feature)
+│   ├── host.rs         # bindgen!, #[derive(HostCtx)] WasiKeyValue, Host impl
+│   └── host/           # Host-side implementation (native)
 │       ├── store_impl.rs     # wasi:keyvalue/store Host* impls on HostView<'_, dyn KeyValueClient>
 │       ├── atomics_impl.rs   # ... one file per WIT interface
 │       ├── resource.rs       # BucketProxy and the other table-held resources
@@ -46,7 +45,7 @@ wasi-keyvalue/
 └── wit/                # WIT interface definitions (+ deps/)
 ```
 
-`lib.rs` declares the host type and derives `HostCtx` on it with `#[host_ctx(client = KeyValueClient)]`, which emits the `HasData`, `HostCtx`, and `SlotHost` impls that let a `runtime!` bundle serve it. `omnia-wasi-keyvalue` is the first crate laid out this way: its derive sits behind the `host` feature, so the marker and the contract build without `wasmtime`. The other interface crates still declare the host type in `host.rs` and take their contract from `omnia-backend`. Either way, its view is the library `HostView<'_, dyn KeyValueClient>` — `{ client, table }` — the `*_impl.rs` files implement the generated `Host*` traits on. See [Extending Omnia](../Architecture.md#extending-omnia) for the chain from backend to linker.
+`host.rs` declares the host type and derives `HostCtx` on it with `#[host_ctx(client = KeyValueClient)]`, which emits the `HasData` and `HostCtx` impls that let a `runtime!` bundle serve it; its view is the library `HostView<'_, dyn KeyValueClient>` — `{ client, table }` — the `*_impl.rs` files implement the generated `Host*` traits on. See [Extending Omnia](../Architecture.md#extending-omnia) for the chain from backend to linker.
 
 ## Supporting crates
 

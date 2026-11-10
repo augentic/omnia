@@ -55,8 +55,6 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[host_ctx(client = WebSocketClient)]
 pub struct WasiWebSocket;
 
-omnia_backend::capability!(WasiWebSocket, "omnia:websocket", WebSocketClient);
-
 impl<B: Provides<Self>> Host<B> for WasiWebSocket {
     fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
         client::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;

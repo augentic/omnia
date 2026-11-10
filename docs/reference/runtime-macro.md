@@ -6,7 +6,7 @@ Every key the `omnia::runtime!` macro accepts, with exact semantics. The task-or
 
 | Key | Purpose | You need it when |
 | --- | ------- | ---------------- |
-| `hosts:` | Which WASI interfaces are linked and what implements them: the `Host: Backend` map, or the [list](#list-form) of backends that name their hosts | Always (except a backend-less command runtime) |
+| `hosts:` | The `Host: Backend` map — which WASI interfaces are linked and what implements them | Always (except a backend-less command runtime) |
 | `mode:` | `server` (default) or `command` | Running jobs/CLIs instead of servers |
 | `manifest:` | Compile in a default manifest *path* | You want `run` with no arguments to work |
 | `guests:`, `mounts:`, `plugins:` | Compile in a default manifest *value* (inline), the guests embedded | Same as `manifest:`, but self-contained — no TOML file and no `.wasm` beside the binary at run time |
@@ -37,40 +37,6 @@ omnia::runtime!({
 ```
 
 The expression's type is the backend's `Connect::ConnectOptions`. Rows sharing a backend type share one connection, so their options must be written identically on every row (or omitted on every row) — a mismatch is a compile error, as are empty parentheses (drop the `()` to connect from the environment).
-
-### List form
-
-`hosts:` also takes a list of backends. A backend names the hosts it serves through `omnia::Backend::Hosts`, so the list does not repeat them:
-
-```rust
-omnia::runtime!({
-    hosts: [
-        HttpDefault,
-        OtelDefault,
-        Filesystem(FilesystemOptions::at(".omnia/storage")),
-        Nats for [WasiMessaging],
-    ]
-});
-```
-
-Here `Filesystem` is connected once and serves both hosts its `Backend::Hosts` names, where the map form repeats it on a `WasiKeyValue` row and a `WasiBlobStore` row.
-
-An entry is a backend type, then two optional parts:
-
-- **`(options)`** compiles the connect options in, as in the map form.
-- **`for [Host, ..]`** narrows the backend to the hosts named, at most four. Without it the backend serves every host in its `Backend::Hosts`.
-
-Each entry is one connection, so a backend is listed once: widen its `for [..]` rather than repeating it. A backend listed twice, a host repeated in one `for [..]`, and an empty `for []` are compile errors. So is a backend that cannot serve a host it is narrowed to.
-
-Every in-tree default implements `Backend` for its own host. A backend from another crate needs its own `impl omnia::Backend`, or a `for [..]` on its entry, which asks only for the host's client trait.
-
-Two entries that serve one host are refused at startup, before any guest runs, with an error naming the capability: ``two backends serve `wasi:keyvalue` ``. Narrow one of them with `for [..]`.
-
-The list form generates a `Backends` bundle over `omnia::Slots`, which holds one slot per served host. A host that is linked but has no slot panics on its first call. The list form's own wiring cannot produce that state; a bundle handed to `run_with` can.
-
-The embedder's `Cargo.toml` enables the host side of each interface crate it links. `omnia-wasi-keyvalue` carries it behind its `host` feature, on by default; a list entry whose host has no host side fails to compile with `` `WasiKeyValue` has no host side in this build ``.
-
-A `hosts:` value is one form or the other. The two do not mix within one invocation.
 
 ## `mode:`
 
@@ -230,8 +196,8 @@ The invocation expands to a private `runtime` module and re-exports five items f
 | ---- | ----- | --- |
 | `main` | `#[tokio::main] fn main() -> ExitCode` | The binary's entry point: connects the declared backends from the environment and drives the compiled-in deployment. |
 | `run` | blocking `fn run(DeploymentBuilder) -> Result<ExitStatus>` | Build the builder, then mount the runtime in-process from a binary with its own argument surface. |
-| `Hooks` | `pub struct Hooks` implementing `omnia::Wiring<B>` | The generated wiring — `link`, `serve` — generic over any bundle `B` that `Provides` each declared host's context (map form), or over which each entry's hosts `Link` (list form). |
+| `Hooks` | `pub struct Hooks` implementing `omnia::Wiring<B>` | The generated wiring — `link`, `serve` — generic over any bundle `B` that `Provides` each declared host's context. |
 | `manifest` | `fn manifest() -> ManifestSource` | The compiled-in deployment (`manifest:` path or inline keys), for a test to overlay. |
 | `run_with` | `async fn run_with<B>(DeploymentBuilder, B) -> Result<ExitStatus>` | Build the builder, then drive the deployment through `Hooks` over a bundle already in hand; nothing connects. |
 
-`main` and `run` use the generated `Backends` bundle: one field per backend in the map form, an `omnia::Slots` in the list form. `Hooks`, `manifest`, and `run_with` exist so a test drives the *same* wiring the binary runs — over `omnia_test::host::Backends`, say — without a second `runtime!` declaration in the test tree.
+`main` and `run` use the generated `Backends` bundle. `Hooks`, `manifest`, and `run_with` exist so a test drives the *same* wiring the binary runs — over `omnia_test::host::Backends`, say — without a second `runtime!` declaration in the test tree.

@@ -9,11 +9,9 @@ use anyhow::{Result, anyhow};
 use bytes::Bytes;
 use futures::FutureExt as _;
 use omnia_backend::blobstore::{BlobStoreClient, Container, ContainerMetadata, ObjectMetadata};
-use omnia_core::{Backend, Connect, FutureResult, NoOptions};
+use omnia_core::{Connect, FutureResult, NoOptions};
 use parking_lot::RwLock;
 use tracing::instrument;
-
-use crate::host::WasiBlobStore;
 
 /// Default in-memory implementation of [`BlobStoreClient`].
 #[derive(Debug, Clone, Default)]
@@ -30,10 +28,6 @@ impl Connect for BlobStoreDefault {
         tracing::debug!("initializing in-memory blobstore");
         Ok(Self::default())
     }
-}
-
-impl Backend for BlobStoreDefault {
-    type Hosts = (WasiBlobStore,);
 }
 
 impl BlobStoreClient for BlobStoreDefault {

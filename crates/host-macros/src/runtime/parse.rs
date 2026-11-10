@@ -30,7 +30,7 @@ impl Mode {
 /// Configuration for the runtime macro.
 pub struct Config {
     pub mode: Mode,
-    pub hosts: Hosts,
+    pub host_entries: Vec<HostEntry>,
     /// The `manifest:` path expression, when the deployment is a manifest
     /// file rather than inline keys.
     pub manifest_file: Option<Expr>,
@@ -40,7 +40,7 @@ pub struct Config {
 impl Parse for Config {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let mut mode = Mode::default();
-        let mut hosts = Hosts::default();
+        let mut host_entries = Vec::new();
         let mut manifest_file = None;
         let mut manifest = ManifestSpec::default();
         let mut manifest_span: Option<Span> = None;
@@ -50,7 +50,13 @@ impl Parse for Config {
             let span = key.span();
             match key.to_string().as_str() {
                 "mode" => mode = parse_mode(value)?,
-                "hosts" => hosts = value.parse()?,
+                "hosts" => {
+                    let list;
+                    syn::braced!(list in value);
+                    host_entries = Punctuated::<HostEntry, Token![,]>::parse_terminated(&list)?
+                        .into_iter()
+                        .collect();
+                }
                 "manifest" => {
                     manifest_file = Some(value.parse()?);
                     manifest_span = Some(span);
@@ -89,7 +95,7 @@ impl Parse for Config {
 
         let config = Self {
             mode,
-            hosts,
+            host_entries,
             manifest_file,
             manifest,
         };
@@ -111,7 +117,22 @@ impl Config {
             ));
         }
 
-        self.hosts.validate()?;
+        // rows sharing a backend share one connection, so their options must agree
+        let mut options_seen: std::collections::HashMap<String, Option<String>> =
+            std::collections::HashMap::new();
+        for entry in &self.host_entries {
+            let backend = entry.backend.to_token_stream().to_string();
+            let options = entry.options.as_ref().map(|expr| expr.to_token_stream().to_string());
+            if *options_seen.entry(backend).or_insert_with(|| options.clone()) != options {
+                let span =
+                    entry.options.as_ref().map_or_else(|| entry.backend.span(), Spanned::span);
+                return Err(syn::Error::new(
+                    span,
+                    "hosts rows sharing a backend share one connection; their connect \
+                     options must be identical (or omitted on every row)",
+                ));
+            }
+        }
 
         let mut marked: Option<Span> = None;
         for guest in &self.manifest.guests {
@@ -137,79 +158,6 @@ impl Config {
     }
 }
 
-/// The `hosts:` value: the map form `{ Host: Backend, .. }`, or the list form
-/// `[Backend, ..]` whose backends name the hosts they serve.
-pub enum Hosts {
-    Map(Vec<HostEntry>),
-    List(Vec<BackendEntry>),
-}
-
-impl Hosts {
-    fn validate(&self) -> syn::Result<()> {
-        match self {
-            Self::Map(entries) => Self::validate_map(entries),
-            Self::List(entries) => Self::validate_list(entries),
-        }
-    }
-
-    // rows sharing a backend share one connection, so their options must agree
-    fn validate_map(entries: &[HostEntry]) -> syn::Result<()> {
-        let mut options_seen: std::collections::HashMap<String, Option<String>> =
-            std::collections::HashMap::new();
-        for entry in entries {
-            let backend = entry.backend.to_token_stream().to_string();
-            let options = entry.options.as_ref().map(|expr| expr.to_token_stream().to_string());
-            if *options_seen.entry(backend).or_insert_with(|| options.clone()) != options {
-                let span =
-                    entry.options.as_ref().map_or_else(|| entry.backend.span(), Spanned::span);
-                return Err(syn::Error::new(
-                    span,
-                    "hosts rows sharing a backend share one connection; their connect \
-                     options must be identical (or omitted on every row)",
-                ));
-            }
-        }
-        Ok(())
-    }
-
-    // one entry is one connection, so a backend appears once
-    fn validate_list(entries: &[BackendEntry]) -> syn::Result<()> {
-        let mut seen: Vec<String> = Vec::new();
-        for entry in entries {
-            let backend = entry.backend.to_token_stream().to_string();
-            if seen.contains(&backend) {
-                return Err(syn::Error::new(
-                    entry.backend.span(),
-                    format!("`{backend}` is listed twice; list it once and widen its `for [..]`"),
-                ));
-            }
-            seen.push(backend);
-        }
-        Ok(())
-    }
-}
-
-impl Default for Hosts {
-    fn default() -> Self {
-        Self::Map(Vec::new())
-    }
-}
-
-impl Parse for Hosts {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
-        if input.peek(syn::token::Bracket) {
-            return parse_bracketed_list(input).map(Self::List);
-        }
-        if input.peek(syn::token::Brace) {
-            let map;
-            syn::braced!(map in input);
-            let entries = Punctuated::<HostEntry, Token![,]>::parse_terminated(&map)?;
-            return Ok(Self::Map(entries.into_iter().collect()));
-        }
-        Err(input.error("expected the map `{ Host: Backend, .. }` or the list `[Backend, ..]`"))
-    }
-}
-
 /// One `Host: Backend` wiring from the `hosts: { ... }` block, optionally
 /// carrying compiled-in connect options: `Host: Backend(options)` lowers to
 /// `Connect::connect_with(options)` instead of the env-sourced
@@ -225,98 +173,27 @@ impl Parse for HostEntry {
         let host = input.parse::<Path>()?;
         input.parse::<Token![:]>()?;
         let backend = input.parse::<Path>()?;
-        let options = parse_connect_options(input)?;
+        let options = if input.peek(syn::token::Paren) {
+            let args;
+            let paren = syn::parenthesized!(args in input);
+            if args.is_empty() {
+                return Err(syn::Error::new(
+                    paren.span.join(),
+                    "empty connect options; drop the `()` to connect from the environment",
+                ));
+            }
+            let expr = args.parse::<Expr>()?;
+            if !args.is_empty() {
+                return Err(args.error("expected a single connect-options expression"));
+            }
+            Some(expr)
+        } else {
+            None
+        };
         Ok(Self {
             host,
             backend,
             options,
-        })
-    }
-}
-
-fn parse_connect_options(input: ParseStream) -> syn::Result<Option<Expr>> {
-    if !input.peek(syn::token::Paren) {
-        return Ok(None);
-    }
-    let args;
-    let paren = syn::parenthesized!(args in input);
-    if args.is_empty() {
-        return Err(syn::Error::new(
-            paren.span.join(),
-            "empty connect options; drop the `()` to connect from the environment",
-        ));
-    }
-    let expr = args.parse::<Expr>()?;
-    if !args.is_empty() {
-        return Err(args.error("expected a single connect-options expression"));
-    }
-    Ok(Some(expr))
-}
-
-/// One backend from the `hosts: [ ... ]` list: `Backend`, optionally with
-/// compiled-in connect options, optionally narrowed to some of the hosts it
-/// serves by `for [Host, ..]`.
-pub struct BackendEntry {
-    pub backend: Path,
-    pub options: Option<Expr>,
-    /// The `for [..]` hosts; absent, the backend serves every host it names.
-    pub hosts: Option<Vec<Path>>,
-}
-
-impl BackendEntry {
-    // the widest host tuple `omnia::Fill` and `omnia::Link` are implemented for
-    const MAX_HOSTS: usize = 4;
-
-    fn parse_narrowing(input: ParseStream) -> syn::Result<Option<Vec<Path>>> {
-        if !input.peek(Token![for]) {
-            return Ok(None);
-        }
-        input.parse::<Token![for]>()?;
-        let list;
-        let bracket = syn::bracketed!(list in input);
-        let hosts: Vec<Path> =
-            Punctuated::<Path, Token![,]>::parse_terminated(&list)?.into_iter().collect();
-
-        if hosts.is_empty() {
-            return Err(syn::Error::new(
-                bracket.span.join(),
-                "empty `for [..]`; name the hosts, or drop `for` to serve every host the \
-                 backend names",
-            ));
-        }
-        if hosts.len() > Self::MAX_HOSTS {
-            return Err(syn::Error::new(
-                bracket.span.join(),
-                format!("`for [..]` takes at most {} hosts", Self::MAX_HOSTS),
-            ));
-        }
-        let mut seen: Vec<String> = Vec::new();
-        for host in &hosts {
-            let name = host.to_token_stream().to_string();
-            if seen.contains(&name) {
-                return Err(syn::Error::new(host.span(), format!("`{name}` is listed twice")));
-            }
-            seen.push(name);
-        }
-        Ok(Some(hosts))
-    }
-}
-
-impl Parse for BackendEntry {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
-        let backend = input.parse::<Path>()?;
-        if input.peek(Token![:]) {
-            return Err(input.error(
-                "a list entry is a backend; `Host: Backend` rows belong to the map form \
-                 `hosts: { .. }`",
-            ));
-        }
-        let options = parse_connect_options(input)?;
-        let hosts = Self::parse_narrowing(input)?;
-        Ok(Self {
-            backend,
-            options,
-            hosts,
         })
     }
 }
@@ -632,71 +509,5 @@ fn parse_embeddable(input: ParseStream) -> Result<Expr> {
             "`path:` is embedded with `include_bytes!`, so it must be a string literal or a \
              macro such as `concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/guest.wasm\")`",
         )),
-    }
-}
-
-// The suites drive the accepted grammar through an expanded `runtime!`. These
-// cover the list form's refusals, which no expansion reaches.
-#[cfg(test)]
-mod tests {
-    use super::Config;
-
-    fn refusal(input: &str) -> String {
-        syn::parse_str::<Config>(input).err().expect("should refuse the input").to_string()
-    }
-
-    #[test]
-    fn backend_twice() {
-        let error = refusal("{ hosts: [Redis for [WasiKeyValue], Redis for [WasiMessaging]] }");
-
-        assert_eq!(error, "`Redis` is listed twice; list it once and widen its `for [..]`");
-    }
-
-    #[test]
-    fn host_twice() {
-        let error = refusal("{ hosts: [Redis for [WasiKeyValue, WasiKeyValue]] }");
-
-        assert_eq!(error, "`WasiKeyValue` is listed twice");
-    }
-
-    #[test]
-    fn empty_narrowing() {
-        let error = refusal("{ hosts: [Redis for []] }");
-
-        assert_eq!(
-            error,
-            "empty `for [..]`; name the hosts, or drop `for` to serve every host the backend names"
-        );
-    }
-
-    #[test]
-    fn five_hosts() {
-        let error = refusal("{ hosts: [Redis for [A, B, C, D, E]] }");
-
-        assert_eq!(error, "`for [..]` takes at most 4 hosts");
-    }
-
-    #[test]
-    fn empty_options() {
-        let error = refusal("{ hosts: [Redis()] }");
-
-        assert_eq!(error, "empty connect options; drop the `()` to connect from the environment");
-    }
-
-    #[test]
-    fn map_row_in_list() {
-        let error = refusal("{ hosts: [WasiKeyValue: Redis] }");
-
-        assert_eq!(
-            error,
-            "a list entry is a backend; `Host: Backend` rows belong to the map form `hosts: { .. }`"
-        );
-    }
-
-    #[test]
-    fn neither_form() {
-        let error = refusal("{ hosts: Redis }");
-
-        assert_eq!(error, "expected the map `{ Host: Backend, .. }` or the list `[Backend, ..]`");
     }
 }

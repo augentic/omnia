@@ -49,8 +49,6 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[host_ctx(client = DocStoreClient)]
 pub struct WasiDocStore;
 
-omnia_backend::capability!(WasiDocStore, "omnia:docstore", DocStoreClient);
-
 impl<B: Provides<Self>> Host<B> for WasiDocStore {
     fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
         types::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;

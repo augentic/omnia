@@ -5,10 +5,8 @@ use std::sync::Arc;
 use anyhow::{Result, anyhow};
 use futures::FutureExt as _;
 use omnia_backend::model::{Answer, Error, Format, ModelClient, Request, ToolHost};
-use omnia_core::{Backend, Connect, FutureResult, NoOptions};
+use omnia_core::{Connect, FutureResult, NoOptions};
 use serde_json::json;
-
-use crate::host::WasiModel;
 
 /// Echo default implementation of [`ModelClient`].
 #[derive(Clone, Copy, Debug, Default)]
@@ -22,10 +20,6 @@ impl Connect for ModelDefault {
     ) -> impl std::future::Future<Output = Result<Self>> {
         std::future::ready(Ok(Self))
     }
-}
-
-impl Backend for ModelDefault {
-    type Hosts = (WasiModel,);
 }
 
 impl ModelClient for ModelDefault {

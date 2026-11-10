@@ -61,8 +61,6 @@ impl Error {
 #[host_ctx(client = SqlClient)]
 pub struct WasiSql;
 
-omnia_backend::capability!(WasiSql, "wasi:sql", SqlClient);
-
 impl<B: Provides<Self>> Host<B> for WasiSql {
     fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
         readwrite::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
