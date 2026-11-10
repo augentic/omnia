@@ -33,18 +33,12 @@
 //! }
 //! ```
 
-#[cfg(feature = "command")]
-use std::borrow::Cow;
 use std::error::Error;
-#[cfg(feature = "command")]
-use std::ffi::OsString;
 use std::fmt;
 use std::future::Future;
 use std::sync::Arc;
 use std::time::SystemTime;
 
-#[cfg(feature = "http")]
-use axum::routing::MethodRouter;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
@@ -53,8 +47,48 @@ pub mod command;
 pub mod http;
 pub mod messaging;
 
-#[cfg(feature = "command")]
-use self::command::{Commands, Failure, Program, Render, Response, Shell};
+// What `Handlers` and `Router` hold for HTTP when the transport is not built.
+#[cfg(not(feature = "http"))]
+mod http {
+    use std::fmt;
+    use std::marker::PhantomData;
+
+    use super::Client;
+
+    pub(super) struct Routes<P>(PhantomData<fn() -> P>);
+
+    impl<P> fmt::Debug for Routes<P> {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str("Routes")
+        }
+    }
+
+    impl<P> Routes<P> {
+        pub(super) const fn new() -> Self {
+            Self(PhantomData)
+        }
+
+        pub(super) const fn merge(self, _other: Self) -> Self {
+            self
+        }
+
+        #[expect(clippy::unused_self, reason = "the signature `axum::Router::with_state` has")]
+        pub(super) fn with_state(self, _client: Client<P>) -> Served {
+            Served
+        }
+    }
+
+    impl<P> Clone for Routes<P> {
+        fn clone(&self) -> Self {
+            Self(PhantomData)
+        }
+    }
+
+    #[derive(Clone, Debug)]
+    pub(super) struct Served;
+}
+
+use self::command::{Commands, Program};
 use self::messaging::{Delivery, DeliveryError, Topics};
 
 /// An input that could not be decoded into handler input.
@@ -233,16 +267,12 @@ accessors! {
     blobs: BlobStore,
     broadcast: Broadcast,
     config: Config,
-    #[cfg(feature = "docstore")]
-    docs: DocumentStore,
     http: HttpRequest,
     identity: Identity,
     model: Model,
     plugins: Plugins,
     publish: Publish,
     state: StateStore,
-    #[cfg(feature = "sql")]
-    tables: TableStore,
     vault: Vault,
     vcs: Vcs,
 }
@@ -350,10 +380,8 @@ impl<P: Send + Sync + 'static> fmt::Debug for Client<P> {
 /// refused when they meet.
 #[must_use = "handlers serve nothing until closed into a `Router` with `with_state`"]
 pub struct Handlers<P: Send + Sync + 'static> {
-    #[cfg(feature = "http")]
-    http: axum::Router<Client<P>>,
+    http: http::Routes<P>,
     topics: Topics<P>,
-    #[cfg(feature = "command")]
     commands: Commands<P>,
 }
 
@@ -361,23 +389,10 @@ impl<P: Send + Sync + 'static> Handlers<P> {
     /// Create an empty set of handlers.
     pub fn new() -> Self {
         Self {
-            #[cfg(feature = "http")]
-            http: axum::Router::new(),
+            http: http::Routes::new(),
             topics: Topics::new(),
-            #[cfg(feature = "command")]
             commands: Commands::new(),
         }
-    }
-
-    /// Register a [`MethodRouter`] at `path`.
-    ///
-    /// # Panics
-    ///
-    /// Panics when `path` overlaps an existing route for the same method.
-    #[cfg(feature = "http")]
-    pub fn route(mut self, path: &str, method_router: MethodRouter<Client<P>>) -> Self {
-        self.http = self.http.route(path, method_router);
-        self
     }
 
     /// Register one handler for one exact topic, decoding the payload as JSON.
@@ -409,47 +424,6 @@ impl<P: Send + Sync + 'static> Handlers<P> {
         self
     }
 
-    /// Register one handler for one subcommand, decoding its arguments
-    /// through [`clap::Args`].
-    ///
-    /// The input's doc comment is the subcommand's `--help` text; the
-    /// output's [`Serialize`] and [`Render`] forms answer
-    /// `--format json` and `--format text`.
-    ///
-    /// # Panics
-    ///
-    /// Panics when `name` is empty or already registered.
-    #[cfg(feature = "command")]
-    pub fn command<F, I>(mut self, name: impl Into<String>, handler: F) -> Self
-    where
-        F: Handler<P, I>,
-        F::Output: Serialize + Render,
-        F::Error: Into<Failure>,
-        I: clap::Args + Send + 'static,
-    {
-        self.commands = self.commands.route(name, handler);
-        self
-    }
-
-    /// Register one handler for one [`clap::Command`] subcommand with a
-    /// decoder over its [`clap::ArgMatches`].
-    ///
-    /// # Panics
-    ///
-    /// Panics when the subcommand's name is empty or already registered.
-    #[cfg(feature = "command")]
-    pub fn command_with<F, I, D>(mut self, command: clap::Command, handler: F, decode: D) -> Self
-    where
-        F: Handler<P, I>,
-        F::Output: Serialize + Render,
-        F::Error: Into<Failure>,
-        I: Send + 'static,
-        D: Fn(&clap::ArgMatches) -> Result<I, DecodeError> + Send + Sync + 'static,
-    {
-        self.commands = self.commands.route_with(command, handler, decode);
-        self
-    }
-
     /// Take every route, topic, and subcommand of `other`.
     ///
     /// # Panics
@@ -458,10 +432,8 @@ impl<P: Send + Sync + 'static> Handlers<P> {
     /// method, or a topic or subcommand of `other` is already registered.
     pub fn merge(self, other: Self) -> Self {
         Self {
-            #[cfg(feature = "http")]
             http: self.http.merge(other.http),
             topics: self.topics.merge(other.topics),
-            #[cfg(feature = "command")]
             commands: self.commands.merge(other.commands),
         }
     }
@@ -470,11 +442,9 @@ impl<P: Send + Sync + 'static> Handlers<P> {
     /// requests, dispatches messaging deliveries, and runs argv.
     pub fn with_state(self, client: Client<P>) -> Router<P> {
         Router {
-            #[cfg(feature = "http")]
             http: self.http.with_state(client.clone()),
             client,
             topics: self.topics,
-            #[cfg(feature = "command")]
             program: Program::new(self.commands),
         }
     }
@@ -495,10 +465,8 @@ impl<P: Send + Sync + 'static, const N: usize> From<[Self; N]> for Handlers<P> {
 impl<P: Send + Sync + 'static> Clone for Handlers<P> {
     fn clone(&self) -> Self {
         Self {
-            #[cfg(feature = "http")]
             http: self.http.clone(),
             topics: self.topics.clone(),
-            #[cfg(feature = "command")]
             commands: self.commands.clone(),
         }
     }
@@ -506,20 +474,11 @@ impl<P: Send + Sync + 'static> Clone for Handlers<P> {
 
 impl<P: Send + Sync + 'static> fmt::Debug for Handlers<P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut debug = f.debug_struct("Handlers");
-        #[cfg(feature = "http")]
-        debug.field("http", &self.http);
-        debug.field("topics", &self.topics);
-        #[cfg(feature = "command")]
-        debug.field("commands", &self.commands);
-        debug.finish()
-    }
-}
-
-#[cfg(feature = "http")]
-impl<P: Send + Sync + 'static> From<Handlers<P>> for axum::Router<Client<P>> {
-    fn from(handlers: Handlers<P>) -> Self {
-        handlers.http
+        f.debug_struct("Handlers")
+            .field("http", &self.http)
+            .field("topics", &self.topics)
+            .field("commands", &self.commands)
+            .finish()
     }
 }
 
@@ -536,95 +495,15 @@ impl<P: Send + Sync + 'static> From<Handlers<P>> for axum::Router<Client<P>> {
 #[must_use = "a router serves nothing until it handles a request or delivery or runs argv"]
 pub struct Router<P: Send + Sync + 'static = ()> {
     client: Client<P>,
-    #[cfg(feature = "http")]
-    http: axum::Router,
+    http: http::Served,
     topics: Topics<P>,
-    #[cfg(feature = "command")]
     program: Program<P>,
 }
 
 impl<P: Send + Sync + 'static> Router<P> {
-    /// Apply a [`tower::Layer`] to every HTTP route on this router.
-    #[cfg(feature = "http")]
-    pub fn layer<L>(mut self, layer: L) -> Self
-    where
-        L: tower::Layer<axum::routing::Route> + Clone + Send + Sync + 'static,
-        L::Service:
-            tower::Service<::http::Request<axum::body::Body>> + Clone + Send + Sync + 'static,
-        <L::Service as tower::Service<::http::Request<axum::body::Body>>>::Response:
-            axum::response::IntoResponse + 'static,
-        <L::Service as tower::Service<::http::Request<axum::body::Body>>>::Error:
-            Into<std::convert::Infallible> + 'static,
-        <L::Service as tower::Service<::http::Request<axum::body::Body>>>::Future: Send + 'static,
-    {
-        self.http = self.http.layer(layer);
-        self
-    }
-
-    /// Set the program name shown in usage and help text.
-    ///
-    /// Defaults to `argv[0]` (or `"app"` when `argv` is empty).
-    #[cfg(feature = "command")]
-    pub fn name(mut self, name: impl Into<String>) -> Self {
-        self.program.name = Some(name.into());
-        self
-    }
-
-    /// Set the version answered for `--version`.
-    ///
-    /// Defaults to the crate's `CARGO_PKG_VERSION` under [`command::export!`].
-    #[cfg(feature = "command")]
-    pub fn version(mut self, version: impl Into<String>) -> Self {
-        self.program.version = Some(version.into());
-        self
-    }
-
-    /// Set the description shown at the top of `--help`.
-    ///
-    /// Defaults to the crate's `CARGO_PKG_DESCRIPTION` under
-    /// [`command::export!`].
-    #[cfg(feature = "command")]
-    pub fn about(mut self, about: impl Into<String>) -> Self {
-        self.program.about = Some(about.into());
-        self
-    }
-
-    /// Set the environment-variable prefix [`run`](Self::run) passes to
-    /// [`Metadata::from_env`].
-    ///
-    /// Defaults to the program name in uppercase with `-` replaced by `_`.
-    #[cfg(feature = "command")]
-    pub fn env_prefix(mut self, prefix: impl Into<String>) -> Self {
-        self.program.env_prefix = Some(prefix.into());
-        self
-    }
-
-    /// Attach a remedy-hint fn consulted for every command failure that
-    /// carries no hint of its own.
-    #[cfg(feature = "command")]
-    pub fn hints(
-        mut self, hint: impl Fn(&crate::Error) -> Option<Cow<'static, str>> + Send + Sync + 'static,
-    ) -> Self {
-        self.program.hint = Some(Arc::new(hint));
-        self
-    }
-
     /// The exact topics registered on this router, in order.
     pub fn topics(&self) -> impl Iterator<Item = &str> {
         self.topics.topics()
-    }
-
-    /// The subcommands registered on this router, in order.
-    #[cfg(feature = "command")]
-    pub fn commands(&self) -> impl Iterator<Item = &str> {
-        self.program.commands.commands()
-    }
-
-    /// A shell-completion script for this router's command grammar.
-    #[cfg(feature = "command")]
-    #[must_use]
-    pub fn completions(&self, shell: Shell) -> Response {
-        self.program.completions(shell)
     }
 
     /// Dispatch one delivery by exact topic.
@@ -635,31 +514,14 @@ impl<P: Send + Sync + 'static> Router<P> {
     pub async fn handle(&self, delivery: Delivery) -> Result<(), DeliveryError> {
         self.topics.handle(delivery, &self.client).await
     }
-
-    /// Run argv: parse it, read [`Metadata::from_env`], and dispatch the
-    /// matched subcommand.
-    #[cfg(feature = "command")]
-    pub async fn run(&self, argv: impl IntoIterator<Item: Into<OsString>>) -> Response {
-        self.program.run(&self.client, argv).await
-    }
-
-    /// Run argv with explicit `metadata`.
-    #[cfg(feature = "command")]
-    pub async fn run_with(
-        &self, argv: impl IntoIterator<Item: Into<OsString>>, metadata: &Metadata,
-    ) -> Response {
-        self.program.run_with(&self.client, argv, metadata).await
-    }
 }
 
 impl<P: Send + Sync + 'static> Clone for Router<P> {
     fn clone(&self) -> Self {
         Self {
             client: self.client.clone(),
-            #[cfg(feature = "http")]
             http: self.http.clone(),
             topics: self.topics.clone(),
-            #[cfg(feature = "command")]
             program: self.program.clone(),
         }
     }
@@ -667,41 +529,10 @@ impl<P: Send + Sync + 'static> Clone for Router<P> {
 
 impl<P: Send + Sync + 'static> fmt::Debug for Router<P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut debug = f.debug_struct("Router");
-        #[cfg(feature = "http")]
-        debug.field("http", &self.http);
-        debug.field("topics", &self.topics);
-        #[cfg(feature = "command")]
-        debug.field("program", &self.program);
-        debug.finish_non_exhaustive()
-    }
-}
-
-#[cfg(feature = "http")]
-impl<P: Send + Sync + 'static> From<Router<P>> for axum::Router {
-    fn from(router: Router<P>) -> Self {
-        router.http
-    }
-}
-
-#[cfg(feature = "http")]
-impl<P, B> tower::Service<::http::Request<B>> for Router<P>
-where
-    P: Send + Sync + 'static,
-    B: http_body::Body<Data = bytes::Bytes> + Send + 'static,
-    B::Error: Into<axum::BoxError>,
-{
-    type Error = std::convert::Infallible;
-    type Future = axum::routing::future::RouteFuture<std::convert::Infallible>;
-    type Response = axum::response::Response;
-
-    fn poll_ready(
-        &mut self, cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        <axum::Router as tower::Service<::http::Request<B>>>::poll_ready(&mut self.http, cx)
-    }
-
-    fn call(&mut self, req: ::http::Request<B>) -> Self::Future {
-        self.http.call(req)
+        f.debug_struct("Router")
+            .field("http", &self.http)
+            .field("topics", &self.topics)
+            .field("program", &self.program)
+            .finish_non_exhaustive()
     }
 }

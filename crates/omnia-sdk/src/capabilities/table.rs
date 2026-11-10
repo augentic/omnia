@@ -86,6 +86,14 @@ pub trait TableStoreExt: TableStore {
 
 impl<P: TableStore + ?Sized> TableStoreExt for P {}
 
+impl<P: TableStore> crate::api::Context<P> {
+    /// Borrow the provider as a [`TableStore`].
+    #[must_use]
+    pub fn tables(&self) -> &impl TableStore {
+        &*self.provider
+    }
+}
+
 // conversions between the target-independent records and the bindings
 #[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
 mod wire {

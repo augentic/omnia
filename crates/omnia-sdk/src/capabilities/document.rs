@@ -68,3 +68,11 @@ pub trait DocumentStoreExt: DocumentStore {
 }
 
 impl<P: DocumentStore + ?Sized> DocumentStoreExt for P {}
+
+impl<P: DocumentStore> crate::api::Context<P> {
+    /// Borrow the provider as a [`DocumentStore`].
+    #[must_use]
+    pub fn docs(&self) -> &impl DocumentStore {
+        &*self.provider
+    }
+}

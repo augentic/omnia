@@ -7,10 +7,9 @@
 //! [`Error`](crate::Error), the JSON [`ErrorBody`] at its status; `?` on an
 //! `anyhow::Error` reaches the same envelope. A domain error with a wire shape
 //! of its own implements `IntoResponse` itself. A module builds its routes
-//! and topics on a [`Handlers`](crate::api::Handlers) of its own and the
-//! guest merges them (`Handlers::from([..])` or
-//! [`Handlers::merge`](crate::api::Handlers::merge)) into its one
-//! [`api::Router`](crate::api::Router) with `with_state(Client::new(provider))`.
+//! and topics on a [`Handlers`] of its own and the guest merges them
+//! (`Handlers::from([..])` or [`Handlers::merge`]) into its one
+//! [`api::Router`](Router) with `with_state(Client::new(provider))`.
 //! [`export!`] binds the router fn as the guest's `wasi:http` handler and
 //! serves each request inside the `handler` span [`trace`] opens.
 
@@ -22,11 +21,16 @@ use axum::Json;
 use axum::extract::{FromRef, FromRequestParts, MatchedPath, Request};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
+use axum::routing::MethodRouter;
 use http::HeaderMap;
 use http::request::Parts;
 use tracing::Instrument as _;
 
-use crate::api::{Client, Context, ErrorBody, Metadata};
+use crate::api::{Client, Context, ErrorBody, Handlers, Metadata, Router};
+
+// What `Handlers` and `Router` hold for HTTP.
+pub(crate) type Routes<P> = axum::Router<Client<P>>;
+pub(crate) type Served = axum::Router;
 
 #[doc(hidden)]
 #[macro_export]
@@ -158,5 +162,68 @@ where
 impl IntoResponse for crate::Error {
     fn into_response(self) -> Response {
         (self.status(), Json(ErrorBody::from(&self))).into_response()
+    }
+}
+
+impl<P: Send + Sync + 'static> Handlers<P> {
+    /// Register a [`MethodRouter`] at `path`.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `path` overlaps an existing route for the same method.
+    pub fn route(mut self, path: &str, method_router: MethodRouter<Client<P>>) -> Self {
+        self.http = self.http.route(path, method_router);
+        self
+    }
+}
+
+impl<P: Send + Sync + 'static> From<Handlers<P>> for axum::Router<Client<P>> {
+    fn from(handlers: Handlers<P>) -> Self {
+        handlers.http
+    }
+}
+
+impl<P: Send + Sync + 'static> Router<P> {
+    /// Apply a [`tower::Layer`] to every HTTP route on this router.
+    pub fn layer<L>(mut self, layer: L) -> Self
+    where
+        L: tower::Layer<axum::routing::Route> + Clone + Send + Sync + 'static,
+        L::Service:
+            tower::Service<::http::Request<axum::body::Body>> + Clone + Send + Sync + 'static,
+        <L::Service as tower::Service<::http::Request<axum::body::Body>>>::Response:
+            axum::response::IntoResponse + 'static,
+        <L::Service as tower::Service<::http::Request<axum::body::Body>>>::Error:
+            Into<std::convert::Infallible> + 'static,
+        <L::Service as tower::Service<::http::Request<axum::body::Body>>>::Future: Send + 'static,
+    {
+        self.http = self.http.layer(layer);
+        self
+    }
+}
+
+impl<P: Send + Sync + 'static> From<Router<P>> for axum::Router {
+    fn from(router: Router<P>) -> Self {
+        router.http
+    }
+}
+
+impl<P, B> tower::Service<::http::Request<B>> for Router<P>
+where
+    P: Send + Sync + 'static,
+    B: http_body::Body<Data = bytes::Bytes> + Send + 'static,
+    B::Error: Into<axum::BoxError>,
+{
+    type Error = std::convert::Infallible;
+    type Future = axum::routing::future::RouteFuture<std::convert::Infallible>;
+    type Response = axum::response::Response;
+
+    fn poll_ready(
+        &mut self, cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        <axum::Router as tower::Service<::http::Request<B>>>::poll_ready(&mut self.http, cx)
+    }
+
+    fn call(&mut self, req: ::http::Request<B>) -> Self::Future {
+        self.http.call(req)
     }
 }

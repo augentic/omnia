@@ -1,11 +1,11 @@
 //! The command façade: argv in, buffered channels and an exit status out.
 //!
-//! A subcommand is one more handler on a [`Handlers`](crate::api::Handlers).
+//! A subcommand is one more handler on a [`Handlers`].
 //! [`Handlers::command`](crate::api::Handlers::command) registers it beside
 //! the paths and topics, decoding its arguments through [`clap::Args`];
 //! [`Handlers::command_with`](crate::api::Handlers::command_with) takes a
 //! decoder over the [`clap::ArgMatches`] instead. The closed
-//! [`Router`](crate::api::Router) [`run`](crate::api::Router::run)s argv:
+//! [`Router`] [`run`](crate::api::Router::run)s argv:
 //!
 //! - the verb's [`Handler`] runs over the router's [`Client`]
 //! - a success body is encoded onto stdout in the selected [`Format`], its
@@ -101,7 +101,7 @@ macro_rules! __export_command {
 /// Calls a router fn with [`WasiProvider`](crate::WasiProvider) (or with the
 /// provider expression passed as a second argument) and runs the WASI
 /// command-line arguments through the resulting
-/// [`Router`](crate::api::Router), or awaits a zero-argument `async fn`
+/// [`Router`], or awaits a zero-argument `async fn`
 /// returning [`IntoExit`], inside the guest telemetry scope. The router's
 /// program answers `--version` with the invoking crate's `CARGO_PKG_VERSION`
 /// and opens `--help` with its `CARGO_PKG_DESCRIPTION` unless
@@ -454,22 +454,6 @@ where
     }
 }
 
-#[cfg(all(target_arch = "wasm32", target_os = "wasi", feature = "command"))]
-impl<F, P> Export<P, crate::api::Router<P>> for F
-where
-    F: FnOnce(P) -> crate::api::Router<P>,
-    P: Send + Sync + 'static,
-{
-    async fn run(self, provider: P, package: Package) {
-        execute_wasi(async move {
-            let mut router = self(provider);
-            router.program.package(&package);
-            router.run(wasip3::cli::environment::get_arguments()).await
-        })
-        .await;
-    }
-}
-
 /// Execute a guest command entry at the WASI CLI boundary.
 ///
 /// Initializes guest telemetry, awaits `entry`, and flushes telemetry and
@@ -515,7 +499,7 @@ cfg_select! {
         pub use clap_complete::Shell;
         use tracing::Instrument as _;
 
-        use crate::api::DecodeError;
+        use crate::api::{DecodeError, Handlers, Router};
 
         impl Response {
             /// A usage error rendered by clap, exiting [`USAGE_EXIT`].
@@ -549,7 +533,7 @@ cfg_select! {
         /// accepting what the runtime already honoured, lists them in `--help` and
         /// completions, and refuses `-v` beside `-q` as a usage error (the runtime
         /// applies no level for that pair however argv splits it). A
-        /// [`Router`](crate::api::Router) declares them itself.
+        /// [`Router`] declares them itself.
         ///
         /// ```rust,ignore
         /// #[derive(clap::Parser)]
@@ -887,8 +871,184 @@ cfg_select! {
             clap_complete::generate(shell, &mut A::command(), name, &mut out);
             Response::success(out)
         }
+
+        impl<P: Send + Sync + 'static> Handlers<P> {
+            /// Register one handler for one subcommand, decoding its arguments
+            /// through [`clap::Args`].
+            ///
+            /// The input's doc comment is the subcommand's `--help` text; the
+            /// output's [`Serialize`] and [`Render`] forms answer
+            /// `--format json` and `--format text`.
+            ///
+            /// # Panics
+            ///
+            /// Panics when `name` is empty or already registered.
+            pub fn command<F, I>(mut self, name: impl Into<String>, handler: F) -> Self
+            where
+                F: Handler<P, I>,
+                F::Output: Serialize + Render,
+                F::Error: Into<Failure>,
+                I: clap::Args + Send + 'static,
+            {
+                self.commands = self.commands.route(name, handler);
+                self
+            }
+
+            /// Register one handler for one [`clap::Command`] subcommand with a
+            /// decoder over its [`clap::ArgMatches`].
+            ///
+            /// # Panics
+            ///
+            /// Panics when the subcommand's name is empty or already registered.
+            pub fn command_with<F, I, D>(
+                mut self, command: clap::Command, handler: F, decode: D,
+            ) -> Self
+            where
+                F: Handler<P, I>,
+                F::Output: Serialize + Render,
+                F::Error: Into<Failure>,
+                I: Send + 'static,
+                D: Fn(&clap::ArgMatches) -> Result<I, DecodeError> + Send + Sync + 'static,
+            {
+                self.commands = self.commands.route_with(command, handler, decode);
+                self
+            }
+        }
+
+        impl<P: Send + Sync + 'static> Router<P> {
+            /// Set the program name shown in usage and help text.
+            ///
+            /// Defaults to `argv[0]` (or `"app"` when `argv` is empty).
+            pub fn name(mut self, name: impl Into<String>) -> Self {
+                self.program.name = Some(name.into());
+                self
+            }
+
+            /// Set the version answered for `--version`.
+            ///
+            /// Defaults to the crate's `CARGO_PKG_VERSION` under [`export!`].
+            pub fn version(mut self, version: impl Into<String>) -> Self {
+                self.program.version = Some(version.into());
+                self
+            }
+
+            /// Set the description shown at the top of `--help`.
+            ///
+            /// Defaults to the crate's `CARGO_PKG_DESCRIPTION` under
+            /// [`export!`].
+            pub fn about(mut self, about: impl Into<String>) -> Self {
+                self.program.about = Some(about.into());
+                self
+            }
+
+            /// Set the environment-variable prefix [`run`](Self::run) passes to
+            /// [`Metadata::from_env`].
+            ///
+            /// Defaults to the program name in uppercase with `-` replaced by `_`.
+            pub fn env_prefix(mut self, prefix: impl Into<String>) -> Self {
+                self.program.env_prefix = Some(prefix.into());
+                self
+            }
+
+            /// Attach a remedy-hint fn consulted for every command failure that
+            /// carries no hint of its own.
+            pub fn hints(
+                mut self,
+                hint: impl Fn(&crate::Error) -> Option<Cow<'static, str>> + Send + Sync + 'static,
+            ) -> Self {
+                self.program.hint = Some(Arc::new(hint));
+                self
+            }
+
+            /// The subcommands registered on this router, in order.
+            pub fn commands(&self) -> impl Iterator<Item = &str> {
+                self.program.commands.commands()
+            }
+
+            /// A shell-completion script for this router's command grammar.
+            #[must_use]
+            pub fn completions(&self, shell: Shell) -> Response {
+                self.program.completions(shell)
+            }
+
+            /// Run argv: parse it, read [`Metadata::from_env`], and dispatch the
+            /// matched subcommand.
+            pub async fn run(&self, argv: impl IntoIterator<Item: Into<OsString>>) -> Response {
+                self.program.run(&self.client, argv).await
+            }
+
+            /// Run argv with explicit `metadata`.
+            pub async fn run_with(
+                &self, argv: impl IntoIterator<Item: Into<OsString>>, metadata: &Metadata,
+            ) -> Response {
+                self.program.run_with(&self.client, argv, metadata).await
+            }
+        }
+
+        #[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
+        impl<F, P> Export<P, crate::api::Router<P>> for F
+        where
+            F: FnOnce(P) -> crate::api::Router<P>,
+            P: Send + Sync + 'static,
+        {
+            async fn run(self, provider: P, package: Package) {
+                execute_wasi(async move {
+                    let mut router = self(provider);
+                    router.program.package(&package);
+                    router.run(wasip3::cli::environment::get_arguments()).await
+                })
+                .await;
+            }
+        }
     }
-    _ => {}
+    _ => {
+        use std::marker::PhantomData;
+
+        // What `Handlers` and `Router` hold for subcommands when clap is not built.
+        pub(crate) struct Commands<P>(PhantomData<fn() -> P>);
+
+        impl<P> fmt::Debug for Commands<P> {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("Commands")
+            }
+        }
+
+        impl<P> Commands<P> {
+            pub(crate) const fn new() -> Self {
+                Self(PhantomData)
+            }
+
+            pub(crate) const fn merge(self, _other: Self) -> Self {
+                self
+            }
+        }
+
+        impl<P> Clone for Commands<P> {
+            fn clone(&self) -> Self {
+                Self(PhantomData)
+            }
+        }
+
+        pub(crate) struct Program<P>(PhantomData<fn() -> P>);
+
+        impl<P> fmt::Debug for Program<P> {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("Program")
+            }
+        }
+
+        impl<P> Program<P> {
+            pub(crate) const fn new(_commands: Commands<P>) -> Self {
+                Self(PhantomData)
+            }
+        }
+
+        impl<P> Clone for Program<P> {
+            fn clone(&self) -> Self {
+                Self(PhantomData)
+            }
+        }
+    }
 }
 
 impl Metadata {
