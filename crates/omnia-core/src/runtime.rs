@@ -2,7 +2,6 @@
 
 mod command;
 
-use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
 
@@ -15,9 +14,10 @@ use crate::digest::Digest;
 use crate::extensions::Extensions;
 use crate::mount::MountRegistry;
 use crate::registry::{Guest, GuestId, HttpRoutes, PublishError, TriggerRouter};
+use crate::seam::StoreFactory;
 use crate::source::{AcquireError, RegistrySource, Source, SourceSpec, Verified};
-use crate::store::{HasLimits, Stdio};
-use crate::{ChainCtx, Dispatcher, Registry, RuntimeOptions, StoreBase, StoreCtx};
+use crate::store::Stdio;
+use crate::{Backends, ChainCtx, Dispatcher, Registry, RuntimeOptions, StoreBase, StoreCtx};
 
 /// Guest exit code. [`code_u8`](Self::code_u8) and [`ExitCode`](std::process::ExitCode)
 /// keep only the low byte (POSIX semantics).
@@ -58,7 +58,7 @@ pub struct RuntimeParts<B: 'static> {
     /// Deployment name read by trigger servers and the bootstrap log.
     pub name: Arc<str>,
     /// Assembled guest registry.
-    pub registry: Arc<Registry<StoreCtx<B>>>,
+    pub registry: Arc<Registry<B>>,
     /// Guest argv.
     pub args: Vec<String>,
     /// Mount registry opened from the deployment's preopens — the WASI
@@ -99,7 +99,7 @@ pub struct Runtime<B: 'static> {
 struct RuntimeInner<B: 'static> {
     // carried state, never a process environment variable
     name: Arc<str>,
-    registry: Arc<Registry<StoreCtx<B>>>,
+    registry: Arc<Registry<B>>,
     args: Arc<Vec<String>>,
     mounts: Arc<MountRegistry>,
     backends: B,
@@ -125,7 +125,7 @@ pub struct RuntimeDispatcher<B: 'static> {
     inner: Arc<RuntimeInner<B>>,
 }
 
-impl<B: Clone + Send + Sync + 'static> RuntimeDispatcher<B> {
+impl<B: Backends> RuntimeDispatcher<B> {
     /// Rehydrate a full runtime handle for a dispatched call.
     pub fn runtime(&self) -> Runtime<B> {
         Runtime::with_inner(Arc::clone(&self.inner))
@@ -147,7 +147,7 @@ impl<B: 'static> Clone for WeakRuntime<B> {
     }
 }
 
-impl<B: Clone + Send + Sync + 'static> WeakRuntime<B> {
+impl<B: Backends> WeakRuntime<B> {
     /// Upgrade to a full handle; `None` once the runtime has shut down.
     #[must_use]
     pub fn upgrade(&self) -> Option<Runtime<B>> {
@@ -175,20 +175,24 @@ pub enum Policy<'a> {
 
 /// Why the runtime could not produce the guest an identity names, from
 /// [`Runtime::guest`] or [`Runtime::admit_bytes`].
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, thiserror::Error)]
 pub enum GuestError {
     /// The deployment neither registered nor declares the identity.
+    #[error("guest `{0}` is not registered")]
     Unregistered(GuestId),
     /// The source could not produce its bytes; a retry may succeed.
+    #[error("{0}")]
     Unavailable(String),
     /// The bytes were refused: they miss the pin, are a pre-compiled
     /// artifact where raw wasm alone is admitted, do not load as a
     /// component against the deployment's host set, were offered under a
     /// name the deployment declares, or under a name active with other
     /// bytes.
+    #[error("{0}")]
     Refused(String),
     /// The runtime has no registry to fetch a package from, or the
     /// registration itself failed.
+    #[error("{0}")]
     Internal(String),
 }
 
@@ -200,21 +204,8 @@ enum SeatError {
     Internal(String),
 }
 
-impl fmt::Display for GuestError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Unregistered(id) => write!(f, "guest `{id}` is not registered"),
-            Self::Unavailable(reason) | Self::Refused(reason) | Self::Internal(reason) => {
-                f.write_str(reason)
-            }
-        }
-    }
-}
-
-impl std::error::Error for GuestError {}
-
 // Manual: `StoreCtx<B>` is not `Clone`; both fields are `Arc`-backed.
-impl<B: Clone + Send + Sync + 'static> Clone for Runtime<B> {
+impl<B: Backends> Clone for Runtime<B> {
     fn clone(&self) -> Self {
         Self {
             inner: Arc::clone(&self.inner),
@@ -223,7 +214,7 @@ impl<B: Clone + Send + Sync + 'static> Clone for Runtime<B> {
     }
 }
 
-impl<B: Clone + Send + Sync + 'static> Runtime<B> {
+impl<B: Backends> Runtime<B> {
     fn with_inner(inner: Arc<RuntimeInner<B>>) -> Self {
         let dispatcher = Arc::new(RuntimeDispatcher {
             inner: Arc::clone(&inner),
@@ -292,7 +283,7 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
     /// pre-compiled artifact where raw wasm alone is admitted, or do not
     /// load as a component; `Internal` when a package has no registry to be
     /// fetched from or the registration failed.
-    pub async fn guest(&self, id: &GuestId) -> Result<Arc<Guest<StoreCtx<B>>>, GuestError> {
+    pub async fn guest(&self, id: &GuestId) -> Result<Arc<Guest<B>>, GuestError> {
         let registry = self.registry();
         if let Some(guest) = registry.get(id) {
             return Ok(guest);
@@ -397,7 +388,7 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
     /// publication failure.
     pub async fn admit_bytes(
         &self, id: GuestId, bytes: Vec<u8>, policy: Policy<'_>,
-    ) -> Result<Arc<Guest<StoreCtx<B>>>, GuestError> {
+    ) -> Result<Arc<Guest<B>>, GuestError> {
         self.admits(&id, &policy)?;
 
         // verify under the policy
@@ -475,7 +466,7 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
 
     /// Guest registry.
     #[must_use]
-    pub fn registry(&self) -> &Registry<StoreCtx<B>> {
+    pub fn registry(&self) -> &Registry<B> {
         &self.inner.registry
     }
 
@@ -577,7 +568,7 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
             store.set_fuel(options.max_fuel).expect("engine was built without fuel metering");
         }
 
-        store.limiter(|ctx| ctx.limits());
+        store.limiter(|ctx| &mut ctx.base.limits);
         store
     }
 
@@ -585,7 +576,7 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
     /// chain context — what the link serve side hands to each served function
     /// to instantiate the target per call.
     #[must_use]
-    pub fn store_factory(&self) -> Arc<dyn Fn(ChainCtx) -> Store<StoreCtx<B>> + Send + Sync> {
+    pub fn store_factory(&self) -> StoreFactory<B> {
         let runtime = self.clone();
         Arc::new(move |chain| runtime.build_store(runtime.store_in(chain)))
     }
@@ -670,9 +661,7 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
     // host-mediated link serve side, then publish entry and endpoint as one
     // lifecycle transition, so no dispatch resolves the entry and misses the
     // endpoint or vice versa.
-    async fn seat(
-        &self, id: GuestId, verified: Verified,
-    ) -> Result<Arc<Guest<StoreCtx<B>>>, SeatError> {
+    async fn seat(&self, id: GuestId, verified: Verified) -> Result<Arc<Guest<B>>, SeatError> {
         let registry = self.registry();
 
         // early occupancy check; the publish below re-checks transactionally
@@ -769,20 +758,6 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
         }
         Ok(())
     }
-}
-
-/// Wire the link serve side of every registered guest; see
-/// [`Runtime::serve_links`].
-///
-/// # Errors
-///
-/// Returns an error if a guest's export cannot be served, or a served guest
-/// already has an endpoint.
-pub async fn serve_links<B>(runtime: &Runtime<B>) -> Result<()>
-where
-    B: Clone + Send + Sync + 'static,
-{
-    runtime.serve_links().await
 }
 
 #[cfg(test)]

@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use futures::{FutureExt as _, future};
-use omnia_core::HasMounts;
+use omnia_core::StoreCtx;
 use wasmtime::component::{Accessor, FutureReader, StreamReader};
 
 use crate::host::generated::omnia::model::completion::{
@@ -18,12 +18,10 @@ use crate::host::{
     Error, FutureResult, Request, ToolHost, ToolOutcome, WasiModel, WasiModelCtxView,
 };
 
-impl<T> HostWithStore<T> for WasiModel
-where
-    T: HasMounts,
-{
+impl<B: Send + 'static> HostWithStore<StoreCtx<B>> for WasiModel {
     fn create(
-        accessor: &Accessor<T, Self>, request: Request, mut results: StreamReader<ToolResult>,
+        accessor: &Accessor<StoreCtx<B>, Self>, request: Request,
+        mut results: StreamReader<ToolResult>,
     ) -> impl Future<Output = Result<Session, Error>> {
         std::future::ready(accessor.with(|mut access| {
             if let Err(error) = request.validate() {

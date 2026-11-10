@@ -36,7 +36,7 @@ mod generated {
 use std::fmt::Debug;
 
 pub use omnia_core::FutureResult;
-use omnia_core::{HasMounts, Host, Server, StoreView};
+use omnia_core::{Host, Provides, StoreCtx};
 use wasmtime::component::{Access, Accessor, HasData, Linker};
 
 pub use self::generated::omnia::vcs::store::{Entry, Merged, Rule, Strategy};
@@ -59,25 +59,20 @@ impl HasData for WasiVcs {
     type Data<'a> = WasiVcsCtxView<'a>;
 }
 
-impl<T> Host<T> for WasiVcs
-where
-    T: StoreView<Self> + HasMounts + 'static,
-{
-    fn add_to_linker(linker: &mut Linker<T>) -> anyhow::Result<()> {
-        types::add_to_linker::<_, Self>(linker, T::view)?;
-        store::add_to_linker::<_, Self>(linker, T::view)?;
-        workspace::add_to_linker::<_, Self>(linker, T::view)?;
-        Ok(transport::add_to_linker::<_, Self>(linker, T::view)?)
+impl<B: Provides<Self>> Host<B> for WasiVcs {
+    fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
+        types::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
+        store::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
+        workspace::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
+        Ok(transport::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?)
     }
 }
-
-impl<B> Server<B> for WasiVcs {}
 
 impl WasiVcs {
     // Resolve a guest location to the place the backend works through,
     // refusing a mutation beneath a read-only mount before any backend runs.
-    fn locate<T: HasMounts>(
-        access: &mut Access<'_, T, Self>, location: &Location, intent: Intent,
+    fn locate<B>(
+        access: &mut Access<'_, StoreCtx<B>, Self>, location: &Location, intent: Intent,
     ) -> Result<Place> {
         let mounts = access.data_mut().mounts();
         let descriptor = access.get().table.get(&location.root)?;
@@ -87,13 +82,10 @@ impl WasiVcs {
     // The locations resolve inside the store access, where the borrowed
     // descriptors are valid; the backend is awaited outside it, holding the
     // opened places rather than paths a guest could redirect meanwhile.
-    async fn dispatch<T, R>(
-        accessor: &Accessor<T, Self>,
-        op: impl FnOnce(&mut Access<'_, T, Self>) -> Result<FutureResult<R>>,
-    ) -> Result<R>
-    where
-        T: HasMounts,
-    {
+    async fn dispatch<B, R>(
+        accessor: &Accessor<StoreCtx<B>, Self>,
+        op: impl FnOnce(&mut Access<'_, StoreCtx<B>, Self>) -> Result<FutureResult<R>>,
+    ) -> Result<R> {
         let pending = accessor.with(|mut access| op(&mut access))?;
         pending.await.map_err(Self::lower)
     }

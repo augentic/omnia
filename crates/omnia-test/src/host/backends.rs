@@ -392,7 +392,7 @@ macro_rules! provides {
                 G: WasiMessagingCtx + Clone,
                 I: WasiIdentityCtx + Clone,
                 O: WasiOtelCtx + Clone,
-                C: Clone + Send,
+                C: Clone + Send + Sync + 'static,
             {
                 fn borrow(&mut self) -> <$host as HostCtx>::Borrow<'_> {
                     &mut self.$field

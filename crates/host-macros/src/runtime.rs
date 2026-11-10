@@ -31,7 +31,6 @@ pub fn expand(config: &Config) -> TokenStream {
             // every path resolves through the facade, the embedder's one dependency
             use omnia::anyhow::Result;
             use omnia::futures::future;
-            use omnia::Server;
             use omnia::tokio;
             use super::*;
 
@@ -44,19 +43,19 @@ pub fn expand(config: &Config) -> TokenStream {
 
             impl<B> omnia::Wiring<B> for Hooks
             where
-                B: Clone + Send + Sync + 'static,
+                B: omnia::Backends,
                 #(B: omnia::Provides<#host_types>,)*
             {
-                fn link(deployment: &mut omnia::Deployment<omnia::StoreCtx<B>>) -> Result<()> {
-                    #(deployment.host::<#host_types, B>()?;)*
+                fn link(deployment: &mut omnia::Deployment<B>) -> Result<()> {
+                    #(deployment.host::<#host_types>()?;)*
                     Ok(())
                 }
 
                 async fn serve(runtime: &omnia::Runtime<B>) -> Result<()> {
-                    // capability hosts resolve at once through `Server`'s no-op default
+                    // capability hosts resolve at once through `Host::run`'s no-op default
                     let servers: Vec<future::BoxFuture<'_, Result<()>>> = vec![
                         #(
-                            Box::pin(#host_types.run(runtime)),
+                            Box::pin(<#host_types as omnia::Host<B>>::run(runtime)),
                         )*
                     ];
                     future::try_join_all(servers).await?;
@@ -84,7 +83,7 @@ pub fn expand(config: &Config) -> TokenStream {
             /// blocking until the guest completes.
             #[tokio::main]
             pub async fn run(builder: omnia::DeploymentBuilder) -> Result<omnia::ExitStatus> {
-                let deployment = builder.mode(#mode).build::<omnia::StoreCtx<#backends_ty>>().await?;
+                let deployment = builder.mode(#mode).build::<#backends_ty>().await?;
                 omnia::run::<#backends_ty, Hooks>(deployment).await
             }
 
@@ -94,10 +93,10 @@ pub fn expand(config: &Config) -> TokenStream {
                 builder: omnia::DeploymentBuilder, backends: B,
             ) -> Result<omnia::ExitStatus>
             where
-                B: Clone + Send + Sync + 'static,
+                B: omnia::Backends,
                 Hooks: omnia::Wiring<B>,
             {
-                let deployment = builder.mode(#mode).build::<omnia::StoreCtx<B>>().await?;
+                let deployment = builder.mode(#mode).build::<B>().await?;
                 omnia::run_with::<B, Hooks>(deployment, backends).await
             }
         }

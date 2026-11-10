@@ -91,7 +91,7 @@ The macro generates a private `runtime` module containing:
 
 ### `Backends` bundle
 
-A `Clone` struct with one connected backend per declared `Host: Backend` wiring, plus its `omnia::Backends` impl whose `connect()` connects every backend concurrently. A deployment that declares no backends uses the library's `()` bundle, so nothing is generated.
+A `Clone` struct with one connected backend per declared `Host: Backend` wiring, plus its `omnia::ConnectAll` impl whose `connect()` connects every backend concurrently. Its shape makes it an `omnia::Backends`, the bound every runtime type puts on a bundle. Its fields are positional (`backend_0`, `backend_1`, ...), so two backends whose paths end in the same name never share one. A deployment that declares no backends uses the library's `()` bundle, so nothing is generated.
 
 ```rust,ignore
 #[derive(Clone)]
@@ -99,7 +99,7 @@ struct Backends {
     // ... one field per declared backend
 }
 
-impl omnia::Backends for Backends {
+impl omnia::ConnectAll for Backends {
     // connect every backend concurrently
     async fn connect() -> Result<Self> { /* ... */ }
 }
@@ -107,7 +107,7 @@ impl omnia::Backends for Backends {
 
 ### Bundle accessor impls
 
-For each `hosts:` row, the macro emits one uniform `omnia::Provides<Ctx>` impl exposing the bundle's backend field; the generic `omnia::StoreView` blanket on `omnia::StoreCtx` turns it into the host's linker-facing view. The impl is keyed by the host type itself — its `omnia::HostCtx` impl carries the borrow shape, so no names are derived from the host and third-party hosts wire the same way.
+For each `hosts:` row, the macro emits one uniform `omnia::Provides<Ctx>` impl exposing the bundle's backend field; `omnia::StoreCtx::view` turns it into the host's linker-facing view. The impl is keyed by the host type itself — its `omnia::HostCtx` impl carries the borrow shape, so no names are derived from the host and third-party hosts wire the same way.
 
 ### `main` entry point
 

@@ -30,7 +30,7 @@ pub use self::digest::Digest;
 pub use self::dispatch::Dispatcher;
 pub use self::extensions::Extensions;
 pub use self::host::{
-    Backend, FromEnv, FutureResult, HasTable, Host, HostCtx, NoOptions, Provides, Proxy, Server,
+    Backend, Backends, FromEnv, FutureResult, HasTable, Host, HostCtx, NoOptions, Provides, Proxy,
     get_cloned,
 };
 pub use self::invoke::{FreshCall, InvokeError, call_fresh};
@@ -40,15 +40,10 @@ pub use self::registry::{
     CliRoutes, Guest, GuestId, HttpRoutes, PatternRoutes, Registry, RegistryParts, Resolver,
     Routes, TriggerRouter,
 };
-pub use self::runtime::{
-    ExitStatus, GuestError, Policy, Runtime, RuntimeParts, WeakRuntime, serve_links,
-};
+pub use self::runtime::{ExitStatus, GuestError, Policy, Runtime, RuntimeParts, WeakRuntime};
 pub use self::seam::{LinkSeam, NoLinks, StoreFactory};
 pub use self::source::{AcquireError, LoadedGuest, RegistrySource, Source, SourceSpec, Verified};
-pub use self::store::{
-    HasChain, HasDispatcher, HasExtensions, HasLimits, HasMounts, Stdio, StoreBase, StoreConfig,
-    StoreCtx, StoreView,
-};
+pub use self::store::{Stdio, StoreBase, StoreConfig, StoreCtx};
 pub use self::telemetry::Telemetry;
 pub use self::value::handle_kind;
 
@@ -93,13 +88,13 @@ macro_rules! host_error {
 /// repeats.
 ///
 /// Emits the `Wasi<Service>CtxView` borrowed `(ctx, table)` view plus the
-/// [`HostCtx`] impl on the `Wasi<Service>` host type, so the generic
-/// `omnia::StoreView` blanket serves the host's `add_to_linker` accessor
-/// with no per-host view or accessor trait.
+/// [`HostCtx`] impl on the `Wasi<Service>` host type, so [`StoreCtx::view`]
+/// serves the host's `add_to_linker` accessor with no per-host view or
+/// accessor trait.
 ///
 /// Pass the service stem (the part after `Wasi` in the host struct name). The
 /// `Wasi<Service>Ctx` trait, the `HasData` impl, the `bindgen!` block, and the
-/// `Host`/`Server` wiring stay hand-written; error conversions come from
+/// `Host` wiring stay hand-written; error conversions come from
 /// [`host_error!`].
 ///
 /// # Example

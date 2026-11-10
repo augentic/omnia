@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::{Context as _, Result, bail};
 use omnia::wasmtime::component::Val;
-use omnia::{Digest, ExitStatus, GuestEntry, GuestId, Runtime, StoreCtx};
+use omnia::{Digest, ExitStatus, GuestEntry, GuestId, Runtime};
 use omnia_test::host::{Backends, Deployment, STATE_BUCKET, ScriptedModel, scratch};
 use omnia_test::{Exchange, SeenFormat};
 use omnia_wasi_blobstore::WasiBlobstoreCtx as _;
@@ -45,6 +45,30 @@ mod production_plugins {
         mode: command,
         mounts: [{ name: ".", path: "/nonexistent/adapters" }],
         hosts: { WasiOtel: OtelDefault },
+    });
+}
+
+// Two backends reached through paths that end in the same name: the bundle's
+// fields are positional, so neither shadows the other.
+mod same_named {
+    use omnia_wasi_keyvalue::WasiKeyValue;
+    use omnia_wasi_model::WasiModel;
+    use omnia_wasi_otel::{OtelDefault, WasiOtel};
+
+    mod keyvalue {
+        pub use omnia_wasi_keyvalue::KeyValueDefault as Client;
+    }
+    mod model {
+        pub use omnia_wasi_model::ModelDefault as Client;
+    }
+
+    omnia::runtime!({
+        mode: command,
+        hosts: {
+            WasiKeyValue: keyvalue::Client,
+            WasiModel: model::Client,
+            WasiOtel: OtelDefault,
+        },
     });
 }
 
@@ -94,6 +118,18 @@ async fn overlay_mount() {
         .await
         .expect("deployment runs");
     assert_eq!(status, ExitStatus::SUCCESS, "the requester's assertions all held");
+}
+
+#[tokio::test]
+async fn same_named_backends() {
+    let _ = (same_named::main, same_named::run);
+    let backends = Backends::defaults().await.model(ScriptedModel::answering(["second"]));
+    let status = Deployment::from(same_named::manifest())
+        .guest("echo", test_programs::MODEL_ECHO_TEXT)
+        .run_with::<same_named::Hooks, _>(backends)
+        .await
+        .expect("deployment runs");
+    assert_eq!(status, ExitStatus::SUCCESS);
 }
 
 #[tokio::test]
@@ -188,7 +224,7 @@ async fn declared_guest() {
         .entry(GuestEntry::new("plugin", test_programs::LINK_ECHOER))
         .args(["declared", "plugin"])
         .run(Backends::defaults().await, |deployment| {
-            deployment.host::<WasiOtel, Backends>()?;
+            deployment.host::<WasiOtel>()?;
             Ok(())
         })
         .await
@@ -201,8 +237,8 @@ async fn declared_guest() {
 // runs, any other fails the run before the guest loads.
 #[tokio::test]
 async fn pinned_path_guest() {
-    fn otel_only(deployment: &mut omnia::Deployment<StoreCtx<Backends>>) -> Result<()> {
-        deployment.host::<WasiOtel, Backends>()?;
+    fn otel_only(deployment: &mut omnia::Deployment<Backends>) -> Result<()> {
+        deployment.host::<WasiOtel>()?;
         Ok(())
     }
     let bytes = std::fs::read(test_programs::COMMAND_EXIT_MAP).expect("reading the guest");
@@ -302,10 +338,9 @@ fn scratch_mounts() {
     assert_eq!(mount.path, scratch.path());
 }
 
-async fn call<B>(runtime: &Runtime<B>, guest: &str, func: &str, message: &str) -> Result<String>
-where
-    B: Clone + Send + Sync + 'static,
-{
+async fn call<B: omnia::Backends>(
+    runtime: &Runtime<B>, guest: &str, func: &str, message: &str,
+) -> Result<String> {
     let entry = runtime
         .registry()
         .get(&GuestId::from(guest))

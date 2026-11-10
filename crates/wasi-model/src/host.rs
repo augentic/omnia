@@ -38,7 +38,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 pub use omnia_core::FutureResult;
-use omnia_core::{HasMounts, Host, Server, StoreView};
+use omnia_core::{Host, Provides, StoreCtx};
 use wasmtime::component::{HasData, Linker};
 
 pub use self::answer::{Answer, ToolTurn, Transcript};
@@ -62,16 +62,11 @@ impl HasData for WasiModel {
     type Data<'a> = WasiModelCtxView<'a>;
 }
 
-impl<T> Host<T> for WasiModel
-where
-    T: StoreView<Self> + HasMounts + 'static,
-{
-    fn add_to_linker(linker: &mut Linker<T>) -> anyhow::Result<()> {
-        Ok(completion::add_to_linker::<_, Self>(linker, T::view)?)
+impl<B: Provides<Self>> Host<B> for WasiModel {
+    fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
+        Ok(completion::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?)
     }
 }
-
-impl<B> Server<B> for WasiModel {}
 
 /// A trait which provides internal WASI Model context.
 ///

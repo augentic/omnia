@@ -17,7 +17,7 @@ use hyper::body::{Body, Frame, SizeHint};
 use hyper::header::{FORWARDED, HOST};
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
-use omnia_core::{HttpRoutes, Provides, Runtime, StoreCtx, StoreView, TriggerRouter};
+use omnia_core::{HttpRoutes, Provides, Runtime, StoreCtx, TriggerRouter};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio::time::timeout;
@@ -37,7 +37,6 @@ const HTTP_ADDR: &str = "0.0.0.0:8080";
 #[instrument("http-server", skip(state))]
 pub async fn run<B>(state: &Runtime<B>) -> Result<()>
 where
-    B: Clone + Send + Sync + 'static,
     B: Provides<WasiHttp>,
 {
     let Some(handler) = HttpHandler::new(state)? else {
@@ -110,7 +109,6 @@ where
 #[derive(Clone)]
 pub struct HttpHandler<B>
 where
-    B: Clone + Send + Sync + 'static,
     B: Provides<WasiHttp>,
 {
     state: Runtime<B>,
@@ -120,7 +118,6 @@ where
 
 impl<B> HttpHandler<B>
 where
-    B: Clone + Send + Sync + 'static,
     B: Provides<WasiHttp>,
 {
     /// Build the handler over `runtime`'s registry; `None` when no guest
@@ -286,8 +283,8 @@ where
     }
 }
 
-fn view<B: Provides<WasiHttp> + 'static>(store: &mut StoreCtx<B>) -> WasiHttpCtxView<'_> {
-    StoreView::<WasiHttp>::view(store)
+fn view<B: Provides<WasiHttp>>(store: &mut StoreCtx<B>) -> WasiHttpCtxView<'_> {
+    store.view::<WasiHttp>()
 }
 
 // rebuild the uri with scheme and authority set, so they reach the guest

@@ -8,7 +8,7 @@ mod server;
 
 use anyhow::Result;
 pub use default_impl::{ConnectOptions, HttpDefault};
-use omnia_core::{Host, HostCtx, Provides, Runtime, Server, StoreView};
+use omnia_core::{Host, HostCtx, Provides, Runtime, StoreCtx};
 pub use server::{HttpHandler, OutgoingBody};
 use wasmtime::component::{HasData, Linker, ResourceTable};
 use wasmtime_wasi_http::p3::bindings::http::{client, types};
@@ -38,22 +38,14 @@ impl HostCtx for WasiHttp {
     }
 }
 
-impl<T> Host<T> for WasiHttp
-where
-    T: StoreView<Self> + 'static,
-{
-    fn add_to_linker(linker: &mut Linker<T>) -> Result<()> {
-        client::add_to_linker::<_, wasmtime_wasi_http::WasiHttp>(linker, T::view)?;
-        types::add_to_linker::<_, wasmtime_wasi_http::WasiHttp>(linker, T::view)?;
+impl<B: Provides<Self>> Host<B> for WasiHttp {
+    fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> Result<()> {
+        client::add_to_linker::<_, wasmtime_wasi_http::WasiHttp>(linker, StoreCtx::view::<Self>)?;
+        types::add_to_linker::<_, wasmtime_wasi_http::WasiHttp>(linker, StoreCtx::view::<Self>)?;
         Ok(())
     }
-}
 
-impl<B> Server<B> for WasiHttp
-where
-    B: Provides<Self> + Clone + Sync + 'static,
-{
-    async fn run(&self, state: &Runtime<B>) -> Result<()> {
-        server::run(state).await
+    async fn run(runtime: &Runtime<B>) -> Result<()> {
+        server::run(runtime).await
     }
 }

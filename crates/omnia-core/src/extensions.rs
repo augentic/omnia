@@ -11,9 +11,9 @@ use std::sync::{Arc, Mutex, PoisonError};
 ///
 /// A capability crate installs its state once — as the deployment
 /// assembles — and reads it back from the
-/// [`Runtime`](crate::Runtime) or, inside a host binding, from the store's
-/// [`HasExtensions`](crate::HasExtensions) view. `clone()` is a handle clone:
-/// every copy observes the same set.
+/// [`Runtime`](crate::Runtime) or, inside a host binding, from the store
+/// context ([`StoreCtx::extensions`](crate::StoreCtx::extensions)).
+/// `clone()` is a handle clone: every copy observes the same set.
 ///
 /// An extension value lives inside the runtime's shared state, so one that
 /// must call back into the runtime holds a [`WeakRuntime`](crate::WeakRuntime)

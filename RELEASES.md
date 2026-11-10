@@ -32,6 +32,13 @@ Unreleased
   `omnia_wasi_docstore::document_store`.
 - `omnia_test::guest::{send, deliver}`, which drive a router natively, and
   `omnia_test::guest::ScriptedVcs`, a scripted `Vcs`.
+- `omnia_core::Backends`, the shape of a deployment's backend bundle:
+  `Clone + Send + Sync + 'static`, implemented for every such type. It is
+  the one bound `Runtime<B>`, `Host<B>`, `Wiring<B>`, and `Deployment<B>`
+  put on the bundle.
+- `StoreCtx::{view, mounts, dispatcher, extensions, chain}`, the store's
+  own accessors. `view::<H>()` assembles host `H`'s view for a bundle
+  `B: Provides<H>`, and is the getter every `add_to_linker` passes.
 
 ### Changed
 
@@ -60,10 +67,28 @@ Unreleased
 - `omnia_test::guest::Scripted` is `ScriptedModel`, and
   `omnia_test::guest::Memory` implements `Vault`.
 - `WasiHttp` is its own `HostCtx` carrier, like every other host. A bundle
-  implements `Provides<WasiHttp>`, `HttpBorrow` is
-  `omnia_wasi_http::HttpBorrow`, and a hand-built store context implements
-  `StoreView<WasiHttp>` in place of `WasiHttpView`. `runtime!` no longer
-  matches a `hosts:` row by the name `WasiHttp`, so an aliased row links.
+  implements `Provides<WasiHttp>`, and `HttpBorrow` is
+  `omnia_wasi_http::HttpBorrow`. `runtime!` no longer matches a `hosts:`
+  row by the name `WasiHttp`, so an aliased row links.
+- `Host<B>` is over the backend bundle, no longer the store type, and
+  carries `run`. `add_to_linker` takes a `&mut Linker<StoreCtx<B>>`, and
+  `run(&Runtime<B>)` resolves at once unless a trigger host (`WasiHttp`,
+  `WasiMessaging`, `WasiWebSocket`) overrides it with its serve loop. A
+  host implements it once, as `impl<B: Provides<Self>> Host<B>`.
+- `omnia::Backends`, the trait the generated bundle implements to connect
+  every backend, is `omnia::ConnectAll`, and `ConnectAll: Backends`.
+- `Deployment<B>`, `DeploymentBuilder::build::<B>()`,
+  `Deployment::host::<H>()`, and `Wiring::link(&mut Deployment<B>)` take
+  the bundle alone. `build::<StoreCtx<Backends>>()` is
+  `build::<Backends>()`, and `host::<WasiOtel, Backends>()` is
+  `host::<WasiOtel>()`.
+- `Registry<B>`, `RegistryParts<B>`, `Guest<B>`, `LinkSeam<B>`,
+  `StoreFactory<B>`, and `FreshCall<B>` are over the bundle, each fixing
+  the store to `StoreCtx<B>`. `Runtime::registry` and `Runtime::guest`
+  return `&Registry<B>` and `Arc<Guest<B>>`.
+- `runtime!` names each backend field by its row's position, so two
+  backends whose paths end in the same name (`keyvalue::Client`,
+  `model::Client`) no longer share a field.
 
 ### Removed
 
@@ -75,6 +100,11 @@ Unreleased
 - `Client::owner`.
 - `BlobStoreExt`.
 - `omnia::HttpCtx`, and the `WasiHttpView` re-export from `omnia_wasi_http`.
+- `omnia::Server`, folded into `Host::run`.
+- `omnia::{StoreView, HasMounts, HasDispatcher, HasExtensions, HasChain,
+  HasLimits, LinkStore}`. `StoreCtx<B>` is the one store type, and its
+  own methods replace them.
+- `omnia::serve_links`. `Runtime::serve_links` is the one entry.
 
 ---
 

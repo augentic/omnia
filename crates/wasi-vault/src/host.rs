@@ -30,7 +30,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 pub use omnia_core::FutureResult;
-use omnia_core::{Host, Server, StoreView};
+use omnia_core::{Host, Provides, StoreCtx};
 use wasmtime::component::{HasData, Linker};
 
 use self::generated::omnia::vault::vault;
@@ -49,16 +49,11 @@ impl HasData for WasiVault {
     type Data<'a> = WasiVaultCtxView<'a>;
 }
 
-impl<T> Host<T> for WasiVault
-where
-    T: StoreView<Self> + 'static,
-{
-    fn add_to_linker(linker: &mut Linker<T>) -> anyhow::Result<()> {
-        Ok(vault::add_to_linker::<_, Self>(linker, T::view)?)
+impl<B: Provides<Self>> Host<B> for WasiVault {
+    fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
+        Ok(vault::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?)
     }
 }
-
-impl<B> Server<B> for WasiVault {}
 
 /// A trait which provides internal WASI Vault context.
 ///

@@ -33,7 +33,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 pub use omnia_core::FutureResult;
-use omnia_core::{Host, Server, StoreView};
+use omnia_core::{Host, Provides, StoreCtx};
 use wasmtime::component::{HasData, Linker};
 
 pub use self::default_impl::KeyValueDefault;
@@ -52,18 +52,13 @@ impl HasData for WasiKeyValue {
     type Data<'a> = WasiKeyValueCtxView<'a>;
 }
 
-impl<T> Host<T> for WasiKeyValue
-where
-    T: StoreView<Self> + 'static,
-{
-    fn add_to_linker(linker: &mut Linker<T>) -> anyhow::Result<()> {
-        store::add_to_linker::<_, Self>(linker, T::view)?;
-        atomics::add_to_linker::<_, Self>(linker, T::view)?;
-        Ok(batch::add_to_linker::<_, Self>(linker, T::view)?)
+impl<B: Provides<Self>> Host<B> for WasiKeyValue {
+    fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
+        store::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
+        atomics::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
+        Ok(batch::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?)
     }
 }
-
-impl<B> Server<B> for WasiKeyValue {}
 
 /// A trait which provides internal WASI Key-Value context.
 ///

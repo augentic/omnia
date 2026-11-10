@@ -29,7 +29,7 @@ mod generated {
 use std::fmt::Debug;
 
 pub use omnia_core::FutureResult;
-use omnia_core::{Host, Server, StoreView};
+use omnia_core::{Host, Provides, StoreCtx};
 use wasmtime::component::{HasData, Linker};
 
 pub use self::default_impl::DocStoreDefault;
@@ -50,17 +50,12 @@ impl HasData for WasiDocStore {
     type Data<'a> = WasiDocStoreCtxView<'a>;
 }
 
-impl<T> Host<T> for WasiDocStore
-where
-    T: StoreView<Self> + 'static,
-{
-    fn add_to_linker(linker: &mut Linker<T>) -> anyhow::Result<()> {
-        types::add_to_linker::<_, Self>(linker, T::view)?;
-        Ok(store::add_to_linker::<_, Self>(linker, T::view)?)
+impl<B: Provides<Self>> Host<B> for WasiDocStore {
+    fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
+        types::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
+        Ok(store::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?)
     }
 }
-
-impl<B> Server<B> for WasiDocStore {}
 
 /// A trait which provides internal WASI `DocStore` context.
 ///

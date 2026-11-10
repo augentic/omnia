@@ -138,7 +138,7 @@ async fn run(deployment: Deployment, label: &str) -> Recording {
     let status = tokio::time::timeout(
         Duration::from_secs(300),
         deployment.run(Backends(recording.clone()), |deployment| {
-            deployment.host::<WasiOtel, Backends>()?;
+            deployment.host::<WasiOtel>()?;
             Ok(())
         }),
     )

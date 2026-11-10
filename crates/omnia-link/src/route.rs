@@ -15,7 +15,7 @@ use std::time::Duration;
 use anyhow::{Result, anyhow, bail};
 use futures::FutureExt as _;
 use futures::future::ready;
-use omnia_core::{ChainCtx, FreshCall, FutureResult, GuestId, StoreFactory, call_fresh};
+use omnia_core::{ChainCtx, FreshCall, FutureResult, GuestId, StoreCtx, StoreFactory, call_fresh};
 use wasmtime::component::{ComponentExportIndex, InstancePre, Val};
 
 /// Delivers one call to a resolved target.
@@ -35,13 +35,13 @@ pub struct Linked {
 
 /// A served guest's linked exports, keyed by interface then function, plus
 /// what instantiating it fresh per call needs.
-pub struct Route<T: 'static> {
-    pub factory: StoreFactory<T>,
-    pub instance_pre: InstancePre<T>,
+pub struct Route<B: 'static> {
+    pub factory: StoreFactory<B>,
+    pub instance_pre: InstancePre<StoreCtx<B>>,
     pub funcs: HashMap<Box<str>, HashMap<Box<str>, Linked>>,
 }
 
-impl<T: Send + 'static> RouteInvoke for Route<T> {
+impl<B: Send + 'static> RouteInvoke for Route<B> {
     fn invoke(
         &self, interface: &str, func: &str, args: Vec<Val>, ctx: ChainCtx, bound: Option<Duration>,
     ) -> FutureResult<Vec<Val>> {

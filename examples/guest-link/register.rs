@@ -17,7 +17,7 @@ cfg_select! {
 
         use anyhow::{Context as _, Result, bail};
         use omnia::wasmtime::component::Val;
-        use omnia::{DeploymentBuilder, GuestEntry, GuestId, Manifest, Runtime, StoreCtx};
+        use omnia::{DeploymentBuilder, GuestEntry, GuestId, Manifest, Runtime};
 
         #[tokio::main]
         async fn main() -> Result<()> {
@@ -33,7 +33,7 @@ cfg_select! {
 
             let deployment = DeploymentBuilder::new()
                 .manifest(manifest)
-                .build::<StoreCtx<()>>()
+                .build::<()>()
                 .await
                 .context("building deployment")?;
             // `assemble` also wires the host-mediated link serve side.

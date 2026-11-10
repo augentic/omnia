@@ -21,11 +21,10 @@ use omnia_core::ChainPolicy;
 use omnia_core::RegistrySource;
 use omnia_core::wasmtime::component::Linker;
 use omnia_core::wasmtime::{Config, Engine};
-use omnia_core::wasmtime_wasi::WasiView;
 use omnia_core::{
-    GuestId, HasChain, HasDispatcher, Host, LevelFilter, LinkSeam, LoadedGuest, MountRegistry,
-    Registry, RegistryParts, Routes, Runtime, RuntimeOptions, RuntimeParts, Server, Source,
-    SourceSpec, Stdio, StoreCtx, Telemetry, telemetry,
+    Backends, GuestId, Host, LevelFilter, LinkSeam, LoadedGuest, MountRegistry, Registry,
+    RegistryParts, Routes, Runtime, RuntimeOptions, RuntimeParts, Source, SourceSpec, Stdio,
+    StoreCtx, Telemetry, telemetry,
 };
 #[cfg(feature = "link")]
 use omnia_link::{FirstArgSelector, GuestSelector, InProcessLinks};
@@ -44,7 +43,7 @@ use crate::Mode;
 ///     .manifest(Manifest::from_wasm(wasm)?)
 ///     .args(args)
 ///     .mode(mode)
-///     .build::<StoreCtx>()
+///     .build::<Backends>()
 ///     .await?;
 /// ```
 #[derive(Debug, Default)]
@@ -168,7 +167,7 @@ impl DeploymentBuilder {
         self
     }
 
-    /// Resolve the manifest into a [`Deployment`].
+    /// Resolve the manifest into a [`Deployment`] over the backend bundle `B`.
     ///
     /// If no manifest was supplied, the path in `OMNIA_MANIFEST` is loaded.
     /// Guests the process already holds as bytes load (and compile) here; a
@@ -181,7 +180,7 @@ impl DeploymentBuilder {
     /// Returns an error if no manifest resolves, the manifest is invalid, a
     /// `~/` path has no `$HOME` to expand against, the package store lies
     /// beneath a writable mount, or the deployment cannot be built.
-    pub async fn build<T: LinkStore>(self) -> Result<Deployment<T>> {
+    pub async fn build<B: Backends>(self) -> Result<Deployment<B>> {
         let mut manifest = if let Some(manifest) = self.manifest {
             manifest
         } else if self.allow_empty {
@@ -261,7 +260,7 @@ impl DeploymentBuilder {
         };
 
         // host-mediated dispatch only with `link`
-        let seam: Arc<dyn LinkSeam<T>> = cfg_select! {
+        let seam: Arc<dyn LinkSeam<B>> = cfg_select! {
             feature = "link" => Arc::new(InProcessLinks::new(
                 Arc::new(FirstArgSelector),
                 ChainPolicy::from(&options),
@@ -295,21 +294,22 @@ impl DeploymentBuilder {
     }
 }
 
-/// A compiled set of WebAssembly components with their shared Linker, ready to
-/// be [`host`]ed against WASI interfaces and assembled into a [`Registry`].
+/// A compiled set of WebAssembly components with their shared Linker over the
+/// backend bundle `B`, ready to be [`host`]ed against WASI interfaces and
+/// assembled into a [`Registry`].
 ///
 /// [`host`]: Self::host
-pub struct Deployment<T: WasiView + 'static> {
+pub struct Deployment<B: 'static> {
     name: String,
     engine: Engine,
-    linker: Linker<T>,
+    linker: Linker<StoreCtx<B>>,
     options: RuntimeOptions,
     guests: Vec<LoadedGuest>,
     // path and package guests, each loaded at first use
     declared: Vec<Source>,
     routes: Routes,
     // `NoLinks` unless the `link` feature is on
-    seam: Arc<dyn LinkSeam<T>>,
+    seam: Arc<dyn LinkSeam<B>>,
     mounts: Arc<MountRegistry>,
     args: Arc<Vec<String>>,
     mode: Mode,
@@ -349,22 +349,13 @@ cfg_select! {
     _ => {}
 }
 
-/// Store bound [`DeploymentBuilder::build`] requires; every deployment store
-/// context ([`StoreCtx`]) satisfies it.
-pub trait LinkStore: WasiView + HasChain + HasDispatcher + 'static {}
-
-impl<T: WasiView + HasChain + HasDispatcher + 'static> LinkStore for T {}
-
-impl<T: WasiView> Deployment<T> {
+impl<B: Backends> Deployment<B> {
     /// Link a WASI host's interfaces into the shared Linker.
     ///
     /// # Errors
     ///
     /// Will fail if the host cannot be added to the Linker.
-    pub fn host<H, B>(&mut self) -> Result<&mut Self>
-    where
-        H: Host<T> + Server<B>,
-    {
+    pub fn host<H: Host<B>>(&mut self) -> Result<&mut Self> {
         H::add_to_linker(&mut self.linker)?;
         Ok(self)
     }
@@ -374,10 +365,7 @@ impl<T: WasiView> Deployment<T> {
     /// Defaults to [`FirstArgSelector`] — the runtime core's "first call argument is the
     /// identity" strategy. Chainable.
     #[cfg(feature = "link")]
-    pub fn selector(&mut self, selector: impl GuestSelector) -> &mut Self
-    where
-        T: HasChain + HasDispatcher,
-    {
+    pub fn selector(&mut self, selector: impl GuestSelector) -> &mut Self {
         // the seam holds only selector and policy until assembly, so rebuilding loses nothing
         self.seam =
             Arc::new(InProcessLinks::new(Arc::new(selector), ChainPolicy::from(&self.options)));
@@ -439,7 +427,7 @@ impl<T: WasiView> Deployment<T> {
     ///
     /// Returns an error if a relayed import cannot be polyfilled, a component
     /// cannot be pre-instantiated, or the registry cannot be assembled.
-    pub fn into_registry(self) -> Result<Registry<T>> {
+    pub fn into_registry(self) -> Result<Registry<B>> {
         Registry::assemble(RegistryParts {
             engine: self.engine,
             linker: self.linker,
@@ -451,9 +439,7 @@ impl<T: WasiView> Deployment<T> {
             allow_empty: self.allow_empty,
         })
     }
-}
 
-impl<B: Clone + Send + Sync + 'static> Deployment<StoreCtx<B>> {
     /// Assemble this deployment into a [`Runtime`]: the guest loader host
     /// joins the linked hosts, the registry pre-instantiates the boot guests
     /// and tables the declared ones, the loader's grant installs, then the
@@ -509,14 +495,14 @@ impl<B: Clone + Send + Sync + 'static> Deployment<StoreCtx<B>> {
     // `omnia:plugins/loader`; `assemble` hands the registry to the runtime.
     #[cfg(feature = "loader")]
     fn with_loader_host(mut self) -> Result<(Self, Loader)> {
-        self.host::<WasiPlugins, B>().context("linking the guest loader host")?;
+        self.host::<WasiPlugins>().context("linking the guest loader host")?;
         let loader = std::mem::take(&mut self.loader);
         Ok((self, loader))
     }
 }
 
 // Build the shared engine, WASI-linked linker, and runtime options.
-fn engine_and_linker<T: WasiView + 'static>() -> Result<(Engine, Linker<T>, RuntimeOptions)> {
+fn engine_and_linker<B: Send + 'static>() -> Result<(Engine, Linker<StoreCtx<B>>, RuntimeOptions)> {
     let options = RuntimeOptions::load_env()?;
     let engine = Engine::new(&Config::from(&options))?;
 

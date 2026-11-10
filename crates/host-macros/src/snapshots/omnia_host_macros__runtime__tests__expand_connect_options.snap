@@ -5,38 +5,37 @@ expression: "expand_pretty(quote!({\n    hosts:\n    {\n        WasiKeyValue: Fi
 mod runtime {
     use omnia::anyhow::Result;
     use omnia::futures::future;
-    use omnia::Server;
     use omnia::tokio;
     use super::*;
     use omnia::Backend;
     #[derive(Clone)]
     struct Backends {
-        filesystem: Filesystem,
-        otel_default: OtelDefault,
+        backend_0: Filesystem,
+        backend_1: OtelDefault,
     }
-    impl omnia::Backends for Backends {
+    impl omnia::ConnectAll for Backends {
         async fn connect() -> Result<Self> {
-            let (filesystem, otel_default) = tokio::try_join!(
+            let (backend_0, backend_1) = tokio::try_join!(
                 < Filesystem as Backend >
                 ::connect_with(FilesystemOptions::at(".omnia/storage")), < OtelDefault as
                 Backend > ::connect(),
             )?;
-            Ok(Self { filesystem, otel_default })
+            Ok(Self { backend_0, backend_1 })
         }
     }
     impl omnia::Provides<WasiKeyValue> for Backends {
         fn borrow(&mut self) -> <WasiKeyValue as omnia::HostCtx>::Borrow<'_> {
-            &mut self.filesystem
+            &mut self.backend_0
         }
     }
     impl omnia::Provides<WasiBlobstore> for Backends {
         fn borrow(&mut self) -> <WasiBlobstore as omnia::HostCtx>::Borrow<'_> {
-            &mut self.filesystem
+            &mut self.backend_0
         }
     }
     impl omnia::Provides<WasiOtel> for Backends {
         fn borrow(&mut self) -> <WasiOtel as omnia::HostCtx>::Borrow<'_> {
-            &mut self.otel_default
+            &mut self.backend_1
         }
     }
     /// This runtime's host wiring, generic over the bundle carrying
@@ -45,21 +44,22 @@ mod runtime {
     pub struct Hooks;
     impl<B> omnia::Wiring<B> for Hooks
     where
-        B: Clone + Send + Sync + 'static,
+        B: omnia::Backends,
         B: omnia::Provides<WasiKeyValue>,
         B: omnia::Provides<WasiBlobstore>,
         B: omnia::Provides<WasiOtel>,
     {
-        fn link(deployment: &mut omnia::Deployment<omnia::StoreCtx<B>>) -> Result<()> {
-            deployment.host::<WasiKeyValue, B>()?;
-            deployment.host::<WasiBlobstore, B>()?;
-            deployment.host::<WasiOtel, B>()?;
+        fn link(deployment: &mut omnia::Deployment<B>) -> Result<()> {
+            deployment.host::<WasiKeyValue>()?;
+            deployment.host::<WasiBlobstore>()?;
+            deployment.host::<WasiOtel>()?;
             Ok(())
         }
         async fn serve(runtime: &omnia::Runtime<B>) -> Result<()> {
             let servers: Vec<future::BoxFuture<'_, Result<()>>> = vec![
-                Box::pin(WasiKeyValue.run(runtime)), Box::pin(WasiBlobstore
-                .run(runtime)), Box::pin(WasiOtel.run(runtime)),
+                Box::pin(< WasiKeyValue as omnia::Host < B >> ::run(runtime)), Box::pin(<
+                WasiBlobstore as omnia::Host < B >> ::run(runtime)), Box::pin(< WasiOtel
+                as omnia::Host < B >> ::run(runtime)),
             ];
             future::try_join_all(servers).await?;
             Ok(())
@@ -90,10 +90,7 @@ mod runtime {
     /// blocking until the guest completes.
     #[tokio::main]
     pub async fn run(builder: omnia::DeploymentBuilder) -> Result<omnia::ExitStatus> {
-        let deployment = builder
-            .mode(omnia::Mode::Server)
-            .build::<omnia::StoreCtx<Backends>>()
-            .await?;
+        let deployment = builder.mode(omnia::Mode::Server).build::<Backends>().await?;
         omnia::run::<Backends, Hooks>(deployment).await
     }
     /// Run one deployment through this runtime's hosts over a bundle
@@ -103,13 +100,10 @@ mod runtime {
         backends: B,
     ) -> Result<omnia::ExitStatus>
     where
-        B: Clone + Send + Sync + 'static,
+        B: omnia::Backends,
         Hooks: omnia::Wiring<B>,
     {
-        let deployment = builder
-            .mode(omnia::Mode::Server)
-            .build::<omnia::StoreCtx<B>>()
-            .await?;
+        let deployment = builder.mode(omnia::Mode::Server).build::<B>().await?;
         omnia::run_with::<B, Hooks>(deployment, backends).await
     }
 }

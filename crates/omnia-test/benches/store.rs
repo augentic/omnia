@@ -8,7 +8,7 @@ use std::hint::black_box;
 use std::time::Instant;
 
 use anyhow::Result;
-use omnia::{DeploymentBuilder, Runtime, StoreCtx, StoreView};
+use omnia::{DeploymentBuilder, Runtime};
 use omnia_test::host::Backends;
 use omnia_wasi_blobstore::WasiBlobstore;
 use omnia_wasi_config::WasiConfig;
@@ -53,20 +53,20 @@ async fn main() -> Result<()> {
 }
 
 async fn boot(backends: Backends) -> Result<Runtime<Backends>> {
-    let mut deployment = DeploymentBuilder::new().dynamic().build::<StoreCtx<Backends>>().await?;
+    let mut deployment = DeploymentBuilder::new().dynamic().build::<Backends>().await?;
     deployment
-        .host::<WasiBlobstore, Backends>()?
-        .host::<WasiDocStore, Backends>()?
-        .host::<WasiKeyValue, Backends>()?
-        .host::<WasiSql, Backends>()?
-        .host::<WasiConfig, Backends>()?
-        .host::<WasiIdentity, Backends>()?
-        .host::<WasiModel, Backends>()?
-        .host::<WasiVault, Backends>()?
-        .host::<WasiHttp, Backends>()?
-        .host::<WasiMessaging, Backends>()?
-        .host::<WasiOtel, Backends>()?
-        .host::<WasiWebSocket, Backends>()?;
+        .host::<WasiBlobstore>()?
+        .host::<WasiDocStore>()?
+        .host::<WasiKeyValue>()?
+        .host::<WasiSql>()?
+        .host::<WasiConfig>()?
+        .host::<WasiIdentity>()?
+        .host::<WasiModel>()?
+        .host::<WasiVault>()?
+        .host::<WasiHttp>()?
+        .host::<WasiMessaging>()?
+        .host::<WasiOtel>()?
+        .host::<WasiWebSocket>()?;
     deployment.assemble(backends).await
 }
 
@@ -77,7 +77,7 @@ fn time_store(runtime: &Runtime<Backends>) -> f64 {
 fn time_view(runtime: &Runtime<Backends>) -> f64 {
     let mut store = runtime.store();
     time(VIEWS_PER_ROUND, || {
-        let view = StoreView::<WasiKeyValue>::view(black_box(&mut store));
+        let view = black_box(&mut store).view::<WasiKeyValue>();
         black_box(view.ctx);
     })
 }

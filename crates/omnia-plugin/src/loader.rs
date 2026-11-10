@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use anyhow::{Context as _, bail, ensure};
 use cap_std::fs::Dir;
-use omnia_core::{Digest, Guest, GuestId, MountRegistry, Runtime};
+use omnia_core::{Backends, Digest, Guest, GuestId, MountRegistry, Runtime};
 
 use crate::admission::Admission;
 use crate::error::LoadError;
@@ -28,7 +28,7 @@ pub trait PluginLoader {
     ) -> impl Future<Output = Result<Plugin, LoadError>> + Send;
 }
 
-impl<B: Clone + Send + Sync + 'static> PluginLoader for Runtime<B> {
+impl<B: Backends> PluginLoader for Runtime<B> {
     fn load(
         &self, from: Location, pin: Option<Digest>,
     ) -> impl Future<Output = Result<Plugin, LoadError>> + Send {
@@ -78,10 +78,7 @@ impl Plugins {
     ///
     /// Returns an error if a writable mount and a read-only mount share or
     /// nest their directories, or the capability is already installed.
-    pub fn install<B>(runtime: &Runtime<B>) -> anyhow::Result<()>
-    where
-        B: Clone + Send + Sync + 'static,
-    {
+    pub fn install<B: Backends>(runtime: &Runtime<B>) -> anyhow::Result<()> {
         let plugins = Self {
             mounts: roots(runtime.mounts())?,
             admission: Box::new(runtime.downgrade()),
@@ -262,7 +259,7 @@ pub struct Plugin {
 impl Plugin {
     /// The handle of a seated guest.
     #[must_use]
-    pub fn of<T: 'static>(guest: &Guest<T>) -> Self {
+    pub fn of<B: 'static>(guest: &Guest<B>) -> Self {
         Self {
             id: guest.id().clone(),
             digest: guest.digest(),

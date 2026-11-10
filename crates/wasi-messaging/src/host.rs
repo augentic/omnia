@@ -36,7 +36,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 pub use omnia_core::FutureResult;
-use omnia_core::{Host, Runtime, Server, StoreCtx, StoreView};
+use omnia_core::{Host, Provides, Runtime, StoreCtx};
 use wasmtime::component::{HasData, Linker};
 
 pub use self::default_impl::MessagingDefault;
@@ -57,24 +57,15 @@ impl HasData for WasiMessaging {
     type Data<'a> = WasiMessagingCtxView<'a>;
 }
 
-impl<T> Host<T> for WasiMessaging
-where
-    T: StoreView<Self> + 'static,
-{
-    fn add_to_linker(linker: &mut Linker<T>) -> anyhow::Result<()> {
-        producer::add_to_linker::<_, Self>(linker, T::view)?;
-        request_reply::add_to_linker::<_, Self>(linker, T::view)?;
-        Ok(types::add_to_linker::<_, Self>(linker, T::view)?)
+impl<B: Provides<Self>> Host<B> for WasiMessaging {
+    fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
+        producer::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
+        request_reply::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
+        Ok(types::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?)
     }
-}
 
-impl<B> Server<B> for WasiMessaging
-where
-    B: Clone + Send + Sync + 'static,
-    StoreCtx<B>: StoreView<Self>,
-{
-    async fn run(&self, state: &Runtime<B>) -> anyhow::Result<()> {
-        server::run(state).await
+    async fn run(runtime: &Runtime<B>) -> anyhow::Result<()> {
+        server::run(runtime).await
     }
 }
 

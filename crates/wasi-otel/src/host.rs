@@ -25,7 +25,7 @@ mod generated {
 
 use std::fmt::Debug;
 
-use omnia_core::{FutureResult, Host, Server, StoreView};
+use omnia_core::{FutureResult, Host, Provides, StoreCtx};
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
 use wasmtime::component::{HasData, Linker};
@@ -41,19 +41,14 @@ impl HasData for WasiOtel {
     type Data<'a> = WasiOtelCtxView<'a>;
 }
 
-impl<T> Host<T> for WasiOtel
-where
-    T: StoreView<Self> + 'static,
-{
-    fn add_to_linker(linker: &mut Linker<T>) -> anyhow::Result<()> {
-        tracing::add_to_linker::<_, Self>(linker, T::view)?;
-        metrics::add_to_linker::<_, Self>(linker, T::view)?;
-        types::add_to_linker::<_, Self>(linker, T::view)?;
-        Ok(resource::add_to_linker::<_, Self>(linker, T::view)?)
+impl<B: Provides<Self>> Host<B> for WasiOtel {
+    fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
+        tracing::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
+        metrics::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
+        types::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
+        Ok(resource::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?)
     }
 }
-
-impl<B> Server<B> for WasiOtel {}
 
 /// A trait which provides internal WASI OpenTelemetry context.
 ///

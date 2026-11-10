@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::{Context as _, Result, ensure};
-use omnia_core::{GuestId, StoreFactory};
+use omnia_core::{GuestId, StoreCtx, StoreFactory};
 use wasmtime::component::{InstancePre, types};
 
 use super::is_host;
@@ -28,9 +28,9 @@ use super::route::{Linked, Route, RouteInvoke, Routes};
 /// Returns an error if a linked export cannot be resolved on the component,
 /// its signature differs from what an importer wired, or the guest already
 /// has a pending route.
-pub fn serve_guest<T: Send + 'static>(
-    routes: &Routes, wired: &WiredLinks, factory: StoreFactory<T>, id: &GuestId,
-    instance_pre: InstancePre<T>,
+pub fn serve_guest<B: Send + 'static>(
+    routes: &Routes, wired: &WiredLinks, factory: StoreFactory<B>, id: &GuestId,
+    instance_pre: InstancePre<StoreCtx<B>>,
 ) -> Result<()> {
     let engine = instance_pre.engine();
     let component = instance_pre.component();

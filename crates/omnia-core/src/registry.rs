@@ -20,12 +20,12 @@ use anyhow::{Context as _, Result, bail, ensure};
 pub use routing::{CliRoutes, HttpRoutes, PatternRoutes, Resolver, Routes, TriggerRouter};
 use wasmtime::Engine;
 use wasmtime::component::{Component, InstancePre, Linker};
-use wasmtime_wasi::WasiView;
 
 use crate::RuntimeOptions;
 use crate::digest::Digest;
 use crate::seam::LinkSeam;
 use crate::source::{LoadedGuest, Source};
+use crate::store::StoreCtx;
 
 /// Opaque guest identity.
 ///
@@ -98,25 +98,26 @@ impl From<String> for GuestId {
 }
 
 // a remote variant will land with distributed transport
-enum Target<T: 'static> {
-    Local(InstancePre<T>),
+enum Target<B: 'static> {
+    Local(InstancePre<StoreCtx<B>>),
 }
 
-/// A registered guest: an opaque identity bound to a resolution target.
-pub struct Guest<T: 'static> {
+/// A registered guest over the backend bundle `B`: an opaque identity bound
+/// to a resolution target.
+pub struct Guest<B: 'static> {
     id: GuestId,
-    target: Target<T>,
+    target: Target<B>,
     digest: Digest,
     exports: Arc<[String]>,
 }
 
-impl<T: 'static> Guest<T> {
+impl<B: 'static> Guest<B> {
     /// Create a guest backed by a local pre-instantiated component, recording
     /// the content digest of the bytes it was loaded from so the attestation
     /// lives and dies with the registry entry itself, and the names the
     /// component exports.
     #[must_use]
-    pub fn local(id: GuestId, instance_pre: InstancePre<T>, digest: Digest) -> Self {
+    pub fn local(id: GuestId, instance_pre: InstancePre<StoreCtx<B>>, digest: Digest) -> Self {
         let component = instance_pre.component();
         let exports = component
             .component_type()
@@ -155,7 +156,7 @@ impl<T: 'static> Guest<T> {
     /// Returns the guest's pre-instantiated component, ready to instantiate
     /// fresh on a new [`wasmtime::Store`] per call.
     #[must_use]
-    pub const fn instance_pre(&self) -> &InstancePre<T> {
+    pub const fn instance_pre(&self) -> &InstancePre<StoreCtx<B>> {
         match &self.target {
             Target::Local(pre) => pre,
         }
@@ -169,8 +170,8 @@ impl<T: 'static> Guest<T> {
     }
 }
 
-/// One [`Engine`] + one `Linker`; many pre-instantiated guests keyed by
-/// identity.
+/// One [`Engine`] + one `Linker` over the backend bundle `B`; many
+/// pre-instantiated guests keyed by identity.
 ///
 /// Every guest is pre-instantiated against the *same* linker, so they share one
 /// set of host interfaces and one pooling pool — load-bearing for the
@@ -186,11 +187,11 @@ impl<T: 'static> Guest<T> {
 /// context is cloned into each connection handler.
 ///
 /// [`Runtime::guest`]: crate::Runtime::guest
-pub struct Registry<T: 'static> {
+pub struct Registry<B: 'static> {
     engine: Engine,
     options: RuntimeOptions,
-    linker: Linker<T>,
-    guests: RwLock<BTreeMap<GuestId, Arc<Guest<T>>>>,
+    linker: Linker<StoreCtx<B>>,
+    guests: RwLock<BTreeMap<GuestId, Arc<Guest<B>>>>,
     // gates lifecycle transitions so the guest map and the seam's live
     // endpoints change as one step; lock order is this gate, then one inner
     // map, never across an await
@@ -200,15 +201,15 @@ pub struct Registry<T: 'static> {
     // not loaded at boot: each loads from its source at first use
     declared: BTreeMap<GuestId, Source>,
     routes: Routes,
-    seam: Arc<dyn LinkSeam<T>>,
+    seam: Arc<dyn LinkSeam<B>>,
 }
 
-/// Inputs to [`Registry::assemble`].
-pub struct RegistryParts<T: 'static> {
+/// Inputs to [`Registry::assemble`], over the backend bundle `B`.
+pub struct RegistryParts<B: 'static> {
     /// The shared engine.
     pub engine: Engine,
     /// The linker every guest pre-instantiates against, hosts linked.
-    pub linker: Linker<T>,
+    pub linker: Linker<StoreCtx<B>>,
     /// Runtime options.
     pub options: RuntimeOptions,
     /// The guests loaded at boot.
@@ -219,13 +220,13 @@ pub struct RegistryParts<T: 'static> {
     /// Per-trigger inbound route tables.
     pub routes: Routes,
     /// The guest→guest link seam.
-    pub seam: Arc<dyn LinkSeam<T>>,
+    pub seam: Arc<dyn LinkSeam<B>>,
     /// Whether a deployment with no guests assembles (a dynamic deployment
     /// registers them later).
     pub allow_empty: bool,
 }
 
-impl<T: WasiView + 'static> Registry<T> {
+impl<B: 'static> Registry<B> {
     /// Assemble a registry from a linked deployment's parts: polyfill link
     /// imports through the seam, pre-instantiate every loaded guest, table
     /// the declared ones, validate that routes name guests, and freeze the
@@ -237,7 +238,7 @@ impl<T: WasiView + 'static> Registry<T> {
     /// link imports cannot be polyfilled, a component cannot be
     /// pre-instantiated, an identity repeats, or a route targets a guest that
     /// is neither loaded nor declared.
-    pub fn assemble(parts: RegistryParts<T>) -> Result<Self> {
+    pub fn assemble(parts: RegistryParts<B>) -> Result<Self> {
         let RegistryParts {
             engine,
             mut linker,
@@ -310,7 +311,7 @@ impl<T: WasiView + 'static> Registry<T> {
     /// declared link interfaces fail here, exactly as at bootstrap.
     pub(crate) fn instantiate_late(
         &self, id: &GuestId, component: &Component,
-    ) -> Result<InstancePre<T>> {
+    ) -> Result<InstancePre<StoreCtx<B>>> {
         let mut linker = self.linker.clone();
         self.seam.polyfill_late(&self.engine, &mut linker, id, component)?;
         linker
@@ -318,9 +319,7 @@ impl<T: WasiView + 'static> Registry<T> {
             .map_err(anyhow::Error::from)
             .with_context(|| format!("pre-instantiating guest `{id}`"))
     }
-}
 
-impl<T: 'static> Registry<T> {
     /// Returns the shared engine every guest is instantiated against.
     #[must_use]
     pub const fn engine(&self) -> &Engine {
@@ -348,7 +347,7 @@ impl<T: 'static> Registry<T> {
     /// loaded is `None` here and loads through
     /// [`Runtime::guest`](crate::Runtime::guest).
     #[must_use]
-    pub fn get(&self, id: &GuestId) -> Option<Arc<Guest<T>>> {
+    pub fn get(&self, id: &GuestId) -> Option<Arc<Guest<B>>> {
         let _lifecycle = self.lifecycle_read();
         self.guests.read().unwrap_or_else(PoisonError::into_inner).get(id).cloned()
     }
@@ -371,8 +370,8 @@ impl<T: 'static> Registry<T> {
     /// runs.
     ///
     /// The order falls out of the [`BTreeMap`] keying; no per-call sort.
-    pub fn guests(&self) -> impl ExactSizeIterator<Item = Arc<Guest<T>>> {
-        let snapshot: Vec<Arc<Guest<T>>> = {
+    pub fn guests(&self) -> impl ExactSizeIterator<Item = Arc<Guest<B>>> {
+        let snapshot: Vec<Arc<Guest<B>>> = {
             let _lifecycle = self.lifecycle_read();
             self.guests.read().unwrap_or_else(PoisonError::into_inner).values().cloned().collect()
         };
@@ -385,7 +384,7 @@ impl<T: 'static> Registry<T> {
     /// deregister + register), discarding the pending endpoint; on refusal the
     /// registry map is untouched, so a failed registration leaves no partial
     /// state.
-    pub(crate) fn publish(&self, guest: Arc<Guest<T>>) -> Result<(), PublishError> {
+    pub(crate) fn publish(&self, guest: Arc<Guest<B>>) -> Result<(), PublishError> {
         let id = guest.id().clone();
 
         // lifecycle write first, then the inner maps
@@ -430,7 +429,7 @@ impl<T: 'static> Registry<T> {
 
     /// Returns the guest→guest link seam the registry drives.
     #[must_use]
-    pub(crate) const fn seam(&self) -> &Arc<dyn LinkSeam<T>> {
+    pub(crate) const fn seam(&self) -> &Arc<dyn LinkSeam<B>> {
         &self.seam
     }
 

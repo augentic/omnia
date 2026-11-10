@@ -35,7 +35,7 @@ use std::sync::Arc;
 
 pub use bytes::Bytes;
 pub use omnia_core::FutureResult;
-use omnia_core::{Host, Server, StoreView};
+use omnia_core::{Host, Provides, StoreCtx};
 pub use resource::*;
 use wasmtime::component::{HasData, Linker};
 use wasmtime_wasi::p2::pipe::MemoryOutputPipe;
@@ -130,18 +130,13 @@ impl HasData for WasiBlobstore {
     type Data<'a> = WasiBlobstoreCtxView<'a>;
 }
 
-impl<T> Host<T> for WasiBlobstore
-where
-    T: StoreView<Self> + 'static,
-{
-    fn add_to_linker(linker: &mut Linker<T>) -> anyhow::Result<()> {
-        blobstore::add_to_linker::<_, Self>(linker, T::view)?;
-        container::add_to_linker::<_, Self>(linker, T::view)?;
-        Ok(types::add_to_linker::<_, Self>(linker, T::view)?)
+impl<B: Provides<Self>> Host<B> for WasiBlobstore {
+    fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
+        blobstore::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
+        container::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
+        Ok(types::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?)
     }
 }
-
-impl<B> Server<B> for WasiBlobstore {}
 
 /// A trait which provides internal WASI Blobstore context.
 ///

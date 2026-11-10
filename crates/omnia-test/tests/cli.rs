@@ -16,7 +16,7 @@ async fn run(deployment: Deployment, expected: String) -> ExitStatus {
         .guest("cli", test_programs::CLI_RUST_LOG)
         .args([expected])
         .run(Backends::defaults().await, |deployment| {
-            deployment.host::<WasiOtel, Backends>()?;
+            deployment.host::<WasiOtel>()?;
             Ok(())
         })
         .await

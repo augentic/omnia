@@ -1,6 +1,6 @@
 //! The `omnia:vcs/store` host bindings.
 
-use omnia_core::HasMounts;
+use omnia_core::StoreCtx;
 use wasmtime::component::Accessor;
 
 use crate::host::generated::omnia::vcs::store::{
@@ -9,12 +9,9 @@ use crate::host::generated::omnia::vcs::store::{
 use crate::host::location::Intent;
 use crate::host::{Result, WasiVcs, WasiVcsCtxView};
 
-impl<T> HostWithStore<T> for WasiVcs
-where
-    T: HasMounts,
-{
+impl<B: Send + 'static> HostWithStore<StoreCtx<B>> for WasiVcs {
     async fn resolve(
-        accessor: &Accessor<T, Self>, repo: Location, revision: String,
+        accessor: &Accessor<StoreCtx<B>, Self>, repo: Location, revision: String,
     ) -> Result<String> {
         Self::dispatch(accessor, |access| {
             let repo = Self::locate(access, &repo, Intent::Read)?;
@@ -24,7 +21,8 @@ where
     }
 
     async fn descends(
-        accessor: &Accessor<T, Self>, repo: Location, ancestor: String, descendant: String,
+        accessor: &Accessor<StoreCtx<B>, Self>, repo: Location, ancestor: String,
+        descendant: String,
     ) -> Result<bool> {
         Self::dispatch(accessor, |access| {
             let repo = Self::locate(access, &repo, Intent::Read)?;
@@ -33,7 +31,7 @@ where
         .await
     }
 
-    async fn head(accessor: &Accessor<T, Self>, at: Location) -> Result<String> {
+    async fn head(accessor: &Accessor<StoreCtx<B>, Self>, at: Location) -> Result<String> {
         Self::dispatch(accessor, |access| {
             let at = Self::locate(access, &at, Intent::Read)?;
             Ok(access.get().ctx.head(at))
@@ -42,7 +40,7 @@ where
     }
 
     async fn commit(
-        accessor: &Accessor<T, Self>, at: Location, message: String,
+        accessor: &Accessor<StoreCtx<B>, Self>, at: Location, message: String,
     ) -> Result<Option<String>> {
         Self::dispatch(accessor, |access| {
             let at = Self::locate(access, &at, Intent::Mutate)?;
@@ -52,7 +50,7 @@ where
     }
 
     async fn merge(
-        accessor: &Accessor<T, Self>, at: Location, revision: String, message: String,
+        accessor: &Accessor<StoreCtx<B>, Self>, at: Location, revision: String, message: String,
         policy: Vec<Rule>,
     ) -> Result<Merged> {
         Self::dispatch(accessor, |access| {
@@ -63,7 +61,7 @@ where
     }
 
     async fn log(
-        accessor: &Accessor<T, Self>, repo: Location, revision: String, base: String,
+        accessor: &Accessor<StoreCtx<B>, Self>, repo: Location, revision: String, base: String,
     ) -> Result<Vec<Entry>> {
         Self::dispatch(accessor, |access| {
             let repo = Self::locate(access, &repo, Intent::Read)?;

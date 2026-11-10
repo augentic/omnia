@@ -5,42 +5,41 @@ expression: "expand_pretty(quote!({\n    hosts:\n    {\n        WasiHttp: HttpDe
 mod runtime {
     use omnia::anyhow::Result;
     use omnia::futures::future;
-    use omnia::Server;
     use omnia::tokio;
     use super::*;
     use omnia::Backend;
     #[derive(Clone)]
     struct Backends {
-        http_default: HttpDefault,
-        otel_default: OtelDefault,
-        key_value_default: KeyValueDefault,
+        backend_0: HttpDefault,
+        backend_1: OtelDefault,
+        backend_2: KeyValueDefault,
     }
-    impl omnia::Backends for Backends {
+    impl omnia::ConnectAll for Backends {
         async fn connect() -> Result<Self> {
-            let (http_default, otel_default, key_value_default) = tokio::try_join!(
+            let (backend_0, backend_1, backend_2) = tokio::try_join!(
                 < HttpDefault as Backend > ::connect(), < OtelDefault as Backend >
                 ::connect(), < KeyValueDefault as Backend > ::connect(),
             )?;
             Ok(Self {
-                http_default,
-                otel_default,
-                key_value_default,
+                backend_0,
+                backend_1,
+                backend_2,
             })
         }
     }
     impl omnia::Provides<WasiHttp> for Backends {
         fn borrow(&mut self) -> <WasiHttp as omnia::HostCtx>::Borrow<'_> {
-            &mut self.http_default
+            &mut self.backend_0
         }
     }
     impl omnia::Provides<WasiOtel> for Backends {
         fn borrow(&mut self) -> <WasiOtel as omnia::HostCtx>::Borrow<'_> {
-            &mut self.otel_default
+            &mut self.backend_1
         }
     }
     impl omnia::Provides<WasiKeyValue> for Backends {
         fn borrow(&mut self) -> <WasiKeyValue as omnia::HostCtx>::Borrow<'_> {
-            &mut self.key_value_default
+            &mut self.backend_2
         }
     }
     /// This runtime's host wiring, generic over the bundle carrying
@@ -49,21 +48,22 @@ mod runtime {
     pub struct Hooks;
     impl<B> omnia::Wiring<B> for Hooks
     where
-        B: Clone + Send + Sync + 'static,
+        B: omnia::Backends,
         B: omnia::Provides<WasiHttp>,
         B: omnia::Provides<WasiOtel>,
         B: omnia::Provides<WasiKeyValue>,
     {
-        fn link(deployment: &mut omnia::Deployment<omnia::StoreCtx<B>>) -> Result<()> {
-            deployment.host::<WasiHttp, B>()?;
-            deployment.host::<WasiOtel, B>()?;
-            deployment.host::<WasiKeyValue, B>()?;
+        fn link(deployment: &mut omnia::Deployment<B>) -> Result<()> {
+            deployment.host::<WasiHttp>()?;
+            deployment.host::<WasiOtel>()?;
+            deployment.host::<WasiKeyValue>()?;
             Ok(())
         }
         async fn serve(runtime: &omnia::Runtime<B>) -> Result<()> {
             let servers: Vec<future::BoxFuture<'_, Result<()>>> = vec![
-                Box::pin(WasiHttp.run(runtime)), Box::pin(WasiOtel.run(runtime)),
-                Box::pin(WasiKeyValue.run(runtime)),
+                Box::pin(< WasiHttp as omnia::Host < B >> ::run(runtime)), Box::pin(<
+                WasiOtel as omnia::Host < B >> ::run(runtime)), Box::pin(< WasiKeyValue
+                as omnia::Host < B >> ::run(runtime)),
             ];
             future::try_join_all(servers).await?;
             Ok(())
@@ -94,10 +94,7 @@ mod runtime {
     /// blocking until the guest completes.
     #[tokio::main]
     pub async fn run(builder: omnia::DeploymentBuilder) -> Result<omnia::ExitStatus> {
-        let deployment = builder
-            .mode(omnia::Mode::Server)
-            .build::<omnia::StoreCtx<Backends>>()
-            .await?;
+        let deployment = builder.mode(omnia::Mode::Server).build::<Backends>().await?;
         omnia::run::<Backends, Hooks>(deployment).await
     }
     /// Run one deployment through this runtime's hosts over a bundle
@@ -107,13 +104,10 @@ mod runtime {
         backends: B,
     ) -> Result<omnia::ExitStatus>
     where
-        B: Clone + Send + Sync + 'static,
+        B: omnia::Backends,
         Hooks: omnia::Wiring<B>,
     {
-        let deployment = builder
-            .mode(omnia::Mode::Server)
-            .build::<omnia::StoreCtx<B>>()
-            .await?;
+        let deployment = builder.mode(omnia::Mode::Server).build::<B>().await?;
         omnia::run_with::<B, Hooks>(deployment, backends).await
     }
 }

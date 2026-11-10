@@ -45,8 +45,7 @@ use anyhow::Result;
 use futures::FutureExt as _;
 use futures::future::ready;
 use omnia_core::{
-    ChainPolicy, FutureResult, Guest, GuestId, HasChain, HasDispatcher, LinkSeam, LoadedGuest,
-    StoreFactory,
+    ChainPolicy, FutureResult, Guest, GuestId, LinkSeam, LoadedGuest, StoreCtx, StoreFactory,
 };
 use wasmtime::Engine;
 use wasmtime::component::{Component, Linker};
@@ -102,9 +101,9 @@ impl InProcessLinks {
     }
 }
 
-impl<T: HasChain + HasDispatcher + 'static> LinkSeam<T> for InProcessLinks {
+impl<B: Send + 'static> LinkSeam<B> for InProcessLinks {
     fn polyfill(
-        &self, engine: &Engine, linker: &mut Linker<T>, guests: &[LoadedGuest],
+        &self, engine: &Engine, linker: &mut Linker<StoreCtx<B>>, guests: &[LoadedGuest],
     ) -> Result<()> {
         let caller = self.caller();
         let mut wired = WiredLinks::new();
@@ -116,14 +115,15 @@ impl<T: HasChain + HasDispatcher + 'static> LinkSeam<T> for InProcessLinks {
     }
 
     fn polyfill_late(
-        &self, engine: &Engine, linker: &mut Linker<T>, id: &GuestId, component: &Component,
+        &self, engine: &Engine, linker: &mut Linker<StoreCtx<B>>, id: &GuestId,
+        component: &Component,
     ) -> Result<()> {
         // a copy, so a linker clone's wiring never leaks into the bootstrap record
         let mut wired = self.wired.lock().unwrap_or_else(PoisonError::into_inner).clone();
         polyfill::polyfill_component(engine, linker, id, component, &self.caller(), &mut wired)
     }
 
-    fn serve(&self, factory: StoreFactory<T>, guest: &Guest<T>) -> FutureResult<()> {
+    fn serve(&self, factory: StoreFactory<B>, guest: &Guest<B>) -> FutureResult<()> {
         // pure introspection: the route is built here, the future only carries its outcome
         let wired = self.wired.lock().unwrap_or_else(PoisonError::into_inner).clone();
         let parked = serve::serve_guest(

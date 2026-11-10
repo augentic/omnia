@@ -1,11 +1,10 @@
 ---
 source: crates/host-macros/src/runtime.rs
-expression: "expand_pretty(quote!({\n    guests:\n    [{ path: \"app.wasm\" },\n    {\n        package: \"acme:tool@1.2.3\", digest:\n        \"sha256:0000000000000000000000000000000000000000000000000000000000000000\",\n    },\n    {\n        name: \"pinned\", path: \"pinned.wasm\", digest:\n        \"sha256:E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855\",\n    }, { name: \"tool\", package: \"acme:tool@2.0.0\" },], registries:\n    include_str!(\"wasm-pkg.toml\"),\n}))"
+expression: "expand_pretty(quote!({\n    guests:\n    [{ path: \"app.wasm\" },\n    {\n        package: \"acme:tool@1.2.3\", digest:\n        \"sha256:0000000000000000000000000000000000000000000000000000000000000000\",\n    },\n    {\n        name: \"pinned\", path: \"pinned.wasm\", digest:\n        \"sha256:E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855\",\n    }, { name: \"tool\", package: \"acme:tool@2.0.0\" },], plugins:\n    { registries: include_str!(\"wasm-pkg.toml\") },\n}))"
 ---
 mod runtime {
     use omnia::anyhow::Result;
     use omnia::futures::future;
-    use omnia::Server;
     use omnia::tokio;
     use super::*;
     /// This runtime's host wiring, generic over the bundle carrying
@@ -14,9 +13,9 @@ mod runtime {
     pub struct Hooks;
     impl<B> omnia::Wiring<B> for Hooks
     where
-        B: Clone + Send + Sync + 'static,
+        B: omnia::Backends,
     {
-        fn link(deployment: &mut omnia::Deployment<omnia::StoreCtx<B>>) -> Result<()> {
+        fn link(deployment: &mut omnia::Deployment<B>) -> Result<()> {
             Ok(())
         }
         async fn serve(runtime: &omnia::Runtime<B>) -> Result<()> {
@@ -86,10 +85,7 @@ mod runtime {
     /// blocking until the guest completes.
     #[tokio::main]
     pub async fn run(builder: omnia::DeploymentBuilder) -> Result<omnia::ExitStatus> {
-        let deployment = builder
-            .mode(omnia::Mode::Server)
-            .build::<omnia::StoreCtx<()>>()
-            .await?;
+        let deployment = builder.mode(omnia::Mode::Server).build::<()>().await?;
         omnia::run::<(), Hooks>(deployment).await
     }
     /// Run one deployment through this runtime's hosts over a bundle
@@ -99,13 +95,10 @@ mod runtime {
         backends: B,
     ) -> Result<omnia::ExitStatus>
     where
-        B: Clone + Send + Sync + 'static,
+        B: omnia::Backends,
         Hooks: omnia::Wiring<B>,
     {
-        let deployment = builder
-            .mode(omnia::Mode::Server)
-            .build::<omnia::StoreCtx<B>>()
-            .await?;
+        let deployment = builder.mode(omnia::Mode::Server).build::<B>().await?;
         omnia::run_with::<B, Hooks>(deployment, backends).await
     }
 }

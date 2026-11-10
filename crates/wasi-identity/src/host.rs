@@ -32,7 +32,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 pub use omnia_core::FutureResult;
-use omnia_core::{Host, Server, StoreView};
+use omnia_core::{Host, Provides, StoreCtx};
 use wasmtime::component::{HasData, Linker};
 
 #[cfg(feature = "oauth")]
@@ -53,16 +53,11 @@ impl HasData for WasiIdentity {
     type Data<'a> = WasiIdentityCtxView<'a>;
 }
 
-impl<T> Host<T> for WasiIdentity
-where
-    T: StoreView<Self> + 'static,
-{
-    fn add_to_linker(linker: &mut Linker<T>) -> anyhow::Result<()> {
-        Ok(credentials::add_to_linker::<_, Self>(linker, T::view)?)
+impl<B: Provides<Self>> Host<B> for WasiIdentity {
+    fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
+        Ok(credentials::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?)
     }
 }
-
-impl<B> Server<B> for WasiIdentity {}
 
 /// A trait which provides internal WASI Identity context.
 ///

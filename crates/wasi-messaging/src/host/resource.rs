@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::fmt::{self, Debug};
+use std::fmt::Debug;
 use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
 use std::sync::Arc;
@@ -61,31 +61,22 @@ pub trait Handler: Send + Sync + 'static {
 }
 
 /// Why a message was not handled.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum HandleError {
     /// No guest ran: the routed guest could not be loaded or instantiated.
+    #[error("no guest ran: {0}")]
     Unavailable(String),
     /// The guest returned `Err`.
+    #[error("guest returned an error: {0}")]
     Rejected(types::Error),
     /// The guest trapped.
+    #[error("guest trapped: {0}")]
     Trapped(String),
     /// The guest ran past the deployment's guest timeout.
+    #[error("guest ran past {0:?}")]
     TimedOut(Duration),
 }
-
-impl fmt::Display for HandleError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Unavailable(reason) => write!(f, "no guest ran: {reason}"),
-            Self::Rejected(error) => write!(f, "guest returned an error: {error}"),
-            Self::Trapped(reason) => write!(f, "guest trapped: {reason}"),
-            Self::TimedOut(timeout) => write!(f, "guest ran past {timeout:?}"),
-        }
-    }
-}
-
-impl std::error::Error for HandleError {}
 
 /// Deliver a message stream to `handler`, one task per message, until it ends.
 ///

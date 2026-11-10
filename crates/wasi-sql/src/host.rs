@@ -34,7 +34,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 pub use omnia_core::FutureResult;
-use omnia_core::{Host, Server, StoreView};
+use omnia_core::{Host, Provides, StoreCtx};
 use wasmtime::component::{HasData, Linker};
 
 use self::generated::wasi::sql::{readwrite, types};
@@ -69,17 +69,12 @@ impl HasData for WasiSql {
     type Data<'a> = WasiSqlCtxView<'a>;
 }
 
-impl<T> Host<T> for WasiSql
-where
-    T: StoreView<Self> + 'static,
-{
-    fn add_to_linker(linker: &mut Linker<T>) -> anyhow::Result<()> {
-        readwrite::add_to_linker::<_, Self>(linker, T::view)?;
-        Ok(types::add_to_linker::<_, Self>(linker, T::view)?)
+impl<B: Provides<Self>> Host<B> for WasiSql {
+    fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
+        readwrite::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
+        Ok(types::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?)
     }
 }
-
-impl<B> Server<B> for WasiSql {}
 
 /// A trait which provides internal WASI SQL context.
 ///

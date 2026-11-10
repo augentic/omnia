@@ -13,7 +13,7 @@ async fn exit_of(args: &[&str]) -> u8 {
         .guest("cli", test_programs::COMMAND_EXIT_MAP)
         .args(args.iter().copied())
         .run(Backends::defaults().await, |deployment| {
-            deployment.host::<WasiOtel, Backends>()?;
+            deployment.host::<WasiOtel>()?;
             Ok(())
         })
         .await
@@ -42,7 +42,7 @@ async fn command_captured() {
             .args(args.iter().copied())
             .captured()
             .run(Backends::defaults().await, |deployment| {
-                deployment.host::<WasiOtel, Backends>()?;
+                deployment.host::<WasiOtel>()?;
                 Ok(())
             })
             .await
@@ -70,7 +70,7 @@ async fn command_package_defaults() {
             .args(args.iter().copied())
             .captured()
             .run(Backends::defaults().await, |deployment| {
-                deployment.host::<WasiOtel, Backends>()?;
+                deployment.host::<WasiOtel>()?;
                 Ok(())
             })
             .await

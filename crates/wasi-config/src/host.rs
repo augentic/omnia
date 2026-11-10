@@ -7,7 +7,7 @@ mod default_impl;
 use std::fmt::Debug;
 
 pub use default_impl::ConfigDefault;
-use omnia_core::{Host, HostCtx, Server, StoreView};
+use omnia_core::{Host, HostCtx, Provides, StoreCtx};
 use wasmtime::component::{HasData, Linker, ResourceTable};
 pub use wasmtime_wasi_config;
 use wasmtime_wasi_config::WasiConfigVariables;
@@ -32,16 +32,11 @@ impl HostCtx for WasiConfig {
     }
 }
 
-impl<T> Host<T> for WasiConfig
-where
-    T: StoreView<Self> + 'static,
-{
-    fn add_to_linker(linker: &mut Linker<T>) -> anyhow::Result<()> {
-        Ok(wasmtime_wasi_config::add_to_linker(linker, T::view)?)
+impl<B: Provides<Self>> Host<B> for WasiConfig {
+    fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
+        Ok(wasmtime_wasi_config::add_to_linker(linker, StoreCtx::view::<Self>)?)
     }
 }
-
-impl<B> Server<B> for WasiConfig {}
 
 /// A trait which provides internal WASI Config context.
 pub trait WasiConfigCtx: Debug + Send + Sync + 'static {
