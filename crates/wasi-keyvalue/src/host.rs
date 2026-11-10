@@ -33,8 +33,8 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 pub use omnia_core::FutureResult;
-use omnia_core::{Host, Provides, StoreCtx};
-use wasmtime::component::{HasData, Linker};
+use omnia_core::{Host, HostCtx, Provides, StoreCtx};
+use wasmtime::component::Linker;
 
 pub use self::default_impl::KeyValueDefault;
 use self::generated::wasi::keyvalue::store::Error;
@@ -45,12 +45,9 @@ pub use self::resource::*;
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Host-side service for `wasi:keyvalue`.
-#[derive(Debug)]
+#[derive(Debug, HostCtx)]
+#[host_ctx(client = WasiKeyValueCtx)]
 pub struct WasiKeyValue;
-
-impl HasData for WasiKeyValue {
-    type Data<'a> = WasiKeyValueCtxView<'a>;
-}
 
 impl<B: Provides<Self>> Host<B> for WasiKeyValue {
     fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
@@ -70,4 +67,3 @@ pub trait WasiKeyValueCtx: Debug + Send + Sync + 'static {
 }
 
 omnia_core::host_error!(Error, Other);
-omnia_core::wasi_view!(KeyValue);

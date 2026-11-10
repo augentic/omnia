@@ -38,8 +38,8 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 pub use omnia_core::FutureResult;
-use omnia_core::{Host, Provides, StoreCtx};
-use wasmtime::component::{HasData, Linker};
+use omnia_core::{Host, HostCtx, Provides, StoreCtx};
+use wasmtime::component::Linker;
 
 pub use self::answer::{Answer, ToolTurn, Transcript};
 pub use self::default_impl::ModelDefault;
@@ -55,12 +55,9 @@ pub use self::tool_host::*;
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Host-side service for `wasi:model`.
-#[derive(Debug)]
+#[derive(Debug, HostCtx)]
+#[host_ctx(client = WasiModelCtx)]
 pub struct WasiModel;
-
-impl HasData for WasiModel {
-    type Data<'a> = WasiModelCtxView<'a>;
-}
 
 impl<B: Provides<Self>> Host<B> for WasiModel {
     fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
@@ -97,4 +94,3 @@ impl WasiModelCtx for Box<dyn WasiModelCtx> {
 
 // An untyped host failure is a `backend` error at the boundary.
 omnia_core::host_error!(Error, Backend);
-omnia_core::wasi_view!(Model);

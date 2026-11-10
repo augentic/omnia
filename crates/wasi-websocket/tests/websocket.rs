@@ -28,14 +28,14 @@ struct Backends {
 }
 
 impl Provides<WasiWebSocket> for Backends {
-    fn borrow(&mut self) -> &mut dyn WasiWebSocketCtx {
-        &mut self.websocket
+    fn borrow(&mut self) -> &dyn WasiWebSocketCtx {
+        &self.websocket
     }
 }
 
 impl Provides<WasiOtel> for Backends {
-    fn borrow(&mut self) -> &mut dyn WasiOtelCtx {
-        &mut self.otel
+    fn borrow(&mut self) -> &dyn WasiOtelCtx {
+        &self.otel
     }
 }
 

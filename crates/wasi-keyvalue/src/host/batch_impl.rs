@@ -1,6 +1,7 @@
+use omnia_core::HostView;
 use wasmtime::component::{Accessor, Resource};
 
-use crate::WasiKeyValueCtxView;
+use crate::WasiKeyValueCtx;
 use crate::host::generated::wasi::keyvalue::batch::{Host, HostWithStore};
 use crate::host::resource::BucketProxy;
 use crate::host::store_impl::get_bucket;
@@ -44,4 +45,4 @@ impl<T> HostWithStore<T> for WasiKeyValue {
     }
 }
 
-impl Host for WasiKeyValueCtxView<'_> {}
+impl Host for HostView<'_, dyn WasiKeyValueCtx> {}

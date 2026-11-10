@@ -32,8 +32,8 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 pub use omnia_core::FutureResult;
-use omnia_core::{Host, Provides, StoreCtx};
-use wasmtime::component::{HasData, Linker};
+use omnia_core::{Host, HostCtx, Provides, StoreCtx};
+use wasmtime::component::Linker;
 
 #[cfg(feature = "oauth")]
 pub use self::default_impl::IdentityDefault;
@@ -46,12 +46,9 @@ use crate::host::generated::Error;
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Host-side service for `wasi:identity`.
-#[derive(Debug)]
+#[derive(Debug, HostCtx)]
+#[host_ctx(client = WasiIdentityCtx)]
 pub struct WasiIdentity;
-
-impl HasData for WasiIdentity {
-    type Data<'a> = WasiIdentityCtxView<'a>;
-}
 
 impl<B: Provides<Self>> Host<B> for WasiIdentity {
     fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
@@ -69,4 +66,3 @@ pub trait WasiIdentityCtx: Debug + Send + Sync + 'static {
 }
 
 omnia_core::host_error!(Error, InternalFailure);
-omnia_core::wasi_view!(Identity);

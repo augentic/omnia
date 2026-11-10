@@ -1,4 +1,5 @@
 use anyhow::Result;
+use omnia_core::HostView;
 use wasmtime::component::{Access, Accessor, Resource};
 
 use crate::host::generated::wasi::sql::types::{
@@ -6,13 +7,13 @@ use crate::host::generated::wasi::sql::types::{
     HostErrorWithStore, HostStatement, HostStatementWithStore, Statement,
 };
 use crate::host::resource::ConnectionProxy;
-use crate::host::{WasiSql, WasiSqlCtxView};
+use crate::host::{WasiSql, WasiSqlCtx};
 
 impl<T> HostConnectionWithStore<T> for WasiSql {
     async fn open(
         accessor: &Accessor<T, Self>, name: String,
     ) -> wasmtime::Result<Result<Resource<Connection>, Resource<Error>>> {
-        let open_conn = accessor.with(|mut store| store.get().ctx.open(name)).await;
+        let open_conn = accessor.with(|mut store| store.get().client.open(name)).await;
 
         let result = match open_conn {
             Ok(conn) => {
@@ -62,12 +63,12 @@ impl<T> HostErrorWithStore<T> for WasiSql {
     }
 }
 
-impl Host for WasiSqlCtxView<'_> {
+impl Host for HostView<'_, dyn WasiSqlCtx> {
     fn convert_error(&mut self, err: Error) -> Result<Error, wasmtime::Error> {
         Ok(err)
     }
 }
 
-impl HostConnection for WasiSqlCtxView<'_> {}
-impl HostStatement for WasiSqlCtxView<'_> {}
-impl HostError for WasiSqlCtxView<'_> {}
+impl HostConnection for HostView<'_, dyn WasiSqlCtx> {}
+impl HostStatement for HostView<'_, dyn WasiSqlCtx> {}
+impl HostError for HostView<'_, dyn WasiSqlCtx> {}

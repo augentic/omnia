@@ -29,8 +29,8 @@ mod generated {
 use std::fmt::Debug;
 
 pub use omnia_core::FutureResult;
-use omnia_core::{Host, Provides, StoreCtx};
-use wasmtime::component::{HasData, Linker};
+use omnia_core::{Host, HostCtx, Provides, StoreCtx};
+use wasmtime::component::Linker;
 
 pub use self::default_impl::DocStoreDefault;
 pub use self::generated::wasi::docstore::types::{
@@ -43,12 +43,9 @@ pub use self::resource::*;
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Host-side service for `wasi:docstore`.
-#[derive(Debug)]
+#[derive(Debug, HostCtx)]
+#[host_ctx(client = WasiDocStoreCtx)]
 pub struct WasiDocStore;
-
-impl HasData for WasiDocStore {
-    type Data<'a> = WasiDocStoreCtxView<'a>;
-}
 
 impl<B: Provides<Self>> Host<B> for WasiDocStore {
     fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
@@ -95,4 +92,3 @@ pub struct QueryOpts {
 }
 
 omnia_core::host_error!(Error, Other);
-omnia_core::wasi_view!(DocStore);

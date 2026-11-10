@@ -1,3 +1,4 @@
+use omnia_core::HostView;
 use wasmtime::component::{Access, Accessor, Resource};
 use wasmtime::error::Context;
 use wasmtime_wasi::p2::bindings::io::streams::{InputStream, OutputStream};
@@ -7,9 +8,7 @@ use crate::host::generated::wasi::blobstore::types::{
     Host, HostIncomingValue, HostIncomingValueWithStore, HostOutgoingValue,
     HostOutgoingValueWithStore, IncomingValueSyncBody,
 };
-use crate::host::{
-    Error, IncomingValue, OutgoingValue, Result, WasiBlobstore, WasiBlobstoreCtxView,
-};
+use crate::host::{Error, IncomingValue, OutgoingValue, Result, WasiBlobstore, WasiBlobstoreCtx};
 
 impl<T> HostIncomingValueWithStore<T> for WasiBlobstore {
     fn incoming_value_consume_sync(
@@ -89,10 +88,10 @@ impl<T> HostOutgoingValueWithStore<T> for WasiBlobstore {
     }
 }
 
-impl Host for WasiBlobstoreCtxView<'_> {
+impl Host for HostView<'_, dyn WasiBlobstoreCtx> {
     fn convert_error(&mut self, err: Error) -> wasmtime::Result<String> {
         Ok(err.to_string())
     }
 }
-impl HostIncomingValue for WasiBlobstoreCtxView<'_> {}
-impl HostOutgoingValue for WasiBlobstoreCtxView<'_> {}
+impl HostIncomingValue for HostView<'_, dyn WasiBlobstoreCtx> {}
+impl HostOutgoingValue for HostView<'_, dyn WasiBlobstoreCtx> {}

@@ -30,8 +30,8 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 pub use omnia_core::FutureResult;
-use omnia_core::{Host, Provides, StoreCtx};
-use wasmtime::component::{HasData, Linker};
+use omnia_core::{Host, HostCtx, Provides, StoreCtx};
+use wasmtime::component::Linker;
 
 use self::generated::omnia::vault::vault;
 pub use crate::host::default_impl::VaultDefault;
@@ -42,12 +42,9 @@ pub use crate::host::resource::*;
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Host-side service for `wasi:vault`.
-#[derive(Debug)]
+#[derive(Debug, HostCtx)]
+#[host_ctx(client = WasiVaultCtx)]
 pub struct WasiVault;
-
-impl HasData for WasiVault {
-    type Data<'a> = WasiVaultCtxView<'a>;
-}
 
 impl<B: Provides<Self>> Host<B> for WasiVault {
     fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
@@ -65,4 +62,3 @@ pub trait WasiVaultCtx: Debug + Send + Sync + 'static {
 }
 
 omnia_core::host_error!(Error, Other);
-omnia_core::wasi_view!(Vault);

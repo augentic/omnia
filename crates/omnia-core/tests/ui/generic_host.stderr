@@ -1,0 +1,5 @@
+error: `#[derive(HostCtx)]` does not support generic types
+ --> tests/ui/generic_host.rs:6:19
+  |
+6 | pub struct WasiFoo<T>(pub T);
+  |                   ^^^

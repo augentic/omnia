@@ -1,4 +1,5 @@
 use anyhow::Context;
+use omnia_core::HostView;
 use wasmtime::component::{Access, Accessor, Resource};
 
 use crate::host::generated::omnia::identity::credentials::{
@@ -6,13 +7,13 @@ use crate::host::generated::omnia::identity::credentials::{
 };
 use crate::host::generated::omnia::identity::types::Error;
 use crate::host::resource::IdentityProxy;
-use crate::host::{Result, WasiIdentity, WasiIdentityCtxView};
+use crate::host::{Result, WasiIdentity, WasiIdentityCtx};
 
 impl<T> HostWithStore<T> for WasiIdentity {
     async fn get_identity(
         accessor: &Accessor<T, Self>, name: String,
     ) -> Result<Resource<IdentityProxy>> {
-        let identity = accessor.with(|mut store| store.get().ctx.get_identity(name)).await?;
+        let identity = accessor.with(|mut store| store.get().client.get_identity(name)).await?;
         let proxy = omnia_core::Proxy(identity);
         Ok(accessor.with(|mut store| store.get().table.push(proxy))?)
     }
@@ -36,5 +37,5 @@ impl<T> HostIdentityWithStore<T> for WasiIdentity {
     }
 }
 
-impl Host for WasiIdentityCtxView<'_> {}
-impl HostIdentity for WasiIdentityCtxView<'_> {}
+impl Host for HostView<'_, dyn WasiIdentityCtx> {}
+impl HostIdentity for HostView<'_, dyn WasiIdentityCtx> {}

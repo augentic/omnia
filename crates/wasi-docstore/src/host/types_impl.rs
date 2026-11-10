@@ -1,12 +1,13 @@
 //! `wasi:docstore` `types` interface — `filter` resource constructors.
 
+use omnia_core::HostView;
 use wasmtime::component::{Access, Resource};
 
 use crate::host::generated::wasi::docstore::types::{
     ComparisonOp, Error, Host as TypesHost, HostFilter, HostFilterWithStore, ScalarValue,
 };
 use crate::host::resource::{FilterProxy, FilterTree};
-use crate::host::{WasiDocStore, WasiDocStoreCtxView};
+use crate::host::{WasiDocStore, WasiDocStoreCtx};
 
 const MAX_FILTER_DEPTH: usize = 5;
 const MAX_IN_LIST_SIZE: usize = 100;
@@ -104,9 +105,9 @@ impl<T> HostFilterWithStore<T> for WasiDocStore {
     }
 }
 
-impl HostFilter for WasiDocStoreCtxView<'_> {}
+impl HostFilter for HostView<'_, dyn WasiDocStoreCtx> {}
 
-impl TypesHost for WasiDocStoreCtxView<'_> {
+impl TypesHost for HostView<'_, dyn WasiDocStoreCtx> {
     fn convert_error(&mut self, err: Error) -> wasmtime::Result<Error> {
         Ok(err)
     }

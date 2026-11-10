@@ -31,8 +31,8 @@ test_programs::foreach_otel!();
 struct Backends(Recording);
 
 impl Provides<WasiOtel> for Backends {
-    fn borrow(&mut self) -> &mut dyn WasiOtelCtx {
-        &mut self.0
+    fn borrow(&mut self) -> &dyn WasiOtelCtx {
+        &self.0
     }
 }
 

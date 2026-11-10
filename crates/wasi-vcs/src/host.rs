@@ -36,8 +36,8 @@ mod generated {
 use std::fmt::Debug;
 
 pub use omnia_core::FutureResult;
-use omnia_core::{Host, Provides, StoreCtx};
-use wasmtime::component::{Access, Accessor, HasData, Linker};
+use omnia_core::{Host, HostCtx, HostView, Provides, StoreCtx};
+use wasmtime::component::{Access, Accessor, Linker};
 
 pub use self::generated::omnia::vcs::store::{Entry, Merged, Rule, Strategy};
 pub use self::generated::omnia::vcs::transport::CloneOptions;
@@ -52,12 +52,9 @@ pub use self::location::Place;
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Host-side service for `omnia:vcs`.
-#[derive(Debug)]
+#[derive(Debug, HostCtx)]
+#[host_ctx(client = WasiVcsCtx)]
 pub struct WasiVcs;
-
-impl HasData for WasiVcs {
-    type Data<'a> = WasiVcsCtxView<'a>;
-}
 
 impl<B: Provides<Self>> Host<B> for WasiVcs {
     fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
@@ -237,7 +234,7 @@ impl WasiVcsCtx for Box<dyn WasiVcsCtx> {
     }
 }
 
-impl TypesHost for WasiVcsCtxView<'_> {
+impl TypesHost for HostView<'_, dyn WasiVcsCtx> {
     fn convert_error(&mut self, err: Error) -> wasmtime::Result<Error> {
         Ok(err)
     }
@@ -245,4 +242,3 @@ impl TypesHost for WasiVcsCtxView<'_> {
 
 // An untyped host failure is an `other` error at the boundary.
 omnia_core::host_error!(Error, Other);
-omnia_core::wasi_view!(Vcs);

@@ -1,9 +1,10 @@
 use anyhow::Context;
+use omnia_core::HostView;
 use wasmtime::component::{Accessor, Resource};
 
 use crate::host::generated::wasi::blobstore::blobstore::{Host, HostWithStore, ObjectId};
 use crate::host::resource::ContainerProxy;
-use crate::host::{Error, Result, WasiBlobstore, WasiBlobstoreCtxView};
+use crate::host::{Error, Result, WasiBlobstore, WasiBlobstoreCtx};
 
 fn same_object(src: &ObjectId, dest: &ObjectId) -> bool {
     src.container == dest.container && src.object == dest.object
@@ -15,7 +16,7 @@ impl<T> HostWithStore<T> for WasiBlobstore {
     ) -> Result<Resource<ContainerProxy>> {
         tracing::trace!("create_container: {name}");
         let container = accessor
-            .with(|mut store| store.get().ctx.create_container(name))
+            .with(|mut store| store.get().client.create_container(name))
             .await
             .context("creating container")?;
         let proxy = omnia_core::Proxy(container);
@@ -27,7 +28,7 @@ impl<T> HostWithStore<T> for WasiBlobstore {
     ) -> Result<Resource<ContainerProxy>> {
         tracing::trace!("get_container: {name}");
         let container = accessor
-            .with(|mut store| store.get().ctx.get_container(name))
+            .with(|mut store| store.get().client.get_container(name))
             .await
             .context("getting container")?;
         let proxy = omnia_core::Proxy(container);
@@ -37,7 +38,7 @@ impl<T> HostWithStore<T> for WasiBlobstore {
     async fn delete_container(accessor: &Accessor<T, Self>, name: String) -> Result<()> {
         tracing::trace!("delete_container: {name}");
         accessor
-            .with(|mut store| store.get().ctx.delete_container(name))
+            .with(|mut store| store.get().client.delete_container(name))
             .await
             .context("deleting container")?;
         Ok(())
@@ -46,7 +47,7 @@ impl<T> HostWithStore<T> for WasiBlobstore {
     async fn container_exists(accessor: &Accessor<T, Self>, name: String) -> Result<bool> {
         tracing::trace!("container_exists: {name}");
         Ok(accessor
-            .with(|mut store| store.get().ctx.container_exists(name))
+            .with(|mut store| store.get().client.container_exists(name))
             .await
             .context("checking container exists")?)
     }
@@ -92,7 +93,7 @@ async fn copy<T>(
     accessor: &Accessor<T, WasiBlobstore>, src: &ObjectId, dest: ObjectId,
 ) -> Result<std::sync::Arc<dyn crate::host::resource::Container>> {
     let src_container = accessor
-        .with(|mut store| store.get().ctx.get_container(src.container.clone()))
+        .with(|mut store| store.get().client.get_container(src.container.clone()))
         .await
         .context("getting source container")?;
 
@@ -105,7 +106,7 @@ async fn copy<T>(
         })?;
 
     let dest_container = accessor
-        .with(|mut store| store.get().ctx.get_container(dest.container.clone()))
+        .with(|mut store| store.get().client.get_container(dest.container.clone()))
         .await
         .context("getting destination container")?;
 
@@ -113,4 +114,4 @@ async fn copy<T>(
     Ok(src_container)
 }
 
-impl Host for WasiBlobstoreCtxView<'_> {}
+impl Host for HostView<'_, dyn WasiBlobstoreCtx> {}

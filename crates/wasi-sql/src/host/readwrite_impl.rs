@@ -1,11 +1,12 @@
 use anyhow::Result;
+use omnia_core::HostView;
 use wasmtime::component::{Accessor, Resource};
 
 use crate::ConnectionProxy;
 use crate::host::generated::wasi::sql::readwrite::{
     Connection, Error, Host, HostWithStore, Row, Statement,
 };
-use crate::host::{WasiSql, WasiSqlCtxView};
+use crate::host::{WasiSql, WasiSqlCtx};
 
 impl<T> HostWithStore<T> for WasiSql {
     async fn query(
@@ -41,7 +42,7 @@ impl<T> HostWithStore<T> for WasiSql {
     }
 }
 
-impl Host for WasiSqlCtxView<'_> {}
+impl Host for HostView<'_, dyn WasiSqlCtx> {}
 
 pub fn get_connection<T>(
     accessor: &Accessor<T, WasiSql>, self_: &Resource<ConnectionProxy>,

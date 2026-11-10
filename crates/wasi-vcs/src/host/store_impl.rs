@@ -1,13 +1,13 @@
 //! The `omnia:vcs/store` host bindings.
 
-use omnia_core::StoreCtx;
+use omnia_core::{HostView, StoreCtx};
 use wasmtime::component::Accessor;
 
 use crate::host::generated::omnia::vcs::store::{
     Entry, Host, HostWithStore, Location, Merged, Rule,
 };
 use crate::host::location::Intent;
-use crate::host::{Result, WasiVcs, WasiVcsCtxView};
+use crate::host::{Result, WasiVcs, WasiVcsCtx};
 
 impl<B: Send + 'static> HostWithStore<StoreCtx<B>> for WasiVcs {
     async fn resolve(
@@ -15,7 +15,7 @@ impl<B: Send + 'static> HostWithStore<StoreCtx<B>> for WasiVcs {
     ) -> Result<String> {
         Self::dispatch(accessor, |access| {
             let repo = Self::locate(access, &repo, Intent::Read)?;
-            Ok(access.get().ctx.resolve(repo, revision))
+            Ok(access.get().client.resolve(repo, revision))
         })
         .await
     }
@@ -26,7 +26,7 @@ impl<B: Send + 'static> HostWithStore<StoreCtx<B>> for WasiVcs {
     ) -> Result<bool> {
         Self::dispatch(accessor, |access| {
             let repo = Self::locate(access, &repo, Intent::Read)?;
-            Ok(access.get().ctx.descends(repo, ancestor, descendant))
+            Ok(access.get().client.descends(repo, ancestor, descendant))
         })
         .await
     }
@@ -34,7 +34,7 @@ impl<B: Send + 'static> HostWithStore<StoreCtx<B>> for WasiVcs {
     async fn head(accessor: &Accessor<StoreCtx<B>, Self>, at: Location) -> Result<String> {
         Self::dispatch(accessor, |access| {
             let at = Self::locate(access, &at, Intent::Read)?;
-            Ok(access.get().ctx.head(at))
+            Ok(access.get().client.head(at))
         })
         .await
     }
@@ -44,7 +44,7 @@ impl<B: Send + 'static> HostWithStore<StoreCtx<B>> for WasiVcs {
     ) -> Result<Option<String>> {
         Self::dispatch(accessor, |access| {
             let at = Self::locate(access, &at, Intent::Mutate)?;
-            Ok(access.get().ctx.commit(at, message))
+            Ok(access.get().client.commit(at, message))
         })
         .await
     }
@@ -55,7 +55,7 @@ impl<B: Send + 'static> HostWithStore<StoreCtx<B>> for WasiVcs {
     ) -> Result<Merged> {
         Self::dispatch(accessor, |access| {
             let at = Self::locate(access, &at, Intent::Mutate)?;
-            Ok(access.get().ctx.merge(at, revision, message, policy))
+            Ok(access.get().client.merge(at, revision, message, policy))
         })
         .await
     }
@@ -65,10 +65,10 @@ impl<B: Send + 'static> HostWithStore<StoreCtx<B>> for WasiVcs {
     ) -> Result<Vec<Entry>> {
         Self::dispatch(accessor, |access| {
             let repo = Self::locate(access, &repo, Intent::Read)?;
-            Ok(access.get().ctx.log(repo, revision, base))
+            Ok(access.get().client.log(repo, revision, base))
         })
         .await
     }
 }
 
-impl Host for WasiVcsCtxView<'_> {}
+impl Host for HostView<'_, dyn WasiVcsCtx> {}

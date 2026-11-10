@@ -1,32 +1,33 @@
 //! `wasi:docstore` `store` interface.
 
+use omnia_core::HostView;
 use wasmtime::component::Accessor;
 
 use crate::host::generated::wasi::docstore::store::{
     Document, Host as StoreHost, HostWithStore, QueryOptions, QueryResult,
 };
-use crate::host::{QueryOpts, Result, WasiDocStore, WasiDocStoreCtxView};
+use crate::host::{QueryOpts, Result, WasiDocStore, WasiDocStoreCtx};
 
 impl<T> HostWithStore<T> for WasiDocStore {
     async fn get(
         accessor: &Accessor<T, Self>, collection: String, id: String,
     ) -> Result<Option<Document>> {
-        let fut = accessor.with(|mut store| store.get().ctx.get(collection, id));
+        let fut = accessor.with(|mut store| store.get().client.get(collection, id));
         Ok(fut.await?)
     }
 
     async fn insert(accessor: &Accessor<T, Self>, collection: String, doc: Document) -> Result<()> {
-        let fut = accessor.with(|mut store| store.get().ctx.insert(collection, doc));
+        let fut = accessor.with(|mut store| store.get().client.insert(collection, doc));
         Ok(fut.await?)
     }
 
     async fn put(accessor: &Accessor<T, Self>, collection: String, doc: Document) -> Result<()> {
-        let fut = accessor.with(|mut store| store.get().ctx.put(collection, doc));
+        let fut = accessor.with(|mut store| store.get().client.put(collection, doc));
         Ok(fut.await?)
     }
 
     async fn delete(accessor: &Accessor<T, Self>, collection: String, id: String) -> Result<bool> {
-        let fut = accessor.with(|mut store| store.get().ctx.delete(collection, id));
+        let fut = accessor.with(|mut store| store.get().client.delete(collection, id));
         Ok(fut.await?)
     }
 
@@ -53,9 +54,10 @@ impl<T> HostWithStore<T> for WasiDocStore {
             continuation,
         };
 
-        let fut = accessor.with(|mut store| store.get().ctx.query(collection, filter_tree, opts));
+        let fut =
+            accessor.with(|mut store| store.get().client.query(collection, filter_tree, opts));
         Ok(fut.await?)
     }
 }
 
-impl StoreHost for WasiDocStoreCtxView<'_> {}
+impl StoreHost for HostView<'_, dyn WasiDocStoreCtx> {}

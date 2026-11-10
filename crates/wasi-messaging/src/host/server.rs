@@ -163,7 +163,7 @@ where
     }
 
     async fn client(&self) -> Result<Arc<dyn Client>> {
-        self.state.store().view::<WasiMessaging>().ctx.connect().await
+        self.state.store().view::<WasiMessaging>().client.connect().await
     }
 }
 

@@ -24,14 +24,14 @@ pub use omnia_compile as compile;
 pub use omnia_core::{
     AcquireError, Backend, Backends, ChainCtx, ChainPolicy, CliRoutes, CompileOptions, Digest,
     Dispatcher, ExitStatus, Extensions, FromEnv, FutureResult, Guest, GuestError, GuestId,
-    HasTable, Host, HostCtx, HttpRoutes, LevelFilter, LinkSeam, MountRegistry, NoLinks, NoOptions,
-    PatternRoutes, Policy, Provides, Proxy, Registry, RegistryParts, RegistrySource,
+    HasTable, Host, HostCtx, HostView, HttpRoutes, LevelFilter, LinkSeam, MountRegistry, NoLinks,
+    NoOptions, PatternRoutes, Policy, Provides, Proxy, Registry, RegistryParts, RegistrySource,
     ResolvedPreopen, Routes, Runtime, RuntimeOptions, RuntimeParts, Source, SourceSpec, Stdio,
     StoreBase, StoreConfig, StoreCtx, StoreFactory, Telemetry, TriggerRouter, Verified,
-    WeakRuntime, get_cloned, host_error, telemetry, wasi_view,
+    WeakRuntime, get_cloned, host_error, telemetry,
 };
 #[doc(hidden)]
-pub use omnia_core::{pastey, tokio, wasmtime, wasmtime_wasi};
+pub use omnia_core::{tokio, wasmtime, wasmtime_wasi};
 #[doc(inline)]
 pub use omnia_host_macros::runtime;
 #[cfg(feature = "link")]

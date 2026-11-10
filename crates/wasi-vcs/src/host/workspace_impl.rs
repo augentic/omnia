@@ -1,17 +1,17 @@
 //! The `omnia:vcs/workspace` host bindings.
 
-use omnia_core::StoreCtx;
+use omnia_core::{HostView, StoreCtx};
 use wasmtime::component::Accessor;
 
 use crate::host::generated::omnia::vcs::workspace::{Change, Host, HostWithStore, Location};
 use crate::host::location::Intent;
-use crate::host::{Result, WasiVcs, WasiVcsCtxView};
+use crate::host::{Result, WasiVcs, WasiVcsCtx};
 
 impl<B: Send + 'static> HostWithStore<StoreCtx<B>> for WasiVcs {
     async fn init(accessor: &Accessor<StoreCtx<B>, Self>, at: Location) -> Result<()> {
         Self::dispatch(accessor, |access| {
             let at = Self::locate(access, &at, Intent::Create)?;
-            Ok(access.get().ctx.init(at))
+            Ok(access.get().client.init(at))
         })
         .await
     }
@@ -23,7 +23,7 @@ impl<B: Send + 'static> HostWithStore<StoreCtx<B>> for WasiVcs {
             // the repository records the working copy, so both locations are written
             let repo = Self::locate(access, &repo, Intent::Mutate)?;
             let at = Self::locate(access, &at, Intent::Create)?;
-            Ok(access.get().ctx.add(repo, at, revision))
+            Ok(access.get().client.add(repo, at, revision))
         })
         .await
     }
@@ -31,7 +31,7 @@ impl<B: Send + 'static> HostWithStore<StoreCtx<B>> for WasiVcs {
     async fn remove(accessor: &Accessor<StoreCtx<B>, Self>, at: Location) -> Result<()> {
         Self::dispatch(accessor, |access| {
             let at = Self::locate(access, &at, Intent::Mutate)?;
-            Ok(access.get().ctx.remove(at))
+            Ok(access.get().client.remove(at))
         })
         .await
     }
@@ -39,10 +39,10 @@ impl<B: Send + 'static> HostWithStore<StoreCtx<B>> for WasiVcs {
     async fn pending(accessor: &Accessor<StoreCtx<B>, Self>, at: Location) -> Result<Vec<Change>> {
         Self::dispatch(accessor, |access| {
             let at = Self::locate(access, &at, Intent::Read)?;
-            Ok(access.get().ctx.pending(at))
+            Ok(access.get().client.pending(at))
         })
         .await
     }
 }
 
-impl Host for WasiVcsCtxView<'_> {}
+impl Host for HostView<'_, dyn WasiVcsCtx> {}

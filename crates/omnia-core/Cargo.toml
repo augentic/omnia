@@ -42,10 +42,10 @@ fromenv.workspace = true
 futures.workspace = true
 http.workspace = true
 omnia-compile.workspace = true
+omnia-host-macros.workspace = true
 opentelemetry = { workspace = true, features = ["metrics", "trace"] }
 opentelemetry-otlp = { workspace = true, features = ["grpc-tonic", "metrics", "trace"] }
 opentelemetry_sdk = { workspace = true, features = ["metrics", "trace"] }
-pastey.workspace = true
 serde.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
@@ -55,3 +55,6 @@ tracing-subscriber = { workspace = true, features = ["ansi", "smallvec"] }
 tokio = { workspace = true, features = ["fs", "io-util", "macros", "rt", "sync", "time"] }
 wasmtime = { workspace = true, features = ["pooling-allocator", "runtime"] }
 wasmtime-wasi.workspace = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+trybuild.workspace = true

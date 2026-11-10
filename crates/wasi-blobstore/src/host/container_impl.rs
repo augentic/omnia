@@ -1,5 +1,6 @@
 use anyhow::Context;
 use bytes::Bytes;
+use omnia_core::HostView;
 use wasmtime::component::{Access, Accessor, Resource};
 
 use crate::host::generated::wasi::blobstore::container::{
@@ -8,8 +9,7 @@ use crate::host::generated::wasi::blobstore::container::{
 };
 use crate::host::resource::ContainerProxy;
 use crate::host::{
-    Error, IncomingValue, OutgoingValue, Result, StreamObjectNames, WasiBlobstore,
-    WasiBlobstoreCtxView,
+    Error, IncomingValue, OutgoingValue, Result, StreamObjectNames, WasiBlobstore, WasiBlobstoreCtx,
 };
 
 impl<T> HostContainerWithStore<T> for WasiBlobstore {
@@ -156,9 +156,9 @@ impl<T> HostStreamObjectNamesWithStore<T> for WasiBlobstore {
     }
 }
 
-impl Host for WasiBlobstoreCtxView<'_> {}
-impl HostContainer for WasiBlobstoreCtxView<'_> {}
-impl HostStreamObjectNames for WasiBlobstoreCtxView<'_> {}
+impl Host for HostView<'_, dyn WasiBlobstoreCtx> {}
+impl HostContainer for HostView<'_, dyn WasiBlobstoreCtx> {}
+impl HostStreamObjectNames for HostView<'_, dyn WasiBlobstoreCtx> {}
 
 pub fn get_container<T>(
     accessor: &Accessor<T, WasiBlobstore>, self_: &Resource<ContainerProxy>,

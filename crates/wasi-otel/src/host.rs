@@ -25,21 +25,18 @@ mod generated {
 
 use std::fmt::Debug;
 
-use omnia_core::{FutureResult, Host, Provides, StoreCtx};
+use omnia_core::{FutureResult, Host, HostCtx, Provides, StoreCtx};
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
-use wasmtime::component::{HasData, Linker};
+use wasmtime::component::Linker;
 
 pub use self::default_impl::OtelDefault;
 use self::generated::omnia::otel::{metrics, resource, tracing, types};
 
 /// Host-side service for `wasi:otel`.
-#[derive(Debug)]
+#[derive(Debug, HostCtx)]
+#[host_ctx(client = WasiOtelCtx)]
 pub struct WasiOtel;
-
-impl HasData for WasiOtel {
-    type Data<'a> = WasiOtelCtxView<'a>;
-}
 
 impl<B: Provides<Self>> Host<B> for WasiOtel {
     fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
@@ -67,5 +64,3 @@ pub trait WasiOtelCtx: Debug + Send + Sync + 'static {
     /// from affecting application logic.
     fn export_metrics(&self, request: ExportMetricsServiceRequest) -> FutureResult<()>;
 }
-
-omnia_core::wasi_view!(Otel);

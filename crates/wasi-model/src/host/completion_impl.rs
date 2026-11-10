@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use futures::{FutureExt as _, future};
-use omnia_core::StoreCtx;
+use omnia_core::{HostView, StoreCtx};
 use wasmtime::component::{Accessor, FutureReader, StreamReader};
 
 use crate::host::generated::omnia::model::completion::{
@@ -14,9 +14,7 @@ use crate::host::generated::omnia::model::completion::{
 use crate::host::session::{CallsProducer, ReplyTask, ResultsConsumer, SessionClose, ToolSession};
 use crate::host::tool_host::DirEntry;
 use crate::host::workspace::{self, Workspace};
-use crate::host::{
-    Error, FutureResult, Request, ToolHost, ToolOutcome, WasiModel, WasiModelCtxView,
-};
+use crate::host::{Error, FutureResult, Request, ToolHost, ToolOutcome, WasiModel, WasiModelCtx};
 
 impl<B: Send + 'static> HostWithStore<StoreCtx<B>> for WasiModel {
     fn create(
@@ -46,7 +44,7 @@ impl<B: Send + 'static> HostWithStore<StoreCtx<B>> for WasiModel {
             };
 
             // call model backend with request and tool host "closure"
-            let limits = access.get().ctx.limits();
+            let limits = access.get().client.limits();
             let allowed = request.tool_names();
 
             let (session, calls_rx) = ToolSession::new(limits, allowed);
@@ -54,7 +52,7 @@ impl<B: Send + 'static> HostWithStore<StoreCtx<B>> for WasiModel {
                 session: Arc::clone(&session),
                 workspace,
             });
-            let answer = access.get().ctx.complete(request, tool_host);
+            let answer = access.get().client.complete(request, tool_host);
 
             results.pipe(&mut access, ResultsConsumer::new(Arc::clone(&session)))?;
             let mut calls = StreamReader::new(&mut access, CallsProducer::new(calls_rx))?;
@@ -95,7 +93,7 @@ impl<B: Send + 'static> HostWithStore<StoreCtx<B>> for WasiModel {
     }
 }
 
-impl Host for WasiModelCtxView<'_> {
+impl Host for HostView<'_, dyn WasiModelCtx> {
     fn convert_error(&mut self, err: Error) -> wasmtime::Result<Error> {
         Ok(err)
     }

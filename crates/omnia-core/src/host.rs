@@ -57,10 +57,42 @@ pub trait Host<B: Backends>: Send + Sync {
 /// backend bundle; [`view`](Self::view) assembles the linker-facing
 /// [`HasData::Data`] view from that borrow plus the store's resource table.
 /// The `runtime!` macro never derives names from the host type — everything
-/// it needs rides these associated items, and every host is its own carrier.
+/// it needs rides these associated items.
 ///
+/// A host over one client trait derives the impl with
+/// [`#[derive(HostCtx)]`](derive@crate::HostCtx), naming the trait in
+/// `#[host_ctx(client = ..)]`; its view is [`HostView`] over that trait object.
 /// Given a bundle `B: Provides<Self>`, [`StoreCtx::view`] assembles the view
-/// for every store.
+/// for every store. A host with another borrow shape, such as `WasiHttp`,
+/// implements it by hand.
+///
+/// # Examples
+///
+/// ```
+/// use omnia_core::{HostCtx, HostView, Provides, StoreCtx};
+///
+/// pub trait FooClient {}
+///
+/// /// Host-side service for `omnia:foo`.
+/// #[derive(Debug, HostCtx)]
+/// #[host_ctx(client = FooClient)]
+/// pub struct WasiFoo;
+///
+/// #[derive(Clone)]
+/// struct Backends<C: Clone>(C);
+///
+/// impl<C: FooClient + Clone + Send + Sync + 'static> Provides<WasiFoo> for Backends<C> {
+///     fn borrow(&mut self) -> &dyn FooClient {
+///         &self.0
+///     }
+/// }
+///
+/// fn view<C: FooClient + Clone + Send + Sync + 'static>(
+///     store: &mut StoreCtx<Backends<C>>,
+/// ) -> HostView<'_, dyn FooClient> {
+///     store.view::<WasiFoo>()
+/// }
+/// ```
 pub trait HostCtx: HasData {
     /// What this host borrows from the backend bundle.
     type Borrow<'a>;
@@ -78,6 +110,30 @@ pub trait HostCtx: HasData {
 pub trait Provides<H: HostCtx>: Backends {
     /// Borrow what host `H` needs from the bundle.
     fn borrow(&mut self) -> H::Borrow<'_>;
+}
+
+/// The linker-facing view of a host over one client: its backend and the
+/// store's resource table, borrowed for one host call.
+///
+/// A host that names its client in [`#[derive(HostCtx)]`](derive@crate::HostCtx)
+/// has `HostView<'a, dyn XClient>` as its [`HasData::Data`], and implements
+/// its bindgen `Host*` traits on it: a host function reaches the backend
+/// through [`client`](Self::client) and WIT resources through
+/// [`table`](Self::table). [`StoreCtx::view`] assembles one per host call.
+// `C: 'a` is not redundant: it makes `HostView<'a, dyn XClient>` default the
+// object lifetime to `'a`, the same as the `&'a dyn XClient` it is built
+// from, for a client trait with or without a `'static` bound.
+pub struct HostView<'a, C: ?Sized + 'a> {
+    /// The host's backend, borrowed from the deployment's bundle.
+    pub client: &'a C,
+    /// The store's resource table.
+    pub table: &'a mut ResourceTable,
+}
+
+impl<C: ?Sized> HasTable for HostView<'_, C> {
+    fn table(&mut self) -> &mut ResourceTable {
+        self.table
+    }
 }
 
 /// Connect a host backend resource during runtime startup.
@@ -145,12 +201,10 @@ impl<T: ?Sized> Deref for Proxy<T> {
     }
 }
 
-/// Access to the store's resource table from a WASI ctx view.
+/// Access to the store's resource table from a WASI view.
 ///
-/// Implemented by the `Wasi<Service>CtxView` types the [`wasi_view!`] macro
-/// generates, enabling the generic [`get_cloned`] table lookup.
-///
-/// [`wasi_view!`]: crate::wasi_view
+/// [`HostView`] implements it for every client, enabling the generic
+/// [`get_cloned`] table lookup.
 pub trait HasTable {
     /// The store's resource table.
     fn table(&mut self) -> &mut ResourceTable;

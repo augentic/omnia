@@ -35,9 +35,9 @@ use std::sync::Arc;
 
 pub use bytes::Bytes;
 pub use omnia_core::FutureResult;
-use omnia_core::{Host, Provides, StoreCtx};
+use omnia_core::{Host, HostCtx, Provides, StoreCtx};
 pub use resource::*;
-use wasmtime::component::{HasData, Linker};
+use wasmtime::component::Linker;
 use wasmtime_wasi::p2::pipe::MemoryOutputPipe;
 
 pub use self::default_impl::BlobstoreDefault;
@@ -123,12 +123,9 @@ impl StreamObjectNames {
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Host-side service for `wasi:blobstore`.
-#[derive(Debug)]
+#[derive(Debug, HostCtx)]
+#[host_ctx(client = WasiBlobstoreCtx)]
 pub struct WasiBlobstore;
-
-impl HasData for WasiBlobstore {
-    type Data<'a> = WasiBlobstoreCtxView<'a>;
-}
 
 impl<B: Provides<Self>> Host<B> for WasiBlobstore {
     fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
@@ -155,8 +152,6 @@ pub trait WasiBlobstoreCtx: Debug + Send + Sync + 'static {
     /// Check if a container exists.
     fn container_exists(&self, name: String) -> FutureResult<bool>;
 }
-
-omnia_core::wasi_view!(Blobstore);
 
 #[cfg(test)]
 mod tests {

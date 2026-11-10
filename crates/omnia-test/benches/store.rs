@@ -78,7 +78,7 @@ fn time_view(runtime: &Runtime<Backends>) -> f64 {
     let mut store = runtime.store();
     time(VIEWS_PER_ROUND, || {
         let view = black_box(&mut store).view::<WasiKeyValue>();
-        black_box(view.ctx);
+        black_box(view.client);
     })
 }
 

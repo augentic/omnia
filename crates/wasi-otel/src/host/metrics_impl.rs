@@ -1,6 +1,7 @@
 //! # WASI Metrics
 
 use anyhow::Result;
+use omnia_core::HostView;
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
 use opentelemetry_proto::tonic::common::v1::any_value::Value;
 use opentelemetry_proto::tonic::common::v1::{
@@ -19,7 +20,7 @@ use wasmtime::component::Accessor;
 
 use crate::host::generated::omnia::otel::metrics::{self as wasi, HostWithStore};
 use crate::host::types_impl::{datetime_nanos, decode_id};
-use crate::host::{WasiOtel, WasiOtelCtxView};
+use crate::host::{WasiOtel, WasiOtelCtx};
 
 impl<T> HostWithStore<T> for WasiOtel {
     async fn export(
@@ -31,13 +32,13 @@ impl<T> HostWithStore<T> for WasiOtel {
         }
 
         let request = ExportMetricsServiceRequest::from(rm);
-        accessor.with(|mut store| store.get().ctx.export_metrics(request)).await?;
+        accessor.with(|mut store| store.get().client.export_metrics(request)).await?;
 
         Ok(())
     }
 }
 
-impl wasi::Host for WasiOtelCtxView<'_> {}
+impl wasi::Host for HostView<'_, dyn WasiOtelCtx> {}
 
 omnia_core::host_error!(wasi::Error, InternalFailure);
 

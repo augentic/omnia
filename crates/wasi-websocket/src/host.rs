@@ -37,8 +37,8 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 pub use omnia_core::FutureResult;
-use omnia_core::{Host, Provides, Runtime, StoreCtx};
-use wasmtime::component::{HasData, Linker};
+use omnia_core::{Host, HostCtx, Provides, Runtime, StoreCtx};
+use wasmtime::component::Linker;
 
 pub use self::default_impl::{ConnectOptions, WebSocketDefault};
 pub use self::generated::Duplex;
@@ -51,12 +51,9 @@ pub use self::server::WebSocketHandler;
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Host-side service for `wasi:websocket`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, HostCtx)]
+#[host_ctx(client = WasiWebSocketCtx)]
 pub struct WasiWebSocket;
-
-impl HasData for WasiWebSocket {
-    type Data<'a> = WasiWebSocketCtxView<'a>;
-}
 
 impl<B: Provides<Self>> Host<B> for WasiWebSocket {
     fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
@@ -86,4 +83,3 @@ pub trait WasiWebSocketCtx: Debug + Send + Sync + 'static {
 }
 
 omnia_core::host_error!(Error, Other);
-omnia_core::wasi_view!(WebSocket);

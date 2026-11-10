@@ -1,11 +1,11 @@
 //! The `omnia:vcs/transport` host bindings.
 
-use omnia_core::StoreCtx;
+use omnia_core::{HostView, StoreCtx};
 use wasmtime::component::Accessor;
 
 use crate::host::generated::omnia::vcs::transport::{CloneOptions, Host, HostWithStore, Location};
 use crate::host::location::Intent;
-use crate::host::{Result, WasiVcs, WasiVcsCtxView};
+use crate::host::{Result, WasiVcs, WasiVcsCtx};
 
 impl<B: Send + 'static> HostWithStore<StoreCtx<B>> for WasiVcs {
     async fn clone(
@@ -13,7 +13,7 @@ impl<B: Send + 'static> HostWithStore<StoreCtx<B>> for WasiVcs {
     ) -> Result<()> {
         Self::dispatch(accessor, |access| {
             let at = Self::locate(access, &at, Intent::Create)?;
-            Ok(access.get().ctx.clone_repo(url, at, options))
+            Ok(access.get().client.clone_repo(url, at, options))
         })
         .await
     }
@@ -23,7 +23,7 @@ impl<B: Send + 'static> HostWithStore<StoreCtx<B>> for WasiVcs {
     ) -> Result<()> {
         Self::dispatch(accessor, |access| {
             let repo = Self::locate(access, &repo, Intent::Mutate)?;
-            Ok(access.get().ctx.fetch(repo, remote))
+            Ok(access.get().client.fetch(repo, remote))
         })
         .await
     }
@@ -33,7 +33,7 @@ impl<B: Send + 'static> HostWithStore<StoreCtx<B>> for WasiVcs {
     ) -> Result<()> {
         Self::dispatch(accessor, |access| {
             let repo = Self::locate(access, &repo, Intent::Mutate)?;
-            Ok(access.get().ctx.label(repo, name, revision))
+            Ok(access.get().client.label(repo, name, revision))
         })
         .await
     }
@@ -43,7 +43,7 @@ impl<B: Send + 'static> HostWithStore<StoreCtx<B>> for WasiVcs {
     ) -> Result<String> {
         Self::dispatch(accessor, |access| {
             let repo = Self::locate(access, &repo, Intent::Read)?;
-            Ok(access.get().ctx.labelled(repo, name))
+            Ok(access.get().client.labelled(repo, name))
         })
         .await
     }
@@ -53,7 +53,7 @@ impl<B: Send + 'static> HostWithStore<StoreCtx<B>> for WasiVcs {
     ) -> Result<String> {
         Self::dispatch(accessor, |access| {
             let repo = Self::locate(access, &repo, Intent::Read)?;
-            Ok(access.get().ctx.fetched(repo, remote, name))
+            Ok(access.get().client.fetched(repo, remote, name))
         })
         .await
     }
@@ -63,10 +63,10 @@ impl<B: Send + 'static> HostWithStore<StoreCtx<B>> for WasiVcs {
     ) -> Result<()> {
         Self::dispatch(accessor, |access| {
             let repo = Self::locate(access, &repo, Intent::Mutate)?;
-            Ok(access.get().ctx.push(repo, remote, label))
+            Ok(access.get().client.push(repo, remote, label))
         })
         .await
     }
 }
 
-impl Host for WasiVcsCtxView<'_> {}
+impl Host for HostView<'_, dyn WasiVcsCtx> {}

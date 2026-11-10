@@ -2,9 +2,10 @@ use std::future::{self, Future};
 use std::sync::Arc;
 
 use anyhow::Context;
+use omnia_core::HostView;
 use wasmtime::component::{Access, Accessor, Resource};
 
-use crate::WasiKeyValueCtxView;
+use crate::WasiKeyValueCtx;
 use crate::host::generated::wasi::keyvalue::atomics::{
     CasError, Host, HostCas, HostCasWithStore, HostWithStore,
 };
@@ -82,9 +83,9 @@ impl From<wasmtime::component::ResourceTableError> for CasError {
     }
 }
 
-impl Host for WasiKeyValueCtxView<'_> {
+impl Host for HostView<'_, dyn WasiKeyValueCtx> {
     fn convert_cas_error(&mut self, err: CasError) -> wasmtime::Result<CasError> {
         Ok(err)
     }
 }
-impl HostCas for WasiKeyValueCtxView<'_> {}
+impl HostCas for HostView<'_, dyn WasiKeyValueCtx> {}

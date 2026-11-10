@@ -39,6 +39,12 @@ Unreleased
 - `StoreCtx::{view, mounts, dispatcher, extensions, chain}`, the store's
   own accessors. `view::<H>()` assembles host `H`'s view for a bundle
   `B: Provides<H>`, and is the getter every `add_to_linker` passes.
+- `omnia_core::HostView<'a, C>`, the linker-facing view of a host over one
+  client: `{ client: &'a C, table: &'a mut ResourceTable }`, with
+  `HasTable`. `#[derive(HostCtx)]` names the client trait in
+  `#[host_ctx(client = WasiXCtx)]` and makes `HostView<'a, dyn WasiXCtx>`
+  the host's `HasData::Data`. The bindgen `Host*` impls go on
+  `HostView<'_, dyn WasiXCtx>`, and reach the backend through `client`.
 
 ### Changed
 
@@ -105,6 +111,9 @@ Unreleased
   HasLimits, LinkStore}`. `StoreCtx<B>` is the one store type, and its
   own methods replace them.
 - `omnia::serve_links`. `Runtime::serve_links` is the one entry.
+- `omnia::wasi_view!`, the `Wasi*CtxView` types it generated, and the
+  `omnia::pastey` re-export. A host derives `HostCtx`, and its view is
+  `HostView`.
 
 ---
 
