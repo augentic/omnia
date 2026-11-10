@@ -54,4 +54,4 @@ wasi-keyvalue/
 | `omnia` | Runtime core: engine, CLI, deployment, registry, dispatch, telemetry |
 | `omnia-sdk` | Guest SDK: `Handler`, `Client`, `Context`, the HTTP and messaging routers, the command façade (`parse`, `Command`, `Response`), each transport's `export!` macro, errors with their status/exit map, the `TableStore` and `DocumentStore` capabilities, and MCP. Features: `sql`, `docstore`, and `http` (default), `command` |
 | `omnia-guest-macros` | `#[instrument]` attribute |
-| `omnia-host-macros` | `runtime!` macro (use via `omnia::runtime!`) and `#[derive(HostCtx)]` (use via `omnia_core::HostCtx`) |
+| `omnia-host-macros` | `runtime!` macro (use via `omnia::runtime!`) and `#[derive(HostCtx)]` (use via `omnia_core::HostCtx`, or `omnia::HostCtx` with `crate = omnia`) |

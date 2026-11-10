@@ -33,8 +33,11 @@ pub fn runtime(input: TokenStream) -> TokenStream {
 /// with `Borrow<'a> = &'a dyn Client`. The host implements its bindgen
 /// `Host*` traits on `HostView<'_, dyn Client>`.
 ///
-/// The type must be non-generic, carry exactly one `#[host_ctx(client = ..)]`,
-/// and the crate must depend on `omnia-core`.
+/// The type must be non-generic and name exactly one `client`.
+///
+/// The emitted paths start at `::omnia_core`. A crate that reaches the derive
+/// through a re-export names that root in `crate`, as in
+/// `#[host_ctx(client = FooClient, crate = omnia)]`.
 ///
 /// # Examples
 ///

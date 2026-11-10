@@ -20,8 +20,8 @@ impl HasData for WasiConfig {
     type Data<'a> = wasmtime_wasi_config::WasiConfig<'a>;
 }
 
-// hand-written rather than `wasi_view!`-generated: the view is a shared
-// borrow over the backend's variables, with no resource table involved
+// hand-written rather than derived: the view is the one `wasmtime-wasi-config`
+// owns, built from the backend's variables with no resource table involved
 impl HostCtx for WasiConfig {
     type Borrow<'a> = &'a dyn ConfigClient;
 

@@ -45,6 +45,8 @@ Unreleased
   `#[host_ctx(client = XClient)]` and makes `HostView<'a, dyn XClient>`
   the host's `HasData::Data`. The bindgen `Host*` impls go on
   `HostView<'_, dyn XClient>`, and reach the backend through `client`.
+  A crate that depends on `omnia` alone derives `omnia::HostCtx` with
+  `#[host_ctx(client = XClient, crate = omnia)]`.
 - `Runtime::stop` and `Runtime::stopped`. A trigger server waits on
   `stopped` to stop accepting work and drain. `Runtime::shutdown` stops
   the runtime too.

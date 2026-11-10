@@ -7,8 +7,8 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Context as _, Result, bail};
-use omnia::wasmtime::component::Val;
-use omnia::{Digest, ExitStatus, GuestEntry, GuestId, Runtime};
+use omnia::wasmtime::component::{ResourceTable, Val};
+use omnia::{Digest, ExitStatus, GuestEntry, GuestId, HostCtx, Runtime};
 use omnia_test::host::{Backends, Deployment, STATE_BUCKET, ScriptedModel, scratch};
 use omnia_test::{Exchange, SeenFormat};
 use omnia_wasi_blobstore::BlobStoreClient as _;
@@ -325,6 +325,32 @@ async fn host_handles() {
     container.write_data("o".to_owned(), b"bytes".to_vec().into()).await.expect("write");
     assert_eq!(backends.object("c", "o").await, Some(b"bytes".to_vec()));
     assert_eq!(backends.object("absent", "o").await, None);
+}
+
+trait EchoClient {
+    fn name(&self) -> &'static str;
+}
+
+struct Named;
+
+impl EchoClient for Named {
+    fn name(&self) -> &'static str {
+        "named"
+    }
+}
+
+#[derive(HostCtx)]
+#[host_ctx(client = EchoClient, crate = omnia)]
+struct WasiEcho;
+
+// A host a deployment crate defines for itself. This crate reaches
+// `omnia-core` only through `omnia`, as a deployment does, so the derive
+// resolves here only under `crate = omnia`.
+#[test]
+fn facade_host() {
+    let mut table = ResourceTable::new();
+    let view = WasiEcho::view(&Named, &mut table);
+    assert_eq!(view.client.name(), "named");
 }
 
 #[test]

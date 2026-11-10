@@ -153,7 +153,15 @@ For a host over `Wasi<Service>Ctx` the derive emits:
 - **`wasmtime::component::HasData`** for the host, naming `omnia_core::HostView<'a, dyn Wasi<Service>Ctx>` as its `Data`: `pub struct HostView { pub client: &'a dyn Wasi<Service>Ctx, pub table: &'a mut ResourceTable }`, the borrowed view the bindgen `Host*` traits are implemented on. A host function reaches its backend through `client` and WIT resources through `table`; the view implements `omnia_core::HasTable`, so `omnia_core::get_cloned` looks a resource up on it.
 - **`omnia_core::HostCtx`** for the host — `Borrow<'a> = &'a dyn Wasi<Service>Ctx`, and `view` assembling the view from the borrow and the store's resource table.
 
-The type must be non-generic, carry exactly one `#[host_ctx(client = ..)]`, and the crate must depend on `omnia-core`. A host with another borrow shape implements `HostCtx` by hand: `WasiHttp` borrows a `dyn HttpBorrow` and assembles the view type `wasmtime-wasi-http` owns.
+The type must be non-generic and name exactly one `client`. A host with another borrow shape implements `HostCtx` by hand: `WasiHttp` borrows a `dyn HttpBorrow` and assembles the view type `wasmtime-wasi-http` owns.
+
+The emitted paths start at `::omnia_core`, which a capability crate depends on directly. A deployment crate that defines a host of its own reaches the derive as `omnia::HostCtx` and names that root in `crate`:
+
+```rust,ignore
+#[derive(Debug, omnia::HostCtx)]
+#[host_ctx(client = FooClient, crate = omnia)]
+pub struct WasiFoo;
+```
 
 How the two halves meet at run time, for the row `WasiKeyValue: Redis`:
 
