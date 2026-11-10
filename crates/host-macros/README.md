@@ -107,7 +107,7 @@ impl omnia::Backends for Backends {
 
 ### Bundle accessor impls
 
-For each `hosts:` row, the macro emits one uniform `omnia::Provides<Ctx>` impl exposing the bundle's backend field; the generic `omnia::StoreView` blanket on `omnia::StoreCtx` turns it into the host's linker-facing view. The impl is keyed by the host type itself — its `omnia::HostCtx` impl carries the borrow shape, so no names are derived from the host and third-party hosts wire the same way. The one exception is `wasi:http`, whose linker-facing view trait is foreign (`wasmtime-wasi-http`): its row is keyed to the core-owned `omnia::HttpCtx` carrier instead.
+For each `hosts:` row, the macro emits one uniform `omnia::Provides<Ctx>` impl exposing the bundle's backend field; the generic `omnia::StoreView` blanket on `omnia::StoreCtx` turns it into the host's linker-facing view. The impl is keyed by the host type itself — its `omnia::HostCtx` impl carries the borrow shape, so no names are derived from the host and third-party hosts wire the same way.
 
 ### `main` entry point
 

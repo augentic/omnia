@@ -21,7 +21,7 @@ use wasmtime_wasi_http::{
     Error as HttpError, RequestOptions, WasiBody, WasiHttpCtx, WasiHttpCtxView, WasiHttpHooks,
 };
 
-use super::client_cert;
+use super::{HttpBorrow, client_cert};
 
 pub type FutureResult<T> = Box<dyn Future<Output = Result<T, HttpError>> + Send>;
 
@@ -57,7 +57,7 @@ pub struct HttpDefault {
     ctx: WasiHttpCtx,
 }
 
-impl omnia_core::HttpBorrow for HttpDefault {
+impl HttpBorrow for HttpDefault {
     fn as_view<'a>(&'a mut self, table: &'a mut ResourceTable) -> WasiHttpCtxView<'a> {
         WasiHttpCtxView {
             hooks: &mut self.hooks,

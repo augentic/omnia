@@ -46,8 +46,8 @@ pub use self::runtime::{
 pub use self::seam::{LinkSeam, NoLinks, StoreFactory};
 pub use self::source::{AcquireError, LoadedGuest, RegistrySource, Source, SourceSpec, Verified};
 pub use self::store::{
-    HasChain, HasDispatcher, HasExtensions, HasLimits, HasMounts, HttpBorrow, HttpCtx, Stdio,
-    StoreBase, StoreConfig, StoreCtx, StoreView,
+    HasChain, HasDispatcher, HasExtensions, HasLimits, HasMounts, Stdio, StoreBase, StoreConfig,
+    StoreCtx, StoreView,
 };
 pub use self::telemetry::Telemetry;
 pub use self::value::handle_kind;

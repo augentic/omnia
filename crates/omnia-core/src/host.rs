@@ -53,13 +53,7 @@ pub trait Server<B>: Debug + Sync + Send {
 /// backend bundle; [`view`](Self::view) assembles the linker-facing
 /// [`HasData::Data`] view from that borrow plus the store's resource table.
 /// The `runtime!` macro never derives names from the host type — everything
-/// it needs rides these associated items.
-///
-/// Almost every host is its own carrier. The exception is a host whose
-/// linker-facing view trait is foreign — `wasi:http`'s `WasiHttpView` is
-/// owned by `wasmtime-wasi-http` — whose carrier must live in this crate so
-/// the foreign trait's `StoreCtx` blanket can name it (see
-/// [`HttpCtx`](crate::HttpCtx)).
+/// it needs rides these associated items, and every host is its own carrier.
 pub trait HostCtx: HasData {
     /// What this host borrows from the backend bundle.
     type Borrow<'a>;

@@ -28,8 +28,8 @@ mod runtime {
             })
         }
     }
-    impl omnia::Provides<omnia::HttpCtx> for Backends {
-        fn borrow(&mut self) -> <omnia::HttpCtx as omnia::HostCtx>::Borrow<'_> {
+    impl omnia::Provides<WasiHttp> for Backends {
+        fn borrow(&mut self) -> <WasiHttp as omnia::HostCtx>::Borrow<'_> {
             &mut self.http_default
         }
     }
@@ -50,7 +50,7 @@ mod runtime {
     impl<B> omnia::Wiring<B> for Hooks
     where
         B: Clone + Send + Sync + 'static,
-        B: omnia::Provides<omnia::HttpCtx>,
+        B: omnia::Provides<WasiHttp>,
         B: omnia::Provides<WasiOtel>,
         B: omnia::Provides<WasiKeyValue>,
     {

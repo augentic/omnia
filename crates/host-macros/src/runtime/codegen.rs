@@ -12,9 +12,6 @@ use crate::runtime::parse::{Config, GuestSource, HostEntry, ManifestSpec, Mode};
 pub struct Codegen {
     pub mode: Mode,
     pub host_types: Vec<Path>,
-    /// The `Provides` keys the generic `Hooks` impl bounds its bundle on,
-    /// one per `hosts:` row.
-    pub ctx_keys: Vec<TokenStream>,
     pub backends_ty: TokenStream,
     pub backends_def: TokenStream,
     pub main_options: TokenStream,
@@ -27,7 +24,6 @@ impl From<&Config> for Codegen {
     fn from(config: &Config) -> Self {
         let host_entries = &config.host_entries;
         let host_types: Vec<Path> = host_entries.iter().map(|entry| entry.host.clone()).collect();
-        let ctx_keys = host_types.iter().map(ctx_key).collect();
 
         let (backends_ty, backends_def) = emit_backends(host_entries);
 
@@ -37,7 +33,6 @@ impl From<&Config> for Codegen {
         Self {
             mode: config.mode,
             host_types,
-            ctx_keys,
             backends_ty,
             backends_def,
             main_options,
@@ -226,24 +221,13 @@ fn path_key(path: &Path) -> String {
 // `&mut self.field` coerces to every carrier's `HostCtx::Borrow`, so
 // third-party hosts and re-exports work with no name surgery
 fn host_impl(host: &Path, field: &Ident) -> TokenStream {
-    let ctx = ctx_key(host);
     quote! {
-        impl omnia::Provides<#ctx> for Backends {
-            fn borrow(&mut self) -> <#ctx as omnia::HostCtx>::Borrow<'_> {
+        impl omnia::Provides<#host> for Backends {
+            fn borrow(&mut self) -> <#host as omnia::HostCtx>::Borrow<'_> {
                 &mut self.#field
             }
         }
     }
-}
-
-// HACK!: `wasi:http`'s view trait is foreign, so its `StoreCtx` blanket is
-// keyed to the core-owned `HttpCtx` carrier and the row must match by name;
-// an associated-type key is no option, since coherence does not normalize
-// projections in impl headers across crates. An aliased `WasiHttp` row fails
-// loudly: linking then finds `Provides<HttpCtx>` unsatisfied.
-fn ctx_key(host: &Path) -> TokenStream {
-    let is_http = host.segments.last().is_some_and(|segment| segment.ident == "WasiHttp");
-    if is_http { quote!(omnia::HttpCtx) } else { quote!(#host) }
 }
 
 fn field_ident(path: &Path) -> Ident {

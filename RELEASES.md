@@ -59,6 +59,11 @@ Unreleased
   and its `is_expired` is public.
 - `omnia_test::guest::Scripted` is `ScriptedModel`, and
   `omnia_test::guest::Memory` implements `Vault`.
+- `WasiHttp` is its own `HostCtx` carrier, like every other host. A bundle
+  implements `Provides<WasiHttp>`, `HttpBorrow` is
+  `omnia_wasi_http::HttpBorrow`, and a hand-built store context implements
+  `StoreView<WasiHttp>` in place of `WasiHttpView`. `runtime!` no longer
+  matches a `hosts:` row by the name `WasiHttp`, so an aliased row links.
 
 ### Removed
 
@@ -69,6 +74,7 @@ Unreleased
   topic is bound with `Handlers::topic` or `Handlers::topic_with`.
 - `Client::owner`.
 - `BlobStoreExt`.
+- `omnia::HttpCtx`, and the `WasiHttpView` re-export from `omnia_wasi_http`.
 
 ---
 

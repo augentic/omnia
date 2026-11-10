@@ -17,16 +17,17 @@ use hyper::body::{Body, Frame, SizeHint};
 use hyper::header::{FORWARDED, HOST};
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
-use omnia_core::{HttpRoutes, Runtime, StoreCtx, TriggerRouter};
+use omnia_core::{HttpRoutes, Provides, Runtime, StoreCtx, StoreView, TriggerRouter};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio::time::timeout;
 use tracing::{Instrument, info_span, instrument};
 use wasmtime::AsContextMut as _;
-use wasmtime_wasi_http::WasiHttpView;
 use wasmtime_wasi_http::io::TokioIo;
 use wasmtime_wasi_http::p3::bindings::ServiceIndices;
 use wasmtime_wasi_http::p3::bindings::http::types as wasi;
+
+use super::{WasiHttp, WasiHttpCtxView};
 
 /// The streaming body of a response produced by [`HttpHandler::handle`].
 pub type OutgoingBody = UnsyncBoxBody<Bytes, anyhow::Error>;
@@ -37,7 +38,7 @@ const HTTP_ADDR: &str = "0.0.0.0:8080";
 pub async fn run<B>(state: &Runtime<B>) -> Result<()>
 where
     B: Clone + Send + Sync + 'static,
-    StoreCtx<B>: WasiHttpView,
+    B: Provides<WasiHttp>,
 {
     let Some(handler) = HttpHandler::new(state)? else {
         tracing::info!("no guest exports the http handler; http trigger inert");
@@ -110,7 +111,7 @@ where
 pub struct HttpHandler<B>
 where
     B: Clone + Send + Sync + 'static,
-    StoreCtx<B>: WasiHttpView,
+    B: Provides<WasiHttp>,
 {
     state: Runtime<B>,
     component: Arc<str>,
@@ -120,7 +121,7 @@ where
 impl<B> HttpHandler<B>
 where
     B: Clone + Send + Sync + 'static,
-    StoreCtx<B>: WasiHttpView,
+    B: Provides<WasiHttp>,
 {
     /// Build the handler over `runtime`'s registry; `None` when no guest
     /// exports the http handler (the trigger is inert).
@@ -209,17 +210,28 @@ where
                     let built = async move {
                         let (request, io) = store.with(|mut access| {
                             let mut cx = access.as_context_mut();
-                            wasi::Request::from_http(cx.data_mut().http().hooks, request)
+                            wasi::Request::from_http(view(cx.data_mut()).hooks, request)
                         });
+                        let req = store
+                            .with(|mut store| {
+                                view(store.as_context_mut().data_mut()).table.push(request)
+                            })
+                            .context("failed to push request to table")?;
 
-                        let wasi_resp = service
-                            .handle(store, request)
+                        let res = service
+                            .wasi_http_handler()
+                            .call_handle(store, req)
                             .await
                             .map_err(anyhow::Error::from)
                             .context("guest trap")?
                             .map_err(|e| anyhow!("guest error: {e}"))?;
+                        let wasi_resp = store
+                            .with(|mut store| {
+                                view(store.as_context_mut().data_mut()).table.delete(res)
+                            })
+                            .context("failed to delete response from table")?;
                         store
-                            .with(|mut store| wasi_resp.into_http(&mut store, io))
+                            .with(|mut store| wasi_resp.into_http_with_getter(&mut store, io, view))
                             .map_err(|e| anyhow!("converting guest response: {e}"))
                     }
                     .await;
@@ -272,6 +284,10 @@ where
 
         Ok(response)
     }
+}
+
+fn view<B: Provides<WasiHttp> + 'static>(store: &mut StoreCtx<B>) -> WasiHttpCtxView<'_> {
+    StoreView::<WasiHttp>::view(store)
 }
 
 // rebuild the uri with scheme and authority set, so they reach the guest

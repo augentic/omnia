@@ -3,12 +3,12 @@
 
 use std::sync::Arc;
 
-use omnia::{Backend as _, HostCtx, HttpCtx, NoOptions, Provides};
+use omnia::{Backend as _, HostCtx, NoOptions, Provides};
 use omnia_wasi_blobstore::{BlobstoreDefault, WasiBlobstore, WasiBlobstoreCtx};
 use omnia_wasi_config::wasmtime_wasi_config::WasiConfigVariables;
 use omnia_wasi_config::{ConfigDefault, WasiConfig};
 use omnia_wasi_docstore::{DocStoreDefault, WasiDocStore, WasiDocStoreCtx};
-use omnia_wasi_http::{ConnectOptions as HttpOptions, HttpDefault};
+use omnia_wasi_http::{ConnectOptions as HttpOptions, HttpDefault, WasiHttp};
 use omnia_wasi_identity::{IdentityStub, WasiIdentity, WasiIdentityCtx};
 use omnia_wasi_keyvalue::{KeyValueDefault, WasiKeyValue, WasiKeyValueCtx};
 use omnia_wasi_messaging::{MessagingDefault, WasiMessaging, WasiMessagingCtx};
@@ -406,7 +406,7 @@ provides! {
     WasiBlobstore => blobstore,
     WasiConfig => config,
     WasiDocStore => docstore,
-    HttpCtx => http,
+    WasiHttp => http,
     WasiIdentity => identity,
     WasiKeyValue => keyvalue,
     WasiMessaging => messaging,

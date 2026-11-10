@@ -16,7 +16,6 @@ pub fn expand(config: &Config) -> TokenStream {
     let Codegen {
         mode,
         host_types,
-        ctx_keys,
         backends_ty,
         backends_def,
         main_options,
@@ -46,7 +45,7 @@ pub fn expand(config: &Config) -> TokenStream {
             impl<B> omnia::Wiring<B> for Hooks
             where
                 B: Clone + Send + Sync + 'static,
-                #(B: omnia::Provides<#ctx_keys>,)*
+                #(B: omnia::Provides<#host_types>,)*
             {
                 fn link(deployment: &mut omnia::Deployment<omnia::StoreCtx<B>>) -> Result<()> {
                     #(deployment.host::<#host_types, B>()?;)*
