@@ -27,8 +27,8 @@ use opentelemetry_proto::tonic::trace::v1::status::StatusCode;
 struct Backends(Recording);
 
 impl Provides<WasiOtel> for Backends {
-    fn borrow(&mut self) -> &mut dyn OtelClient {
-        &mut self.0
+    fn borrow(&mut self) -> &dyn OtelClient {
+        &self.0
     }
 }
 

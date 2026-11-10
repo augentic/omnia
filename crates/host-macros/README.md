@@ -154,8 +154,8 @@ impl<B: Provides<Self>> Host<B> for WasiKeyValue {
 
 For a host over `<Service>Client` the derive emits:
 
-- **`wasmtime::component::HasData`** for the host, naming `omnia_core::HostView<'a, dyn <Service>Client>` as its `Data`: `pub struct HostView { pub client: &'a mut dyn <Service>Client, pub table: &'a mut ResourceTable }`, the borrowed view the bindgen `Host*` traits are implemented on. A host function reaches its backend through `client` and WIT resources through `table`; the view implements `omnia_core::HasTable`, so `omnia_core::get_cloned` looks a resource up on it.
-- **`omnia_core::HostCtx`** for the host — `Borrow<'a> = &'a mut dyn <Service>Client`, and `view` assembling the view from the borrow and the store's resource table.
+- **`wasmtime::component::HasData`** for the host, naming `omnia_core::HostView<'a, dyn <Service>Client>` as its `Data`: `pub struct HostView { pub client: &'a dyn <Service>Client, pub table: &'a mut ResourceTable }`, the borrowed view the bindgen `Host*` traits are implemented on. A host function reaches its backend through `client` and WIT resources through `table`; the view implements `omnia_core::HasTable`, so `omnia_core::get_cloned` looks a resource up on it.
+- **`omnia_core::HostCtx`** for the host — `Borrow<'a> = &'a dyn <Service>Client`, and `view` assembling the view from the borrow and the store's resource table.
 
 The type must be non-generic, carry exactly one `#[host_ctx(client = ..)]`, and the crate must depend on `omnia-core`. A host with another borrow shape implements `HostCtx` by hand: `WasiHttp` borrows a `dyn HttpBorrow` and assembles the view type `wasmtime-wasi-http` owns.
 

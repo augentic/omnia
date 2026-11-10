@@ -78,8 +78,8 @@ pub trait Host<B: Backends>: Send + Sync {
 /// struct Backends<C: Clone>(C);
 ///
 /// impl<C: FooClient + Clone + Send + Sync + 'static> Provides<WasiFoo> for Backends<C> {
-///     fn borrow(&mut self) -> &mut dyn FooClient {
-///         &mut self.0
+///     fn borrow(&mut self) -> &dyn FooClient {
+///         &self.0
 ///     }
 /// }
 ///
@@ -117,11 +117,11 @@ pub trait Provides<H: HostCtx>: Backends {
 /// through [`client`](Self::client) and WIT resources through
 /// [`table`](Self::table). [`StoreCtx::view`] assembles one per host call.
 // `C: 'a` is not redundant: it makes `HostView<'a, dyn XClient>` default the
-// object lifetime to `'a`, the same as the `&'a mut dyn XClient` it is built
+// object lifetime to `'a`, the same as the `&'a dyn XClient` it is built
 // from, for a client trait with or without a `'static` bound.
 pub struct HostView<'a, C: ?Sized + 'a> {
     /// The host's backend, borrowed from the deployment's bundle.
-    pub client: &'a mut C,
+    pub client: &'a C,
     /// The store's resource table.
     pub table: &'a mut ResourceTable,
 }

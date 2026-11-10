@@ -31,14 +31,14 @@ impl Backends {
 }
 
 impl Provides<WasiIdentity> for Backends {
-    fn borrow(&mut self) -> &mut dyn IdentityClient {
-        &mut self.identity
+    fn borrow(&mut self) -> &dyn IdentityClient {
+        &self.identity
     }
 }
 
 impl Provides<WasiOtel> for Backends {
-    fn borrow(&mut self) -> &mut dyn OtelClient {
-        &mut self.otel
+    fn borrow(&mut self) -> &dyn OtelClient {
+        &self.otel
     }
 }
 

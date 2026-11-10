@@ -21,7 +21,7 @@ pub fn expand(input: &DeriveInput) -> Result<TokenStream> {
         }
 
         impl ::omnia_core::HostCtx for #host {
-            type Borrow<'a> = &'a mut dyn #client;
+            type Borrow<'a> = &'a dyn #client;
 
             fn view<'a>(
                 borrow: Self::Borrow<'a>,

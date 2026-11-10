@@ -29,7 +29,7 @@ Unreleased
   specification's own reason codes. The macros of the same names build
   the variant under its default code (`bad_request`, ...).
 - `omnia_core::HostView<'a, C>`: the linker-facing view of a host over one
-  client, `{ client: &'a mut C, table: &'a mut ResourceTable }`, with
+  client, `{ client: &'a C, table: &'a mut ResourceTable }`, with
   `HasTable`. `#[derive(HostCtx)]` names the client trait in
   `#[host_ctx(client = XClient)]` and makes `HostView<'a, dyn XClient>`
   the host's `HasData::Data`; the bindgen `Host*` impls go on
