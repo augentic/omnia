@@ -40,8 +40,6 @@ impl<T> HostWithStore<T> for WasiOtel {
 
 impl wasi::Host for HostView<'_, dyn OtelClient> {}
 
-omnia_core::host_error!(wasi::Error, InternalFailure);
-
 impl From<wasi::ResourceMetrics> for ExportMetricsServiceRequest {
     fn from(rm: wasi::ResourceMetrics) -> Self {
         let schema_url = rm.resource.schema_url.clone().unwrap_or_default();
@@ -153,6 +151,20 @@ impl From<wasi::MetricData> for MetricData {
     }
 }
 
+impl From<wasi::Gauge> for Gauge {
+    fn from(gauge: wasi::Gauge) -> Self {
+        let start = gauge.start_time.map(datetime_nanos).unwrap_or_default();
+        let time = datetime_nanos(gauge.time);
+        Self {
+            data_points: gauge
+                .data_points
+                .into_iter()
+                .map(|dp| number_dp(dp.attributes, dp.value, dp.exemplars, start, time))
+                .collect(),
+        }
+    }
+}
+
 // shared by the Gauge and Sum conversions
 fn number_dp(
     attributes: Vec<wasi::KeyValue>, value: wasi::DataValue, exemplars: Vec<wasi::Exemplar>,
@@ -168,19 +180,8 @@ fn number_dp(
     }
 }
 
-impl From<wasi::Gauge> for Gauge {
-    fn from(gauge: wasi::Gauge) -> Self {
-        let start = gauge.start_time.map(datetime_nanos).unwrap_or_default();
-        let time = datetime_nanos(gauge.time);
-        Self {
-            data_points: gauge
-                .data_points
-                .into_iter()
-                .map(|dp| number_dp(dp.attributes, dp.value, dp.exemplars, start, time))
-                .collect(),
-        }
-    }
-}
+// The proto `DataPointFlags` default (`FLAG_NONE` / "do not use").
+const DATA_POINT_FLAGS_DO_NOT_USE: u32 = 0;
 
 impl From<wasi::Sum> for Sum {
     fn from(sum: wasi::Sum) -> Self {
@@ -317,8 +318,7 @@ impl From<wasi::Temporality> for i32 {
     }
 }
 
-// The proto `DataPointFlags` default (`FLAG_NONE` / "do not use").
-const DATA_POINT_FLAGS_DO_NOT_USE: u32 = 0;
+omnia_core::host_error!(wasi::Error, InternalFailure);
 
 #[cfg(test)]
 mod tests {

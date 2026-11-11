@@ -56,15 +56,6 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[host_ctx(client = VcsClient)]
 pub struct WasiVcs;
 
-impl<B: Provides<Self>> Host<B> for WasiVcs {
-    fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
-        types::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
-        store::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
-        workspace::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
-        Ok(transport::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?)
-    }
-}
-
 impl WasiVcs {
     // Resolve a guest location to the place the backend works through,
     // refusing a mutation beneath a read-only mount before any backend runs.
@@ -90,6 +81,15 @@ impl WasiVcs {
     // A backend's typed failure passes through; anything else is `other`.
     fn lower(error: anyhow::Error) -> Error {
         error.downcast::<Error>().unwrap_or_else(Into::into)
+    }
+}
+
+impl<B: Provides<Self>> Host<B> for WasiVcs {
+    fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
+        types::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
+        store::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
+        workspace::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
+        Ok(transport::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?)
     }
 }
 

@@ -21,10 +21,6 @@ use crate::host::{DocStoreClient, Document, FutureResult, QueryOpts, QueryResult
 
 const MAX_PAGE_SIZE: u64 = 1000;
 
-// Collections keyed by name; documents keyed by id (BTreeMap gives queries a
-// deterministic id-ascending base order).
-type Collections = HashMap<String, BTreeMap<String, Value>>;
-
 /// Default in-memory [`DocStoreClient`].
 ///
 /// Clones share the same store, so a probe handle kept by a test observes the
@@ -32,6 +28,16 @@ type Collections = HashMap<String, BTreeMap<String, Value>>;
 #[derive(Clone, Default)]
 pub struct DocStoreDefault {
     collections: Arc<RwLock<Collections>>,
+}
+
+impl DocStoreDefault {
+    fn read(&self) -> std::sync::RwLockReadGuard<'_, Collections> {
+        self.collections.read().expect("docstore lock poisoned")
+    }
+
+    fn write(&self) -> std::sync::RwLockWriteGuard<'_, Collections> {
+        self.collections.write().expect("docstore lock poisoned")
+    }
 }
 
 impl std::fmt::Debug for DocStoreDefault {
@@ -47,16 +53,6 @@ impl Connect for DocStoreDefault {
     async fn connect_with(options: Self::ConnectOptions) -> Result<Self> {
         tracing::debug!("initializing in-memory document store");
         Ok(Self::default())
-    }
-}
-
-impl DocStoreDefault {
-    fn read(&self) -> std::sync::RwLockReadGuard<'_, Collections> {
-        self.collections.read().expect("docstore lock poisoned")
-    }
-
-    fn write(&self) -> std::sync::RwLockWriteGuard<'_, Collections> {
-        self.collections.write().expect("docstore lock poisoned")
     }
 }
 
@@ -156,6 +152,28 @@ impl DocStoreClient for DocStoreDefault {
     }
 }
 
+// Collections keyed by name; documents keyed by id (BTreeMap gives queries a
+// deterministic id-ascending base order).
+type Collections = HashMap<String, BTreeMap<String, Value>>;
+
+fn to_document(id: &str, body: &Value) -> Result<Document> {
+    Ok(Document {
+        id: id.to_owned(),
+        data: serde_json::to_vec(body).context("serialize JSON body")?,
+    })
+}
+
+fn parse_body(doc: &Document) -> Result<Value> {
+    serde_json::from_slice(&doc.data).context("invalid JSON in document body")
+}
+
+fn parse_continuation(continuation: Option<&str>) -> Result<u64> {
+    continuation.map_or_else(
+        || Ok(0),
+        |s| s.parse().with_context(|| format!("invalid continuation token: {s:?}")),
+    )
+}
+
 // Take one page from the filtered/sorted rows, returning the continuation
 // token (the absolute index of the next row) when more rows remain.
 fn paginate(
@@ -166,24 +184,6 @@ fn paginate(
     let next = skip.saturating_add(page.len());
     let continuation = (next < total).then(|| next.to_string());
     (page, continuation)
-}
-
-fn parse_continuation(continuation: Option<&str>) -> Result<u64> {
-    continuation.map_or_else(
-        || Ok(0),
-        |s| s.parse().with_context(|| format!("invalid continuation token: {s:?}")),
-    )
-}
-
-fn parse_body(doc: &Document) -> Result<Value> {
-    serde_json::from_slice(&doc.data).context("invalid JSON in document body")
-}
-
-fn to_document(id: &str, body: &Value) -> Result<Document> {
-    Ok(Document {
-        id: id.to_owned(),
-        data: serde_json::to_vec(body).context("serialize JSON body")?,
-    })
 }
 
 #[cfg(test)]

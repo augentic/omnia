@@ -64,6 +64,12 @@ impl<T> HostLockerWithStore<T> for WasiVault {
     }
 }
 
+pub fn get_locker<T>(
+    accessor: &Accessor<T, WasiVault>, self_: &Resource<LockerProxy>,
+) -> Result<LockerProxy> {
+    Ok(omnia_core::get_cloned(accessor, self_)?)
+}
+
 impl Host for HostView<'_, dyn VaultClient> {
     fn convert_error(&mut self, err: Error) -> wasmtime::Result<Error> {
         Ok(err)
@@ -71,9 +77,3 @@ impl Host for HostView<'_, dyn VaultClient> {
 }
 
 impl HostLocker for HostView<'_, dyn VaultClient> {}
-
-pub fn get_locker<T>(
-    accessor: &Accessor<T, WasiVault>, self_: &Resource<LockerProxy>,
-) -> Result<LockerProxy> {
-    Ok(omnia_core::get_cloned(accessor, self_)?)
-}

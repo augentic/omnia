@@ -14,9 +14,6 @@ use tracing::instrument;
 use crate::host::KeyValueClient;
 use crate::host::resource::{Bucket, Cas, FutureResult};
 
-type BucketCache = Cache<String, Vec<u8>>;
-type KeyLocks = Arc<Mutex<HashMap<String, Weak<Mutex<()>>>>>;
-
 /// Default implementation for `wasi:keyvalue`.
 #[derive(Clone)]
 pub struct KeyValueDefault {
@@ -63,12 +60,6 @@ struct InMemBucket {
     locks: KeyLocks,
 }
 
-impl std::fmt::Debug for InMemBucket {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("InMemBucket").field("name", &self.name).finish_non_exhaustive()
-    }
-}
-
 impl InMemBucket {
     // Per-key, so writes and atomics serialize per key rather than per bucket.
     // `Weak` refs let unused keys drop their mutex; an entry is never removed
@@ -83,6 +74,12 @@ impl InMemBucket {
         let lock = Arc::new(Mutex::new(()));
         locks.insert(key.to_string(), Arc::downgrade(&lock));
         lock
+    }
+}
+
+impl std::fmt::Debug for InMemBucket {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("InMemBucket").field("name", &self.name).finish_non_exhaustive()
     }
 }
 
@@ -157,6 +154,9 @@ impl Bucket for InMemBucket {
         async move { Ok(result) }.boxed()
     }
 }
+
+type BucketCache = Cache<String, Vec<u8>>;
+type KeyLocks = Arc<Mutex<HashMap<String, Weak<Mutex<()>>>>>;
 
 fn add_i64(current: Option<&[u8]>, delta: i64) -> anyhow::Result<i64> {
     let base = match current {

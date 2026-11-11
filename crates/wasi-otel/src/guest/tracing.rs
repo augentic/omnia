@@ -90,6 +90,17 @@ impl otel::Tracer for Tracer {
     }
 }
 
+// a counter stands in should the random source fail, so an id is never the all-zero invalid one
+fn random<const N: usize>() -> [u8; N] {
+    let mut bytes = [0; N];
+    if getrandom::fill(&mut bytes).is_err() {
+        static NEXT: AtomicU64 = AtomicU64::new(1);
+        let counter = NEXT.fetch_add(1, Ordering::Relaxed).to_be_bytes();
+        bytes[N - counter.len()..].copy_from_slice(&counter);
+    }
+    bytes
+}
+
 /// A span in progress; it records until it ends, explicitly or on drop.
 #[derive(Debug)]
 pub struct Span {
@@ -193,17 +204,6 @@ impl Drop for Span {
     fn drop(&mut self) {
         self.end_at(SystemTime::now());
     }
-}
-
-// a counter stands in should the random source fail, so an id is never the all-zero invalid one
-fn random<const N: usize>() -> [u8; N] {
-    let mut bytes = [0; N];
-    if getrandom::fill(&mut bytes).is_err() {
-        static NEXT: AtomicU64 = AtomicU64::new(1);
-        let counter = NEXT.fetch_add(1, Ordering::Relaxed).to_be_bytes();
-        bytes[N - counter.len()..].copy_from_slice(&counter);
-    }
-    bytes
 }
 
 /// Export all buffered spans to the host.

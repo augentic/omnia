@@ -20,8 +20,6 @@ use crate::host::IdentityClient;
 pub use crate::host::generated::omnia::identity::credentials::AccessToken;
 use crate::host::resource::{FutureResult, Identity};
 
-type TokenResponse = StandardTokenResponse<EmptyExtraTokenFields, BasicTokenType>;
-
 #[derive(Clone, FromEnv)]
 pub struct ConnectOptions {
     #[env(from = "IDENTITY_CLIENT_ID")]
@@ -75,36 +73,6 @@ impl IdentityClient for IdentityDefault {
     }
 }
 
-impl From<TokenResponse> for AccessToken {
-    fn from(token_resp: TokenResponse) -> Self {
-        let token = token_resp.access_token().secret().clone();
-        let expires_in = token_resp.expires_in().unwrap_or(Duration::from_hours(1));
-
-        Self {
-            token,
-            expires_in: expires_in.as_secs(),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-struct CachedToken {
-    access_token: AccessToken,
-    expires_at: Instant,
-}
-
-impl CachedToken {
-    fn new(access_token: AccessToken) -> Self {
-        let ttl = Duration::from_secs(access_token.expires_in);
-        let expires_at = Instant::now() + ttl;
-
-        Self {
-            access_token,
-            expires_at,
-        }
-    }
-}
-
 #[derive(Debug, Clone)]
 struct TokenManager {
     options: Arc<ConnectOptions>,
@@ -112,14 +80,6 @@ struct TokenManager {
     // handed out for another
     // TODO: change to use wasi-keyvalue for distributed caching
     cache: Arc<Mutex<HashMap<Vec<String>, CachedToken>>>,
-}
-
-impl Identity for TokenManager {
-    fn get_token(&self, scopes: Vec<String>) -> FutureResult<AccessToken> {
-        tracing::debug!("getting token");
-        let token_manager = self.clone();
-        async move { token_manager.token(&scopes).await }.boxed()
-    }
 }
 
 impl TokenManager {
@@ -172,10 +132,50 @@ impl TokenManager {
     }
 }
 
+impl Identity for TokenManager {
+    fn get_token(&self, scopes: Vec<String>) -> FutureResult<AccessToken> {
+        tracing::debug!("getting token");
+        let token_manager = self.clone();
+        async move { token_manager.token(&scopes).await }.boxed()
+    }
+}
+
+#[derive(Debug, Clone)]
+struct CachedToken {
+    access_token: AccessToken,
+    expires_at: Instant,
+}
+
+impl CachedToken {
+    fn new(access_token: AccessToken) -> Self {
+        let ttl = Duration::from_secs(access_token.expires_in);
+        let expires_at = Instant::now() + ttl;
+
+        Self {
+            access_token,
+            expires_at,
+        }
+    }
+}
+
 // order- and duplicate-insensitive
 fn cache_key(scopes: &[String]) -> Vec<String> {
     let mut key = scopes.to_vec();
     key.sort_unstable();
     key.dedup();
     key
+}
+
+type TokenResponse = StandardTokenResponse<EmptyExtraTokenFields, BasicTokenType>;
+
+impl From<TokenResponse> for AccessToken {
+    fn from(token_resp: TokenResponse) -> Self {
+        let token = token_resp.access_token().secret().clone();
+        let expires_in = token_resp.expires_in().unwrap_or(Duration::from_hours(1));
+
+        Self {
+            token,
+            expires_in: expires_in.as_secs(),
+        }
+    }
 }

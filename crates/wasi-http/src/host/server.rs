@@ -311,8 +311,34 @@ where
     }
 }
 
-fn view<B: Provides<WasiHttp>>(store: &mut StoreCtx<B>) -> WasiHttpCtxView<'_> {
-    store.view::<WasiHttp>()
+// The sender drops once the body is consumed (or the wrapper dropped); its
+// receiver keeps `run_concurrent` alive while hyper streams the response.
+struct BodyDoneWrapper<B> {
+    body: B,
+    _tx: oneshot::Sender<()>,
+}
+
+impl<B> Body for BodyDoneWrapper<B>
+where
+    B: Body + Unpin,
+{
+    type Data = B::Data;
+    type Error = B::Error;
+
+    fn poll_frame(
+        self: Pin<&mut Self>, cx: &mut TaskContext<'_>,
+    ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
+        let inner = Pin::new(&mut self.get_mut().body);
+        inner.poll_frame(cx)
+    }
+
+    fn size_hint(&self) -> SizeHint {
+        self.body.size_hint()
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.body.is_end_stream()
+    }
 }
 
 // rebuild the uri with scheme and authority set, so they reach the guest
@@ -360,34 +386,24 @@ fn fix_request<T>(request: http::Request<T>) -> Result<http::Request<T>> {
     Ok(request)
 }
 
-// The sender drops once the body is consumed (or the wrapper dropped); its
-// receiver keeps `run_concurrent` alive while hyper streams the response.
-struct BodyDoneWrapper<B> {
-    body: B,
-    _tx: oneshot::Sender<()>,
+fn bad_request() -> hyper::Response<OutgoingBody> {
+    let body = Full::new(Bytes::from_static(b"Bad Request")).map_err(Into::into).boxed_unsync();
+
+    hyper::Response::builder()
+        .status(StatusCode::BAD_REQUEST)
+        .header("Content-Type", "text/plain; charset=UTF-8")
+        .body(body)
+        .expect("should build bad request response")
 }
 
-impl<B> Body for BodyDoneWrapper<B>
-where
-    B: Body + Unpin,
-{
-    type Data = B::Data;
-    type Error = B::Error;
+fn not_found() -> hyper::Response<OutgoingBody> {
+    let body = Full::new(Bytes::from_static(b"Not Found")).map_err(Into::into).boxed_unsync();
 
-    fn poll_frame(
-        self: Pin<&mut Self>, cx: &mut TaskContext<'_>,
-    ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
-        let inner = Pin::new(&mut self.get_mut().body);
-        inner.poll_frame(cx)
-    }
-
-    fn size_hint(&self) -> SizeHint {
-        self.body.size_hint()
-    }
-
-    fn is_end_stream(&self) -> bool {
-        self.body.is_end_stream()
-    }
+    hyper::Response::builder()
+        .status(StatusCode::NOT_FOUND)
+        .header("Content-Type", "text/plain; charset=UTF-8")
+        .body(body)
+        .expect("should build not found response")
 }
 
 const BODY: &str = r"<!doctype html>
@@ -414,22 +430,6 @@ fn internal_error() -> hyper::Response<OutgoingBody> {
         .expect("should build internal error response")
 }
 
-fn bad_request() -> hyper::Response<OutgoingBody> {
-    let body = Full::new(Bytes::from_static(b"Bad Request")).map_err(Into::into).boxed_unsync();
-
-    hyper::Response::builder()
-        .status(StatusCode::BAD_REQUEST)
-        .header("Content-Type", "text/plain; charset=UTF-8")
-        .body(body)
-        .expect("should build bad request response")
-}
-
-fn not_found() -> hyper::Response<OutgoingBody> {
-    let body = Full::new(Bytes::from_static(b"Not Found")).map_err(Into::into).boxed_unsync();
-
-    hyper::Response::builder()
-        .status(StatusCode::NOT_FOUND)
-        .header("Content-Type", "text/plain; charset=UTF-8")
-        .body(body)
-        .expect("should build not found response")
+fn view<B: Provides<WasiHttp>>(store: &mut StoreCtx<B>) -> WasiHttpCtxView<'_> {
+    store.view::<WasiHttp>()
 }

@@ -59,8 +59,6 @@ impl Error {
     }
 }
 
-omnia_core::host_error!(Error, Other);
-
 /// Host-side service for `wasi:sql`.
 #[derive(Debug, HostCtx)]
 #[host_ctx(client = SqlClient)]
@@ -81,3 +79,5 @@ pub trait SqlClient: Debug + Send + Sync + 'static {
     /// Open a connection to the database.
     fn open(&self, name: String) -> FutureResult<Arc<dyn Connection>>;
 }
+
+omnia_core::host_error!(Error, Other);

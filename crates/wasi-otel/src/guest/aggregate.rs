@@ -62,16 +62,6 @@ impl Measurement for f64 {
 /// winning for a duplicated key.
 pub type Attributes = Vec<KeyValue>;
 
-fn attribute_set(attributes: &[KeyValue]) -> Attributes {
-    attributes
-        .iter()
-        .map(|kv| (kv.key.clone(), kv.value.clone()))
-        .collect::<BTreeMap<_, _>>()
-        .into_iter()
-        .map(|(key, value)| KeyValue::new(key, value))
-        .collect()
-}
-
 /// The accumulator behind one instrument.
 pub trait Aggregate: fmt::Debug + Send + Sync + 'static {
     /// The measurement type the instrument records.
@@ -94,21 +84,6 @@ pub struct Sum<T> {
     start_time: SystemTime,
     monotonic: bool,
     delta: bool,
-}
-
-/// One collection of a [`Sum`].
-#[derive(Debug)]
-pub struct SumData<T> {
-    /// The total per attribute set.
-    pub points: Vec<(Attributes, T)>,
-    /// When the reported interval began.
-    pub start_time: SystemTime,
-    /// When the collection happened.
-    pub time: SystemTime,
-    /// Whether the totals only ever increase.
-    pub monotonic: bool,
-    /// Whether the totals cover only the interval since the last collection.
-    pub delta: bool,
 }
 
 impl<T> Sum<T> {
@@ -158,22 +133,36 @@ impl<T: Measurement> Aggregate for Sum<T> {
     }
 }
 
-/// The last value recorded per attribute set: a gauge.
-#[derive(Debug)]
-pub struct LastValue<T> {
-    values: HashMap<Attributes, T>,
-    start_time: SystemTime,
+fn attribute_set(attributes: &[KeyValue]) -> Attributes {
+    attributes
+        .iter()
+        .map(|kv| (kv.key.clone(), kv.value.clone()))
+        .collect::<BTreeMap<_, _>>()
+        .into_iter()
+        .map(|(key, value)| KeyValue::new(key, value))
+        .collect()
 }
 
-/// One collection of a [`LastValue`].
+/// One collection of a [`Sum`].
 #[derive(Debug)]
-pub struct GaugeData<T> {
-    /// The last value per attribute set recorded since the previous collection.
+pub struct SumData<T> {
+    /// The total per attribute set.
     pub points: Vec<(Attributes, T)>,
     /// When the reported interval began.
     pub start_time: SystemTime,
     /// When the collection happened.
     pub time: SystemTime,
+    /// Whether the totals only ever increase.
+    pub monotonic: bool,
+    /// Whether the totals cover only the interval since the last collection.
+    pub delta: bool,
+}
+
+/// The last value recorded per attribute set: a gauge.
+#[derive(Debug)]
+pub struct LastValue<T> {
+    values: HashMap<Attributes, T>,
+    start_time: SystemTime,
 }
 
 impl<T> LastValue<T> {
@@ -208,51 +197,23 @@ impl<T: Measurement> Aggregate for LastValue<T> {
     }
 }
 
-/// Explicit-bucket distributions per attribute set.
+/// One collection of a [`LastValue`].
 #[derive(Debug)]
-pub struct Histogram<T> {
-    bounds: Vec<f64>,
-    buckets: HashMap<Attributes, Buckets<T>>,
-    start_time: SystemTime,
-}
-
-#[derive(Debug)]
-struct Buckets<T> {
-    counts: Vec<u64>,
-    count: u64,
-    sum: T,
-    min: T,
-    max: T,
-}
-
-/// One collection of a [`Histogram`].
-#[derive(Debug)]
-pub struct HistogramData<T> {
-    /// The distribution per attribute set.
-    pub points: Vec<HistogramPoint<T>>,
-    /// The upper bounds of every bucket but the open-ended last one.
-    pub bounds: Vec<f64>,
+pub struct GaugeData<T> {
+    /// The last value per attribute set recorded since the previous collection.
+    pub points: Vec<(Attributes, T)>,
     /// When the reported interval began.
     pub start_time: SystemTime,
     /// When the collection happened.
     pub time: SystemTime,
 }
 
-/// The distribution recorded for one attribute set.
+/// Explicit-bucket distributions per attribute set.
 #[derive(Debug)]
-pub struct HistogramPoint<T> {
-    /// The attribute set.
-    pub attributes: Attributes,
-    /// How many values were recorded.
-    pub count: u64,
-    /// How many values fell into each bucket; one more than the bounds.
-    pub bucket_counts: Vec<u64>,
-    /// The sum of the recorded values.
-    pub sum: T,
-    /// The smallest recorded value.
-    pub min: T,
-    /// The largest recorded value.
-    pub max: T,
+pub struct Histogram<T> {
+    bounds: Vec<f64>,
+    buckets: HashMap<Attributes, Buckets<T>>,
+    start_time: SystemTime,
 }
 
 impl<T> Histogram<T> {
@@ -313,6 +274,45 @@ impl<T: Measurement> Aggregate for Histogram<T> {
             time: now,
         })
     }
+}
+
+#[derive(Debug)]
+struct Buckets<T> {
+    counts: Vec<u64>,
+    count: u64,
+    sum: T,
+    min: T,
+    max: T,
+}
+
+/// One collection of a [`Histogram`].
+#[derive(Debug)]
+pub struct HistogramData<T> {
+    /// The distribution per attribute set.
+    pub points: Vec<HistogramPoint<T>>,
+    /// The upper bounds of every bucket but the open-ended last one.
+    pub bounds: Vec<f64>,
+    /// When the reported interval began.
+    pub start_time: SystemTime,
+    /// When the collection happened.
+    pub time: SystemTime,
+}
+
+/// The distribution recorded for one attribute set.
+#[derive(Debug)]
+pub struct HistogramPoint<T> {
+    /// The attribute set.
+    pub attributes: Attributes,
+    /// How many values were recorded.
+    pub count: u64,
+    /// How many values fell into each bucket; one more than the bounds.
+    pub bucket_counts: Vec<u64>,
+    /// The sum of the recorded values.
+    pub sum: T,
+    /// The smallest recorded value.
+    pub min: T,
+    /// The largest recorded value.
+    pub max: T,
 }
 
 /// Whether histogram `bounds` are finite and strictly increasing.

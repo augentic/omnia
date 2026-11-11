@@ -42,8 +42,6 @@ impl<T> HostWithStore<T> for WasiSql {
     }
 }
 
-impl Host for HostView<'_, dyn SqlClient> {}
-
 pub fn get_connection<T>(
     accessor: &Accessor<T, WasiSql>, self_: &Resource<ConnectionProxy>,
 ) -> Result<ConnectionProxy> {
@@ -55,3 +53,5 @@ pub fn get_statement<T>(
 ) -> Result<Statement> {
     Ok(omnia_core::get_cloned(accessor, self_)?)
 }
+
+impl Host for HostView<'_, dyn SqlClient> {}

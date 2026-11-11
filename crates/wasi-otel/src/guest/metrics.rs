@@ -29,15 +29,6 @@ pub struct MeterProvider {
     registry: Arc<Registry>,
 }
 
-impl opentelemetry::metrics::MeterProvider for MeterProvider {
-    fn meter_with_scope(&self, scope: InstrumentationScope) -> Meter {
-        Meter::new(Arc::new(Instruments {
-            scope,
-            registry: Arc::clone(&self.registry),
-        }))
-    }
-}
-
 impl MeterProvider {
     // A scope without data points is left out, as is an instrument.
     fn collect(&self, now: SystemTime) -> Vec<wasi::ScopeMetrics> {
@@ -58,6 +49,15 @@ impl MeterProvider {
                 })
             })
             .collect()
+    }
+}
+
+impl opentelemetry::metrics::MeterProvider for MeterProvider {
+    fn meter_with_scope(&self, scope: InstrumentationScope) -> Meter {
+        Meter::new(Arc::new(Instruments {
+            scope,
+            registry: Arc::clone(&self.registry),
+        }))
     }
 }
 
@@ -392,6 +392,10 @@ impl<T: Number> From<SumData<T>> for wasi::AggregatedMetrics {
     }
 }
 
+fn convert(attributes: Vec<KeyValue>) -> Vec<wasi::KeyValue> {
+    attributes.into_iter().map(Into::into).collect()
+}
+
 impl<T: Number> From<GaugeData<T>> for wasi::AggregatedMetrics {
     fn from(gauge: GaugeData<T>) -> Self {
         T::aggregated(wasi::MetricData::Gauge(wasi::Gauge {
@@ -437,8 +441,4 @@ impl<T: Number> From<HistogramData<T>> for wasi::AggregatedMetrics {
             temporality: wasi::Temporality::Delta,
         }))
     }
-}
-
-fn convert(attributes: Vec<KeyValue>) -> Vec<wasi::KeyValue> {
-    attributes.into_iter().map(Into::into).collect()
 }

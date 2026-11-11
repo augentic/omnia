@@ -105,14 +105,6 @@ impl<T> HostFilterWithStore<T> for WasiDocStore {
     }
 }
 
-impl HostFilter for HostView<'_, dyn DocStoreClient> {}
-
-impl TypesHost for HostView<'_, dyn DocStoreClient> {
-    fn convert_error(&mut self, err: Error) -> wasmtime::Result<Error> {
-        Ok(err)
-    }
-}
-
 // consumes the child filter resources into one `and` / `or` node
 fn combine<T>(
     mut host: Access<'_, T, WasiDocStore>, filters: Vec<Resource<FilterProxy>>, verb: &str,
@@ -136,4 +128,12 @@ fn check_depth(tree: &FilterTree) -> wasmtime::Result<()> {
         "filter tree depth {depth} exceeds maximum of {MAX_FILTER_DEPTH}"
     );
     Ok(())
+}
+
+impl HostFilter for HostView<'_, dyn DocStoreClient> {}
+
+impl TypesHost for HostView<'_, dyn DocStoreClient> {
+    fn convert_error(&mut self, err: Error) -> wasmtime::Result<Error> {
+        Ok(err)
+    }
 }
