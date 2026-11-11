@@ -41,15 +41,84 @@ impl From<&Config> for Codegen {
     }
 }
 
-// no call is emitted for a key the invocation omits
-fn emit_main_options(config: &Config, has_manifest: bool) -> TokenStream {
-    let mode = config.mode.tokens();
-    let manifest = has_manifest.then(|| quote! { .manifest(manifest()) });
+fn emit_backends(host_entries: &[HostEntry]) -> (TokenStream, TokenStream) {
+    // order-preserving dedup: a backend shared by non-adjacent hosts must not
+    // emit two fields; parse validation made their options agree
+    let mut backends: Vec<(&Path, Option<&Expr>)> = Vec::new();
+    let mut slots: Vec<usize> = Vec::with_capacity(host_entries.len());
+    for entry in host_entries {
+        let key = path_key(&entry.backend);
+        let found = backends.iter().position(|(backend, _)| path_key(backend) == key);
+        slots.push(found.unwrap_or_else(|| {
+            backends.push((&entry.backend, entry.options.as_ref()));
+            backends.len() - 1
+        }));
+    }
 
+    // positional, so two backends sharing a type name never share a field
+    let idents: Vec<Ident> =
+        (0..backends.len()).map(|slot| format_ident!("backend_{slot}")).collect();
+    let types: Vec<&Path> = backends.iter().map(|(backend, _)| *backend).collect();
+
+    if idents.is_empty() {
+        return (quote! { () }, quote! {});
+    }
+
+    // `Host: Backend(options)` compiles the options in; a bare row connects
+    // from the environment.
+    let connects: Vec<TokenStream> = backends
+        .iter()
+        .map(|(ty, options)| {
+            options.map_or_else(
+                || quote! { <#ty as Connect>::connect() },
+                |options| quote! { <#ty as Connect>::connect_with(#options) },
+            )
+        })
+        .collect();
+
+    let host_impls: Vec<TokenStream> = host_entries
+        .iter()
+        .zip(&slots)
+        .map(|(entry, slot)| host_impl(&entry.host, &idents[*slot]))
+        .collect();
+
+    (
+        quote! { Backends },
+        quote! {
+            use omnia::Connect;
+
+            #[derive(Clone)]
+            struct Backends {#(
+                #idents: #types,
+            )*}
+
+            impl omnia::ConnectAll for Backends {
+                async fn connect() -> Result<Self> {
+                    let (#(#idents,)*) = tokio::try_join!(
+                        #(#connects,)*
+                    )?;
+                    Ok(Self { #(#idents,)* })
+                }
+            }
+
+            #(#host_impls)*
+        },
+    )
+}
+
+fn path_key(path: &Path) -> String {
+    path.to_token_stream().to_string()
+}
+
+// `&mut self.field` coerces to every carrier's `HostCtx::Borrow`, so
+// third-party hosts and re-exports work with no name surgery
+fn host_impl(host: &Path, field: &Ident) -> TokenStream {
     quote! {
-        omnia::MainOptions::new(#mode)
-            .program_name(env!("CARGO_PKG_NAME"))
-            #manifest
+        impl omnia::Provides<#host> for Backends {
+            fn borrow(&mut self) -> <#host as omnia::HostCtx>::Borrow<'_> {
+                &mut self.#field
+            }
+        }
     }
 }
 
@@ -158,84 +227,15 @@ fn emit_manifest_builder(manifest: &ManifestSpec) -> TokenStream {
     }
 }
 
-fn emit_backends(host_entries: &[HostEntry]) -> (TokenStream, TokenStream) {
-    // order-preserving dedup: a backend shared by non-adjacent hosts must not
-    // emit two fields; parse validation made their options agree
-    let mut backends: Vec<(&Path, Option<&Expr>)> = Vec::new();
-    let mut slots: Vec<usize> = Vec::with_capacity(host_entries.len());
-    for entry in host_entries {
-        let key = path_key(&entry.backend);
-        let found = backends.iter().position(|(backend, _)| path_key(backend) == key);
-        slots.push(found.unwrap_or_else(|| {
-            backends.push((&entry.backend, entry.options.as_ref()));
-            backends.len() - 1
-        }));
-    }
+// no call is emitted for a key the invocation omits
+fn emit_main_options(config: &Config, has_manifest: bool) -> TokenStream {
+    let mode = config.mode.tokens();
+    let manifest = has_manifest.then(|| quote! { .manifest(manifest()) });
 
-    // positional, so two backends sharing a type name never share a field
-    let idents: Vec<Ident> =
-        (0..backends.len()).map(|slot| format_ident!("backend_{slot}")).collect();
-    let types: Vec<&Path> = backends.iter().map(|(backend, _)| *backend).collect();
-
-    if idents.is_empty() {
-        return (quote! { () }, quote! {});
-    }
-
-    // `Host: Backend(options)` compiles the options in; a bare row connects
-    // from the environment.
-    let connects: Vec<TokenStream> = backends
-        .iter()
-        .map(|(ty, options)| {
-            options.map_or_else(
-                || quote! { <#ty as Connect>::connect() },
-                |options| quote! { <#ty as Connect>::connect_with(#options) },
-            )
-        })
-        .collect();
-
-    let host_impls: Vec<TokenStream> = host_entries
-        .iter()
-        .zip(&slots)
-        .map(|(entry, slot)| host_impl(&entry.host, &idents[*slot]))
-        .collect();
-
-    (
-        quote! { Backends },
-        quote! {
-            use omnia::Connect;
-
-            #[derive(Clone)]
-            struct Backends {#(
-                #idents: #types,
-            )*}
-
-            impl omnia::ConnectAll for Backends {
-                async fn connect() -> Result<Self> {
-                    let (#(#idents,)*) = tokio::try_join!(
-                        #(#connects,)*
-                    )?;
-                    Ok(Self { #(#idents,)* })
-                }
-            }
-
-            #(#host_impls)*
-        },
-    )
-}
-
-fn path_key(path: &Path) -> String {
-    path.to_token_stream().to_string()
-}
-
-// `&mut self.field` coerces to every carrier's `HostCtx::Borrow`, so
-// third-party hosts and re-exports work with no name surgery
-fn host_impl(host: &Path, field: &Ident) -> TokenStream {
     quote! {
-        impl omnia::Provides<#host> for Backends {
-            fn borrow(&mut self) -> <#host as omnia::HostCtx>::Borrow<'_> {
-                &mut self.#field
-            }
-        }
+        omnia::MainOptions::new(#mode)
+            .program_name(env!("CARGO_PKG_NAME"))
+            #manifest
     }
 }
 

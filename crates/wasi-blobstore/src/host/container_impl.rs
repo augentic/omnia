@@ -117,6 +117,12 @@ impl<T> HostContainerWithStore<T> for WasiBlobStore {
     }
 }
 
+pub fn get_container<T>(
+    accessor: &Accessor<T, WasiBlobStore>, self_: &Resource<ContainerProxy>,
+) -> Result<ContainerProxy> {
+    Ok(omnia_core::get_cloned(accessor, self_).context("Container not found")?)
+}
+
 impl<T> HostStreamObjectNamesWithStore<T> for WasiBlobStore {
     fn read_stream_object_names(
         accessor: &Accessor<T, Self>, self_: Resource<StreamObjectNames>, len: u64,
@@ -159,9 +165,3 @@ impl<T> HostStreamObjectNamesWithStore<T> for WasiBlobStore {
 impl Host for HostView<'_, dyn BlobStoreClient> {}
 impl HostContainer for HostView<'_, dyn BlobStoreClient> {}
 impl HostStreamObjectNames for HostView<'_, dyn BlobStoreClient> {}
-
-pub fn get_container<T>(
-    accessor: &Accessor<T, WasiBlobStore>, self_: &Resource<ContainerProxy>,
-) -> Result<ContainerProxy> {
-    Ok(omnia_core::get_cloned(accessor, self_).context("Container not found")?)
-}

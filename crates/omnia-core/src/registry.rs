@@ -97,11 +97,6 @@ impl From<String> for GuestId {
     }
 }
 
-// a remote variant will land with distributed transport
-enum Target<B: 'static> {
-    Local(InstancePre<StoreCtx<B>>),
-}
-
 /// A registered guest over the backend bundle `B`: an opaque identity bound
 /// to a resolution target.
 pub struct Guest<B: 'static> {
@@ -170,6 +165,33 @@ impl<B: 'static> Guest<B> {
     }
 }
 
+// a remote variant will land with distributed transport
+enum Target<B: 'static> {
+    Local(InstancePre<StoreCtx<B>>),
+}
+
+/// Inputs to [`Registry::assemble`], over the backend bundle `B`.
+pub struct RegistryParts<B: 'static> {
+    /// The shared engine.
+    pub engine: Engine,
+    /// The linker every guest pre-instantiates against, hosts linked.
+    pub linker: Linker<StoreCtx<B>>,
+    /// Runtime options.
+    pub options: RuntimeOptions,
+    /// The guests loaded at boot.
+    pub loaded: Vec<LoadedGuest>,
+    /// The deployment's other guests, each loaded from its source at first
+    /// use.
+    pub declared: Vec<Source>,
+    /// Per-trigger inbound route tables.
+    pub routes: Routes,
+    /// The guest→guest link seam.
+    pub seam: Arc<dyn LinkSeam<B>>,
+    /// Whether a deployment with no guests assembles (a dynamic deployment
+    /// registers them later).
+    pub allow_empty: bool,
+}
+
 /// One [`Engine`] + one `Linker` over the backend bundle `B`; many
 /// pre-instantiated guests keyed by identity.
 ///
@@ -202,28 +224,6 @@ pub struct Registry<B: 'static> {
     declared: BTreeMap<GuestId, Source>,
     routes: Routes,
     seam: Arc<dyn LinkSeam<B>>,
-}
-
-/// Inputs to [`Registry::assemble`], over the backend bundle `B`.
-pub struct RegistryParts<B: 'static> {
-    /// The shared engine.
-    pub engine: Engine,
-    /// The linker every guest pre-instantiates against, hosts linked.
-    pub linker: Linker<StoreCtx<B>>,
-    /// Runtime options.
-    pub options: RuntimeOptions,
-    /// The guests loaded at boot.
-    pub loaded: Vec<LoadedGuest>,
-    /// The deployment's other guests, each loaded from its source at first
-    /// use.
-    pub declared: Vec<Source>,
-    /// Per-trigger inbound route tables.
-    pub routes: Routes,
-    /// The guest→guest link seam.
-    pub seam: Arc<dyn LinkSeam<B>>,
-    /// Whether a deployment with no guests assembles (a dynamic deployment
-    /// registers them later).
-    pub allow_empty: bool,
 }
 
 impl<B: 'static> Registry<B> {

@@ -62,14 +62,6 @@ impl std::error::Error for InvokeError {
     }
 }
 
-struct AbortOnDrop<T>(JoinHandle<T>);
-
-impl<T> Drop for AbortOnDrop<T> {
-    fn drop(&mut self) {
-        self.0.abort();
-    }
-}
-
 /// Instantiate `call`'s component on a fresh store built at `ctx` and invoke
 /// its export with `args`, returning the results.
 ///
@@ -117,4 +109,12 @@ pub async fn call_fresh<B: Send + 'static>(
     }
 
     Ok(out)
+}
+
+struct AbortOnDrop<T>(JoinHandle<T>);
+
+impl<T> Drop for AbortOnDrop<T> {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
 }

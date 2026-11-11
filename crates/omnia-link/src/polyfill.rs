@@ -39,22 +39,6 @@ pub struct Caller {
     pub routes: Routes,
 }
 
-// Read from the calling store before the future is built, so no store borrow
-// crosses the dispatch.
-struct Origin {
-    chain: ChainCtx,
-    dispatcher: Arc<dyn Dispatcher>,
-}
-
-impl Origin {
-    fn of<B>(data: &StoreCtx<B>) -> Self {
-        Self {
-            chain: data.chain(),
-            dispatcher: data.dispatcher(),
-        }
-    }
-}
-
 /// Polyfill one component's imports outside the runtime's own namespaces
 /// ([`is_host`]) not already in `wired`, bound to `caller`.
 ///
@@ -178,6 +162,22 @@ pub fn polyfill_component<B: Send + 'static>(
         }));
     }
     Ok(())
+}
+
+// Read from the calling store before the future is built, so no store borrow
+// crosses the dispatch.
+struct Origin {
+    chain: ChainCtx,
+    dispatcher: Arc<dyn Dispatcher>,
+}
+
+impl Origin {
+    fn of<B>(data: &StoreCtx<B>) -> Self {
+        Self {
+            chain: data.chain(),
+            dispatcher: data.dispatcher(),
+        }
+    }
 }
 
 // One call: select the target, reject crossing handles, take a depth slot,

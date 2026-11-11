@@ -129,13 +129,6 @@ impl DocumentStore for MemoryDocs {
     }
 }
 
-fn to_host(doc: &Document) -> host::Document {
-    host::Document {
-        id: doc.id.clone(),
-        data: doc.data.clone(),
-    }
-}
-
 fn from_host(doc: host::Document) -> Document {
     Document {
         id: doc.id,
@@ -143,27 +136,10 @@ fn from_host(doc: host::Document) -> Document {
     }
 }
 
-fn scalar(value: ScalarValue) -> host::ScalarValue {
-    match value {
-        ScalarValue::Null => host::ScalarValue::Null,
-        ScalarValue::Bool(b) => host::ScalarValue::Boolean(b),
-        ScalarValue::Int32(i) => host::ScalarValue::Int32(i),
-        ScalarValue::Int64(i) => host::ScalarValue::Int64(i),
-        ScalarValue::Float64(f) => host::ScalarValue::Float64(f),
-        ScalarValue::Str(s) => host::ScalarValue::Str(s),
-        ScalarValue::Binary(b) => host::ScalarValue::Binary(b),
-        ScalarValue::Timestamp(t) => host::ScalarValue::Timestamp(t),
-    }
-}
-
-const fn op(op: ComparisonOp) -> host::ComparisonOp {
-    match op {
-        ComparisonOp::Eq => host::ComparisonOp::Eq,
-        ComparisonOp::Ne => host::ComparisonOp::Ne,
-        ComparisonOp::Gt => host::ComparisonOp::Gt,
-        ComparisonOp::Gte => host::ComparisonOp::Gte,
-        ComparisonOp::Lt => host::ComparisonOp::Lt,
-        ComparisonOp::Lte => host::ComparisonOp::Lte,
+fn to_host(doc: &Document) -> host::Document {
+    host::Document {
+        id: doc.id.clone(),
+        data: doc.data.clone(),
     }
 }
 
@@ -194,5 +170,29 @@ fn filter_tree(filter: Filter) -> FilterTree {
         Filter::And(children) => FilterTree::And(children.into_iter().map(filter_tree).collect()),
         Filter::Or(children) => FilterTree::Or(children.into_iter().map(filter_tree).collect()),
         Filter::Not(inner) => FilterTree::Not(Box::new(filter_tree(*inner))),
+    }
+}
+
+const fn op(op: ComparisonOp) -> host::ComparisonOp {
+    match op {
+        ComparisonOp::Eq => host::ComparisonOp::Eq,
+        ComparisonOp::Ne => host::ComparisonOp::Ne,
+        ComparisonOp::Gt => host::ComparisonOp::Gt,
+        ComparisonOp::Gte => host::ComparisonOp::Gte,
+        ComparisonOp::Lt => host::ComparisonOp::Lt,
+        ComparisonOp::Lte => host::ComparisonOp::Lte,
+    }
+}
+
+fn scalar(value: ScalarValue) -> host::ScalarValue {
+    match value {
+        ScalarValue::Null => host::ScalarValue::Null,
+        ScalarValue::Bool(b) => host::ScalarValue::Boolean(b),
+        ScalarValue::Int32(i) => host::ScalarValue::Int32(i),
+        ScalarValue::Int64(i) => host::ScalarValue::Int64(i),
+        ScalarValue::Float64(f) => host::ScalarValue::Float64(f),
+        ScalarValue::Str(s) => host::ScalarValue::Str(s),
+        ScalarValue::Binary(b) => host::ScalarValue::Binary(b),
+        ScalarValue::Timestamp(t) => host::ScalarValue::Timestamp(t),
     }
 }

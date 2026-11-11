@@ -173,14 +173,6 @@ pub trait IntoExit {
     fn into_exit(self) -> Result<(), u8>;
 }
 
-impl IntoExit for Response {
-    fn into_exit(self) -> Result<(), u8> {
-        write_channel(&mut std::io::stdout(), &self.stdout)?;
-        write_channel(&mut std::io::stderr(), &self.stderr)?;
-        if self.exit == 0 { Ok(()) } else { Err(self.exit) }
-    }
-}
-
 impl IntoExit for () {
     fn into_exit(self) -> Result<(), u8> {
         Ok(())
@@ -190,6 +182,24 @@ impl IntoExit for () {
 impl IntoExit for Result<(), u8> {
     fn into_exit(self) -> Result<(), u8> {
         self
+    }
+}
+
+impl IntoExit for Response {
+    fn into_exit(self) -> Result<(), u8> {
+        write_channel(&mut std::io::stdout(), &self.stdout)?;
+        write_channel(&mut std::io::stderr(), &self.stderr)?;
+        if self.exit == 0 { Ok(()) } else { Err(self.exit) }
+    }
+}
+
+fn write_channel(sink: &mut impl Write, bytes: &[u8]) -> Result<(), u8> {
+    match sink.write_all(bytes).and_then(|()| sink.flush()) {
+        Ok(()) => Ok(()),
+        // a reader that has gone away is the consumer's decision, not this command's failure
+        Err(error) if error.kind() == ErrorKind::BrokenPipe => Ok(()),
+        // anything else is unclassified, so it takes a `ServerError`'s exit
+        Err(error) => Err(crate::server_error!("process channel: {error}").exit_code()),
     }
 }
 
@@ -469,21 +479,6 @@ pub async fn execute_wasi<E: IntoExit>(entry: impl Future<Output = E>) {
         && code != 0
     {
         wasip3::cli::exit::exit_with_code(code);
-    }
-}
-
-// The environment variable carrying the metadata field `name` under `prefix`.
-fn env_key(prefix: &str, name: &str) -> String {
-    format!("{prefix}_{}", name.to_ascii_uppercase().replace('-', "_"))
-}
-
-fn write_channel(sink: &mut impl Write, bytes: &[u8]) -> Result<(), u8> {
-    match sink.write_all(bytes).and_then(|()| sink.flush()) {
-        Ok(()) => Ok(()),
-        // a reader that has gone away is the consumer's decision, not this command's failure
-        Err(error) if error.kind() == ErrorKind::BrokenPipe => Ok(()),
-        // anything else is unclassified, so it takes a `ServerError`'s exit
-        Err(error) => Err(crate::server_error!("process channel: {error}").exit_code()),
     }
 }
 
@@ -1062,4 +1057,9 @@ impl Metadata {
     pub fn from_env(prefix: &str) -> Self {
         Self::from_lookup(|name| std::env::var(env_key(prefix, name)).ok())
     }
+}
+
+// The environment variable carrying the metadata field `name` under `prefix`.
+fn env_key(prefix: &str, name: &str) -> String {
+    format!("{prefix}_{}", name.to_ascii_uppercase().replace('-', "_"))
 }

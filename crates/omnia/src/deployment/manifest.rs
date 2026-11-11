@@ -369,6 +369,15 @@ fn is_home_relative(path: &Path) -> bool {
     path.starts_with("~")
 }
 
+// The one resolution from a `[[guest]]` entry to its loadable source.
+fn source(entry: &GuestEntry) -> Source {
+    let source = Source::new(entry.name.as_str(), entry.source.clone());
+    match entry.digest {
+        Some(digest) => source.pinned(digest),
+        None => source,
+    }
+}
+
 /// The `[plugins]` table: where acquired packages are kept and how they are
 /// routed to a registry.
 ///
@@ -566,15 +575,6 @@ impl GuestEntry {
     pub const fn digest(mut self, digest: Digest) -> Self {
         self.digest = Some(digest);
         self
-    }
-}
-
-// The one resolution from a `[[guest]]` entry to its loadable source.
-fn source(entry: &GuestEntry) -> Source {
-    let source = Source::new(entry.name.as_str(), entry.source.clone());
-    match entry.digest {
-        Some(digest) => source.pinned(digest),
-        None => source,
     }
 }
 

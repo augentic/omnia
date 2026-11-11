@@ -131,24 +131,6 @@ impl From<anyhow::Error> for Error {
     }
 }
 
-// The default taxonomy: what the repository lacks is `not_found`, a remote
-// that cannot be reached is the gateway's, a location, working copy, or
-// label in the wrong state is the request's, and the rest is the host's.
-impl From<Error> for crate::Error {
-    fn from(error: Error) -> Self {
-        let code = error.code().to_owned();
-        let description = error.to_string();
-        match error {
-            Error::NotFound(_) => Self::NotFound { code, description },
-            Error::Access(_) => Self::BadGateway { code, description },
-            Error::Other(_) => Self::ServerError { code, description },
-            Error::NotARepository | Error::Exists(_) | Error::Pending(_) | Error::Diverged(_) => {
-                Self::BadRequest { code, description }
-            }
-        }
-    }
-}
-
 /// Version control (Omnia VCS).
 ///
 /// Every location is a deployment-local path resolved against the guest's
@@ -455,6 +437,24 @@ mod wire {
                 types::Error::Access(detail) => Self::Access(detail),
                 types::Error::Diverged(label) => Self::Diverged(label),
                 types::Error::Other(detail) => Self::Other(detail),
+            }
+        }
+    }
+}
+
+// The default taxonomy: what the repository lacks is `not_found`, a remote
+// that cannot be reached is the gateway's, a location, working copy, or
+// label in the wrong state is the request's, and the rest is the host's.
+impl From<Error> for crate::Error {
+    fn from(error: Error) -> Self {
+        let code = error.code().to_owned();
+        let description = error.to_string();
+        match error {
+            Error::NotFound(_) => Self::NotFound { code, description },
+            Error::Access(_) => Self::BadGateway { code, description },
+            Error::Other(_) => Self::ServerError { code, description },
+            Error::NotARepository | Error::Exists(_) | Error::Pending(_) | Error::Diverged(_) => {
+                Self::BadRequest { code, description }
             }
         }
     }

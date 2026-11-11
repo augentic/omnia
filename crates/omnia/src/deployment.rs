@@ -294,6 +294,19 @@ impl DeploymentBuilder {
     }
 }
 
+// Build the shared engine, WASI-linked linker, and runtime options.
+fn engine_and_linker<B: Send + 'static>() -> Result<(Engine, Linker<StoreCtx<B>>, RuntimeOptions)> {
+    let options = RuntimeOptions::load_env()?;
+    let engine = Engine::new(&Config::from(&options))?;
+
+    // register services with runtime's Linker
+    let mut linker = Linker::new(&engine);
+    omnia_core::wasmtime_wasi::p2::add_to_linker_async(&mut linker)?;
+    omnia_core::wasmtime_wasi::p3::add_to_linker(&mut linker)?;
+
+    Ok((engine, linker, options))
+}
+
 /// A compiled set of WebAssembly components with their shared Linker over the
 /// backend bundle `B`, ready to be [`host`]ed against WASI interfaces and
 /// assembled into a [`Registry`].
@@ -322,31 +335,6 @@ pub struct Deployment<B: 'static> {
     // every store's `RUST_LOG`
     rust_log: String,
     stdio: Option<Stdio>,
-}
-
-cfg_select! {
-    feature = "loader" => {
-        #[derive(Default)]
-        struct Loader {
-            // the package store's root; `None` keeps nothing fetched
-            store: Option<PathBuf>,
-            // `None` installs a `RegistryClient` over the store and the deployment's `registries`
-            registry: Option<Arc<dyn RegistrySource>>,
-        }
-
-        impl Loader {
-            fn registry(&self, config: Option<&str>) -> Result<Arc<dyn RegistrySource>> {
-                if let Some(registry) = &self.registry {
-                    return Ok(Arc::clone(registry));
-                }
-                Ok(match &self.store {
-                    Some(root) => Arc::new(RegistryClient::from_toml(config, FsStore::open(root))?),
-                    None => Arc::new(RegistryClient::from_toml(config, NoStore)?),
-                })
-            }
-        }
-    }
-    _ => {}
 }
 
 impl<B: Backends> Deployment<B> {
@@ -501,17 +489,29 @@ impl<B: Backends> Deployment<B> {
     }
 }
 
-// Build the shared engine, WASI-linked linker, and runtime options.
-fn engine_and_linker<B: Send + 'static>() -> Result<(Engine, Linker<StoreCtx<B>>, RuntimeOptions)> {
-    let options = RuntimeOptions::load_env()?;
-    let engine = Engine::new(&Config::from(&options))?;
+cfg_select! {
+    feature = "loader" => {
+        #[derive(Default)]
+        struct Loader {
+            // the package store's root; `None` keeps nothing fetched
+            store: Option<PathBuf>,
+            // `None` installs a `RegistryClient` over the store and the deployment's `registries`
+            registry: Option<Arc<dyn RegistrySource>>,
+        }
 
-    // register services with runtime's Linker
-    let mut linker = Linker::new(&engine);
-    omnia_core::wasmtime_wasi::p2::add_to_linker_async(&mut linker)?;
-    omnia_core::wasmtime_wasi::p3::add_to_linker(&mut linker)?;
-
-    Ok((engine, linker, options))
+        impl Loader {
+            fn registry(&self, config: Option<&str>) -> Result<Arc<dyn RegistrySource>> {
+                if let Some(registry) = &self.registry {
+                    return Ok(Arc::clone(registry));
+                }
+                Ok(match &self.store {
+                    Some(root) => Arc::new(RegistryClient::from_toml(config, FsStore::open(root))?),
+                    None => Arc::new(RegistryClient::from_toml(config, NoStore)?),
+                })
+            }
+        }
+    }
+    _ => {}
 }
 
 #[cfg(test)]

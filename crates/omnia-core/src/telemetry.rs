@@ -180,6 +180,11 @@ impl Telemetry {
     }
 }
 
+// read once per build so `directives` stays pure over its inputs
+fn rust_log() -> Option<String> {
+    env::var("RUST_LOG").ok()
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Exports {
     traces: bool,
@@ -205,47 +210,73 @@ fn exports(endpoint: Option<&str>, env: impl Fn(&str) -> Option<String>) -> Expo
     }
 }
 
-/// The run's tracing directives: the verbosity flag composed with `RUST_LOG`.
-///
-/// The global level is `level` when one is selected, else the bare level
-/// `rust_log` carries, else `fallback` when it carries no directive at all;
-/// every targeted directive (`tower=off`, `omnia_core=trace`, `[span]=debug`)
-/// in `rust_log` follows it.
-///
-/// A selected level displaces only `rust_log`'s bare level, so a flag steps
-/// the run's level without discarding the operator's refinements. A token
-/// that is neither is reported on stderr and dropped, as `EnvFilter` drops
-/// it on a bare run; the result always parses.
-#[must_use]
-#[expect(clippy::print_stderr, reason = "the subscriber this composes is not installed yet")]
-pub fn directives(
-    level: Option<LevelFilter>, fallback: LevelFilter, rust_log: Option<&str>,
-) -> String {
-    let tokens = tokens(rust_log);
-    for (token, error) in &tokens.invalid {
-        eprintln!("ignoring `RUST_LOG` directive `{token}`: {error}");
-    }
-
-    tokens
-        .bare(level, fallback)
-        .map(|level| level.to_string())
-        .into_iter()
-        .chain(tokens.targeted.iter().map(|&token| token.to_owned()))
-        .collect::<Vec<_>>()
-        .join(",")
+struct Providers {
+    resource: Resource,
+    tracer: SdkTracerProvider,
+    meter: SdkMeterProvider,
 }
 
-/// The bare level the run's directives lead with.
-///
-/// `level` when one is selected, else the bare level `rust_log` carries,
-/// else `fallback` when it carries no directive at all — the level
-/// [`directives`] renders first over the same inputs — and `None` when
-/// `rust_log` names targets alone, so no bare level governs the run.
-#[must_use]
-pub fn bare(
-    level: Option<LevelFilter>, fallback: LevelFilter, rust_log: Option<&str>,
-) -> Option<LevelFilter> {
-    tokens(rust_log).bare(level, fallback)
+impl Providers {
+    // Built whatever exports: guest telemetry grafts onto the resource and
+    // tracer, and a provider with no processor or reader drops what it gets.
+    fn build(name: &str, endpoint: Option<&str>, exports: Exports) -> Result<Self> {
+        let resource = resource_for(name);
+        Ok(Self {
+            tracer: build_traces(endpoint, resource.clone(), exports.traces)?,
+            meter: build_metrics(endpoint, resource.clone(), exports.metrics)?,
+            resource,
+        })
+    }
+
+    fn publish(self) -> Result<()> {
+        global::set_meter_provider(self.meter.clone());
+        global::set_tracer_provider(self.tracer.clone());
+        PROVIDERS.set(self).map_err(|_providers| anyhow!("telemetry providers already installed"))
+    }
+}
+
+fn resource_for(name: &str) -> Resource {
+    Resource::builder()
+        .with_service_name(name.to_string())
+        .with_attributes(vec![
+            KeyValue::new("service.namespace", name.to_string()),
+            KeyValue::new("service.version", env!("CARGO_PKG_VERSION")),
+            KeyValue::new(
+                "service.instance.id",
+                env::var("HOSTNAME").unwrap_or_else(|_| "unknown".to_string()),
+            ),
+            KeyValue::new("telemetry.sdk.name", "opentelemetry"),
+            KeyValue::new("instrumentation.provider", "opentelemetry"),
+        ])
+        .build()
+}
+
+fn build_traces(
+    endpoint: Option<&str>, resource: Resource, export: bool,
+) -> Result<SdkTracerProvider> {
+    let mut provider = SdkTracerProvider::builder().with_resource(resource);
+    if export {
+        let mut exporter = SpanExporter::builder().with_tonic();
+        if let Some(endpoint) = endpoint {
+            exporter = exporter.with_endpoint(endpoint);
+        }
+        provider = provider.with_batch_exporter(exporter.build()?);
+    }
+    Ok(provider.build())
+}
+
+fn build_metrics(
+    endpoint: Option<&str>, resource: Resource, export: bool,
+) -> Result<SdkMeterProvider> {
+    let mut provider = SdkMeterProvider::builder().with_resource(resource);
+    if export {
+        let mut exporter = MetricExporter::builder().with_tonic();
+        if let Some(endpoint) = endpoint {
+            exporter = exporter.with_endpoint(endpoint);
+        }
+        provider = provider.with_periodic_exporter(exporter.build()?);
+    }
+    Ok(provider.build())
 }
 
 // the refinement is per-layer so it never disables a span
@@ -285,6 +316,50 @@ fn target(directive: &str) -> Option<&str> {
     (!target.is_empty()).then_some(target)
 }
 
+// `directives` plus the noisy-dependency mutes; `tower` is muted whole since
+// it narrates every buffered request through `reqwest` as well as `tonic`
+fn filter(directives: &str) -> Result<EnvFilter> {
+    Ok(EnvFilter::builder()
+        .parse(directives)?
+        .add_directive("hyper=off".parse()?)
+        .add_directive("h2=off".parse()?)
+        .add_directive("tower=off".parse()?)
+        .add_directive("tonic=off".parse()?)
+        .add_directive("opentelemetry=off".parse()?)
+        .add_directive("opentelemetry_sdk=off".parse()?)
+        .add_directive("omnia_wasi_otel=off".parse()?))
+}
+
+/// The run's tracing directives: the verbosity flag composed with `RUST_LOG`.
+///
+/// The global level is `level` when one is selected, else the bare level
+/// `rust_log` carries, else `fallback` when it carries no directive at all;
+/// every targeted directive (`tower=off`, `omnia_core=trace`, `[span]=debug`)
+/// in `rust_log` follows it.
+///
+/// A selected level displaces only `rust_log`'s bare level, so a flag steps
+/// the run's level without discarding the operator's refinements. A token
+/// that is neither is reported on stderr and dropped, as `EnvFilter` drops
+/// it on a bare run; the result always parses.
+#[must_use]
+#[expect(clippy::print_stderr, reason = "the subscriber this composes is not installed yet")]
+pub fn directives(
+    level: Option<LevelFilter>, fallback: LevelFilter, rust_log: Option<&str>,
+) -> String {
+    let tokens = tokens(rust_log);
+    for (token, error) in &tokens.invalid {
+        eprintln!("ignoring `RUST_LOG` directive `{token}`: {error}");
+    }
+
+    tokens
+        .bare(level, fallback)
+        .map(|level| level.to_string())
+        .into_iter()
+        .chain(tokens.targeted.iter().map(|&token| token.to_owned()))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
 // The tokens of a `RUST_LOG`: its bare level (the last, as `EnvFilter`
 // reads one), its targeted directives, and the tokens that are neither.
 struct Tokens<'a> {
@@ -322,9 +397,17 @@ fn tokens(rust_log: Option<&str>) -> Tokens<'_> {
     tokens
 }
 
-// read once per build so `directives` stays pure over its inputs
-fn rust_log() -> Option<String> {
-    env::var("RUST_LOG").ok()
+/// The bare level the run's directives lead with.
+///
+/// `level` when one is selected, else the bare level `rust_log` carries,
+/// else `fallback` when it carries no directive at all — the level
+/// [`directives`] renders first over the same inputs — and `None` when
+/// `rust_log` names targets alone, so no bare level governs the run.
+#[must_use]
+pub fn bare(
+    level: Option<LevelFilter>, fallback: LevelFilter, rust_log: Option<&str>,
+) -> Option<LevelFilter> {
+    tokens(rust_log).bare(level, fallback)
 }
 
 /// Whether the host console colours its lines: stderr is a terminal and
@@ -342,87 +425,13 @@ fn colour(terminal: bool, no_color: Option<&str>) -> bool {
     terminal && no_color.is_none_or(str::is_empty)
 }
 
-// `directives` plus the noisy-dependency mutes; `tower` is muted whole since
-// it narrates every buffered request through `reqwest` as well as `tonic`
-fn filter(directives: &str) -> Result<EnvFilter> {
-    Ok(EnvFilter::builder()
-        .parse(directives)?
-        .add_directive("hyper=off".parse()?)
-        .add_directive("h2=off".parse()?)
-        .add_directive("tower=off".parse()?)
-        .add_directive("tonic=off".parse()?)
-        .add_directive("opentelemetry=off".parse()?)
-        .add_directive("opentelemetry_sdk=off".parse()?)
-        .add_directive("omnia_wasi_otel=off".parse()?))
-}
-
-struct Providers {
-    resource: Resource,
-    tracer: SdkTracerProvider,
-    meter: SdkMeterProvider,
-}
-
-impl Providers {
-    // Built whatever exports: guest telemetry grafts onto the resource and
-    // tracer, and a provider with no processor or reader drops what it gets.
-    fn build(name: &str, endpoint: Option<&str>, exports: Exports) -> Result<Self> {
-        let resource = resource_for(name);
-        Ok(Self {
-            tracer: build_traces(endpoint, resource.clone(), exports.traces)?,
-            meter: build_metrics(endpoint, resource.clone(), exports.metrics)?,
-            resource,
-        })
+/// Flush batched telemetry to the exporters.
+///
+/// A no-op when telemetry was never installed.
+pub fn flush() {
+    if let Some(providers) = PROVIDERS.get() {
+        flush_providers(&providers.tracer, &providers.meter);
     }
-
-    fn publish(self) -> Result<()> {
-        global::set_meter_provider(self.meter.clone());
-        global::set_tracer_provider(self.tracer.clone());
-        PROVIDERS.set(self).map_err(|_providers| anyhow!("telemetry providers already installed"))
-    }
-}
-
-fn build_traces(
-    endpoint: Option<&str>, resource: Resource, export: bool,
-) -> Result<SdkTracerProvider> {
-    let mut provider = SdkTracerProvider::builder().with_resource(resource);
-    if export {
-        let mut exporter = SpanExporter::builder().with_tonic();
-        if let Some(endpoint) = endpoint {
-            exporter = exporter.with_endpoint(endpoint);
-        }
-        provider = provider.with_batch_exporter(exporter.build()?);
-    }
-    Ok(provider.build())
-}
-
-fn build_metrics(
-    endpoint: Option<&str>, resource: Resource, export: bool,
-) -> Result<SdkMeterProvider> {
-    let mut provider = SdkMeterProvider::builder().with_resource(resource);
-    if export {
-        let mut exporter = MetricExporter::builder().with_tonic();
-        if let Some(endpoint) = endpoint {
-            exporter = exporter.with_endpoint(endpoint);
-        }
-        provider = provider.with_periodic_exporter(exporter.build()?);
-    }
-    Ok(provider.build())
-}
-
-fn resource_for(name: &str) -> Resource {
-    Resource::builder()
-        .with_service_name(name.to_string())
-        .with_attributes(vec![
-            KeyValue::new("service.namespace", name.to_string()),
-            KeyValue::new("service.version", env!("CARGO_PKG_VERSION")),
-            KeyValue::new(
-                "service.instance.id",
-                env::var("HOSTNAME").unwrap_or_else(|_| "unknown".to_string()),
-            ),
-            KeyValue::new("telemetry.sdk.name", "opentelemetry"),
-            KeyValue::new("instrumentation.provider", "opentelemetry"),
-        ])
-        .build()
 }
 
 // force-flush rather than shut down, so export continues and repeated flushes are safe
@@ -436,15 +445,6 @@ fn settle(signal: &str, result: OTelSdkResult) {
     match result {
         Ok(()) | Err(OTelSdkError::AlreadyShutdown) => {}
         Err(error) => tracing::debug!(%error, "telemetry: {signal} flush failed"),
-    }
-}
-
-/// Flush batched telemetry to the exporters.
-///
-/// A no-op when telemetry was never installed.
-pub fn flush() {
-    if let Some(providers) = PROVIDERS.get() {
-        flush_providers(&providers.tracer, &providers.meter);
     }
 }
 

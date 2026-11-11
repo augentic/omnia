@@ -4,16 +4,6 @@
 
 use crate::{DeploymentBuilder, LevelFilter, Mode};
 
-// The scale the flags step along, quietest first.
-const LADDER: [LevelFilter; 6] = [
-    LevelFilter::OFF,
-    LevelFilter::ERROR,
-    LevelFilter::WARN,
-    LevelFilter::INFO,
-    LevelFilter::DEBUG,
-    LevelFilter::TRACE,
-];
-
 /// The levels a run's verbosity flags select, each `None` when they select
 /// nothing.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -70,6 +60,16 @@ pub fn level(default: LevelFilter, verbose: u8, quiet: u8) -> Option<LevelFilter
         _ => None,
     }
 }
+
+// The scale the flags step along, quietest first.
+const LADDER: [LevelFilter; 6] = [
+    LevelFilter::OFF,
+    LevelFilter::ERROR,
+    LevelFilter::WARN,
+    LevelFilter::INFO,
+    LevelFilter::DEBUG,
+    LevelFilter::TRACE,
+];
 
 /// The `(verbose, quiet)` counts the verbosity flags in `args` carry.
 ///

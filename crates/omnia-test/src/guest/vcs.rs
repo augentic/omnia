@@ -13,12 +13,6 @@ pub struct ScriptedVcs {
     script: Script<SeenVcs, Result<VcsTurn, vcs::Error>>,
 }
 
-impl Default for ScriptedVcs {
-    fn default() -> Self {
-        Self::new([])
-    }
-}
-
 impl ScriptedVcs {
     /// A script of ordered version-control turn results.
     pub fn new(turns: impl IntoIterator<Item = Result<VcsTurn, vcs::Error>>) -> Self {
@@ -69,6 +63,12 @@ impl ScriptedVcs {
             path: PathBuf::from(path),
             args,
         })
+    }
+}
+
+impl Default for ScriptedVcs {
+    fn default() -> Self {
+        Self::new([])
     }
 }
 

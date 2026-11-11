@@ -44,22 +44,6 @@ pub struct Question<T> {
     answer: PhantomData<fn() -> T>,
 }
 
-impl<T> Clone for Question<T> {
-    fn clone(&self) -> Self {
-        Self {
-            request: self.request.clone(),
-            correction: Arc::clone(&self.correction),
-            answer: PhantomData,
-        }
-    }
-}
-
-impl<T> fmt::Debug for Question<T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Question").field("request", &self.request).finish_non_exhaustive()
-    }
-}
-
 impl<T: JsonSchema + DeserializeOwned + Send> Question<T> {
     /// A question steered by `T`'s schema under `name`, with `check` set.
     #[must_use]
@@ -223,6 +207,22 @@ impl<T: JsonSchema + DeserializeOwned + Send> Question<T> {
             }
             (Err(error), _, _) => Err(error),
         }
+    }
+}
+
+impl<T> Clone for Question<T> {
+    fn clone(&self) -> Self {
+        Self {
+            request: self.request.clone(),
+            correction: Arc::clone(&self.correction),
+            answer: PhantomData,
+        }
+    }
+}
+
+impl<T> fmt::Debug for Question<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Question").field("request", &self.request).finish_non_exhaustive()
     }
 }
 

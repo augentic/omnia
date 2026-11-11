@@ -19,12 +19,6 @@ pub struct Broadcasted {
     pub sockets: Option<Vec<String>>,
 }
 
-#[derive(Debug, Default)]
-struct SinkInner {
-    sent: Mutex<Vec<(String, Message)>>,
-    broadcasts: Mutex<Vec<Broadcasted>>,
-}
-
 /// Records every published message and broadcast; clones share one log.
 ///
 /// ```
@@ -82,6 +76,12 @@ impl Broadcast for Sink {
         });
         ready(Ok(()))
     }
+}
+
+#[derive(Debug, Default)]
+struct SinkInner {
+    sent: Mutex<Vec<(String, Message)>>,
+    broadcasts: Mutex<Vec<Broadcasted>>,
 }
 
 /// Configuration from a map; an unknown key is an error, as it is on the

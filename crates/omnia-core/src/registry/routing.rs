@@ -49,15 +49,6 @@ pub trait MatchStrategy {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct PrefixMatch;
 
-/// NATS-style wildcard matching: `.`-tokenised, `*` matches one token, `>`
-/// matches one or more trailing tokens.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct PatternMatch;
-
-/// Exact string matching, used for CLI subcommands.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct ExactMatch;
-
 impl MatchStrategy for PrefixMatch {
     fn matches(key: &str, pattern: &str) -> bool {
         path_has_prefix(key, pattern)
@@ -68,11 +59,52 @@ impl MatchStrategy for PrefixMatch {
     }
 }
 
+// segment-aware: `/a` matches `/a` and `/a/b` but not `/ab`
+fn path_has_prefix(path: &str, prefix: &str) -> bool {
+    path.strip_prefix(prefix)
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with('/') || prefix.ends_with('/'))
+}
+
+/// NATS-style wildcard matching: `.`-tokenised, `*` matches one token, `>`
+/// matches one or more trailing tokens.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct PatternMatch;
+
 impl MatchStrategy for PatternMatch {
     fn matches(key: &str, pattern: &str) -> bool {
         topic_matches(key, pattern)
     }
 }
+
+// NATS-style: `*` matches exactly one `.`-token, a trailing `>` one or more
+fn topic_matches(topic: &str, pattern: &str) -> bool {
+    let mut topic_tokens = topic.split('.');
+    let mut pattern_tokens = pattern.split('.').peekable();
+
+    while let Some(token) = pattern_tokens.next() {
+        match token {
+            ">" => return pattern_tokens.peek().is_none() && topic_tokens.next().is_some(),
+            "*" => {
+                if topic_tokens.next().is_none() {
+                    return false;
+                }
+            }
+            literal => {
+                if topic_tokens.next() != Some(literal) {
+                    return false;
+                }
+            }
+        }
+    }
+
+    // Every pattern token matched; it is a full match only if the topic is also
+    // exhausted (equal token counts).
+    topic_tokens.next().is_none()
+}
+
+/// Exact string matching, used for CLI subcommands.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ExactMatch;
 
 impl MatchStrategy for ExactMatch {
     fn matches(key: &str, pattern: &str) -> bool {
@@ -337,38 +369,6 @@ impl<R: Resolver> TriggerRouter<R> {
     pub const fn catch_all(&self) -> Option<&GuestId> {
         self.router.catch_all()
     }
-}
-
-// segment-aware: `/a` matches `/a` and `/a/b` but not `/ab`
-fn path_has_prefix(path: &str, prefix: &str) -> bool {
-    path.strip_prefix(prefix)
-        .is_some_and(|rest| rest.is_empty() || rest.starts_with('/') || prefix.ends_with('/'))
-}
-
-// NATS-style: `*` matches exactly one `.`-token, a trailing `>` one or more
-fn topic_matches(topic: &str, pattern: &str) -> bool {
-    let mut topic_tokens = topic.split('.');
-    let mut pattern_tokens = pattern.split('.').peekable();
-
-    while let Some(token) = pattern_tokens.next() {
-        match token {
-            ">" => return pattern_tokens.peek().is_none() && topic_tokens.next().is_some(),
-            "*" => {
-                if topic_tokens.next().is_none() {
-                    return false;
-                }
-            }
-            literal => {
-                if topic_tokens.next() != Some(literal) {
-                    return false;
-                }
-            }
-        }
-    }
-
-    // Every pattern token matched; it is a full match only if the topic is also
-    // exhausted (equal token counts).
-    topic_tokens.next().is_none()
 }
 
 #[cfg(test)]

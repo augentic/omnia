@@ -101,12 +101,6 @@ struct InMemContainer {
     created_at: SystemTime,
 }
 
-#[derive(Debug, Clone)]
-struct Object {
-    data: Bytes,
-    created_at: SystemTime,
-}
-
 impl InMemContainer {
     fn new(name: String) -> Self {
         Self {
@@ -239,4 +233,10 @@ impl Container for InMemContainer {
         }
         .boxed()
     }
+}
+
+#[derive(Debug, Clone)]
+struct Object {
+    data: Bytes,
+    created_at: SystemTime,
 }

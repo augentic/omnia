@@ -56,15 +56,6 @@ pub struct Plugins {
     admission: Box<dyn Admission>,
 }
 
-// One of the deployment's mounts as a path load sees it: the handle it
-// reads through, and whether the guest can write beneath it.
-#[derive(Debug)]
-struct Root {
-    name: String,
-    dir: Arc<Dir>,
-    writable: bool,
-}
-
 impl Plugins {
     /// Install the loader capability on `runtime`: its mounts are the roots
     /// a path load resolves against — the read-only ones as code roots, the
@@ -187,6 +178,15 @@ impl Plugins {
         check_subpath(path, subpath)?;
         Ok((Arc::clone(&root.dir), subpath.to_owned()))
     }
+}
+
+// One of the deployment's mounts as a path load sees it: the handle it
+// reads through, and whether the guest can write beneath it.
+#[derive(Debug)]
+struct Root {
+    name: String,
+    dir: Arc<Dir>,
+    writable: bool,
 }
 
 // Refuses a writable mount that shares or nests a read-only mount's

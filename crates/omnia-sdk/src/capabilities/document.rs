@@ -32,6 +32,20 @@ pub trait DocumentStore: Send + Sync {
     ) -> impl Future<Output = Result<QueryResult>> + Send;
 }
 
+/// Typed reads over any [`DocumentStore`].
+///
+/// Blanket-implemented for every [`DocumentStore`]; never implemented by hand.
+pub trait DocumentStoreExt: DocumentStore {
+    /// Fetch a document by id and decode its JSON body as `T`.
+    fn get_as<T: DeserializeOwned>(
+        &self, store: &str, id: &str,
+    ) -> impl Future<Output = Result<Option<T>>> + Send {
+        async move { self.get(store, id).await?.map(|document| document.decode()).transpose() }
+    }
+}
+
+impl<P: DocumentStore + ?Sized> DocumentStoreExt for P {}
+
 #[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
 impl DocumentStore for crate::WasiProvider {
     async fn get(&self, store: &str, id: &str) -> Result<Option<Document>> {
@@ -54,20 +68,6 @@ impl DocumentStore for crate::WasiProvider {
         omnia_wasi_docstore::store::query(store, options).await
     }
 }
-
-/// Typed reads over any [`DocumentStore`].
-///
-/// Blanket-implemented for every [`DocumentStore`]; never implemented by hand.
-pub trait DocumentStoreExt: DocumentStore {
-    /// Fetch a document by id and decode its JSON body as `T`.
-    fn get_as<T: DeserializeOwned>(
-        &self, store: &str, id: &str,
-    ) -> impl Future<Output = Result<Option<T>>> + Send {
-        async move { self.get(store, id).await?.map(|document| document.decode()).transpose() }
-    }
-}
-
-impl<P: DocumentStore + ?Sized> DocumentStoreExt for P {}
 
 impl<P: DocumentStore> crate::api::Context<P> {
     /// Borrow the provider as a [`DocumentStore`].

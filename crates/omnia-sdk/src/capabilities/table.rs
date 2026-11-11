@@ -31,6 +31,27 @@ pub trait TableStore: Send + Sync {
     ) -> impl Future<Output = Result<u32>> + Send;
 }
 
+/// Typed row decoding over any [`TableStore`].
+///
+/// Blanket-implemented for every [`TableStore`]; never implemented by hand.
+pub trait TableStoreExt: TableStore {
+    /// Executes a query and decodes each returned row through [`FromRow`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails or any row cannot be decoded as `T`.
+    fn query_as<T: FromRow>(
+        &self, conn_name: &str, query: &str, params: &[DataType],
+    ) -> impl Future<Output = Result<Vec<T>>> + Send {
+        async move {
+            let rows = self.query(conn_name, query, params).await?;
+            rows.iter().map(T::from_row).collect()
+        }
+    }
+}
+
+impl<P: TableStore + ?Sized> TableStoreExt for P {}
+
 #[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
 impl TableStore for crate::WasiProvider {
     async fn query(&self, conn_name: &str, query: &str, params: &[DataType]) -> Result<Vec<Row>> {
@@ -63,35 +84,6 @@ async fn prepare(
         .await
         .map_err(|e| anyhow::anyhow!("failed to prepare statement: {}", e.trace()))?;
     Ok((conn, stmt))
-}
-
-/// Typed row decoding over any [`TableStore`].
-///
-/// Blanket-implemented for every [`TableStore`]; never implemented by hand.
-pub trait TableStoreExt: TableStore {
-    /// Executes a query and decodes each returned row through [`FromRow`].
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the query fails or any row cannot be decoded as `T`.
-    fn query_as<T: FromRow>(
-        &self, conn_name: &str, query: &str, params: &[DataType],
-    ) -> impl Future<Output = Result<Vec<T>>> + Send {
-        async move {
-            let rows = self.query(conn_name, query, params).await?;
-            rows.iter().map(T::from_row).collect()
-        }
-    }
-}
-
-impl<P: TableStore + ?Sized> TableStoreExt for P {}
-
-impl<P: TableStore> crate::api::Context<P> {
-    /// Borrow the provider as a [`TableStore`].
-    #[must_use]
-    pub fn tables(&self) -> &impl TableStore {
-        &*self.provider
-    }
 }
 
 // conversions between the target-independent records and the bindings
@@ -155,5 +147,13 @@ mod wire {
                 fields: row.fields.into_iter().map(Into::into).collect(),
             }
         }
+    }
+}
+
+impl<P: TableStore> crate::api::Context<P> {
+    /// Borrow the provider as a [`TableStore`].
+    #[must_use]
+    pub fn tables(&self) -> &impl TableStore {
+        &*self.provider
     }
 }

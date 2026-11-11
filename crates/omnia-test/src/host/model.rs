@@ -10,8 +10,6 @@ use omnia_wasi_model::{
 
 use crate::{Exchange, Script, Seen, SeenFormat, SeenWorker};
 
-const CHECK_TOOL: &str = "check";
-
 /// One step a scripted turn drives through the session before answering.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Step {
@@ -97,12 +95,6 @@ pub struct ScriptedModel {
     exchanges: Arc<Mutex<Vec<Exchange>>>,
     lent: Arc<Mutex<Vec<Option<PathBuf>>>>,
     limits: Limits,
-}
-
-impl Default for ScriptedModel {
-    fn default() -> Self {
-        Self::replying([])
-    }
 }
 
 impl ScriptedModel {
@@ -314,6 +306,12 @@ impl ScriptedModel {
     }
 }
 
+impl Default for ScriptedModel {
+    fn default() -> Self {
+        Self::replying([])
+    }
+}
+
 impl ModelClient for ScriptedModel {
     fn complete(&self, request: Request, tool_host: Arc<dyn ToolHost>) -> FutureResult<Answer> {
         self.lent.lock().expect("lent lock").push(tool_host.local_path().map(Path::to_path_buf));
@@ -350,6 +348,8 @@ impl ModelClient for ScriptedModel {
         self.limits
     }
 }
+
+const CHECK_TOOL: &str = "check";
 
 impl From<&Request> for Seen {
     fn from(request: &Request) -> Self {

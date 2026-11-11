@@ -22,18 +22,6 @@ pub struct Statement {
     pub params: Vec<DataType>,
 }
 
-struct Rule<T> {
-    matches: Predicate,
-    outcome: T,
-}
-
-#[derive(Default)]
-struct Inner {
-    queries: Mutex<Vec<Rule<Vec<Row>>>>,
-    execs: Mutex<Vec<Rule<u32>>>,
-    statements: Mutex<Vec<Statement>>,
-}
-
 /// SQL `query`/`exec` answered by the first matching predicate; every
 /// statement is recorded and an unmatched one panics naming it.
 ///
@@ -52,16 +40,6 @@ struct Inner {
 #[derive(Clone, Default)]
 pub struct ScriptedTables {
     inner: Arc<Inner>,
-}
-
-impl fmt::Debug for ScriptedTables {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ScriptedTables")
-            .field("queries", &self.inner.queries.lock().map_or(0, |q| q.len()))
-            .field("execs", &self.inner.execs.lock().map_or(0, |e| e.len()))
-            .field("statements", &self.statements())
-            .finish()
-    }
 }
 
 impl ScriptedTables {
@@ -129,6 +107,16 @@ impl ScriptedTables {
     }
 }
 
+impl fmt::Debug for ScriptedTables {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ScriptedTables")
+            .field("queries", &self.inner.queries.lock().map_or(0, |q| q.len()))
+            .field("execs", &self.inner.execs.lock().map_or(0, |e| e.len()))
+            .field("statements", &self.statements())
+            .finish()
+    }
+}
+
 // panics when no rule matches the statement
 impl TableStore for ScriptedTables {
     fn query(
@@ -150,4 +138,16 @@ impl TableStore for ScriptedTables {
         });
         ready(Ok(affected))
     }
+}
+
+#[derive(Default)]
+struct Inner {
+    queries: Mutex<Vec<Rule<Vec<Row>>>>,
+    execs: Mutex<Vec<Rule<u32>>>,
+    statements: Mutex<Vec<Statement>>,
+}
+
+struct Rule<T> {
+    matches: Predicate,
+    outcome: T,
 }
