@@ -326,15 +326,7 @@ fn parse_millis(value: &str) -> ParseResult<Duration> {
 
 #[cfg(test)]
 mod tests {
-    use super::{CompileOptions, Enabled, RuntimeOptions, parse_enabled};
-
-    // an artifact compiled under the defaults loads into a runtime whose
-    // environment sets none of the compile-affecting variables
-    #[test]
-    fn compile_options_default_is_env_default() {
-        let options = RuntimeOptions::load_env().expect("should load");
-        assert_eq!(options.compile_options(), CompileOptions::default());
-    }
+    use super::{Enabled, RuntimeOptions, parse_enabled};
 
     #[test]
     fn parse_enabled_values() {

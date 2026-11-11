@@ -1,7 +1,7 @@
-// The host-mediated interface for the link dispatch suite. One plain and one
-// async-typed function, so importer guests can use different subsets: the
-// componentizer prunes unused imports, making each guest's view of `ops` an
-// arbitrary slice the host must union at function granularity.
+// The host-mediated interfaces for the link dispatch suite. `ops` has one
+// plain and one async-typed function, so importer guests can use different
+// subsets: the componentizer prunes unused imports, making each guest's view
+// of `ops` an arbitrary slice the host must union at function granularity.
 package omnia-test:link;
 
 interface ops {
@@ -11,6 +11,19 @@ interface ops {
 
     /// The async-typed dual of `ping`.
     ping-async: async func(target: string, message: string) -> string;
+}
+
+/// A signature carrying a resource below its top level, which no call can
+/// relay across the seam.
+interface tokens {
+    resource token;
+
+    record wrapped {
+        n: u32,
+        t: token,
+    }
+
+    take: func(w: option<wrapped>);
 }
 
 /// Serves `ops`; no trigger of its own, reachable only via dispatch.
@@ -44,6 +57,12 @@ world full {
     import ops;
     export poke: func(message: string) -> string;
     export poke-async: async func(message: string) -> string;
+}
+
+/// Imports `tokens`, whose `take` nests a resource in an optional record.
+world handle {
+    import tokens;
+    export poke: func();
 }
 
 /// Requests plugin loads through `omnia:plugins/loader` and drives the

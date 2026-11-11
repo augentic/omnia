@@ -6,7 +6,7 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use futures::FutureExt as _;
 use omnia::{ExitStatus, FutureResult, Provides, Telemetry};
@@ -172,7 +172,33 @@ async fn otel_axum_handler() {
 
 #[tokio::test]
 async fn otel_span_tree() {
+    let unix_nanos = || {
+        let since_epoch = SystemTime::now().duration_since(UNIX_EPOCH).expect("clock past epoch");
+        u64::try_from(since_epoch.as_nanos()).expect("nanos fit u64")
+    };
+    let before = unix_nanos();
     let recording = run_guest(test_programs::OTEL_SPAN_TREE).await;
+    let after = unix_nanos();
+
+    // One export under one resource, grouped by scope in first-ended order:
+    // the `tracing` bridge's layer scope, then the API tracer's own with its
+    // schema URL.
+    let traces = recording.traces.lock().expect("traces lock").clone();
+    let [export] = traces.as_slice() else {
+        panic!("one flush exports one trace request, got {}", traces.len());
+    };
+    let [resource] = export.resource_spans.as_slice() else {
+        panic!("one resource, got {}", export.resource_spans.len());
+    };
+    let scopes: Vec<_> = resource
+        .scope_spans
+        .iter()
+        .map(|group| {
+            let name = group.scope.as_ref().map_or("", |scope| scope.name.as_str());
+            (name, group.schema_url.as_str(), group.spans.len())
+        })
+        .collect();
+    assert_eq!(scopes, [("global", "", 3), ("guest", "https://guest", 1)]);
 
     let spans = recording.spans();
     let find = |name: &str| {
@@ -181,16 +207,17 @@ async fn otel_span_tree() {
             .find(|(_, span)| span.name == name)
             .unwrap_or_else(|| panic!("span `{name}` exported"))
     };
-    assert_eq!(spans.len(), 3, "spans: {:?}", recording.span_names());
+    assert_eq!(spans.len(), 4, "spans: {:?}", recording.span_names());
     let (parent_scope, parent) = find("parent");
     let (child_scope, child) = find("child");
+    let (sibling_scope, sibling) = find("sibling");
     let (api_scope, api) = find("api");
 
     // The `tracing` bridge's spans sit in the layer's scope; the API span in
     // the tracer's own.
     assert_eq!(
-        (parent_scope.as_str(), child_scope.as_str(), api_scope.as_str()),
-        ("global", "global", "guest")
+        (parent_scope.as_str(), child_scope.as_str(), sibling_scope.as_str(), api_scope.as_str()),
+        ("global", "global", "global", "guest")
     );
 
     // One trace: the host's, which re-parents the guest's root to its live
@@ -198,11 +225,16 @@ async fn otel_span_tree() {
     assert!(!parent.parent_span_id.is_empty(), "the root is grafted onto the host span");
     assert_ne!(parent.parent_span_id, parent.span_id);
     assert_eq!(child.parent_span_id, parent.span_id);
+    assert_eq!(sibling.parent_span_id, parent.span_id);
     assert_eq!(api.parent_span_id, parent.span_id);
     assert!(spans.iter().all(|(_, span)| span.trace_id == parent.trace_id));
-    assert!(
-        child.start_time_unix_nano > 0 && child.end_time_unix_nano >= child.start_time_unix_nano
-    );
+
+    // Every guest timestamp lands, seconds and nanoseconds combined, inside
+    // the run's own wall-clock window.
+    for (_, span) in &spans {
+        let (start, end) = (span.start_time_unix_nano, span.end_time_unix_nano);
+        assert!(before <= start && start <= end && end <= after, "`{}`: {start}..{end}", span.name);
+    }
 
     // The child's field, event, and the error status the event implies.
     assert_eq!(attribute(&child.attributes, "answer"), Some(&AnyValue::IntValue(42)));

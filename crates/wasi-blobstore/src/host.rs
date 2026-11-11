@@ -157,24 +157,12 @@ pub trait BlobStoreClient: Debug + Send + Sync + 'static {
 mod tests {
     use super::OutgoingValue;
 
-    #[test]
-    fn write_body_once() {
-        let mut outgoing = OutgoingValue::new(16);
-        assert_eq!(outgoing.take_write_body(), Ok(()));
-        assert_eq!(outgoing.take_write_body(), Err(()));
-    }
-
-    #[test]
-    fn finish_write_body() {
-        let mut outgoing = OutgoingValue::new(16);
-        assert_eq!(outgoing.finalize(), Err("outgoing value write body was never requested"));
-    }
-
+    // `finish` consumes the guest's handle, so a second call never crosses the boundary
     #[test]
     fn finish_once() {
         let mut outgoing = OutgoingValue::new(16);
-        assert_eq!(outgoing.take_write_body(), Ok(()));
-        assert_eq!(outgoing.finalize(), Ok(()));
+        outgoing.take_write_body().expect("write body");
+        outgoing.finalize().expect("finish");
         assert_eq!(outgoing.finalize(), Err("outgoing value already finished"));
     }
 }

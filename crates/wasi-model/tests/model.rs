@@ -124,16 +124,19 @@ fn workspace_turn() -> ScriptedModel {
 
 // what a fully served `workspace_turn` records
 fn workspace_exchanges() -> Vec<Exchange> {
-    let exchange = |tool: &str, path: &str, outcome: &str| Exchange {
+    vec![
+        workspace_exchange("read", "seed.txt", "hello"),
+        workspace_exchange("write", "out.txt", ""),
+        workspace_exchange("list", "", "out.txt,seed.txt"),
+    ]
+}
+
+fn workspace_exchange(tool: &str, path: &str, outcome: &str) -> Exchange {
+    Exchange {
         tool: tool.into(),
         arguments: path.into(),
         outcome: Ok(outcome.into()),
-    };
-    vec![
-        exchange("read", "seed.txt", "hello"),
-        exchange("write", "out.txt", ""),
-        exchange("list", "", "out.txt,seed.txt"),
-    ]
+    }
 }
 
 // ------------------------------------------------------------------------
@@ -398,19 +401,57 @@ async fn model_out_of_order_results() {
 async fn model_workspace_tools() {
     let workspace = scratch();
     fs::write(workspace.path().join("seed.txt"), "hello").expect("seeding workspace");
+    fs::create_dir(workspace.path().join("docs")).expect("creating docs dir");
+    fs::write(workspace.path().join("docs").join("a.txt"), "a").expect("seeding docs");
 
-    let model = run_scripted(
-        test_programs::MODEL_WORKSPACE_TOOLS,
-        vec![workspace.mount(true)],
-        workspace_turn(),
-    )
-    .await;
+    let model = ScriptedModel::answering(["hello:docs,out.txt,seed.txt"])
+        .reading(0, "seed.txt")
+        .writing(0, "out.txt", "written")
+        .listing(0, "")
+        .listing(0, "docs");
+    let model =
+        run_scripted(test_programs::MODEL_WORKSPACE_TOOLS, vec![workspace.mount(true)], model)
+            .await;
 
-    // The host-injected tools read the seed and listed the root; the write
-    // landed on the real filesystem, and `local_path` resolved to this mount.
-    assert_eq!(model.exchanges(), workspace_exchanges());
+    // The host-injected tools read the seed and listed the root and a
+    // subdirectory; the write landed on the real filesystem, and
+    // `local_path` resolved to this mount.
+    assert_eq!(
+        model.exchanges(),
+        [
+            workspace_exchange("read", "seed.txt", "hello"),
+            workspace_exchange("write", "out.txt", ""),
+            workspace_exchange("list", "", "docs,out.txt,seed.txt"),
+            workspace_exchange("list", "docs", "a.txt"),
+        ]
+    );
     assert_eq!(fs::read_to_string(workspace.path().join("out.txt")).expect("out.txt"), "written");
     assert_eq!(model.lent(), [Some(workspace.path().to_path_buf())]);
+}
+
+#[tokio::test]
+async fn model_workspace_limits() {
+    // the host's private caps: 4 MiB read and write, 4096 listed entries
+    const MAX_BYTES: usize = 4 * 1024 * 1024;
+    const MAX_LIST_ENTRIES: usize = 4096;
+
+    let workspace = scratch();
+    fs::write(workspace.path().join("big.bin"), vec![0_u8; MAX_BYTES + 1])
+        .expect("seeding big.bin");
+    for i in 0..MAX_LIST_ENTRIES {
+        fs::write(workspace.path().join(format!("{i}.txt")), []).expect("seeding entries");
+    }
+
+    let model = ScriptedModel::answering(["read", "write", "list"])
+        .reading(0, "big.bin")
+        .writing(1, "out.bin", vec![0_u8; MAX_BYTES + 1])
+        .listing(2, "");
+    let model =
+        run_scripted(test_programs::MODEL_WORKSPACE_LIMITS, vec![workspace.mount(true)], model)
+            .await;
+
+    assert!(model.exchanges().is_empty(), "every capped step fails hard");
+    assert!(!workspace.path().join("out.bin").exists(), "the oversize write never lands");
 }
 
 #[tokio::test]

@@ -117,20 +117,4 @@ mod tests {
         let grandchild = policy().enter(&child, &callee()).expect("within depth");
         assert_eq!((grandchild.depth, grandchild.uncapped), (2, true));
     }
-
-    // A server root's hops run capped, and the hop past the bound is refused
-    // naming the target and the option that raises it.
-    #[test]
-    fn over_depth() {
-        let root = ChainCtx::server();
-        let child = policy().enter(&root, &callee()).expect("within depth");
-        assert!(!child.uncapped);
-        let grandchild = policy().enter(&child, &callee()).expect("at the bound");
-
-        let error = policy().enter(&grandchild, &callee()).expect_err("over the bound");
-        let text = error.to_string();
-        for needle in ["depth 3", "maximum 2", "`callee`", "MAX_DISPATCH_DEPTH"] {
-            assert!(text.contains(needle), "`{needle}` missing from: {text}");
-        }
-    }
 }

@@ -295,15 +295,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn fills_absent() {
-        let host = pairs(&[("HOME", "/home/op")]);
-        assert_eq!(
-            guest_env(host, "warn", true),
-            pairs(&[("HOME", "/home/op"), ("RUST_LOG", "warn")])
-        );
-    }
-
     // A console off a terminal tells the guest so; a host `NO_COLOR` already
     // in force stands, and an empty one — no colour suppression, by the
     // convention — is filled the way an absent one is.

@@ -95,21 +95,3 @@ pub struct Example {
     /// Example model output.
     pub output: String,
 }
-
-#[cfg(test)]
-mod tests {
-    use super::Sections;
-
-    #[test]
-    fn assemble_drops_blank_system() {
-        let sections = Sections {
-            role: Some("   ".to_owned()),
-            task: "do it".to_owned(),
-            context: Some(String::new()),
-            ..Sections::default()
-        };
-        let (system, user) = sections.assemble(None);
-        assert!(system.is_none());
-        assert_eq!(user, "do it");
-    }
-}

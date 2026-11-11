@@ -20,8 +20,8 @@ use omnia::wasmtime::Engine;
 use omnia::wasmtime::component::Val;
 use omnia::{
     AcquireError, ChainCtx, CompileOptions, DeploymentBuilder, Digest, ExitStatus, GuestEntry,
-    GuestId, LoadError, Location, Manifest, Mode, Mount, NoStore, PluginLoader as _, PluginsConfig,
-    RegistryClient, RegistryConfig, RegistrySource, Runtime, SourceSpec,
+    GuestId, LoadError, Location, Manifest, Mode, Mount, NoStore, PluginLoader as _, Plugins,
+    PluginsConfig, RegistryClient, RegistryConfig, RegistrySource, Runtime, SourceSpec,
 };
 use omnia_test::host::{Backends, Scratch, scratch};
 use omnia_wasi_otel::WasiOtel;
@@ -563,7 +563,8 @@ async fn plugins_load_registry() {
 
 // The refusal matrix over requester-named locations, one run per row, over
 // a deployment mounting the scratch directory read-only as `.`: a path that
-// escapes, a missing file, junk, a pre-compiled artifact, a malformed or
+// escapes or is not plain (the mount itself, a `.` or empty segment, a
+// backslash), a missing file, junk, a pre-compiled artifact, a malformed or
 // mismatched pin, a stem the deployment declares (the requester itself,
 // loaded and running), and a declared name pinned by the call. Nothing a
 // row names is ever admitted — the requester stays the registry's one
@@ -577,9 +578,13 @@ async fn location_refused() {
     precompile(&scratch, "native.bin", test_programs::LINK_ECHOER);
     let other = Digest::of(b"other bytes").to_string();
 
-    let rows: [&[&str]; 9] = [
+    let rows: [&[&str]; 13] = [
         &["path", "../plugin.wasm", "refused", "plain relative path"],
         &["path", "/etc/passwd", "refused", "plain relative path"],
+        &["path", ".", "refused", "plain relative path"],
+        &["path", "././plugin.wasm", "refused", "plain relative path"],
+        &["path", "adapters//plugin.wasm", "refused", "plain relative path"],
+        &["path", "adapters\\plugin.wasm", "refused", "plain relative path"],
         &["path", "absent.wasm", "unavailable", "reading component"],
         &["path", "junk.wasm", "refused", "validating `junk`"],
         &["path", "native.bin", "refused", "admits raw wasm alone"],
@@ -645,7 +650,7 @@ async fn writable_mount_refused() {
 
 // A writable mount that shares or nests a read-only mount's directory
 // refuses at assembly, naming both: written through one view, a component
-// would load through the other.
+// would load through the other. Mounts of one permission nest freely.
 #[tokio::test]
 async fn overlap_refused_at_install() {
     let scratch = scratch();
@@ -670,9 +675,59 @@ async fn overlap_refused_at_install() {
         assert!(detail.contains("read-only mount"), "{detail}");
     }
 
-    let manifest =
-        requester(test_programs::PLUGINS_LOAD).mounts([scratch.mount(false), out(false)]);
-    boot(manifest, &[]).await.expect("two read-only mounts may nest").shutdown();
+    for writable in [false, true] {
+        let manifest =
+            requester(test_programs::PLUGINS_LOAD).mounts([scratch.mount(writable), out(writable)]);
+        boot(manifest, &[]).await.expect("same-permission mounts may nest").shutdown();
+    }
+}
+
+// macOS firmlinks the data volume at `/System/Volumes/Data`, the one second
+// path with its own canonical form a test reaches unprivileged: mounting the
+// scratch directory through both is still one directory, told apart by
+// identity rather than path.
+#[cfg(target_os = "macos")]
+#[tokio::test]
+async fn overlap_across_firmlink() {
+    let scratch = scratch();
+    let root = scratch.path().canonicalize().expect("canonical scratch dir");
+    let relative = root.strip_prefix("/").expect("a canonical path is absolute");
+    let alias = Path::new("/System/Volumes/Data").join(relative);
+    assert_ne!(
+        alias.canonicalize().expect("the firmlinked path resolves"),
+        root,
+        "the firmlink keeps a canonical path of its own"
+    );
+
+    let manifest = requester(test_programs::PLUGINS_LOAD).mounts([
+        Mount {
+            name: ".".to_owned(),
+            path: root,
+            writable: false,
+        },
+        Mount {
+            name: "out".to_owned(),
+            path: alias,
+            writable: true,
+        },
+    ]);
+    let Err(error) = boot(manifest, &[]).await else {
+        panic!("one directory through two paths is refused");
+    };
+    let detail = format!("{error:#}");
+    assert!(detail.contains("writable mount"), "{detail}");
+}
+
+// Malformed `registries` TOML fails assembly, not the first load.
+#[tokio::test]
+async fn malformed_registries() {
+    let manifest = requester(test_programs::PLUGINS_LOAD)
+        .registries(RegistryConfig::contents("[namespace_registries"));
+    let Err(error) = boot(manifest, &[]).await else {
+        panic!("malformed TOML is refused");
+    };
+    let detail = format!("{error:#}");
+    assert!(detail.contains("`registries` configuration"), "{detail}");
 }
 
 // The deployment's `registries` outranks the registry a load names: a
@@ -749,12 +804,23 @@ async fn plugins_unlinked() {
 }
 
 // Plugin without link: the requester imports no `ops`, loads a host-only
-// handler and exits, then the host drives it through the Dispatcher.
+// handler and exits, then the host drives it through the Dispatcher. The
+// requester is the CLI's `run <component>` shape: the file is read at
+// startup, so it loads at boot under its stem and is the sole exporter. The
+// assembled runtime already carries the loader, so a second install refuses.
 #[tokio::test]
 async fn plugins_host_only() {
-    let manifest = requester(test_programs::PLUGINS_HOST_ONLY)
+    let manifest = Manifest::from_wasm(test_programs::PLUGINS_HOST_ONLY)
+        .expect("the component is read")
         .guest(GuestEntry::new("plugin", test_programs::LINK_ECHOER));
     let runtime = boot(manifest, &[]).await.expect("assembling runtime");
+    assert_eq!(
+        recorded(&runtime, "plugins_host_only"),
+        Registered::Active(digest_of(test_programs::PLUGINS_HOST_ONLY)),
+        "the requester loaded at boot under its file stem"
+    );
+    let error = Plugins::install(&runtime).expect_err("the loader is installed once");
+    assert!(format!("{error:#}").contains("installs exactly once"), "{error:#}");
 
     let status = runtime.run_command().await.expect("deployment runs");
     assert_eq!(status, ExitStatus::SUCCESS, "the requester's load held");
@@ -907,16 +973,27 @@ fn wit_copies_stay_identical() {
 }
 
 // Compile-time proof that the macro's inline keys lower into the manifest
-// data this crate consumes: a `package` guest with a `digest`, named by its
-// reference, and the `plugins` block with the store that keeps it and the
-// `registries` contents that route it. The macro's snapshot suite pins the
-// expansion shape; this pins the types and the carried data.
+// data this crate consumes: a `package` guest with a `digest` and a route
+// list per trigger, named by its reference; a named package pinned in
+// uppercase hex; and the `plugins` block with the store that keeps them and
+// the `registries` contents that route them. The macro's snapshot suite pins
+// the expansion shape; this pins the types and the carried data.
 mod loader_grammar {
     omnia::runtime!({
         guests: [
             {
                 package: "acme:tool@1.2.3",
                 digest: "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                routes: {
+                    http: ["/", concat!("/", "api")],
+                    messaging: ["orders.>"],
+                    websocket: ["chat.*"],
+                },
+            },
+            {
+                name: "pinned",
+                package: "acme:tool@2.0.0",
+                digest: "sha256:E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855",
             },
         ],
         plugins: {
@@ -940,12 +1017,19 @@ fn loader_grammar() {
         }),
         "the store is carried as written; `~/` expands when the deployment builds"
     );
-    let [tool] = manifest.guests.as_slice() else {
-        panic!("one guest: {:?}", manifest.guests);
+    let [tool, pinned] = manifest.guests.as_slice() else {
+        panic!("two guests: {:?}", manifest.guests);
     };
     assert_eq!(tool.name, "acme:tool", "the reference without its version");
     assert_eq!(tool.digest, Some(Digest::of(b"")), "the empty input's digest, as written");
     assert!(matches!(&tool.source, SourceSpec::Package(package) if package == "acme:tool@1.2.3"));
+    assert_eq!(tool.routes.http, ["/", "/api"], "a macro-valued pattern lands as its value");
+    assert_eq!(tool.routes.messaging, ["orders.>"]);
+    assert_eq!(tool.routes.websocket, ["chat.*"]);
+
+    assert_eq!(pinned.name, "pinned", "a `name:` overrides the reference");
+    assert_eq!(pinned.digest, Some(Digest::of(b"")), "uppercase hex decodes to the same digest");
+    assert!(matches!(&pinned.source, SourceSpec::Package(package) if package == "acme:tool@2.0.0"));
 }
 
 // the file the deployment's store keeps the echoer package under
@@ -1074,17 +1158,27 @@ async fn named_endpoint_never_stored() {
 
 // The store is where loaded code comes from, so it is refused beneath a
 // writable mount at assembly — whether the directory exists yet or not,
-// since a guest could create it through the mount.
+// since a guest could create it through the mount. A relative store is
+// placed against the current directory rather than refused for its absent
+// parent; the refusal fires at build, so nothing is written there.
 #[tokio::test]
 async fn store_beneath_writable_refused() {
     let scratch = scratch();
     let present = scratch.path().join("present");
     std::fs::create_dir_all(&present).expect("creating the present store");
     let absent = scratch.path().join("missing").join("store");
+    let cwd = Mount {
+        name: ".".to_owned(),
+        path: std::env::current_dir().expect("a current directory"),
+        writable: true,
+    };
 
-    for store in [present, absent] {
-        let manifest =
-            requester(test_programs::PLUGINS_LOAD).store(&store).mounts([scratch.mount(true)]);
+    for (store, mount) in [
+        (present, scratch.mount(true)),
+        (absent, scratch.mount(true)),
+        (PathBuf::from("omnia-no-such-store/store"), cwd),
+    ] {
+        let manifest = requester(test_programs::PLUGINS_LOAD).store(&store).mounts([mount]);
         let Err(error) = deployment(manifest, &["declared", "requester"]).await else {
             panic!("a store beneath a writable mount at {} is refused", store.display());
         };
@@ -1106,9 +1200,49 @@ async fn store_beneath_writable_refused() {
     );
 }
 
-// A leading `~/` on the store or a mount is the operator's home, expanded
-// against `$HOME` when the deployment builds — here overlaid onto the
-// scratch directory, so the release staged beneath it is what loads.
+// A manifest file's relative paths resolve against its own directory, and
+// an unnamed guest is named by its file's stem or its package reference
+// without the version. The test process runs elsewhere, so the requester
+// loading, the package routing through `registries.path`, and the release
+// landing in `store` each prove one resolution.
+#[tokio::test]
+async fn manifest_file() {
+    let scratch = scratch();
+    stage(&scratch, "requester.wasm", test_programs::PLUGINS_LOAD);
+    let registry = scratch.path().join("registry");
+    stage_package(&registry, ECHOER_PACKAGE, test_programs::LINK_ECHOER);
+    scratch.write("wasm-pkg.toml", local_registry_toml(&registry));
+    std::fs::create_dir(scratch.path().join("code")).expect("creating the mount");
+    scratch.write(
+        "omnia.toml",
+        format!(
+            "[[guest]]\nsource.path = \"requester.wasm\"\ncommand = true\n\n\
+             [[guest]]\nsource.package = \"{ECHOER_PACKAGE}\"\n\n\
+             [[mount]]\nname = \"code\"\npath = \"code\"\n\n\
+             [plugins]\nstore = \"store\"\nregistries.path = \"wasm-pkg.toml\"\n"
+        ),
+    );
+
+    let manifest = Manifest::load(scratch.path().join("omnia.toml")).expect("the manifest loads");
+    let names: Vec<_> = manifest.guests.iter().map(|guest| guest.name.as_str()).collect();
+    assert_eq!(names, ["requester", ECHOER_NAME]);
+    assert_eq!(manifest.mounts[0].path, scratch.path().join("code"));
+    assert!(!manifest.mounts[0].writable, "a mount is read-only unless it says otherwise");
+
+    let status = run(manifest, &["declared", ECHOER_NAME]).await.expect("deployment runs");
+    assert_eq!(status, ExitStatus::SUCCESS, "the requester's assertions all held");
+    let stored = std::fs::read(store_root(&scratch).join(ECHOER_STORED));
+    assert_eq!(
+        Digest::of(&stored.expect("the release was written")),
+        digest_of(test_programs::LINK_ECHOER),
+        "the store resolved beside the manifest"
+    );
+}
+
+// A leading `~/` on the store or a mount is the operator's home: a manifest
+// file leaves it alone, and it expands against `$HOME` when the deployment
+// builds — here overlaid onto the scratch directory, so the release staged
+// beneath it is what loads.
 #[tokio::test]
 async fn home_relative_store() {
     let scratch = scratch();
@@ -1125,11 +1259,19 @@ async fn home_relative_store() {
         std::env::set_var("HOME", scratch.path());
     }
 
-    let manifest = requester(test_programs::PLUGINS_LOAD).store("~/store").mounts([Mount {
-        name: "work".to_owned(),
-        path: PathBuf::from("~/work"),
-        writable: false,
-    }]);
+    scratch.write(
+        "deploy/omnia.toml",
+        format!(
+            "[[guest]]\nname = \"requester\"\nsource.path = {:?}\ncommand = true\n\n\
+             [[mount]]\nname = \"work\"\npath = \"~/work\"\n\n\
+             [plugins]\nstore = \"~/store\"\n",
+            test_programs::PLUGINS_LOAD
+        ),
+    );
+    let manifest =
+        Manifest::load(scratch.path().join("deploy/omnia.toml")).expect("the manifest loads");
+    assert_eq!(manifest.mounts[0].path, PathBuf::from("~/work"), "left for the home to expand");
+    assert_eq!(manifest.store_root(), Some(Path::new("~/store")), "left for the home to expand");
     let deployment =
         deployment(manifest, &["registry", ECHOER_PACKAGE]).await.expect("building deployment");
     let mounts = deployment.mounts();

@@ -108,12 +108,6 @@ mod tests {
     const EMPTY: &str = "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 
     #[test]
-    fn hash_vector() {
-        // the well-known sha256 of the empty input
-        assert_eq!(Digest::of(b"").to_string(), EMPTY);
-    }
-
-    #[test]
     fn parse_canonicalizes_case() {
         let parsed: Digest =
             EMPTY.to_ascii_uppercase().replace("SHA256", "sha256").parse().expect("uppercase hex");

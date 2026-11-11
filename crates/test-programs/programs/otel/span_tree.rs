@@ -1,12 +1,14 @@
 //! A span tree reaches the host intact: a `tracing` child under an
 //! instrumented parent carries its field, its error event, and the error
-//! status the event implies, and a span opened through the OpenTelemetry API
-//! inside the parent joins the same tree in its own instrumentation scope.
+//! status the event implies, an instrumented sync function opens its span
+//! under the parent without owning the telemetry lifecycle, and a span opened
+//! through the OpenTelemetry API inside the parent joins the same tree in its
+//! own instrumentation scope, schema URL included.
 
 #![cfg(target_arch = "wasm32")]
 
-use opentelemetry::KeyValue;
 use opentelemetry::trace::{TraceContextExt as _, Tracer as _};
+use opentelemetry::{InstrumentationScope, KeyValue};
 use tracing::{Instrument as _, Level};
 
 omnia_sdk::api::command::export!(scenario);
@@ -25,9 +27,15 @@ async fn parent() {
     .instrument(tracing::error_span!("child", answer = 42))
     .await;
 
+    sibling();
+
     // The entered parent is the current OpenTelemetry context, so the API
     // span parents to it without any explicit wiring.
-    opentelemetry::global::tracer("guest").in_span("api", |cx| {
+    let scope = InstrumentationScope::builder("guest").with_schema_url("https://guest").build();
+    opentelemetry::global::tracer_with_scope(scope).in_span("api", |cx| {
         cx.span().set_attribute(KeyValue::new("kind", "direct"));
     });
 }
+
+#[omnia_wasi_otel::instrument(level = Level::ERROR)]
+fn sibling() {}

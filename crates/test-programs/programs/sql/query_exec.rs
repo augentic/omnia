@@ -1,8 +1,9 @@
 //! One connection walked end to end over the raw `wasi:sql` bindings: DDL
 //! and parameterised inserts through `exec`, a typed read-back through
 //! `query` covering every `data-type` variant the default codec round-trips,
-//! a parameterised filter, a delete reporting its affected rows, and an
-//! invalid statement surfacing as an `error` resource with a trace.
+//! a parameterised filter, a delete reporting its affected rows, an invalid
+//! statement surfacing as an `error` resource with a trace, and a non-UTF-8
+//! text value refused on read.
 
 #![cfg(target_arch = "wasm32")]
 
@@ -53,7 +54,7 @@ async fn scenario() {
             DataType::Str(Some("beta".to_owned())),
             DataType::Boolean(Some(false)),
             DataType::Double(Some(2.25)),
-            DataType::Uint64(Some(9)),
+            DataType::Uint64(Some(u64::MAX)),
             DataType::Binary(Some(vec![0xff, 0x00])),
             DataType::Str(Some(CREATED.to_owned())),
         ],
@@ -64,6 +65,7 @@ async fn scenario() {
 
     // Read back: rows are indexed in order, columns keep their names, and
     // every value comes back as the widened storage type `from_sqlite` emits.
+    // A `u64` is stored as its raw bits, so `u64::MAX` reads back as -1.
     let select = Statement::prepare(
         "SELECT id, name, flag, score, count, payload, created FROM items ORDER BY id".to_owned(),
         vec![],
@@ -90,7 +92,7 @@ async fn scenario() {
     assert_str(&rows[1], "name", "beta");
     assert_int(&rows[1], "flag", 0);
     assert_double(&rows[1], "score", 2.25);
-    assert_int(&rows[1], "count", 9);
+    assert_int(&rows[1], "count", -1);
     assert_binary(&rows[1], "payload", &[0xff, 0x00]);
     assert_str(&rows[1], "created", CREATED);
 
@@ -121,6 +123,14 @@ async fn scenario() {
     let error = exec(&conn, &invalid).await.expect_err("invalid SQL executes");
     let trace = error.trace();
     assert!(trace.contains("failed to prepare statement"), "unexpected trace: {trace}");
+
+    // A text value that is not UTF-8 fails the read rather than crossing lossily.
+    let invalid_text = Statement::prepare("SELECT CAST(X'FF' AS TEXT) AS t".to_owned(), vec![])
+        .await
+        .expect("prepare invalid text");
+    let error = query(&conn, &invalid_text).await.expect_err("invalid UTF-8 reads");
+    let trace = error.trace();
+    assert!(trace.contains("invalid UTF-8 in text value"), "unexpected trace: {trace}");
 }
 
 fn names(row: &Row) -> Vec<&str> {

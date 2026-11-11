@@ -13,7 +13,8 @@ use std::time::Duration;
 use anyhow::{Context as _, Result, bail};
 use omnia::wasmtime::component::Val;
 use omnia::{
-    ChainCtx, CompileOptions, DeploymentBuilder, GuestEntry, GuestId, Manifest, Runtime, Verified,
+    ChainCtx, CompileOptions, DeploymentBuilder, FirstArgSelector, GuestEntry, GuestId,
+    GuestSelector as _, Manifest, Runtime, Transport, TransportKind, Verified,
 };
 
 // Every guest program in `crates/test-programs` must have a matching test
@@ -275,7 +276,10 @@ async fn link_relay() {
     // The relay's own hop trips the bound, and the callee's trap propagates
     // through the caller's polyfill with its text intact.
     let err = call(&runtime, "full", "poke", "5").await.expect_err("chain exceeds the bound");
-    assert!(format!("{err:#}").contains("exceeds maximum"), "unexpected error: {err:#}");
+    let text = format!("{err:#}");
+    for needle in ["exceeds maximum 3", "MAX_DISPATCH_DEPTH"] {
+        assert!(text.contains(needle), "`{needle}` missing from: {text}");
+    }
 }
 
 // The sleeper takes the id `echoer` for the same reason as the relay. Only
@@ -312,6 +316,78 @@ async fn link_skewed() {
     let text = format!("{err:#}");
     for needle in ["echoer", "full", "omnia-test:link/ops", "ping"] {
         assert!(text.contains(needle), "`{needle}` missing from: {text}");
+    }
+}
+
+// `take` nests its resource in an optional record, so the refusal must walk
+// the signature's types, not just its parameters; it fires as the importer
+// is wired, before any call.
+#[tokio::test]
+async fn link_handle() {
+    let Err(err) = boot(&[("handle", test_programs::LINK_HANDLE)]).await else {
+        panic!("a resource-carrying import was wired");
+    };
+
+    let text = format!("{err:#}");
+    for needle in ["`handle`", "omnia-test:link/tokens", "take", "carries a resource"] {
+        assert!(text.contains(needle), "`{needle}` missing from: {text}");
+    }
+}
+
+// The manifest is validated before any guest loads, so no row's source need
+// exist. Two files of one stem collide on the name each derives.
+#[tokio::test]
+async fn manifest_refused() {
+    let stems = Path::new(env!("CARGO_TARGET_TMPDIR")).join("duplicate_stem.toml");
+    std::fs::write(
+        &stems,
+        "[[guest]]\nsource.path = \"./a/echo.wasm\"\n\n\
+         [[guest]]\nsource.path = \"./b/echo.wasm\"\n",
+    )
+    .expect("writing the manifest");
+    let mut unix = Manifest::new().guest(GuestEntry::new("only", "./only.wasm"));
+    unix.transport = Transport {
+        default: TransportKind::Unix,
+    };
+
+    let rows = [
+        (unix, "transport `Unix` is not yet implemented"),
+        (
+            Manifest::new()
+                .guest(GuestEntry::new("a", "./a.wasm").command())
+                .guest(GuestEntry::new("b", "./b.wasm").command()),
+            "at most one guest may be the command guest",
+        ),
+        (
+            Manifest::new()
+                .guest(GuestEntry::new("same", "./a.wasm"))
+                .guest(GuestEntry::new("same", "./b.wasm")),
+            "duplicate [[guest]] name `same`",
+        ),
+        (Manifest::load(&stems).expect("the manifest parses"), "duplicate [[guest]] name `echo`"),
+        (Manifest::new().guest(GuestEntry::new("", b"\0asm")), "names no guest"),
+        (Manifest::new(), "defines no [[guest]] entry"),
+    ];
+    for (manifest, needle) in rows {
+        let Err(err) = assemble(manifest, |builder| builder).await else {
+            panic!("a manifest refused for `{needle}` was built");
+        };
+        assert!(format!("{err:#}").contains(needle), "unexpected error: {err:#}");
+    }
+
+    assemble(Manifest::new(), omnia::DeploymentBuilder::dynamic)
+        .await
+        .expect("a dynamic deployment may start with no guests");
+}
+
+#[test]
+fn selector_no_identity() {
+    let calls: [&[Val]; 2] = [&[Val::U32(7)], &[]];
+    for params in calls {
+        let err = FirstArgSelector
+            .select("omnia-test:link/ops", "ping", params)
+            .expect_err("the call names no target");
+        assert!(err.to_string().contains("leading string identity"), "unexpected error: {err}");
     }
 }
 

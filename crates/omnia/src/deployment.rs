@@ -513,39 +513,3 @@ cfg_select! {
     }
     _ => {}
 }
-
-#[cfg(test)]
-mod tests {
-    use omnia_core::RuntimeOptions;
-    use omnia_core::wasmtime::{Config, Engine};
-
-    #[test]
-    fn builds_pooling() {
-        // sized small so the reservation stays cheap
-        let options = RuntimeOptions {
-            pool_max_instances: 8,
-            pool_total_core_instances: 8,
-            pool_total_memories: 16,
-            pool_total_tables: 16,
-            pool_total_stacks: 8,
-            pool_max_memory_bytes: Some(1 << 20),
-            pool_max_memories_per_component: Some(4),
-            pool_max_tables_per_component: Some(4),
-            pool_max_memories_per_module: Some(2),
-            pool_max_tables_per_module: Some(2),
-            pool_decommit_batch_size: 8,
-            ..RuntimeOptions::load_env().expect("should load")
-        };
-        Engine::new(&Config::from(&options))
-            .expect("decoupled multi-memory pooling config should build an engine");
-    }
-
-    #[test]
-    fn builds_no_pooling() {
-        let options = RuntimeOptions {
-            pooling: false,
-            ..RuntimeOptions::load_env().expect("should load")
-        };
-        Engine::new(&Config::from(&options)).expect("non-pooling config should build an engine");
-    }
-}

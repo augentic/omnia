@@ -224,6 +224,43 @@ async fn no_route() {
     runtime.shutdown();
 }
 
+// No guest loaded at boot exports the handler: a command-only guest, or a
+// sole exporter declared from a path, which is never the catch-all.
+#[tokio::test]
+async fn inert() {
+    let command = Deployment::new().guest("guest", test_programs::MESSAGING_REQUEST_REPLY);
+    let declared =
+        Deployment::new().entry(GuestEntry::new("guest", test_programs::MESSAGING_PRODUCE_HANDLE));
+
+    for deployment in [command, declared] {
+        let runtime = boot(&deployment, Backends::defaults().await).await;
+        let handler = MessagingHandler::new(&runtime).expect("messaging routes consistent");
+        assert!(handler.is_none(), "the messaging trigger is inert");
+        runtime.shutdown();
+    }
+}
+
+// Two exporters with no routes are ambiguous, and a route to a guest that
+// does not export the handler is refused, both as the handler is built.
+#[tokio::test]
+async fn routes_refused() {
+    let ambiguous = Deployment::new()
+        .guest("a", test_programs::MESSAGING_PRODUCE_HANDLE)
+        .guest("b", test_programs::MESSAGING_HANDLE_ERR);
+    let command = std::fs::read(test_programs::MESSAGING_REQUEST_REPLY).expect("guest bytes");
+    let misrouted =
+        Deployment::new().entry(GuestEntry::new("guest", command).route_messaging("orders"));
+
+    for (deployment, needle) in [(ambiguous, "2 capable guests"), (misrouted, "does not export")] {
+        let runtime = boot(&deployment, Backends::defaults().await).await;
+        let Err(error) = MessagingHandler::new(&runtime) else {
+            panic!("routes refused for `{needle}` were accepted");
+        };
+        assert!(format!("{error:#}").contains(needle), "unexpected error: {error:#}");
+        runtime.shutdown();
+    }
+}
+
 // A routed guest that cannot be loaded never runs, and the outcome says so.
 #[tokio::test]
 async fn unloadable_guest() {

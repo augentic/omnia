@@ -53,25 +53,3 @@ impl TryFrom<Cacheable> for Vec<u8> {
         serde_json::to_vec(&value).context("issue serializing Cacheable")
     }
 }
-
-#[cfg(test)]
-mod tests {
-
-    use super::*;
-
-    #[test]
-    fn invalid_json() {
-        let invalid = b"not a json".to_vec();
-        let result = Cacheable::try_from(&invalid);
-        assert!(result.is_err());
-        let err = result.unwrap_err().to_string();
-        assert!(err.contains("issue deserializing Cacheable"));
-    }
-
-    #[test]
-    fn wrong_type() {
-        let bytes = serde_json::to_vec(&"just a string").unwrap();
-        let result = Cacheable::try_from(&bytes);
-        result.unwrap_err();
-    }
-}

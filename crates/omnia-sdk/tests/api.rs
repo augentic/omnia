@@ -388,6 +388,9 @@ async fn capability_error_taxonomy() {
 
     async fn route(Path(kind): Path<String>) -> Result<Json<()>, omnia_sdk::Error> {
         match kind.as_str() {
+            "vcs-not-a-repository" => Err(vcs::Error::NotARepository)?,
+            "vcs-exists" => Err(vcs::Error::Exists("x".into()))?,
+            "vcs-diverged" => Err(vcs::Error::Diverged("emery/x".into()))?,
             "vcs-missing" => Err(vcs::Error::NotFound("v1".into()))?,
             "vcs-access" => Err(vcs::Error::Access("denied".into()))?,
             "vcs-pending" => Err(vcs::Error::Pending(vec!["a.rs".into(), "b.md".into()]))?,
@@ -402,6 +405,9 @@ async fn capability_error_taxonomy() {
     let router = axum::Router::new().route("/err/{kind}", get(route)).with_state(Client::new(()));
 
     for (path, expected_status, expected_code) in [
+        ("/err/vcs-not-a-repository", StatusCode::BAD_REQUEST, "not-a-repository"),
+        ("/err/vcs-exists", StatusCode::BAD_REQUEST, "exists"),
+        ("/err/vcs-diverged", StatusCode::BAD_REQUEST, "diverged"),
         ("/err/vcs-missing", StatusCode::NOT_FOUND, "not-found"),
         ("/err/vcs-access", StatusCode::BAD_GATEWAY, "access"),
         ("/err/vcs-pending", StatusCode::BAD_REQUEST, "pending"),
@@ -415,6 +421,9 @@ async fn capability_error_taxonomy() {
         assert_eq!(status, expected_status, "{path}");
         let body: ErrorBody = serde_json::from_str(&body).expect("decode error body");
         assert_eq!(body.error, expected_code, "{path}");
+        if path == "/err/vcs-pending" {
+            assert_eq!(body.message, "pending changes: a.rs, b.md");
+        }
     }
 }
 

@@ -21,12 +21,15 @@ use http_body_util::{BodyExt as _, Full};
 use hyper::body::Incoming;
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
-use omnia::ExitStatus;
+use omnia::{ExitStatus, GuestEntry};
 use omnia_test::host::{Backends, Deployment};
 use omnia_wasi_config::WasiConfig;
 use omnia_wasi_http::{HttpHandler, WasiHttp};
 use omnia_wasi_otel::WasiOtel;
-use rcgen::{CertificateParams, ExtendedKeyUsagePurpose, KeyPair, KeyUsagePurpose};
+use rcgen::{
+    BasicConstraints, CertificateParams, ExtendedKeyUsagePurpose, IsCa, Issuer, KeyPair,
+    KeyUsagePurpose, date_time_ymd,
+};
 use rustls::pki_types::PrivateKeyDer;
 use rustls::{ServerConfig, ServerConnection};
 use serde_json::{Value, json};
@@ -123,15 +126,43 @@ async fn http_outgoing_get() {
     assert_eq!(hits[0].headers.get("x-probe").and_then(|v| v.to_str().ok()), Some("1"));
 }
 
+// rcgen's defaults: no EKU, no key usage, no basic constraints
+fn cert_params(configure: impl FnOnce(&mut CertificateParams)) -> CertificateParams {
+    let mut params = CertificateParams::new(Vec::<String>::new()).expect("parameters");
+    configure(&mut params);
+    params
+}
+
+fn client_auth(params: &mut CertificateParams) {
+    params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ClientAuth];
+    params.key_usages = vec![KeyUsagePurpose::DigitalSignature];
+}
+
 // a throwaway self-signed certificate then its PKCS#8 key, minted per run so
 // no private key is ever checked in
-fn client_cert(purpose: ExtendedKeyUsagePurpose) -> String {
+fn client_cert(configure: impl FnOnce(&mut CertificateParams)) -> String {
     let key = KeyPair::generate().expect("key pair");
-    let mut params = CertificateParams::new(Vec::<String>::new()).expect("parameters");
-    params.extended_key_usages = vec![purpose];
-    params.key_usages = vec![KeyUsagePurpose::DigitalSignature];
-    let certificate = params.self_signed(&key).expect("certificate");
+    let certificate = cert_params(configure).self_signed(&key).expect("certificate");
     Base64::encode_string(format!("{}{}", certificate.pem(), key.serialize_pem()).as_bytes())
+}
+
+// a client-auth leaf, then the CA that signed it, then the leaf's key; the CA
+// lacks `clientAuth`, which only matters if it is mistaken for the identity
+fn client_cert_chain() -> String {
+    let ca_key = KeyPair::generate().expect("CA key pair");
+    let ca_params = cert_params(|params| {
+        params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+        params.key_usages = vec![KeyUsagePurpose::KeyCertSign, KeyUsagePurpose::CrlSign];
+    });
+    let ca = ca_params.self_signed(&ca_key).expect("CA certificate");
+
+    let leaf_key = KeyPair::generate().expect("leaf key pair");
+    let leaf = cert_params(client_auth)
+        .signed_by(&leaf_key, &Issuer::from_params(&ca_params, &ca_key))
+        .expect("leaf certificate");
+
+    let bundle = format!("{}{}{}", leaf.pem(), ca.pem(), leaf_key.serialize_pem());
+    Base64::encode_string(bundle.as_bytes())
 }
 
 #[tokio::test]
@@ -139,17 +170,49 @@ async fn http_outgoing_client_cert() {
     let (origin, url) = Origin::serve().await;
     let backends = Backends::defaults().await.config([
         ("ORIGIN", url),
-        ("CLIENT_CERT_OK", client_cert(ExtendedKeyUsagePurpose::ClientAuth)),
-        ("CLIENT_CERT_SERVER", client_cert(ExtendedKeyUsagePurpose::ServerAuth)),
+        ("CLIENT_CERT_OK", client_cert(client_auth)),
+        ("CLIENT_CERT_NO_EKU", client_cert(|_| {})),
+        ("CLIENT_CERT_CHAIN", client_cert_chain()),
+        (
+            "CLIENT_CERT_SERVER",
+            client_cert(|params| {
+                params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ServerAuth];
+                params.key_usages = vec![KeyUsagePurpose::DigitalSignature];
+            }),
+        ),
+        (
+            "CLIENT_CERT_CA",
+            client_cert(|params| params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained)),
+        ),
+        (
+            "CLIENT_CERT_KEY_ENCIPHERMENT",
+            client_cert(|params| params.key_usages = vec![KeyUsagePurpose::KeyEncipherment]),
+        ),
+        (
+            "CLIENT_CERT_EXPIRED",
+            client_cert(|params| {
+                params.not_before = date_time_ymd(2020, 1, 1);
+                params.not_after = date_time_ymd(2021, 1, 1);
+            }),
+        ),
+        (
+            "CLIENT_CERT_NOT_YET_VALID",
+            client_cert(|params| {
+                params.not_before = date_time_ymd(2100, 1, 1);
+                params.not_after = date_time_ymd(2101, 1, 1);
+            }),
+        ),
     ]);
 
     run_guest(test_programs::HTTP_OUTGOING_CLIENT_CERT, backends).await;
 
-    // only the client-auth request reached the origin, and the bundle never left the host
+    // only the accepted bundles reached the origin, and none left the host
     let hits = origin.hits();
-    assert_eq!(hits.len(), 1);
-    assert_eq!(hits[0].path, "/mtls");
-    assert!(hits[0].headers.get("client-cert").is_none(), "Client-Cert header stripped");
+    let paths: Vec<_> = hits.iter().map(|hit| hit.path.as_str()).collect();
+    assert_eq!(paths, ["/mtls", "/no-eku", "/chain"]);
+    for hit in &hits {
+        assert!(hit.headers.get("client-cert").is_none(), "Client-Cert header stripped");
+    }
 }
 
 // a loopback TLS origin presenting a self-signed certificate no root trusts,
@@ -278,8 +341,9 @@ async fn http_outgoing_timeout() {
 #[tokio::test]
 async fn http_incoming_echo() {
     // no `wasi:cli/run` to drive: boot, then dispatch through the in-process handler
+    let guest = std::fs::read(test_programs::HTTP_INCOMING_ECHO).expect("guest bytes");
     let runtime = Deployment::new()
-        .guest("guest", test_programs::HTTP_INCOMING_ECHO)
+        .entry(GuestEntry::new("guest", guest).route_http("/echo"))
         .boot(Backends::defaults().await, |deployment| {
             deployment.host::<WasiHttp>()?;
             deployment.host::<WasiOtel>()?;
@@ -320,6 +384,14 @@ async fn http_incoming_echo() {
     let response = handler.handle(request).await.expect("handled");
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(collect(response).await, json!({ "message": "h2", "request_id": "req-h2" }));
+
+    // the declared route drives the trigger, so a path beside it is a miss
+    let request = Request::get("/other")
+        .header(HOST, "echo.test")
+        .body(Full::new(Bytes::new()))
+        .expect("request");
+    let response = handler.handle(request).await.expect("handled");
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
 
     runtime.shutdown();
 }

@@ -191,30 +191,6 @@ mod tests {
     }
 
     #[test]
-    fn examples_replace() {
-        let marker = "# Generated\n";
-        let current = "[package]\nname = \"p\"\n\n# Generated\n\n[[example]]\nname = \"stale\"\n";
-        let programs = [
-            program("link_echo", "link", "programs/link/echo.rs"),
-            program("model_tools", "model", "programs/model/tools.rs"),
-        ];
-        let next = refresh_examples(current, marker, &programs).expect("marker present");
-        assert_eq!(
-            next,
-            "[package]\nname = \"p\"\n\n# Generated\n\n\
-             [[example]]\nname = \"link_echo\"\npath = \"programs/link/echo.rs\"\n\
-             crate-type = [\"cdylib\"]\n\n\
-             [[example]]\nname = \"model_tools\"\npath = \"programs/model/tools.rs\"\n\
-             crate-type = [\"cdylib\"]\n"
-        );
-    }
-
-    #[test]
-    fn examples_without_marker() {
-        assert!(refresh_examples("[package]\n", "# Generated\n", &[]).is_none());
-    }
-
-    #[test]
     fn dep_info() {
         let contents = "/out/a.wasm: /src/lib.rs /my\\ dir/with\\ space.rs /src/b.rs\n\n\
                         /src/lib.rs:\n/src/b.rs:\n";

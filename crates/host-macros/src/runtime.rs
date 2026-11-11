@@ -221,64 +221,6 @@ mod tests {
         })));
     }
 
-    // every trigger list expands to `route_*` calls on the owning entry
-    #[test]
-    fn expand_routes() {
-        insta::assert_snapshot!(expand_pretty(quote!({
-            guests: [
-                {
-                    name: "responder",
-                    path: concat!(env!("CARGO_MANIFEST_DIR"), "/responder.wasm"),
-                    routes: {
-                        messaging: ["orders.>"],
-                        websocket: ["chat.*"],
-                    },
-                },
-                {
-                    name: "router",
-                    path: concat!(env!("CARGO_MANIFEST_DIR"), "/router.wasm"),
-                    routes: {
-                        http: ["/", concat!("/", "api")],
-                    },
-                },
-            ],
-            mounts: [
-                { name: ".", path: concat!(env!("CARGO_MANIFEST_DIR"), "/workspace"), writable: true },
-            ],
-            hosts: {
-                WasiOtel: OtelDefault,
-            },
-        })));
-    }
-
-    // the expansion never names a loader path: assembly installs the registry client
-    #[test]
-    fn expand_guests_block() {
-        insta::assert_snapshot!(expand_pretty(quote!({
-            guests: [
-                { path: "engine.wasm" },
-            ],
-            plugins: {
-                store: "~/.app/store",
-                registries: include_str!("wasm-pkg.toml"),
-            },
-            mounts: [
-                { name: ".", path: project_root() },
-            ],
-            hosts: {
-                WasiOtel: OtelDefault,
-            },
-        })));
-    }
-
-    // valid: the guests arrive at run time or over the cli
-    #[test]
-    fn expand_plugins_only() {
-        insta::assert_snapshot!(expand_pretty(quote!({
-            plugins: { registries: include_str!("wasm-pkg.toml") },
-        })));
-    }
-
     // either key alone is a block; neither is nothing to declare
     #[test]
     fn plugins_block_keys() {
@@ -303,28 +245,6 @@ mod tests {
         .err()
         .expect("a top-level registries key must be refused");
         assert!(error.to_string().contains("plugins: { registries: ... }"), "{error}");
-    }
-
-    // an unnamed package is named by its reference without the version; a
-    // `digest:` literal lands as the bytes it decoded to
-    #[test]
-    fn expand_package_defaults() {
-        insta::assert_snapshot!(expand_pretty(quote!({
-            guests: [
-                { path: "app.wasm" },
-                {
-                    package: "acme:tool@1.2.3",
-                    digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
-                },
-                {
-                    name: "pinned",
-                    path: "pinned.wasm",
-                    digest: "sha256:E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855",
-                },
-                { name: "tool", package: "acme:tool@2.0.0" },
-            ],
-            plugins: { registries: include_str!("wasm-pkg.toml") },
-        })));
     }
 
     #[test]

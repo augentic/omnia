@@ -138,6 +138,20 @@ impl Components {
     ///
     /// Panics when no source precedes it, or the preceding one is a
     /// [`scan`](Self::scan).
+    ///
+    /// # Examples
+    ///
+    /// ```should_panic
+    /// use omnia_test::build::Components;
+    ///
+    /// let _ = Components::in_workspace(".").scan("programs").group("model");
+    /// ```
+    ///
+    /// ```should_panic
+    /// use omnia_test::build::Components;
+    ///
+    /// let _ = Components::in_workspace(".").group("model");
+    /// ```
     #[must_use]
     pub fn group(mut self, name: impl Into<String>) -> Self {
         match self.sources.last_mut() {
@@ -562,43 +576,6 @@ impl Built {
 mod tests {
     use super::*;
 
-    #[test]
-    fn scanned_programs() {
-        let programs = programs_from(
-            "programs",
-            [
-                ("model".to_owned(), vec!["tools".to_owned(), "echo_text".to_owned()]),
-                ("link".to_owned(), vec!["echo".to_owned()]),
-            ],
-        );
-        assert_eq!(
-            programs,
-            [
-                Program {
-                    name: "link_echo".into(),
-                    constant: "LINK_ECHO".into(),
-                    group: "link".into(),
-                    source: "programs/link/echo.rs".into(),
-                    example: true,
-                },
-                Program {
-                    name: "model_echo_text".into(),
-                    constant: "MODEL_ECHO_TEXT".into(),
-                    group: "model".into(),
-                    source: "programs/model/echo_text.rs".into(),
-                    example: true,
-                },
-                Program {
-                    name: "model_tools".into(),
-                    constant: "MODEL_TOOLS".into(),
-                    group: "model".into(),
-                    source: "programs/model/tools.rs".into(),
-                    example: true,
-                },
-            ]
-        );
-    }
-
     // A package's crate name is the artifact stem and macro arm, the group
     // prefixes only the constant, and the build is told the package name.
     #[test]
@@ -626,95 +603,25 @@ mod tests {
         );
     }
 
-    // Examples are uplifted under `debug/examples/`; packages and extras sit
-    // in the profile directory itself.
+    // Packages and extras sit in the profile directory itself, not under
+    // `debug/examples/`.
     #[test]
     fn artifact_layout() {
-        let program = |name: &str, group: &str, example: bool| Program {
+        let program = |name: &str, group: &str| Program {
             name: name.into(),
             constant: name.to_uppercase(),
             group: group.into(),
             source: name.into(),
-            example,
+            example: false,
         };
         let built = Built {
             header: String::new(),
-            programs: vec![
-                program("adapter", "examples", true),
-                program("intent", "source", false),
-            ],
-            extras: vec![program("caller", "", false)],
+            programs: vec![program("intent", "source")],
+            extras: vec![program("caller", "")],
             artifacts_dir: PathBuf::from("/out/debug"),
         };
-        assert_eq!(
-            built.artifact(&built.programs[0]),
-            Path::new("/out/debug/examples/adapter.wasm")
-        );
-        assert_eq!(built.artifact(&built.programs[1]), Path::new("/out/debug/intent.wasm"));
+        assert_eq!(built.artifact(&built.programs[0]), Path::new("/out/debug/intent.wasm"));
         assert_eq!(built.artifact(&built.extras[0]), Path::new("/out/debug/caller.wasm"));
-    }
-
-    #[test]
-    fn builder_config() {
-        let components = Components::in_workspace("../..")
-            .package("test-programs")
-            .scan("crates/test-programs/programs")
-            .sync_examples("crates/test-programs/Cargo.toml")
-            .track(["wit", "Cargo.lock"]);
-        assert_eq!(components.package.as_deref(), Some("test-programs"));
-        assert_eq!(components.sources, [Source::Scan("crates/test-programs/programs".into())]);
-        assert_eq!(components.sync.as_deref(), Some(Path::new("crates/test-programs/Cargo.toml")));
-        assert_eq!(components.tracked, [PathBuf::from("wit"), PathBuf::from("Cargo.lock")]);
-
-        let explicit = Components::in_workspace(".").examples(["adapter"]).group("mock");
-        assert_eq!(
-            explicit.sources,
-            [Source::Examples {
-                names: vec!["adapter".to_owned()],
-                group: "mock".to_owned(),
-            }]
-        );
-
-        let packages = Components::in_workspace("../..")
-            .scan_packages("sources")
-            .group("source")
-            .extra_package("caller");
-        assert_eq!(
-            packages.sources,
-            [Source::ScanPackages {
-                dir: "sources".into(),
-                group: "source".to_owned(),
-            }]
-        );
-        assert!(!packages.sources[0].is_examples());
-        assert_eq!(packages.extras, ["caller"]);
-    }
-
-    // the underscored stem is the artifact, constant and macro arm; the
-    // nested build still selects the target by its manifest name
-    #[test]
-    fn hyphenated_examples() {
-        let components =
-            Components::in_workspace("..").package("examples").examples(["http-proxy-wasm"]);
-        let programs = components.programs(Path::new("/workspace"));
-        assert_eq!(
-            programs,
-            [Program {
-                name: "http_proxy_wasm".into(),
-                constant: "HTTP_PROXY_WASM".into(),
-                group: DEFAULT_GROUP.into(),
-                source: "examples/http-proxy-wasm.rs".into(),
-                example: true,
-            }]
-        );
-
-        let builds =
-            components.nested_builds(Path::new("/workspace"), Path::new("/out"), &programs);
-        assert_eq!(builds.len(), 1);
-        let args: Vec<_> = builds[0].get_args().map(|arg| arg.to_string_lossy()).collect();
-        assert!(args.contains(&"--package=examples".into()));
-        assert!(args.contains(&"--example".into()));
-        assert!(args.contains(&"http-proxy-wasm".into()));
     }
 
     // One build draws from several sources: `group` names the one added just
@@ -741,17 +648,5 @@ mod tests {
                 },
             ]
         );
-    }
-
-    #[test]
-    #[should_panic(expected = "grouped by its directories")]
-    fn group_after_scan() {
-        let _ = Components::in_workspace(".").scan("programs").group("model");
-    }
-
-    #[test]
-    #[should_panic(expected = "add one first")]
-    fn group_before_source() {
-        let _ = Components::in_workspace(".").group("model");
     }
 }

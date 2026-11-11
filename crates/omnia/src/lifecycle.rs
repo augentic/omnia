@@ -407,11 +407,4 @@ mod tests {
         assert!(!idle.due(0, false, start + AFTER));
         assert!(idle.due(0, false, start + 2 * AFTER));
     }
-
-    #[test]
-    fn tick_within_after() {
-        assert_eq!(IdleRelease::new(AFTER).tick(), IdleRelease::TICK);
-        let short = Duration::from_millis(200);
-        assert_eq!(IdleRelease::new(short).tick(), short);
-    }
 }

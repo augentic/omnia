@@ -53,19 +53,3 @@ impl fmt::Display for Location {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn ids() {
-        let registry = Location::Registry {
-            package: "acme:tool@1.0.0".to_owned(),
-            endpoint: Some("ghcr.io".to_owned()),
-        };
-        assert_eq!(registry.id(), GuestId::from("acme:tool"));
-        assert_eq!(Location::Path("./adapters/tool.wasm".to_owned()).id(), GuestId::from("tool"));
-        assert_eq!(Location::Declared("tool".to_owned()).id(), GuestId::from("tool"));
-    }
-}

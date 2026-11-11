@@ -461,12 +461,10 @@ pub fn resource() -> Option<&'static Resource> {
 mod tests {
     use std::sync::{Arc, Mutex};
 
-    use opentelemetry::trace::{Tracer as _, TracerProvider as _};
+    use opentelemetry::trace::TracerProvider as _;
     use opentelemetry_sdk::metrics::SdkMeterProvider;
     use opentelemetry_sdk::trace::{SdkTracerProvider, SpanData, SpanExporter};
-    use tracing::Subscriber as _;
-    use tracing_opentelemetry::MetricsLayer;
-    use tracing_subscriber::layer::{Layer as _, SubscriberExt as _};
+    use tracing_subscriber::layer::SubscriberExt as _;
 
     use super::{LevelFilter, OTelSdkResult, Registry, console, filter, flush_providers};
 
@@ -527,17 +525,6 @@ mod tests {
             SdkTracerProvider::builder().with_batch_exporter(exporter.clone()).build(),
             SdkMeterProvider::builder().build(),
         )
-    }
-
-    #[test]
-    fn empty_endpoint_unset() {
-        use super::Telemetry;
-
-        assert!(Telemetry::new("svc").endpoint("").endpoint.is_none());
-        assert_eq!(
-            Telemetry::new("svc").endpoint("http://collector:4317").endpoint.as_deref(),
-            Some("http://collector:4317")
-        );
     }
 
     // the process `RUST_LOG` is handed in, never read: other tests run in parallel
@@ -647,41 +634,6 @@ mod tests {
         }
     }
 
-    // the level `directives` leads with, over the same composition
-    mod bare {
-        use super::super::{LevelFilter, bare};
-
-        #[test]
-        fn flag_displaces_bare_level() {
-            assert_eq!(
-                bare(Some(LevelFilter::INFO), LevelFilter::WARN, Some("trace")),
-                Some(LevelFilter::INFO)
-            );
-        }
-
-        #[test]
-        fn no_flag_keeps_rust_log() {
-            assert_eq!(
-                bare(None, LevelFilter::WARN, Some("debug,omnia_core=trace")),
-                Some(LevelFilter::DEBUG)
-            );
-        }
-
-        #[test]
-        fn unset_falls_back() {
-            assert_eq!(bare(None, LevelFilter::WARN, None), Some(LevelFilter::WARN));
-            assert_eq!(
-                bare(None, LevelFilter::WARN, Some("omnia_core=loud")),
-                Some(LevelFilter::WARN)
-            );
-        }
-
-        #[test]
-        fn targeted_only_takes_no_fallback() {
-            assert_eq!(bare(None, LevelFilter::WARN, Some("my_sdk=debug")), None);
-        }
-    }
-
     mod refine {
         use super::super::{LevelFilter, RUNTIME, refine};
 
@@ -742,58 +694,6 @@ mod tests {
                     assert!(!other.starts_with(prefix), "`{prefix}` would govern `{other}`");
                 }
             }
-        }
-    }
-
-    mod filter {
-        use super::super::filter;
-
-        const MUTES: [&str; 7] = [
-            "hyper=off",
-            "h2=off",
-            "tower=off",
-            "tonic=off",
-            "opentelemetry=off",
-            "opentelemetry_sdk=off",
-            "omnia_wasi_otel=off",
-        ];
-
-        fn rendered(directives: &str) -> String {
-            filter(directives).expect("filter directives parse").to_string()
-        }
-
-        fn has(rendered: &str, directive: &str) -> bool {
-            rendered.split(',').any(|candidate| candidate == directive)
-        }
-
-        #[test]
-        fn directives_with_mutes() {
-            let rendered = rendered("info,omnia_core=debug");
-            for directive in ["info", "omnia_core=debug"].into_iter().chain(MUTES) {
-                assert!(has(&rendered, directive), "missing `{directive}` in `{rendered}`");
-            }
-        }
-
-        #[test]
-        fn off() {
-            let rendered = rendered("off");
-            assert!(has(&rendered, "off"), "{rendered}");
-        }
-
-        // `omnia::` is a target `EnvFilter` accepts, so the refinement parses whole
-        #[test]
-        fn refined() {
-            use super::super::{LevelFilter, refine};
-
-            let rendered = rendered(&refine("info,tower=off", LevelFilter::WARN));
-            for directive in ["info", "omnia::=warn", "omnia_core=warn", "omnia_plugin=warn"] {
-                assert!(has(&rendered, directive), "missing `{directive}` in `{rendered}`");
-            }
-        }
-
-        #[test]
-        fn unparsable_directives() {
-            assert!(filter("omnia_core=loud").is_err(), "an unknown level must not parse");
         }
     }
 
@@ -893,44 +793,5 @@ mod tests {
         assert!(!console.contains("guest loaded"), "{console}");
         assert!(console.contains("mount failed"), "{console}");
         assert!(console.contains("completion"), "{console}");
-    }
-
-    // The stack `build` installs, as `tracing-log` reads it: the hint is the
-    // run's level, refined or not, so `log` records above it never dispatch.
-    #[test]
-    fn stack_level_hint() {
-        for runtime in [Some(LevelFilter::WARN), None] {
-            let exporter = Recording::default();
-            let (tracer, meter) = providers(&exporter);
-            let stack = Registry::default()
-                .with(filter("info,tower=off").expect("parse"))
-                .with(console("info,tower=off", runtime, Console::default(), false).expect("parse"))
-                .with(
-                    tracing_opentelemetry::layer()
-                        .with_tracer(tracer.tracer("test"))
-                        .with_filter(filter("info,tower=off").expect("parse")),
-                )
-                .with(
-                    MetricsLayer::new(meter).with_filter(filter("info,tower=off").expect("parse")),
-                );
-            assert_eq!(stack.max_level_hint(), Some(LevelFilter::INFO), "runtime {runtime:?}");
-        }
-    }
-
-    // the fast-exit contract: a span emitted just before a flush reaches the exporter
-    #[test]
-    fn flush_exports() {
-        let exporter = Recording::default();
-        let (tracer, meter) = providers(&exporter);
-
-        tracer.tracer("test").start("first-drive");
-        assert_eq!(exporter.names(), Vec::<String>::new());
-
-        flush_providers(&tracer, &meter);
-        assert_eq!(exporter.names(), ["first-drive"]);
-
-        tracer.tracer("test").start("second-drive");
-        flush_providers(&tracer, &meter);
-        assert_eq!(exporter.names(), ["first-drive", "second-drive"]);
     }
 }

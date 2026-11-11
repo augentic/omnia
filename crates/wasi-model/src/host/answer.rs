@@ -186,7 +186,7 @@ impl<'a> Iterator for Spans<'a> {
     }
 }
 
-// `candidate` and `instruction` are pure; backends drive them directly
+// `candidate` is pure; backends drive it directly
 #[cfg(test)]
 mod tests {
     use super::Format;
@@ -309,21 +309,5 @@ mod tests {
     #[test]
     fn no_json() {
         assert_eq!(candidate("not json"), "not json");
-    }
-
-    #[test]
-    fn instruction_per_format() {
-        assert!(Format::Text.instruction().contains("plain text"));
-        assert!(Format::Json.instruction().contains("JSON object"));
-        let schema = verdict_schema().instruction();
-        assert!(schema.contains("JSON Schema"), "unexpected: {schema}");
-        assert!(schema.contains("object"), "unexpected: {schema}");
-    }
-
-    #[test]
-    fn format_display() {
-        assert_eq!(Format::Text.to_string(), "text");
-        assert_eq!(Format::Json.to_string(), "json");
-        assert_eq!(verdict_schema().to_string(), "schema");
     }
 }

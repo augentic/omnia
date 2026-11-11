@@ -326,6 +326,7 @@ fn query_filters_and_sorting() {
     );
     assert_eq!(query_ids(Filter::negate(Filter::eq("route_type", 1))), ["a", "b"]);
     assert_eq!(query_ids(Filter::on_date("updated", "2026-03-19").expect("valid date")), ["a"]);
+    assert_eq!(query_ids(Filter::on_date("updated", "2026-03-20").expect("valid date")), ["b"]);
     assert_eq!(query_ids(Filter::on_date("updated", "2026-12-31").expect("month end")), ["c"]);
     Filter::on_date("updated", "2026-13-01").expect_err("invalid month");
 
