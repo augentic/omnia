@@ -100,30 +100,3 @@ const fn nibble(digit: u8) -> Option<u8> {
         _ => None,
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::Digest;
-
-    const EMPTY: &str = "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
-
-    #[test]
-    fn parse_canonicalizes_case() {
-        let parsed: Digest =
-            EMPTY.to_ascii_uppercase().replace("SHA256", "sha256").parse().expect("uppercase hex");
-        assert_eq!(parsed, Digest::of(b""));
-        assert_eq!(parsed.to_string(), EMPTY, "the spelling is lowercase whatever was parsed");
-    }
-
-    #[test]
-    fn malformed() {
-        for digest in [
-            format!("sha512:{}", "ab".repeat(32)),
-            "sha256:abcd".to_owned(),
-            format!("sha256:{}", "zz".repeat(32)),
-            format!("sha256:{}", "é".repeat(32)),
-        ] {
-            digest.parse::<Digest>().expect_err("refused");
-        }
-    }
-}

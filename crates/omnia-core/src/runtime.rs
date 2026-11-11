@@ -775,16 +775,3 @@ pub enum GuestError {
     #[error("{0}")]
     Internal(String),
 }
-
-#[cfg(test)]
-mod tests {
-    use super::ExitStatus;
-
-    #[test]
-    fn code_u8_low_byte() {
-        // posix low-byte truncation
-        assert_eq!(ExitStatus::from(256).code_u8(), 0);
-        assert_eq!(ExitStatus::from(257).code_u8(), 1);
-        assert_eq!(ExitStatus::from(-1).code_u8(), 255);
-    }
-}

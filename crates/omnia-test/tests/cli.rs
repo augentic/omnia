@@ -37,7 +37,7 @@ async fn cli_rust_log() {
 }
 
 #[tokio::test]
-async fn cli_rust_log_level() {
+async fn selected_level() {
     let deployment = Deployment::new().level(LevelFilter::DEBUG);
     let expected = expected(Some(LevelFilter::DEBUG));
     assert!(expected.starts_with("debug"), "the selected level leads: {expected}");

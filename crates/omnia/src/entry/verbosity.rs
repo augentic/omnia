@@ -135,7 +135,7 @@ mod tests {
     }
 
     #[test]
-    fn ladder_clamps() {
+    fn ladder_overflow() {
         assert_eq!(level(LevelFilter::INFO, 4, 0), Some(LevelFilter::TRACE));
         assert_eq!(level(LevelFilter::INFO, u8::MAX, 0), Some(LevelFilter::TRACE));
         assert_eq!(level(LevelFilter::INFO, 0, 4), Some(LevelFilter::OFF));
@@ -197,7 +197,7 @@ mod tests {
     // A value-taking flag's argument, a mixed cluster, a bare `-`, and a
     // longer flag are the guest's: none of them counts.
     #[test]
-    fn scan_leaves_other_tokens() {
+    fn scan_other_tokens() {
         assert_eq!(scan(&args(&["-c", "-v", "-d", "v", "-vq", "-", "--verbosity"])), (1, 0));
     }
 

@@ -31,7 +31,7 @@ fn router() -> (Provider, Router<Provider>) {
 }
 
 #[tokio::test]
-async fn send_json_route() {
+async fn json_route() {
     let (_, router) = router();
     let request = Request::get("/shout/hi").body(Body::empty()).expect("build request");
 
@@ -43,7 +43,7 @@ async fn send_json_route() {
 }
 
 #[tokio::test]
-async fn send_unknown_path() {
+async fn unknown_path() {
     let (_, router) = router();
     let request = Request::get("/missing").body(Body::empty()).expect("build request");
 
@@ -53,7 +53,7 @@ async fn send_unknown_path() {
 }
 
 #[tokio::test]
-async fn deliver_topic() {
+async fn handled_topic() {
     let (provider, router) = router();
 
     deliver(&router, "notes", br#""remember""#).await.expect("the topic is handled");
@@ -62,7 +62,7 @@ async fn deliver_topic() {
 }
 
 #[tokio::test]
-async fn deliver_unhandled_topic() {
+async fn unhandled_topic() {
     let (_, router) = router();
 
     assert_eq!(

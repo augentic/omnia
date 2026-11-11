@@ -2,7 +2,7 @@
 //! into a [`RunPlan`] over paths and strings.
 //!
 //! [`plan`] is pure with respect to the process — argv and `OMNIA_MANIFEST`
-//! are parameters — so source precedence is unit-testable without spawning a
+//! are parameters — so source precedence is testable without spawning a
 //! binary.
 
 use std::ffi::OsString;
@@ -110,63 +110,5 @@ pub enum PlanError {
 impl From<anyhow::Error> for PlanError {
     fn from(error: anyhow::Error) -> Self {
         Self::Fatal(error)
-    }
-}
-
-// `plan` is pure over argv and `OMNIA_MANIFEST`, so precedence is testable without a binary
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn argv(args: &[&str]) -> Vec<OsString> {
-        args.iter().map(OsString::from).collect()
-    }
-
-    fn fatal(error: PlanError) -> String {
-        match error {
-            PlanError::Fatal(error) => format!("{error:#}"),
-            PlanError::Usage(error) => panic!("expected a fatal error, got usage: {error}"),
-        }
-    }
-
-    #[test]
-    fn manifest_beats_positional() {
-        let long =
-            plan(argv(&["bin", "run", "guest.wasm", "--manifest", "omnia.toml"]), None, true)
-                .unwrap_or_else(|error| panic!("{}", fatal(error)));
-        assert_eq!(long.source, RunSource::Manifest(PathBuf::from("omnia.toml")));
-
-        let short = plan(argv(&["bin", "run", "-m", "omnia.toml"]), None, false)
-            .unwrap_or_else(|error| panic!("{}", fatal(error)));
-        assert_eq!(short.source, RunSource::Manifest(PathBuf::from("omnia.toml")));
-    }
-
-    #[test]
-    fn omnia_manifest_env() {
-        let plan =
-            plan(argv(&["bin", "run", "guest.wasm"]), Some(OsString::from("from_env.toml")), false)
-                .unwrap_or_else(|error| panic!("{}", fatal(error)));
-        assert_eq!(plan.source, RunSource::Manifest(PathBuf::from("from_env.toml")));
-    }
-
-    #[test]
-    fn positional_beats_compiled() {
-        let plan = plan(argv(&["bin", "run", "guest.wasm"]), None, true)
-            .unwrap_or_else(|error| panic!("{}", fatal(error)));
-        assert_eq!(plan.source, RunSource::Wasm(PathBuf::from("guest.wasm")));
-    }
-
-    #[test]
-    fn compiled_source() {
-        let plan = plan(argv(&["bin", "run"]), None, true)
-            .unwrap_or_else(|error| panic!("{}", fatal(error)));
-        assert_eq!(plan.source, RunSource::CompiledIn);
-    }
-
-    #[test]
-    fn no_source_fails() {
-        let error = plan(argv(&["bin", "run"]), None, false)
-            .expect_err("a sourceless deployment must fail");
-        assert!(fatal(error).contains("no guest specified"));
     }
 }

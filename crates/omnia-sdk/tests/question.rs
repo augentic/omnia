@@ -128,7 +128,7 @@ async fn corrected() {
 }
 
 #[tokio::test]
-async fn own_correction_template() {
+async fn custom_correction() {
     let model = ScriptedModel::answering([
         r#"{"verdict":"fail","findings":[]}"#,
         r#"{"verdict":"pass","findings":[]}"#,
@@ -222,7 +222,7 @@ async fn other_tools() {
 }
 
 #[tokio::test]
-async fn refuse_tool_call() {
+async fn unhandled_tool_call() {
     let model = ScriptedModel::answering([r#"{"verdict":"pass","findings":[]}"#]).calling(
         0,
         [ToolCall {

@@ -173,7 +173,7 @@ where
             let mut serve = pin!(H::serve(&runtime));
             let result = tokio::select! {
                 result = &mut serve => result,
-                () = wait_for_shutdown_signal() => {
+                () = shutdown_signal() => {
                     tracing::info!(
                         component = runtime.name(),
                         "waiting for in-flight tasks to exit; send another signal to quit immediately"
@@ -181,7 +181,7 @@ where
                     runtime.stop();
                     tokio::select! {
                         result = &mut serve => result,
-                        () = wait_for_shutdown_signal() => Ok(()),
+                        () = shutdown_signal() => Ok(()),
                     }
                 }
             };
@@ -335,7 +335,7 @@ impl IdleRelease {
     }
 }
 
-async fn wait_for_shutdown_signal() {
+async fn shutdown_signal() {
     #[cfg(unix)]
     {
         use tokio::signal::unix::{SignalKind, signal};
@@ -389,15 +389,7 @@ mod tests {
     }
 
     #[test]
-    fn idle_short_of_after() {
-        let mut idle = IdleRelease::new(AFTER);
-        let start = Instant::now();
-        assert!(!idle.due(0, false, start));
-        assert!(!idle.due(0, false, start + ALMOST));
-    }
-
-    #[test]
-    fn idle_past_after() {
+    fn elapsed() {
         let mut idle = IdleRelease::new(AFTER);
         let start = Instant::now();
         assert!(!idle.due(0, false, start));

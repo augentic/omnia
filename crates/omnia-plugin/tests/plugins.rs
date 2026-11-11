@@ -363,7 +363,7 @@ async fn plugins_plant() {
 // manifest's `registries` routes it to, and registers under its declared
 // name — the reference without its version, never the reference itself.
 #[tokio::test]
-async fn plugins_load_package() {
+async fn declared_package() {
     let scratch = scratch();
     stage_package(scratch.path(), ECHOER_PACKAGE, test_programs::LINK_ECHOER);
     let manifest = requester(test_programs::PLUGINS_LOAD)
@@ -474,7 +474,7 @@ async fn unrouted_namespace() {
 // beneath — `.` for a bare relative path, a mount's name as its prefix
 // otherwise — registers as its file stem, and records the bytes' digest.
 #[tokio::test]
-async fn plugins_load_path() {
+async fn mounted_path() {
     let scratch = scratch();
     stage(&scratch, "adapters/plugin.wasm", test_programs::LINK_ECHOER);
     let manifest = requester(test_programs::PLUGINS_LOAD).mounts([scratch.mount(false)]);
@@ -499,7 +499,7 @@ async fn plugins_load_path() {
 // same: the deployment booted the echoer from embedded bytes, and the
 // requester names its file.
 #[tokio::test]
-async fn path_attests_active() {
+async fn active_stem() {
     let scratch = scratch();
     stage(&scratch, "echoer.wasm", test_programs::LINK_ECHOER);
     let echoer = std::fs::read(test_programs::LINK_ECHOER).expect("reading the echoer");
@@ -517,7 +517,7 @@ async fn path_attests_active() {
 // for the declared load to attest. A package derives its name without the
 // version, so another release of a declared package is refused the same.
 #[tokio::test]
-async fn declared_name_reserved() {
+async fn squatted_name() {
     let scratch = scratch();
     scratch.write("plugin.wasm", changed_echoer(b"squatter"));
     stage_package(scratch.path(), ECHOER_PACKAGE, test_programs::LINK_ECHOER);
@@ -544,7 +544,7 @@ async fn declared_name_reserved() {
 // deployment's `registries` routes it to, and registers as its reference
 // without the version.
 #[tokio::test]
-async fn plugins_load_registry() {
+async fn named_package() {
     let scratch = scratch();
     stage_package(scratch.path(), ECHOER_PACKAGE, test_programs::LINK_ECHOER);
     let manifest = requester(test_programs::PLUGINS_LOAD)
@@ -570,15 +570,23 @@ async fn plugins_load_registry() {
 // row names is ever admitted — the requester stays the registry's one
 // guest.
 #[tokio::test]
-async fn location_refused() {
+async fn named_locations() {
     let scratch = scratch();
     stage(&scratch, "plugin.wasm", test_programs::LINK_ECHOER);
     scratch.write("junk.wasm", b"not a component");
     scratch.write("requester.wasm", changed_echoer(b"impostor"));
     precompile(&scratch, "native.bin", test_programs::LINK_ECHOER);
     let other = Digest::of(b"other bytes").to_string();
+    let hex = other.strip_prefix("sha256:").expect("a sha256 digest");
+    // an uppercase pin parses, and the refusal spells it canonically
+    let shouted = format!("sha256:{}", hex.to_ascii_uppercase());
+    let canonical = format!("not its declared digest {other}");
+    let sha512 = format!("sha512:{hex}");
+    let not_hex = format!("sha256:{}", "zz".repeat(32));
+    // 64 bytes but 32 characters, so only the hex check refuses it
+    let not_ascii = format!("sha256:{}", "é".repeat(32));
 
-    let rows: [&[&str]; 13] = [
+    let rows: [&[&str]; 17] = [
         &["path", "../plugin.wasm", "refused", "plain relative path"],
         &["path", "/etc/passwd", "refused", "plain relative path"],
         &["path", ".", "refused", "plain relative path"],
@@ -590,6 +598,10 @@ async fn location_refused() {
         &["path", "native.bin", "refused", "admits raw wasm alone"],
         &["path", "plugin.wasm", "refused", "digest `sha256:zz`", "sha256:zz"],
         &["path", "plugin.wasm", "refused", "not its declared digest", &other],
+        &["path", "plugin.wasm", "refused", &canonical, &shouted],
+        &["path", "plugin.wasm", "refused", "is not `sha256:<hex>`", &sha512],
+        &["path", "plugin.wasm", "refused", "is not 64 hex characters", &not_hex],
+        &["path", "plugin.wasm", "refused", "is not 64 hex characters", &not_ascii],
         &["path", "requester.wasm", "refused", "declares"],
         &["declared", "requester", "refused", "takes no digest", &other],
     ];
@@ -605,7 +617,7 @@ async fn location_refused() {
     // A stem active under other bytes, where no entry declares the name: the
     // echoer booted from embedded bytes, and the file planted under its name
     // is refused rather than re-bound (the same bytes would attest —
-    // `path_attests_active`).
+    // `active_stem`).
     scratch.write("echoer.wasm", changed_echoer(b"impostor"));
     let echoer = std::fs::read(test_programs::LINK_ECHOER).expect("reading the echoer");
     let manifest = requester(test_programs::PLUGINS_REFUSED)
@@ -630,7 +642,7 @@ async fn location_refused() {
 // `.` or the path names it: what the guest can write, it cannot run. The
 // refusal names the mount and is reached before the file is read.
 #[tokio::test]
-async fn writable_mount_refused() {
+async fn writable_mount() {
     let scratch = scratch();
     stage(&scratch, "plugin.wasm", test_programs::LINK_ECHOER);
     let manifest = requester(test_programs::PLUGINS_REFUSED).mounts([scratch.mount(true)]);
@@ -652,7 +664,7 @@ async fn writable_mount_refused() {
 // refuses at assembly, naming both: written through one view, a component
 // would load through the other. Mounts of one permission nest freely.
 #[tokio::test]
-async fn overlap_refused_at_install() {
+async fn overlapping_mounts() {
     let scratch = scratch();
     std::fs::create_dir(scratch.path().join("out")).expect("creating out");
     let out = |writable| omnia::Mount {
@@ -734,7 +746,7 @@ async fn malformed_registries() {
 // package whose namespace it routes — here through the default — is refused
 // rather than fetched elsewhere, and the refusal names both registries.
 #[tokio::test]
-async fn endpoint_conflicts_with_routing() {
+async fn endpoint_routed() {
     let scratch = scratch();
     stage_package(scratch.path(), ECHOER_PACKAGE, test_programs::LINK_ECHOER);
     let manifest = requester(test_programs::PLUGINS_REFUSED)
@@ -752,7 +764,7 @@ async fn endpoint_conflicts_with_routing() {
 // load names — one the deployment's `registries` configures but routes
 // nothing to.
 #[tokio::test]
-async fn endpoint_unrouted_namespace() {
+async fn endpoint_unrouted() {
     let scratch = scratch();
     stage_package(scratch.path(), ECHOER_PACKAGE, test_programs::LINK_ECHOER);
     let manifest = requester(test_programs::PLUGINS_LOAD)
@@ -935,7 +947,7 @@ async fn pinned_reload() {
 // deregistered declared name for the next declared load to attest, so that
 // load reaches the entry's own source again.
 #[tokio::test]
-async fn reregister_refused() {
+async fn reregister() {
     let manifest = requester(test_programs::PLUGINS_LOAD)
         .guest(GuestEntry::new("plugin", test_programs::LINK_ECHOER));
     let runtime = boot(manifest, &[]).await.expect("assembling runtime");
@@ -958,7 +970,7 @@ async fn reregister_refused() {
 // The guest-side copies exist because published crates cannot reference WIT
 // outside their package root; the host copy stays canonical.
 #[test]
-fn wit_copies_stay_identical() {
+fn wit_copies() {
     let canonical = include_str!("../wit/plugins.wit");
     assert_eq!(
         include_str!("../../omnia-sdk/wit/plugins.wit"),
@@ -1044,7 +1056,7 @@ fn store_root(scratch: &Scratch) -> PathBuf {
 // there with no registry routed at all — the store is the one place a
 // package's bytes come from once it holds them.
 #[tokio::test]
-async fn second_start_fetches_nothing() {
+async fn second_start() {
     let scratch = scratch();
     let store = store_root(&scratch);
     stage_package(scratch.path(), ECHOER_PACKAGE, test_programs::LINK_ECHOER);
@@ -1110,7 +1122,7 @@ async fn stored_release() {
 // A pre-compiled release a registry serves is refused before it is written,
 // so the store holds nothing a later start would load.
 #[tokio::test]
-async fn precompiled_package_never_stored() {
+async fn precompiled_with_store() {
     let scratch = scratch();
     let store = store_root(&scratch);
     let plugin_bin = precompile(&scratch, "plugin.bin", test_programs::LINK_ECHOER);
@@ -1132,7 +1144,7 @@ async fn precompiled_package_never_stored() {
 // plant bytes of its choosing under a reference the deployment later
 // acquires on its own, where the store answers before the routing refusal.
 #[tokio::test]
-async fn named_endpoint_never_stored() {
+async fn endpoint_with_store() {
     let scratch = scratch();
     let store = store_root(&scratch);
     let planted = scratch.path().join("planted.wasm");
@@ -1162,7 +1174,7 @@ async fn named_endpoint_never_stored() {
 // placed against the current directory rather than refused for its absent
 // parent; the refusal fires at build, so nothing is written there.
 #[tokio::test]
-async fn store_beneath_writable_refused() {
+async fn writable_store() {
     let scratch = scratch();
     let present = scratch.path().join("present");
     std::fs::create_dir_all(&present).expect("creating the present store");

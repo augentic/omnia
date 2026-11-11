@@ -635,7 +635,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn plugins_without_loader_feature() {
+    fn plugins_without_loader() {
         let manifest = Manifest::new()
             .guest(GuestEntry::new("a", "./a.wasm"))
             .registries("default_registry = \"ghcr.io\"\n");
@@ -651,7 +651,7 @@ mod tests {
     // A package source is fetched through the guest loader's registry
     // client, which only the `loader` feature builds.
     #[test]
-    fn package_without_loader_feature() {
+    fn package_without_loader() {
         let manifest = Manifest::new()
             .guest(GuestEntry::new("app", "./app.wasm"))
             .guest(GuestEntry::package("acme:tool@1.0.0"));

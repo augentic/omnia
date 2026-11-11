@@ -16,7 +16,7 @@ fn user(content: &str) -> Request {
 }
 
 #[tokio::test]
-async fn provider_seeds() {
+async fn seeded_doubles() {
     let provider = Provider::default()
         .config(MapConfig::default().with([("region", "eu")]))
         .identity(FixedIdentity::new("tok"))

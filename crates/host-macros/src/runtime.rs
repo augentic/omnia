@@ -238,7 +238,7 @@ mod tests {
 
     // the retired top-level key is refused at the key, naming its new home
     #[test]
-    fn top_level_registries_refused() {
+    fn top_level_registries() {
         let error = syn::parse2::<Config>(quote!({
             registries: include_str!("wasm-pkg.toml"),
         }))
@@ -269,7 +269,7 @@ mod tests {
     // A guest has one source; the retired `on_demand` and `wasm_only` keys
     // are unknown keys like any other.
     #[test]
-    fn package_sources_exclusive() {
+    fn guest_sources() {
         let error = syn::parse2::<Config>(quote!({
             guests: [{ name: "tool", path: "tool.wasm", package: "acme:tool@1.2.3" }],
         }))
@@ -294,7 +294,7 @@ mod tests {
     // `include_bytes!` takes a literal or a macro, so a path computed at run
     // time is refused where the key is named rather than deep in the expansion.
     #[test]
-    fn guest_path_not_embeddable() {
+    fn computed_guest_path() {
         let error = syn::parse2::<Config>(quote!({
             guests: [{ path: engine_component_path() }],
         }))
@@ -316,7 +316,7 @@ mod tests {
     // `plugins` is manifest data, so it conflicts with `manifest:` like
     // every other inline key; the file declares `[plugins]`.
     #[test]
-    fn plugins_refused_beside_manifest() {
+    fn plugins_beside_manifest() {
         let error = syn::parse2::<Config>(quote!({
             manifest: concat!(env!("CARGO_MANIFEST_DIR"), "/omnia.toml"),
             plugins: { registries: include_str!("wasm-pkg.toml") },

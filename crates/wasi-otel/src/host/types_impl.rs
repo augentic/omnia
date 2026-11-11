@@ -70,13 +70,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn decode_id_malformed() {
+    fn malformed_id() {
         assert_eq!(decode_id("not-hex"), b"");
         assert_eq!(decode_id("abc"), b"");
     }
 
     #[test]
-    fn datetime_nanos_saturates() {
+    fn datetime_overflow() {
         let dt = types::Datetime {
             seconds: u64::MAX,
             nanoseconds: 999_999_999,

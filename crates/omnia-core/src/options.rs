@@ -329,7 +329,7 @@ mod tests {
     use super::{Enabled, RuntimeOptions, parse_enabled};
 
     #[test]
-    fn parse_enabled_values() {
+    fn enabled_spellings() {
         assert_eq!(parse_enabled("auto").unwrap(), Enabled::Auto);
         assert_eq!(parse_enabled("YES").unwrap(), Enabled::Yes);
         assert_eq!(parse_enabled(" no ").unwrap(), Enabled::No);
@@ -337,7 +337,7 @@ mod tests {
     }
 
     #[test]
-    fn per_module_memories_over_total() {
+    fn memories_over_total() {
         let options = RuntimeOptions {
             pool_total_memories: 8,
             pool_max_memories_per_module: Some(16),
@@ -347,7 +347,7 @@ mod tests {
     }
 
     #[test]
-    fn per_module_tables_over_total() {
+    fn tables_over_total() {
         let options = RuntimeOptions {
             pool_total_tables: 8,
             pool_max_tables_per_module: Some(16),

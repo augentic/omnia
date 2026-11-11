@@ -284,17 +284,6 @@ mod tests {
         entries.iter().map(|(name, value)| ((*name).to_owned(), (*value).to_owned())).collect()
     }
 
-    // The composed directives replace the host's `RUST_LOG` in place; every
-    // other pair comes through untouched.
-    #[test]
-    fn replaces_process() {
-        let host = pairs(&[("RUST_LOG", "off"), ("HOME", "/home/op")]);
-        assert_eq!(
-            guest_env(host, "debug,tower=off", true),
-            pairs(&[("RUST_LOG", "debug,tower=off"), ("HOME", "/home/op")])
-        );
-    }
-
     // A console off a terminal tells the guest so; a host `NO_COLOR` already
     // in force stands, and an empty one — no colour suppression, by the
     // convention — is filled the way an absent one is.

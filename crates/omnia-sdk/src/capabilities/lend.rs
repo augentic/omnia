@@ -17,12 +17,12 @@ pub fn resolve_lend<'d, 'p, D>(
 ) -> Option<(&'d D, &'p str)> {
     directories
         .iter()
-        .filter_map(|(dir, name)| Some((dir, lend_subpath(name, path)?)))
+        .filter_map(|(dir, name)| Some((dir, subpath(name, path)?)))
         .max_by_key(|(_, subpath)| std::cmp::Reverse(subpath.len()))
 }
 
 #[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
-fn lend_subpath<'a>(name: &str, path: &'a str) -> Option<&'a str> {
+fn subpath<'a>(name: &str, path: &'a str) -> Option<&'a str> {
     if path == name {
         return Some("");
     }

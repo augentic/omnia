@@ -106,7 +106,7 @@ async fn link_partial() {
 // than left unresolved: the deployment boots, and the call fails when the
 // relay finds no target.
 #[tokio::test]
-async fn link_unserved() {
+async fn unserved_import() {
     let runtime = boot(&[("full", test_programs::LINK_FULL)]).await.expect("deployment boots");
 
     let err = call(&runtime, "full", "poke", "hi").await.expect_err("no guest serves `ops`");
@@ -118,7 +118,7 @@ async fn link_unserved() {
 // seam, and the call lands on the freshly served route. The importer boots
 // from bytes, so the seam it imports was polyfilled at bootstrap.
 #[tokio::test]
-async fn link_declared_exporter() {
+async fn declared_exporter() {
     let full = std::fs::read(test_programs::LINK_FULL).expect("reading the full guest");
     let manifest = Manifest::new()
         .guest(GuestEntry::new("full", full))
@@ -145,7 +145,7 @@ async fn link_declared_exporter() {
 // route, so a call dispatched to it names the missing export rather than a
 // missing guest.
 #[tokio::test]
-async fn link_unlinked_target() {
+async fn unlinked_target() {
     let runtime = boot(&[("echoer", test_programs::LINK_FULL), ("full", test_programs::LINK_FULL)])
         .await
         .expect("deployment boots");
@@ -183,7 +183,7 @@ async fn link_full() {
 // registering `full` afterwards must polyfill the missing `ping-async` on the
 // linker clone.
 #[tokio::test]
-async fn link_full_registered_late() {
+async fn late_registration() {
     let runtime =
         boot(&[("echoer", test_programs::LINK_ECHOER), ("partial", test_programs::LINK_PARTIAL)])
             .await
@@ -206,7 +206,7 @@ async fn link_full_registered_late() {
 // through the `unsafe` `Verified::trusted`, the embedder's word that the
 // artifact came from its own toolchain.
 #[tokio::test]
-async fn register_refuses_precompiled() {
+async fn register_precompiled() {
     let runtime =
         boot(&[("echoer", test_programs::LINK_ECHOER), ("partial", test_programs::LINK_PARTIAL)])
             .await
@@ -239,7 +239,7 @@ async fn register_refuses_precompiled() {
 // `register` and `admit` are refused under it with nothing seated, and the
 // first use that follows still reaches the entry's own bytes.
 #[tokio::test]
-async fn register_declared_refused() {
+async fn register_declared() {
     let full = std::fs::read(test_programs::LINK_FULL).expect("reading the full guest");
     let manifest = Manifest::new()
         .guest(GuestEntry::new("full", full.clone()))
@@ -337,7 +337,7 @@ async fn link_handle() {
 // The manifest is validated before any guest loads, so no row's source need
 // exist. Two files of one stem collide on the name each derives.
 #[tokio::test]
-async fn manifest_refused() {
+async fn invalid_manifests() {
     let stems = Path::new(env!("CARGO_TARGET_TMPDIR")).join("duplicate_stem.toml");
     std::fs::write(
         &stems,

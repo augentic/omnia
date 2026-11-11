@@ -243,7 +243,7 @@ async fn inert() {
 // Two exporters with no routes are ambiguous, and a route to a guest that
 // does not export the handler is refused, both as the handler is built.
 #[tokio::test]
-async fn routes_refused() {
+async fn inconsistent_routes() {
     let ambiguous = Deployment::new()
         .guest("a", test_programs::MESSAGING_PRODUCE_HANDLE)
         .guest("b", test_programs::MESSAGING_HANDLE_ERR);
@@ -280,7 +280,7 @@ async fn unloadable_guest() {
 // that gives up on its transport must take the process down for a restart
 // rather than leave it idle and looking healthy.
 #[tokio::test]
-async fn consumer_end_fails_server() {
+async fn consumer_end() {
     let backends = Backends::defaults().await.messaging(EndedBroker);
     let runtime = boot(&sole(test_programs::MESSAGING_PRODUCE_HANDLE), backends).await;
 

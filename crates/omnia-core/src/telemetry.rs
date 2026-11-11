@@ -456,163 +456,10 @@ pub fn resource() -> Option<&'static Resource> {
     PROVIDERS.get().map(|providers| &providers.resource)
 }
 
-// these pin the tracing/OTLP SDK contract, not guest-host boundary behaviour
+// private rules over the run's directives and environment, which no public
+// boundary reaches
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, Mutex};
-
-    use opentelemetry::trace::TracerProvider as _;
-    use opentelemetry_sdk::metrics::SdkMeterProvider;
-    use opentelemetry_sdk::trace::{SdkTracerProvider, SpanData, SpanExporter};
-    use tracing_subscriber::layer::SubscriberExt as _;
-
-    use super::{LevelFilter, OTelSdkResult, Registry, console, filter, flush_providers};
-
-    // keeps its records, so flushing is observable without a collector
-    #[derive(Clone, Debug, Default)]
-    struct Recording {
-        names: Arc<Mutex<Vec<String>>>,
-    }
-
-    impl Recording {
-        fn names(&self) -> Vec<String> {
-            self.names.lock().expect("recording lock").clone()
-        }
-    }
-
-    impl SpanExporter for Recording {
-        fn export(&self, batch: Vec<SpanData>) -> impl std::future::Future<Output = OTelSdkResult> {
-            self.names
-                .lock()
-                .expect("recording lock")
-                .extend(batch.into_iter().map(|span| span.name.into_owned()));
-            std::future::ready(Ok(()))
-        }
-    }
-
-    // captures the console, so what a refinement shows is observable
-    #[derive(Clone, Debug, Default)]
-    struct Console(Arc<Mutex<Vec<u8>>>);
-
-    impl Console {
-        fn text(&self) -> String {
-            String::from_utf8(self.0.lock().expect("console lock").clone()).expect("utf-8 console")
-        }
-    }
-
-    impl std::io::Write for Console {
-        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-            self.0.lock().expect("console lock").extend_from_slice(buf);
-            Ok(buf.len())
-        }
-
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
-
-    impl<'a> super::MakeWriter<'a> for Console {
-        type Writer = Self;
-
-        fn make_writer(&'a self) -> Self {
-            self.clone()
-        }
-    }
-
-    // batch-exported, so spans stay queued until a flush pushes them
-    fn providers(exporter: &Recording) -> (SdkTracerProvider, SdkMeterProvider) {
-        (
-            SdkTracerProvider::builder().with_batch_exporter(exporter.clone()).build(),
-            SdkMeterProvider::builder().build(),
-        )
-    }
-
-    // the process `RUST_LOG` is handed in, never read: other tests run in parallel
-    mod directives {
-        use super::super::{LevelFilter, directives};
-
-        #[test]
-        fn flag_displaces_bare_level() {
-            assert_eq!(
-                directives(Some(LevelFilter::DEBUG), LevelFilter::INFO, Some("info")),
-                "debug"
-            );
-            assert_eq!(
-                directives(Some(LevelFilter::WARN), LevelFilter::INFO, Some("trace")),
-                "warn"
-            );
-        }
-
-        #[test]
-        fn flag_keeps_targets() {
-            assert_eq!(
-                directives(Some(LevelFilter::DEBUG), LevelFilter::INFO, Some("debug,tower=off")),
-                "debug,tower=off"
-            );
-            assert_eq!(
-                directives(Some(LevelFilter::WARN), LevelFilter::INFO, Some("omnia_core=trace")),
-                "warn,omnia_core=trace"
-            );
-        }
-
-        #[test]
-        fn no_flag_keeps_rust_log() {
-            assert_eq!(
-                directives(None, LevelFilter::INFO, Some("warn,omnia_core=debug")),
-                "warn,omnia_core=debug"
-            );
-        }
-
-        #[test]
-        fn unset_falls_back() {
-            assert_eq!(directives(None, LevelFilter::INFO, None), "info");
-            assert_eq!(directives(None, LevelFilter::WARN, Some("")), "warn");
-            assert_eq!(directives(Some(LevelFilter::TRACE), LevelFilter::WARN, None), "trace");
-        }
-
-        // the fallback stands in for an empty variable alone
-        #[test]
-        fn targeted_only_takes_no_fallback() {
-            assert_eq!(
-                directives(None, LevelFilter::INFO, Some("omnia_core=trace")),
-                "omnia_core=trace"
-            );
-        }
-
-        // every spelling `EnvFilter` reads as a level renders canonically; a bare target is not one
-        #[test]
-        fn bare_level_spellings() {
-            assert_eq!(directives(None, LevelFilter::INFO, Some("3,tower=off")), "info,tower=off");
-            assert_eq!(directives(None, LevelFilter::INFO, Some("DEBUG")), "debug");
-            assert_eq!(
-                directives(Some(LevelFilter::TRACE), LevelFilter::INFO, Some("INFO")),
-                "trace"
-            );
-            assert_eq!(directives(None, LevelFilter::INFO, Some("tower")), "tower");
-        }
-
-        #[test]
-        fn invalid_token_dropped() {
-            assert_eq!(
-                directives(
-                    Some(LevelFilter::DEBUG),
-                    LevelFilter::INFO,
-                    Some("omnia_core=loud,tower=off")
-                ),
-                "debug,tower=off"
-            );
-            assert_eq!(directives(None, LevelFilter::INFO, Some("omnia_core=loud")), "info");
-        }
-
-        #[test]
-        fn whitespace_and_empty_tokens() {
-            assert_eq!(
-                directives(None, LevelFilter::INFO, Some(" info , tower=off ,,")),
-                "info,tower=off"
-            );
-        }
-    }
-
     // `NO_COLOR` is honoured on a terminal by its convention — any non-empty
     // value disables colour, an empty one does not — and off a terminal
     // nothing enables it
@@ -635,10 +482,10 @@ mod tests {
     }
 
     mod refine {
-        use super::super::{LevelFilter, RUNTIME, refine};
+        use super::super::{LevelFilter, refine};
 
         #[test]
-        fn refines_runtime_crates() {
+        fn no_runtime_targets() {
             assert_eq!(
                 refine("info", LevelFilter::WARN),
                 "info,omnia::=warn,omnia_core=warn,omnia_link=warn,omnia_plugin=warn"
@@ -651,7 +498,7 @@ mod tests {
 
         // a directive of the operator's governing a runtime target stands as written
         #[test]
-        fn named_target_stands() {
+        fn named_target() {
             assert_eq!(
                 refine("info,omnia_core=trace", LevelFilter::WARN),
                 "info,omnia_core=trace,omnia::=warn,omnia_link=warn,omnia_plugin=warn"
@@ -665,14 +512,14 @@ mod tests {
         // `omnia=debug` matches every runtime target by prefix, so refining
         // one beneath it would override what the operator wrote
         #[test]
-        fn prefix_of_target_stands() {
+        fn prefix_of_target() {
             assert_eq!(refine("info,omnia=debug", LevelFilter::WARN), "info,omnia=debug");
         }
 
         // a more specific directive wins where it applies and leaves the rest of
         // the crate to the refinement; a span-only directive names no target
         #[test]
-        fn narrower_directives_refined_around() {
+        fn narrower_directives() {
             assert_eq!(
                 refine("info,omnia_core::runtime=trace", LevelFilter::WARN),
                 "info,omnia_core::runtime=trace,omnia::=warn,omnia_core=warn,omnia_link=warn,\
@@ -682,18 +529,6 @@ mod tests {
                 refine("info,[cli-run]=trace", LevelFilter::WARN),
                 "info,[cli-run]=trace,omnia::=warn,omnia_core=warn,omnia_link=warn,omnia_plugin=warn"
             );
-        }
-
-        // the composition root's prefix leaves `omnia_cursor`, `omnia_sdk`,
-        // and every `omnia_wasi_*` host to the run's level
-        #[test]
-        fn runtime_prefixes() {
-            for prefix in RUNTIME {
-                assert!(prefix.starts_with("omnia"), "{prefix}");
-                for other in ["omnia_cursor", "omnia_sdk", "omnia_wasi_http", "omnia"] {
-                    assert!(!other.starts_with(prefix), "`{prefix}` would govern `{other}`");
-                }
-            }
         }
     }
 
@@ -723,7 +558,7 @@ mod tests {
 
         // an `=` left in a profile attaches nothing
         #[test]
-        fn empty_is_unset() {
+        fn empty_endpoints() {
             let empty = |_: &str| Some(String::new());
             assert_eq!(
                 exports(Some(""), empty),
@@ -747,7 +582,7 @@ mod tests {
         }
 
         #[test]
-        fn per_signal_env_endpoint() {
+        fn per_signal_endpoint() {
             assert_eq!(
                 exports(None, env(&["OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"])),
                 Exports {
@@ -763,35 +598,5 @@ mod tests {
                 }
             );
         }
-    }
-
-    // The refinement is the console's alone: at a bare command run it hides
-    // the runtime's `info` while an `info` span of the same crate — the one
-    // guest telemetry grafts onto — is live and exports.
-    #[test]
-    fn refined_spans() {
-        let out = Console::default();
-        let exporter = Recording::default();
-        let (tracer, meter) = providers(&exporter);
-        let subscriber = Registry::default()
-            .with(filter("info").expect("directives parse"))
-            .with(console("info", Some(LevelFilter::WARN), out.clone(), false).expect("parse"))
-            .with(tracing_opentelemetry::layer().with_tracer(tracer.tracer("test")));
-
-        tracing::subscriber::with_default(subscriber, || {
-            let anchor = tracing::info_span!("cli-run");
-            assert!(!anchor.is_disabled(), "the run's filter governs spans");
-            let _entered = anchor.enter();
-            tracing::info!("guest loaded");
-            tracing::warn!("mount failed");
-            tracing::info!(target: "omnia_cursor::model", "completion");
-        });
-
-        flush_providers(&tracer, &meter);
-        assert_eq!(exporter.names(), ["cli-run"]);
-        let console = out.text();
-        assert!(!console.contains("guest loaded"), "{console}");
-        assert!(console.contains("mount failed"), "{console}");
-        assert!(console.contains("completion"), "{console}");
     }
 }

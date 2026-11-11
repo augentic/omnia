@@ -180,7 +180,7 @@ mod tests {
     }
 
     #[test]
-    fn gen_quotes_paths() {
+    fn gen_windows_path() {
         let programs = [program("adapter", "examples", "examples/adapter/main.rs")];
         let artifacts = [Artifact {
             program: &programs[0],

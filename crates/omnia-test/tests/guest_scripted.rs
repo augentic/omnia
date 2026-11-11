@@ -51,7 +51,7 @@ async fn answers_in_order() {
 }
 
 #[tokio::test]
-async fn scripted_failures() {
+async fn failed_turn() {
     let model = ScriptedModel::new([Err(Error::BudgetExhausted("cap".into()))]);
     assert_eq!(model.complete(user("a")).await, Err(Error::BudgetExhausted("cap".into())));
 }
@@ -144,7 +144,7 @@ async fn check_exhausts() {
 }
 
 #[tokio::test]
-async fn check_skips_failed() {
+async fn check_failed_turn() {
     let model = ScriptedModel::new([Err(Error::Backend("offline".into()))]);
     let error = model.complete_with(checked("go"), judge).await.expect_err("backend failed");
     assert_eq!(error, Error::Backend("offline".into()));
@@ -152,14 +152,14 @@ async fn check_skips_failed() {
 }
 
 #[test]
-fn complete_rejects_check() {
+fn complete_check() {
     let model = ScriptedModel::default();
     let result = catch_unwind(AssertUnwindSafe(|| drop(model.complete(checked("a")))));
     assert!(result.is_err(), "complete must refuse a check request");
 }
 
 #[tokio::test]
-async fn complete_rejects_calls() {
+async fn complete_calls() {
     let model = ScriptedModel::answering(["x"]).calling(0, [call("t", "{}")]);
     let result = catch_unwind(AssertUnwindSafe(|| model.complete(user("a"))));
     assert!(result.is_err(), "complete must refuse scripted tool calls");
@@ -299,7 +299,7 @@ async fn loader_defaulting() {
 }
 
 #[tokio::test]
-async fn scripted_refusal() {
+async fn loader_refusal() {
     let loader = ScriptedLoader::default()
         .declare("tool")
         .digest("tool", digest("ab"))
@@ -311,7 +311,7 @@ async fn scripted_refusal() {
 }
 
 #[tokio::test]
-async fn vcs_turns_and_seen() {
+async fn vcs_turns() {
     let vcs = ScriptedVcs::new([
         Ok(VcsTurn::Revision("sha:main".to_owned())),
         Ok(VcsTurn::Commit(Some("sha:c1".to_owned()))),

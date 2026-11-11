@@ -273,7 +273,7 @@ async fn observe(context: Context<StatefulProvider>) -> Json<ProviderObservation
 }
 
 #[tokio::test]
-async fn context_shares_provider() {
+async fn shared_provider() {
     let router = axum::Router::new()
         .route("/first", get(observe))
         .route("/second", get(observe))
@@ -383,7 +383,7 @@ async fn route_and_topic() {
 }
 
 #[tokio::test]
-async fn capability_error_taxonomy() {
+async fn capability_errors() {
     use omnia_sdk::{plugins, vcs};
 
     async fn route(Path(kind): Path<String>) -> Result<Json<()>, omnia_sdk::Error> {
@@ -489,13 +489,13 @@ async fn mcp_router() {
     let post = |body: serde_json::Value| {
         let app = app.clone();
         async move {
-            let req = Request::builder()
+            let request = Request::builder()
                 .method(Method::POST)
                 .uri("/mcp")
                 .header(CONTENT_TYPE, "application/json")
                 .body(Body::from(body.to_string()))
                 .expect("request");
-            send(app, req).await
+            send(app, request).await
         }
     };
 
@@ -520,12 +520,12 @@ async fn mcp_router() {
     assert_eq!(call["result"]["isError"], false);
     assert_eq!(call["result"]["content"][0]["text"], "the guide body");
 
-    let (_, tool_err) = post(serde_json::json!({
+    let (_, tool_error) = post(serde_json::json!({
         "jsonrpc": "2.0", "id": 4, "method": "tools/call",
         "params": { "name": "read_doc", "arguments": { "name": "missing" } }
     }))
     .await;
-    assert_eq!(tool_err["result"]["isError"], true);
+    assert_eq!(tool_error["result"]["isError"], true);
 
     let (_, bad_args) = post(serde_json::json!({
         "jsonrpc": "2.0", "id": 5, "method": "tools/call",
@@ -542,18 +542,18 @@ async fn mcp_router() {
     assert_eq!(unknown_tool["error"]["message"], "Unknown tool: nope");
 
     // resources/read and notification (202 Accepted) and GET (405 Method Not Allowed)
-    let (_, res) = post(serde_json::json!({
+    let (_, resource) = post(serde_json::json!({
         "jsonrpc": "2.0", "id": 7, "method": "resources/read",
         "params": { "uri": "doc://guide" }
     }))
     .await;
-    assert_eq!(res["result"]["contents"][0]["text"], "the guide body");
+    assert_eq!(resource["result"]["contents"][0]["text"], "the guide body");
 
-    let (notif_status, _) =
+    let (notified, _) =
         post(serde_json::json!({ "jsonrpc": "2.0", "method": "notifications/initialized" })).await;
-    assert_eq!(notif_status, StatusCode::ACCEPTED);
+    assert_eq!(notified, StatusCode::ACCEPTED);
 
-    let get_req = Request::get("/mcp").body(Body::empty()).expect("get");
-    let (get_status, _) = send(app, get_req).await;
+    let request = Request::get("/mcp").body(Body::empty()).expect("get");
+    let (get_status, _) = send(app, request).await;
     assert_eq!(get_status, StatusCode::METHOD_NOT_ALLOWED);
 }

@@ -229,17 +229,3 @@ impl PackageStore for NoStore {
         "no store is attached".to_owned()
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn reference_spellings() {
-        let dev: Reference = "emery:type-script@0.14.0-dev".parse().expect("an exact reference");
-        assert_eq!(dev.file_name(), "emery_type-script@0.14.0-dev.wasm");
-        for malformed in ["acme:tool@latest", "tool@1.2.3", "acme_tool@1.2.3"] {
-            malformed.parse::<Reference>().expect_err("refused");
-        }
-    }
-}

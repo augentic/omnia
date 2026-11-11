@@ -199,7 +199,7 @@ mod tests {
     }
 
     #[test]
-    fn direct_argv() {
+    fn host_grammar() {
         // nothing in argv is reserved for the host
         let options = MainOptions::new(Mode::Command).manifest(inline_source("app"));
         let plan =
@@ -217,7 +217,7 @@ mod tests {
     // The verbosity flags are read for the levels and stay in the guest's
     // argv, where its own grammar declares them.
     #[test]
-    fn direct_argv_verbatim() {
+    fn verbosity_flags() {
         use crate::LevelFilter;
 
         let options = MainOptions::new(Mode::Command).manifest(inline_source("app"));
@@ -254,7 +254,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn direct_non_utf8() {
+    fn non_utf8() {
         use std::os::unix::ffi::OsStringExt as _;
 
         let options = MainOptions::new(Mode::Command).manifest(inline_source("app"));

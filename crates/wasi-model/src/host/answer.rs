@@ -234,7 +234,7 @@ mod tests {
     // the largest value is the answer: a worked example before it, a
     // fragment of it repeated after it, and a citation beside it are smaller
     #[test]
-    fn largest_value_wins() {
+    fn largest_value() {
         assert_eq!(
             candidate(
                 "For example {\"verdict\":\"fail\"} — and mine:\n{\"findings\":[],\"verdict\":\"pass\"}"
@@ -255,7 +255,7 @@ mod tests {
     // one block: a literal inside code is never mined, even one that parses
     // and outweighs the answer
     #[test]
-    fn blocks_that_are_not_json() {
+    fn non_json_blocks() {
         for text in [
             "[thinking] weighing the claims.\n{\"verdict\":\"pass\"}",
             "{thinking} done.\n```json\n{\"verdict\":\"pass\"}\n```",

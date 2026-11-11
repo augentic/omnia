@@ -342,8 +342,11 @@ async fn http_outgoing_timeout() {
 async fn http_incoming_echo() {
     // no `wasi:cli/run` to drive: boot, then dispatch through the in-process handler
     let guest = std::fs::read(test_programs::HTTP_INCOMING_ECHO).expect("guest bytes");
+    // declared from a path that does not exist, so it loads (and fails) at first use
+    let absent = std::env::temp_dir().join("omnia-http-absent-guest.wasm");
     let runtime = Deployment::new()
         .entry(GuestEntry::new("guest", guest).route_http("/echo"))
+        .entry(GuestEntry::new("absent", absent).route_http("/echo/absent"))
         .boot(Backends::defaults().await, |deployment| {
             deployment.host::<WasiHttp>()?;
             deployment.host::<WasiOtel>()?;
@@ -385,13 +388,24 @@ async fn http_incoming_echo() {
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(collect(response).await, json!({ "message": "h2", "request_id": "req-h2" }));
 
-    // the declared route drives the trigger, so a path beside it is a miss
-    let request = Request::get("/other")
-        .header(HOST, "echo.test")
-        .body(Full::new(Bytes::new()))
-        .expect("request");
-    let response = handler.handle(request).await.expect("handled");
-    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    // the declared routes drive the trigger: the longest prefix wins, matched
+    // by whole segment, so `/echo/absentee` runs the echo guest (which has no
+    // such route) and a path beside both is a miss that runs nothing
+    for (path, status, ran) in [
+        ("/echo/absent", StatusCode::INTERNAL_SERVER_ERROR, false),
+        ("/echo/absent/x", StatusCode::INTERNAL_SERVER_ERROR, false),
+        ("/echo/absentee", StatusCode::NOT_FOUND, true),
+        ("/other", StatusCode::NOT_FOUND, false),
+    ] {
+        let built = runtime.stores_built();
+        let request = Request::get(path)
+            .header(HOST, "echo.test")
+            .body(Full::new(Bytes::new()))
+            .expect("request");
+        let response = handler.handle(request).await.expect("handled");
+        assert_eq!(response.status(), status, "{path}");
+        assert_eq!(runtime.stores_built() > built, ran, "{path}");
+    }
 
     runtime.shutdown();
 }

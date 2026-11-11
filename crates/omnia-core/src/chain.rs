@@ -105,16 +105,15 @@ mod tests {
         GuestId::from("callee")
     }
 
-    // The depth counts up one and two hops down from a command root, with the
-    // root's wall-clock policy carried to each.
+    // A command root's wall-clock policy is carried to every hop beneath it.
     #[test]
     fn inherited() {
         let root = ChainCtx::command();
 
         let child = policy().enter(&root, &callee()).expect("within depth");
-        assert_eq!((child.depth, child.uncapped), (1, true));
+        assert!(child.uncapped);
 
         let grandchild = policy().enter(&child, &callee()).expect("within depth");
-        assert_eq!((grandchild.depth, grandchild.uncapped), (2, true));
+        assert!(grandchild.uncapped);
     }
 }

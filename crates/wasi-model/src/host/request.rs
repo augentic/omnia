@@ -191,7 +191,7 @@ mod tests {
     use crate::host::{Grants, Message};
 
     #[test]
-    fn prompt_joins_channels() {
+    fn mixed_roles() {
         let messages = [(Role::User, "hi"), (Role::Assistant, "yo"), (Role::System, "note")];
         let prompt = Request {
             model: None,

@@ -32,7 +32,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_skips_malformed_entries() {
+    fn malformed_entries() {
         assert_eq!(
             parse("vendor=opaque,noequals,other=v"),
             pairs(&[("vendor", "opaque"), ("other", "v")])
@@ -40,7 +40,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_empty_header() {
+    fn empty_header() {
         assert_eq!(parse(""), Vec::<(String, String)>::new());
     }
 }

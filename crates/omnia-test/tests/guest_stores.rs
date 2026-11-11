@@ -41,7 +41,7 @@ fn doc(id: &str, json: &str) -> Document {
 // -- Memory: state -----------------------------------------------------------
 
 #[test]
-fn state_set_get_delete() {
+fn state() {
     let memory = Memory::default();
     now(StateStore::set(&memory, "k", b"v1", None)).expect("set");
     now(StateStore::set(&memory, "k", b"v2", Some(30))).expect("set");
@@ -153,7 +153,7 @@ fn info_timestamps() {
 }
 
 #[test]
-fn copy_move_and_clear() {
+fn copy_move_clear() {
     let memory = Memory::default();
     memory.insert_object("src", "o", b"data");
     now(memory.copy_object("src", "o", "dst", "copy")).expect("copy");
@@ -275,7 +275,7 @@ fn queries() {
 }
 
 #[test]
-fn query_filters_and_sorting() {
+fn filter_and_sort() {
     let docs = MemoryDocs::default();
     for (id, body) in [
         (

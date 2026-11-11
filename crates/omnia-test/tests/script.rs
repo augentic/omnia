@@ -26,7 +26,7 @@ fn pops_in_order() {
 }
 
 #[test]
-fn clones_share_queue() {
+fn clones() {
     let script = Script::new([1, 2]);
     let handle = script.clone();
     assert_eq!(handle.next(()), 1);
@@ -70,7 +70,7 @@ fn edit_out_of_range() {
 }
 
 #[test]
-fn assert_exhausted_remainder() {
+fn assert_turns_left() {
     let script = Script::<(), i32>::new([1, 2, 3]);
     assert_eq!(script.next(()), 1);
     let result = catch_unwind(AssertUnwindSafe(|| script.assert_exhausted()));
@@ -104,7 +104,7 @@ fn try_next_overrun() {
 }
 
 #[test]
-fn then_answers_try_next() {
+fn then_try_next() {
     let script = Script::<(), i32>::new([]).then(|| 7);
     assert_eq!(script.try_next(()), Some(7));
     assert_eq!(script.overruns(), 0);
@@ -121,8 +121,9 @@ fn drop_overrun() {
     assert!(text.contains("1 request(s) past the end"), "{text}");
 }
 
+// the drop check stays silent once assert_exhausted has reported
 #[test]
-fn drop_check_asserted() {
+fn drop_after_assert() {
     let script = Script::<(), i32>::new([1, 2]);
     let result = catch_unwind(AssertUnwindSafe(|| script.assert_exhausted()));
     assert!(result.is_err(), "the assertion reports the remainder");
@@ -130,7 +131,7 @@ fn drop_check_asserted() {
 }
 
 #[test]
-fn drop_check_unrelated_panic() {
+fn drop_while_panicking() {
     let result = catch_unwind(|| {
         let _script = Script::<(), i32>::new([1]);
         panic!("the real failure");

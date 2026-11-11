@@ -175,7 +175,7 @@ mod tests {
     }
 
     #[test]
-    fn null_sorts_first() {
+    fn absent_sort_key() {
         let order = [SortField {
             field: "v".to_string(),
             descending: false,
