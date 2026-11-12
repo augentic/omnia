@@ -274,7 +274,7 @@ fn stderr_json(response: &Response) -> serde_json::Value {
 }
 
 #[tokio::test]
-async fn call_success_text() {
+async fn call_text() {
     let client = Client::new(());
     let metadata = Metadata::default();
     let response = Command::new(&client, &metadata, Format::Text).call(greet, ada()).await;
@@ -285,7 +285,7 @@ async fn call_success_text() {
 }
 
 #[tokio::test]
-async fn call_success_json() {
+async fn call_json() {
     let client = Client::new(());
     let metadata = Metadata::default();
     let response = Command::new(&client, &metadata, Format::Json).call(greet, ada()).await;
@@ -321,7 +321,7 @@ async fn call_handler_error() {
 }
 
 #[tokio::test]
-async fn hints_apply_by_error() {
+async fn hints_by_error() {
     let client = Client::new(());
     let metadata = Metadata::default();
     let command = Command::new(&client, &metadata, Format::Text).hints(|error| {
@@ -490,7 +490,7 @@ mod http_parity {
     // One `Handlers` carries the path and the subcommand, and the one router
     // answers both with the same error body.
     #[tokio::test]
-    async fn handler_error_http() {
+    async fn handler_error() {
         let router = Handlers::new()
             .route("/items", get(lookup_route))
             .command("lookup", lookup)

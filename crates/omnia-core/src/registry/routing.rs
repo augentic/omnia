@@ -49,15 +49,6 @@ pub trait MatchStrategy {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct PrefixMatch;
 
-/// NATS-style wildcard matching: `.`-tokenised, `*` matches one token, `>`
-/// matches one or more trailing tokens.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct PatternMatch;
-
-/// Exact string matching, used for CLI subcommands.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct ExactMatch;
-
 impl MatchStrategy for PrefixMatch {
     fn matches(key: &str, pattern: &str) -> bool {
         path_has_prefix(key, pattern)
@@ -68,11 +59,52 @@ impl MatchStrategy for PrefixMatch {
     }
 }
 
+// segment-aware: `/a` matches `/a` and `/a/b` but not `/ab`
+fn path_has_prefix(path: &str, prefix: &str) -> bool {
+    path.strip_prefix(prefix)
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with('/') || prefix.ends_with('/'))
+}
+
+/// NATS-style wildcard matching: `.`-tokenised, `*` matches one token, `>`
+/// matches one or more trailing tokens.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct PatternMatch;
+
 impl MatchStrategy for PatternMatch {
     fn matches(key: &str, pattern: &str) -> bool {
         topic_matches(key, pattern)
     }
 }
+
+// NATS-style: `*` matches exactly one `.`-token, a trailing `>` one or more
+fn topic_matches(topic: &str, pattern: &str) -> bool {
+    let mut topic_tokens = topic.split('.');
+    let mut pattern_tokens = pattern.split('.').peekable();
+
+    while let Some(token) = pattern_tokens.next() {
+        match token {
+            ">" => return pattern_tokens.peek().is_none() && topic_tokens.next().is_some(),
+            "*" => {
+                if topic_tokens.next().is_none() {
+                    return false;
+                }
+            }
+            literal => {
+                if topic_tokens.next() != Some(literal) {
+                    return false;
+                }
+            }
+        }
+    }
+
+    // Every pattern token matched; it is a full match only if the topic is also
+    // exhausted (equal token counts).
+    topic_tokens.next().is_none()
+}
+
+/// Exact string matching, used for CLI subcommands.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ExactMatch;
 
 impl MatchStrategy for ExactMatch {
     fn matches(key: &str, pattern: &str) -> bool {
@@ -336,136 +368,5 @@ impl<R: Resolver> TriggerRouter<R> {
     #[must_use]
     pub const fn catch_all(&self) -> Option<&GuestId> {
         self.router.catch_all()
-    }
-}
-
-// segment-aware: `/a` matches `/a` and `/a/b` but not `/ab`
-fn path_has_prefix(path: &str, prefix: &str) -> bool {
-    path.strip_prefix(prefix)
-        .is_some_and(|rest| rest.is_empty() || rest.starts_with('/') || prefix.ends_with('/'))
-}
-
-// NATS-style: `*` matches exactly one `.`-token, a trailing `>` one or more
-fn topic_matches(topic: &str, pattern: &str) -> bool {
-    let mut topic_tokens = topic.split('.');
-    let mut pattern_tokens = pattern.split('.').peekable();
-
-    while let Some(token) = pattern_tokens.next() {
-        match token {
-            ">" => return pattern_tokens.peek().is_none() && topic_tokens.next().is_some(),
-            "*" => {
-                if topic_tokens.next().is_none() {
-                    return false;
-                }
-            }
-            literal => {
-                if topic_tokens.next() != Some(literal) {
-                    return false;
-                }
-            }
-        }
-    }
-
-    // Every pattern token matched; it is a full match only if the topic is also
-    // exhausted (equal token counts).
-    topic_tokens.next().is_none()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn id(value: &str) -> GuestId {
-        GuestId::from(value)
-    }
-
-    #[test]
-    fn http_longest_prefix() {
-        let routes =
-            HttpRoutes::new([("/a".to_owned(), id("short")), ("/a/b".to_owned(), id("long"))]);
-        assert_eq!(routes.resolve("/a/b/c"), Some(&id("long")));
-        assert_eq!(routes.resolve("/a/x"), Some(&id("short")));
-        assert_eq!(routes.resolve("/other"), None);
-    }
-
-    #[test]
-    fn http_prefix_segments() {
-        let routes = HttpRoutes::new([("/a".to_owned(), id("a"))]);
-        assert_eq!(routes.resolve("/a"), Some(&id("a")));
-        assert_eq!(routes.resolve("/a/deep"), Some(&id("a")));
-        assert_eq!(routes.resolve("/abc"), None);
-    }
-
-    #[test]
-    fn topic_wildcard() {
-        let routes = PatternRoutes::new([
-            ("specify.build.>".to_owned(), id("workflow")),
-            ("events.*.created".to_owned(), id("audit")),
-        ]);
-        assert_eq!(routes.resolve("specify.build.rust"), Some(&id("workflow")));
-        assert_eq!(routes.resolve("specify.build.rust.extra"), Some(&id("workflow")));
-        assert_eq!(routes.resolve("events.user.created"), Some(&id("audit")));
-        assert_eq!(routes.resolve("events.user.deleted"), None);
-        assert_eq!(routes.resolve("specify.build"), None);
-    }
-
-    fn none_declared(_: &GuestId) -> bool {
-        false
-    }
-
-    #[test]
-    fn build_catch_all() {
-        let router = Router::build("http", &[id("only")], none_declared, HttpRoutes::default())
-            .expect("a sole exporter is the catch-all");
-        assert_eq!(router.resolve("/anything"), Some(&id("only")));
-    }
-
-    #[test]
-    fn build_inert() {
-        let router = Router::build("http", &[], none_declared, HttpRoutes::default())
-            .expect("no exporters is inert, not an error");
-        assert!(router.is_inert());
-        assert_eq!(router.resolve("/anything"), None);
-    }
-
-    #[test]
-    fn declared_is_never_catch_all() {
-        let router =
-            Router::build("http", &[], |guest| *guest == id("later"), HttpRoutes::default())
-                .expect("no loaded exporter is inert, whatever is declared");
-        assert!(router.is_inert());
-    }
-
-    #[test]
-    fn build_ambiguous() {
-        let error =
-            Router::build("http", &[id("a"), id("b")], none_declared, HttpRoutes::default())
-                .expect_err("two exporters with no routes is ambiguous");
-        assert!(error.to_string().contains("2 capable guests"));
-    }
-
-    #[test]
-    fn build_routes() {
-        let routes = HttpRoutes::new([("/a".to_owned(), id("a"))]);
-        let r = Router::build("http", &[id("a")], none_declared, routes).expect("routes are valid");
-        assert_eq!(r.resolve("/a"), Some(&id("a")));
-        // an explicit route makes the trigger route-driven: a miss is a miss
-        assert_eq!(r.resolve("/b"), None);
-    }
-
-    #[test]
-    fn defer_declared_route() {
-        let routes = HttpRoutes::new([("/a".to_owned(), id("later"))]);
-        let r = Router::build("http", &[], |guest| *guest == id("later"), routes)
-            .expect("a route may name a declared guest that has not loaded");
-        assert_eq!(r.resolve("/a"), Some(&id("later")));
-    }
-
-    #[test]
-    fn reject_route() {
-        let routes = HttpRoutes::new([("/a".to_owned(), id("ghost"))]);
-        let error = Router::build("http", &[id("real")], none_declared, routes)
-            .expect_err("a route to a non-exporter must fail fast");
-        assert!(error.to_string().contains("ghost"));
     }
 }

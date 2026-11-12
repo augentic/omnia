@@ -13,8 +13,6 @@ use tracing::instrument;
 use crate::host::VaultClient;
 use crate::host::resource::{FutureResult, Locker};
 
-type Store = Arc<parking_lot::RwLock<HashMap<String, HashMap<String, Vec<u8>>>>>;
-
 /// Default implementation for `wasi:vault`.
 #[derive(Debug, Clone)]
 pub struct VaultDefault {
@@ -51,6 +49,8 @@ impl VaultClient for VaultDefault {
         async move { Ok(Arc::new(locker) as Arc<dyn Locker>) }.boxed()
     }
 }
+
+type Store = Arc<parking_lot::RwLock<HashMap<String, HashMap<String, Vec<u8>>>>>;
 
 #[derive(Debug, Clone)]
 struct InMemLocker {

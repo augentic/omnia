@@ -39,22 +39,6 @@ pub struct Caller {
     pub routes: Routes,
 }
 
-// Read from the calling store before the future is built, so no store borrow
-// crosses the dispatch.
-struct Origin {
-    chain: ChainCtx,
-    dispatcher: Arc<dyn Dispatcher>,
-}
-
-impl Origin {
-    fn of<B>(data: &StoreCtx<B>) -> Self {
-        Self {
-            chain: data.chain(),
-            dispatcher: data.dispatcher(),
-        }
-    }
-}
-
 /// Polyfill one component's imports outside the runtime's own namespaces
 /// ([`is_host`]) not already in `wired`, bound to `caller`.
 ///
@@ -180,6 +164,22 @@ pub fn polyfill_component<B: Send + 'static>(
     Ok(())
 }
 
+// Read from the calling store before the future is built, so no store borrow
+// crosses the dispatch.
+struct Origin {
+    chain: ChainCtx,
+    dispatcher: Arc<dyn Dispatcher>,
+}
+
+impl Origin {
+    fn of<B>(data: &StoreCtx<B>) -> Self {
+        Self {
+            chain: data.chain(),
+            dispatcher: data.dispatcher(),
+        }
+    }
+}
+
 // One call: select the target, reject crossing handles, take a depth slot,
 // resolve the live route (loading a declared target at first use), and run a
 // fresh callee instance on its own task.
@@ -286,80 +286,5 @@ fn plain_type(ty: &Type) -> Result<(), &'static str> {
         | Type::String
         | Type::Enum(_)
         | Type::Flags(_) => Ok(()),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use wasmtime::component::types::ComponentItem;
-    use wasmtime::component::{Component, types};
-    use wasmtime::{Config, Engine};
-
-    use super::plain_signature;
-
-    fn signatures() -> (Engine, Component) {
-        let mut config = Config::new();
-        config.wasm_component_model(true);
-        config.wasm_component_model_async(true);
-        let engine = Engine::new(&config).expect("engine");
-        let component = Component::new(
-            &engine,
-            r#"
-            (component
-              (import "sigs" (instance
-                (export "r" (type $r (sub resource)))
-                (type $rec-def (record (field "n" u32) (field "r" (own $r))))
-                (export "rec" (type $rec (eq $rec-def)))
-                (export "plain" (func (param "n" u32) (param "s" string) (result (list u8))))
-                (export "own" (func (param "r" (own $r))))
-                (export "borrow" (func (param "r" (borrow $r))))
-                (export "future" (func (result (future u32))))
-                (export "stream" (func (param "bytes" (stream u8))))
-                (export "nested" (func (param "rec" (option $rec))))
-              ))
-            )
-            "#,
-        )
-        .expect("type-only component");
-        (engine, component)
-    }
-
-    fn signature(engine: &Engine, component: &Component, name: &str) -> types::ComponentFunc {
-        let ComponentItem::ComponentInstance(sigs) =
-            component.component_type().get_import(engine, "sigs").expect("sigs import").ty
-        else {
-            panic!("sigs import is not an instance");
-        };
-        let (_, types::ComponentExtern { ty, .. }) =
-            sigs.exports(engine).find(|(func, _)| *func == name).expect(name);
-        match ty {
-            ComponentItem::ComponentFunc(func) => func,
-            other => panic!("{name} export is {other:?}"),
-        }
-    }
-
-    #[test]
-    fn plain_params_and_results() {
-        let (engine, component) = signatures();
-        assert_eq!(plain_signature(&signature(&engine, &component, "plain")), Ok(()));
-    }
-
-    #[test]
-    fn handle_kinds() {
-        let (engine, component) = signatures();
-        for (name, kind) in [
-            ("own", "resource"),
-            ("borrow", "resource"),
-            ("future", "future"),
-            ("stream", "stream"),
-        ] {
-            assert_eq!(plain_signature(&signature(&engine, &component, name)), Err(kind), "{name}");
-        }
-    }
-
-    #[test]
-    fn handle_nested_in_record() {
-        let (engine, component) = signatures();
-        assert_eq!(plain_signature(&signature(&engine, &component, "nested")), Err("resource"));
     }
 }

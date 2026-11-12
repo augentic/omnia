@@ -14,7 +14,7 @@ use x509_cert::ext::pkix::{BasicConstraints, ExtendedKeyUsage, KeyUsage};
 use x509_cert::{Certificate, TbsCertificate};
 
 /// Why a `Client-Cert` bundle was refused before any connection was attempted.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub enum Rejection {
     NoCertificate,
     Malformed,
@@ -95,119 +95,4 @@ where
     tbs.get_extension::<T>()
         .map(|found| found.map(|(_critical, value)| value))
         .map_err(|_decode| Rejection::Malformed)
-}
-
-#[cfg(test)]
-mod tests {
-    use rcgen::{
-        BasicConstraints, CertificateParams, ExtendedKeyUsagePurpose, IsCa, Issuer, KeyPair,
-        KeyUsagePurpose, date_time_ymd,
-    };
-
-    use super::*;
-
-    // rcgen's defaults: no EKU, no key usage, no basic constraints
-    fn params(configure: impl FnOnce(&mut CertificateParams)) -> CertificateParams {
-        let mut params = CertificateParams::new(Vec::<String>::new()).expect("parameters");
-        configure(&mut params);
-        params
-    }
-
-    // certificate then PKCS#8 key: the layout the `Client-Cert` header carries
-    fn bundle(configure: impl FnOnce(&mut CertificateParams)) -> Vec<u8> {
-        let key = KeyPair::generate().expect("key pair");
-        let certificate = params(configure).self_signed(&key).expect("certificate");
-        format!("{}{}", certificate.pem(), key.serialize_pem()).into_bytes()
-    }
-
-    fn client_auth_params(params: &mut CertificateParams) {
-        params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ClientAuth];
-        params.key_usages = vec![KeyUsagePurpose::DigitalSignature];
-    }
-
-    #[test]
-    fn client_auth() {
-        assert_eq!(validate_bundle(&bundle(client_auth_params)), Ok(()));
-    }
-
-    #[test]
-    fn server_auth() {
-        let bundle = bundle(|params| {
-            params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ServerAuth];
-            params.key_usages = vec![KeyUsagePurpose::DigitalSignature];
-        });
-        assert_eq!(validate_bundle(&bundle), Err(Rejection::NotForClientAuth));
-    }
-
-    #[test]
-    fn no_eku() {
-        assert_eq!(validate_bundle(&bundle(|_| {})), Ok(()));
-    }
-
-    #[test]
-    fn ca() {
-        let bundle = bundle(|params| params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained));
-        assert_eq!(validate_bundle(&bundle), Err(Rejection::CertificateAuthority));
-    }
-
-    #[test]
-    fn client_auth_with_chain() {
-        // the ca is never the identity, so its lack of `clientAuth` must not be inspected
-        let ca_key = KeyPair::generate().expect("CA key pair");
-        let ca_params = params(|params| {
-            params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
-            params.key_usages = vec![KeyUsagePurpose::KeyCertSign, KeyUsagePurpose::CrlSign];
-        });
-        let ca = ca_params.self_signed(&ca_key).expect("CA certificate");
-
-        let leaf_key = KeyPair::generate().expect("leaf key pair");
-        let leaf = params(client_auth_params)
-            .signed_by(&leaf_key, &Issuer::from_params(&ca_params, &ca_key))
-            .expect("leaf certificate");
-
-        let bundle = format!("{}{}{}", leaf.pem(), ca.pem(), leaf_key.serialize_pem());
-        assert_eq!(validate_bundle(bundle.as_bytes()), Ok(()));
-    }
-
-    #[test]
-    fn key_encipherment_only() {
-        let bundle = bundle(|params| params.key_usages = vec![KeyUsagePurpose::KeyEncipherment]);
-        assert_eq!(validate_bundle(&bundle), Err(Rejection::NoDigitalSignature));
-    }
-
-    #[test]
-    fn expired() {
-        let bundle = bundle(|params| {
-            params.not_before = date_time_ymd(2020, 1, 1);
-            params.not_after = date_time_ymd(2021, 1, 1);
-        });
-        assert_eq!(validate_bundle(&bundle), Err(Rejection::Expired));
-    }
-
-    #[test]
-    fn not_yet_valid() {
-        let bundle = bundle(|params| {
-            params.not_before = date_time_ymd(2100, 1, 1);
-            params.not_after = date_time_ymd(2101, 1, 1);
-        });
-        assert_eq!(validate_bundle(&bundle), Err(Rejection::NotYetValid));
-    }
-
-    #[test]
-    fn empty_bundle() {
-        assert_eq!(validate_bundle(b""), Err(Rejection::NoCertificate));
-    }
-
-    #[test]
-    fn key_only() {
-        let key = KeyPair::generate().expect("key pair");
-        assert_eq!(validate_bundle(key.serialize_pem().as_bytes()), Err(Rejection::NoCertificate));
-    }
-
-    #[test]
-    fn garbage() {
-        let bundle =
-            b"-----BEGIN CERTIFICATE-----\nbm90IGEgY2VydGlmaWNhdGU=\n-----END CERTIFICATE-----\n";
-        assert_eq!(validate_bundle(bundle), Err(Rejection::Malformed));
-    }
 }

@@ -37,84 +37,55 @@ pub struct Config {
     pub manifest: ManifestSpec,
 }
 
-/// One `Host: Backend` wiring from the `hosts: { ... }` block, optionally
-/// carrying compiled-in connect options: `Host: Backend(options)` lowers to
-/// `Connect::connect_with(options)` instead of the env-sourced
-/// `Connect::connect()`.
-pub struct HostEntry {
-    pub host: Path,
-    pub backend: Path,
-    pub options: Option<Expr>,
-}
+impl Config {
+    fn validate(&self, spans: &KeySpans) -> syn::Result<()> {
+        if let (Some(_), Some(inline)) = (spans.manifest, spans.inline) {
+            return Err(syn::Error::new(
+                inline,
+                "`manifest:` and the inline keys (`guests`, `mounts`, `plugins`) are mutually \
+                 exclusive; declare the deployment in the manifest file",
+            ));
+        }
 
-/// Inline manifest keys (`guests`, `mounts`, `plugins`) parsed from
-/// `runtime!({ ... })`; mirrors the `omnia::Manifest` schema.
-#[derive(Default)]
-pub struct ManifestSpec {
-    /// The `guests:` list — every component the deployment may run.
-    pub guests: Vec<GuestSpec>,
-    pub mounts: Vec<MountSpec>,
-    /// The `plugins: { .. }` block — the package store and the routing of
-    /// every package source.
-    pub plugins: Option<PluginsSpec>,
-}
+        // rows sharing a backend share one connection, so their options must agree
+        let mut options_seen: std::collections::HashMap<String, Option<String>> =
+            std::collections::HashMap::new();
+        for entry in &self.host_entries {
+            let backend = entry.backend.to_token_stream().to_string();
+            let options = entry.options.as_ref().map(|expr| expr.to_token_stream().to_string());
+            if *options_seen.entry(backend).or_insert_with(|| options.clone()) != options {
+                let span =
+                    entry.options.as_ref().map_or_else(|| entry.backend.span(), Spanned::span);
+                return Err(syn::Error::new(
+                    span,
+                    "hosts rows sharing a backend share one connection; their connect \
+                     options must be identical (or omitted on every row)",
+                ));
+            }
+        }
 
-impl ManifestSpec {
-    pub const fn is_empty(&self) -> bool {
-        self.guests.is_empty() && self.mounts.is_empty() && self.plugins.is_none()
+        let mut marked: Option<Span> = None;
+        for guest in &self.manifest.guests {
+            let Some(span) = guest.command_span else {
+                continue;
+            };
+            if self.mode != Mode::Command {
+                return Err(syn::Error::new(
+                    span,
+                    "`command: true` requires `mode: command` (it only routes command mode)",
+                ));
+            }
+            if marked.replace(span).is_some() {
+                return Err(syn::Error::new(
+                    span,
+                    "multiple guests marked `command: true`; at most one guest may be the \
+                     command guest",
+                ));
+            }
+        }
+
+        Ok(())
     }
-}
-
-/// The `plugins: { store: ..., registries: ... }` block.
-pub struct PluginsSpec {
-    /// The `store:` path expression — the directory every package is kept
-    /// in; a leading `~/` expands against `$HOME` at start-up.
-    pub store: Option<Expr>,
-    /// The `registries:` expression — the wasm-pkg configuration (TOML) that
-    /// routes package sources, typically an `include_str!`.
-    pub registries: Option<Expr>,
-}
-
-/// One `{ path: ..., name: ..., routes: { ... }, command: true }` (or
-/// `{ package: ..., digest: ... }`) guest entry.
-pub struct GuestSpec {
-    pub source: GuestSource,
-    pub routes: GuestRoutesSpec,
-    pub command: bool,
-    /// Span of the `command:` key, for cross-key diagnostics.
-    pub command_span: Option<Span>,
-    /// The `digest:` pin, decoded from its `sha256:<hex>` literal.
-    pub digest: Option<[u8; DIGEST_LEN]>,
-}
-
-/// Where a guest entry's component comes from.
-pub enum GuestSource {
-    /// A `path:` embedded with `include_bytes!` — a string literal or a macro
-    /// such as `concat!(env!(..), ..)`; the file's stem names the guest
-    /// unless `name:` does.
-    Embedded { path: Expr, name: Option<Expr> },
-    /// A `package:` reference the runtime fetches at the guest's first use;
-    /// the reference without its version names the guest unless `name:`
-    /// does.
-    Package { reference: Expr, name: Option<Expr> },
-}
-
-const DIGEST_LEN: usize = 32;
-
-/// One `{ name: ..., path: ..., writable: ... }` mount entry.
-pub struct MountSpec {
-    pub name: Expr,
-    pub path: Expr,
-    pub writable: Option<Expr>,
-}
-
-/// Per-trigger route pattern lists from a guest entry's `routes: { ... }`
-/// block; the containing guest is the implicit target.
-#[derive(Default)]
-pub struct GuestRoutesSpec {
-    pub http: Vec<Expr>,
-    pub messaging: Vec<Expr>,
-    pub websocket: Vec<Expr>,
 }
 
 impl Parse for Config {
@@ -179,81 +150,11 @@ struct KeySpans {
     inline: Option<Span>,
 }
 
-impl Config {
-    fn validate(&self, spans: &KeySpans) -> syn::Result<()> {
-        if let (Some(_), Some(inline)) = (spans.manifest, spans.inline) {
-            return Err(syn::Error::new(
-                inline,
-                "`manifest:` and the inline keys (`guests`, `mounts`, `plugins`) are mutually \
-                 exclusive; declare the deployment in the manifest file",
-            ));
-        }
-
-        // rows sharing a backend share one connection, so their options must agree
-        let mut options_seen: std::collections::HashMap<String, Option<String>> =
-            std::collections::HashMap::new();
-        for entry in &self.host_entries {
-            let backend = entry.backend.to_token_stream().to_string();
-            let options = entry.options.as_ref().map(|expr| expr.to_token_stream().to_string());
-            if *options_seen.entry(backend).or_insert_with(|| options.clone()) != options {
-                let span =
-                    entry.options.as_ref().map_or_else(|| entry.backend.span(), Spanned::span);
-                return Err(syn::Error::new(
-                    span,
-                    "hosts rows sharing a backend share one connection; their connect \
-                     options must be identical (or omitted on every row)",
-                ));
-            }
-        }
-
-        let mut marked: Option<Span> = None;
-        for guest in &self.manifest.guests {
-            let Some(span) = guest.command_span else {
-                continue;
-            };
-            if self.mode != Mode::Command {
-                return Err(syn::Error::new(
-                    span,
-                    "`command: true` requires `mode: command` (it only routes command mode)",
-                ));
-            }
-            if marked.replace(span).is_some() {
-                return Err(syn::Error::new(
-                    span,
-                    "multiple guests marked `command: true`; at most one guest may be the \
-                     command guest",
-                ));
-            }
-        }
-
-        Ok(())
-    }
-}
-
-mod kw {
-    syn::custom_keyword!(mode);
-    syn::custom_keyword!(hosts);
-    syn::custom_keyword!(manifest);
-    syn::custom_keyword!(guests);
-    syn::custom_keyword!(plugins);
-    syn::custom_keyword!(registries);
-    syn::custom_keyword!(mounts);
-}
-
 // the span lets `Config::parse` reject a duplicate with a pointed diagnostic
 struct Opt {
     name: &'static str,
     span: Span,
     value: OptValue,
-}
-
-enum OptValue {
-    Mode(Mode),
-    Hosts(Vec<HostEntry>),
-    Manifest(Expr),
-    Guests(Vec<GuestSpec>),
-    Plugins(PluginsSpec),
-    Mounts(Vec<MountSpec>),
 }
 
 impl Parse for Opt {
@@ -299,31 +200,23 @@ impl Parse for Opt {
     }
 }
 
-impl Parse for PluginsSpec {
-    fn parse(input: ParseStream) -> Result<Self> {
-        let mut store = None;
-        let mut registries = None;
-        let span = parse_kv_block(input, |key, value| {
-            match key.to_string().as_str() {
-                "store" => store = Some(value.parse()?),
-                "registries" => registries = Some(value.parse()?),
-                other => {
-                    return Err(syn::Error::new(
-                        key.span(),
-                        format!("unknown plugins key `{other}`; expected `store` or `registries`"),
-                    ));
-                }
-            }
-            Ok(())
-        })?;
-        if store.is_none() && registries.is_none() {
-            return Err(syn::Error::new(
-                span,
-                "`plugins:` block is empty; name a `store`, a `registries` configuration, or both",
-            ));
-        }
-        Ok(Self { store, registries })
-    }
+enum OptValue {
+    Mode(Mode),
+    Hosts(Vec<HostEntry>),
+    Manifest(Expr),
+    Guests(Vec<GuestSpec>),
+    Plugins(PluginsSpec),
+    Mounts(Vec<MountSpec>),
+}
+
+mod kw {
+    syn::custom_keyword!(mode);
+    syn::custom_keyword!(hosts);
+    syn::custom_keyword!(manifest);
+    syn::custom_keyword!(guests);
+    syn::custom_keyword!(plugins);
+    syn::custom_keyword!(registries);
+    syn::custom_keyword!(mounts);
 }
 
 fn parse_mode(input: ParseStream) -> Result<Mode> {
@@ -336,6 +229,26 @@ fn parse_mode(input: ParseStream) -> Result<Mode> {
             format!("expected `server` or `command`, got `{other}`"),
         )),
     }
+}
+
+fn parse_host_entries(input: ParseStream) -> Result<Vec<HostEntry>> {
+    Ok(Punctuated::<HostEntry, Token![,]>::parse_terminated(input)?.into_iter().collect())
+}
+
+fn parse_bracketed_list<T: Parse>(input: ParseStream) -> Result<Vec<T>> {
+    let list;
+    syn::bracketed!(list in input);
+    Ok(Punctuated::<T, Token![,]>::parse_terminated(&list)?.into_iter().collect())
+}
+
+/// One `Host: Backend` wiring from the `hosts: { ... }` block, optionally
+/// carrying compiled-in connect options: `Host: Backend(options)` lowers to
+/// `Connect::connect_with(options)` instead of the env-sourced
+/// `Connect::connect()`.
+pub struct HostEntry {
+    pub host: Path,
+    pub backend: Path,
+    pub options: Option<Expr>,
 }
 
 impl Parse for HostEntry {
@@ -368,14 +281,59 @@ impl Parse for HostEntry {
     }
 }
 
-fn parse_host_entries(input: ParseStream) -> Result<Vec<HostEntry>> {
-    Ok(Punctuated::<HostEntry, Token![,]>::parse_terminated(input)?.into_iter().collect())
+/// Inline manifest keys (`guests`, `mounts`, `plugins`) parsed from
+/// `runtime!({ ... })`; mirrors the `omnia::Manifest` schema.
+#[derive(Default)]
+pub struct ManifestSpec {
+    /// The `guests:` list — every component the deployment may run.
+    pub guests: Vec<GuestSpec>,
+    pub mounts: Vec<MountSpec>,
+    /// The `plugins: { .. }` block — the package store and the routing of
+    /// every package source.
+    pub plugins: Option<PluginsSpec>,
 }
 
-fn parse_bracketed_list<T: Parse>(input: ParseStream) -> Result<Vec<T>> {
-    let list;
-    syn::bracketed!(list in input);
-    Ok(Punctuated::<T, Token![,]>::parse_terminated(&list)?.into_iter().collect())
+impl ManifestSpec {
+    pub const fn is_empty(&self) -> bool {
+        self.guests.is_empty() && self.mounts.is_empty() && self.plugins.is_none()
+    }
+}
+
+/// The `plugins: { store: ..., registries: ... }` block.
+pub struct PluginsSpec {
+    /// The `store:` path expression — the directory every package is kept
+    /// in; a leading `~/` expands against `$HOME` at start-up.
+    pub store: Option<Expr>,
+    /// The `registries:` expression — the wasm-pkg configuration (TOML) that
+    /// routes package sources, typically an `include_str!`.
+    pub registries: Option<Expr>,
+}
+
+impl Parse for PluginsSpec {
+    fn parse(input: ParseStream) -> Result<Self> {
+        let mut store = None;
+        let mut registries = None;
+        let span = parse_kv_block(input, |key, value| {
+            match key.to_string().as_str() {
+                "store" => store = Some(value.parse()?),
+                "registries" => registries = Some(value.parse()?),
+                other => {
+                    return Err(syn::Error::new(
+                        key.span(),
+                        format!("unknown plugins key `{other}`; expected `store` or `registries`"),
+                    ));
+                }
+            }
+            Ok(())
+        })?;
+        if store.is_none() && registries.is_none() {
+            return Err(syn::Error::new(
+                span,
+                "`plugins:` block is empty; name a `store`, a `registries` configuration, or both",
+            ));
+        }
+        Ok(Self { store, registries })
+    }
 }
 
 // Hands each key and the stream at its value to `field`, refusing repeats;
@@ -400,6 +358,18 @@ fn parse_kv_block(
         }
     }
     Ok(brace.span.join())
+}
+
+/// One `{ path: ..., name: ..., routes: { ... }, command: true }` (or
+/// `{ package: ..., digest: ... }`) guest entry.
+pub struct GuestSpec {
+    pub source: GuestSource,
+    pub routes: GuestRoutesSpec,
+    pub command: bool,
+    /// Span of the `command:` key, for cross-key diagnostics.
+    pub command_span: Option<Span>,
+    /// The `digest:` pin, decoded from its `sha256:<hex>` literal.
+    pub digest: Option<[u8; DIGEST_LEN]>,
 }
 
 impl Parse for GuestSpec {
@@ -461,6 +431,26 @@ impl Parse for GuestSpec {
     }
 }
 
+// `include_bytes!` takes a literal or a macro expanding to one; anything else
+// is refused here, where the diagnostic can name the key
+fn parse_embeddable(input: ParseStream) -> Result<Expr> {
+    let expr: Expr = input.parse()?;
+    match &expr {
+        Expr::Lit(syn::ExprLit {
+            lit: syn::Lit::Str(_),
+            ..
+        })
+        | Expr::Macro(_) => Ok(expr),
+        other => Err(syn::Error::new(
+            other.span(),
+            "`path:` is embedded with `include_bytes!`, so it must be a string literal or a \
+             macro such as `concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/guest.wasm\")`",
+        )),
+    }
+}
+
+const DIGEST_LEN: usize = 32;
+
 // a malformed pin is refused here, pointed at the key, rather than at start-up
 fn parse_digest(input: ParseStream) -> Result<[u8; DIGEST_LEN]> {
     let lit: syn::LitStr = input.parse()?;
@@ -495,22 +485,23 @@ const fn nibble(digit: u8) -> Option<u8> {
     }
 }
 
-// `include_bytes!` takes a literal or a macro expanding to one; anything else
-// is refused here, where the diagnostic can name the key
-fn parse_embeddable(input: ParseStream) -> Result<Expr> {
-    let expr: Expr = input.parse()?;
-    match &expr {
-        Expr::Lit(syn::ExprLit {
-            lit: syn::Lit::Str(_),
-            ..
-        })
-        | Expr::Macro(_) => Ok(expr),
-        other => Err(syn::Error::new(
-            other.span(),
-            "`path:` is embedded with `include_bytes!`, so it must be a string literal or a \
-             macro such as `concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/guest.wasm\")`",
-        )),
-    }
+/// Where a guest entry's component comes from.
+pub enum GuestSource {
+    /// A `path:` embedded with `include_bytes!` — a string literal or a macro
+    /// such as `concat!(env!(..), ..)`; the file's stem names the guest
+    /// unless `name:` does.
+    Embedded { path: Expr, name: Option<Expr> },
+    /// A `package:` reference the runtime fetches at the guest's first use;
+    /// the reference without its version names the guest unless `name:`
+    /// does.
+    Package { reference: Expr, name: Option<Expr> },
+}
+
+/// One `{ name: ..., path: ..., writable: ... }` mount entry.
+pub struct MountSpec {
+    pub name: Expr,
+    pub path: Expr,
+    pub writable: Option<Expr>,
 }
 
 impl Parse for MountSpec {
@@ -543,6 +534,15 @@ impl Parse for MountSpec {
             writable,
         })
     }
+}
+
+/// Per-trigger route pattern lists from a guest entry's `routes: { ... }`
+/// block; the containing guest is the implicit target.
+#[derive(Default)]
+pub struct GuestRoutesSpec {
+    pub http: Vec<Expr>,
+    pub messaging: Vec<Expr>,
+    pub websocket: Vec<Expr>,
 }
 
 impl Parse for GuestRoutesSpec {

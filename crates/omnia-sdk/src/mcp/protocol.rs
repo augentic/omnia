@@ -65,6 +65,10 @@ fn dispatch(server: &dyn McpServer, method: &str, params: &Value) -> Result<Valu
     }
 }
 
+// revisions this stateless server behaves identically across; any other
+// negotiates down to `PROTOCOL_VERSION`, as the spec allows
+const SUPPORTED_VERSIONS: &[&str] = &["2025-06-18", "2025-03-26"];
+
 // Capabilities advertise feature support, not list contents: the trait
 // always answers `tools/list` and `resources/list`.
 fn initialize_result(server: &dyn McpServer, params: &Value) -> Value {
@@ -115,7 +119,3 @@ fn error_response(id: &Value, code: i32, message: &str) -> String {
     })
     .to_string()
 }
-
-// revisions this stateless server behaves identically across; any other
-// negotiates down to `PROTOCOL_VERSION`, as the spec allows
-const SUPPORTED_VERSIONS: &[&str] = &["2025-06-18", "2025-03-26"];

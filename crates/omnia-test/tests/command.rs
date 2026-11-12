@@ -35,7 +35,7 @@ async fn command_exit_map() {
 // rendered answer on stdout, the refusal's envelope on stderr, and each
 // stream empty where the guest wrote nothing to it.
 #[tokio::test]
-async fn command_captured() {
+async fn captured_run() {
     async fn captured(args: &[&str]) -> omnia_test::host::Run {
         Deployment::new()
             .guest("cli", test_programs::COMMAND_EXIT_MAP)
@@ -63,7 +63,7 @@ async fn command_captured() {
 // `command::export!` stamps the guest crate's version and description where
 // the router set none; `test-programs` shares the workspace version.
 #[tokio::test]
-async fn command_package_defaults() {
+async fn package_defaults() {
     async fn captured(args: &[&str]) -> omnia_test::host::Run {
         Deployment::new()
             .guest("cli", test_programs::COMMAND_EXIT_MAP)

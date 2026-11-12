@@ -51,6 +51,36 @@ pub trait StateStore: Send + Sync {
     fn increment(&self, key: &str, delta: i64) -> impl Future<Output = Result<i64>> + Send;
 }
 
+/// JSON codecs over any [`StateStore`].
+///
+/// Blanket-implemented for every [`StateStore`]; never implemented by hand.
+pub trait StateStoreExt: StateStore {
+    /// Retrieve and deserialize a JSON value from the state store.
+    fn get_json<T: DeserializeOwned>(
+        &self, key: &str,
+    ) -> impl Future<Output = Result<Option<T>>> + Send {
+        async move {
+            let Some(bytes) = self.get(key).await? else {
+                return Ok(None);
+            };
+            serde_json::from_slice(&bytes).with_context(|| format!("parsing `{key}`")).map(Some)
+        }
+    }
+
+    /// Serialize `value` as JSON and store it in the state store.
+    fn set_json<T: Serialize + Sync + ?Sized>(
+        &self, key: &str, value: &T, ttl_secs: Option<u64>,
+    ) -> impl Future<Output = Result<()>> + Send {
+        async move {
+            let bytes =
+                serde_json::to_vec(value).with_context(|| format!("serializing `{key}`"))?;
+            self.set(key, &bytes, ttl_secs).await
+        }
+    }
+}
+
+impl<P: StateStore + ?Sized> StateStoreExt for P {}
+
 #[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
 impl StateStore for crate::WasiProvider {
     async fn get(&self, key: &str) -> Result<Option<Vec<u8>>> {
@@ -121,33 +151,3 @@ async fn open_bucket() -> Result<omnia_wasi_keyvalue::store::Bucket> {
         .await
         .with_context(|| format!("opening bucket `{}`", crate::keyvalue::BUCKET))
 }
-
-/// JSON codecs over any [`StateStore`].
-///
-/// Blanket-implemented for every [`StateStore`]; never implemented by hand.
-pub trait StateStoreExt: StateStore {
-    /// Retrieve and deserialize a JSON value from the state store.
-    fn get_json<T: DeserializeOwned>(
-        &self, key: &str,
-    ) -> impl Future<Output = Result<Option<T>>> + Send {
-        async move {
-            let Some(bytes) = self.get(key).await? else {
-                return Ok(None);
-            };
-            serde_json::from_slice(&bytes).with_context(|| format!("parsing `{key}`")).map(Some)
-        }
-    }
-
-    /// Serialize `value` as JSON and store it in the state store.
-    fn set_json<T: Serialize + Sync + ?Sized>(
-        &self, key: &str, value: &T, ttl_secs: Option<u64>,
-    ) -> impl Future<Output = Result<()>> + Send {
-        async move {
-            let bytes =
-                serde_json::to_vec(value).with_context(|| format!("serializing `{key}`"))?;
-            self.set(key, &bytes, ttl_secs).await
-        }
-    }
-}
-
-impl<P: StateStore + ?Sized> StateStoreExt for P {}

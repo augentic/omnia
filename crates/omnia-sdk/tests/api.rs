@@ -273,7 +273,7 @@ async fn observe(context: Context<StatefulProvider>) -> Json<ProviderObservation
 }
 
 #[tokio::test]
-async fn context_shares_provider() {
+async fn shared_provider() {
     let router = axum::Router::new()
         .route("/first", get(observe))
         .route("/second", get(observe))
@@ -383,11 +383,14 @@ async fn route_and_topic() {
 }
 
 #[tokio::test]
-async fn capability_error_taxonomy() {
+async fn capability_errors() {
     use omnia_sdk::{plugins, vcs};
 
     async fn route(Path(kind): Path<String>) -> Result<Json<()>, omnia_sdk::Error> {
         match kind.as_str() {
+            "vcs-not-a-repository" => Err(vcs::Error::NotARepository)?,
+            "vcs-exists" => Err(vcs::Error::Exists("x".into()))?,
+            "vcs-diverged" => Err(vcs::Error::Diverged("emery/x".into()))?,
             "vcs-missing" => Err(vcs::Error::NotFound("v1".into()))?,
             "vcs-access" => Err(vcs::Error::Access("denied".into()))?,
             "vcs-pending" => Err(vcs::Error::Pending(vec!["a.rs".into(), "b.md".into()]))?,
@@ -402,6 +405,9 @@ async fn capability_error_taxonomy() {
     let router = axum::Router::new().route("/err/{kind}", get(route)).with_state(Client::new(()));
 
     for (path, expected_status, expected_code) in [
+        ("/err/vcs-not-a-repository", StatusCode::BAD_REQUEST, "not-a-repository"),
+        ("/err/vcs-exists", StatusCode::BAD_REQUEST, "exists"),
+        ("/err/vcs-diverged", StatusCode::BAD_REQUEST, "diverged"),
         ("/err/vcs-missing", StatusCode::NOT_FOUND, "not-found"),
         ("/err/vcs-access", StatusCode::BAD_GATEWAY, "access"),
         ("/err/vcs-pending", StatusCode::BAD_REQUEST, "pending"),
@@ -415,6 +421,9 @@ async fn capability_error_taxonomy() {
         assert_eq!(status, expected_status, "{path}");
         let body: ErrorBody = serde_json::from_str(&body).expect("decode error body");
         assert_eq!(body.error, expected_code, "{path}");
+        if path == "/err/vcs-pending" {
+            assert_eq!(body.message, "pending changes: a.rs, b.md");
+        }
     }
 }
 
@@ -480,13 +489,13 @@ async fn mcp_router() {
     let post = |body: serde_json::Value| {
         let app = app.clone();
         async move {
-            let req = Request::builder()
+            let request = Request::builder()
                 .method(Method::POST)
                 .uri("/mcp")
                 .header(CONTENT_TYPE, "application/json")
                 .body(Body::from(body.to_string()))
                 .expect("request");
-            send(app, req).await
+            send(app, request).await
         }
     };
 
@@ -511,12 +520,12 @@ async fn mcp_router() {
     assert_eq!(call["result"]["isError"], false);
     assert_eq!(call["result"]["content"][0]["text"], "the guide body");
 
-    let (_, tool_err) = post(serde_json::json!({
+    let (_, tool_error) = post(serde_json::json!({
         "jsonrpc": "2.0", "id": 4, "method": "tools/call",
         "params": { "name": "read_doc", "arguments": { "name": "missing" } }
     }))
     .await;
-    assert_eq!(tool_err["result"]["isError"], true);
+    assert_eq!(tool_error["result"]["isError"], true);
 
     let (_, bad_args) = post(serde_json::json!({
         "jsonrpc": "2.0", "id": 5, "method": "tools/call",
@@ -533,18 +542,18 @@ async fn mcp_router() {
     assert_eq!(unknown_tool["error"]["message"], "Unknown tool: nope");
 
     // resources/read and notification (202 Accepted) and GET (405 Method Not Allowed)
-    let (_, res) = post(serde_json::json!({
+    let (_, resource) = post(serde_json::json!({
         "jsonrpc": "2.0", "id": 7, "method": "resources/read",
         "params": { "uri": "doc://guide" }
     }))
     .await;
-    assert_eq!(res["result"]["contents"][0]["text"], "the guide body");
+    assert_eq!(resource["result"]["contents"][0]["text"], "the guide body");
 
-    let (notif_status, _) =
+    let (notified, _) =
         post(serde_json::json!({ "jsonrpc": "2.0", "method": "notifications/initialized" })).await;
-    assert_eq!(notif_status, StatusCode::ACCEPTED);
+    assert_eq!(notified, StatusCode::ACCEPTED);
 
-    let get_req = Request::get("/mcp").body(Body::empty()).expect("get");
-    let (get_status, _) = send(app, get_req).await;
+    let request = Request::get("/mcp").body(Body::empty()).expect("get");
+    let (get_status, _) = send(app, request).await;
     assert_eq!(get_status, StatusCode::METHOD_NOT_ALLOWED);
 }

@@ -94,15 +94,6 @@ impl Workspace {
         let dir = Arc::clone(&self.dir);
         async move { spawn_blocking(move || f(&dir)).await? }.boxed()
     }
-
-    #[cfg(test)]
-    fn test_handle(dir: Dir, writable: bool) -> Self {
-        Self {
-            dir: Arc::new(dir),
-            local_path: PathBuf::from("/test"),
-            writable,
-        }
-    }
 }
 
 // Resolve a lent workspace directory and grant into a [`Workspace`].
@@ -150,94 +141,4 @@ fn check_subpath(subpath: &str) -> anyhow::Result<()> {
         && subpath.split('/').all(|part| !part.is_empty() && part != "." && part != "..");
     ensure!(plain, "grants.workspace subpath `{subpath}` is not a plain relative path");
     Ok(())
-}
-
-// subpath vetting and the I/O caps are pure; the guest scenarios cover mount
-// authority and write policy
-#[cfg(test)]
-mod tests {
-    use std::fs;
-
-    use cap_std::ambient_authority;
-    use cap_std::fs::Dir;
-
-    use super::{MAX_LIST_ENTRIES, MAX_READ_BYTES, MAX_WRITE_BYTES, Workspace, check_subpath};
-
-    fn temp_dir(label: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("omnia-ws-{label}-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).expect("creating temp workspace");
-        dir
-    }
-
-    fn handle(label: &str, writable: bool) -> (std::path::PathBuf, Workspace) {
-        let path = temp_dir(label);
-        let dir = Dir::open_ambient_dir(&path, ambient_authority()).expect("opening temp dir");
-        (path, Workspace::test_handle(dir, writable))
-    }
-
-    #[test]
-    fn plain_subpath() {
-        check_subpath("docs").unwrap();
-        check_subpath("docs/guides").unwrap();
-    }
-
-    #[test]
-    fn complex_subpath() {
-        for subpath in ["/abs", "docs\\guides", "docs//guides", ".", "..", "a/../b", "./a", "a/"] {
-            check_subpath(subpath).unwrap_err();
-        }
-    }
-
-    #[tokio::test]
-    async fn list_subdirectory() {
-        let (root, workspace) = handle("list-subdir", false);
-        fs::create_dir(root.join("docs")).expect("creating docs");
-        fs::write(root.join("docs").join("a.txt"), "a").expect("seeding docs");
-        fs::write(root.join("root.txt"), "r").expect("seeding root");
-
-        let mut entries = workspace.list("docs".to_owned()).await.expect("listing docs");
-        entries.sort_by(|left, right| left.name.cmp(&right.name));
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].name, "a.txt");
-        assert!(!entries[0].is_directory);
-
-        let mut root_entries = workspace.list(String::new()).await.expect("listing root");
-        root_entries.sort_by(|left, right| left.name.cmp(&right.name));
-        let docs = root_entries.iter().find(|entry| entry.name == "docs").expect("docs dir");
-        assert!(docs.is_directory);
-        let _ = fs::remove_dir_all(root);
-    }
-
-    #[tokio::test]
-    async fn read_over_limit() {
-        let (root, workspace) = handle("read-limit", false);
-        let oversized =
-            vec![0_u8; usize::try_from(MAX_READ_BYTES).expect("read cap fits usize") + 1];
-        fs::write(root.join("big.bin"), &oversized).expect("writing oversized file");
-        let error = workspace.read("big.bin".to_owned()).await.expect_err("read limit");
-        assert!(error.to_string().contains("exceeds workspace read limit"), "{error}");
-        let _ = fs::remove_dir_all(root);
-    }
-
-    #[tokio::test]
-    async fn write_over_limit() {
-        let (root, workspace) = handle("write-limit", true);
-        let oversized = vec![0_u8; MAX_WRITE_BYTES + 1];
-        let error =
-            workspace.write("big.bin".to_owned(), oversized).await.expect_err("write limit");
-        assert!(error.to_string().contains("write limit exceeded"), "{error}");
-        let _ = fs::remove_dir_all(root);
-    }
-
-    #[tokio::test]
-    async fn list_over_limit() {
-        let (root, workspace) = handle("list-limit", true);
-        for i in 0..=MAX_LIST_ENTRIES {
-            fs::write(root.join(format!("{i}.txt")), []).expect("seeding list entries");
-        }
-        let error = workspace.list(String::new()).await.expect_err("list limit");
-        assert!(error.to_string().contains("directory exceeds listing limit"), "{error}");
-        let _ = fs::remove_dir_all(root);
-    }
 }

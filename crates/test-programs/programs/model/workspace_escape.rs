@@ -1,5 +1,5 @@
-//! Raw bindings: a workspace grant whose subpath escapes the lent root is
-//! refused at `create`.
+//! Raw bindings: a workspace grant whose subpath is not a plain relative
+//! path beneath the lent root is refused at `create`.
 
 #![cfg(target_arch = "wasm32")]
 
@@ -17,21 +17,25 @@ async fn scenario() {
         .map(|(dir, _)| dir)
         .expect("host mounts `.`");
 
-    let grants = completion::Grants {
-        workspace: Some(completion::WorkspaceGrant {
-            root,
-            subpath: "../escape".to_owned(),
-        }),
-        worker: None,
-    };
+    for subpath in
+        ["../escape", "/abs", "docs\\guides", "docs//guides", ".", "..", "a/../b", "./a", "a/"]
+    {
+        let grants = completion::Grants {
+            workspace: Some(completion::WorkspaceGrant {
+                root,
+                subpath: subpath.to_owned(),
+            }),
+            worker: None,
+        };
 
-    let (results, results_rx) = wit_stream::new();
-    let error = completion::create(raw_request(vec![], grants), results_rx)
-        .await
-        .expect_err("escaping subpath refused");
-    drop(results);
-    assert!(
-        matches!(error, completion::Error::Backend(ref detail) if detail.contains("not a plain relative path")),
-        "unexpected: {error:?}"
-    );
+        let (results, results_rx) = wit_stream::new();
+        let error = completion::create(raw_request(vec![], grants), results_rx)
+            .await
+            .expect_err("subpath refused");
+        drop(results);
+        assert!(
+            matches!(error, completion::Error::Backend(ref detail) if detail.contains("not a plain relative path")),
+            "`{subpath}`: unexpected: {error:?}"
+        );
+    }
 }

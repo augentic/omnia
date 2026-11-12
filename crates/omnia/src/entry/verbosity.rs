@@ -4,16 +4,6 @@
 
 use crate::{DeploymentBuilder, LevelFilter, Mode};
 
-// The scale the flags step along, quietest first.
-const LADDER: [LevelFilter; 6] = [
-    LevelFilter::OFF,
-    LevelFilter::ERROR,
-    LevelFilter::WARN,
-    LevelFilter::INFO,
-    LevelFilter::DEBUG,
-    LevelFilter::TRACE,
-];
-
 /// The levels a run's verbosity flags select, each `None` when they select
 /// nothing.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -70,6 +60,16 @@ pub fn level(default: LevelFilter, verbose: u8, quiet: u8) -> Option<LevelFilter
         _ => None,
     }
 }
+
+// The scale the flags step along, quietest first.
+const LADDER: [LevelFilter; 6] = [
+    LevelFilter::OFF,
+    LevelFilter::ERROR,
+    LevelFilter::WARN,
+    LevelFilter::INFO,
+    LevelFilter::DEBUG,
+    LevelFilter::TRACE,
+];
 
 /// The `(verbose, quiet)` counts the verbosity flags in `args` carry.
 ///
@@ -135,7 +135,7 @@ mod tests {
     }
 
     #[test]
-    fn ladder_clamps() {
+    fn ladder_overflow() {
         assert_eq!(level(LevelFilter::INFO, 4, 0), Some(LevelFilter::TRACE));
         assert_eq!(level(LevelFilter::INFO, u8::MAX, 0), Some(LevelFilter::TRACE));
         assert_eq!(level(LevelFilter::INFO, 0, 4), Some(LevelFilter::OFF));
@@ -197,7 +197,7 @@ mod tests {
     // A value-taking flag's argument, a mixed cluster, a bare `-`, and a
     // longer flag are the guest's: none of them counts.
     #[test]
-    fn scan_leaves_other_tokens() {
+    fn scan_other_tokens() {
         assert_eq!(scan(&args(&["-c", "-v", "-d", "v", "-vq", "-", "--verbosity"])), (1, 0));
     }
 

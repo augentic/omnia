@@ -52,7 +52,7 @@ fn delivery(topic: Option<&str>, payload: &[u8]) -> Delivery {
 }
 
 #[tokio::test]
-async fn messaging_exact_topic() {
+async fn exact_topic() {
     let router = Handlers::new().topic("events.created", echo).with_state(Client::new(()));
 
     router
@@ -66,7 +66,7 @@ async fn messaging_exact_topic() {
 }
 
 #[tokio::test]
-async fn messaging_failures() {
+async fn malformed_delivery() {
     let router = Handlers::new().topic("events", echo).with_state(Client::new(()));
 
     assert_eq!(
@@ -106,7 +106,7 @@ async fn topic_span() {
 }
 
 #[tokio::test]
-async fn rejected_delivery_span() {
+async fn invalid_payload_span() {
     let (spans, _guard) = Spans::install();
     let router = Handlers::new().topic("events.created", echo).with_state(Client::new(()));
     let delivery = Delivery {
@@ -132,12 +132,12 @@ async fn rejected_delivery_span() {
 
 #[test]
 #[should_panic(expected = "duplicate messaging topic")]
-fn dup_topic() {
+fn duplicate_topic() {
     let _handlers = Handlers::<()>::new().topic("events", echo).topic("events", echo);
 }
 
 #[tokio::test]
-async fn messaging_merged_routes() {
+async fn merged_routes() {
     let created = Handlers::new().topic("events.created", echo);
     let deleted = Handlers::new().topic("events.deleted", echo);
     let updated = Handlers::new().topic("events.updated", echo);
@@ -161,7 +161,7 @@ async fn messaging_merged_routes() {
 
 #[test]
 #[should_panic(expected = "duplicate messaging topic `events`")]
-fn dup_topic_across() {
+fn duplicate_topic_merged() {
     let _handlers =
         Handlers::<()>::new().topic("events", echo).merge(Handlers::new().topic("events", echo));
 }

@@ -6,10 +6,6 @@ use crate::host::generated::wasi::blobstore::blobstore::{Host, HostWithStore, Ob
 use crate::host::resource::ContainerProxy;
 use crate::host::{BlobStoreClient, Error, Result, WasiBlobStore};
 
-fn same_object(src: &ObjectId, dest: &ObjectId) -> bool {
-    src.container == dest.container && src.object == dest.object
-}
-
 impl<T> HostWithStore<T> for WasiBlobStore {
     async fn create_container(
         accessor: &Accessor<T, Self>, name: String,
@@ -112,6 +108,10 @@ async fn copy<T>(
 
     dest_container.write_data(dest.object, data).await.context("writing object")?;
     Ok(src_container)
+}
+
+fn same_object(src: &ObjectId, dest: &ObjectId) -> bool {
+    src.container == dest.container && src.object == dest.object
 }
 
 impl Host for HostView<'_, dyn BlobStoreClient> {}

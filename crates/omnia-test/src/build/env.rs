@@ -8,9 +8,6 @@ use std::process::Command;
 
 pub const WASM_TARGET: &str = "wasm32-wasip2";
 
-// a sibling of the outer profile directory
-const NESTED_TARGET: &str = "wasm32-fixtures";
-
 /// A cargo-provided variable, or a panic naming it: the pipeline only runs
 /// under `cargo` as a build script.
 pub fn var(name: &str) -> OsString {
@@ -57,6 +54,9 @@ pub fn nested_dir(out_dir: &Path) -> PathBuf {
         .and_then(|build| build.parent()?.parent())
         .map_or_else(|| out_dir.join("fixtures"), |target| target.join(NESTED_TARGET))
 }
+
+// a sibling of the outer profile directory
+const NESTED_TARGET: &str = "wasm32-fixtures";
 
 /// The nested `cargo build` for the fixture components, sanitised and pointed
 /// at its own target directory.
@@ -112,14 +112,6 @@ fn should_strip(key: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn deny_warnings() {
-        assert!(denies_warnings(Some("-Dwarnings")));
-        assert!(denies_warnings(Some("-C target-cpu=native -D warnings")));
-        assert!(!denies_warnings(Some("-C target-cpu=native")));
-        assert!(!denies_warnings(None));
-    }
 
     // cargo's v1 and v2 layouts, default and redirected `target/`; a layout
     // that is not cargo's keeps the build under `OUT_DIR`

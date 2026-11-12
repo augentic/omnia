@@ -26,6 +26,18 @@ pub trait Identity: Send + Sync {
     ) -> impl Future<Output = Result<AccessToken>> + Send;
 }
 
+/// Token shorthands over any [`Identity`].
+///
+/// Blanket-implemented for every [`Identity`]; never implemented by hand.
+pub trait IdentityExt: Identity {
+    /// Get an access token string for `identity` with default scopes.
+    fn access_token(&self, identity: &str) -> impl Future<Output = Result<String>> + Send {
+        async move { Ok(self.token(identity, &[]).await?.token) }
+    }
+}
+
+impl<P: Identity + ?Sized> IdentityExt for P {}
+
 #[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
 impl Identity for crate::WasiProvider {
     async fn token(&self, identity: &str, scopes: &[String]) -> Result<AccessToken> {
@@ -39,15 +51,3 @@ impl Identity for crate::WasiProvider {
         })
     }
 }
-
-/// Token shorthands over any [`Identity`].
-///
-/// Blanket-implemented for every [`Identity`]; never implemented by hand.
-pub trait IdentityExt: Identity {
-    /// Get an access token string for `identity` with default scopes.
-    fn access_token(&self, identity: &str) -> impl Future<Output = Result<String>> + Send {
-        async move { Ok(self.token(identity, &[]).await?.token) }
-    }
-}
-
-impl<P: Identity + ?Sized> IdentityExt for P {}

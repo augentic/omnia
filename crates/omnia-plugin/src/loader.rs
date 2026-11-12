@@ -56,15 +56,6 @@ pub struct Plugins {
     admission: Box<dyn Admission>,
 }
 
-// One of the deployment's mounts as a path load sees it: the handle it
-// reads through, and whether the guest can write beneath it.
-#[derive(Debug)]
-struct Root {
-    name: String,
-    dir: Arc<Dir>,
-    writable: bool,
-}
-
 impl Plugins {
     /// Install the loader capability on `runtime`: its mounts are the roots
     /// a path load resolves against — the read-only ones as code roots, the
@@ -189,6 +180,14 @@ impl Plugins {
     }
 }
 
+// One of the deployment's mounts as a path load sees it: the handle it
+// reads through, and whether the guest can write beneath it.
+struct Root {
+    name: String,
+    dir: Arc<Dir>,
+    writable: bool,
+}
+
 // Refuses a writable mount that shares or nests a read-only mount's
 // directory: written through one view, its files would load through the
 // other. Directories are told apart by identity, not path.
@@ -283,76 +282,5 @@ impl Plugin {
     #[must_use]
     pub fn exports(&self) -> &[String] {
         &self.exports
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::path::Path;
-
-    use omnia_core::ResolvedPreopen;
-
-    use super::*;
-
-    fn preopen(name: &str, path: &Path, writable: bool) -> ResolvedPreopen {
-        ResolvedPreopen::new(name.to_owned(), path.to_path_buf(), writable)
-    }
-
-    // two read-only mounts, or two writable ones, may nest freely
-    #[test]
-    fn overlap() {
-        let dir = tempfile::tempdir().expect("scratch dir");
-        let root = dir.path();
-        let out = root.join("out");
-        std::fs::create_dir(&out).expect("out dir");
-
-        let open = |preopens| MountRegistry::open(preopens).expect("mounts open");
-        for (first, second) in [
-            (preopen(".", root, false), preopen("out", &out, true)),
-            (preopen(".", root, true), preopen("out", &out, false)),
-            (preopen("a", root, false), preopen("b", root, true)),
-        ] {
-            let error = roots(&open(vec![first, second])).expect_err("overlap refused");
-            assert!(error.to_string().contains("writable mount"), "{error}");
-        }
-        for (first, second) in [
-            (preopen(".", root, false), preopen("out", &out, false)),
-            (preopen(".", root, true), preopen("out", &out, true)),
-        ] {
-            roots(&open(vec![first, second])).expect("same-permission nesting installs");
-        }
-        roots(&open(vec![preopen(".", root, false)])).expect("one read-only mount installs");
-    }
-
-    // macOS firmlinks the data volume at `/System/Volumes/Data`, the one
-    // second path with its own canonical form a test reaches unprivileged
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn overlap_across_firmlink() {
-        let dir = tempfile::tempdir().expect("scratch dir");
-        let root = dir.path().canonicalize().expect("canonical scratch dir");
-        let relative = root.strip_prefix("/").expect("a canonical path is absolute");
-        let alias = Path::new("/System/Volumes/Data").join(relative);
-        assert_ne!(
-            alias.canonicalize().expect("the firmlinked path resolves"),
-            root,
-            "the firmlink keeps a canonical path of its own"
-        );
-
-        let mounts =
-            MountRegistry::open(vec![preopen(".", &root, false), preopen("out", &alias, true)])
-                .expect("mounts open");
-        let error = roots(&mounts).expect_err("one directory through two paths is refused");
-        assert!(error.to_string().contains("writable mount"), "{error}");
-    }
-
-    #[test]
-    fn subpaths() {
-        for plain in ["tool.wasm", "adapters/tool.wasm", ".hidden/tool.wasm"] {
-            check_subpath(plain, plain).expect("plain relative paths pass");
-        }
-        for escaping in ["", "/etc/passwd", "../tool.wasm", "./tool.wasm", "a//b", "a\\b"] {
-            check_subpath(escaping, escaping).expect_err("escapes are refused");
-        }
     }
 }

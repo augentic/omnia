@@ -27,7 +27,6 @@ use crate::host::generated::omnia::model::completion::{Reply, ToolCall, ToolResu
 use crate::host::{Error, FutureResult, ToolOutcome};
 
 const CALL_QUEUE: usize = 8;
-const MAX_RESULT_BYTES: usize = 1024 * 1024;
 const CHECK_TOOL: &str = "check";
 
 /// Shared state for one completion session: the calls bridge, the pending
@@ -38,59 +37,6 @@ pub struct ToolSession {
     // tool names used by request, the only names `call-tool` accepts.
     allowed: Vec<String>,
     inner: Mutex<Inner>,
-}
-
-/// Session bounds the host enforces per completion, in `wasi:model`,
-/// regardless of backend.
-#[derive(Clone, Copy, Debug)]
-pub struct Limits {
-    /// Tool calls one completion may issue before `budget-exhausted`.
-    pub max_tool_calls: u32,
-    /// Byte cap on a single tool result's output, and on a `check`'s
-    /// correction text.
-    pub max_result_bytes: usize,
-    /// How long the host waits for the guest to answer one tool call.
-    pub tool_timeout: Duration,
-}
-
-impl Default for Limits {
-    fn default() -> Self {
-        Self {
-            max_tool_calls: 32,
-            max_result_bytes: MAX_RESULT_BYTES,
-            tool_timeout: Duration::from_secs(60),
-        }
-    }
-}
-
-struct Inner {
-    // Write end of the calls bridge; `None` once the host closed the stream.
-    calls: Option<mpsc::Sender<ToolCall>>,
-    pending: HashMap<String, oneshot::Sender<ToolOutcome>>,
-    remaining: u32,
-    next_id: u64,
-    error: Option<Error>,
-}
-
-impl Inner {
-    // The first typed failure wins. Spelled by hand because the generated
-    // `Display` for `Error` is `Debug`-shaped.
-    fn record(&mut self, error: Error) -> anyhow::Error {
-        let hard = anyhow!(match &error {
-            Error::InvalidRequest(detail) => format!("invalid request: {detail}"),
-            Error::BudgetExhausted(detail) => format!("budget exhausted: {detail}"),
-            Error::ToolFailed(detail) => format!("tool failed: {detail}"),
-            Error::Backend(detail) => format!("backend failure: {detail}"),
-        });
-        self.error.get_or_insert(error);
-        hard
-    }
-}
-
-struct PendingCall {
-    id: String,
-    calls: mpsc::Sender<ToolCall>,
-    result: oneshot::Receiver<ToolOutcome>,
 }
 
 impl ToolSession {
@@ -262,6 +208,61 @@ impl ToolSession {
 
     fn lock(&self) -> MutexGuard<'_, Inner> {
         self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+}
+
+struct Inner {
+    // Write end of the calls bridge; `None` once the host closed the stream.
+    calls: Option<mpsc::Sender<ToolCall>>,
+    pending: HashMap<String, oneshot::Sender<ToolOutcome>>,
+    remaining: u32,
+    next_id: u64,
+    error: Option<Error>,
+}
+
+impl Inner {
+    // The first typed failure wins. Spelled by hand because the generated
+    // `Display` for `Error` is `Debug`-shaped.
+    fn record(&mut self, error: Error) -> anyhow::Error {
+        let hard = anyhow!(match &error {
+            Error::InvalidRequest(detail) => format!("invalid request: {detail}"),
+            Error::BudgetExhausted(detail) => format!("budget exhausted: {detail}"),
+            Error::ToolFailed(detail) => format!("tool failed: {detail}"),
+            Error::Backend(detail) => format!("backend failure: {detail}"),
+        });
+        self.error.get_or_insert(error);
+        hard
+    }
+}
+
+struct PendingCall {
+    id: String,
+    calls: mpsc::Sender<ToolCall>,
+    result: oneshot::Receiver<ToolOutcome>,
+}
+
+const MAX_RESULT_BYTES: usize = 1024 * 1024;
+
+/// Session bounds the host enforces per completion, in `wasi:model`,
+/// regardless of backend.
+#[derive(Clone, Copy, Debug)]
+pub struct Limits {
+    /// Tool calls one completion may issue before `budget-exhausted`.
+    pub max_tool_calls: u32,
+    /// Byte cap on a single tool result's output, and on a `check`'s
+    /// correction text.
+    pub max_result_bytes: usize,
+    /// How long the host waits for the guest to answer one tool call.
+    pub tool_timeout: Duration,
+}
+
+impl Default for Limits {
+    fn default() -> Self {
+        Self {
+            max_tool_calls: 32,
+            max_result_bytes: MAX_RESULT_BYTES,
+            tool_timeout: Duration::from_secs(60),
+        }
     }
 }
 

@@ -6,12 +6,6 @@ use wasmtime::{Engine, Precompiled};
 
 use crate::source::Verified;
 
-// Appended to every pre-compiled deserialization failure: the usual cause is a
-// compile-affecting settings mismatch, not corruption.
-const SETTINGS_HINT: &str = "the artifact must be built with the same compile-affecting settings \
-                             used by `omnia compile` (MAX_FUEL, BRANCH_HINTING, \
-                             MEMORY_RESERVATION, MEMORY_GUARD_SIZE)";
-
 /// Load verified component bytes into a [`Component`] on a blocking thread.
 ///
 /// The bytes are a raw wasm component, compiled here, or `omnia compile`
@@ -37,6 +31,12 @@ pub async fn component(engine: &Engine, verified: Verified) -> Result<Component>
     .await
     .context("guest load task panicked")?
 }
+
+// Appended to every pre-compiled deserialization failure: the usual cause is a
+// compile-affecting settings mismatch, not corruption.
+const SETTINGS_HINT: &str = "the artifact must be built with the same compile-affecting settings \
+                             used by `omnia compile` (MAX_FUEL, BRANCH_HINTING, \
+                             MEMORY_RESERVATION, MEMORY_GUARD_SIZE)";
 
 // The base build has no compiler and refuses raw wasm; `jit` adds the compile
 // path ahead of that refusal.

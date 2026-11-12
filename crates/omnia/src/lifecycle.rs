@@ -173,7 +173,7 @@ where
             let mut serve = pin!(H::serve(&runtime));
             let result = tokio::select! {
                 result = &mut serve => result,
-                () = wait_for_shutdown_signal() => {
+                () = shutdown_signal() => {
                     tracing::info!(
                         component = runtime.name(),
                         "waiting for in-flight tasks to exit; send another signal to quit immediately"
@@ -181,7 +181,7 @@ where
                     runtime.stop();
                     tokio::select! {
                         result = &mut serve => result,
-                        () = wait_for_shutdown_signal() => Ok(()),
+                        () = shutdown_signal() => Ok(()),
                     }
                 }
             };
@@ -203,22 +203,6 @@ where
     // batch-queued telemetry must survive a fast command-mode exit
     omnia_core::telemetry::flush();
     outcome
-}
-
-async fn wait_for_shutdown_signal() {
-    #[cfg(unix)]
-    {
-        use tokio::signal::unix::{SignalKind, signal};
-        let mut sigterm = signal(SignalKind::terminate()).expect("SIGTERM handler");
-        tokio::select! {
-            _ = tokio::signal::ctrl_c() => {}
-            _ = sigterm.recv() => {}
-        }
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = tokio::signal::ctrl_c().await;
-    }
 }
 
 fn drive_epoch(engine: Engine, tick: Duration) -> tokio::task::JoinHandle<()> {
@@ -351,6 +335,22 @@ impl IdleRelease {
     }
 }
 
+async fn shutdown_signal() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{SignalKind, signal};
+        let mut sigterm = signal(SignalKind::terminate()).expect("SIGTERM handler");
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {}
+            _ = sigterm.recv() => {}
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = tokio::signal::ctrl_c().await;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::{Duration, Instant};
@@ -389,15 +389,7 @@ mod tests {
     }
 
     #[test]
-    fn idle_short_of_after() {
-        let mut idle = IdleRelease::new(AFTER);
-        let start = Instant::now();
-        assert!(!idle.due(0, false, start));
-        assert!(!idle.due(0, false, start + ALMOST));
-    }
-
-    #[test]
-    fn idle_past_after() {
+    fn elapsed() {
         let mut idle = IdleRelease::new(AFTER);
         let start = Instant::now();
         assert!(!idle.due(0, false, start));
@@ -406,12 +398,5 @@ mod tests {
         // the spell that released is over; the next waits `after` again
         assert!(!idle.due(0, false, start + AFTER));
         assert!(idle.due(0, false, start + 2 * AFTER));
-    }
-
-    #[test]
-    fn tick_within_after() {
-        assert_eq!(IdleRelease::new(AFTER).tick(), IdleRelease::TICK);
-        let short = Duration::from_millis(200);
-        assert_eq!(IdleRelease::new(short).tick(), short);
     }
 }

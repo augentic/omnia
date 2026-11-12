@@ -45,11 +45,6 @@ impl omnia_core::FromEnv for ConnectOptions {
     }
 }
 
-#[derive(Debug, Clone)]
-struct HttpHooks {
-    clients: Clients,
-}
-
 /// Default implementation for `wasi:http`.
 #[derive(Debug, Clone)]
 pub struct HttpDefault {
@@ -64,15 +59,6 @@ impl HttpBorrow for HttpDefault {
             ctx: &mut self.ctx,
             table,
         }
-    }
-}
-
-// reqwest is built with `rustls-no-provider` (keeping `aws-lc-sys` out of the
-// tree), so a process-level provider must exist before a client is built; an
-// embedder's own provider wins, and a lost install race still leaves one.
-fn ensure_crypto_provider() {
-    if rustls::crypto::CryptoProvider::get_default().is_none() {
-        let _ = rustls::crypto::ring::default_provider().install_default();
     }
 }
 
@@ -91,61 +77,18 @@ impl Connect for HttpDefault {
     }
 }
 
-// The shared client and the ones built for a guest's own `connect-timeout`,
-// one per distinct value, so a guest that sets one on every request keeps a
-// connection pool rather than opening a connection per request. A client is
-// `Arc`-backed, so a clone per store shares the pools.
-#[derive(Debug, Clone)]
-struct Clients {
-    shared: reqwest::Client,
-    connect_timeout: Duration,
-    by_timeout: Arc<Mutex<Vec<(Duration, reqwest::Client)>>>,
+// reqwest is built with `rustls-no-provider` (keeping `aws-lc-sys` out of the
+// tree), so a process-level provider must exist before a client is built; an
+// embedder's own provider wins, and a lost install race still leaves one.
+fn ensure_crypto_provider() {
+    if rustls::crypto::CryptoProvider::get_default().is_none() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    }
 }
 
-impl Clients {
-    // distinct guest `connect-timeout` values kept; past it a request builds its own
-    const CAP: usize = 8;
-
-    fn new(connect_timeout: Duration) -> reqwest::Result<Self> {
-        Ok(Self {
-            shared: Self::builder(connect_timeout).build()?,
-            connect_timeout,
-            by_timeout: Arc::default(),
-        })
-    }
-
-    // what every client starts from, so one built for a request differs from
-    // the shared one only in what the request asked for
-    fn builder(connect_timeout: Duration) -> reqwest::ClientBuilder {
-        reqwest::Client::builder().connect_timeout(connect_timeout)
-    }
-
-    // the client for a request's `connect-timeout`: the shared one when the
-    // request sets none, or the configured value
-    fn get(&self, connect_timeout: Option<Duration>) -> reqwest::Result<reqwest::Client> {
-        let Some(timeout) = connect_timeout.filter(|timeout| *timeout != self.connect_timeout)
-        else {
-            return Ok(self.shared.clone());
-        };
-
-        let mut by_timeout = self.by_timeout.lock().expect("clients lock");
-        if let Some((_, client)) = by_timeout.iter().find(|(kept, _)| *kept == timeout) {
-            return Ok(client.clone());
-        }
-        let client = Self::builder(timeout).build()?;
-        if by_timeout.len() < Self::CAP {
-            by_timeout.push((timeout, client.clone()));
-        }
-        drop(by_timeout);
-        Ok(client)
-    }
-
-    // a client of the request's own: the identity is part of the TLS configuration
-    fn with_identity(
-        &self, connect_timeout: Option<Duration>, identity: reqwest::Identity,
-    ) -> reqwest::Result<reqwest::Client> {
-        Self::builder(connect_timeout.unwrap_or(self.connect_timeout)).identity(identity).build()
-    }
+#[derive(Debug, Clone)]
+struct HttpHooks {
+    clients: Clients,
 }
 
 impl WasiHttpHooks for HttpHooks {
@@ -216,6 +159,63 @@ impl WasiHttpHooks for HttpHooks {
 
             Ok((response, fut))
         })
+    }
+}
+
+// The shared client and the ones built for a guest's own `connect-timeout`,
+// one per distinct value, so a guest that sets one on every request keeps a
+// connection pool rather than opening a connection per request. A client is
+// `Arc`-backed, so a clone per store shares the pools.
+#[derive(Debug, Clone)]
+struct Clients {
+    shared: reqwest::Client,
+    connect_timeout: Duration,
+    by_timeout: Arc<Mutex<Vec<(Duration, reqwest::Client)>>>,
+}
+
+impl Clients {
+    // distinct guest `connect-timeout` values kept; past it a request builds its own
+    const CAP: usize = 8;
+
+    fn new(connect_timeout: Duration) -> reqwest::Result<Self> {
+        Ok(Self {
+            shared: Self::builder(connect_timeout).build()?,
+            connect_timeout,
+            by_timeout: Arc::default(),
+        })
+    }
+
+    // what every client starts from, so one built for a request differs from
+    // the shared one only in what the request asked for
+    fn builder(connect_timeout: Duration) -> reqwest::ClientBuilder {
+        reqwest::Client::builder().connect_timeout(connect_timeout)
+    }
+
+    // the client for a request's `connect-timeout`: the shared one when the
+    // request sets none, or the configured value
+    fn get(&self, connect_timeout: Option<Duration>) -> reqwest::Result<reqwest::Client> {
+        let Some(timeout) = connect_timeout.filter(|timeout| *timeout != self.connect_timeout)
+        else {
+            return Ok(self.shared.clone());
+        };
+
+        let mut by_timeout = self.by_timeout.lock().expect("clients lock");
+        if let Some((_, client)) = by_timeout.iter().find(|(kept, _)| *kept == timeout) {
+            return Ok(client.clone());
+        }
+        let client = Self::builder(timeout).build()?;
+        if by_timeout.len() < Self::CAP {
+            by_timeout.push((timeout, client.clone()));
+        }
+        drop(by_timeout);
+        Ok(client)
+    }
+
+    // a client of the request's own: the identity is part of the TLS configuration
+    fn with_identity(
+        &self, connect_timeout: Option<Duration>, identity: reqwest::Identity,
+    ) -> reqwest::Result<reqwest::Client> {
+        Self::builder(connect_timeout.unwrap_or(self.connect_timeout)).identity(identity).build()
     }
 }
 

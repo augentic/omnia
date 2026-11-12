@@ -57,23 +57,6 @@ pub struct Deployment {
     stdio: Option<Stdio>,
 }
 
-// One added through `guest` is read into bytes when the manifest is built,
-// so it loads at boot like the `runtime!` macro's embedded guests.
-#[derive(Clone, Debug)]
-struct Entry {
-    entry: GuestEntry,
-    embed: bool,
-}
-
-impl From<ManifestSource> for Deployment {
-    fn from(base: ManifestSource) -> Self {
-        Self {
-            base: Some(base),
-            ..Self::default()
-        }
-    }
-}
-
 impl Deployment {
     /// An empty deployment.
     #[must_use]
@@ -314,6 +297,23 @@ impl Deployment {
     }
 }
 
+impl From<ManifestSource> for Deployment {
+    fn from(base: ManifestSource) -> Self {
+        Self {
+            base: Some(base),
+            ..Self::default()
+        }
+    }
+}
+
+// One added through `guest` is read into bytes when the manifest is built,
+// so it loads at boot like the `runtime!` macro's embedded guests.
+#[derive(Clone, Debug)]
+struct Entry {
+    entry: GuestEntry,
+    embed: bool,
+}
+
 // generous, since a run past it traps the guest's write
 const CAPTURE_BYTES: usize = 64 << 20;
 
@@ -324,17 +324,6 @@ pub struct Captured {
     deployment: Deployment,
     stdout: MemoryOutputPipe,
     stderr: MemoryOutputPipe,
-}
-
-/// What one captured run produced.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Run {
-    /// The command guest's exit status.
-    pub status: ExitStatus,
-    /// Everything the guests wrote to stdout, lossily as UTF-8.
-    pub stdout: String,
-    /// Everything the guests wrote to stderr, lossily as UTF-8.
-    pub stderr: String,
 }
 
 impl Captured {
@@ -391,4 +380,15 @@ impl Captured {
             stderr: String::from_utf8_lossy(&self.stderr.contents()).into_owned(),
         }
     }
+}
+
+/// What one captured run produced.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Run {
+    /// The command guest's exit status.
+    pub status: ExitStatus,
+    /// Everything the guests wrote to stdout, lossily as UTF-8.
+    pub stdout: String,
+    /// Everything the guests wrote to stderr, lossily as UTF-8.
+    pub stderr: String,
 }

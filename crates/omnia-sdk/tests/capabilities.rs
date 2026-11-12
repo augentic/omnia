@@ -64,7 +64,7 @@ fn row(id: i64, label: &str, note: Option<&str>) -> Row {
 }
 
 #[tokio::test]
-async fn state_json_round_trip() {
+async fn state_json() {
     let provider = Provider::default();
     let value = Cached {
         name: "ann".into(),
@@ -84,7 +84,7 @@ async fn state_json_round_trip() {
 }
 
 #[tokio::test]
-async fn fetch_json_upstream_ok() {
+async fn fetch_json() {
     let http = MatchedHttp::default().on(
         Method::GET,
         "https://api.test/status",
@@ -98,7 +98,7 @@ async fn fetch_json_upstream_ok() {
 }
 
 #[tokio::test]
-async fn fetch_json_upstream_failure() {
+async fn fetch_json_unavailable() {
     let mut unavailable = Response::new(Bytes::from_static(b"try later"));
     *unavailable.status_mut() = StatusCode::SERVICE_UNAVAILABLE;
     let http = MatchedHttp::default().on(Method::GET, "https://api.test/status", unavailable);
@@ -111,7 +111,7 @@ async fn fetch_json_upstream_failure() {
 }
 
 #[tokio::test]
-async fn config_get_parsed_invalid() {
+async fn config_parse_invalid() {
     let config = MapConfig::default().with([("PORT", "eighty")]);
 
     let error = config.get_parsed::<u16>("PORT").await.expect_err("not a number");
@@ -130,7 +130,7 @@ async fn identity_access_token() {
 }
 
 #[tokio::test]
-async fn document_json_round_trip() {
+async fn document_json() {
     let docs = MemoryDocs::default();
     let value = Cached {
         name: "ann".into(),
@@ -240,7 +240,7 @@ fn row_get_null() {
 }
 
 #[test]
-fn row_get_type_mismatch() {
+fn row_get_mismatch() {
     let row = row(1, "alpha", None);
 
     let error = row.get::<i64>("label").expect_err("text into i64");
@@ -251,7 +251,7 @@ fn row_get_type_mismatch() {
 }
 
 #[tokio::test]
-async fn message_json_with_header() {
+async fn message_json() {
     let sink = Sink::default();
     let message =
         Message::json(&json!({"id": 7})).expect("serialize").with_header("tenant", "acme");

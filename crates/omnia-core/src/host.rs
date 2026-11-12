@@ -112,6 +112,15 @@ pub trait Provides<H: HostCtx>: Backends {
     fn borrow(&mut self) -> H::Borrow<'_>;
 }
 
+/// Access to the store's resource table from a WASI view.
+///
+/// [`HostView`] implements it for every client, enabling the generic
+/// [`get_cloned`] table lookup.
+pub trait HasTable {
+    /// The store's resource table.
+    fn table(&mut self) -> &mut ResourceTable;
+}
+
 /// The linker-facing view of a host over one client: its backend and the
 /// store's resource table, borrowed for one host call.
 ///
@@ -199,15 +208,6 @@ impl<T: ?Sized> Deref for Proxy<T> {
     fn deref(&self) -> &Self::Target {
         &self.0
     }
-}
-
-/// Access to the store's resource table from a WASI view.
-///
-/// [`HostView`] implements it for every client, enabling the generic
-/// [`get_cloned`] table lookup.
-pub trait HasTable {
-    /// The store's resource table.
-    fn table(&mut self) -> &mut ResourceTable;
 }
 
 /// Clone `resource`'s host-side entry out of the store's resource table.

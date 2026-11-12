@@ -15,8 +15,6 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::{fmt, thread};
 
-type Fallback<Turn> = Box<dyn Fn() -> Turn + Send + Sync>;
-
 /// A shared FIFO of scripted turns that records the requests consuming them.
 ///
 /// ```
@@ -30,37 +28,6 @@ type Fallback<Turn> = Box<dyn Fn() -> Turn + Send + Sync>;
 /// ```
 pub struct Script<Req, Turn> {
     inner: Arc<Inner<Req, Turn>>,
-}
-
-struct Inner<Req, Turn> {
-    turns: Mutex<VecDeque<Turn>>,
-    seen: Mutex<Vec<Req>>,
-    fallback: OnceLock<Fallback<Turn>>,
-    // Requests that found the script exhausted with no fallback, answered
-    // softly by `try_next`; reported by `assert_exhausted` and the drop check.
-    overruns: AtomicUsize,
-    // Set once `assert_exhausted` has reported, so the drop check does not
-    // fail the same test a second time.
-    checked: AtomicBool,
-}
-
-impl<Req, Turn> Clone for Script<Req, Turn> {
-    fn clone(&self) -> Self {
-        Self {
-            inner: Arc::clone(&self.inner),
-        }
-    }
-}
-
-impl<Req, Turn> fmt::Debug for Script<Req, Turn> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Script")
-            .field("remaining", &self.remaining())
-            .field("seen", &self.inner.seen.lock().map_or(0, |seen| seen.len()))
-            .field("overruns", &self.overruns())
-            .field("soft", &self.inner.fallback.get().is_some())
-            .finish()
-    }
 }
 
 impl<Req, Turn> Script<Req, Turn> {
@@ -198,6 +165,37 @@ impl<Req, Turn> Script<Req, Turn> {
     }
 }
 
+impl<Req, Turn> Clone for Script<Req, Turn> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: Arc::clone(&self.inner),
+        }
+    }
+}
+
+impl<Req, Turn> fmt::Debug for Script<Req, Turn> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Script")
+            .field("remaining", &self.remaining())
+            .field("seen", &self.inner.seen.lock().map_or(0, |seen| seen.len()))
+            .field("overruns", &self.overruns())
+            .field("soft", &self.inner.fallback.get().is_some())
+            .finish()
+    }
+}
+
+struct Inner<Req, Turn> {
+    turns: Mutex<VecDeque<Turn>>,
+    seen: Mutex<Vec<Req>>,
+    fallback: OnceLock<Fallback<Turn>>,
+    // Requests that found the script exhausted with no fallback, answered
+    // softly by `try_next`; reported by `assert_exhausted` and the drop check.
+    overruns: AtomicUsize,
+    // Set once `assert_exhausted` has reported, so the drop check does not
+    // fail the same test a second time.
+    checked: AtomicBool,
+}
+
 // The last handle dropping with turns left or overruns is a forgotten
 // assertion; a panic already unwinding must not be masked, since a panic
 // during unwinding aborts the process.
@@ -215,6 +213,8 @@ impl<Req, Turn> Drop for Inner<Req, Turn> {
         );
     }
 }
+
+type Fallback<Turn> = Box<dyn Fn() -> Turn + Send + Sync>;
 
 /// One recorded model request, as both rungs see it.
 ///

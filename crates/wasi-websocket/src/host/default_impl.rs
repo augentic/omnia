@@ -27,12 +27,6 @@ use tracing::instrument;
 use crate::host::WebSocketClient;
 use crate::host::resource::{Endpoint, Event, Events};
 
-const MAX_CONNECTIONS: usize = 1024;
-const BROADCAST_CAPACITY: usize = 256;
-const CLIENT_CAPACITY: usize = 256;
-
-type ConnectionMap = Arc<DashMap<String, mpsc::Sender<Message>>>;
-
 /// Options used to connect to the WebSocket service.
 #[derive(Debug, Clone)]
 pub struct ConnectOptions {
@@ -48,86 +42,15 @@ impl omnia_core::FromEnv for ConnectOptions {
     }
 }
 
+const MAX_CONNECTIONS: usize = 1024;
+const BROADCAST_CAPACITY: usize = 256;
+const CLIENT_CAPACITY: usize = 256;
+
 /// Default implementation for `wasi:websocket`.
 #[derive(Clone, Debug)]
 pub struct WebSocketDefault {
     event_tx: Sender<Event>,
     connections: ConnectionMap,
-}
-
-impl Connect for WebSocketDefault {
-    type ConnectOptions = ConnectOptions;
-
-    #[instrument]
-    async fn connect_with(options: Self::ConnectOptions) -> Result<Self> {
-        tracing::debug!("using default WebSocket backend");
-
-        let websocket = Self::new();
-        let server = websocket.clone();
-        tokio::spawn(async move {
-            let listener = match TcpListener::bind(options.socket_addr).await {
-                Ok(listener) => listener,
-                Err(e) => {
-                    tracing::error!("issue starting websocket server: {e}");
-                    return;
-                }
-            };
-            server.accept_loop(listener).await;
-        });
-
-        Ok(websocket)
-    }
-}
-
-impl Default for WebSocketDefault {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl WebSocketClient for WebSocketDefault {
-    fn endpoint(&self) -> FutureResult<Arc<dyn Endpoint>> {
-        let client = self.clone();
-        async move { Ok(Arc::new(client) as Arc<dyn Endpoint>) }.boxed()
-    }
-}
-
-impl Endpoint for WebSocketDefault {
-    fn events(&self) -> FutureResult<Events> {
-        let stream = BroadcastStream::new(self.event_tx.subscribe());
-
-        async move {
-            let stream = stream.filter_map(|res| async move {
-                match res {
-                    Ok(event) => Some(event),
-                    Err(e) => {
-                        tracing::warn!("broadcast lag: {e}");
-                        None
-                    }
-                }
-            });
-            Ok(Box::pin(stream) as Events)
-        }
-        .boxed()
-    }
-
-    fn send(&self, event: Event, sockets: Option<Vec<String>>) -> FutureResult<()> {
-        tracing::debug!("sending event to WebSocket clients, sockets: {:?}", sockets);
-
-        self.connections.retain(|_, sender| !sender.is_closed());
-
-        let msg = Message::Binary(event.data.into());
-        for mut entry in self.connections.iter_mut() {
-            if sockets.as_ref().is_some_and(|s| !s.contains(entry.key())) {
-                continue;
-            }
-            if let Err(e) = entry.value_mut().try_send(msg.clone()) {
-                tracing::warn!("failed to send to peer, channel full or disconnected: {e}");
-            }
-        }
-
-        async move { Ok(()) }.boxed()
-    }
 }
 
 impl WebSocketDefault {
@@ -238,3 +161,80 @@ impl WebSocketDefault {
         }
     }
 }
+
+impl Connect for WebSocketDefault {
+    type ConnectOptions = ConnectOptions;
+
+    #[instrument]
+    async fn connect_with(options: Self::ConnectOptions) -> Result<Self> {
+        tracing::debug!("using default WebSocket backend");
+
+        let websocket = Self::new();
+        let server = websocket.clone();
+        tokio::spawn(async move {
+            let listener = match TcpListener::bind(options.socket_addr).await {
+                Ok(listener) => listener,
+                Err(e) => {
+                    tracing::error!("issue starting websocket server: {e}");
+                    return;
+                }
+            };
+            server.accept_loop(listener).await;
+        });
+
+        Ok(websocket)
+    }
+}
+
+impl Default for WebSocketDefault {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl WebSocketClient for WebSocketDefault {
+    fn endpoint(&self) -> FutureResult<Arc<dyn Endpoint>> {
+        let client = self.clone();
+        async move { Ok(Arc::new(client) as Arc<dyn Endpoint>) }.boxed()
+    }
+}
+
+impl Endpoint for WebSocketDefault {
+    fn events(&self) -> FutureResult<Events> {
+        let stream = BroadcastStream::new(self.event_tx.subscribe());
+
+        async move {
+            let stream = stream.filter_map(|res| async move {
+                match res {
+                    Ok(event) => Some(event),
+                    Err(e) => {
+                        tracing::warn!("broadcast lag: {e}");
+                        None
+                    }
+                }
+            });
+            Ok(Box::pin(stream) as Events)
+        }
+        .boxed()
+    }
+
+    fn send(&self, event: Event, sockets: Option<Vec<String>>) -> FutureResult<()> {
+        tracing::debug!("sending event to WebSocket clients, sockets: {:?}", sockets);
+
+        self.connections.retain(|_, sender| !sender.is_closed());
+
+        let msg = Message::Binary(event.data.into());
+        for mut entry in self.connections.iter_mut() {
+            if sockets.as_ref().is_some_and(|s| !s.contains(entry.key())) {
+                continue;
+            }
+            if let Err(e) = entry.value_mut().try_send(msg.clone()) {
+                tracing::warn!("failed to send to peer, channel full or disconnected: {e}");
+            }
+        }
+
+        async move { Ok(()) }.boxed()
+    }
+}
+
+type ConnectionMap = Arc<DashMap<String, mpsc::Sender<Message>>>;

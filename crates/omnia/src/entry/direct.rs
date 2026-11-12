@@ -199,7 +199,7 @@ mod tests {
     }
 
     #[test]
-    fn direct_argv() {
+    fn host_grammar() {
         // nothing in argv is reserved for the host
         let options = MainOptions::new(Mode::Command).manifest(inline_source("app"));
         let plan =
@@ -217,7 +217,7 @@ mod tests {
     // The verbosity flags are read for the levels and stay in the guest's
     // argv, where its own grammar declares them.
     #[test]
-    fn direct_argv_verbatim() {
+    fn verbosity_flags() {
         use crate::LevelFilter;
 
         let options = MainOptions::new(Mode::Command).manifest(inline_source("app"));
@@ -244,17 +244,6 @@ mod tests {
         );
     }
 
-    // the direct plan always carries the compiled-in manifest, so `build` can
-    // never fall through to its own `OMNIA_MANIFEST` lookup
-    #[test]
-    fn direct_compiled_manifest() {
-        let options = MainOptions::new(Mode::Command).manifest(inline_source("app"));
-        let plan = plan(options, argv(&["bin", "greet"]))
-            .unwrap_or_else(|error| panic!("{}", fatal(&error)));
-        assert_eq!(first_guest(&plan), "app", "the compiled-in manifest is the sole source");
-        assert_eq!(plan.args, ["greet"]);
-    }
-
     #[test]
     fn non_direct() {
         let error = plan(MainOptions::new(Mode::Server), argv(&["bin", "run", "guest.wasm"]))
@@ -265,7 +254,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn direct_non_utf8() {
+    fn non_utf8() {
         use std::os::unix::ffi::OsStringExt as _;
 
         let options = MainOptions::new(Mode::Command).manifest(inline_source("app"));

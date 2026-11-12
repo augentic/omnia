@@ -112,6 +112,7 @@ async fn overlay_mount() {
         [std::path::Path::new("/nonexistent/adapters"), scratch.path()],
         "the overlay's `.` mount follows the binary's, so it wins the dedup"
     );
+    assert!(!manifest.mounts[0].writable, "a mount without `writable:` is read-only");
 
     let status = deployment
         .run_with::<production_plugins::Hooks, _>(Backends::defaults().await)

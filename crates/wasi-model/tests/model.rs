@@ -15,7 +15,8 @@ use omnia::{ExitStatus, Mount};
 use omnia_test::host::{Backends, Deployment, ScriptedModel, scratch};
 use omnia_test::{Exchange, SeenFormat, SeenWorker};
 use omnia_wasi_model::{
-    Answer, FutureResult, Limits, ModelClient, ModelDefault, Request, ToolHost, Usage, WasiModel,
+    Answer, Format, FutureResult, Grants, Limits, Message, ModelClient, ModelDefault, Request,
+    Role, Schema, ToolHost, Usage, WasiModel,
 };
 
 // Every guest program in `crates/test-programs` must have a matching test
@@ -124,16 +125,19 @@ fn workspace_turn() -> ScriptedModel {
 
 // what a fully served `workspace_turn` records
 fn workspace_exchanges() -> Vec<Exchange> {
-    let exchange = |tool: &str, path: &str, outcome: &str| Exchange {
+    vec![
+        workspace_exchange("read", "seed.txt", "hello"),
+        workspace_exchange("write", "out.txt", ""),
+        workspace_exchange("list", "", "out.txt,seed.txt"),
+    ]
+}
+
+fn workspace_exchange(tool: &str, path: &str, outcome: &str) -> Exchange {
+    Exchange {
         tool: tool.into(),
         arguments: path.into(),
         outcome: Ok(outcome.into()),
-    };
-    vec![
-        exchange("read", "seed.txt", "hello"),
-        exchange("write", "out.txt", ""),
-        exchange("list", "", "out.txt,seed.txt"),
-    ]
+    }
 }
 
 // ------------------------------------------------------------------------
@@ -398,19 +402,57 @@ async fn model_out_of_order_results() {
 async fn model_workspace_tools() {
     let workspace = scratch();
     fs::write(workspace.path().join("seed.txt"), "hello").expect("seeding workspace");
+    fs::create_dir(workspace.path().join("docs")).expect("creating docs dir");
+    fs::write(workspace.path().join("docs").join("a.txt"), "a").expect("seeding docs");
 
-    let model = run_scripted(
-        test_programs::MODEL_WORKSPACE_TOOLS,
-        vec![workspace.mount(true)],
-        workspace_turn(),
-    )
-    .await;
+    let model = ScriptedModel::answering(["hello:docs,out.txt,seed.txt"])
+        .reading(0, "seed.txt")
+        .writing(0, "out.txt", "written")
+        .listing(0, "")
+        .listing(0, "docs");
+    let model =
+        run_scripted(test_programs::MODEL_WORKSPACE_TOOLS, vec![workspace.mount(true)], model)
+            .await;
 
-    // The host-injected tools read the seed and listed the root; the write
-    // landed on the real filesystem, and `local_path` resolved to this mount.
-    assert_eq!(model.exchanges(), workspace_exchanges());
+    // The host-injected tools read the seed and listed the root and a
+    // subdirectory; the write landed on the real filesystem, and
+    // `local_path` resolved to this mount.
+    assert_eq!(
+        model.exchanges(),
+        [
+            workspace_exchange("read", "seed.txt", "hello"),
+            workspace_exchange("write", "out.txt", ""),
+            workspace_exchange("list", "", "docs,out.txt,seed.txt"),
+            workspace_exchange("list", "docs", "a.txt"),
+        ]
+    );
     assert_eq!(fs::read_to_string(workspace.path().join("out.txt")).expect("out.txt"), "written");
     assert_eq!(model.lent(), [Some(workspace.path().to_path_buf())]);
+}
+
+#[tokio::test]
+async fn model_workspace_limits() {
+    // the host's private caps: 4 MiB read and write, 4096 listed entries
+    const MAX_BYTES: usize = 4 * 1024 * 1024;
+    const MAX_LIST_ENTRIES: usize = 4096;
+
+    let workspace = scratch();
+    fs::write(workspace.path().join("big.bin"), vec![0_u8; MAX_BYTES + 1])
+        .expect("seeding big.bin");
+    for i in 0..MAX_LIST_ENTRIES {
+        fs::write(workspace.path().join(format!("{i}.txt")), []).expect("seeding entries");
+    }
+
+    let model = ScriptedModel::answering(["read", "write", "list"])
+        .reading(0, "big.bin")
+        .writing(1, "out.bin", vec![0_u8; MAX_BYTES + 1])
+        .listing(2, "");
+    let model =
+        run_scripted(test_programs::MODEL_WORKSPACE_LIMITS, vec![workspace.mount(true)], model)
+            .await;
+
+    assert!(model.exchanges().is_empty(), "every capped step fails hard");
+    assert!(!workspace.path().join("out.bin").exists(), "the oversize write never lands");
 }
 
 #[tokio::test]
@@ -475,4 +517,152 @@ async fn model_workspace_unauthorized() {
         ScriptedModel::default(),
     )
     .await;
+}
+
+// ------------------------------------------------------------------------
+// Prompt formatting and candidate extraction
+// ------------------------------------------------------------------------
+
+const VERDICT_PASS: &str = r#"{"verdict":"pass"}"#;
+
+fn verdict_schema() -> Format {
+    Format::Schema(Schema {
+        name: "verdict".to_owned(),
+        schema: r#"{"type":"object"}"#.to_owned(),
+    })
+}
+
+fn candidate(text: &str) -> String {
+    verdict_schema().candidate(text)
+}
+
+#[test]
+fn mixed_roles() {
+    let messages = [(Role::User, "hi"), (Role::Assistant, "yo"), (Role::System, "note")];
+    let prompt = Request {
+        model: None,
+        system: Some("be terse".to_owned()),
+        messages: messages
+            .into_iter()
+            .map(|(role, content)| Message {
+                role,
+                content: content.to_owned(),
+            })
+            .collect(),
+        generation: None,
+        format: Format::Text,
+        tools: vec![],
+        grants: Grants {
+            workspace: None,
+            worker: None,
+        },
+        check: false,
+    }
+    .to_string();
+    assert!(
+        prompt.starts_with("be terse\n\nhi\n\n[assistant]\nyo\n\n[system]\nnote\n\n"),
+        "{prompt}"
+    );
+    assert!(prompt.contains("plain text"), "{prompt}");
+}
+
+#[test]
+fn text_passthrough() {
+    assert_eq!(Format::Text.candidate("  plain {not: json}  "), "  plain {not: json}  ");
+}
+
+#[test]
+fn json_document() {
+    assert_eq!(Format::Json.candidate(VERDICT_PASS), VERDICT_PASS);
+}
+
+#[test]
+fn fenced_json() {
+    assert_eq!(candidate("```json\n{\"verdict\":\"pass\"}\n```"), VERDICT_PASS);
+}
+
+// A scalar answer has no bracket to open it, so the fence is its only way in.
+#[test]
+fn fenced_scalar() {
+    assert_eq!(candidate("```json\n\"pass\"\n```"), r#""pass""#);
+}
+
+#[test]
+fn json_with_preamble() {
+    assert_eq!(candidate("Done.\n{\"verdict\":\"pass\"}\n"), VERDICT_PASS);
+}
+
+// The full document beats a worked example, a repeated fragment, and a bracketed citation.
+#[test]
+fn largest_value() {
+    assert_eq!(
+        candidate(
+            "For example {\"verdict\":\"fail\"} — and mine:\n{\"findings\":[],\"verdict\":\"pass\"}"
+        ),
+        r#"{"findings":[],"verdict":"pass"}"#
+    );
+    let document = r#"{"requirements":[{"scenarios":[],"subject":"a.run"}]}"#;
+    assert_eq!(
+        candidate(&format!("{document}\n{{\"scenarios\":[],\"subject\":\"a.run\"}}")),
+        document
+    );
+    assert_eq!(candidate("{\"verdict\":\"pass\"}\nSee [1] and [2]."), VERDICT_PASS);
+}
+
+// Blocks that fail to parse whole are skipped without mining literals inside them,
+// even when a code fence holds a larger JSON literal than the answer.
+#[test]
+fn non_json_blocks() {
+    for text in [
+        "[thinking] weighing the claims.\n{\"verdict\":\"pass\"}",
+        "{thinking} done.\n```json\n{\"verdict\":\"pass\"}\n```",
+        "Done [thinking] with {care}; see [[note]] and {{name}}.\n{\"verdict\":\"pass\"}",
+        "Scored [1 point] as a [true story] — [3 items, mostly]:\n{\"verdict\":\"pass\"}",
+        "```python\nxs = [x for x in xs]\n```\n{\"verdict\":\"pass\"}",
+        "```js\nconst reply = { \"verdict\": verdict };\n```\n{\"verdict\":\"pass\"}",
+        "```python\nconfig = {\"model\":\"gpt-4\",\"temperature\":0,\"stream\":false}\n```\n{\"verdict\":\"pass\"}",
+        "{\"verdict\":\"pass\"}\nThe {\"verdict\"} key is required.",
+        "The object opens with a { like so:\n```json\n{\"verdict\":\"pass\"}\n```",
+    ] {
+        assert_eq!(candidate(text), VERDICT_PASS, "{text}");
+    }
+}
+
+// A bracket or an escaped quote inside a string does not end the block.
+#[test]
+fn brackets_in_strings() {
+    let answer = r#"{"finding":"an unmatched } and \" quote","verdict":"pass"}"#;
+    assert_eq!(candidate(&format!("Note:\n{answer}")), answer);
+}
+
+// A mid-line "```" is content rather than a fence delimiter, whether inside a
+// JSON string or in prose.
+#[test]
+fn fence_delimiter_mid_line() {
+    let answer = r#"{"finding":"wrap code in ``` fences","verdict":"pass"}"#;
+    assert_eq!(candidate(&format!("Note:\n{answer}")), answer);
+    assert_eq!(candidate(&format!("```json\n{answer}\n```")), answer);
+    assert_eq!(
+        candidate("Open a fence with ``` on its own line.\n{\"verdict\":\"pass\"}"),
+        VERDICT_PASS
+    );
+}
+
+// A truncated or invalid document comes back whole rather than yielding a
+// well-formed inner fragment.
+#[test]
+fn malformed_document() {
+    for text in [
+        "{\n  \"requirements\": [{\"scenarios\":[],\"subject\":\"a.run\"}],\n",
+        "```json\n{\n  \"requirements\": [{\"scenarios\":[],\"subject\":\"a.run\"}],\n```",
+        "Here is my answer: {\"findings\": [], \"verdict\": \"pass\"",
+        "{\"verdict\": \"pass\", // reason\n  \"findings\": [{\"claim\":\"a\"}]}",
+    ] {
+        assert_eq!(candidate(text), text);
+    }
+}
+
+#[test]
+fn no_json() {
+    assert_eq!(candidate("not json"), "not json");
 }

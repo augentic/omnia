@@ -35,19 +35,6 @@ pub struct CompileOptions {
     pub generate_address_map: bool,
 }
 
-impl Default for CompileOptions {
-    fn default() -> Self {
-        Self {
-            max_fuel: 0,
-            branch_hinting: false,
-            memory_reservation: None,
-            memory_guard_size: None,
-            debug_symbols: false,
-            generate_address_map: true,
-        }
-    }
-}
-
 impl CompileOptions {
     /// Apply every compile-affecting setting to `config` — these six, and the
     /// two the runtime fixes (epoch interruption, copy-on-write heap images).
@@ -79,5 +66,18 @@ impl CompileOptions {
         // artifact size: strip symbols, keep the address map for trap offsets
         config.debug_symbols(self.debug_symbols);
         config.generate_address_map(self.generate_address_map);
+    }
+}
+
+impl Default for CompileOptions {
+    fn default() -> Self {
+        Self {
+            max_fuel: 0,
+            branch_hinting: false,
+            memory_reservation: None,
+            memory_guard_size: None,
+            debug_symbols: false,
+            generate_address_map: true,
+        }
     }
 }

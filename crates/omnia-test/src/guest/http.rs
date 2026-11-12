@@ -13,8 +13,6 @@ use http::{HeaderMap, Method, Request, Response, StatusCode, Uri};
 use http_body::{Body, Frame};
 use omnia_sdk::HttpRequest;
 
-type BodyPredicate = Arc<dyn Fn(&[u8]) -> bool + Send + Sync>;
-
 /// One request the code under test sent, with its body collected.
 #[derive(Clone, Debug)]
 pub struct Recorded {
@@ -34,36 +32,6 @@ impl Recorded {
     pub fn text(&self) -> String {
         String::from_utf8_lossy(&self.body).into_owned()
     }
-}
-
-struct Route {
-    method: Method,
-    url: String,
-    body: Option<BodyPredicate>,
-    status: StatusCode,
-    headers: HeaderMap,
-    payload: Bytes,
-}
-
-impl Route {
-    fn matches(&self, recorded: &Recorded) -> bool {
-        self.method == recorded.method
-            && self.url == recorded.uri.to_string()
-            && self.body.as_ref().is_none_or(|matches| matches(&recorded.body))
-    }
-
-    fn response(&self) -> Response<Bytes> {
-        let mut response = Response::new(self.payload.clone());
-        *response.status_mut() = self.status;
-        *response.headers_mut() = self.headers.clone();
-        response
-    }
-}
-
-#[derive(Default)]
-struct Inner {
-    routes: Mutex<Vec<Route>>,
-    requests: Mutex<Vec<Recorded>>,
 }
 
 /// Outbound HTTP answered by the first route matching method, URL, and
@@ -91,15 +59,6 @@ struct Inner {
 #[derive(Clone, Default)]
 pub struct MatchedHttp {
     inner: Arc<Inner>,
-}
-
-impl fmt::Debug for MatchedHttp {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("MatchedHttp")
-            .field("routes", &self.inner.routes.lock().map_or(0, |r| r.len()))
-            .field("requests", &self.requests())
-            .finish()
-    }
 }
 
 impl MatchedHttp {
@@ -161,6 +120,15 @@ impl MatchedHttp {
     }
 }
 
+impl fmt::Debug for MatchedHttp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("MatchedHttp")
+            .field("routes", &self.inner.routes.lock().map_or(0, |r| r.len()))
+            .field("requests", &self.requests())
+            .finish()
+    }
+}
+
 // panics when no route matches the request
 impl HttpRequest for MatchedHttp {
     fn fetch<T>(&self, request: Request<T>) -> impl Future<Output = Result<Response<Bytes>>> + Send
@@ -182,6 +150,38 @@ impl HttpRequest for MatchedHttp {
         }
     }
 }
+
+#[derive(Default)]
+struct Inner {
+    routes: Mutex<Vec<Route>>,
+    requests: Mutex<Vec<Recorded>>,
+}
+
+struct Route {
+    method: Method,
+    url: String,
+    body: Option<BodyPredicate>,
+    status: StatusCode,
+    headers: HeaderMap,
+    payload: Bytes,
+}
+
+impl Route {
+    fn matches(&self, recorded: &Recorded) -> bool {
+        self.method == recorded.method
+            && self.url == recorded.uri.to_string()
+            && self.body.as_ref().is_none_or(|matches| matches(&recorded.body))
+    }
+
+    fn response(&self) -> Response<Bytes> {
+        let mut response = Response::new(self.payload.clone());
+        *response.status_mut() = self.status;
+        *response.headers_mut() = self.headers.clone();
+        response
+    }
+}
+
+type BodyPredicate = Arc<dyn Fn(&[u8]) -> bool + Send + Sync>;
 
 // Frame by frame: `BodyExt::collect` would hold `T::Data`, which the trait
 // does not promise is `Send`, across an await.

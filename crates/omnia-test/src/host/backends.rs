@@ -89,15 +89,6 @@ pub struct Backends<
     pub websocket: WebSocketDefault,
 }
 
-/// The empty `omnia:vcs` slot: no backend, so no deployment links `WasiVcs`
-/// over it.
-///
-/// `omnia:vcs` ships no in-memory default, since a repository is a tree on
-/// disk; a scenario that drives it sets a backend with
-/// [`Backends::vcs`].
-#[derive(Clone, Copy, Debug, Default)]
-pub struct NoVcs;
-
 impl Backends {
     /// Every default, freshly constructed from nothing in the environment.
     ///
@@ -360,12 +351,6 @@ impl<M, K, B, D, S, V, G, I, O, C> Backends<M, K, B, D, S, V, G, I, O, C> {
     }
 }
 
-fn config_from(vars: WasiConfigVariables) -> ConfigDefault {
-    ConfigDefault {
-        config_vars: Arc::new(vars),
-    }
-}
-
 /// One `Provides` impl per host, each yielding the named field's borrow.
 ///
 /// Every impl carries the full set of bounds over the slots that have a
@@ -430,3 +415,18 @@ where
         &mut self.vcs
     }
 }
+
+fn config_from(vars: WasiConfigVariables) -> ConfigDefault {
+    ConfigDefault {
+        config_vars: Arc::new(vars),
+    }
+}
+
+/// The empty `omnia:vcs` slot: no backend, so no deployment links `WasiVcs`
+/// over it.
+///
+/// `omnia:vcs` ships no in-memory default, since a repository is a tree on
+/// disk; a scenario that drives it sets a backend with
+/// [`Backends::vcs`].
+#[derive(Clone, Copy, Debug, Default)]
+pub struct NoVcs;

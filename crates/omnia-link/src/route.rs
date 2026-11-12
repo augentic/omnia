@@ -76,14 +76,6 @@ pub struct Routes {
     inner: Arc<RwLock<RouteTable>>,
 }
 
-// Every served guest is recorded, linked or not, so `resolve` can tell "not
-// registered" from "registered but exports nothing linked".
-#[derive(Default)]
-struct RouteTable {
-    pending: HashMap<GuestId, Option<Arc<dyn RouteInvoke>>>,
-    live: HashMap<GuestId, Option<Arc<dyn RouteInvoke>>>,
-}
-
 impl Routes {
     /// Park `target`'s served route as pending until it is published or
     /// discarded, refusing an identity that is already pending.
@@ -172,4 +164,12 @@ impl Routes {
     pub fn resolve(&self, target: &GuestId, interface: &str) -> Result<Arc<dyn RouteInvoke>> {
         self.lookup(target, interface)?.ok_or_else(|| anyhow!("guest `{target}` is not registered"))
     }
+}
+
+// Every served guest is recorded, linked or not, so `resolve` can tell "not
+// registered" from "registered but exports nothing linked".
+#[derive(Default)]
+struct RouteTable {
+    pending: HashMap<GuestId, Option<Arc<dyn RouteInvoke>>>,
+    live: HashMap<GuestId, Option<Arc<dyn RouteInvoke>>>,
 }

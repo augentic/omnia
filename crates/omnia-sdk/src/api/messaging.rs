@@ -208,14 +208,14 @@ impl<P: Send + Sync + 'static> fmt::Debug for Topics<P> {
 
 type DispatchFuture<'a> = Pin<Box<dyn Future<Output = Result<(), DeliveryError>> + Send + 'a>>;
 
+trait ErasedRoute<P: Send + Sync + 'static>: Send + Sync {
+    fn dispatch<'a>(&'a self, delivery: &'a Delivery, client: &'a Client<P>) -> DispatchFuture<'a>;
+}
+
 struct Route<P, F, I, D> {
     handler: F,
     decode: D,
     marker: PhantomData<fn(P) -> I>,
-}
-
-trait ErasedRoute<P: Send + Sync + 'static>: Send + Sync {
-    fn dispatch<'a>(&'a self, delivery: &'a Delivery, client: &'a Client<P>) -> DispatchFuture<'a>;
 }
 
 impl<P, F, I, D> ErasedRoute<P> for Route<P, F, I, D>

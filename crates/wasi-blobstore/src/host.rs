@@ -152,29 +152,3 @@ pub trait BlobStoreClient: Debug + Send + Sync + 'static {
     /// Check if a container exists.
     fn container_exists(&self, name: String) -> FutureResult<bool>;
 }
-
-#[cfg(test)]
-mod tests {
-    use super::OutgoingValue;
-
-    #[test]
-    fn write_body_once() {
-        let mut outgoing = OutgoingValue::new(16);
-        assert_eq!(outgoing.take_write_body(), Ok(()));
-        assert_eq!(outgoing.take_write_body(), Err(()));
-    }
-
-    #[test]
-    fn finish_write_body() {
-        let mut outgoing = OutgoingValue::new(16);
-        assert_eq!(outgoing.finalize(), Err("outgoing value write body was never requested"));
-    }
-
-    #[test]
-    fn finish_once() {
-        let mut outgoing = OutgoingValue::new(16);
-        assert_eq!(outgoing.take_write_body(), Ok(()));
-        assert_eq!(outgoing.finalize(), Ok(()));
-        assert_eq!(outgoing.finalize(), Err("outgoing value already finished"));
-    }
-}

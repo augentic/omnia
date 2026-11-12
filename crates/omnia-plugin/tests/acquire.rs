@@ -13,6 +13,7 @@ use omnia_plugin::{
     FsStore, NoStore, PackageStore, Reference, RegistryClient, RegistrySource as _,
 };
 use tempfile::TempDir;
+use tokio::task::JoinSet;
 use wasm_pkg_client::{Config, Registry};
 
 const PACKAGE: &str = "test:adapter@1.0.0";
@@ -100,7 +101,7 @@ async fn registry_fetch() {
 // acquisition is served from the store with no registry reached — the
 // registry republishing the version changes nothing until the file goes.
 #[tokio::test]
-async fn fetched_then_stored() {
+async fn fetch_through_store() {
     let registry = TempDir::new().expect("registry dir");
     let store = TempDir::new().expect("store dir");
     stage(registry.path(), PACKAGE, b"first bytes");
@@ -138,7 +139,7 @@ async fn stored_without_registry() {
 // Only the `namespace_name@version.wasm` spelling is a stored release: the
 // `:` spelling, the bare name, and wkg's temporary files are never read.
 #[tokio::test]
-async fn off_reference_names_unread() {
+async fn off_reference_names() {
     let store = TempDir::new().expect("store dir");
     for name in ["test:adapter@1.0.0.wasm", "adapter.wasm", ".wkg-get-test_adapter@1.0.0.wasm"] {
         std::fs::write(store.path().join(name), b"off-reference bytes").expect("writing a file");
@@ -184,7 +185,7 @@ async fn unrouted_package() {
 // pre-compiled release is refused the same way — nothing of either lands in
 // the store, so a later acquisition reaches the registry again.
 #[tokio::test]
-async fn precompiled_never_stored() {
+async fn precompiled_release() {
     let registry = TempDir::new().expect("registry dir");
     let store = TempDir::new().expect("store dir");
     stage(registry.path(), PACKAGE, &precompiled(registry.path()));
@@ -217,7 +218,7 @@ async fn unreadable_store() {
 // `put` never replaces: a release already stored stays as it is, and a
 // missing root is created on the first write.
 #[tokio::test]
-async fn put_is_final() {
+async fn put_twice() {
     let scratch = TempDir::new().expect("scratch dir");
     let root = scratch.path().join("store");
     let store = FsStore::open(&root);
@@ -230,6 +231,33 @@ async fn put_is_final() {
     assert_eq!(held, b"first");
     assert_eq!(std::fs::read(root.join(STORED)).expect("the file"), b"first");
     let entries = std::fs::read_dir(&root).expect("listing the store").count();
+    assert_eq!(entries, 1, "no temporary file is left behind");
+}
+
+// Racing puts of one release each file their own temp, so the one that
+// lands is whole and the rest are the no-replace rule holding. A put blocks
+// its worker, so a worker per put keeps all sixteen in flight at once.
+#[tokio::test(flavor = "multi_thread", worker_threads = 16)]
+async fn concurrent_puts() {
+    let scratch = TempDir::new().expect("scratch dir");
+    let store = FsStore::open(scratch.path());
+    let payloads: Vec<Vec<u8>> = (0..16u8).map(|byte| vec![byte; 1 << 16]).collect();
+
+    let mut puts = JoinSet::new();
+    for payload in payloads.clone() {
+        let store = store.clone();
+        puts.spawn(async move {
+            let reference = reference(PACKAGE);
+            store.put(&reference, &payload).await
+        });
+    }
+    while let Some(put) = puts.join_next().await {
+        put.expect("the put task completes").expect("every put lands");
+    }
+
+    let held = store.get(&reference(PACKAGE)).await.expect("the store reads").expect("the release");
+    assert!(payloads.contains(&held), "the release is one put's whole bytes");
+    let entries = std::fs::read_dir(scratch.path()).expect("listing the store").count();
     assert_eq!(entries, 1, "no temporary file is left behind");
 }
 
@@ -277,11 +305,12 @@ async fn config_routing() {
 }
 
 // The registry a load names serves a namespace the configuration routes
-// nowhere, and gives way to the configuration's routing — namespace or
-// default — everywhere else: a load cannot re-route a package the deployment
-// has placed.
+// nowhere, for that load alone, and gives way to the configuration's
+// routing — namespace or default — everywhere else: a load cannot re-route a
+// package the deployment has placed. Naming the routed registry itself
+// changes nothing, so that release is the deployment's word and is stored.
 #[tokio::test]
-async fn endpoint_named_on_load() {
+async fn named_endpoint() {
     let default_root = TempDir::new().expect("default registry dir");
     stage(default_root.path(), PACKAGE, b"default registry bytes");
     let acme_root = TempDir::new().expect("acme registry dir");
@@ -290,14 +319,23 @@ async fn endpoint_named_on_load() {
     stage(named_root.path(), PACKAGE, b"named registry bytes");
     stage(named_root.path(), "acme:ledger@2.1.0", b"named ledger bytes");
     stage(named_root.path(), "other:tool@1.0.0", b"named tool bytes");
+    let store = TempDir::new().expect("store dir");
 
     let mut unrouted = Config::from_toml("[namespace_registries]\nacme = \"acme.test\"\n")
         .expect("routing config parses");
     add_local_registry(&mut unrouted, "acme.test", acme_root.path());
     add_local_registry(&mut unrouted, "named.test", named_root.path());
-    let acquirer = RegistryClient::new(unrouted, NoStore);
+    let acquirer = RegistryClient::new(unrouted, FsStore::open(store.path()));
     let bytes = acquirer.acquire(PACKAGE, Some("named.test")).await.expect("named acquires");
     assert_eq!(bytes, b"named registry bytes", "an unrouted namespace takes the named registry");
+    let unnamed = acquirer
+        .acquire(PACKAGE, None)
+        .await
+        .expect_err("the named registry routed nothing beyond its load");
+    assert!(
+        matches!(&unnamed, AcquireError::Refused(detail) if detail.contains("no registry routes")),
+        "refusal: {unnamed:?}"
+    );
     let routed = acquirer
         .acquire("acme:ledger@2.1.0", Some("named.test"))
         .await
@@ -311,6 +349,9 @@ async fn endpoint_named_on_load() {
         .await
         .expect("naming the routed registry agrees with it");
     assert_eq!(same, b"acme registry bytes");
+    let stored = std::fs::read(store.path().join("acme_ledger@2.1.0.wasm"))
+        .expect("the routed release was written");
+    assert_eq!(stored, b"acme registry bytes");
     let malformed = acquirer
         .acquire("other:tool@1.0.0", Some("not a registry"))
         .await
@@ -335,7 +376,7 @@ async fn endpoint_named_on_load() {
 }
 
 #[tokio::test]
-async fn unversioned_and_missing() {
+async fn unresolvable_packages() {
     let registry = TempDir::new().expect("registry dir");
     stage(registry.path(), PACKAGE, b"component bytes");
     let acquirer = registry_acquirer(registry.path());
@@ -345,6 +386,13 @@ async fn unversioned_and_missing() {
     assert!(
         matches!(&unversioned, AcquireError::Refused(detail) if detail.contains("exact version")),
         "refusal: {unversioned:?}"
+    );
+
+    let latest =
+        acquirer.acquire("test:adapter@latest", None).await.expect_err("nothing resolves latest");
+    assert!(
+        matches!(&latest, AcquireError::Refused(detail) if detail.contains("exact semver version")),
+        "refusal: {latest:?}"
     );
 
     let absent =

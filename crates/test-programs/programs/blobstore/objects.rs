@@ -1,6 +1,7 @@
 //! One container walked end to end over the raw `wasi:blobstore` bindings: a
 //! host-seeded container is readable, a chunked `outgoing-value` lands as one
-//! object, `get-data` honours whole and inclusive ranged reads, `has-object`
+//! object, an `outgoing-value` lends its write body once and cannot `finish`
+//! without it, `get-data` honours whole and inclusive ranged reads, `has-object`
 //! and `object-info` distinguish present from absent, `list-objects` pages
 //! and skips, single and batch deletes are idempotent, `clear` empties, and
 //! `delete-container` removes the container.
@@ -61,6 +62,15 @@ async fn scenario() {
     // Overwrite replaces the whole value.
     write(&container, "alpha", b"short").await;
     assert_eq!(read(&container, "alpha").await, b"short");
+
+    // The write body is lent once, and finish refuses a value that never took it.
+    let outgoing = OutgoingValue::new_outgoing_value();
+    drop(outgoing.outgoing_value_write_body().await.expect("write-body"));
+    assert!(outgoing.outgoing_value_write_body().await.is_err(), "second write-body");
+    OutgoingValue::finish(outgoing).expect("finish");
+    let error =
+        OutgoingValue::finish(OutgoingValue::new_outgoing_value()).expect_err("no write-body");
+    assert!(error.contains("write body was never requested"), "unexpected error: {error}");
 
     // Listing pages through every name and reports the end once.
     write(&container, "beta", b"b").await;

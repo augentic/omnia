@@ -31,11 +31,16 @@ test_programs::foreach_vcs!();
 // ------------------------------------------------------------------------
 
 async fn run_guest(wasm: &str, mounts: Vec<Mount>) -> Recorder {
+    run_guest_args(wasm, mounts, &[]).await
+}
+
+async fn run_guest_args(wasm: &str, mounts: Vec<Mount>, args: &[&str]) -> Recorder {
     let recorder = Recorder::default();
     let backends = Backends::defaults().await.vcs(recorder.clone());
     let status = Deployment::new()
         .guest("guest", wasm)
         .mounts(mounts)
+        .args(args.iter().copied())
         .run_host::<WasiVcs, _>(backends)
         .await
         .expect("guest runs");
@@ -250,14 +255,27 @@ impl VcsClient for Recorder {
 async fn vcs_flow() {
     let project = scratch();
     fs::create_dir(project.path().join("work")).expect("creating the working copy");
+    let workspaces = scratch();
+    fs::create_dir(workspaces.path().join("repo")).expect("creating the repository under `ws`");
+    let nested = scratch();
+    fs::create_dir(nested.path().join("repo")).expect("creating the repository under `ws/sub`");
     let root = shown(project.path());
     let under = |subpath: &str| shown(&project.path().join(subpath));
 
-    let recorder = run_guest(test_programs::VCS_FLOW, vec![project.mount(true)]).await;
+    let recorder = run_guest(
+        test_programs::VCS_FLOW,
+        vec![
+            project.mount(true),
+            workspaces.mount_as("ws", false),
+            nested.mount_as("ws/sub", false),
+        ],
+    )
+    .await;
 
-    // Every location resolved beneath the mount, an existing subpath and
+    // Every location resolved beneath its mount, an existing subpath and
     // one the host laid down for the operation that creates alike, and the
-    // refused calls reached the backend as put.
+    // refused calls reached the backend as put. A path no preopen answers
+    // reached nothing.
     for created in ["fresh", ".cache/work", "clone"] {
         assert!(project.path().join(created).is_dir(), "host created `{created}`");
     }
@@ -287,25 +305,37 @@ async fn vcs_flow() {
             format!("fetched {} origin missing", under("clone")),
             format!("push {} moved emery/rev", under("clone")),
             format!("push {} offline emery/rev", under("clone")),
+            format!("head {}", shown(&workspaces.path().join("repo"))),
+            format!("head {}", shown(&nested.path().join("repo"))),
         ]
     );
 }
 
 #[tokio::test]
 async fn vcs_locations() {
-    let project = scratch();
-    fs::create_dir(project.path().join("nested")).expect("creating nested dir");
+    // the mount sits one level down, so whatever escapes through `up` lands
+    // in this test's own scratch rather than the shared temp directory
+    let outside = scratch();
+    let project = outside.path().join("project");
+    fs::create_dir_all(project.join("nested")).expect("creating nested dir");
     let readonly = scratch();
 
-    let recorder = run_guest(
+    let mount = Mount {
+        name: ".".to_owned(),
+        path: project.clone(),
+        writable: true,
+    };
+    let extra: &[&str] = if cfg!(windows) { &["C:evil", "C:/evil"] } else { &[] };
+    let recorder = run_guest_args(
         test_programs::VCS_LOCATIONS,
-        vec![project.mount(true), readonly.mount_as("ro", false)],
+        vec![mount, readonly.mount_as("ro", false)],
+        extra,
     )
     .await;
 
     // Only the read on the read-only mount and the calls at the new subpath
     // reached the backend; every refusal was the host's, before any call.
-    let fresh = shown(&project.path().join("fresh/repo"));
+    let fresh = shown(&project.join("fresh/repo"));
     assert_eq!(
         recorder.calls(),
         [
@@ -314,12 +344,16 @@ async fn vcs_locations() {
             format!("head {fresh}"),
         ]
     );
-    for link in ["escape", "dangling"] {
+    for link in ["escape", "up", "dangling"] {
         assert!(
-            fs::symlink_metadata(project.path().join(link)).is_ok_and(|meta| meta.is_symlink()),
+            fs::symlink_metadata(project.join(link)).is_ok_and(|meta| meta.is_symlink()),
             "the guest planted `{link}` through the mount"
         );
     }
-    assert!(!project.path().join("nowhere").exists(), "no link target was materialized");
+    assert!(!project.join("nowhere").exists(), "no link target was materialized");
+    assert!(
+        !outside.path().join("omnia-vcs-locations-outside").exists(),
+        "nothing was laid down through `up`"
+    );
     assert!(!readonly.path().join("fresh").exists(), "nothing was laid down beneath `ro`");
 }

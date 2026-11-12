@@ -11,9 +11,12 @@ use std::path::Path;
 use std::time::Duration;
 
 use anyhow::{Context as _, Result, bail};
+use omnia::wasmtime::Enabled;
 use omnia::wasmtime::component::Val;
 use omnia::{
-    ChainCtx, CompileOptions, DeploymentBuilder, GuestEntry, GuestId, Manifest, Runtime, Verified,
+    ChainCtx, ChainPolicy, CompileOptions, DeploymentBuilder, FirstArgSelector, GuestEntry,
+    GuestId, GuestSelector as _, Manifest, Runtime, RuntimeOptions, Transport, TransportKind,
+    Verified,
 };
 
 // Every guest program in `crates/test-programs` must have a matching test
@@ -105,7 +108,7 @@ async fn link_partial() {
 // than left unresolved: the deployment boots, and the call fails when the
 // relay finds no target.
 #[tokio::test]
-async fn link_unserved() {
+async fn unserved_import() {
     let runtime = boot(&[("full", test_programs::LINK_FULL)]).await.expect("deployment boots");
 
     let err = call(&runtime, "full", "poke", "hi").await.expect_err("no guest serves `ops`");
@@ -117,7 +120,7 @@ async fn link_unserved() {
 // seam, and the call lands on the freshly served route. The importer boots
 // from bytes, so the seam it imports was polyfilled at bootstrap.
 #[tokio::test]
-async fn link_declared_exporter() {
+async fn declared_exporter() {
     let full = std::fs::read(test_programs::LINK_FULL).expect("reading the full guest");
     let manifest = Manifest::new()
         .guest(GuestEntry::new("full", full))
@@ -144,7 +147,7 @@ async fn link_declared_exporter() {
 // route, so a call dispatched to it names the missing export rather than a
 // missing guest.
 #[tokio::test]
-async fn link_unlinked_target() {
+async fn unlinked_target() {
     let runtime = boot(&[("echoer", test_programs::LINK_FULL), ("full", test_programs::LINK_FULL)])
         .await
         .expect("deployment boots");
@@ -182,7 +185,7 @@ async fn link_full() {
 // registering `full` afterwards must polyfill the missing `ping-async` on the
 // linker clone.
 #[tokio::test]
-async fn link_full_registered_late() {
+async fn late_registration() {
     let runtime =
         boot(&[("echoer", test_programs::LINK_ECHOER), ("partial", test_programs::LINK_PARTIAL)])
             .await
@@ -205,7 +208,7 @@ async fn link_full_registered_late() {
 // through the `unsafe` `Verified::trusted`, the embedder's word that the
 // artifact came from its own toolchain.
 #[tokio::test]
-async fn register_refuses_precompiled() {
+async fn register_precompiled() {
     let runtime =
         boot(&[("echoer", test_programs::LINK_ECHOER), ("partial", test_programs::LINK_PARTIAL)])
             .await
@@ -238,7 +241,7 @@ async fn register_refuses_precompiled() {
 // `register` and `admit` are refused under it with nothing seated, and the
 // first use that follows still reaches the entry's own bytes.
 #[tokio::test]
-async fn register_declared_refused() {
+async fn register_declared() {
     let full = std::fs::read(test_programs::LINK_FULL).expect("reading the full guest");
     let manifest = Manifest::new()
         .guest(GuestEntry::new("full", full.clone()))
@@ -275,7 +278,10 @@ async fn link_relay() {
     // The relay's own hop trips the bound, and the callee's trap propagates
     // through the caller's polyfill with its text intact.
     let err = call(&runtime, "full", "poke", "5").await.expect_err("chain exceeds the bound");
-    assert!(format!("{err:#}").contains("exceeds maximum"), "unexpected error: {err:#}");
+    let text = format!("{err:#}");
+    for needle in ["exceeds maximum 3", "MAX_DISPATCH_DEPTH"] {
+        assert!(text.contains(needle), "`{needle}` missing from: {text}");
+    }
 }
 
 // The sleeper takes the id `echoer` for the same reason as the relay. Only
@@ -313,6 +319,168 @@ async fn link_skewed() {
     for needle in ["echoer", "full", "omnia-test:link/ops", "ping"] {
         assert!(text.contains(needle), "`{needle}` missing from: {text}");
     }
+}
+
+// `take` nests its resource in an optional record, so the refusal must walk
+// the signature's types, not just its parameters; it fires as the importer
+// is wired, before any call.
+#[tokio::test]
+async fn link_handle() {
+    let Err(err) = boot(&[("handle", test_programs::LINK_HANDLE)]).await else {
+        panic!("a resource-carrying import was wired");
+    };
+
+    let text = format!("{err:#}");
+    for needle in ["`handle`", "omnia-test:link/tokens", "take", "carries a resource"] {
+        assert!(text.contains(needle), "`{needle}` missing from: {text}");
+    }
+}
+
+// The manifest is validated before any guest loads, so no row's source need
+// exist. Two files of one stem collide on the name each derives.
+#[tokio::test]
+async fn invalid_manifests() {
+    let stems = Path::new(env!("CARGO_TARGET_TMPDIR")).join("duplicate_stem.toml");
+    std::fs::write(
+        &stems,
+        "[[guest]]\nsource.path = \"./a/echo.wasm\"\n\n\
+         [[guest]]\nsource.path = \"./b/echo.wasm\"\n",
+    )
+    .expect("writing the manifest");
+    let mut unix = Manifest::new().guest(GuestEntry::new("only", "./only.wasm"));
+    unix.transport = Transport {
+        default: TransportKind::Unix,
+    };
+
+    let rows = [
+        (unix, "transport `Unix` is not yet implemented"),
+        (
+            Manifest::new()
+                .guest(GuestEntry::new("a", "./a.wasm").command())
+                .guest(GuestEntry::new("b", "./b.wasm").command()),
+            "at most one guest may be the command guest",
+        ),
+        (
+            Manifest::new()
+                .guest(GuestEntry::new("same", "./a.wasm"))
+                .guest(GuestEntry::new("same", "./b.wasm")),
+            "duplicate [[guest]] name `same`",
+        ),
+        (Manifest::load(&stems).expect("the manifest parses"), "duplicate [[guest]] name `echo`"),
+        (Manifest::new().guest(GuestEntry::new("", b"\0asm")), "names no guest"),
+        (Manifest::new(), "defines no [[guest]] entry"),
+    ];
+    for (manifest, needle) in rows {
+        let Err(err) = assemble(manifest, |builder| builder).await else {
+            panic!("a manifest refused for `{needle}` was built");
+        };
+        assert!(format!("{err:#}").contains(needle), "unexpected error: {err:#}");
+    }
+
+    assemble(Manifest::new(), omnia::DeploymentBuilder::dynamic)
+        .await
+        .expect("a dynamic deployment may start with no guests");
+}
+
+#[test]
+fn selector_no_identity() {
+    let calls: [&[Val]; 2] = [&[Val::U32(7)], &[]];
+    for params in calls {
+        let err = FirstArgSelector
+            .select("omnia-test:link/ops", "ping", params)
+            .expect_err("the call names no target");
+        assert!(err.to_string().contains("leading string identity"), "unexpected error: {err}");
+    }
+}
+
+// A command root's wall-clock policy is carried to every hop beneath it.
+#[test]
+fn command_chain() {
+    let policy = ChainPolicy {
+        max_depth: 2,
+        timeout: Duration::from_secs(1),
+    };
+    let callee = GuestId::from("callee");
+    let root = ChainCtx::command();
+
+    let child = policy.enter(&root, &callee).expect("within depth");
+    assert!(child.uncapped);
+    assert_eq!(child.depth, 1);
+
+    let grandchild = policy.enter(&child, &callee).expect("within depth");
+    assert!(grandchild.uncapped);
+    assert_eq!(grandchild.depth, 2);
+}
+
+#[test]
+fn runtime_options() {
+    fn set_env(key: &str, value: &str) {
+        // SAFETY: nextest runs each test in a process of its own, so no other
+        // thread reads the environment while it is written.
+        #[expect(unsafe_code, reason = "process environment under single-threaded test")]
+        unsafe {
+            std::env::set_var(key, value);
+        }
+    }
+
+    fn remove_env(key: &str) {
+        // SAFETY: nextest runs each test in a process of its own, so no other
+        // thread reads the environment while it is written.
+        #[expect(unsafe_code, reason = "process environment under single-threaded test")]
+        unsafe {
+            std::env::remove_var(key);
+        }
+    }
+
+    // `Enabled` spellings through `POOL_PAGEMAP_SCAN`
+    for (spelling, expected) in
+        [("auto", Enabled::Auto), ("YES", Enabled::Yes), (" no ", Enabled::No)]
+    {
+        set_env("POOL_PAGEMAP_SCAN", spelling);
+        let options = RuntimeOptions::load_env().expect("valid spelling loads");
+        assert_eq!(options.pool_pagemap_scan, expected);
+    }
+    set_env("POOL_PAGEMAP_SCAN", "maybe");
+    let err = RuntimeOptions::load_env().expect_err("invalid spelling is refused");
+    assert!(
+        format!("{err:#}").contains("expected one of `auto`/`yes`/`no`"),
+        "unexpected error: {err:#}"
+    );
+    remove_env("POOL_PAGEMAP_SCAN");
+
+    // per-module memory bound exceeding total pool memories
+    set_env("POOL_TOTAL_MEMORIES", "8");
+    set_env("POOL_MAX_MEMORIES_PER_MODULE", "16");
+    let err = RuntimeOptions::load_env().expect_err("memories per module exceed total");
+    assert!(
+        format!("{err:#}")
+            .contains("POOL_MAX_MEMORIES_PER_MODULE (16) exceeds POOL_TOTAL_MEMORIES (8)"),
+        "unexpected error: {err:#}"
+    );
+    remove_env("POOL_TOTAL_MEMORIES");
+    remove_env("POOL_MAX_MEMORIES_PER_MODULE");
+
+    // per-module table bound exceeding total pool tables
+    set_env("POOL_TOTAL_TABLES", "8");
+    set_env("POOL_MAX_TABLES_PER_MODULE", "16");
+    let err = RuntimeOptions::load_env().expect_err("tables per module exceed total");
+    assert!(
+        format!("{err:#}")
+            .contains("POOL_MAX_TABLES_PER_MODULE (16) exceeds POOL_TOTAL_TABLES (8)"),
+        "unexpected error: {err:#}"
+    );
+    remove_env("POOL_TOTAL_TABLES");
+    remove_env("POOL_MAX_TABLES_PER_MODULE");
+
+    // pool bounds ignored when pooling is disabled
+    set_env("POOLING", "false");
+    set_env("POOL_TOTAL_MEMORIES", "8");
+    set_env("POOL_MAX_MEMORIES_PER_MODULE", "16");
+    let options = RuntimeOptions::load_env().expect("pool bounds ignored when pooling is off");
+    assert!(!options.pooling);
+    remove_env("POOLING");
+    remove_env("POOL_TOTAL_MEMORIES");
+    remove_env("POOL_MAX_MEMORIES_PER_MODULE");
 }
 
 // The host→guest hop is entered from a root, so it is depth 1 and with a bound

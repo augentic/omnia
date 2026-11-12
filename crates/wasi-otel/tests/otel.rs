@@ -6,7 +6,7 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use futures::FutureExt as _;
 use omnia::{ExitStatus, FutureResult, Provides, Telemetry};
@@ -172,7 +172,33 @@ async fn otel_axum_handler() {
 
 #[tokio::test]
 async fn otel_span_tree() {
+    let unix_nanos = || {
+        let since_epoch = SystemTime::now().duration_since(UNIX_EPOCH).expect("clock past epoch");
+        u64::try_from(since_epoch.as_nanos()).expect("nanos fit u64")
+    };
+    let before = unix_nanos();
     let recording = run_guest(test_programs::OTEL_SPAN_TREE).await;
+    let after = unix_nanos();
+
+    // the raw export arrives during `parent`, followed by one SDK flush
+    // grouped by scope in first-ended order with the API tracer's schema URL
+    let traces = recording.traces.lock().expect("traces lock").clone();
+    let [raw_export, export] = traces.as_slice() else {
+        panic!("raw export plus one flush, got {}", traces.len());
+    };
+    assert_eq!(raw_export.resource_spans.len(), 1);
+    let [resource] = export.resource_spans.as_slice() else {
+        panic!("one resource, got {}", export.resource_spans.len());
+    };
+    let scopes: Vec<_> = resource
+        .scope_spans
+        .iter()
+        .map(|group| {
+            let name = group.scope.as_ref().map_or("", |scope| scope.name.as_str());
+            (name, group.schema_url.as_str(), group.spans.len())
+        })
+        .collect();
+    assert_eq!(scopes, [("global", "", 3), ("guest", "https://guest", 1)]);
 
     let spans = recording.spans();
     let find = |name: &str| {
@@ -181,30 +207,42 @@ async fn otel_span_tree() {
             .find(|(_, span)| span.name == name)
             .unwrap_or_else(|| panic!("span `{name}` exported"))
     };
-    assert_eq!(spans.len(), 3, "spans: {:?}", recording.span_names());
+    assert_eq!(spans.len(), 5, "spans: {:?}", recording.span_names());
     let (parent_scope, parent) = find("parent");
     let (child_scope, child) = find("child");
+    let (sibling_scope, sibling) = find("sibling");
     let (api_scope, api) = find("api");
+    let (malformed_scope, malformed) = find("malformed");
 
-    // The `tracing` bridge's spans sit in the layer's scope; the API span in
-    // the tracer's own.
+    // each span sits in the scope that produced it
     assert_eq!(
-        (parent_scope.as_str(), child_scope.as_str(), api_scope.as_str()),
-        ("global", "global", "guest")
+        (
+            parent_scope.as_str(),
+            child_scope.as_str(),
+            sibling_scope.as_str(),
+            api_scope.as_str(),
+            malformed_scope.as_str(),
+        ),
+        ("global", "global", "global", "guest", "raw")
     );
 
-    // One trace: the host's, which re-parents the guest's root to its live
-    // span and leaves the children under their guest parent.
+    // one trace: the host grafts the guest's root onto its live span and
+    // leaves children under their guest parent
     assert!(!parent.parent_span_id.is_empty(), "the root is grafted onto the host span");
     assert_ne!(parent.parent_span_id, parent.span_id);
+    assert_eq!(parent.trace_state, "");
     assert_eq!(child.parent_span_id, parent.span_id);
+    assert_eq!(sibling.parent_span_id, parent.span_id);
     assert_eq!(api.parent_span_id, parent.span_id);
     assert!(spans.iter().all(|(_, span)| span.trace_id == parent.trace_id));
-    assert!(
-        child.start_time_unix_nano > 0 && child.end_time_unix_nano >= child.start_time_unix_nano
-    );
 
-    // The child's field, event, and the error status the event implies.
+    // every SDK timestamp lands inside the run's wall-clock window
+    for span in [parent, child, sibling, api] {
+        let (start, end) = (span.start_time_unix_nano, span.end_time_unix_nano);
+        assert!(before <= start && start <= end && end <= after, "`{}`: {start}..{end}", span.name);
+    }
+
+    // the child's field, event, and the error status the event implies
     assert_eq!(attribute(&child.attributes, "answer"), Some(&AnyValue::IntValue(42)));
     let [event] = child.events.as_slice() else {
         panic!("one event on `child`, got {:?}", child.events);
@@ -213,9 +251,25 @@ async fn otel_span_tree() {
     assert_eq!(child.status.as_ref().map(|s| s.code), Some(StatusCode::Error as i32));
     assert_eq!(parent.status.as_ref().map(|s| s.code), Some(StatusCode::Unset as i32));
 
-    // The API span's attribute set through `TraceContextExt`.
+    // the API span's attribute and linked `tracestate` round-trip
     assert_eq!(attribute(&api.attributes, "kind"), Some(&AnyValue::StringValue("direct".into())));
     assert_eq!(api.status.as_ref().map(|s| s.code), Some(StatusCode::Unset as i32));
+    let [api_link] = api.links.as_slice() else {
+        panic!("one link on `api`, got {:?}", api.links);
+    };
+    assert_eq!(api_link.trace_state, "vendor=opaque,other=a:b");
+
+    // malformed hex ids decode to empty and overflowing timestamps clamp
+    assert_eq!(malformed.span_id, b"");
+    assert_eq!(malformed.parent_span_id, b"");
+    assert_eq!(malformed.trace_state, "vendor=opaque,other=a:b=c");
+    assert_eq!(malformed.start_time_unix_nano, u64::MAX);
+    assert_eq!(malformed.end_time_unix_nano, u64::MAX);
+    let [malformed_link] = malformed.links.as_slice() else {
+        panic!("one link on `malformed`, got {:?}", malformed.links);
+    };
+    assert_eq!(malformed_link.trace_id, b"");
+    assert_eq!(malformed_link.span_id, b"");
 }
 
 #[tokio::test]

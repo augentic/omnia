@@ -106,16 +106,6 @@ struct BoundToolHost {
     workspace: Option<Workspace>,
 }
 
-// Manual because the session and workspace internals (channels, capability
-// handles) carry no useful state to print; the lent path is the identity.
-impl fmt::Debug for BoundToolHost {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("BoundToolHost")
-            .field("workspace", &self.workspace.as_ref().map(Workspace::local_path))
-            .finish_non_exhaustive()
-    }
-}
-
 impl BoundToolHost {
     // Run `op` against the lent workspace, or fail when none was granted.
     fn with_workspace<R: Send + 'static>(
@@ -151,5 +141,15 @@ impl ToolHost for BoundToolHost {
 
     fn local_path(&self) -> Option<&std::path::Path> {
         self.workspace.as_ref().map(Workspace::local_path)
+    }
+}
+
+// Manual because the session and workspace internals (channels, capability
+// handles) carry no useful state to print; the lent path is the identity.
+impl fmt::Debug for BoundToolHost {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("BoundToolHost")
+            .field("workspace", &self.workspace.as_ref().map(Workspace::local_path))
+            .finish_non_exhaustive()
     }
 }

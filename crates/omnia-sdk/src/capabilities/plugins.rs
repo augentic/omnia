@@ -65,11 +65,20 @@ impl TryFrom<String> for Digest {
     }
 }
 
+impl From<Digest> for String {
+    fn from(digest: Digest) -> Self {
+        digest.0
+    }
+}
+
 impl std::fmt::Display for Digest {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.0)
     }
 }
+
+const SCHEME: &str = "sha256:";
+const HEX_LEN: usize = 64;
 
 /// Where a load's component bytes come from, and the name the guest
 /// registers under — the requester's mirror of the `omnia:plugins/loader`
@@ -219,17 +228,6 @@ impl Error {
     }
 }
 
-impl From<Error> for crate::Error {
-    fn from(error: Error) -> Self {
-        let code = error.code().to_owned();
-        match error {
-            Error::Unavailable(description) => Self::BadGateway { code, description },
-            Error::Internal(description) => Self::ServerError { code, description },
-            Error::Refused(description) => Self::BadRequest { code, description },
-        }
-    }
-}
-
 /// Plugin loading (Omnia Plugins).
 ///
 /// [`WasiProvider`](crate::WasiProvider) delegates to `omnia:plugins/loader`.
@@ -263,9 +261,6 @@ impl Plugins for crate::WasiProvider {
     }
 }
 
-const SCHEME: &str = "sha256:";
-const HEX_LEN: usize = 64;
-
 #[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
 mod wire {
     use super::generated::omnia::plugins::loader;
@@ -295,8 +290,13 @@ mod wire {
     }
 }
 
-impl From<Digest> for String {
-    fn from(digest: Digest) -> Self {
-        digest.0
+impl From<Error> for crate::Error {
+    fn from(error: Error) -> Self {
+        let code = error.code().to_owned();
+        match error {
+            Error::Unavailable(description) => Self::BadGateway { code, description },
+            Error::Internal(description) => Self::ServerError { code, description },
+            Error::Refused(description) => Self::BadRequest { code, description },
+        }
     }
 }

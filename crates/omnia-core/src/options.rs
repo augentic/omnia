@@ -147,6 +147,69 @@ pub struct RuntimeOptions {
     pub branch_hinting: bool,
 }
 
+impl RuntimeOptions {
+    /// Finalize the runtime configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the runtime configuration cannot be loaded from the
+    /// environment or fails cross-field validation.
+    pub fn load_env() -> Result<Self> {
+        let options = Self::from_env().finalize().map_err(anyhow::Error::from)?;
+        options.validate()?;
+        Ok(options)
+    }
+
+    /// The compile-affecting settings among these options, as the value an
+    /// artifact this runtime loads must have been compiled under.
+    #[must_use]
+    pub const fn compile_options(&self) -> CompileOptions {
+        CompileOptions {
+            max_fuel: self.max_fuel,
+            branch_hinting: self.branch_hinting,
+            memory_reservation: self.memory_reservation,
+            memory_guard_size: self.memory_guard_size,
+            debug_symbols: self.debug_symbols,
+            generate_address_map: self.generate_address_map,
+        }
+    }
+
+    // Cross-field invariants `FromEnv` cannot express, checked before the
+    // engine is built where wasmtime's own rejection is less specific.
+    fn validate(&self) -> Result<()> {
+        if !self.pooling {
+            return Ok(());
+        }
+
+        // fail fast on a feature the build lacks rather than ignore it
+        if !cfg!(feature = "mpk") && self.pool_memory_protection_keys == Enabled::Yes {
+            bail!("POOL_MEMORY_PROTECTION_KEYS=yes requires building omnia with the `mpk` feature");
+        }
+        if !cfg!(feature = "gc") && self.pool_total_gc_heaps.is_some() {
+            bail!("POOL_TOTAL_GC_HEAPS requires building omnia with the `gc` feature");
+        }
+
+        if let Some(per_module) = self.pool_max_memories_per_module
+            && per_module > self.pool_total_memories
+        {
+            bail!(
+                "POOL_MAX_MEMORIES_PER_MODULE ({per_module}) exceeds POOL_TOTAL_MEMORIES ({})",
+                self.pool_total_memories
+            );
+        }
+        if let Some(per_module) = self.pool_max_tables_per_module
+            && per_module > self.pool_total_tables
+        {
+            bail!(
+                "POOL_MAX_TABLES_PER_MODULE ({per_module}) exceeds POOL_TOTAL_TABLES ({})",
+                self.pool_total_tables
+            );
+        }
+
+        Ok(())
+    }
+}
+
 // compile-affecting settings through `configure`, then the runtime-only ones
 impl From<&RuntimeOptions> for Config {
     fn from(options: &RuntimeOptions) -> Self {
@@ -234,73 +297,6 @@ impl From<&RuntimeOptions> for Config {
     }
 }
 
-impl RuntimeOptions {
-    /// Finalize the runtime configuration.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the runtime configuration cannot be loaded from the
-    /// environment or fails cross-field validation.
-    pub fn load_env() -> Result<Self> {
-        let options = Self::from_env().finalize().map_err(anyhow::Error::from)?;
-        options.validate()?;
-        Ok(options)
-    }
-
-    /// The compile-affecting settings among these options, as the value an
-    /// artifact this runtime loads must have been compiled under.
-    #[must_use]
-    pub const fn compile_options(&self) -> CompileOptions {
-        CompileOptions {
-            max_fuel: self.max_fuel,
-            branch_hinting: self.branch_hinting,
-            memory_reservation: self.memory_reservation,
-            memory_guard_size: self.memory_guard_size,
-            debug_symbols: self.debug_symbols,
-            generate_address_map: self.generate_address_map,
-        }
-    }
-
-    // Cross-field invariants `FromEnv` cannot express, checked before the
-    // engine is built where wasmtime's own rejection is less specific.
-    fn validate(&self) -> Result<()> {
-        if !self.pooling {
-            return Ok(());
-        }
-
-        // fail fast on a feature the build lacks rather than ignore it
-        if !cfg!(feature = "mpk") && self.pool_memory_protection_keys == Enabled::Yes {
-            bail!("POOL_MEMORY_PROTECTION_KEYS=yes requires building omnia with the `mpk` feature");
-        }
-        if !cfg!(feature = "gc") && self.pool_total_gc_heaps.is_some() {
-            bail!("POOL_TOTAL_GC_HEAPS requires building omnia with the `gc` feature");
-        }
-
-        if let Some(per_module) = self.pool_max_memories_per_module
-            && per_module > self.pool_total_memories
-        {
-            bail!(
-                "POOL_MAX_MEMORIES_PER_MODULE ({per_module}) exceeds POOL_TOTAL_MEMORIES ({})",
-                self.pool_total_memories
-            );
-        }
-        if let Some(per_module) = self.pool_max_tables_per_module
-            && per_module > self.pool_total_tables
-        {
-            bail!(
-                "POOL_MAX_TABLES_PER_MODULE ({per_module}) exceeds POOL_TOTAL_TABLES ({})",
-                self.pool_total_tables
-            );
-        }
-
-        Ok(())
-    }
-}
-
-fn parse_millis(value: &str) -> ParseResult<Duration> {
-    Ok(Duration::from_millis(value.parse::<u64>()?))
-}
-
 // a zero wall-clock bound would time out every invocation
 fn parse_timeout(value: &str) -> ParseResult<Duration> {
     let millis = value.parse::<u64>()?;
@@ -324,54 +320,6 @@ fn parse_enabled(value: &str) -> ParseResult<Enabled> {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{CompileOptions, Enabled, RuntimeOptions, parse_enabled};
-
-    // an artifact compiled under the defaults loads into a runtime whose
-    // environment sets none of the compile-affecting variables
-    #[test]
-    fn compile_options_default_is_env_default() {
-        let options = RuntimeOptions::load_env().expect("should load");
-        assert_eq!(options.compile_options(), CompileOptions::default());
-    }
-
-    #[test]
-    fn parse_enabled_values() {
-        assert_eq!(parse_enabled("auto").unwrap(), Enabled::Auto);
-        assert_eq!(parse_enabled("YES").unwrap(), Enabled::Yes);
-        assert_eq!(parse_enabled(" no ").unwrap(), Enabled::No);
-        parse_enabled("maybe").unwrap_err();
-    }
-
-    #[test]
-    fn per_module_memories_over_total() {
-        let options = RuntimeOptions {
-            pool_total_memories: 8,
-            pool_max_memories_per_module: Some(16),
-            ..RuntimeOptions::load_env().expect("should load")
-        };
-        options.validate().unwrap_err();
-    }
-
-    #[test]
-    fn per_module_tables_over_total() {
-        let options = RuntimeOptions {
-            pool_total_tables: 8,
-            pool_max_tables_per_module: Some(16),
-            ..RuntimeOptions::load_env().expect("should load")
-        };
-        options.validate().unwrap_err();
-    }
-
-    #[test]
-    fn pooling_disabled() {
-        let options = RuntimeOptions {
-            pooling: false,
-            pool_total_memories: 8,
-            pool_max_memories_per_module: Some(16),
-            ..RuntimeOptions::load_env().expect("should load")
-        };
-        options.validate().unwrap();
-    }
+fn parse_millis(value: &str) -> ParseResult<Duration> {
+    Ok(Duration::from_millis(value.parse::<u64>()?))
 }

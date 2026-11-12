@@ -14,40 +14,6 @@ pub type StateSnapshot = BTreeMap<String, Vec<u8>>;
 /// A blob snapshot: container to object name to bytes.
 pub type BlobSnapshot = BTreeMap<String, BTreeMap<String, Vec<u8>>>;
 
-#[derive(Clone, Debug)]
-struct StateEntry {
-    bytes: Vec<u8>,
-    expires_at: Option<Instant>,
-}
-
-impl StateEntry {
-    fn is_expired(&self, now: Instant) -> bool {
-        self.expires_at.is_some_and(|at| now >= at)
-    }
-}
-
-#[derive(Clone, Debug)]
-struct Object {
-    data: Vec<u8>,
-    created_at: u64,
-}
-
-#[derive(Clone, Debug, Default)]
-struct Container {
-    created_at: u64,
-    objects: BTreeMap<String, Object>,
-}
-
-#[derive(Debug, Default)]
-struct Inner {
-    state: Mutex<BTreeMap<String, StateEntry>>,
-    blobs: Mutex<BTreeMap<String, Container>>,
-    secrets: Mutex<BTreeMap<String, Vec<u8>>>,
-    // Metadata timestamps come from this counter, not the wall clock, so
-    // `*_info` reads are deterministic and ordered by creation.
-    clock: AtomicU64,
-}
-
 /// In-memory state, blob, and secret storage; clones share one store.
 ///
 /// Every method of all three traits is real: `cas` and `increment` hold the
@@ -299,19 +265,6 @@ impl Memory {
     }
 }
 
-fn add_i64(current: Option<&[u8]>, delta: i64) -> Result<i64> {
-    let base = match current {
-        None => 0,
-        Some(value) => {
-            let bytes: [u8; 8] = value.try_into().map_err(|_len| {
-                anyhow!("value is {} bytes, not an 8-byte big-endian integer", value.len())
-            })?;
-            i64::from_be_bytes(bytes)
-        }
-    };
-    base.checked_add(delta).context("adding delta overflows i64")
-}
-
 impl StateStore for Memory {
     fn get(&self, key: &str) -> impl Future<Output = Result<Option<Vec<u8>>>> + Send {
         ready(Ok(self.state(key)))
@@ -418,6 +371,53 @@ impl Vault for Memory {
     fn list_ids(&self) -> impl Future<Output = Result<Vec<String>>> + Send {
         ready(Ok(self.lock_secrets().keys().cloned().collect()))
     }
+}
+
+#[derive(Debug, Default)]
+struct Inner {
+    state: Mutex<BTreeMap<String, StateEntry>>,
+    blobs: Mutex<BTreeMap<String, Container>>,
+    secrets: Mutex<BTreeMap<String, Vec<u8>>>,
+    // Metadata timestamps come from this counter, not the wall clock, so
+    // `*_info` reads are deterministic and ordered by creation.
+    clock: AtomicU64,
+}
+
+#[derive(Clone, Debug)]
+struct StateEntry {
+    bytes: Vec<u8>,
+    expires_at: Option<Instant>,
+}
+
+impl StateEntry {
+    fn is_expired(&self, now: Instant) -> bool {
+        self.expires_at.is_some_and(|at| now >= at)
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+struct Container {
+    created_at: u64,
+    objects: BTreeMap<String, Object>,
+}
+
+#[derive(Clone, Debug)]
+struct Object {
+    data: Vec<u8>,
+    created_at: u64,
+}
+
+fn add_i64(current: Option<&[u8]>, delta: i64) -> Result<i64> {
+    let base = match current {
+        None => 0,
+        Some(value) => {
+            let bytes: [u8; 8] = value.try_into().map_err(|_len| {
+                anyhow!("value is {} bytes, not an 8-byte big-endian integer", value.len())
+            })?;
+            i64::from_be_bytes(bytes)
+        }
+    };
+    base.checked_add(delta).context("adding delta overflows i64")
 }
 
 /// A prefixed view over one shared [`Memory`]: every key, secret, and

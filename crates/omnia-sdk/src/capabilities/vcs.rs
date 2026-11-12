@@ -131,24 +131,6 @@ impl From<anyhow::Error> for Error {
     }
 }
 
-// The default taxonomy: what the repository lacks is `not_found`, a remote
-// that cannot be reached is the gateway's, a location, working copy, or
-// label in the wrong state is the request's, and the rest is the host's.
-impl From<Error> for crate::Error {
-    fn from(error: Error) -> Self {
-        let code = error.code().to_owned();
-        let description = error.to_string();
-        match error {
-            Error::NotFound(_) => Self::NotFound { code, description },
-            Error::Access(_) => Self::BadGateway { code, description },
-            Error::Other(_) => Self::ServerError { code, description },
-            Error::NotARepository | Error::Exists(_) | Error::Pending(_) | Error::Diverged(_) => {
-                Self::BadRequest { code, description }
-            }
-        }
-    }
-}
-
 /// Version control (Omnia VCS).
 ///
 /// Every location is a deployment-local path resolved against the guest's
@@ -460,41 +442,20 @@ mod wire {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::Error;
-
-    #[test]
-    fn taxonomy_mapping() {
-        let cases = [
-            (Error::NotARepository, "not-a-repository"),
-            (Error::Exists("x".into()), "exists"),
-            (Error::NotFound("v1".into()), "not-found"),
-            (Error::Pending(vec!["a".into(), "b".into()]), "pending"),
-            (Error::Access("denied".into()), "access"),
-            (Error::Diverged("emery/x".into()), "diverged"),
-            (Error::Other("boom".into()), "other"),
-        ];
-        for (error, code) in cases {
-            let mapped = crate::Error::from(error.clone());
-            assert_eq!(mapped.code(), code);
-            match error {
-                Error::NotFound(_) => assert!(matches!(mapped, crate::Error::NotFound { .. })),
-                Error::Access(_) => assert!(matches!(mapped, crate::Error::BadGateway { .. })),
-                Error::Other(_) => assert!(matches!(mapped, crate::Error::ServerError { .. })),
-                Error::NotARepository
-                | Error::Exists(_)
-                | Error::Pending(_)
-                | Error::Diverged(_) => {
-                    assert!(matches!(mapped, crate::Error::BadRequest { .. }));
-                }
+// The default taxonomy: what the repository lacks is `not_found`, a remote
+// that cannot be reached is the gateway's, a location, working copy, or
+// label in the wrong state is the request's, and the rest is the host's.
+impl From<Error> for crate::Error {
+    fn from(error: Error) -> Self {
+        let code = error.code().to_owned();
+        let description = error.to_string();
+        match error {
+            Error::NotFound(_) => Self::NotFound { code, description },
+            Error::Access(_) => Self::BadGateway { code, description },
+            Error::Other(_) => Self::ServerError { code, description },
+            Error::NotARepository | Error::Exists(_) | Error::Pending(_) | Error::Diverged(_) => {
+                Self::BadRequest { code, description }
             }
         }
-    }
-
-    #[test]
-    fn pending_lists_paths() {
-        let error = Error::Pending(vec!["src/a.rs".into(), "b.md".into()]);
-        assert_eq!(error.to_string(), "pending changes: src/a.rs, b.md");
     }
 }

@@ -68,12 +68,6 @@ pub struct ScriptedModel {
     exchanges: Arc<Mutex<Vec<Exchange>>>,
 }
 
-impl Default for ScriptedModel {
-    fn default() -> Self {
-        Self::new([])
-    }
-}
-
 impl ScriptedModel {
     /// A script of ordered completion results.
     pub fn new(results: impl IntoIterator<Item = Result<Reply, Error>>) -> Self {
@@ -156,6 +150,12 @@ impl ScriptedModel {
     }
 }
 
+impl Default for ScriptedModel {
+    fn default() -> Self {
+        Self::new([])
+    }
+}
+
 // panics when the script is exhausted without a fallback
 impl Model for ScriptedModel {
     fn complete(&self, request: Request) -> impl Future<Output = Result<Reply, Error>> + Send {
@@ -213,55 +213,6 @@ impl Model for ScriptedModel {
                     Err(_) => {}
                 }
             }
-        }
-    }
-}
-
-impl From<&Request> for Seen {
-    fn from(request: &Request) -> Self {
-        Self {
-            system: request.system.clone(),
-            messages: request.messages.iter().map(|message| message.content.clone()).collect(),
-            format: match &request.format {
-                Format::Text => SeenFormat::Text,
-                Format::Json => SeenFormat::Json,
-                Format::Schema(schema) => SeenFormat::Schema {
-                    name: schema.name.clone(),
-                    schema: schema.schema.clone(),
-                },
-            },
-            tools: request
-                .tools
-                .iter()
-                .map(|tool| match tool {
-                    Tool::Function(function) => function.name.clone(),
-                    Tool::Mcp(mcp) => mcp.name.clone(),
-                })
-                .collect(),
-            temperature: request.generation.as_ref().and_then(|generation| generation.temperature),
-            workspace: request.workspace.clone(),
-            worker: request.worker.as_ref().map(SeenWorker::from),
-            check: request.check,
-        }
-    }
-}
-
-impl From<&WorkerGrant> for SeenWorker {
-    fn from(grant: &WorkerGrant) -> Self {
-        Self {
-            egress: grant.egress.clone(),
-            read: grant.read.clone(),
-            env: grant.env.clone(),
-        }
-    }
-}
-
-impl From<WorkerGrant> for SeenWorker {
-    fn from(grant: WorkerGrant) -> Self {
-        Self {
-            egress: grant.egress,
-            read: grant.read,
-            env: grant.env,
         }
     }
 }
@@ -463,4 +414,53 @@ fn placeholder_digest(name: &str) -> Digest {
     name.hash(&mut hasher);
     let word = format!("{:016x}", hasher.finish());
     format!("sha256:{}", word.repeat(4)).parse().expect("64 hex characters form a digest")
+}
+
+impl From<&Request> for Seen {
+    fn from(request: &Request) -> Self {
+        Self {
+            system: request.system.clone(),
+            messages: request.messages.iter().map(|message| message.content.clone()).collect(),
+            format: match &request.format {
+                Format::Text => SeenFormat::Text,
+                Format::Json => SeenFormat::Json,
+                Format::Schema(schema) => SeenFormat::Schema {
+                    name: schema.name.clone(),
+                    schema: schema.schema.clone(),
+                },
+            },
+            tools: request
+                .tools
+                .iter()
+                .map(|tool| match tool {
+                    Tool::Function(function) => function.name.clone(),
+                    Tool::Mcp(mcp) => mcp.name.clone(),
+                })
+                .collect(),
+            temperature: request.generation.as_ref().and_then(|generation| generation.temperature),
+            workspace: request.workspace.clone(),
+            worker: request.worker.as_ref().map(SeenWorker::from),
+            check: request.check,
+        }
+    }
+}
+
+impl From<&WorkerGrant> for SeenWorker {
+    fn from(grant: &WorkerGrant) -> Self {
+        Self {
+            egress: grant.egress.clone(),
+            read: grant.read.clone(),
+            env: grant.env.clone(),
+        }
+    }
+}
+
+impl From<WorkerGrant> for SeenWorker {
+    fn from(grant: WorkerGrant) -> Self {
+        Self {
+            egress: grant.egress,
+            read: grant.read,
+            env: grant.env,
+        }
+    }
 }

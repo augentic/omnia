@@ -1,7 +1,8 @@
 //! Every `omnia:vcs` operation through the SDK's `Vcs` trait: each path
-//! lends the `.` mount or a subpath beneath it, each answer is the scripted
-//! backend's, and a typed refusal and an untyped one lower to the SDK's
-//! `Error` as its variant (`not-found`, `diverged`) and as `other`.
+//! lends the `.` mount, a named mount, or a subpath beneath one, each answer
+//! is the scripted backend's, and a typed refusal and an untyped one lower
+//! to the SDK's `Error` as its variant (`not-found`, `diverged`) and as
+//! `other`.
 
 #![cfg(target_arch = "wasm32")]
 
@@ -113,10 +114,16 @@ async fn scenario() {
     );
     assert_eq!(offline.code(), "other");
 
+    // a path lends the longest preopen it names, at a `/` boundary
+    assert_eq!(WasiProvider.head("ws/repo").await.expect("head beneath `ws`"), "head-sha");
+    assert_eq!(WasiProvider.head("ws/sub/repo").await.expect("head beneath `ws/sub`"), "head-sha");
+
     // a path no preopen answers never reaches the host
-    let elsewhere = WasiProvider.head("/elsewhere").await.expect_err("no preopen");
-    assert!(
-        matches!(elsewhere, Error::Other(ref detail) if detail.contains("matches no preopen")),
-        "unexpected: {elsewhere:?}"
-    );
+    for path in ["/elsewhere", "ws-evil/x", "ws/"] {
+        let error = WasiProvider.head(path).await.expect_err("no preopen");
+        assert!(
+            matches!(error, Error::Other(ref detail) if detail.contains("matches no preopen")),
+            "at `{path}`: {error:?}"
+        );
+    }
 }

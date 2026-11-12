@@ -5,21 +5,6 @@ use quote::{ToTokens, format_ident, quote};
 use syn::punctuated::Punctuated;
 use syn::{Data, DeriveInput, Error, Field, Fields, Ident, Result, Token, Type};
 
-pub fn to_snake_case(name: &str) -> String {
-    let mut snake = String::with_capacity(name.len() + 4);
-    for (i, ch) in name.chars().enumerate() {
-        if ch.is_ascii_uppercase() {
-            if i > 0 {
-                snake.push('_');
-            }
-            snake.push(ch.to_ascii_lowercase());
-        } else {
-            snake.push(ch);
-        }
-    }
-    snake
-}
-
 pub fn expand(input: &DeriveInput) -> Result<TokenStream> {
     let Data::Struct(data) = &input.data else {
         return Err(Error::new_spanned(
@@ -69,12 +54,19 @@ pub fn expand(input: &DeriveInput) -> Result<TokenStream> {
     })
 }
 
-fn mentions_type_param(tokens: TokenStream, params: &[&Ident]) -> bool {
-    tokens.into_iter().any(|tree| match tree {
-        TokenTree::Ident(ident) => params.contains(&&ident),
-        TokenTree::Group(group) => mentions_type_param(group.stream(), params),
-        TokenTree::Punct(_) | TokenTree::Literal(_) => false,
-    })
+pub fn to_snake_case(name: &str) -> String {
+    let mut snake = String::with_capacity(name.len() + 4);
+    for (i, ch) in name.chars().enumerate() {
+        if ch.is_ascii_uppercase() {
+            if i > 0 {
+                snake.push('_');
+            }
+            snake.push(ch.to_ascii_lowercase());
+        } else {
+            snake.push(ch);
+        }
+    }
+    snake
 }
 
 fn parse_fields(fields: &Punctuated<Field, Token![,]>) -> Result<Vec<(Ident, &Ident, &Type)>> {
@@ -163,3 +155,11 @@ const CAPABILITIES: &[&str] = &[
     "Vault",
     "Vcs",
 ];
+
+fn mentions_type_param(tokens: TokenStream, params: &[&Ident]) -> bool {
+    tokens.into_iter().any(|tree| match tree {
+        TokenTree::Ident(ident) => params.contains(&&ident),
+        TokenTree::Group(group) => mentions_type_param(group.stream(), params),
+        TokenTree::Punct(_) | TokenTree::Literal(_) => false,
+    })
+}

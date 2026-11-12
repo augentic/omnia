@@ -1,0 +1,71 @@
+error: `plugins:` block is empty; name a `store`, a `registries` configuration, or both
+ --> tests/ui/runtime_invalid.rs:3:18
+  |
+3 |         plugins: {},
+  |                  ^^
+
+error: unknown plugins key `cache`; expected `store` or `registries`
+ --> tests/ui/runtime_invalid.rs:9:20
+  |
+9 |         plugins: { cache: "store" },
+  |                    ^^^^^
+
+error: `registries:` moved under `plugins:`; write `plugins: { registries: ... }`
+  --> tests/ui/runtime_invalid.rs:15:9
+   |
+15 |         registries: "default_registry = \"ghcr.io\"\n",
+   |         ^^^^^^^^^^
+
+error: `digest:` must be `sha256:<64 hex characters>`: missing `sha256:`
+  --> tests/ui/runtime_invalid.rs:21:46
+   |
+21 |         guests: [{ path: "app.wasm", digest: "md5:00" }],
+   |                                              ^^^^^^^^
+
+error: `digest:` must be `sha256:<64 hex characters>`: got 3 hex characters
+  --> tests/ui/runtime_invalid.rs:27:46
+   |
+27 |         guests: [{ path: "app.wasm", digest: "sha256:abc" }],
+   |                                              ^^^^^^^^^^^^
+
+error: `digest:` must be `sha256:<64 hex characters>`: not hexadecimal
+  --> tests/ui/runtime_invalid.rs:35:21
+   |
+35 |             digest: "sha256:zz00000000000000000000000000000000000000000000000000000000000000",
+   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: `path:` and `package:` are mutually exclusive; a guest has one source
+  --> tests/ui/runtime_invalid.rs:42:53
+   |
+42 |         guests: [{ name: "tool", path: "tool.wasm", package: "acme:tool@1.2.3" }],
+   |                                                     ^^^^^^^
+
+error: unknown guest key `on_demand`; expected `path` or `package`, `name`, `routes`, `command`, or `digest`
+  --> tests/ui/runtime_invalid.rs:48:39
+   |
+48 |         guests: [{ path: "tool.wasm", on_demand: true }],
+   |                                       ^^^^^^^^^
+
+error: unknown guest key `wasm_only`; expected `path` or `package`, `name`, `routes`, `command`, or `digest`
+  --> tests/ui/runtime_invalid.rs:54:39
+   |
+54 |         guests: [{ path: "tool.wasm", wasm_only: true }],
+   |                                       ^^^^^^^^^
+
+error: `path:` is embedded with `include_bytes!`, so it must be a string literal or a macro such as `concat!(env!("CARGO_MANIFEST_DIR"), "/guest.wasm")`
+  --> tests/ui/runtime_invalid.rs:60:26
+   |
+60 |         guests: [{ path: engine_component_path() }],
+   |                          ^^^^^^^^^^^^^^^^^^^^^
+
+error: guest entry is missing `path` (or `package`)
+  --> tests/ui/runtime_invalid.rs:66:18
+   |
+66 |         guests: [{ name: "api" }],
+   |                  ^^^^^^^^^^^^^^^
+
+error: `manifest:` and the inline keys (`guests`, `mounts`, `plugins`) are mutually exclusive; declare the deployment in the manifest file
+  --> tests/ui/runtime_invalid.rs:73:9
+   |
+73 |         plugins: { registries: "default_registry = \"ghcr.io\"\n" },
+   |         ^^^^^^^

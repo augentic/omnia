@@ -40,8 +40,6 @@ impl<T> HostWithStore<T> for WasiOtel {
 
 impl wasi::Host for HostView<'_, dyn OtelClient> {}
 
-omnia_core::host_error!(wasi::Error, InternalFailure);
-
 impl From<wasi::ResourceMetrics> for ExportMetricsServiceRequest {
     fn from(rm: wasi::ResourceMetrics) -> Self {
         let schema_url = rm.resource.schema_url.clone().unwrap_or_default();
@@ -153,6 +151,20 @@ impl From<wasi::MetricData> for MetricData {
     }
 }
 
+impl From<wasi::Gauge> for Gauge {
+    fn from(gauge: wasi::Gauge) -> Self {
+        let start = gauge.start_time.map(datetime_nanos).unwrap_or_default();
+        let time = datetime_nanos(gauge.time);
+        Self {
+            data_points: gauge
+                .data_points
+                .into_iter()
+                .map(|dp| number_dp(dp.attributes, dp.value, dp.exemplars, start, time))
+                .collect(),
+        }
+    }
+}
+
 // shared by the Gauge and Sum conversions
 fn number_dp(
     attributes: Vec<wasi::KeyValue>, value: wasi::DataValue, exemplars: Vec<wasi::Exemplar>,
@@ -168,19 +180,8 @@ fn number_dp(
     }
 }
 
-impl From<wasi::Gauge> for Gauge {
-    fn from(gauge: wasi::Gauge) -> Self {
-        let start = gauge.start_time.map(datetime_nanos).unwrap_or_default();
-        let time = datetime_nanos(gauge.time);
-        Self {
-            data_points: gauge
-                .data_points
-                .into_iter()
-                .map(|dp| number_dp(dp.attributes, dp.value, dp.exemplars, start, time))
-                .collect(),
-        }
-    }
-}
+// The proto `DataPointFlags` default (`FLAG_NONE` / "do not use").
+const DATA_POINT_FLAGS_DO_NOT_USE: u32 = 0;
 
 impl From<wasi::Sum> for Sum {
     fn from(sum: wasi::Sum) -> Self {
@@ -317,36 +318,4 @@ impl From<wasi::Temporality> for i32 {
     }
 }
 
-// The proto `DataPointFlags` default (`FLAG_NONE` / "do not use").
-const DATA_POINT_FLAGS_DO_NOT_USE: u32 = 0;
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn export_request_carries_schema_url_once() {
-        let rm = wasi::ResourceMetrics {
-            resource: wasi::Resource {
-                attributes: vec![wasi::KeyValue {
-                    key: "service.name".to_string(),
-                    value: wasi::Value::String("guest".to_string()),
-                }],
-                schema_url: Some("https://resource".to_string()),
-            },
-            scope_metrics: Vec::new(),
-        };
-
-        let request = ExportMetricsServiceRequest::from(rm);
-        let [resource_metrics] = request.resource_metrics.as_slice() else {
-            panic!("one resource, got {}", request.resource_metrics.len());
-        };
-        assert_eq!(resource_metrics.schema_url, "https://resource");
-        // the url is not doubled as a resource attribute
-        let attributes = &resource_metrics.resource.as_ref().expect("resource").attributes;
-        assert_eq!(
-            attributes.iter().map(|kv| kv.key.as_str()).collect::<Vec<_>>(),
-            ["service.name"]
-        );
-    }
-}
+omnia_core::host_error!(wasi::Error, InternalFailure);

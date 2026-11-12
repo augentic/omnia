@@ -17,6 +17,6 @@ async fn scenario() {
         .complete(Request::builder().messages(vec![user("workspace")]).workspace(".").build())
         .await
         .expect("workspace tools answer");
-    // seed.txt content, then the sorted listing after the backend's write.
-    assert_eq!(reply.answer, "hello:out.txt,seed.txt");
+    // seed.txt content, then the sorted root listing after the backend's write.
+    assert_eq!(reply.answer, "hello:docs,out.txt,seed.txt");
 }

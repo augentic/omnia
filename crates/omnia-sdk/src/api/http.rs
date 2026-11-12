@@ -157,14 +157,6 @@ where
     }
 }
 
-// Carries the same `error` discriminant every transport emits, so a client
-// classifies failures identically over HTTP and the command line.
-impl IntoResponse for crate::Error {
-    fn into_response(self) -> Response {
-        (self.status(), Json(ErrorBody::from(&self))).into_response()
-    }
-}
-
 impl<P: Send + Sync + 'static> Handlers<P> {
     /// Register a [`MethodRouter`] at `path`.
     ///
@@ -225,5 +217,13 @@ where
 
     fn call(&mut self, req: ::http::Request<B>) -> Self::Future {
         self.http.call(req)
+    }
+}
+
+// Carries the same `error` discriminant every transport emits, so a client
+// classifies failures identically over HTTP and the command line.
+impl IntoResponse for crate::Error {
+    fn into_response(self) -> Response {
+        (self.status(), Json(ErrorBody::from(&self))).into_response()
     }
 }

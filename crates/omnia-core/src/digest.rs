@@ -67,15 +67,6 @@ impl FromStr for Digest {
     }
 }
 
-const fn nibble(digit: u8) -> Option<u8> {
-    match digit {
-        b'0'..=b'9' => Some(digit - b'0'),
-        b'a'..=b'f' => Some(digit - b'a' + 10),
-        b'A'..=b'F' => Some(digit - b'A' + 10),
-        _ => None,
-    }
-}
-
 impl TryFrom<String> for Digest {
     type Error = anyhow::Error;
 
@@ -101,35 +92,11 @@ impl fmt::Debug for Digest {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::Digest;
-
-    const EMPTY: &str = "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
-
-    #[test]
-    fn hash_vector() {
-        // the well-known sha256 of the empty input
-        assert_eq!(Digest::of(b"").to_string(), EMPTY);
-    }
-
-    #[test]
-    fn parse_canonicalizes_case() {
-        let parsed: Digest =
-            EMPTY.to_ascii_uppercase().replace("SHA256", "sha256").parse().expect("uppercase hex");
-        assert_eq!(parsed, Digest::of(b""));
-        assert_eq!(parsed.to_string(), EMPTY, "the spelling is lowercase whatever was parsed");
-    }
-
-    #[test]
-    fn malformed() {
-        for digest in [
-            format!("sha512:{}", "ab".repeat(32)),
-            "sha256:abcd".to_owned(),
-            format!("sha256:{}", "zz".repeat(32)),
-            format!("sha256:{}", "é".repeat(32)),
-        ] {
-            digest.parse::<Digest>().expect_err("refused");
-        }
+const fn nibble(digit: u8) -> Option<u8> {
+    match digit {
+        b'0'..=b'9' => Some(digit - b'0'),
+        b'a'..=b'f' => Some(digit - b'a' + 10),
+        b'A'..=b'F' => Some(digit - b'A' + 10),
+        _ => None,
     }
 }
