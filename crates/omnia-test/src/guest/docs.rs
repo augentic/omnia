@@ -1,24 +1,29 @@
-//! In-memory `DocumentStore` over the runtime's default docstore backend.
+//! In-memory `DocumentStore` with the SDK's reference query semantics.
 
-use std::future::Future;
+use std::cmp::Ordering;
+use std::collections::btree_map::Entry;
+use std::collections::{BTreeMap, HashMap};
+use std::future::{Future, ready};
+use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
-use anyhow::Result;
+use anyhow::{Context as _, Result, ensure};
 use omnia_sdk::DocumentStore;
-use omnia_sdk::docstore::{ComparisonOp, Document, Filter, QueryOptions, QueryResult, ScalarValue};
-use omnia_wasi_docstore::{DocStoreClient, DocStoreDefault, FilterTree, QueryOpts};
+use omnia_sdk::docstore::{Document, QueryOptions, QueryResult};
+use serde_json::Value;
 
-// The host-side twins of the guest domain types.
-mod host {
-    pub use omnia_wasi_docstore::{ComparisonOp, Document, ScalarValue, SortField};
-}
-
-/// In-memory documents with the production default's filter, sort, and
-/// pagination semantics; clones share one store.
+/// In-memory documents queried with the SDK's reference semantics; clones share one store.
 ///
-/// Wraps `omnia_wasi_docstore::DocStoreDefault`, translating the guest's
-/// `Filter`/`QueryOptions` into the host's `FilterTree`/`QueryOpts`, so a
-/// query behaves exactly as it would through the runtime's in-memory
-/// backend.
+/// A query behaves as it does through the runtime's in-memory backend:
+///
+/// - [`Filter::matches`](omnia_sdk::docstore::Filter::matches) selects the
+///   documents.
+/// - [`SortField::compare`](omnia_sdk::docstore::SortField::compare) orders
+///   them field by field, with ties broken on the id.
+/// - A `limit` is capped at 1000, and a `limit` of zero is an error.
+/// - The `offset` and the continuation token skip documents, and a malformed
+///   token is an error.
+///
+/// `insert` refuses an id already stored, and every body must be JSON.
 ///
 /// ```
 /// use omnia_sdk::DocumentStore as _;
@@ -44,155 +49,143 @@ mod host {
 /// ```
 #[derive(Clone, Debug, Default)]
 pub struct MemoryDocs {
-    store: DocStoreDefault,
+    collections: Arc<RwLock<Collections>>,
 }
 
-impl MemoryDocs {
-    /// The wrapped host backend, for scenarios that also run the runtime.
-    #[must_use]
-    pub const fn backend(&self) -> &DocStoreDefault {
-        &self.store
-    }
+// documents keyed by id, so a query's base order is id-ascending
+type Collections = HashMap<String, BTreeMap<String, Value>>;
 
-    /// Every document in `store`, following continuations to the end.
+const MAX_PAGE_SIZE: u32 = 1000;
+
+impl MemoryDocs {
+    /// Every document in `store`, in id order.
     ///
     /// # Errors
     ///
-    /// Returns the backend's error.
-    pub async fn documents(&self, store: &str) -> Result<Vec<Document>> {
-        let mut all = Vec::new();
-        let mut continuation = None;
-        loop {
-            let page = self
-                .store
-                .query(
-                    store.to_owned(),
-                    None,
-                    QueryOpts {
-                        continuation,
-                        ..QueryOpts::default()
-                    },
-                )
-                .await?;
-            all.extend(page.documents.into_iter().map(from_host));
-            continuation = page.continuation;
-            if continuation.is_none() {
-                return Ok(all);
+    /// Returns an error when a stored body does not serialize.
+    pub fn documents(&self, store: &str) -> impl Future<Output = Result<Vec<Document>>> + Send {
+        let documents = self
+            .read()
+            .get(store)
+            .into_iter()
+            .flatten()
+            .map(|(id, body)| document(id, body))
+            .collect();
+        ready(documents)
+    }
+
+    fn read(&self) -> RwLockReadGuard<'_, Collections> {
+        self.collections.read().expect("docs lock")
+    }
+
+    fn write(&self) -> RwLockWriteGuard<'_, Collections> {
+        self.collections.write().expect("docs lock")
+    }
+
+    fn insert_document(&self, store: &str, doc: &Document) -> Result<()> {
+        let body = body(doc)?;
+        let inserted = match self.write().entry(store.to_owned()).or_default().entry(doc.id.clone())
+        {
+            Entry::Vacant(slot) => {
+                slot.insert(body);
+                true
             }
-        }
+            Entry::Occupied(_) => false,
+        };
+        ensure!(inserted, "document id already exists");
+        Ok(())
+    }
+
+    fn put_document(&self, store: &str, doc: &Document) -> Result<()> {
+        let body = body(doc)?;
+        self.write().entry(store.to_owned()).or_default().insert(doc.id.clone(), body);
+        Ok(())
+    }
+
+    fn page(&self, store: &str, options: &QueryOptions) -> Result<QueryResult> {
+        let limit = options.limit.map_or(MAX_PAGE_SIZE, |limit| limit.min(MAX_PAGE_SIZE));
+        ensure!(limit > 0, "query limit must be at least 1");
+        let page_size = usize::try_from(limit).unwrap_or(usize::MAX);
+        let offset =
+            options.offset.map_or(0, |offset| usize::try_from(offset).unwrap_or(usize::MAX));
+        let skip = continuation(options.continuation.as_deref())?.saturating_add(offset);
+
+        let mut rows: Vec<(String, Value)> = self
+            .read()
+            .get(store)
+            .into_iter()
+            .flatten()
+            .filter(|(_, body)| options.filter.as_ref().is_none_or(|filter| filter.matches(body)))
+            .map(|(id, body)| (id.clone(), body.clone()))
+            .collect();
+        rows.sort_by(|(a_id, a), (b_id, b)| {
+            options
+                .order_by
+                .iter()
+                .fold(Ordering::Equal, |ordering, sort| ordering.then_with(|| sort.compare(a, b)))
+                .then_with(|| a_id.cmp(b_id))
+        });
+
+        let total = rows.len();
+        let documents = rows
+            .iter()
+            .skip(skip)
+            .take(page_size)
+            .map(|(id, body)| document(id, body))
+            .collect::<Result<Vec<_>>>()?;
+        let next = skip.saturating_add(documents.len());
+        Ok(QueryResult {
+            documents,
+            continuation: (next < total).then(|| next.to_string()),
+        })
     }
 }
 
 impl DocumentStore for MemoryDocs {
     fn get(&self, store: &str, id: &str) -> impl Future<Output = Result<Option<Document>>> + Send {
-        let pending = self.store.get(store.to_owned(), id.to_owned());
-        async move { Ok(pending.await?.map(from_host)) }
+        let found = self
+            .read()
+            .get(store)
+            .and_then(|documents| documents.get(id))
+            .map(|body| document(id, body))
+            .transpose();
+        ready(found)
     }
 
     fn insert(&self, store: &str, doc: &Document) -> impl Future<Output = Result<()>> + Send {
-        self.store.insert(store.to_owned(), to_host(doc))
+        ready(self.insert_document(store, doc))
     }
 
     fn put(&self, store: &str, doc: &Document) -> impl Future<Output = Result<()>> + Send {
-        self.store.put(store.to_owned(), to_host(doc))
+        ready(self.put_document(store, doc))
     }
 
     fn delete(&self, store: &str, id: &str) -> impl Future<Output = Result<bool>> + Send {
-        self.store.delete(store.to_owned(), id.to_owned())
+        let removed =
+            self.write().get_mut(store).is_some_and(|documents| documents.remove(id).is_some());
+        ready(Ok(removed))
     }
 
     fn query(
         &self, store: &str, options: QueryOptions,
     ) -> impl Future<Output = Result<QueryResult>> + Send {
-        let filter = options.filter.map(filter_tree);
-        let opts = QueryOpts {
-            order_by: options
-                .order_by
-                .into_iter()
-                .map(|sort| host::SortField {
-                    field: sort.field,
-                    descending: sort.descending,
-                })
-                .collect(),
-            limit: options.limit,
-            offset: options.offset,
-            continuation: options.continuation,
-        };
-        let pending = self.store.query(store.to_owned(), filter, opts);
-        async move {
-            let result = pending.await?;
-            Ok(QueryResult {
-                documents: result.documents.into_iter().map(from_host).collect(),
-                continuation: result.continuation,
-            })
-        }
+        ready(self.page(store, &options))
     }
 }
 
-fn from_host(doc: host::Document) -> Document {
-    Document {
-        id: doc.id,
-        data: doc.data,
-    }
+fn continuation(token: Option<&str>) -> Result<usize> {
+    token.map_or(Ok(0), |token| {
+        token.parse().with_context(|| format!("invalid continuation token: {token:?}"))
+    })
 }
 
-fn to_host(doc: &Document) -> host::Document {
-    host::Document {
-        id: doc.id.clone(),
-        data: doc.data.clone(),
-    }
+fn document(id: &str, body: &Value) -> Result<Document> {
+    Ok(Document {
+        id: id.to_owned(),
+        data: serde_json::to_vec(body).context("serialize JSON body")?,
+    })
 }
 
-fn filter_tree(filter: Filter) -> FilterTree {
-    match filter {
-        Filter::Compare {
-            field,
-            op: cmp,
-            value,
-        } => FilterTree::Compare {
-            field,
-            op: op(cmp),
-            value: scalar(value),
-        },
-        Filter::InList { field, values } => FilterTree::InList {
-            field,
-            values: values.into_iter().map(scalar).collect(),
-        },
-        Filter::NotInList { field, values } => FilterTree::NotInList {
-            field,
-            values: values.into_iter().map(scalar).collect(),
-        },
-        Filter::IsNull(field) => FilterTree::IsNull(field),
-        Filter::IsNotNull(field) => FilterTree::IsNotNull(field),
-        Filter::Contains { field, pattern } => FilterTree::Contains { field, pattern },
-        Filter::StartsWith { field, pattern } => FilterTree::StartsWith { field, pattern },
-        Filter::EndsWith { field, pattern } => FilterTree::EndsWith { field, pattern },
-        Filter::And(children) => FilterTree::And(children.into_iter().map(filter_tree).collect()),
-        Filter::Or(children) => FilterTree::Or(children.into_iter().map(filter_tree).collect()),
-        Filter::Not(inner) => FilterTree::Not(Box::new(filter_tree(*inner))),
-    }
-}
-
-const fn op(op: ComparisonOp) -> host::ComparisonOp {
-    match op {
-        ComparisonOp::Eq => host::ComparisonOp::Eq,
-        ComparisonOp::Ne => host::ComparisonOp::Ne,
-        ComparisonOp::Gt => host::ComparisonOp::Gt,
-        ComparisonOp::Gte => host::ComparisonOp::Gte,
-        ComparisonOp::Lt => host::ComparisonOp::Lt,
-        ComparisonOp::Lte => host::ComparisonOp::Lte,
-    }
-}
-
-fn scalar(value: ScalarValue) -> host::ScalarValue {
-    match value {
-        ScalarValue::Null => host::ScalarValue::Null,
-        ScalarValue::Bool(b) => host::ScalarValue::Boolean(b),
-        ScalarValue::Int32(i) => host::ScalarValue::Int32(i),
-        ScalarValue::Int64(i) => host::ScalarValue::Int64(i),
-        ScalarValue::Float64(f) => host::ScalarValue::Float64(f),
-        ScalarValue::Str(s) => host::ScalarValue::Str(s),
-        ScalarValue::Binary(b) => host::ScalarValue::Binary(b),
-        ScalarValue::Timestamp(t) => host::ScalarValue::Timestamp(t),
-    }
+fn body(doc: &Document) -> Result<Value> {
+    serde_json::from_slice(&doc.data).context("invalid JSON in document body")
 }

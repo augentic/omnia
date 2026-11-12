@@ -29,7 +29,7 @@ query: async func(collection: string, options: query-options) -> result<query-re
 
 Collections are named by string and created implicitly on first write; there is no open/close handshake and no collection resource.
 
-Guests normally call these through the `omnia_sdk::DocumentStore` trait (implemented by `omnia_sdk::WasiProvider` on `wasm32`, delegating to `omnia_wasi_docstore::store`). The underlying guest functions are `omnia_wasi_docstore::store::{get, insert, put, delete, query}`.
+Guests normally call these through the `omnia_sdk::DocumentStore` trait, which `omnia_sdk::WasiProvider` implements on `wasm32` over the raw bindings. Those bindings are `omnia_wasi_docstore::store::{get, insert, put, delete, query}`, taking the WIT types in `omnia_wasi_docstore::types`.
 
 ## Types
 
@@ -60,7 +60,7 @@ Guests normally call these through the `omnia_sdk::DocumentStore` trait (impleme
 
 ## Filters
 
-Filters reference fields *inside* the document JSON and compose into trees. On the guest side, build them with the `Filter` constructors from `omnia_sdk::docstore` (defined in [`crates/wasi-docstore/src/document_store.rs`](../../crates/wasi-docstore/src/document_store.rs)):
+Filters reference fields *inside* the document JSON and compose into trees. On the guest side, build them with the `Filter` constructors from `omnia_sdk::docstore` (defined in [`crates/omnia-sdk/src/docstore.rs`](../../crates/omnia-sdk/src/docstore.rs)):
 
 | Constructor | Predicate |
 | ----------- | --------- |
@@ -75,6 +75,10 @@ Filters reference fields *inside* the document JSON and compose into trees. On t
 ### Scalar values
 
 Comparison values are flat scalars (`ScalarValue`): `Null`, `Bool`, `Int32`, `Int64`, `Float64`, `Str`, `Binary`, `Timestamp` (an ISO-8601 string; use the `Timestamp` newtype to distinguish it from a plain string). `From` impls exist for `&str`, `String`, `i32`, `i64`, `f64`, and `bool`, so `Filter::eq("status", "active")` works without explicit wrapping.
+
+### Reference semantics
+
+`Filter::matches` and `SortField::compare` in `omnia_sdk::docstore` define how a filter selects a JSON document and how a sort field orders two. Their rustdoc states the rules: dotted field paths, a missing field reading as `null`, ordering only between comparable types, and a fixed type rank for sorting. The default backend evaluates queries by the same rules, and `omnia_test::guest::MemoryDocs` calls the two functions directly. A provider that evaluates queries itself calls them too, rather than writing its own evaluator.
 
 ### Host-enforced limits
 

@@ -23,6 +23,7 @@ default = []
 # and the `send`/`deliver` router drivers.
 # `omnia-sdk/sql` and `omnia-sdk/docstore` carry the `TableStore` and
 # `DocumentStore` traits the `ScriptedTables` and `MemoryDocs` doubles implement.
+# No host crate belongs here: a stem's test build must not compile `wasmtime`.
 guest = [
     "dep:anyhow",
     "dep:bytes",
@@ -32,7 +33,7 @@ guest = [
     "dep:omnia-sdk",
     "omnia-sdk/sql",
     "omnia-sdk/docstore",
-    "dep:omnia-wasi-docstore",
+    "dep:serde_json",
     "dep:tower",
 ]
 # The component runtime harness: `Deployment`, `Backends`, `ScriptedModel`, `Scratch`.
@@ -84,6 +85,7 @@ omnia-wasi-sql = { workspace = true, optional = true }
 omnia-wasi-vault = { workspace = true, optional = true }
 omnia-wasi-vcs = { workspace = true, optional = true }
 omnia-wasi-websocket = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
 tempfile = { workspace = true, optional = true }
 tower = { workspace = true, features = ["util"], optional = true }
 

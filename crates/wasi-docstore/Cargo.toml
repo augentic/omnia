@@ -15,17 +15,12 @@ version.workspace = true
 [lints]
 workspace = true
 
-# dependencies shared across host and guest
-[dependencies]
-anyhow.workspace = true
-chrono.workspace = true
-serde.workspace = true
-serde_json.workspace = true
-
 # host dependencies
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+anyhow.workspace = true
 futures.workspace = true
 omnia-core.workspace = true
+serde_json.workspace = true
 tracing.workspace = true
 wasmtime.workspace = true
 wasmtime-wasi.workspace = true

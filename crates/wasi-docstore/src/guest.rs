@@ -11,5 +11,4 @@ mod generated {
     });
 }
 
-mod convert;
-pub mod store;
+pub use self::generated::omnia::docstore::*;

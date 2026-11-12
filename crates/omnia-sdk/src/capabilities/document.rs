@@ -1,5 +1,8 @@
 //! JSON document store capability.
 
+#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
+mod convert;
+
 use std::future::Future;
 
 use anyhow::Result;
@@ -49,23 +52,35 @@ impl<P: DocumentStore + ?Sized> DocumentStoreExt for P {}
 #[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
 impl DocumentStore for crate::WasiProvider {
     async fn get(&self, store: &str, id: &str) -> Result<Option<Document>> {
-        omnia_wasi_docstore::store::get(store, id).await
+        let document = omnia_wasi_docstore::store::get(store.to_owned(), id.to_owned())
+            .await
+            .map_err(|e| anyhow::anyhow!("get failed: {e:?}"))?;
+        Ok(document.map(Into::into))
     }
 
     async fn insert(&self, store: &str, doc: &Document) -> Result<()> {
-        omnia_wasi_docstore::store::insert(store, doc).await
+        omnia_wasi_docstore::store::insert(store.to_owned(), doc.into())
+            .await
+            .map_err(|e| anyhow::anyhow!("insert failed: {e:?}"))
     }
 
     async fn put(&self, store: &str, doc: &Document) -> Result<()> {
-        omnia_wasi_docstore::store::put(store, doc).await
+        omnia_wasi_docstore::store::put(store.to_owned(), doc.into())
+            .await
+            .map_err(|e| anyhow::anyhow!("put failed: {e:?}"))
     }
 
     async fn delete(&self, store: &str, id: &str) -> Result<bool> {
-        omnia_wasi_docstore::store::delete(store, id).await
+        omnia_wasi_docstore::store::delete(store.to_owned(), id.to_owned())
+            .await
+            .map_err(|e| anyhow::anyhow!("delete failed: {e:?}"))
     }
 
     async fn query(&self, store: &str, options: QueryOptions) -> Result<QueryResult> {
-        omnia_wasi_docstore::store::query(store, options).await
+        let result = omnia_wasi_docstore::store::query(store.to_owned(), options.into())
+            .await
+            .map_err(|e| anyhow::anyhow!("query failed: {e:?}"))?;
+        Ok(result.into())
     }
 }
 

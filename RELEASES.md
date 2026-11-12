@@ -28,8 +28,10 @@ Unreleased
   `StateStoreExt::{get_json, set_json}`, and `TableStoreExt::query_as`.
 - `Error::{bad_request, not_found, server_error, bad_gateway}(code,
   description)`, which name the wire `error` code.
-- `Document::{json, decode}` and `Filter::depth` in
-  `omnia_wasi_docstore::document_store`.
+- `Document::{json, decode}`, `Filter::{depth, matches}`, and
+  `SortField::compare` in `omnia_sdk::docstore`. `Filter::matches` and
+  `SortField::compare` are the reference query semantics, and
+  `omnia_test::guest::MemoryDocs` evaluates its queries with them.
 - `omnia_test::guest::{send, deliver}`, which drive a router natively, and
   `omnia_test::guest::ScriptedVcs`, a scripted `Vcs`.
 - `omnia_core::Backends`, the shape of a deployment's backend bundle:
@@ -121,6 +123,11 @@ Unreleased
   `connect`. `ClientProxy` keeps its name.
 - The document store's WIT package is `omnia:docstore`, which was
   `wasi:docstore`, so a guest built against `wasi:docstore` is rebuilt.
+- Native builds of `omnia-sdk`, and of `omnia-test` with the `guest`
+  feature, link no `wasmtime`. `omnia-wasi-docstore` is a `wasm32`-only
+  dependency of the SDK, and `MemoryDocs` keeps its own in-memory store.
+- `Filter::on_date` accepts only a zero-padded `YYYY-MM-DD` date, so
+  `2024-1-5` is an error.
 
 ### Removed
 
@@ -140,6 +147,12 @@ Unreleased
 - `omnia::wasi_view!`, the `Wasi*CtxView` types it generated, and the
   `omnia::pastey` re-export. A host derives `HostCtx`, and its view is
   `HostView`.
+- `omnia_wasi_docstore::document_store` and the SDK-typed
+  `omnia_wasi_docstore::store` functions. The value types are
+  `omnia_sdk::docstore`, a guest reaches the store through
+  `omnia_sdk::DocumentStore`, and `omnia_wasi_docstore::{store, types}` are
+  the raw `omnia:docstore` bindings.
+- `omnia_test::guest::MemoryDocs::backend`.
 
 ---
 

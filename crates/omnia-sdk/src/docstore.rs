@@ -1,15 +1,16 @@
-//! Target-neutral domain types for the `omnia:docstore` guest SDK.
+//! Document store value types, filter builders, and the reference query semantics.
 //!
-//! The guest builds queries with these ergonomic types, then the guest bindings
-//! bridge them across the WIT boundary. The host keeps its own `FilterTree`
-//! built from WIT-native leaf types (see `docs/reference/docstore.md`); the two
-//! representations sit on opposite sides of the WASM boundary by design.
+//! [`Filter::matches`] and [`SortField::compare`] define how a query selects
+//! and orders JSON documents. A provider that evaluates queries itself calls
+//! them rather than writing its own evaluator.
 
+use std::cmp::Ordering;
 use std::ops::Not;
 
 use anyhow::Context as _;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
+use serde_json::Value;
 
 /// Scalar values for filter comparisons.
 #[derive(Debug, Clone, PartialEq)]
@@ -278,8 +279,8 @@ impl Filter {
     ///
     /// # Errors
     ///
-    /// Returns an error if `iso_date` is not a valid `YYYY-MM-DD` date or is the
-    /// maximum representable date (no next day).
+    /// Returns an error if `iso_date` is not a zero-padded `YYYY-MM-DD` date,
+    /// or is `9999-12-31`, which has no next day in that form.
     pub fn on_date(field: &str, iso_date: &str) -> anyhow::Result<Self> {
         let next = next_iso_date(iso_date)?;
         let start = format!("{iso_date}T00:00:00Z");
@@ -298,6 +299,62 @@ impl Filter {
             _ => 1,
         }
     }
+
+    /// Whether the JSON document body `doc` satisfies this filter.
+    ///
+    /// These are the semantics every document store provider follows:
+    ///
+    /// - A field path is dotted: `"a.b"` descends into nested objects.
+    /// - A missing field reads as `null`, so [`Filter::IsNull`] matches an
+    ///   absent field and [`ComparisonOp::Ne`] matches a document lacking it.
+    /// - An ordering comparison matches only comparable types: a number with
+    ///   a number, a string with a [`ScalarValue::Str`] or
+    ///   [`ScalarValue::Timestamp`]. Equality treats incomparable types as
+    ///   unequal.
+    /// - A [`ScalarValue::Binary`] never matches, since JSON has no binary
+    ///   type.
+    /// - [`Filter::Contains`], [`Filter::StartsWith`], and
+    ///   [`Filter::EndsWith`] match only string fields.
+    #[must_use]
+    pub fn matches(&self, doc: &Value) -> bool {
+        match self {
+            Self::Compare { field, op, value } => {
+                let ordering = scalar_cmp(lookup(doc, field), value);
+                match op {
+                    ComparisonOp::Eq => ordering == Some(Ordering::Equal),
+                    ComparisonOp::Ne => ordering != Some(Ordering::Equal),
+                    ComparisonOp::Gt => ordering == Some(Ordering::Greater),
+                    ComparisonOp::Gte => {
+                        matches!(ordering, Some(Ordering::Greater | Ordering::Equal))
+                    }
+                    ComparisonOp::Lt => ordering == Some(Ordering::Less),
+                    ComparisonOp::Lte => matches!(ordering, Some(Ordering::Less | Ordering::Equal)),
+                }
+            }
+            Self::InList { field, values } => {
+                let stored = lookup(doc, field);
+                values.iter().any(|value| scalar_cmp(stored, value) == Some(Ordering::Equal))
+            }
+            Self::NotInList { field, values } => {
+                let stored = lookup(doc, field);
+                values.iter().all(|value| scalar_cmp(stored, value) != Some(Ordering::Equal))
+            }
+            Self::IsNull(field) => lookup(doc, field).is_null(),
+            Self::IsNotNull(field) => !lookup(doc, field).is_null(),
+            Self::Contains { field, pattern } => {
+                lookup(doc, field).as_str().is_some_and(|s| s.contains(pattern))
+            }
+            Self::StartsWith { field, pattern } => {
+                lookup(doc, field).as_str().is_some_and(|s| s.starts_with(pattern))
+            }
+            Self::EndsWith { field, pattern } => {
+                lookup(doc, field).as_str().is_some_and(|s| s.ends_with(pattern))
+            }
+            Self::And(children) => children.iter().all(|child| child.matches(doc)),
+            Self::Or(children) => children.iter().any(|child| child.matches(doc)),
+            Self::Not(inner) => !inner.matches(doc),
+        }
+    }
 }
 
 impl Not for Filter {
@@ -309,13 +366,75 @@ impl Not for Filter {
 }
 
 fn next_iso_date(iso_date: &str) -> anyhow::Result<String> {
-    use chrono::NaiveDate;
-    let date = NaiveDate::parse_from_str(iso_date, "%Y-%m-%d")
-        .map_err(|_e| anyhow::anyhow!("invalid ISO date: {iso_date:?}"))?;
-    let next = date
-        .succ_opt()
-        .ok_or_else(|| anyhow::anyhow!("cannot compute next day for date: {iso_date}"))?;
-    Ok(next.format("%Y-%m-%d").to_string())
+    let (year, month, day) = parse_iso_date(iso_date)
+        .ok_or_else(|| anyhow::anyhow!("invalid ISO date: {iso_date:?}"))?;
+    let (year, month, day) = if day < days_in_month(year, month) {
+        (year, month, day + 1)
+    } else if month < 12 {
+        (year, month + 1, 1)
+    } else if year < 9999 {
+        (year + 1, 1, 1)
+    } else {
+        anyhow::bail!("cannot compute next day for date: {iso_date}");
+    };
+    Ok(format!("{year:04}-{month:02}-{day:02}"))
+}
+
+fn parse_iso_date(iso_date: &str) -> Option<(u32, u32, u32)> {
+    let mut parts = iso_date.split('-');
+    let year = digits(parts.next()?, 4)?;
+    let month = digits(parts.next()?, 2)?;
+    let day = digits(parts.next()?, 2)?;
+    let valid = parts.next().is_none()
+        && (1..=12).contains(&month)
+        && (1..=days_in_month(year, month)).contains(&day);
+    valid.then_some((year, month, day))
+}
+
+fn digits(part: &str, width: usize) -> Option<u32> {
+    if part.len() == width && part.bytes().all(|byte| byte.is_ascii_digit()) {
+        part.parse().ok()
+    } else {
+        None
+    }
+}
+
+const fn days_in_month(year: u32, month: u32) -> u32 {
+    match month {
+        2 if year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400)) => {
+            29
+        }
+        2 => 28,
+        4 | 6 | 9 | 11 => 30,
+        _ => 31,
+    }
+}
+
+const NULL: Value = Value::Null;
+
+fn lookup<'a>(doc: &'a Value, path: &str) -> &'a Value {
+    path.split('.').try_fold(doc, |current, segment| current.get(segment)).unwrap_or(&NULL)
+}
+
+fn scalar_cmp(stored: &Value, target: &ScalarValue) -> Option<Ordering> {
+    match (stored, target) {
+        (Value::Null, ScalarValue::Null) => Some(Ordering::Equal),
+        (Value::Bool(a), ScalarValue::Bool(b)) => Some(a.cmp(b)),
+        (Value::Number(n), _) => {
+            let target = match target {
+                ScalarValue::Int32(i) => f64::from(*i),
+                #[expect(clippy::cast_precision_loss, reason = "JSON numbers compare as f64")]
+                ScalarValue::Int64(i) => *i as f64,
+                ScalarValue::Float64(f) => *f,
+                _ => return None,
+            };
+            n.as_f64().and_then(|stored| stored.partial_cmp(&target))
+        }
+        (Value::String(s), ScalarValue::Str(t) | ScalarValue::Timestamp(t)) => {
+            Some(s.as_str().cmp(t.as_str()))
+        }
+        _ => None,
+    }
 }
 
 /// Sort field for queries.
@@ -325,6 +444,48 @@ pub struct SortField {
     pub field: String,
     /// When `true`, sort descending.
     pub descending: bool,
+}
+
+impl SortField {
+    /// Order two JSON document bodies by this field.
+    ///
+    /// The field path reads as in [`Filter::matches`]. Values of different
+    /// JSON types order by type, `null` < bool < number < string < array <
+    /// object, so the order is total. Two arrays, or two objects, are equal.
+    /// A descending field reverses the order.
+    ///
+    /// A query sorts by its first field, then by each next field with
+    /// [`Ordering::then_with`], and breaks the remaining ties on the document
+    /// id so its pages are stable.
+    #[must_use]
+    pub fn compare(&self, a: &Value, b: &Value) -> Ordering {
+        let ordering = json_cmp(lookup(a, &self.field), lookup(b, &self.field));
+        if self.descending { ordering.reverse() } else { ordering }
+    }
+}
+
+fn json_cmp(a: &Value, b: &Value) -> Ordering {
+    const fn rank(value: &Value) -> u8 {
+        match value {
+            Value::Null => 0,
+            Value::Bool(_) => 1,
+            Value::Number(_) => 2,
+            Value::String(_) => 3,
+            Value::Array(_) => 4,
+            Value::Object(_) => 5,
+        }
+    }
+
+    match (a, b) {
+        (Value::Bool(x), Value::Bool(y)) => x.cmp(y),
+        (Value::Number(x), Value::Number(y)) => x
+            .as_f64()
+            .zip(y.as_f64())
+            .and_then(|(x, y)| x.partial_cmp(&y))
+            .unwrap_or(Ordering::Equal),
+        (Value::String(x), Value::String(y)) => x.cmp(y),
+        _ => rank(a).cmp(&rank(b)),
+    }
 }
 
 /// Options for listing or searching documents.

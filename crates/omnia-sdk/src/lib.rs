@@ -2,6 +2,8 @@
 
 pub mod api;
 mod capabilities;
+#[cfg(feature = "docstore")]
+pub mod docstore;
 mod error;
 #[cfg(feature = "http")]
 pub mod mcp;
@@ -14,15 +16,6 @@ pub use crate::error::*;
 /// Blobstore metadata value types.
 pub mod blobstore {
     pub use crate::{ContainerMetadata, ObjectMetadata};
-}
-
-/// Document store value types and filter builders.
-#[cfg(feature = "docstore")]
-pub mod docstore {
-    pub use omnia_wasi_docstore::document_store::{
-        ComparisonOp, Document, Filter, QueryOptions, QueryResult, ScalarValue, SortField,
-        Timestamp,
-    };
 }
 
 /// Identity access-token value type.

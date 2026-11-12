@@ -19,7 +19,7 @@ default = ["sql", "docstore", "http"]
 # Enables the `TableStore` capability over `wasi:sql`.
 sql = ["dep:omnia-wasi-sql"]
 
-# Enables the `DocumentStore` capability and the `docstore` re-exports.
+# Enables the `DocumentStore` capability and the `docstore` value types.
 docstore = ["dep:omnia-wasi-docstore"]
 
 # Enables the axum-backed `api::http` handler support and the `mcp` server.
@@ -40,7 +40,6 @@ clap_complete = { workspace = true, optional = true }
 http.workspace = true
 http-body.workspace = true
 omnia-guest-macros.workspace = true
-omnia-wasi-docstore = { workspace = true, optional = true }
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -52,6 +51,7 @@ tracing.workspace = true
 futures.workspace = true
 omnia-wasi-blobstore.workspace = true
 omnia-wasi-config.workspace = true
+omnia-wasi-docstore = { workspace = true, optional = true }
 omnia-wasi-http.workspace = true
 omnia-wasi-identity.workspace = true
 omnia-wasi-keyvalue.workspace = true

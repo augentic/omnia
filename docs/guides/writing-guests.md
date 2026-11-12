@@ -276,14 +276,25 @@ As text the envelope is `error[<code>]: <message>` followed by `hint: <hint>` wh
 
 ## Tracing
 
-Annotate functions with `#[omnia_wasi_otel::instrument]` to wrap them in an OpenTelemetry span. `tracing::debug!` and friends work inside guests; spans flow to whatever OTel backend the host configures:
+`tracing::debug!` and friends work inside guests, and spans flow to whatever OTel backend the host configures. Each transport's `export!` runs the export inside `omnia_wasi_otel::scope`: it initializes the guest's telemetry on entry and exports every span and metric as it returns. A span opened anywhere beneath it reaches the host.
+
+Annotate stem handlers with `#[tracing::instrument]`. A stem compiles natively for its handler tests and depends on no `omnia-wasi-*` crate, and the export's scope already owns the telemetry lifecycle:
+
+```rust
+#[tracing::instrument(skip_all)]
+pub(crate) async fn place<P: StateStore>(
+    context: Context<P>, Path(id): Path<String>,
+) -> omnia_sdk::Result<Json<Option<Place>>> { /* ... */ }
+```
+
+A guest that binds its WASI export by hand, as the standalone `examples/` do, annotates the export's `handle` with `#[omnia_wasi_otel::instrument]`, which opens that scope itself:
 
 ```rust
 #[omnia_wasi_otel::instrument(name = "http_guest_handle", level = Level::INFO)]
 async fn handle(request: Request) -> Result<Response, ErrorCode> { /* ... */ }
 ```
 
-The outermost instrumented `async fn` (or `command::export!`, which does the same for a CLI entry) runs inside `omnia_wasi_otel::scope`: it initializes the guest's telemetry on entry and exports every span and metric as it returns, so put the attribute on the export's `handle` and on any handler beneath it. A sync function only opens a span.
+Only the outermost scope initializes and exports. A nested instrumented `async fn` adds its span to the same run, and on a sync function the attribute only opens a span.
 
 The OpenTelemetry API works directly too: `global::tracer(..)` and `global::meter(..)` return Omnia's own providers, which record straight into the `omnia:otel` records the flush exports — no OpenTelemetry SDK is linked into the guest. Counters, histograms, and gauges export delta series (one instance per invocation); up-down counters are cumulative. Observable (callback) instruments are no-ops: record through a synchronous instrument instead.
 

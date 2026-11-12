@@ -2460,6 +2460,7 @@ dependencies = [
  "omnia-wasi-vault",
  "omnia-wasi-vcs",
  "omnia-wasi-websocket",
+ "serde_json",
  "tempfile",
  "test-programs",
  "tokio",
@@ -2506,12 +2507,10 @@ name = "omnia-wasi-docstore"
 version = "0.38.0"
 dependencies = [
  "anyhow",
- "chrono",
  "futures",
  "omnia",
  "omnia-core",
  "omnia-test",
- "serde",
  "serde_json",
  "test-programs",
  "tokio",
@@ -4090,7 +4089,6 @@ dependencies = [
  "omnia-test",
  "omnia-wasi-blobstore",
  "omnia-wasi-config",
- "omnia-wasi-docstore",
  "omnia-wasi-http",
  "omnia-wasi-identity",
  "omnia-wasi-keyvalue",
