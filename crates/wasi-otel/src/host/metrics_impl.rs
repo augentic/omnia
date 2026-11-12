@@ -153,7 +153,7 @@ impl From<wasi::MetricData> for MetricData {
 
 impl From<wasi::Gauge> for Gauge {
     fn from(gauge: wasi::Gauge) -> Self {
-        let start = gauge.start_time.map(datetime_nanos).unwrap_or_default();
+        let start = gauge.start_time.map_or_default(datetime_nanos);
         let time = datetime_nanos(gauge.time);
         Self {
             data_points: gauge

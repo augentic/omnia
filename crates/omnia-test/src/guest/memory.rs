@@ -129,8 +129,7 @@ impl Memory {
     pub fn objects(&self, container: &str) -> Vec<String> {
         self.lock_blobs()
             .get(container)
-            .map(|container| container.objects.keys().cloned().collect())
-            .unwrap_or_default()
+            .map_or_default(|container| container.objects.keys().cloned().collect())
     }
 
     /// Seeds a state entry in this handle's bucket, with no TTL.
@@ -148,7 +147,9 @@ impl Memory {
     pub fn insert_secret(&self, key: &str, bytes: &[u8]) {
         let mut secrets = self.lock_secrets();
         let locker = secrets.entry(self.name.to_string()).or_default();
-        drop(locker.insert(key.to_owned(), bytes.to_vec()));
+        let replaced = locker.insert(key.to_owned(), bytes.to_vec());
+        drop(secrets);
+        drop(replaced);
     }
 
     /// Seeds an object, creating its container.
@@ -295,37 +296,31 @@ impl Memory {
     }
 
     fn object_info(&self, container: &str, name: &str) -> Option<ObjectMetadata> {
-        let blobs = self.lock_blobs();
-        let object = blobs.get(container)?.objects.get(name)?;
-        Some(ObjectMetadata::new(
-            name,
-            container,
-            timestamp(object.created_at),
-            object.data.len() as u64,
-        ))
+        self.lock_blobs().get(container)?.objects.get(name).map(|object| {
+            let size = object.data.len() as u64;
+            ObjectMetadata::new(name, container, timestamp(object.created_at), size)
+        })
     }
 
     fn listing(&self, container: &str, prefix: &str, after: Option<&str>) -> Vec<ObjectMetadata> {
-        let blobs = self.lock_blobs();
-        let Some(objects) = blobs.get(container).map(|container| &container.objects) else {
-            return Vec::new();
-        };
-        objects
-            .iter()
-            .filter(|(name, _)| {
-                name.starts_with(prefix) && after.is_none_or(|after| name.as_str() > after)
-            })
-            .map(|(name, object)| {
-                let size = object.data.len() as u64;
-                ObjectMetadata::new(name, container, timestamp(object.created_at), size)
-            })
-            .collect()
+        self.lock_blobs().get(container).map_or_default(|stored| {
+            stored
+                .objects
+                .iter()
+                .filter(|(name, _)| {
+                    name.starts_with(prefix) && after.is_none_or(|after| name.as_str() > after)
+                })
+                .map(|(name, object)| {
+                    let size = object.data.len() as u64;
+                    ObjectMetadata::new(name, container, timestamp(object.created_at), size)
+                })
+                .collect()
+        })
     }
 
     fn container_info(&self, name: &str) -> Option<ContainerMetadata> {
-        let blobs = self.lock_blobs();
-        let container = blobs.get(name)?;
-        Some(ContainerMetadata::new(name, timestamp(container.created_at)))
+        let created_at = self.lock_blobs().get(name)?.created_at;
+        Some(ContainerMetadata::new(name, timestamp(created_at)))
     }
 
     // -- secrets ----------------------------------------------------------
@@ -337,16 +332,13 @@ impl Memory {
     }
 
     fn secret_keys(&self, after: Option<&str>) -> Vec<String> {
-        self.lock_secrets()
-            .get(&*self.name)
-            .map(|locker| {
-                locker
-                    .keys()
-                    .filter(|key| after.is_none_or(|after| key.as_str() > after))
-                    .cloned()
-                    .collect()
-            })
-            .unwrap_or_default()
+        self.lock_secrets().get(&*self.name).map_or_default(|locker| {
+            locker
+                .keys()
+                .filter(|key| after.is_none_or(|after| key.as_str() > after))
+                .cloned()
+                .collect()
+        })
     }
 }
 

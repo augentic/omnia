@@ -119,8 +119,7 @@ fn metadata(message: &Message) -> Vec<(String, String)> {
     let mut pairs: Vec<_> = message
         .metadata
         .as_ref()
-        .map(|md| md.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
-        .unwrap_or_default();
+        .map_or_default(|md| md.iter().map(|(k, v)| (k.clone(), v.clone())).collect());
     pairs.sort();
     pairs
 }

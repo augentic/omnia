@@ -24,7 +24,7 @@ pub fn expand(input: &DeriveInput) -> Result<TokenStream> {
     let struct_name = &input.ident;
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
     let existing_predicates =
-        where_clause.map(|wc| wc.predicates.iter().collect::<Vec<_>>()).unwrap_or_default();
+        where_clause.map_or_default(|wc| wc.predicates.iter().collect::<Vec<_>>());
     let type_params: Vec<&Ident> = input.generics.type_params().map(|param| &param.ident).collect();
 
     let impls = assigned.into_iter().map(|(cap, field_ident, field_ty)| {

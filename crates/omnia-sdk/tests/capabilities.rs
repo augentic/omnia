@@ -180,7 +180,7 @@ async fn document_decode_invalid() {
 
     assert_eq!(error.kind(), ErrorKind::Invalid);
     assert!(error.to_string().contains("decoding document `bob`"), "{error}");
-    let source = error.source().map(ToString::to_string).unwrap_or_default();
+    let source = error.source().map_or_default(ToString::to_string);
     assert!(source.contains("missing field `hits`"), "{source}");
 }
 
