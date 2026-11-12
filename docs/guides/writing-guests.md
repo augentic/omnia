@@ -15,7 +15,7 @@ Every pattern here is drawn from [`omnia-exemplar`](https://github.com/augentic/
 
 ## Project setup
 
-A guest is a library crate with `crate-type = ["cdylib", "rlib"]`: `cdylib` produces the WebAssembly component on `wasm32-wasip2`, and `rlib` lets native integration tests link your routers and handlers against `omnia_test::guest::Provider` doubles.
+A guest is a library crate with `crate-type = ["cdylib", "rlib"]`: `cdylib` produces the WebAssembly component on `wasm32-wasip2`, and `rlib` lets a native build link your routers and handlers. Native integration tests run them against `omnia_test::guest::Provider` doubles, and a native host can serve them over a provider of its own (see the [Provider Contract](../reference/provider-contract.md)).
 
 Typical guest dependencies:
 
@@ -55,9 +55,9 @@ cargo build --example <name>-wasm --target wasm32-wasip2
 
 `omnia-sdk` keeps application logic independent of how it is invoked. Three pieces, defined once:
 
-- A **provider** is the struct your handlers run against — it carries their capabilities (implement `DocumentDb`, `Config`, etc. on it).
+- A **provider** is the value your handlers run against: it serves their capabilities (implement `DocumentDb`, `Config`, etc. on it). `WasiProvider` serves them through the WASI host, `omnia_test::guest::Provider` with in-memory doubles in tests, and a native provider of your own over real services in a native host ([Provider Contract](../reference/provider-contract.md)).
 - A **client** (`Client::new(provider)`) owns the provider. It is the state of an HTTP router and the thing a messaging router or command invokes handlers through.
-- A **context** (`Context<P>`) is what a handler receives: the provider, through `provider()` or one accessor per capability (`config()`, `state()`, `sql()`, `http()`, `publisher()`, ...), and the public transport-neutral `metadata` (request, correlation, and causation ids, and the tenant when the transport names one). A handler bounds its `P` on the capability traits it uses and never names the provider; an accessor names the one capability a call means where two of them share a method name.
+- A **context** (`Context<P>`) is what a handler receives: the provider, through `provider()` or one accessor per capability (`config()`, `state()`, `sql()`, `http()`, `publisher()`, ...), and the public transport-neutral `metadata` (request, correlation, and causation ids, the tenant when the transport names one, and the deadline the host set for the invocation). A handler bounds its `P` on the capability traits it uses and never names the provider; an accessor names the one capability a call means where two of them share a method name.
 
 An **HTTP handler** is a plain [Axum](https://github.com/tokio-rs/axum) handler. `Context<P>` is an extractor over the `Client` in the router state; the input comes through axum's own `Path`, `Query`, and `Json` extractors; the output is anything `IntoResponse`, typically `Json<Reply>`:
 
@@ -109,7 +109,7 @@ where
 omnia_sdk::api::http::export!(http_router);
 ```
 
-One `Handlers<P>` maps every transport's events onto handlers: an HTTP route is registered through axum's own `get`/`post`/`put`/`patch`/`delete` (`route`), a messaging topic by exact name (`topic`), and a CLI subcommand by name (`command`), and `with_state(Client::new(provider))` closes them into the one `Router<P>`. Each transport's `export!` macro (`http::export!`, `messaging::export!`, or `command::export!`) binds its WASI export, calling the router fn with `WasiProvider` (or a custom provider passed as a second argument), and expands to the `#[omnia_wasi_otel::instrument]`-scoped export on `wasm32` and to nothing on native targets. The HTTP export also layers `api::http::trace`, which serves each request inside a `handler` span carrying the request and correlation ids, the method, and the matched route; a native test can layer it with `axum::middleware::from_fn(trace)`. A delivery and a subcommand run inside the same span through the router's dispatch, which names the `topic` or the `command`.
+One `Handlers<P>` maps every transport's events onto handlers: an HTTP route is registered through axum's own `get`/`post`/`put`/`patch`/`delete` (`route`), a messaging topic by exact name (`topic`), and a CLI subcommand by name (`command`), and `with_state(Client::new(provider))` closes them into the one `Router<P>`. Each transport's `export!` macro (`http::export!`, `messaging::export!`, or `command::export!`) binds its WASI export, calling the router fn with `WasiProvider` (or a custom provider passed as a second argument), and expands to the `#[omnia_wasi_otel::instrument]`-scoped export on `wasm32` and to nothing on native targets, where a test or a native host serves the router itself. The HTTP export also layers `api::http::trace`, which serves each request inside a `handler` span carrying the request and correlation ids, the method, and the matched route; a native host or test layers it with `axum::middleware::from_fn(trace)`. A delivery and a subcommand run inside the same span through the router's dispatch, which names the `topic` or the `command`.
 
 Messaging is `topic("items.created", item_created)` on the same `Handlers<P>`; topic matching is exact. A module registers its HTTP routes and topics on an `api::Handlers<P>` of its own, with no client, and the guest merges each (`Handlers::from([..])` or `Handlers::merge`) and closes the whole into its one `api::Router<P>` with `Handlers::with_state`, the router's only constructor; a path or topic registered twice panics where the two meet. `topic` decodes JSON; `topic_with(topic, handler, decode)` takes a decoder `Fn(&Delivery) -> Result<I, DecodeError>` over the whole `Delivery` for any other wire format.
 
@@ -283,7 +283,7 @@ The pieces, in the order argv flows through them:
 - **The program** is the router: `--version` answers the guest crate's `CARGO_PKG_VERSION` and `--help` opens with its `CARGO_PKG_DESCRIPTION`, both stamped by `command::export!`; `Router::name` (default `argv[0]`), `version`, `about`, and `env_prefix` override them, and `Router::hints(|error| ..)` attaches a remedy hint to every failure that carries none.
 - **`Command::new(&client, &metadata, format)`** is the underlying projector the router dispatches through, and the escape hatch for a hand-written clap grammar: `parse::<App>(argv) -> Parsed` classifies argv, and `command.call(handler, input)` runs one verb over the client, encoding a success body in the selected `command::Format` onto stdout at exit 0 — `Format::Text` is the output's `Render` form, `Format::Json` the output pretty-printed with a trailing newline.
 - **`Response { stdout, stderr, exit }`** buffers both channels. `command::export!(command_router)` binds a router fn (or a zero-argument `async fn` returning `IntoExit`) as the `wasi:cli/run` export and writes the channels at that boundary through `IntoExit`: a `BrokenPipe` on either channel (a reader that went away) keeps the response's own exit, any other refused channel exits 3. Because the channels are whole buffers, a command that must stream writes to the process channels itself and returns `Result<(), u8>` or `()`, which the export also accepts; a guest that needs its own export writes the raw `wasip3` export and calls `command::execute_wasi` itself.
-- **`Metadata::from_env(prefix)`** reads `<PREFIX>_REQUEST_ID`, `<PREFIX>_CORRELATION_ID`, `<PREFIX>_CAUSATION_ID`, and `<PREFIX>_TENANT` from the environment (`Router::run` derives the default prefix from the program name, or `.env_prefix(..)` sets it; `run_with` takes explicit metadata). A missing request id is minted from `wasi:random`, as on every transport, so a command invocation is as observable as an HTTP request: the router runs the verb in a `handler` span carrying the request and correlation ids and the `command`.
+- **`Metadata::from_env(prefix)`** reads `<PREFIX>_REQUEST_ID`, `<PREFIX>_CORRELATION_ID`, `<PREFIX>_CAUSATION_ID`, `<PREFIX>_TENANT`, and `<PREFIX>_DEADLINE` from the environment (`Router::run` derives the default prefix from the program name, or `.env_prefix(..)` sets it; `run_with` takes explicit metadata). A missing request id is minted from the platform's CSPRNG (`wasi:random` in a guest), as on every transport, so a command invocation is as observable as an HTTP request: the router runs the verb in a `handler` span carrying the request and correlation ids and the `command`.
 
 ### Failures and the exit map
 
@@ -309,7 +309,7 @@ As text the envelope is `error[<code>]: <message>` followed by `hint: <hint>` wh
 
 `tracing::debug!` and friends work inside guests, and spans flow to whatever OTel backend the host configures. Each transport's `export!` runs the export inside `omnia_wasi_otel::scope`: it initializes the guest's telemetry on entry and exports every span and metric as it returns. A span opened anywhere beneath it reaches the host.
 
-Annotate stem handlers with `#[tracing::instrument]`. A stem compiles natively for its handler tests and depends on no `omnia-wasi-*` crate, and the export's scope already owns the telemetry lifecycle:
+Annotate stem handlers with `#[tracing::instrument]`. A stem compiles natively, for its handler tests or a native host, and depends on no `omnia-wasi-*` crate. The export's scope already owns the telemetry lifecycle:
 
 ```rust
 #[tracing::instrument(skip_all)]

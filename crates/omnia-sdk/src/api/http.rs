@@ -71,8 +71,8 @@ macro_rules! __export_http {
 /// Calls the router fn on each request with [`WasiProvider`](crate::WasiProvider),
 /// or with the provider expression passed as a second argument, and serves the
 /// request through the resulting router inside the `handler` span [`trace`]
-/// opens. Expands to nothing on native targets, so the same crate's tests
-/// build the router natively.
+/// opens. Expands to nothing on native targets, where a test or a native host
+/// serves the router itself.
 ///
 /// ```rust,ignore
 /// use omnia_sdk::api::http;
@@ -109,10 +109,14 @@ pub use omnia_wasi_http::serve;
 
 impl Metadata {
     /// Build metadata from HTTP request headers: `x-request-id`,
-    /// `x-correlation-id`, `x-causation-id`, and `x-tenant`.
+    /// `x-correlation-id`, `x-causation-id`, `x-tenant`, and `x-deadline`.
     ///
     /// HTTP's carrier for the values the command line reads from the
     /// environment; a missing request id is minted as on every transport.
+    ///
+    /// # Panics
+    ///
+    /// Panics as [`Metadata::from_lookup`] does.
     #[must_use]
     pub fn from_headers(headers: &HeaderMap) -> Self {
         Self::from_lookup(|name| {

@@ -6,6 +6,7 @@ mod support;
 
 use std::future::{Ready, ready};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::{Duration, UNIX_EPOCH};
 
 use axum::Json;
 use axum::body::Body;
@@ -101,11 +102,9 @@ async fn send_raw(
 
 #[tokio::test]
 async fn invoke_direct() {
-    let metadata = Metadata {
-        correlation_id: Some("call-1".to_string()),
-        tenant: Some("acme".to_string()),
-        ..Metadata::default()
-    };
+    let mut metadata = Metadata::default();
+    metadata.correlation_id = Some("call-1".to_string());
+    metadata.tenant = Some("acme".to_string());
     let context = Context::new((), metadata);
 
     let output = echo(
@@ -339,6 +338,7 @@ fn from_lookup_mints() {
     assert_eq!(first.correlation_id, first.request_id);
     assert_eq!(first.causation_id, None);
     assert_eq!(first.tenant, None);
+    assert_eq!(first.deadline, None);
     assert_ne!(first.request_id, second.request_id);
     assert_eq!(Metadata::default().request_id, None);
 }
@@ -350,6 +350,7 @@ fn from_lookup_reads() {
         "correlation-id" => Some("corr-1".to_owned()),
         "causation-id" => Some("cause-1".to_owned()),
         "tenant" => Some("acme".to_owned()),
+        "deadline" => Some("1700000000123".to_owned()),
         _ => None,
     });
 
@@ -357,7 +358,10 @@ fn from_lookup_reads() {
     assert_eq!(metadata.correlation_id.as_deref(), Some("corr-1"));
     assert_eq!(metadata.causation_id.as_deref(), Some("cause-1"));
     assert_eq!(metadata.tenant.as_deref(), Some("acme"));
-    assert_eq!(metadata.deadline, None);
+    assert_eq!(metadata.deadline, Some(UNIX_EPOCH + Duration::from_millis(1_700_000_000_123)));
+
+    let unparseable = Metadata::from_lookup(|name| (name == "deadline").then(|| "soon".to_owned()));
+    assert_eq!(unparseable.deadline, None);
 }
 
 #[test]

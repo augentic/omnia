@@ -7,5 +7,8 @@
 //! - `omnia-test` runs them natively over its doubles.
 //! - A guest runs them over [`WasiProvider`](crate::WasiProvider), against a
 //!   real host and its backend.
+//!
+//! The rows are the testable half of the
+//! [provider obligations](https://github.com/augentic/omnia/blob/main/docs/reference/provider-contract.md#obligations).
 
 pub mod state;

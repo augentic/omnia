@@ -33,7 +33,7 @@ On the `run` grammar the flags are the host's, global to the command (`bin -v ru
 
 | Variable             | Default               | Meaning                                                               |
 | -------------------- | --------------------- | --------------------------------------------------------------------- |
-| `GUEST_TIMEOUT_MS`   | `30000`               | Wall-clock cap on a single server guest invocation and each link-dispatch hop on a server-rooted chain. A command-mode (`wasi:cli/run`) chain is uncapped, including its link hops. |
+| `GUEST_TIMEOUT_MS`   | `30000`               | Wall-clock cap on a single server guest invocation and each link-dispatch hop on a server-rooted chain. A command-mode (`wasi:cli/run`) chain is uncapped, including its link hops. The HTTP and messaging hosts stamp its expiry on each invocation as the guest's `Metadata::deadline`. |
 | `MAX_MEMORY_BYTES`   | `268435456` (256 MiB) | Maximum linear memory a guest may grow to.                            |
 | `MAX_FUEL`           | `0` (off)             | Per-invocation fuel budget; `0` disables metering. Compile-affecting. |
 | `MAX_DISPATCH_DEPTH` | `8`                   | Maximum nesting depth for host-mediated calls between guests.         |

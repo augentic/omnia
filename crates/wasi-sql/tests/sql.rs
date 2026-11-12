@@ -50,8 +50,8 @@ async fn sql_query_exec() {
     run_guest(test_programs::SQL_QUERY_EXEC, backends.clone()).await;
 
     // Persisted state: the same `:memory:` database the guest wrote holds the
-    // one row its delete left behind.
-    assert_eq!(names(&backends.sql, "default").await, ["alpha"]);
+    // one row its delete left behind, under the name its update gave it.
+    assert_eq!(names(&backends.sql, "default").await, ["renamed"]);
 }
 
 #[tokio::test]

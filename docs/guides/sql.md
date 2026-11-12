@@ -36,7 +36,7 @@ async fn ensure_schema() -> Result<()> {
 }
 ```
 
-Statements are always parameterized (`$1`, `$2`, ...) — string interpolation into SQL is never necessary and never safe.
+Statements are always parameterized (`$1`, `$2`, ...) — string interpolation into SQL is never necessary and never safe. Every backend binds `$n` to the `n`th parameter wherever it appears, so `UPDATE items SET name = $2 WHERE id = $1` runs alike on `SQLite` and Postgres.
 
 The database name (`default` here) is what the backend resolves, and both backends refuse a name they do not declare. `SqlDefault` declares `default` plus the names in `SQL_DATABASES`, and `omnia-postgres` maps `default` to `POSTGRES_URL` and each name in `POSTGRES_POOLS` to `POSTGRES_URL__<NAME>`.
 

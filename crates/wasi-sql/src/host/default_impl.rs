@@ -11,7 +11,7 @@ use anyhow::{Context, Result, ensure};
 use futures::FutureExt;
 use omnia_core::Connect;
 use rusqlite::types::ValueRef;
-use rusqlite::{Connection as SqliteConnection, params_from_iter};
+use rusqlite::{Connection as SqliteConnection, Statement};
 use tracing::instrument;
 
 use crate::host::resource::{Connection, FutureResult};
@@ -125,17 +125,14 @@ impl Connection for SqliteConn {
         async move {
             // rusqlite blocks, and holds the mutex, so it never pins an executor thread
             tokio::task::spawn_blocking(move || {
-                let rusqlite_params: Vec<_> = params.iter().map(to_sqlite).collect();
-
                 let conn = conn.lock();
                 let mut stmt = conn.prepare(&query).context("failed to prepare statement")?;
+                bind(&mut stmt, &params).context("failed to bind parameters")?;
 
                 let column_names: Vec<String> =
                     stmt.column_names().map(ToString::to_string).collect();
 
-                let mut rows = stmt
-                    .query(params_from_iter(rusqlite_params.iter()))
-                    .context("failed to execute query")?;
+                let mut rows = stmt.raw_query();
 
                 let mut result_rows = Vec::new();
                 let mut index = 0;
@@ -178,14 +175,11 @@ impl Connection for SqliteConn {
         async move {
             // as `query`: keep the blocking work off the executor
             tokio::task::spawn_blocking(move || {
-                let rusqlite_params: Vec<_> = params.iter().map(to_sqlite).collect();
-
                 let conn = conn.lock();
                 let mut stmt = conn.prepare(&query).context("failed to prepare statement")?;
+                bind(&mut stmt, &params).context("failed to bind parameters")?;
 
-                let rows_affected = stmt
-                    .execute(params_from_iter(rusqlite_params.iter()))
-                    .context("failed to execute statement")?;
+                let rows_affected = stmt.raw_execute().context("failed to execute statement")?;
 
                 Ok(u32::try_from(rows_affected).unwrap_or(u32::MAX))
             })
@@ -194,6 +188,34 @@ impl Connection for SqliteConn {
         }
         .boxed()
     }
+}
+
+// `SQLite` numbers `$n` slots by first appearance, not by `n`: positional
+// binding would hand `$2` the first value in `SET name = $2 WHERE id = $1`.
+fn bind(stmt: &mut Statement<'_>, params: &[DataType]) -> Result<()> {
+    let count = stmt.parameter_count();
+    ensure!(count == params.len(), "the statement takes {count} parameters, not {}", params.len());
+
+    for slot in 1..=count {
+        let value = match stmt.parameter_name(slot) {
+            None => &params[slot - 1],
+            Some(name) => {
+                let number = name
+                    .strip_prefix(['$', '?'])
+                    .and_then(|number| number.parse::<usize>().ok())
+                    .with_context(|| {
+                        format!("unsupported placeholder `{name}`; use `?`, `?n`, or `$n`")
+                    })?;
+                number
+                    .checked_sub(1)
+                    .and_then(|index| params.get(index))
+                    .with_context(|| format!("placeholder `{name}` has no supplied value"))?
+            }
+        };
+        stmt.raw_bind_parameter(slot, to_sqlite(value))?;
+    }
+
+    Ok(())
 }
 
 // A `u64` is stored as its raw bits, the `SQLite` convention: its integers

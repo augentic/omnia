@@ -139,6 +139,15 @@ impl Error {
             | Self::BadGateway { description, .. } => description.clone(),
         }
     }
+
+    pub(crate) const fn kind(&self) -> ErrorKind {
+        match self {
+            Self::BadRequest { .. } => ErrorKind::Invalid,
+            Self::NotFound { .. } => ErrorKind::NotFound,
+            Self::ServerError { .. } => ErrorKind::Other,
+            Self::BadGateway { .. } => ErrorKind::Unavailable,
+        }
+    }
 }
 
 // An `Error` inside the chain keeps its variant and code. A

@@ -1,10 +1,13 @@
 //! A `wasi:http/incoming-handler` guest behind `http::export!`, plain axum
 //! handlers, and `WasiProvider`: the one route echoes a `message` taken from
 //! the JSON body (POST) or the query string (GET), alongside the request id
-//! the `Context` extractor carried in. Middleware first asserts the host's
+//! and deadline the `Context` extractor carried in, the deadline in
+//! milliseconds since the Unix epoch. Middleware first asserts the host's
 //! request normalisation reached it: scheme and authority filled from `Host`.
 
 #![cfg(target_arch = "wasm32")]
+
+use std::time::UNIX_EPOCH;
 
 use axum::Router;
 use axum::body::Body;
@@ -26,6 +29,7 @@ struct Input {
 struct Echo {
     message: String,
     request_id: String,
+    deadline: Option<u64>,
 }
 
 http::export!(router);
@@ -57,8 +61,13 @@ async fn echo_post<P: Send + Sync + 'static>(
 
 fn echo<P>(input: Input, context: Context<P>) -> Result<Json<Echo>, Error> {
     let request_id = context.metadata.request_id.expect("http metadata always carries an id");
+    let deadline = context.metadata.deadline.map(|deadline| {
+        let since_epoch = deadline.duration_since(UNIX_EPOCH).expect("deadline after the epoch");
+        u64::try_from(since_epoch.as_millis()).expect("deadline fits in u64 milliseconds")
+    });
     Ok(Json(Echo {
         message: input.message,
         request_id,
+        deadline,
     }))
 }

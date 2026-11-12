@@ -37,7 +37,7 @@ use std::error::Error;
 use std::fmt;
 use std::future::Future;
 use std::sync::Arc;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -141,6 +141,7 @@ impl From<&crate::Error> for ErrorBody {
 
 /// Transport-neutral invocation metadata.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[non_exhaustive]
 pub struct Metadata {
     /// Identifies this invocation at its transport boundary.
     pub request_id: Option<String>,
@@ -155,6 +156,10 @@ pub struct Metadata {
     pub tenant: Option<String>,
 
     /// The latest instant at which the caller considers the work useful.
+    ///
+    /// The Omnia host sets it on every HTTP request and messaging delivery, to
+    /// the instant its guest timeout expires. A command runs unbounded and
+    /// carries none.
     pub deadline: Option<SystemTime>,
 }
 
@@ -162,9 +167,14 @@ impl Metadata {
     /// Build metadata from a transport's named-value lookup.
     ///
     /// Names are the transport-neutral `request-id` / `correlation-id` /
-    /// `causation-id` / `tenant`. A missing request id is minted so every
-    /// invocation is observable; the correlation id falls back to the
-    /// request id.
+    /// `causation-id` / `tenant` / `deadline`. A missing request id is minted
+    /// so every invocation is observable; the correlation id falls back to the
+    /// request id. The `deadline` is decimal milliseconds since the Unix epoch,
+    /// and a value that does not parse reads as none.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the platform's random source fails while minting a request id.
     pub fn from_lookup(lookup: impl Fn(&str) -> Option<String>) -> Self {
         let request_id = lookup("request-id").unwrap_or_else(mint_request_id);
         Self {
@@ -172,7 +182,7 @@ impl Metadata {
             request_id: Some(request_id),
             causation_id: lookup("causation-id"),
             tenant: lookup("tenant"),
-            deadline: None,
+            deadline: lookup("deadline").as_deref().and_then(parse_deadline),
         }
     }
 
@@ -191,27 +201,16 @@ impl Metadata {
     }
 }
 
-// A fresh request id: 32 lowercase hex chars from 128 random bits.
+// A fresh request id: 32 lowercase hex chars from 128 bits of the platform's
+// CSPRNG, which is `wasi:random` in a guest and the OS on native.
 fn mint_request_id() -> String {
-    let (high, low) = random_u64_pair();
-    format!("{high:016x}{low:016x}")
+    let mut bytes = [0_u8; 16];
+    getrandom::fill(&mut bytes).expect("the platform's random source is available");
+    format!("{:032x}", u128::from_be_bytes(bytes))
 }
 
-// The native arm exists so the transports are testable off-target; it
-// is unique per call but not a CSPRNG, and no native transport mints ids.
-fn random_u64_pair() -> (u64, u64) {
-    cfg_select! {
-        all(target_arch = "wasm32", target_os = "wasi") => {
-            use wasip3::random::random::get_random_u64;
-
-            (get_random_u64(), get_random_u64())
-        }
-        _ => {
-            use std::hash::{BuildHasher, RandomState};
-
-            (RandomState::new().hash_one(0_u8), RandomState::new().hash_one(1_u8))
-        }
-    }
+fn parse_deadline(millis: &str) -> Option<SystemTime> {
+    SystemTime::UNIX_EPOCH.checked_add(Duration::from_millis(millis.parse().ok()?))
 }
 
 /// Context owned by one handler call.
@@ -510,9 +509,20 @@ impl<P: Send + Sync + 'static> Router<P> {
 
     /// Dispatch one delivery by exact topic.
     ///
+    /// A broker serving the router acts on a failure by its variant:
+    ///
+    /// - It drops an [`Undecodable`](DeliveryError::Undecodable) delivery,
+    ///   which no redelivery decodes.
+    /// - It redelivers a [`Failed`](DeliveryError::Failed) one of kind
+    ///   [`Unavailable`](crate::capability::ErrorKind::Unavailable), which may
+    ///   succeed later.
+    ///
     /// # Errors
     ///
-    /// Returns missing-topic, unhandled-topic, decoding, or handler failures.
+    /// Returns [`DeliveryError::MissingTopic`] or
+    /// [`DeliveryError::UnhandledTopic`] when no route takes the delivery,
+    /// [`DeliveryError::Undecodable`] when its payload does not decode, and
+    /// [`DeliveryError::Failed`] when the handler fails.
     pub async fn handle(&self, delivery: Delivery) -> Result<(), DeliveryError> {
         self.topics.handle(delivery, &self.client).await
     }

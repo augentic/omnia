@@ -36,7 +36,7 @@ A guest wires its routers to `omnia_sdk::WasiProvider`, which implements every c
 omnia_sdk::api::http::export!(http_router);
 ```
 
-A test runs the same handler against `omnia_test::guest::Provider`, which implements every capability trait over one `pub` field per double, each seeded through a consuming builder of the same name:
+A test runs the same handler natively against `omnia_test::guest::Provider`. It is one native provider among others: a native host serves the same handlers over a provider of its own ([Provider Contract](../reference/provider-contract.md)). `Provider` implements every capability trait over one `pub` field per double, each seeded through a consuming builder of the same name:
 
 ```rust,ignore
 use omnia_test::guest::{MapConfig, Provider};
@@ -63,7 +63,7 @@ Every capability trait is also implemented for `Arc<T>`, `&T`, and `Box<T>`, so 
 
 That covers the two other shapes a test provider takes. A handler bounded on a single capability needs no struct at all: pass `Arc<Memory>` (or `&Memory`) where the provider goes. A bespoke struct — generic over a storage type, say, or holding a double behind an `Arc` — hand-writes its impls, each method forwarding to the field that carries the double, exactly as a production provider over a custom backend would.
 
-A hand-written capability impl proves it keeps the trait's contract with the rows in `omnia_sdk::contract`: one generic `async fn` per invariant, which panics when the provider breaks it. `omnia-test` runs the `contract::state` rows over `Memory` ([`tests/contract.rs`](../../crates/omnia-test/tests/contract.rs)), and a guest runs the same rows over `WasiProvider` against the real host ([`programs/keyvalue/state_store.rs`](../../crates/test-programs/programs/keyvalue/state_store.rs)).
+A hand-written capability impl proves it keeps the trait's contract with the rows in `omnia_sdk::contract`: one generic `async fn` per invariant, which panics when the provider breaks it. `omnia-test` runs the `contract::state` rows over `Memory` ([`tests/contract.rs`](../../crates/omnia-test/tests/contract.rs)), and a guest runs the same rows over `WasiProvider` against the real host ([`programs/keyvalue/state_store.rs`](../../crates/test-programs/programs/keyvalue/state_store.rs)). Passing the rows is the first of the [provider obligations](../reference/provider-contract.md#obligations).
 
 ## Component rung: `Deployment` over `Backends`
 

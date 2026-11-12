@@ -2,11 +2,14 @@
 
 mod support;
 
+use std::fmt;
 use std::future::{Ready, ready};
 use std::sync::{Arc, Mutex};
 
 use omnia_sdk::api::messaging::{Delivery, DeliveryError};
 use omnia_sdk::api::{Client, Context, DecodeError, Handlers};
+use omnia_sdk::capability::{self, ErrorKind};
+use omnia_sdk::{bad_gateway, bad_request};
 use serde::{Deserialize, Serialize};
 
 use self::support::{Spans, fields};
@@ -72,8 +75,49 @@ async fn malformed_delivery() {
     );
     assert!(matches!(
         router.handle(delivery(Some("events"), b"not-json")).await,
-        Err(DeliveryError::Rejected(_))
+        Err(DeliveryError::Undecodable(_))
     ));
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("could not place the order")]
+struct PlaceError(#[source] capability::Error);
+
+fn unavailable() -> capability::Error {
+    capability::Error::new(ErrorKind::Unavailable, "store did not answer")
+}
+
+#[tokio::test]
+async fn failing_handler() {
+    let router = Handlers::new()
+        .topic("gateway", |_: Context<()>, _: EchoInput| {
+            ready(Err::<(), _>(bad_gateway!("upstream did not answer")))
+        })
+        .topic("store", |_: Context<()>, _: EchoInput| ready(Err::<(), _>(unavailable())))
+        .topic("order", |_: Context<()>, _: EchoInput| {
+            ready(Err::<(), _>(PlaceError(unavailable())))
+        })
+        .topic("request", |_: Context<()>, _: EchoInput| {
+            ready(Err::<(), _>(bad_request!("no name")))
+        })
+        .topic("format", |_: Context<()>, _: EchoInput| ready(Err::<(), _>(fmt::Error)))
+        .with_state(Client::new(()));
+
+    for (topic, expected, text) in [
+        ("gateway", ErrorKind::Unavailable, "upstream did not answer"),
+        ("store", ErrorKind::Unavailable, "store did not answer"),
+        ("order", ErrorKind::Unavailable, "could not place the order"),
+        ("request", ErrorKind::Invalid, "no name"),
+        ("format", ErrorKind::Other, "when formatting"),
+    ] {
+        match router.handle(delivery(Some(topic), br#"{"name":"message"}"#)).await {
+            Err(DeliveryError::Failed { kind, message }) => {
+                assert_eq!(kind, expected, "{topic}: {message}");
+                assert!(message.contains(text), "{topic}: {message}");
+            }
+            outcome => panic!("`{topic}` fails in its handler: {outcome:?}"),
+        }
+    }
 }
 
 #[tokio::test]
@@ -104,7 +148,7 @@ async fn invalid_payload_span() {
         .with_metadata("request-id", "req-1")
         .with_metadata("correlation-id", "corr-1");
 
-    assert!(matches!(router.handle(delivery).await, Err(DeliveryError::Rejected(_))));
+    assert!(matches!(router.handle(delivery).await, Err(DeliveryError::Undecodable(_))));
     assert_eq!(
         spans.handler(),
         fields([

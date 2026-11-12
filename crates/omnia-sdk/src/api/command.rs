@@ -107,7 +107,7 @@ macro_rules! __export_command {
 /// and opens `--help` with its `CARGO_PKG_DESCRIPTION` unless
 /// [`Router::version`](crate::api::Router::version) or
 /// [`Router::about`](crate::api::Router::about) set them. Expands to nothing
-/// on native targets, so the same crate's tests build the router natively.
+/// on native targets, where a test or a native host serves the router itself.
 ///
 /// ```rust,ignore
 /// use omnia_sdk::api::command;
@@ -1048,11 +1048,15 @@ cfg_select! {
 
 impl Metadata {
     /// Build metadata from the process environment: `<PREFIX>_REQUEST_ID`,
-    /// `<PREFIX>_CORRELATION_ID`, `<PREFIX>_CAUSATION_ID`, and
-    /// `<PREFIX>_TENANT`.
+    /// `<PREFIX>_CORRELATION_ID`, `<PREFIX>_CAUSATION_ID`, `<PREFIX>_TENANT`,
+    /// and `<PREFIX>_DEADLINE`.
     ///
     /// The command line's carrier for the values HTTP reads from headers; a
     /// missing request id is minted as on every transport.
+    ///
+    /// # Panics
+    ///
+    /// Panics as [`Metadata::from_lookup`] does.
     #[must_use]
     pub fn from_env(prefix: &str) -> Self {
         Self::from_lookup(|name| std::env::var(env_key(prefix, name)).ok())

@@ -171,7 +171,7 @@ async fn messaging_keyed() {
     // beside the header the guest set.
     let status = runtime.run_command().await.expect("command runs");
     assert_eq!(status, ExitStatus::SUCCESS);
-    let sent = next(&mut stream).await;
+    let mut sent = next(&mut stream).await;
     assert_eq!(sent.topic, "orders");
     assert_eq!(sent.payload, b"order-7");
     assert_eq!(
@@ -179,7 +179,9 @@ async fn messaging_keyed() {
         [("key".to_owned(), "customer-7".to_owned()), ("tenant".to_owned(), "acme".to_owned())]
     );
 
-    // Incoming handler: the guest's router finds the key on the delivery.
+    // Incoming handler: the guest's router finds the key on the delivery, and
+    // the host's deadline replaces one the delivery carried, whatever its case.
+    sent.metadata.get_or_insert_default().insert("Deadline".to_owned(), "1".to_owned());
     handler.handle(sent).await.expect("handled");
 
     runtime.shutdown();

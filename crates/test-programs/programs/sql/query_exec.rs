@@ -1,7 +1,8 @@
 //! One connection walked end to end over the raw `wasi:sql` bindings: DDL
 //! and parameterised inserts through `exec`, a typed read-back through
 //! `query` covering every `data-type` variant the default codec round-trips,
-//! a parameterised filter, a delete reporting its affected rows, an invalid
+//! a filter on a numbered `$1` placeholder, a delete reporting its affected
+//! rows, an update whose `$n` placeholders appear out of order, an invalid
 //! statement surfacing as an `error` resource with a trace, and a non-UTF-8
 //! text value refused on read.
 
@@ -98,7 +99,7 @@ async fn scenario() {
 
     // Parameters bind on the query path too.
     let filtered = Statement::prepare(
-        "SELECT name FROM items WHERE score > ?".to_owned(),
+        "SELECT name FROM items WHERE score > $1".to_owned(),
         vec![DataType::Double(Some(2.0))],
     )
     .await
@@ -115,6 +116,15 @@ async fn scenario() {
     .await
     .expect("prepare delete");
     assert_eq!(exec(&conn, &delete).await.expect("delete"), 1);
+
+    // A `$n` placeholder binds the value it numbers, wherever it appears.
+    let rename = Statement::prepare(
+        "UPDATE items SET name = $2 WHERE id = $1".to_owned(),
+        vec![DataType::Int32(Some(1)), DataType::Str(Some("renamed".to_owned()))],
+    )
+    .await
+    .expect("prepare rename");
+    assert_eq!(exec(&conn, &rename).await.expect("rename"), 1);
 
     // Preparing is lazy on the host: a bad statement fails at execution with
     // the backend's context chain in the trace.

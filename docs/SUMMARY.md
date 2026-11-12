@@ -48,6 +48,7 @@
 - [`runtime!` Macro](reference/runtime-macro.md)
 - [Model Interface](reference/model.md)
 - [DocStore Interface](reference/docstore.md)
+- [Provider Contract](reference/provider-contract.md)
 - [CLI](reference/cli.md)
 - [Configuration](reference/configuration.md)
 

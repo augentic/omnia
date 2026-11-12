@@ -390,11 +390,9 @@ async fn merged_commands() {
 async fn command_span() {
     let (spans, _guard) = Spans::install();
     let router = Handlers::new().command("greet", greet).with_state(Client::new(())).name("app");
-    let metadata = Metadata {
-        request_id: Some("req-1".to_string()),
-        correlation_id: Some("corr-1".to_string()),
-        ..Metadata::default()
-    };
+    let mut metadata = Metadata::default();
+    metadata.request_id = Some("req-1".to_string());
+    metadata.correlation_id = Some("corr-1".to_string());
 
     let response = router.run_with(["app", "greet", "ada"], &metadata).await;
 

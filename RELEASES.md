@@ -72,6 +72,14 @@ Unreleased
   wire as its `key` metadata entry.
 - `omnia_test::guest::{send, deliver}`, which drive a router natively, and
   `omnia_test::guest::ScriptedVcs`, a scripted `Vcs`.
+- `Metadata::deadline` carries the instant the guest timeout expires. Each
+  carrier holds it as decimal milliseconds since the Unix epoch:
+  - The HTTP host stamps the `x-deadline` header.
+  - The messaging host stamps the `deadline` metadata entry.
+  - `Metadata::from_env` reads `<PREFIX>_DEADLINE`.
+
+  A host's stamp replaces any inbound value. A command runs uncapped and
+  carries none.
 - `omnia_core::Backends`, the shape of a deployment's backend bundle:
   `Clone + Send + Sync + 'static`, implemented for every such type. It is
   the one bound `Runtime<B>`, `Host<B>`, `Wiring<B>`, and `Deployment<B>`
@@ -246,6 +254,26 @@ Unreleased
   dependency of the SDK, and `MemoryDocs` keeps its own in-memory store.
 - `Filter::on_date` accepts only a zero-padded `YYYY-MM-DD` date, so
   `2024-1-5` is an error.
+- `DeliveryError::Rejected` splits in two:
+  - `Undecodable(message)` is a payload that did not decode, which a
+    broker drops.
+  - `Failed { kind, message }` is a handler error, which a broker
+    redelivers when `kind` is `Unavailable`. The `kind` comes from the
+    first `omnia_sdk::Error` or `capability::Error` in the error's source
+    chain.
+
+  Over the draft `wasi:messaging`, both still cross as `error.other` with
+  the same text. A match on `Rejected(message)` becomes
+  `Undecodable(message) | Failed { message, .. }`.
+- `omnia_sdk::api::Metadata` is `#[non_exhaustive]`. Code outside the SDK
+  builds one with `Metadata::default()` and assigns its fields, or with
+  `from_lookup`, `from_headers`, `from_env`, or `minted`.
+- A request id minted natively draws 128 bits from the operating system's
+  CSPRNG, as one minted in a guest draws from `wasi:random`.
+- `SqlDefault` binds each `$n` placeholder to the `n`th parameter wherever
+  it appears, so `SET name = $2 WHERE id = $1` no longer binds its values
+  swapped. A `?` or `?n` placeholder binds as before, and any other named
+  placeholder fails.
 
 ### Removed
 

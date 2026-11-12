@@ -31,6 +31,7 @@ bon.workspace = true
 bytes.workspace = true
 clap = { workspace = true, features = ["string"], optional = true }
 clap_complete = { workspace = true, optional = true }
+getrandom.workspace = true
 http.workspace = true
 http-body.workspace = true
 omnia-guest-macros.workspace = true
