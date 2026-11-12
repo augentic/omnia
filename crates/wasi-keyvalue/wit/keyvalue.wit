@@ -5,6 +5,13 @@ package omnia:keyvalue@0.1.0;
 /// `bucket` names a binding the deployment declares. An unnamed SDK handle
 /// passes `default`.
 ///
+/// Every backend stores a portable key, and may reject any other as
+/// `invalid`. A portable key:
+///
+/// - is not empty;
+/// - holds only ASCII letters, digits, `.`, `_`, and `-`;
+/// - neither starts nor ends with `.`.
+///
 /// A TTL is a lifetime the host enforces, in milliseconds:
 ///
 /// - An entry written without one never expires.
@@ -18,7 +25,8 @@ interface store {
     not-found(string),
     /// The caller may not use the bucket.
     denied(string),
-    /// The request was rejected, such as a zero TTL.
+    /// The request was rejected, such as a zero TTL or a key the backend
+    /// cannot store.
     invalid(string),
     /// A valid request this backend cannot serve.
     unsupported(string),

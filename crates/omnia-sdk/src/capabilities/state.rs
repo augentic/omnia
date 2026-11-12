@@ -20,6 +20,13 @@ use crate::keyvalue::{DEFAULT, Handle};
 /// buckets, and a call on an undeclared one fails with
 /// [`ErrorKind::NotFound`].
 ///
+/// Every provider accepts a portable key, and a provider may reject any
+/// other with [`ErrorKind::Invalid`]. A portable key:
+///
+/// - is not empty;
+/// - holds only ASCII letters, digits, `.`, `_`, and `-`;
+/// - neither starts nor ends with `.`.
+///
 /// A TTL is a lifetime the store enforces:
 ///
 /// - A value written without one stays until deleted.

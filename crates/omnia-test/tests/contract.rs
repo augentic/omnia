@@ -72,6 +72,11 @@ async fn state_delete_absent() {
 }
 
 #[tokio::test]
+async fn state_portable_key() {
+    state::portable_key(&memory()).await;
+}
+
+#[tokio::test]
 async fn state_malformed_json() {
     state::malformed_json(&memory()).await;
 }

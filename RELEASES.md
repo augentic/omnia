@@ -96,6 +96,9 @@ Unreleased
   - `increment` takes a TTL. Like `compare_and_swap`, it applies the TTL
     only to an entry it creates.
   - `named(name)` selects another bucket the deployment declares.
+  - A portable key works on every backend: it holds only ASCII letters,
+    digits, `.`, `_`, and `-`, and neither starts nor ends with `.`. A
+    backend may reject any other key with `ErrorKind::Invalid`.
 - `StateStoreExt::{get_json, set_json}` return `capability::Result`, and a
   value that does not encode or decode fails with `ErrorKind::Invalid`.
 - `StateStore` opens the `default` bucket, which was `cache`. The host

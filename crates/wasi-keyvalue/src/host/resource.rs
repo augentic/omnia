@@ -17,6 +17,13 @@ pub use omnia_core::FutureResult;
 ///   [`increment`](Self::increment) apply their TTL only when they create the
 ///   entry. An existing entry keeps the time it has left.
 ///
+/// A backend stores every portable key, and fails a key it cannot store with
+/// [`Error::Invalid`](crate::Error::Invalid). A portable key:
+///
+/// - is not empty;
+/// - holds only ASCII letters, digits, `.`, `_`, and `-`;
+/// - neither starts nor ends with `.`.
+///
 /// The host rejects a zero TTL before a backend sees it. A backend picks the
 /// kind of a failure by returning an [`Error`](crate::Error), and any other
 /// error reaches the guest as [`Error::Other`](crate::Error::Other).

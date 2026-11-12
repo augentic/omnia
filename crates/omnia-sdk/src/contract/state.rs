@@ -1,7 +1,8 @@
 //! The [`StateStore`] rows.
 //!
 //! Each row writes keys of its own, so the rows run in any order, or all at
-//! once, over one store. The store must:
+//! once, over one store. Every key is portable, as [`StateStore`] defines
+//! it. The store must:
 //!
 //! - declare its own bucket and [`SECOND`], both empty when the rows start;
 //! - leave [`UNDECLARED`] undeclared.
@@ -29,6 +30,9 @@ const TTL: Duration = Duration::from_secs(1);
 const EXPIRED: Duration = Duration::from_secs(2);
 const LONG: Duration = Duration::from_hours(1);
 
+// every kind of character a portable key may hold
+const PORTABLE: &str = "Portable-key_09.end";
+
 /// A value set without a TTL outlasts every TTL the rows use.
 ///
 /// # Panics
@@ -52,15 +56,15 @@ pub async fn persist(store: &impl StateStore, wait: impl AsyncFn(Duration)) {
 ///
 /// Panics if a value keeps the lifetime it was first set with.
 pub async fn set_ttl(store: &impl StateStore, wait: impl AsyncFn(Duration)) {
-    store.set("set_ttl:expiring", b"one", None).await.expect("set without a TTL");
-    store.set("set_ttl:expiring", b"two", Some(TTL)).await.expect("set with a TTL");
-    store.set("set_ttl:kept", b"one", Some(TTL)).await.expect("set with a TTL");
-    store.set("set_ttl:kept", b"two", None).await.expect("set without a TTL");
+    store.set("set_ttl.expiring", b"one", None).await.expect("set without a TTL");
+    store.set("set_ttl.expiring", b"two", Some(TTL)).await.expect("set with a TTL");
+    store.set("set_ttl.kept", b"one", Some(TTL)).await.expect("set with a TTL");
+    store.set("set_ttl.kept", b"two", None).await.expect("set without a TTL");
 
     wait(EXPIRED).await;
 
-    assert_eq!(value(store, "set_ttl:expiring").await, None, "a set kept the old lifetime");
-    assert_eq!(value(store, "set_ttl:kept").await, Some(b"two".to_vec()), "a set kept the old TTL");
+    assert_eq!(value(store, "set_ttl.expiring").await, None, "a set kept the old lifetime");
+    assert_eq!(value(store, "set_ttl.kept").await, Some(b"two".to_vec()), "a set kept the old TTL");
 }
 
 /// A zero TTL fails with [`ErrorKind::Invalid`] on every method that takes
@@ -75,13 +79,13 @@ pub async fn zero_ttl(store: &impl StateStore) {
 
     let set = store.set("zero_ttl", b"new", zero).await;
     let swap = store.compare_and_swap("zero_ttl", Some(b"old"), b"new", zero).await;
-    let increment = store.increment("zero_ttl:counter", 1, zero).await;
+    let increment = store.increment("zero_ttl.counter", 1, zero).await;
 
     expect_kind(set, ErrorKind::Invalid, "set with a zero TTL");
     expect_kind(swap, ErrorKind::Invalid, "compare_and_swap with a zero TTL");
     expect_kind(increment, ErrorKind::Invalid, "increment with a zero TTL");
     assert_eq!(value(store, "zero_ttl").await, Some(b"old".to_vec()), "a zero TTL wrote the value");
-    assert_eq!(counter_at(store, "zero_ttl:counter").await, 0, "a zero TTL wrote the counter");
+    assert_eq!(counter_at(store, "zero_ttl.counter").await, 0, "a zero TTL wrote the counter");
 }
 
 /// [`compare_and_swap`](StateStore::compare_and_swap) and
@@ -92,15 +96,15 @@ pub async fn zero_ttl(store: &impl StateStore) {
 ///
 /// Panics if a created entry outlives its TTL.
 pub async fn create_ttl(store: &impl StateStore, wait: impl AsyncFn(Duration)) {
-    let swapped = store.compare_and_swap("create_ttl:lock", None, b"held", Some(TTL)).await;
-    let counted = store.increment("create_ttl:counter", 1, Some(TTL)).await;
+    let swapped = store.compare_and_swap("create_ttl.lock", None, b"held", Some(TTL)).await;
+    let counted = store.increment("create_ttl.counter", 1, Some(TTL)).await;
     assert_eq!(swapped.expect("compare_and_swap"), Ok(()), "a creating swap conflicted");
     assert_eq!(counted.expect("increment"), 1);
 
     wait(EXPIRED).await;
 
-    assert_eq!(value(store, "create_ttl:lock").await, None, "a created lock outlived its TTL");
-    assert_eq!(counter_at(store, "create_ttl:counter").await, 0, "a counter outlived its TTL");
+    assert_eq!(value(store, "create_ttl.lock").await, None, "a created lock outlived its TTL");
+    assert_eq!(counter_at(store, "create_ttl.counter").await, 0, "a counter outlived its TTL");
 }
 
 /// An update through [`compare_and_swap`](StateStore::compare_and_swap) or
@@ -110,18 +114,18 @@ pub async fn create_ttl(store: &impl StateStore, wait: impl AsyncFn(Duration)) {
 ///
 /// Panics if an update refreshes, extends, or clears the entry's lifetime.
 pub async fn update_ttl(store: &impl StateStore, wait: impl AsyncFn(Duration)) {
-    store.set("update_ttl:value", b"one", Some(TTL)).await.expect("set with a TTL");
+    store.set("update_ttl.value", b"one", Some(TTL)).await.expect("set with a TTL");
     let swapped =
-        store.compare_and_swap("update_ttl:value", Some(b"one"), b"two", Some(LONG)).await;
+        store.compare_and_swap("update_ttl.value", Some(b"one"), b"two", Some(LONG)).await;
     assert_eq!(swapped.expect("compare_and_swap"), Ok(()), "a matching swap conflicted");
-    assert_eq!(store.increment("update_ttl:counter", 1, Some(TTL)).await.expect("increment"), 1);
-    assert_eq!(store.increment("update_ttl:counter", 1, Some(LONG)).await.expect("increment"), 2);
-    assert_eq!(store.increment("update_ttl:counter", 1, None).await.expect("increment"), 3);
+    assert_eq!(store.increment("update_ttl.counter", 1, Some(TTL)).await.expect("increment"), 1);
+    assert_eq!(store.increment("update_ttl.counter", 1, Some(LONG)).await.expect("increment"), 2);
+    assert_eq!(store.increment("update_ttl.counter", 1, None).await.expect("increment"), 3);
 
     wait(EXPIRED).await;
 
-    assert_eq!(value(store, "update_ttl:value").await, None, "a swap refreshed the lifetime");
-    assert_eq!(counter_at(store, "update_ttl:counter").await, 0, "an increment refreshed it");
+    assert_eq!(value(store, "update_ttl.value").await, None, "a swap refreshed the lifetime");
+    assert_eq!(counter_at(store, "update_ttl.counter").await, 0, "an increment refreshed it");
 }
 
 /// [`compare_and_swap`](StateStore::compare_and_swap) matches the bytes of a
@@ -234,6 +238,23 @@ pub async fn delete_absent(store: &impl StateStore) {
     store.delete("delete_absent").await.expect("delete the key again");
 
     assert_eq!(value(store, "delete_absent").await, None);
+}
+
+/// A key holding every kind of character a portable key may use works like
+/// any other.
+///
+/// # Panics
+///
+/// Panics if a call on the key fails or reads back another value.
+pub async fn portable_key(store: &impl StateStore) {
+    store.set(PORTABLE, b"one", None).await.expect("set a portable key");
+    let swapped = store.compare_and_swap(PORTABLE, Some(b"one"), b"two", None).await;
+    assert_eq!(swapped.expect("compare_and_swap"), Ok(()), "a matching swap conflicted");
+    assert_eq!(value(store, PORTABLE).await, Some(b"two".to_vec()));
+
+    store.delete(PORTABLE).await.expect("delete a portable key");
+
+    assert_eq!(value(store, PORTABLE).await, None, "a delete left the portable key");
 }
 
 /// [`get_json`](StateStoreExt::get_json) over bytes that do not decode fails

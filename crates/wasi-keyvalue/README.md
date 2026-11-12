@@ -10,6 +10,9 @@ the `wasi:keyvalue` draft for raw-binding guests. Both are served from one
 
 - A guest opens a bucket by name. A name the deployment does not declare
   fails with `not-found`.
+- Every backend stores a portable key: one that is not empty, holds only
+  ASCII letters, digits, `.`, `_`, and `-`, and neither starts nor ends with
+  `.`. A backend may reject any other key with `invalid`.
 - The backend enforces a TTL. An entry written without one never expires, and
   a zero TTL is rejected before the backend sees it.
 - `compare-and-swap` and `increment` apply a TTL only when they create the

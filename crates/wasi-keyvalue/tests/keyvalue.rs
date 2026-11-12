@@ -68,9 +68,9 @@ async fn keyvalue_state_store() {
     run_guest(test_programs::KEYVALUE_STATE_STORE, backends.clone()).await;
 
     // the guest's bytes are stored as they are, and the host expires them
-    assert_eq!(backends.state("host:raw").await, Some(b"raw".to_vec()));
-    assert_eq!(backends.state("host:persist").await, Some(b"kept".to_vec()));
-    assert_eq!(backends.state("host:expiring").await, None);
+    assert_eq!(backends.state("host.raw").await, Some(b"raw".to_vec()));
+    assert_eq!(backends.state("host.persist").await, Some(b"kept".to_vec()));
+    assert_eq!(backends.state("host.expiring").await, None);
 }
 
 // fails `open_bucket` with the kind a bucket is named for, delegating any

@@ -14,9 +14,9 @@ omnia_sdk::api::command::export!(scenario);
 async fn scenario() {
     let store = WasiProvider;
 
-    store.set("host:raw", b"raw", Some(Duration::from_hours(1))).await.expect("set with a TTL");
-    store.set("host:persist", b"kept", None).await.expect("set without a TTL");
-    store.set("host:expiring", b"gone", Some(Duration::from_millis(100))).await.expect("set");
+    store.set("host.raw", b"raw", Some(Duration::from_hours(1))).await.expect("set with a TTL");
+    store.set("host.persist", b"kept", None).await.expect("set without a TTL");
+    store.set("host.expiring", b"gone", Some(Duration::from_millis(100))).await.expect("set");
 
     futures::join!(
         state::persist(&store, wait),
@@ -30,6 +30,7 @@ async fn scenario() {
         state::named(&store),
         state::undeclared(&store),
         state::delete_absent(&store),
+        state::portable_key(&store),
         state::malformed_json(&store),
     );
 }

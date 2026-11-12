@@ -153,7 +153,7 @@ if let Err(Conflict { current }) = locks.compare_and_swap("job", None, b"held", 
 }
 ```
 
-A provider's own handle uses the `default` bucket, and `named(name)` selects another. The deployment declares every bucket a guest names, and a call on an undeclared one fails with `ErrorKind::NotFound`. The host enforces a TTL:
+A provider's own handle uses the `default` bucket, and `named(name)` selects another. The deployment declares every bucket a guest names, and a call on an undeclared one fails with `ErrorKind::NotFound`. A key that holds only ASCII letters, digits, `.`, `_`, and `-`, and neither starts nor ends with `.`, works on every backend. A backend may reject any other key with `ErrorKind::Invalid`. The host enforces a TTL:
 
 - A value set without one stays until deleted.
 - `set` replaces a value's lifetime along with its bytes.
