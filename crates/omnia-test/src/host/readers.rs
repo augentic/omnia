@@ -1,7 +1,7 @@
 //! Reading state back through the bundle's host handles after a run.
 
 use omnia_wasi_blobstore::BlobStoreClient;
-use omnia_wasi_keyvalue::{Cacheable, KeyValueClient};
+use omnia_wasi_keyvalue::KeyValueClient;
 
 use super::{Backends, STATE_BUCKET};
 
@@ -23,16 +23,11 @@ where
     /// One entry of the bucket the guest's `StateStore` writes, as the guest
     /// reads it through the keyvalue handle.
     ///
-    /// A value set with a TTL is unwrapped from its [`Cacheable`] envelope,
-    /// and reads as absent once that TTL has passed.
+    /// The bytes are the guest's own, and an entry whose TTL has passed
+    /// reads as absent.
     pub async fn state(&self, key: &str) -> Option<Vec<u8>> {
         let bucket = self.keyvalue.open_bucket(STATE_BUCKET.to_owned()).await.ok()?;
-        let stored = bucket.get(key.to_owned()).await.ok().flatten()?;
-        match Cacheable::try_from(&stored) {
-            Ok(envelope) if envelope.is_expired() => None,
-            Ok(envelope) => Some(envelope.value),
-            Err(_) => Some(stored),
-        }
+        bucket.get(key.to_owned()).await.ok().flatten()
     }
 
     /// One committed object, read through the blobstore handle.

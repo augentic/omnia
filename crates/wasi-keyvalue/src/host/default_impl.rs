@@ -4,20 +4,63 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, Weak};
+use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, Result, anyhow};
 use futures::FutureExt;
+use moka::Expiry;
 use moka::sync::Cache;
 use omnia_core::Connect;
 use tracing::instrument;
 
-use crate::host::KeyValueClient;
-use crate::host::resource::{Bucket, Cas, FutureResult};
+use crate::host::resource::{Bucket, FutureResult};
+use crate::host::{Error, KeyValueClient};
+
+#[expect(missing_docs, reason = "`FromEnv` has no docs")]
+mod config {
+    use fromenv::{FromEnv, ParseResult};
+
+    /// Options used to connect to the in-memory key-value store.
+    ///
+    /// This struct is used to load connection options from environment variables.
+    #[derive(Debug, Clone, FromEnv)]
+    pub struct ConnectOptions {
+        /// The buckets a guest may open (`KEYVALUE_BUCKETS`, comma-separated, default: `default`).
+        #[env(from = "KEYVALUE_BUCKETS", default = "default", with = comma_separated)]
+        pub buckets: Vec<String>,
+    }
+
+    impl Default for ConnectOptions {
+        fn default() -> Self {
+            Self {
+                buckets: vec!["default".to_owned()],
+            }
+        }
+    }
+
+    #[expect(clippy::unnecessary_wraps, reason = "the signature `fromenv` parsers take")]
+    fn comma_separated(value: &str) -> ParseResult<Vec<String>> {
+        Ok(value
+            .split(',')
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(str::to_owned)
+            .collect())
+    }
+}
+pub use config::ConnectOptions;
+
+impl omnia_core::FromEnv for ConnectOptions {
+    fn load_env() -> Result<Self> {
+        // `Self::from_env()` is the builder the `FromEnv` derive emits
+        Self::from_env().finalize().context("issue loading connection options")
+    }
+}
 
 /// Default implementation for `wasi:keyvalue`.
 #[derive(Clone)]
 pub struct KeyValueDefault {
-    store: Cache<String, InMemBucket>,
+    buckets: Arc<HashMap<String, InMemBucket>>,
 }
 
 impl std::fmt::Debug for KeyValueDefault {
@@ -27,13 +70,18 @@ impl std::fmt::Debug for KeyValueDefault {
 }
 
 impl Connect for KeyValueDefault {
-    type ConnectOptions = omnia_core::NoOptions;
+    type ConnectOptions = ConnectOptions;
 
     #[instrument]
     async fn connect_with(options: Self::ConnectOptions) -> Result<Self> {
         tracing::debug!("initializing in-memory key-value store");
+        let buckets = options
+            .buckets
+            .into_iter()
+            .map(|name| (name.clone(), InMemBucket::new(name)))
+            .collect();
         Ok(Self {
-            store: Cache::builder().build(),
+            buckets: Arc::new(buckets),
         })
     }
 }
@@ -41,15 +89,10 @@ impl Connect for KeyValueDefault {
 impl KeyValueClient for KeyValueDefault {
     fn open_bucket(&self, identifier: String) -> FutureResult<Arc<dyn Bucket>> {
         tracing::trace!("opening bucket: {identifier}");
-
-        // the lock registry lives with the bucket, so every handle shares its locks
-        let bucket = self.store.get_with(identifier.clone(), || InMemBucket {
-            name: identifier,
-            cache: Cache::builder().build(),
-            locks: Arc::default(),
+        let bucket = self.buckets.get(&identifier).cloned().ok_or_else(|| {
+            anyhow::Error::from(Error::NotFound(format!("bucket `{identifier}` is not declared")))
         });
-
-        async move { Ok(Arc::new(bucket) as Arc<dyn Bucket>) }.boxed()
+        async move { Ok(Arc::new(bucket?) as Arc<dyn Bucket>) }.boxed()
     }
 }
 
@@ -61,6 +104,14 @@ struct InMemBucket {
 }
 
 impl InMemBucket {
+    fn new(name: String) -> Self {
+        Self {
+            name,
+            cache: Cache::builder().expire_after(Deadline).build(),
+            locks: Arc::default(),
+        }
+    }
+
     // Per-key, so writes and atomics serialize per key rather than per bucket.
     // `Weak` refs let unused keys drop their mutex; an entry is never removed
     // while a strong ref exists, or a concurrent call could install a second
@@ -86,15 +137,15 @@ impl std::fmt::Debug for InMemBucket {
 impl Bucket for InMemBucket {
     fn get(&self, key: String) -> FutureResult<Option<Vec<u8>>> {
         tracing::trace!("getting key: {key} from bucket: {}", self.name);
-        let result = self.cache.get(&key);
+        let result = self.cache.get(&key).map(|entry| entry.bytes);
         async move { Ok(result) }.boxed()
     }
 
-    fn set(&self, key: String, value: Vec<u8>) -> FutureResult<()> {
+    fn set(&self, key: String, value: Vec<u8>, ttl: Option<Duration>) -> FutureResult<()> {
         tracing::trace!("setting key: {key} in bucket: {}", self.name);
         let lock = self.key_lock(&key);
         let _guard = lock.lock().expect("key lock poisoned");
-        self.cache.insert(key, value);
+        self.cache.insert(key, Entry::new(value, ttl));
         async move { Ok(()) }.boxed()
     }
 
@@ -118,36 +169,39 @@ impl Bucket for InMemBucket {
         async move { Ok(keys) }.boxed()
     }
 
-    fn increment(&self, key: String, delta: i64) -> FutureResult<i64> {
+    fn increment(&self, key: String, delta: i64, ttl: Option<Duration>) -> FutureResult<i64> {
         tracing::trace!("incrementing key: {key} in bucket: {}", self.name);
 
         let lock = self.key_lock(&key);
         let result = (|| {
             let _guard = lock.lock().expect("key lock poisoned");
-            let incremented = add_i64(self.cache.get(&key).as_deref(), delta)
-                .with_context(|| format!("incrementing `{key}` by {delta}"))?;
-            self.cache.insert(key, encode_i64(incremented));
+            let existing = self.cache.get(&key);
+            let incremented = add_i64(existing.as_ref().map(|entry| entry.bytes.as_slice()), delta)
+                .map_err(|err| {
+                    Error::Invalid(format!("incrementing `{key}` by {delta}: {err:#}"))
+                })?;
+            self.cache.insert(key, Entry::atomic(existing, encode_i64(incremented), ttl));
             Ok(incremented)
         })();
 
         async move { result }.boxed()
     }
 
-    fn swap(&self, cas: Cas, value: Vec<u8>) -> FutureResult<Result<(), Cas>> {
-        tracing::trace!("swapping key: {} in bucket: {}", cas.key, self.name);
+    fn compare_and_swap(
+        &self, key: String, current: Option<Vec<u8>>, new: Vec<u8>, ttl: Option<Duration>,
+    ) -> FutureResult<Result<(), Option<Vec<u8>>>> {
+        tracing::trace!("swapping key: {key} in bucket: {}", self.name);
 
-        let lock = self.key_lock(&cas.key);
+        let lock = self.key_lock(&key);
         let result = {
             let _guard = lock.lock().expect("key lock poisoned");
-            let observed = self.cache.get(&cas.key);
-            if observed == cas.current {
-                self.cache.insert(cas.key, value);
+            let existing = self.cache.get(&key);
+            let observed = existing.as_ref().map(|entry| entry.bytes.clone());
+            if observed == current {
+                self.cache.insert(key, Entry::atomic(existing, new, ttl));
                 Ok(())
             } else {
-                Err(Cas {
-                    current: observed,
-                    ..cas
-                })
+                Err(observed)
             }
         };
 
@@ -155,8 +209,47 @@ impl Bucket for InMemBucket {
     }
 }
 
-type BucketCache = Cache<String, Vec<u8>>;
+type BucketCache = Cache<String, Entry>;
 type KeyLocks = Arc<Mutex<HashMap<String, Weak<Mutex<()>>>>>;
+
+#[derive(Clone)]
+struct Entry {
+    bytes: Vec<u8>,
+    // `None` never expires; a TTL too long for an `Instant` is the same
+    expires_at: Option<Instant>,
+}
+
+impl Entry {
+    fn new(bytes: Vec<u8>, ttl: Option<Duration>) -> Self {
+        Self {
+            bytes,
+            expires_at: ttl.and_then(|ttl| Instant::now().checked_add(ttl)),
+        }
+    }
+
+    // an atomic applies its TTL only on create; a live entry keeps the time it has left
+    fn atomic(existing: Option<Self>, bytes: Vec<u8>, ttl: Option<Duration>) -> Self {
+        match existing {
+            Some(existing) => Self { bytes, ..existing },
+            None => Self::new(bytes, ttl),
+        }
+    }
+}
+
+// expires each entry at its own deadline, on create and on every update
+struct Deadline;
+
+impl Expiry<String, Entry> for Deadline {
+    fn expire_after_create(&self, _key: &String, entry: &Entry, at: Instant) -> Option<Duration> {
+        entry.expires_at.map(|expires_at| expires_at.saturating_duration_since(at))
+    }
+
+    fn expire_after_update(
+        &self, _key: &String, entry: &Entry, at: Instant, _remaining: Option<Duration>,
+    ) -> Option<Duration> {
+        entry.expires_at.map(|expires_at| expires_at.saturating_duration_since(at))
+    }
+}
 
 fn add_i64(current: Option<&[u8]>, delta: i64) -> anyhow::Result<i64> {
     let base = match current {

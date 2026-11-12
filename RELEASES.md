@@ -22,6 +22,20 @@ Unreleased
   guest crate's version and description as `--version` and `--help`.
 - `omnia_sdk::Capabilities`, every capability trait at once, and the
   `Vault` capability.
+- `omnia:keyvalue`, the Omnia-owned interface `StateStore` calls.
+  `WasiKeyValue` serves it beside the `wasi:keyvalue` draft over one
+  `Bucket`. Each call names its bucket, and `set`, `compare-and-swap`, and
+  `increment` take a TTL in milliseconds.
+- `omnia_sdk::capability::{Error, ErrorKind, Result}`, the error
+  `StateStore` returns. `ErrorKind` is one of `NotFound`, `Denied`,
+  `Invalid`, `Unsupported`, `Unavailable`, and `Other`. `?` converts it into
+  `omnia_sdk::Error`, as a `502` for `Unavailable` and a `500` otherwise.
+- `omnia_sdk::contract::state`, the `StateStore` behaviour rows: one
+  generic `async fn` per invariant, run natively over
+  `omnia_test::guest::Memory` and in a guest over `WasiProvider`.
+- `omnia_wasi_keyvalue::ConnectOptions`. `KeyValueDefault` serves the
+  buckets `KEYVALUE_BUCKETS` lists, comma-separated, and `default` when it
+  is unset.
 - Extension traits, blanket-implemented over each capability:
   `ConfigExt::get_parsed`, `DocumentStoreExt::get_as`,
   `HttpRequestExt::fetch_json`, `IdentityExt::access_token`,
@@ -68,17 +82,42 @@ Unreleased
   - `omnia_sdk::sql` (`DataType`, `Row`, `Field`, `FromRow`,
     `ColumnError`), which `omnia_wasi_sql` exported.
   - `omnia_sdk::blobstore`, `omnia_sdk::identity::AccessToken`,
-    `omnia_sdk::keyvalue::BUCKET`, and `omnia_sdk::vault::LOCKER`.
-- `TableStore::{query, exec}` take `&str` and `&[DataType]`,
-  `StateStore::set` answers `()`, and `Identity::token(identity, scopes)`
-  answers an `AccessToken`.
-- `StateStore` opens the `state` bucket, which was `cache`. A value set
-  with a TTL is still stored in the guest-side `Cacheable` envelope, and
-  `omnia_test::host::Backends::state` reads through it.
-- `omnia_wasi_keyvalue::Cacheable` is at the crate root on every target,
-  and its `is_expired` is public.
+    `omnia_sdk::keyvalue::{DEFAULT, Conflict}`, and
+    `omnia_sdk::vault::LOCKER`.
+- `TableStore::{query, exec}` take `&str` and `&[DataType]`, and
+  `Identity::token(identity, scopes)` answers an `AccessToken`.
+- `StateStore` calls `omnia:keyvalue`, one host call per method:
+  - Every method returns `capability::Result`, and `get` answers
+    `Option<Bytes>`.
+  - `set` answers `()`, and a TTL is an `Option<Duration>`. A zero TTL
+    fails with `ErrorKind::Invalid` and writes nothing.
+  - `cas` is `compare_and_swap`. A mismatch answers `Ok(Err(Conflict))`
+    with the value it found.
+  - `increment` takes a TTL. Like `compare_and_swap`, it applies the TTL
+    only to an entry it creates.
+  - `named(name)` selects another bucket the deployment declares.
+- `StateStoreExt::{get_json, set_json}` return `capability::Result`, and a
+  value that does not encode or decode fails with `ErrorKind::Invalid`.
+- `StateStore` opens the `default` bucket, which was `cache`. The host
+  stores a guest's bytes as they are and expires them itself, so a value a
+  0.37 guest set with a TTL reads back as its JSON `Cacheable` envelope.
+  `omnia_test::host::Backends::state` reads the raw bytes.
+- Bucket names are strict. `KeyValueDefault` opens only the buckets it
+  declares, and any other fails with `not-found` on `omnia:keyvalue` and
+  `no-such-store` on the draft. A deployment whose guests open a bucket
+  other than `default` lists it in `KEYVALUE_BUCKETS`.
+- `Bucket::{set, increment}` take a TTL, and `Bucket::compare_and_swap`
+  replaces `swap`. A backend picks a failure's kind by returning an
+  `omnia_wasi_keyvalue::Error`.
+- Each `Has<Trait>` names the type it delegates to as `Inner`, and its
+  accessor returns `&Self::Inner`, so a capability's associated types
+  forward to the field's. A `pub` provider that derives `Provider` needs
+  `pub` field types.
 - `omnia_test::guest::Scripted` is `ScriptedModel`, and
   `omnia_test::guest::Memory` implements `Vault`.
+- `omnia_test::guest::Memory` keeps state per bucket. `Memory::bucket`
+  declares one beside `default`, and `Memory::snapshot` answers state by
+  bucket.
 - `WasiHttp` is its own `HostCtx` carrier, like every other host. A bundle
   implements `Provides<WasiHttp>`, and `HttpBorrow` is
   `omnia_wasi_http::HttpBorrow`. `runtime!` no longer matches a `hosts:`
@@ -153,6 +192,9 @@ Unreleased
   `omnia_sdk::DocumentStore`, and `omnia_wasi_docstore::{store, types}` are
   the raw `omnia:docstore` bindings.
 - `omnia_test::guest::MemoryDocs::backend`.
+- `omnia_wasi_keyvalue::Cacheable` and the guest-side `cache` module, the
+  envelope a value set with a TTL was stored in.
+- `omnia_sdk::CasError`. A conflict is `omnia_sdk::keyvalue::Conflict`.
 
 ---
 

@@ -25,7 +25,10 @@ async fn seeded_doubles() {
 
     assert_eq!(Config::get(&provider, "region").await.expect("config"), "eu");
     assert_eq!(provider.token("svc", &[]).await.expect("token").token, "tok");
-    assert_eq!(StateStore::get(&provider, "seen").await.expect("state"), Some(b"1".to_vec()));
+    assert_eq!(
+        StateStore::get(&provider, "seen").await.expect("state").as_deref(),
+        Some(&b"1"[..])
+    );
     BlobStore::put(&provider, "c", "o", b"blob").await.expect("blob");
     assert_eq!(
         provider.storage.object("c", "o"),

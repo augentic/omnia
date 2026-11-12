@@ -7,7 +7,7 @@ Every capability Omnia exposes to guests, its interface crate, the zero-config d
 | Interface | Crate | Host type | Default backend | Production backends |
 | --------- | ----- | --------- | --------------- | ------------------- |
 | HTTP client/server | `wasi-http` | `WasiHttp` † | `HttpDefault` — hyper outbound client, axum inbound server (`HTTP_ADDR`, default `0.0.0.0:8080`) | — |
-| Key-value storage | `wasi-keyvalue` | `WasiKeyValue` | `KeyValueDefault` — in-memory cache | `omnia-redis`, `omnia-nats` |
+| Key-value storage | `wasi-keyvalue` | `WasiKeyValue` | `KeyValueDefault` — in-memory, serving the buckets `KEYVALUE_BUCKETS` declares (default `default`) | `omnia-redis`, `omnia-nats` |
 | Pub/sub messaging | `wasi-messaging` | `WasiMessaging` † | `MessagingDefault` — in-process broadcast | `omnia-kafka`, `omnia-nats` |
 | Blob storage | `wasi-blobstore` | `WasiBlobStore` | `BlobStoreDefault` — in-memory | `omnia-azure-blob`, `omnia-mongodb`, `omnia-nats` |
 | SQL | `wasi-sql` | `WasiSql` | `SqlDefault` — SQLite (`SQL_DATABASE`, default shared in-memory) | `omnia-postgres` |
@@ -38,11 +38,14 @@ wasi-keyvalue/
 │   ├── guest.rs        # Guest-side bindings (wasm32)
 │   ├── host.rs         # bindgen!, #[derive(HostCtx)] WasiKeyValue, Host impl
 │   └── host/           # Host-side implementation (native)
+│       ├── omnia_impl.rs     # omnia:keyvalue/store Host* impls: one Bucket call each
 │       ├── store_impl.rs     # wasi:keyvalue/store Host* impls on HostView<'_, dyn KeyValueClient>
 │       ├── atomics_impl.rs   # ... one file per WIT interface
-│       ├── resource.rs       # BucketProxy and the other table-held resources
+│       ├── resource.rs       # Bucket, BucketProxy and the other table-held resources
 │       └── default_impl.rs   # KeyValueDefault backend
-└── wit/                # WIT interface definitions (+ deps/)
+└── wit/
+    ├── keyvalue.wit    # omnia:keyvalue, owned and edited here
+    └── deps/           # the wasi:keyvalue draft, fetched with wkg
 ```
 
 `host.rs` declares the host type and derives `HostCtx` on it with `#[host_ctx(client = KeyValueClient)]`, which emits the `HasData` and `HostCtx` impls that let a `runtime!` bundle serve it; its view is the library `HostView<'_, dyn KeyValueClient>` — `{ client, table }` — the `*_impl.rs` files implement the generated `Host*` traits on. See [Extending Omnia](../Architecture.md#extending-omnia) for the chain from backend to linker.

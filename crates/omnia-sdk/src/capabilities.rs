@@ -13,10 +13,14 @@
 //! A `<Capability>Ext` trait ([`StateStoreExt`], [`ConfigExt`], ...) holds the
 //! caller-side codecs and parsers over a capability's primitives. It is
 //! blanket-implemented for every implementor and never implemented by hand, so
-//! one encoding holds across providers. Its methods return `anyhow::Result`
-//! like the primitives they wrap; [`HttpRequestExt::fetch_json`] alone returns
-//! [`crate::Result`], since it also maps a non-2xx status to
-//! [`Error::BadGateway`](crate::Error::BadGateway).
+//! one encoding holds across providers. Its methods return the error type of
+//! the primitives they wrap:
+//!
+//! - [`StateStoreExt`] returns [`capability::Result`](crate::capability::Result),
+//!   with a codec failure as [`ErrorKind::Invalid`](crate::capability::ErrorKind::Invalid).
+//! - [`HttpRequestExt::fetch_json`] returns [`crate::Result`], since it also
+//!   maps a non-2xx status to [`Error::BadGateway`](crate::Error::BadGateway).
+//! - The others return `anyhow::Result`.
 //!
 //! [`Capabilities`] is every capability trait at once, the bound a fn generic
 //! over the whole provider takes.
@@ -71,7 +75,7 @@ pub use plugins::HasPlugins;
 pub use plugins::Plugins;
 #[doc(hidden)]
 pub use state::HasStateStore;
-pub use state::{CasError, StateStore, StateStoreExt};
+pub use state::{StateStore, StateStoreExt};
 #[cfg(feature = "sql")]
 #[doc(hidden)]
 pub use table::HasTableStore;

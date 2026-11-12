@@ -55,13 +55,15 @@ async fn device_site_header() {
 }
 ```
 
-The handler's own bounds pick out the capabilities it touches, so a test seeds only those fields and leaves the rest at their defaults. `StateStore`, `BlobStore`, and `Vault` share one `storage` field — one `Memory` serves all three, the shape a production provider's storage backend has. The full field/double table is on the struct's rustdoc: `MapConfig`, `MatchedHttp`, `FixedIdentity`, `Sink` (for `Publish` and `Broadcast`), `Memory`, `MemoryDocs`, `ScriptedTables`, `ScriptedModel` (for `Model`), `ScriptedLoader` (for `Plugins`), and `ScriptedVcs` (for `Vcs`).
+The handler's own bounds pick out the capabilities it touches, so a test seeds only those fields and leaves the rest at their defaults. `StateStore`, `BlobStore`, and `Vault` share one `storage` field — one `Memory` serves all three, the shape a production provider's storage backend has. `Memory` declares the `default` bucket, and `Memory::default().bucket(name)` declares each other bucket a handler names, so a `named(..)` call on an undeclared one fails with `NotFound` as it does in a deployment. It enforces TTLs by the same rules as the host. The full field/double table is on the struct's rustdoc: `MapConfig`, `MatchedHttp`, `FixedIdentity`, `Sink` (for `Publish` and `Broadcast`), `Memory`, `MemoryDocs`, `ScriptedTables`, `ScriptedModel` (for `Model`), `ScriptedLoader` (for `Plugins`), and `ScriptedVcs` (for `Vcs`).
 
 A test that drives the router rather than a handler builds it once, `handlers().with_state(Client::new(provider.clone()))`, and runs one request through it with `omnia_test::guest::send(&router, request)`, which answers the reply with its body collected, or one delivery with `omnia_test::guest::deliver(&router, topic, payload)`.
 
 Every capability trait is also implemented for `Arc<T>`, `&T`, and `Box<T>`, so a handler bounded on `P: StateStore` accepts `Arc<Memory>` directly.
 
 That covers the two other shapes a test provider takes. A handler bounded on a single capability needs no struct at all: pass `Arc<Memory>` (or `&Memory`) where the provider goes. A bespoke struct — generic over a storage type, say, or holding a double behind an `Arc` — hand-writes its impls, each method forwarding to the field that carries the double, exactly as a production provider over a custom backend would.
+
+A hand-written capability impl proves it keeps the trait's contract with the rows in `omnia_sdk::contract`: one generic `async fn` per invariant, which panics when the provider breaks it. `omnia-test` runs the `contract::state` rows over `Memory` ([`tests/contract.rs`](../../crates/omnia-test/tests/contract.rs)), and a guest runs the same rows over `WasiProvider` against the real host ([`programs/keyvalue/state_store.rs`](../../crates/test-programs/programs/keyvalue/state_store.rs)).
 
 ## Component rung: `Deployment` over `Backends`
 
@@ -82,7 +84,7 @@ assert_eq!(backends.model.seen()[0].messages, ["hi", "second"]);
 backends.model.assert_exhausted();
 ```
 
-The guest asserts what crosses the boundary to it (a panic traps and fails the host test); the host side asserts wire fidelity and side effects through the handles the bundle keeps — `backends.model.seen()`, `backends.state(key)`, `backends.object(container, name)`, the scratch directory.
+The guest asserts what crosses the boundary to it (a panic traps and fails the host test); the host side asserts wire fidelity and side effects through the handles the bundle keeps — `backends.model.seen()`, `backends.state(key)` (the raw bytes in the `default` bucket), `backends.object(container, name)`, the scratch directory.
 
 ### The overlay on a `runtime!`
 
@@ -98,7 +100,7 @@ The generated `main` and `run` stay untouched; the test reaches the same hosts t
 
 ### `Backends`
 
-`Backends::defaults()` is deterministic: it reads no environment variable and opens no socket. Config answers from the map seeded by `Backends::config([("KEY", "value")])` alone, the websocket backend serves no listener, and the HTTP client and `SQLite` connection (one private `:memory:` database per bundle) are built from fixed options. Every swappable host is a type parameter of `Backends` defaulting to its in-memory backend, with a consuming setter of the same name: `Backends::model(m)` swaps in any `ModelClient`, and `keyvalue`, `blobstore`, `docstore`, `sql`, `vault`, `messaging`, `identity`, and `otel` take any backend of theirs — a production backend crate's client, or a recording wrapper around the default — so the same guests run over it. `ScriptedModel` is the scripted model, sharing its `Script` core with the handler rung's `ScriptedModel` so a script reads identically at both rungs. Each scripted completion may run tool calls and workspace `read`/`write`/`list` steps ahead of its answer, recording every exchange; an overrun answers the guest softly and fails the test at `assert_exhausted()`.
+`Backends::defaults()` is deterministic: it reads no environment variable and opens no socket. Config answers from the map seeded by `Backends::config([("KEY", "value")])` alone, the websocket backend serves no listener, and the HTTP client and `SQLite` connection (one private `:memory:` database per bundle) are built from fixed options. The key-value backend declares the `default` bucket alone; a guest that names others runs over `keyvalue(KeyValueDefault::connect_with(ConnectOptions { buckets }).await?)`. Every swappable host is a type parameter of `Backends` defaulting to its in-memory backend, with a consuming setter of the same name: `Backends::model(m)` swaps in any `ModelClient`, and `keyvalue`, `blobstore`, `docstore`, `sql`, `vault`, `messaging`, `identity`, and `otel` take any backend of theirs — a production backend crate's client, or a recording wrapper around the default — so the same guests run over it. `ScriptedModel` is the scripted model, sharing its `Script` core with the handler rung's `ScriptedModel` so a script reads identically at both rungs. Each scripted completion may run tool calls and workspace `read`/`write`/`list` steps ahead of its answer, recording every exchange; an overrun answers the guest softly and fails the test at `assert_exhausted()`.
 
 ## Fixture rung: `Components` in `build.rs`
 

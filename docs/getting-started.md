@@ -83,7 +83,7 @@ async fn store_item<P: StateStore>(
 }
 ```
 
-Under the hood, `WasiProvider` delegates to the standard `wasi:keyvalue` interface, which the standalone `keyvalue` example (`examples/keyvalue/guest.rs`) calls directly to demonstrate the raw WIT binding:
+Under the hood, `WasiProvider` calls Omnia's `omnia:keyvalue` interface. The same host also serves the standard `wasi:keyvalue` draft, which the standalone `keyvalue` example (`examples/keyvalue/guest.rs`) calls directly to demonstrate the raw WIT binding:
 
 ```rust,noplayground
 async fn handler(body: Bytes) -> omnia_sdk::Result<Json<Value>> {
@@ -95,11 +95,11 @@ async fn handler(body: Bytes) -> omnia_sdk::Result<Json<Value>> {
     tracing::debug!("found val: {res:?}");
 ```
 
-Build and run it the same way:
+The in-memory backend serves only the buckets `KEYVALUE_BUCKETS` declares, `default` when it is unset. The example opens `omnia_bucket`, so build and run it the same way with that bucket declared:
 
 ```bash
 cargo build --example keyvalue-wasm --target wasm32-wasip2
-cargo run --example keyvalue -- run ./target/wasm32-wasip2/debug/examples/keyvalue_wasm.wasm
+KEYVALUE_BUCKETS=omnia_bucket cargo run --example keyvalue -- run ./target/wasm32-wasip2/debug/examples/keyvalue_wasm.wasm
 curl -X POST http://localhost:8080 -d '"some data"'
 ```
 

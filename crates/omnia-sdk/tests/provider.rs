@@ -20,20 +20,32 @@ struct PrivateConfig {
     inner: MapConfig,
 }
 
-/// Public provider delegating to a private field type without triggering
-/// `private_bounds`.
 #[derive(Clone, Default, Provider)]
-pub struct PublicWithPrivateField {
+struct PrivateWithPrivateField {
     #[provider(Config)]
     config: PrivateConfig,
 }
 
-/// Public generic provider combining a generic field with a private concrete
-/// field without emitting a `private_bounds` predicate on the private field.
+/// Configuration a public provider can delegate to.
 #[derive(Clone, Default, Provider)]
-pub struct GenericWithPrivateField<S> {
+pub struct PublicConfig {
     #[provider(Config)]
-    config: PrivateConfig,
+    inner: MapConfig,
+}
+
+/// Public provider delegating to a public field type.
+#[derive(Clone, Default, Provider)]
+pub struct PublicWithPublicField {
+    #[provider(Config)]
+    config: PublicConfig,
+}
+
+/// Public generic provider combining a generic field with a concrete field,
+/// without a `private_bounds` predicate on either.
+#[derive(Clone, Default, Provider)]
+pub struct GenericWithConcreteField<S> {
+    #[provider(Config)]
+    config: PublicConfig,
     #[provider(StateStore)]
     storage: S,
 }
@@ -48,25 +60,35 @@ async fn generic_multi() {
     provider.storage.insert_object("b", "o", b"2");
 
     assert_eq!(Config::get(&provider, "k").await.expect("config"), "v");
-    assert_eq!(StateStore::get(&provider, "s").await.expect("state"), Some(b"1".to_vec()));
+    assert_eq!(StateStore::get(&provider, "s").await.expect("state").as_deref(), Some(&b"1"[..]));
     assert_eq!(BlobStore::get(&provider, "b", "o").await.expect("blob"), Some(b"2".to_vec()));
 
-    let pub_provider = PublicWithPrivateField {
+    let private = PrivateWithPrivateField {
         config: PrivateConfig {
             inner: MapConfig::default().with([("p", "ok")]),
         },
     };
-    assert_eq!(Config::get(&pub_provider, "p").await.expect("private field config"), "ok");
+    assert_eq!(Config::get(&private, "p").await.expect("private field config"), "ok");
 
-    let mixed = GenericWithPrivateField {
-        config: PrivateConfig {
+    let public = PublicWithPublicField {
+        config: PublicConfig {
+            inner: MapConfig::default().with([("q", "ok")]),
+        },
+    };
+    assert_eq!(Config::get(&public, "q").await.expect("public field config"), "ok");
+
+    let mixed = GenericWithConcreteField {
+        config: PublicConfig {
             inner: MapConfig::default().with([("m", "mixed-ok")]),
         },
         storage: Memory::default(),
     };
     mixed.storage.insert_state("ms", b"9");
     assert_eq!(Config::get(&mixed, "m").await.expect("mixed config"), "mixed-ok");
-    assert_eq!(StateStore::get(&mixed, "ms").await.expect("mixed state"), Some(b"9".to_vec()));
+    assert_eq!(
+        StateStore::get(&mixed, "ms").await.expect("mixed state").as_deref(),
+        Some(&b"9"[..])
+    );
 }
 
 #[test]

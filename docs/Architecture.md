@@ -124,7 +124,7 @@ Each interface crate provides guest bindings, a host implementation, and, with o
 | Crate            | Interface        | Purpose                          | Default backend                           |
 | ---------------- | ---------------- | -------------------------------- | ----------------------------------------- |
 | `wasi-http`      | `wasi:http`      | HTTP client/server (trigger)     | `HttpDefault` — hyper client, axum server |
-| `wasi-keyvalue`  | `wasi:keyvalue`  | Key-value storage                | `KeyValueDefault` — in-memory cache       |
+| `wasi-keyvalue`  | `omnia:keyvalue` | Key-value storage (+ wasi draft) | `KeyValueDefault` — in-memory             |
 | `wasi-messaging` | `wasi:messaging` | Pub/sub messaging (trigger)      | `MessagingDefault` — in-process broadcast |
 | `wasi-blobstore` | `wasi:blobstore` | Object/blob storage              | `BlobStoreDefault` — in-memory            |
 | `wasi-sql`       | `wasi:sql`       | Parameterized SQL access         | `SqlDefault` — SQLite                     |

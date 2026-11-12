@@ -18,13 +18,11 @@ workspace = true
 # dependencies shared across host and guest
 [dependencies]
 anyhow.workspace = true
-chrono = { workspace = true, features = ["serde"] }
-serde.workspace = true
-serde_json.workspace = true
 tracing.workspace = true
 
 # host dependencies
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+fromenv.workspace = true
 futures.workspace = true
 omnia-core.workspace = true
 moka.workspace = true

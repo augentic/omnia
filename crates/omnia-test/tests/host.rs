@@ -8,11 +8,13 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::{Context as _, Result, bail};
 use omnia::wasmtime::component::{ResourceTable, Val};
-use omnia::{Digest, ExitStatus, GuestEntry, GuestId, HostCtx, Runtime};
+use omnia::{Connect as _, Digest, ExitStatus, GuestEntry, GuestId, HostCtx, Runtime};
 use omnia_test::host::{Backends, Deployment, STATE_BUCKET, ScriptedModel, scratch};
 use omnia_test::{Exchange, SeenFormat};
 use omnia_wasi_blobstore::BlobStoreClient as _;
-use omnia_wasi_keyvalue::{Bucket, FutureResult, KeyValueClient, KeyValueDefault, WasiKeyValue};
+use omnia_wasi_keyvalue::{
+    Bucket, ConnectOptions, FutureResult, KeyValueClient, KeyValueDefault, WasiKeyValue,
+};
 use omnia_wasi_model::WasiModel;
 use omnia_wasi_otel::WasiOtel;
 
@@ -278,16 +280,18 @@ impl KeyValueClient for RecordingKeyValue {
 
 #[tokio::test]
 async fn swapped_keyvalue() {
-    let defaults = Backends::defaults().await;
+    let options = ConnectOptions {
+        buckets: vec!["bucket".to_owned()],
+    };
     let recording = RecordingKeyValue {
-        inner: defaults.keyvalue.clone(),
+        inner: KeyValueDefault::connect_with(options).await.expect("in-memory keyvalue"),
         opened: Arc::default(),
     };
     // The guest's atomics start from a host-seeded counter.
     let bucket = recording.inner.open_bucket("bucket".to_owned()).await.expect("bucket");
-    bucket.set("counter".to_owned(), 37_i64.to_be_bytes().to_vec()).await.expect("seed");
+    bucket.set("counter".to_owned(), 37_i64.to_be_bytes().to_vec(), None).await.expect("seed");
 
-    let backends = defaults.keyvalue(recording);
+    let backends = Backends::defaults().await.keyvalue(recording);
     let status = Deployment::new()
         .guest("guest", test_programs::KEYVALUE_BUCKET)
         .run_host::<WasiKeyValue, _>(backends.clone())
@@ -310,17 +314,9 @@ async fn swapped_keyvalue() {
 async fn host_handles() {
     let backends = Backends::defaults().await;
     let bucket = backends.keyvalue.open_bucket(STATE_BUCKET.to_owned()).await.expect("bucket");
-    bucket.set("k".to_owned(), b"v".to_vec()).await.expect("set");
+    bucket.set("k".to_owned(), b"v".to_vec(), None).await.expect("set");
     assert_eq!(backends.state("k").await, Some(b"v".to_vec()));
     assert_eq!(backends.state("missing").await, None);
-
-    // a value the guest set with a TTL, in the envelope its cache writes
-    let live = br#"{"value":[119],"expires_at":4102444800}"#;
-    bucket.set("ttl".to_owned(), live.to_vec()).await.expect("set");
-    assert_eq!(backends.state("ttl").await, Some(b"w".to_vec()));
-    let expired = br#"{"value":[119],"expires_at":0}"#;
-    bucket.set("expired".to_owned(), expired.to_vec()).await.expect("set");
-    assert_eq!(backends.state("expired").await, None);
 
     let container = backends.blobstore.create_container("c".to_owned()).await.expect("container");
     container.write_data("o".to_owned(), b"bytes".to_vec().into()).await.expect("write");

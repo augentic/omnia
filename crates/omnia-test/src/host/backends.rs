@@ -10,7 +10,9 @@ use omnia_wasi_config::{ConfigDefault, WasiConfig};
 use omnia_wasi_docstore::{DocStoreClient, DocStoreDefault, WasiDocStore};
 use omnia_wasi_http::{ConnectOptions as HttpOptions, HttpDefault, WasiHttp};
 use omnia_wasi_identity::{IdentityClient, IdentityStub, WasiIdentity};
-use omnia_wasi_keyvalue::{KeyValueClient, KeyValueDefault, WasiKeyValue};
+use omnia_wasi_keyvalue::{
+    ConnectOptions as KeyValueOptions, KeyValueClient, KeyValueDefault, WasiKeyValue,
+};
 use omnia_wasi_messaging::{MessagingClient, MessagingDefault, WasiMessaging};
 use omnia_wasi_model::{ModelClient, ModelDefault, WasiModel};
 use omnia_wasi_otel::{OtelClient, OtelDefault, WasiOtel};
@@ -22,8 +24,9 @@ use omnia_wasi_websocket::{WasiWebSocket, WebSocketDefault};
 #[cfg(doc)]
 use super::ScriptedModel;
 
-/// The keyvalue bucket `omnia_sdk`'s wasm32 `StateStore` opens.
-pub const STATE_BUCKET: &str = "state";
+/// The keyvalue bucket `omnia_sdk`'s wasm32 `StateStore` opens, the one bucket
+/// the default keyvalue backend declares.
+pub const STATE_BUCKET: &str = "default";
 
 /// Every host's default backend as one bundle, each swappable for another
 /// backend of its host — the model for a [`ScriptedModel`], a store for a
@@ -38,8 +41,11 @@ pub const STATE_BUCKET: &str = "state";
 /// The bundle is deterministic: [`defaults`](Self::defaults) reads no
 /// environment variable and opens no socket. Config answers from the map
 /// seeded by [`config`](Self::config) alone, the websocket backend serves no
-/// listener, and the HTTP client and `SQLite` connection are built from
-/// fixed options rather than `HTTP_CONNECT_TIMEOUT` / `SQL_DATABASE`.
+/// listener, and the HTTP client, keyvalue buckets, and `SQLite` connection
+/// are built from fixed options rather than `HTTP_CONNECT_TIMEOUT` /
+/// `KEYVALUE_BUCKETS` / `SQL_DATABASE`. The keyvalue backend declares
+/// [`STATE_BUCKET`] alone; a scenario that opens another sets its own with
+/// [`keyvalue`](Self::keyvalue).
 ///
 /// One type parameter per swappable host, each defaulting to the in-memory
 /// backend, so `Backends` with no arguments is the all-default bundle and a
@@ -106,7 +112,9 @@ impl Backends {
                 .await
                 .expect("outbound http client"),
             identity: IdentityStub,
-            keyvalue: KeyValueDefault::connect_with(NoOptions).await.expect("in-memory keyvalue"),
+            keyvalue: KeyValueDefault::connect_with(KeyValueOptions::default())
+                .await
+                .expect("in-memory keyvalue"),
             messaging: MessagingDefault::connect_with(NoOptions)
                 .await
                 .expect("in-process messaging"),

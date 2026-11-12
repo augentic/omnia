@@ -130,7 +130,7 @@ async fn invoke_direct() {
 async fn context_accessors() {
     async fn lookup<P: Config + StateStore>(
         context: Context<P>, key: String,
-    ) -> Result<(String, Option<Vec<u8>>), omnia_sdk::Error> {
+    ) -> Result<(String, Option<bytes::Bytes>), omnia_sdk::Error> {
         let setting = context.config().get(&key).await?;
         let state = context.state().get(&key).await?;
         Ok((setting, state))

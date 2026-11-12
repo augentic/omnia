@@ -113,6 +113,16 @@ path = "programs/keyvalue/bucket.rs"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "keyvalue_error_kinds"
+path = "programs/keyvalue/error_kinds.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "keyvalue_state_store"
+path = "programs/keyvalue/state_store.rs"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "link_echoer"
 path = "programs/link/echoer.rs"
 crate-type = ["cdylib"]

@@ -110,7 +110,7 @@ The guest crate exposes trait-based abstractions for host capabilities. `WasiPro
 | `Config` | Read configuration values from the host. |
 | `HttpRequest` | Make outbound HTTP requests. |
 | `Publish` | Publish messages to a topic. |
-| `StateStore` | Get/set/delete key-value state with optional TTL, plus one-shot `cas` (conflict is a typed `CasError::Conflict`) and atomic `increment`. |
+| `StateStore` | Key-value state in the deployment's declared buckets: `get`, `set` with an optional TTL the host enforces, `delete`, a one-shot `compare_and_swap` whose mismatch answers the `keyvalue::Conflict` it found, and atomic `increment`. A provider's own handle uses the `default` bucket, and `named(name)` selects another. |
 | `Identity` | Obtain access tokens from an identity provider. |
 | `TableStore` | Execute parameterized SQL queries and statements over `wasi:sql`. |
 | `Broadcast` | Send events over WebSocket channels. |
@@ -121,7 +121,7 @@ The guest crate exposes trait-based abstractions for host capabilities. `WasiPro
 | `Vcs` | Version-control operations over lent repository and working-copy mounts. |
 | `Model` | Prompt completions, with tool calls answered by a guest closure. A request with `check` set has the guest judge each candidate answer (`Ok` accepts, `Err(text)` is the correction the backend sends back to the model); `model::Question<T>` runs that exchange for a `Deserialize + JsonSchema` answer type and returns the accepted `T`. |
 
-Every trait is annotated with `#[omnia_guest_macros::capability]`, which emits a companion `Has<Capability>` accessor trait with a blanket forwarding impl and implementations for `Arc<T>`, `&T`, and `Box<T>` where `T` implements the capability. `#[derive(omnia_sdk::Provider)]` implements those `Has*` traits for each `#[provider(...)]`-annotated field.
+Every trait is annotated with `#[omnia_guest_macros::capability]`, which emits a companion `Has<Capability>` accessor trait with a blanket forwarding impl and implementations for `Arc<T>`, `&T`, and `Box<T>` where `T` implements the capability. `#[derive(omnia_sdk::Provider)]` implements those `Has*` traits for each `#[provider(...)]`-annotated field. Each `Has*` trait names the type it delegates to as `Inner`, so a capability's associated types, such as `StateStore::Named`, are the field's own. A `pub` provider therefore needs `pub` field types.
 
 ### Example: Using Capabilities
 
@@ -157,6 +157,8 @@ fn validate(name: &str) -> Result<(), Error> {
     Ok(())
 }
 ```
+
+A capability that names its failure classes returns a `capability::Error`, as `StateStore` does. Its `ErrorKind` is one of `NotFound`, `Denied`, `Invalid`, `Unsupported`, `Unavailable`, or `Other`, and a caller matches on `kind()` rather than the message. `?` converts it into `Error`: `Unavailable` becomes a `BadGateway` and every other kind a `ServerError`, through any `anyhow` context wrapped around it.
 
 ## Architecture
 

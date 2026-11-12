@@ -2580,14 +2580,12 @@ name = "omnia-wasi-keyvalue"
 version = "0.38.0"
 dependencies = [
  "anyhow",
- "chrono",
+ "fromenv",
  "futures",
  "moka",
  "omnia",
  "omnia-core",
  "omnia-test",
- "serde",
- "serde_json",
  "test-programs",
  "tokio",
  "tracing",

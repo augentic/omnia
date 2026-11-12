@@ -44,6 +44,10 @@ pub fn instrument(args: TokenStream, item: TokenStream) -> TokenStream {
 
 /// Emits the `Has<Cap>` accessor trait, blanket forwarding impl, and pointer
 /// impls (`Arc<P>`, `&P`, `Box<P>`) for an `omnia_sdk` capability trait.
+///
+/// The accessor trait names the type it delegates to as `Inner`, and each
+/// associated type of the capability forwards to `Inner`'s. A generic or
+/// defaulted associated type is rejected.
 #[proc_macro_attribute]
 pub fn capability(_args: TokenStream, item: TokenStream) -> TokenStream {
     let item_trait = parse_macro_input!(item as ItemTrait);
@@ -55,6 +59,9 @@ pub fn capability(_args: TokenStream, item: TokenStream) -> TokenStream {
 
 /// Derives `omnia_sdk` capability traits by delegating each named capability to
 /// the struct field annotated with `#[provider(Capability, ...)]`.
+///
+/// The field's type is part of the provider's interface, so a `pub` provider
+/// delegates only to `pub` field types.
 #[proc_macro_derive(Provider, attributes(provider))]
 pub fn derive_provider(item: TokenStream) -> TokenStream {
     let input = parse_macro_input!(item as DeriveInput);

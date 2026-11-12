@@ -2,9 +2,12 @@
 
 pub mod api;
 mod capabilities;
+pub mod capability;
+pub mod contract;
 #[cfg(feature = "docstore")]
 pub mod docstore;
 mod error;
+pub mod keyvalue;
 #[cfg(feature = "http")]
 pub mod mcp;
 #[cfg(feature = "sql")]
@@ -21,14 +24,6 @@ pub mod blobstore {
 /// Identity access-token value type.
 pub mod identity {
     pub use crate::AccessToken;
-}
-
-/// Key-value wire constants.
-pub mod keyvalue {
-    /// The bucket [`StateStore`](crate::StateStore) opens.
-    ///
-    /// A value written without a TTL stays until deleted, on every backend.
-    pub const BUCKET: &str = "state";
 }
 
 /// Secret vault wire constants.

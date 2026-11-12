@@ -8,14 +8,16 @@ use std::pin::pin;
 use std::sync::Arc;
 use std::task::{Context, Poll, Waker};
 use std::thread;
+use std::time::Duration;
 
 use bytes::Bytes;
 use http::{Method, Request, Response};
 use http_body_util::Full;
+use omnia_sdk::capability::ErrorKind;
 use omnia_sdk::docstore::{Document, Filter, QueryOptions, SortField};
 use omnia_sdk::sql::{DataType, Field, Row};
 use omnia_sdk::{
-    BlobStore, Broadcast, CasError, Config, DocumentStore, HttpRequest, Identity, Message, Publish,
+    BlobStore, Broadcast, Config, DocumentStore, HttpRequest, Identity, Message, Publish,
     StateStore, TableStore, Vault,
 };
 use omnia_test::guest::{
@@ -42,23 +44,19 @@ fn doc(id: &str, json: &str) -> Document {
 
 #[test]
 fn state() {
-    let memory = Memory::default();
+    let memory = Memory::default().bucket("sessions");
+    let sessions = memory.named("sessions");
     now(StateStore::set(&memory, "k", b"v1", None)).expect("set");
-    now(StateStore::set(&memory, "k", b"v2", Some(30))).expect("set");
-    assert_eq!(now(StateStore::get(&memory, "k")).expect("get"), Some(b"v2".to_vec()));
+    now(StateStore::set(&memory, "k", b"v2", Some(Duration::from_secs(30)))).expect("set");
+    now(StateStore::set(&sessions, "k", b"s", None)).expect("set");
     assert_eq!(memory.state("k"), Some(b"v2".to_vec()));
-    now(StateStore::delete(&memory, "k")).expect("delete");
-    assert_eq!(now(StateStore::get(&memory, "k")).expect("get"), None);
-    assert!(memory.is_empty());
-}
+    assert_eq!(sessions.state("k"), Some(b"s".to_vec()));
 
-#[test]
-fn cas_conflict() {
-    let memory = Memory::default();
-    now(memory.cas("k", None, b"a")).expect("absent key swaps");
-    assert_eq!(now(memory.cas("k", None, b"b")), Err(CasError::Conflict(Some(b"a".to_vec()))));
-    now(memory.cas("k", Some(b"a"), b"b")).expect("matching value swaps");
-    assert_eq!(memory.state("k"), Some(b"b".to_vec()));
+    now(StateStore::delete(&memory, "k")).expect("delete");
+    now(StateStore::delete(&sessions, "k")).expect("delete");
+    assert!(memory.is_empty());
+    let (state, _) = memory.snapshot();
+    assert_eq!(state.keys().collect::<Vec<_>>(), ["default", "sessions"]);
 }
 
 #[test]
@@ -78,7 +76,13 @@ fn cas_race() {
                             std::str::from_utf8(bytes).unwrap().parse().unwrap()
                         });
                         let next = (value + 1).to_string();
-                        if now(memory.cas("counter", current.as_deref(), next.as_bytes())).is_ok() {
+                        let swapped = now(memory.compare_and_swap(
+                            "counter",
+                            current.as_deref(),
+                            next.as_bytes(),
+                            None,
+                        ));
+                        if swapped.expect("store").is_ok() {
                             break;
                         }
                     }
@@ -95,15 +99,14 @@ fn cas_race() {
 }
 
 #[test]
-fn increment() {
+fn increment_text() {
     let memory = Memory::default();
-    assert_eq!(now(memory.increment("n", 5)).expect("increment"), 5);
-    assert_eq!(now(memory.increment("n", -7)).expect("increment"), -2);
-    assert_eq!(memory.state("n"), Some((-2i64).to_be_bytes().to_vec()));
-
     memory.insert_state("text", b"nope");
-    let error = now(memory.increment("text", 1)).expect_err("non-integer bytes fail");
-    assert!(format!("{error:#}").contains("8-byte"), "{error:#}");
+
+    let error = now(memory.increment("text", 1, None)).expect_err("non-integer bytes fail");
+
+    assert_eq!(error.kind(), ErrorKind::Invalid, "{error}");
+    assert!(error.to_string().contains("8-byte"), "{error}");
 }
 
 // -- Memory: blobs -----------------------------------------------------------
@@ -167,10 +170,11 @@ fn copy_move_clear() {
 
 #[test]
 fn namespaced() {
-    let memory = Memory::default();
+    let memory = Memory::default().bucket("sessions");
     let alpha = Namespaced::new("alpha", memory.clone());
     let beta = Namespaced::new("beta", memory.clone());
     now(StateStore::set(&alpha, "k", b"a", None)).expect("set");
+    now(StateStore::set(&alpha.named("sessions"), "k", b"s", None)).expect("set");
     now(beta.put("c", "o", b"b")).expect("put");
     now(Vault::set(&alpha, "sec", b"s1")).expect("set secret");
 
@@ -179,30 +183,33 @@ fn namespaced() {
     assert_eq!(now(Vault::list_ids(&alpha)).expect("list secrets"), ["sec"]);
     assert_eq!(now(Vault::list_ids(&beta)).expect("list secrets"), Vec::<String>::new());
     assert_eq!(memory.state("alpha/k"), Some(b"a".to_vec()));
+    assert_eq!(memory.named("sessions").state("alpha/k"), Some(b"s".to_vec()));
     assert_eq!(memory.secret("alpha/sec"), Some(b"s1".to_vec()));
     assert_eq!(memory.object("beta/c", "o"), Some(b"b".to_vec()));
     assert_eq!(now(beta.object_info("c", "o")).expect("info").container, "c");
     assert_eq!(now(beta.container_info("c")).expect("info").name, "c");
     let (state, blobs) = alpha.memory().snapshot();
-    assert_eq!(state.len(), 1);
+    assert_eq!(state["default"].keys().collect::<Vec<_>>(), ["alpha/k"]);
+    assert_eq!(state["sessions"].keys().collect::<Vec<_>>(), ["alpha/k"]);
     assert_eq!(blobs.keys().collect::<Vec<_>>(), ["beta/c"]);
 }
 
 // -- Pointer impls -----------------------------------------------------------
 
 // handler-shaped: bounded on the capability, not on `Memory`
-fn bump<P: StateStore>(store: &P) -> i64 {
-    now(store.increment("visits", 1)).expect("increment")
+fn bump<P: StateStore>(store: &P, delta: i64) -> i64 {
+    now(store.increment("visits", delta, None)).expect("increment")
 }
 
 #[test]
 fn shared_handle() {
-    let memory = Memory::default();
+    let memory = Memory::default().bucket("sessions");
     let shared = Arc::new(memory.clone());
-    assert_eq!(bump(&shared), 1);
-    assert_eq!(bump(&&memory), 2);
-    assert_eq!(bump(&Box::new(memory.clone())), 3);
-    assert_eq!(memory.state("visits"), Some(3_i64.to_be_bytes().to_vec()));
+    assert_eq!(bump(&shared, 1), 1);
+    assert_eq!(bump(&&memory, 1), 2);
+    assert_eq!(bump(&Box::new(memory.clone()), 1), 3);
+    assert_eq!(bump(&shared.named("sessions"), 1), 1);
+    assert_eq!(bump(&memory, 0), 3);
     assert!(now(Arc::new(memory).has("c", "missing")).is_ok_and(|found| !found));
 }
 

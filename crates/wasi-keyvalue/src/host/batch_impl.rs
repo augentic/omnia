@@ -5,12 +5,12 @@ use crate::KeyValueClient;
 use crate::host::generated::wasi::keyvalue::batch::{Host, HostWithStore};
 use crate::host::resource::BucketProxy;
 use crate::host::store_impl::get_bucket;
-use crate::host::{Result, WasiKeyValue};
+use crate::host::{WasiKeyValue, WasiResult};
 
 impl<T> HostWithStore<T> for WasiKeyValue {
     async fn get_many(
         accessor: &Accessor<T, Self>, bucket: Resource<BucketProxy>, keys: Vec<String>,
-    ) -> Result<Vec<Option<(String, Vec<u8>)>>> {
+    ) -> WasiResult<Vec<Option<(String, Vec<u8>)>>> {
         let bucket = get_bucket(accessor, &bucket)?;
 
         // one entry per requested key, positionally aligned
@@ -26,17 +26,17 @@ impl<T> HostWithStore<T> for WasiKeyValue {
     async fn set_many(
         accessor: &Accessor<T, Self>, bucket: Resource<BucketProxy>,
         key_values: Vec<(String, Vec<u8>)>,
-    ) -> Result<()> {
+    ) -> WasiResult<()> {
         let bucket = get_bucket(accessor, &bucket)?;
         for (key, value) in key_values {
-            bucket.set(key, value).await?;
+            bucket.set(key, value, None).await?;
         }
         Ok(())
     }
 
     async fn delete_many(
         accessor: &Accessor<T, Self>, bucket: Resource<BucketProxy>, keys: Vec<String>,
-    ) -> Result<()> {
+    ) -> WasiResult<()> {
         let bucket = get_bucket(accessor, &bucket)?;
         for key in keys {
             bucket.delete(key).await?;

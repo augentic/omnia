@@ -4,6 +4,8 @@ use http::StatusCode;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::capability::{self, ErrorKind};
+
 /// Result type used across the crate.
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -139,8 +141,10 @@ impl Error {
     }
 }
 
-// An `Error` inside the chain keeps its variant and code and gains the
-// context wrapped around it; anything else is a `server_error`.
+// An `Error` inside the chain keeps its variant and code. A
+// `capability::Error` is a `bad_gateway` when the upstream did not answer,
+// and otherwise the deployment's own `server_error`. Both gain the context
+// wrapped around them, and anything else is a `server_error`.
 impl From<anyhow::Error> for Error {
     fn from(err: anyhow::Error) -> Self {
         let chain = err.chain().map(ToString::to_string).collect::<Vec<_>>().join(": ");
@@ -156,7 +160,20 @@ impl From<anyhow::Error> for Error {
             };
         }
 
+        if let Some(inner) = err.downcast_ref::<capability::Error>() {
+            return match inner.kind() {
+                ErrorKind::Unavailable => Self::bad_gateway("bad_gateway", chain),
+                _ => Self::server_error("server_error", chain),
+            };
+        }
+
         Self::server_error("server_error", chain)
+    }
+}
+
+impl From<capability::Error> for Error {
+    fn from(err: capability::Error) -> Self {
+        Self::from(anyhow::Error::from(err))
     }
 }
 

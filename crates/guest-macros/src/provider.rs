@@ -42,7 +42,9 @@ pub fn expand(input: &DeriveInput) -> Result<TokenStream> {
                 #generic_bound
                 #(#existing_predicates,)*
             {
-                fn #accessor(&self) -> &impl ::omnia_sdk::#cap {
+                type Inner = #field_ty;
+
+                fn #accessor(&self) -> &#field_ty {
                     &self.#field_ident
                 }
             }

@@ -123,6 +123,10 @@ name = "guest_stores"
 required-features = ["guest"]
 
 [[test]]
+name = "contract"
+required-features = ["guest"]
+
+[[test]]
 name = "guest_router"
 required-features = ["guest"]
 

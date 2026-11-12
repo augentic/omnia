@@ -140,12 +140,25 @@ For **outbound** HTTP requests inside a handler, bound `P: HttpRequest` and call
 
 In handlers, access host capabilities through the portable traits on `context.provider()` — `WasiProvider` implements every trait on `wasm32` over the underlying `omnia-wasi-*` WIT bindings, while `omnia_test::guest::Provider` backs them with in-memory doubles in native tests. The guest never names a backend implementation — the host decides what backs each interface.
 
-Key-value (`StateStore` over `wasi:keyvalue`):
+Key-value (`StateStore` over `omnia:keyvalue`):
 
 ```rust,noplayground
-context.provider().set("my_key", &body, None).await?;
-let res = context.provider().get("my_key").await?;
+context.state().set("my_key", &body, Some(Duration::from_secs(300))).await?;
+let res = context.state().get("my_key").await?;
+
+let locks = context.state().named("locks");
+let lease = Some(Duration::from_secs(30));
+if let Err(Conflict { current }) = locks.compare_and_swap("job", None, b"held", lease).await? {
+    // another instance holds the lock
+}
 ```
+
+A provider's own handle uses the `default` bucket, and `named(name)` selects another. The deployment declares every bucket a guest names, and a call on an undeclared one fails with `ErrorKind::NotFound`. The host enforces a TTL:
+
+- A value set without one stays until deleted.
+- `set` replaces a value's lifetime along with its bytes.
+- `compare_and_swap` and `increment` apply their TTL only to an entry they create.
+- A zero TTL fails with `ErrorKind::Invalid`.
 
 Publishing a message (`Publish` over `wasi:messaging`):
 
@@ -158,7 +171,7 @@ When writing `wasm32`-only code (as in `examples/`), you can also call the `omni
 
 | Capability | `WasiProvider` trait (`omnia_sdk`) | Raw guest module | Example | Deep dive |
 | ---------- | ---------------------------------- | ---------------- | ------- | --------- |
-| Key-value | `StateStore` | `omnia_wasi_keyvalue::store` | `examples/keyvalue` | — |
+| Key-value | `StateStore` | `omnia_wasi_keyvalue::omnia::store`, or the `wasi:keyvalue` draft's `omnia_wasi_keyvalue::store` | `examples/keyvalue` | — |
 | Messaging | `Publish` | `omnia_wasi_messaging::{producer, request_reply}` | `examples/messaging` | [Messaging](messaging.md) |
 | SQL | `TableStore` (feature `sql`) | `omnia_wasi_sql` | `examples/sql` | [SQL](sql.md) |
 | Document store | `DocumentStore` (feature `docstore`) | `omnia_wasi_docstore` | `examples/docstore` | [Document Store](document-store.md) |

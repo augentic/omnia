@@ -2,23 +2,24 @@ use anyhow::Context;
 use omnia_core::HostView;
 use wasmtime::component::{Access, Accessor, Resource};
 
+use crate::host::generated::WasiError;
 use crate::host::generated::wasi::keyvalue::store::{
-    Error, HostBucketWithStore, HostWithStore, KeyResponse,
+    HostBucketWithStore, HostWithStore, KeyResponse,
 };
 use crate::host::resource::BucketProxy;
 use crate::host::store::{Host, HostBucket};
-use crate::host::{KeyValueClient, Result, WasiKeyValue};
+use crate::host::{KeyValueClient, WasiKeyValue, WasiResult};
 
 pub fn get_bucket<T>(
     accessor: &Accessor<T, WasiKeyValue>, self_: &Resource<BucketProxy>,
-) -> Result<BucketProxy> {
-    omnia_core::get_cloned(accessor, self_).map_err(|_stale| Error::NoSuchStore)
+) -> WasiResult<BucketProxy> {
+    omnia_core::get_cloned(accessor, self_).map_err(|_stale| WasiError::NoSuchStore)
 }
 
 impl<T> HostWithStore<T> for WasiKeyValue {
     async fn open(
         accessor: &Accessor<T, Self>, identifier: String,
-    ) -> Result<Resource<BucketProxy>> {
+    ) -> WasiResult<Resource<BucketProxy>> {
         let bucket = accessor.with(|mut store| store.get().client.open_bucket(identifier)).await?;
         let proxy = omnia_core::Proxy(bucket);
         Ok(accessor.with(|mut store| store.get().table.push(proxy))?)
@@ -28,7 +29,7 @@ impl<T> HostWithStore<T> for WasiKeyValue {
 impl<T> HostBucketWithStore<T> for WasiKeyValue {
     async fn get(
         accessor: &Accessor<T, Self>, self_: Resource<BucketProxy>, key: String,
-    ) -> Result<Option<Vec<u8>>> {
+    ) -> WasiResult<Option<Vec<u8>>> {
         let bucket = get_bucket(accessor, &self_)?;
         let value = bucket.get(key).await.context("issue getting value")?;
         Ok(value)
@@ -36,15 +37,15 @@ impl<T> HostBucketWithStore<T> for WasiKeyValue {
 
     async fn set(
         accessor: &Accessor<T, Self>, self_: Resource<BucketProxy>, key: String, value: Vec<u8>,
-    ) -> Result<()> {
+    ) -> WasiResult<()> {
         let bucket = get_bucket(accessor, &self_)?;
-        bucket.set(key, value).await.context("issue setting value")?;
+        bucket.set(key, value, None).await.context("issue setting value")?;
         Ok(())
     }
 
     async fn delete(
         accessor: &Accessor<T, Self>, self_: Resource<BucketProxy>, key: String,
-    ) -> Result<()> {
+    ) -> WasiResult<()> {
         let bucket = get_bucket(accessor, &self_)?;
         bucket.delete(key).await.context("issue deleting value")?;
         Ok(())
@@ -52,7 +53,7 @@ impl<T> HostBucketWithStore<T> for WasiKeyValue {
 
     async fn exists(
         accessor: &Accessor<T, Self>, self_: Resource<BucketProxy>, key: String,
-    ) -> Result<bool> {
+    ) -> WasiResult<bool> {
         let bucket = get_bucket(accessor, &self_)?;
         let exists = bucket.exists(key).await.context("issue checking existence")?;
         Ok(exists)
@@ -60,7 +61,7 @@ impl<T> HostBucketWithStore<T> for WasiKeyValue {
 
     async fn list_keys(
         accessor: &Accessor<T, Self>, self_: Resource<BucketProxy>, cursor: Option<String>,
-    ) -> Result<KeyResponse> {
+    ) -> WasiResult<KeyResponse> {
         tracing::trace!("store::HostBucket::list_keys {cursor:?}");
         let bucket = get_bucket(accessor, &self_)?;
         let keys = bucket.keys().await.context("issue listing keys")?;
@@ -74,7 +75,7 @@ impl<T> HostBucketWithStore<T> for WasiKeyValue {
 }
 
 impl Host for HostView<'_, dyn KeyValueClient> {
-    fn convert_error(&mut self, err: Error) -> wasmtime::Result<Error> {
+    fn convert_error(&mut self, err: WasiError) -> wasmtime::Result<WasiError> {
         Ok(err)
     }
 }
