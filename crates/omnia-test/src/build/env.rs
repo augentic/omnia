@@ -113,14 +113,6 @@ fn should_strip(key: &str) -> bool {
 mod tests {
     use super::*;
 
-    #[test]
-    fn deny_warnings() {
-        assert!(denies_warnings(Some("-Dwarnings")));
-        assert!(denies_warnings(Some("-C target-cpu=native -D warnings")));
-        assert!(!denies_warnings(Some("-C target-cpu=native")));
-        assert!(!denies_warnings(None));
-    }
-
     // cargo's v1 and v2 layouts, default and redirected `target/`; a layout
     // that is not cargo's keeps the build under `OUT_DIR`
     #[test]

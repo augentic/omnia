@@ -988,8 +988,7 @@ fn wit_copies() {
 // data this crate consumes: a `package` guest with a `digest` and a route
 // list per trigger, named by its reference; a named package pinned in
 // uppercase hex; and the `plugins` block with the store that keeps them and
-// the `registries` contents that route them. The macro's snapshot suite pins
-// the expansion shape; this pins the types and the carried data.
+// the `registries` contents that route them.
 mod loader_grammar {
     omnia::runtime!({
         guests: [

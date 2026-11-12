@@ -89,31 +89,3 @@ impl From<&RuntimeOptions> for ChainPolicy {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn policy() -> ChainPolicy {
-        ChainPolicy {
-            max_depth: 2,
-            timeout: Duration::from_secs(1),
-        }
-    }
-
-    fn callee() -> GuestId {
-        GuestId::from("callee")
-    }
-
-    // A command root's wall-clock policy is carried to every hop beneath it.
-    #[test]
-    fn inherited() {
-        let root = ChainCtx::command();
-
-        let child = policy().enter(&root, &callee()).expect("within depth");
-        assert!(child.uncapped);
-
-        let grandchild = policy().enter(&child, &callee()).expect("within depth");
-        assert!(grandchild.uncapped);
-    }
-}

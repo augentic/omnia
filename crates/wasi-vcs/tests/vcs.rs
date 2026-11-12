@@ -31,11 +31,16 @@ test_programs::foreach_vcs!();
 // ------------------------------------------------------------------------
 
 async fn run_guest(wasm: &str, mounts: Vec<Mount>) -> Recorder {
+    run_guest_args(wasm, mounts, &[]).await
+}
+
+async fn run_guest_args(wasm: &str, mounts: Vec<Mount>, args: &[&str]) -> Recorder {
     let recorder = Recorder::default();
     let backends = Backends::defaults().await.vcs(recorder.clone());
     let status = Deployment::new()
         .guest("guest", wasm)
         .mounts(mounts)
+        .args(args.iter().copied())
         .run_host::<WasiVcs, _>(backends)
         .await
         .expect("guest runs");
@@ -320,8 +325,13 @@ async fn vcs_locations() {
         path: project.clone(),
         writable: true,
     };
-    let recorder =
-        run_guest(test_programs::VCS_LOCATIONS, vec![mount, readonly.mount_as("ro", false)]).await;
+    let extra: &[&str] = if cfg!(windows) { &["C:evil", "C:/evil"] } else { &[] };
+    let recorder = run_guest_args(
+        test_programs::VCS_LOCATIONS,
+        vec![mount, readonly.mount_as("ro", false)],
+        extra,
+    )
+    .await;
 
     // Only the read on the read-only mount and the calls at the new subpath
     // reached the backend; every refusal was the host's, before any call.

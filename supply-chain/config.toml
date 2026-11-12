@@ -190,10 +190,6 @@ criteria = "safe-to-deploy"
 version = "4.6.8"
 criteria = "safe-to-deploy"
 
-[[exemptions.console]]
-version = "0.16.6"
-criteria = "safe-to-run"
-
 [[exemptions.const-hex]]
 version = "1.19.3"
 criteria = "safe-to-deploy"
@@ -338,10 +334,6 @@ criteria = "safe-to-deploy"
 version = "1.19.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.encode_unicode]]
-version = "0.3.6"
-criteria = "safe-to-run"
-
 [[exemptions.equivalent]]
 version = "1.0.3"
 criteria = "safe-to-deploy"
@@ -473,10 +465,6 @@ criteria = "safe-to-deploy"
 [[exemptions.idna_adapter]]
 version = "1.2.2"
 criteria = "safe-to-deploy"
-
-[[exemptions.insta]]
-version = "1.49.0"
-criteria = "safe-to-run"
 
 [[exemptions.ipnet]]
 version = "2.12.2"

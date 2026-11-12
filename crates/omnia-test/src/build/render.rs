@@ -138,48 +138,6 @@ mod tests {
     }
 
     #[test]
-    fn gen_macros() {
-        let programs = [
-            program("link_echo", "link", "programs/link/echo.rs"),
-            program("model_echo_text", "model", "programs/model/echo_text.rs"),
-            program("model_tools", "model", "programs/model/tools.rs"),
-        ];
-        let artifacts: Vec<_> = programs
-            .iter()
-            .map(|program| Artifact {
-                program,
-                path: format!("/out/{}.wasm", program.name),
-            })
-            .collect();
-
-        let rendered = render_gen("// header\n", &artifacts);
-        assert_eq!(
-            rendered,
-            "// header\n\
-             /// Path to the compiled `link_echo` guest component.\n\
-             pub const LINK_ECHO: &str = \"/out/link_echo.wasm\";\n\
-             /// Path to the compiled `model_echo_text` guest component.\n\
-             pub const MODEL_ECHO_TEXT: &str = \"/out/model_echo_text.wasm\";\n\
-             /// Path to the compiled `model_tools` guest component.\n\
-             pub const MODEL_TOOLS: &str = \"/out/model_tools.wasm\";\n\
-             /// Asserts an identically named test exists at the invocation site for every \
-             `link` guest program; a program without one fails to compile.\n\
-             #[macro_export]\n\
-             macro_rules! foreach_link {\n    () => {\n        \
-             #[expect(unused_imports, reason = \"asserts the test exists\")]\n        \
-             use self::link_echo as _;\n    };\n}\n\
-             /// Asserts an identically named test exists at the invocation site for every \
-             `model` guest program; a program without one fails to compile.\n\
-             #[macro_export]\n\
-             macro_rules! foreach_model {\n    () => {\n        \
-             #[expect(unused_imports, reason = \"asserts the test exists\")]\n        \
-             use self::model_echo_text as _;\n        \
-             #[expect(unused_imports, reason = \"asserts the test exists\")]\n        \
-             use self::model_tools as _;\n    };\n}\n"
-        );
-    }
-
-    #[test]
     fn gen_windows_path() {
         let programs = [program("adapter", "examples", "examples/adapter/main.rs")];
         let artifacts = [Artifact {

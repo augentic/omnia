@@ -144,17 +144,3 @@ fn open_beneath(root: &Dir, subpath: &str, create: bool) -> anyhow::Result<Dir> 
         Err(error) => Err(error).with_context(|| format!("opening location subpath `{subpath}`")),
     }
 }
-
-// the drive-prefix rule is the one branch no guest reaches: on unix
-// `C:evil` is an ordinary file name
-#[cfg(all(test, windows))]
-mod tests {
-    use super::check_subpath;
-
-    #[test]
-    fn drive_prefixed_subpath() {
-        for subpath in ["C:evil", "C:/evil"] {
-            check_subpath(subpath).unwrap_err();
-        }
-    }
-}

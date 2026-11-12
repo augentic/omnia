@@ -11,10 +11,12 @@ use std::path::Path;
 use std::time::Duration;
 
 use anyhow::{Context as _, Result, bail};
+use omnia::wasmtime::Enabled;
 use omnia::wasmtime::component::Val;
 use omnia::{
-    ChainCtx, CompileOptions, DeploymentBuilder, FirstArgSelector, GuestEntry, GuestId,
-    GuestSelector as _, Manifest, Runtime, Transport, TransportKind, Verified,
+    ChainCtx, ChainPolicy, CompileOptions, DeploymentBuilder, FirstArgSelector, GuestEntry,
+    GuestId, GuestSelector as _, Manifest, Runtime, RuntimeOptions, Transport, TransportKind,
+    Verified,
 };
 
 // Every guest program in `crates/test-programs` must have a matching test
@@ -389,6 +391,96 @@ fn selector_no_identity() {
             .expect_err("the call names no target");
         assert!(err.to_string().contains("leading string identity"), "unexpected error: {err}");
     }
+}
+
+// A command root's wall-clock policy is carried to every hop beneath it.
+#[test]
+fn command_chain() {
+    let policy = ChainPolicy {
+        max_depth: 2,
+        timeout: Duration::from_secs(1),
+    };
+    let callee = GuestId::from("callee");
+    let root = ChainCtx::command();
+
+    let child = policy.enter(&root, &callee).expect("within depth");
+    assert!(child.uncapped);
+    assert_eq!(child.depth, 1);
+
+    let grandchild = policy.enter(&child, &callee).expect("within depth");
+    assert!(grandchild.uncapped);
+    assert_eq!(grandchild.depth, 2);
+}
+
+#[test]
+fn runtime_options() {
+    fn set_env(key: &str, value: &str) {
+        // SAFETY: nextest runs each test in a process of its own, so no other
+        // thread reads the environment while it is written.
+        #[expect(unsafe_code, reason = "process environment under single-threaded test")]
+        unsafe {
+            std::env::set_var(key, value);
+        }
+    }
+
+    fn remove_env(key: &str) {
+        // SAFETY: nextest runs each test in a process of its own, so no other
+        // thread reads the environment while it is written.
+        #[expect(unsafe_code, reason = "process environment under single-threaded test")]
+        unsafe {
+            std::env::remove_var(key);
+        }
+    }
+
+    // `Enabled` spellings through `POOL_PAGEMAP_SCAN`
+    for (spelling, expected) in
+        [("auto", Enabled::Auto), ("YES", Enabled::Yes), (" no ", Enabled::No)]
+    {
+        set_env("POOL_PAGEMAP_SCAN", spelling);
+        let options = RuntimeOptions::load_env().expect("valid spelling loads");
+        assert_eq!(options.pool_pagemap_scan, expected);
+    }
+    set_env("POOL_PAGEMAP_SCAN", "maybe");
+    let err = RuntimeOptions::load_env().expect_err("invalid spelling is refused");
+    assert!(
+        format!("{err:#}").contains("expected one of `auto`/`yes`/`no`"),
+        "unexpected error: {err:#}"
+    );
+    remove_env("POOL_PAGEMAP_SCAN");
+
+    // per-module memory bound exceeding total pool memories
+    set_env("POOL_TOTAL_MEMORIES", "8");
+    set_env("POOL_MAX_MEMORIES_PER_MODULE", "16");
+    let err = RuntimeOptions::load_env().expect_err("memories per module exceed total");
+    assert!(
+        format!("{err:#}")
+            .contains("POOL_MAX_MEMORIES_PER_MODULE (16) exceeds POOL_TOTAL_MEMORIES (8)"),
+        "unexpected error: {err:#}"
+    );
+    remove_env("POOL_TOTAL_MEMORIES");
+    remove_env("POOL_MAX_MEMORIES_PER_MODULE");
+
+    // per-module table bound exceeding total pool tables
+    set_env("POOL_TOTAL_TABLES", "8");
+    set_env("POOL_MAX_TABLES_PER_MODULE", "16");
+    let err = RuntimeOptions::load_env().expect_err("tables per module exceed total");
+    assert!(
+        format!("{err:#}")
+            .contains("POOL_MAX_TABLES_PER_MODULE (16) exceeds POOL_TOTAL_TABLES (8)"),
+        "unexpected error: {err:#}"
+    );
+    remove_env("POOL_TOTAL_TABLES");
+    remove_env("POOL_MAX_TABLES_PER_MODULE");
+
+    // pool bounds ignored when pooling is disabled
+    set_env("POOLING", "false");
+    set_env("POOL_TOTAL_MEMORIES", "8");
+    set_env("POOL_MAX_MEMORIES_PER_MODULE", "16");
+    let options = RuntimeOptions::load_env().expect("pool bounds ignored when pooling is off");
+    assert!(!options.pooling);
+    remove_env("POOLING");
+    remove_env("POOL_TOTAL_MEMORIES");
+    remove_env("POOL_MAX_MEMORIES_PER_MODULE");
 }
 
 // The host→guest hop is entered from a root, so it is depth 1 and with a bound

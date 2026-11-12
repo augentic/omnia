@@ -60,8 +60,12 @@ async fn scenario() {
     refused(error, "not an authorized mount");
 
     // a subpath that leaves the root, starts at it, or is not plainly spelled
-    for subpath in ["../escape", "/abs", "a\\b", "a//b", ".", "..", "a/../b", "./a", "a/"] {
-        let error = store::head(at(root, subpath)).await.expect_err("subpath refused");
+    for subpath in ["../escape", "/abs", "a\\b", "a//b", ".", "..", "a/../b", "./a", "a/"]
+        .into_iter()
+        .map(str::to_owned)
+        .chain(wasip3::cli::environment::get_arguments().into_iter().skip(1))
+    {
+        let error = store::head(at(root, &subpath)).await.expect_err("subpath refused");
         refused(error, "not a plain relative path");
     }
 

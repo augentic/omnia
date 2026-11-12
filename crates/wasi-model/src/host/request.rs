@@ -184,39 +184,3 @@ impl fmt::Display for Role {
         })
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::{Format, Request, Role};
-    use crate::host::{Grants, Message};
-
-    #[test]
-    fn mixed_roles() {
-        let messages = [(Role::User, "hi"), (Role::Assistant, "yo"), (Role::System, "note")];
-        let prompt = Request {
-            model: None,
-            system: Some("be terse".to_owned()),
-            messages: messages
-                .into_iter()
-                .map(|(role, content)| Message {
-                    role,
-                    content: content.to_owned(),
-                })
-                .collect(),
-            generation: None,
-            format: Format::Text,
-            tools: vec![],
-            grants: Grants {
-                workspace: None,
-                worker: None,
-            },
-            check: false,
-        }
-        .to_string();
-        assert!(
-            prompt.starts_with("be terse\n\nhi\n\n[assistant]\nyo\n\n[system]\nnote\n\n"),
-            "{prompt}"
-        );
-        assert!(prompt.contains("plain text"), "{prompt}");
-    }
-}

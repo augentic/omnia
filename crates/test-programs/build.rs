@@ -18,6 +18,7 @@ fn main() {
             "crates/test-programs/wit-skew",
             "crates/test-programs/src",
             "crates/test-programs/Cargo.toml",
+            "crates/wasi-otel/wit",
         ])
         .build()
         .write_gen("gen.rs");

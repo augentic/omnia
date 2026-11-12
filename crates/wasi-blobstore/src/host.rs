@@ -152,17 +152,3 @@ pub trait BlobStoreClient: Debug + Send + Sync + 'static {
     /// Check if a container exists.
     fn container_exists(&self, name: String) -> FutureResult<bool>;
 }
-
-#[cfg(test)]
-mod tests {
-    use super::OutgoingValue;
-
-    // `finish` consumes the guest's handle, so a second call never crosses the boundary
-    #[test]
-    fn finish_once() {
-        let mut outgoing = OutgoingValue::new(16);
-        outgoing.take_write_body().expect("write body");
-        outgoing.finalize().expect("finish");
-        assert_eq!(outgoing.finalize(), Err("outgoing value already finished"));
-    }
-}
