@@ -1,41 +1,27 @@
 #![doc = include_str!("../README.md")]
 
 pub mod api;
+pub mod blobstore;
 mod capabilities;
 pub mod capability;
 pub mod contract;
-#[cfg(feature = "docstore")]
 pub mod docstore;
 mod error;
+pub mod identity;
 pub mod keyvalue;
 #[cfg(feature = "http")]
 pub mod mcp;
-#[cfg(feature = "sql")]
+pub mod messaging;
 pub mod sql;
-
-pub use crate::capabilities::*;
-pub use crate::error::*;
-
-/// Blobstore metadata value types.
-pub mod blobstore {
-    pub use crate::{ContainerMetadata, ObjectMetadata};
-}
-
-/// Identity access-token value type.
-pub mod identity {
-    pub use crate::AccessToken;
-}
-
-/// Secret vault wire constants.
-pub mod vault {
-    /// The locker the [`Vault`](crate::Vault) capability opens.
-    pub const LOCKER: &str = "locker";
-}
+pub mod vault;
 
 #[cfg(feature = "http")]
 #[doc(hidden)]
 pub use axum;
-pub use omnia_guest_macros::{Provider, Settings};
+pub use omnia_guest_macros::{Provider, Settings, capability};
+
+pub use crate::capabilities::*;
+pub use crate::error::*;
 #[doc(hidden)]
 pub mod http {
     pub use ::http::*;

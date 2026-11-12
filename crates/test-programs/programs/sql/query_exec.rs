@@ -15,7 +15,7 @@ omnia_sdk::api::command::export!(scenario);
 const CREATED: &str = "2024-01-02T03:04:05Z";
 
 async fn scenario() {
-    let conn = Connection::open("db".to_owned()).await.expect("open");
+    let conn = Connection::open("default".to_owned()).await.expect("open");
 
     let create = Statement::prepare(
         "CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT, flag INTEGER, score REAL, \

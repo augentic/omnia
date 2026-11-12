@@ -67,6 +67,8 @@ Every backend reads its connection settings from environment variables at startu
 
 Each crate's README in the `omnia-backends` repository documents its complete variable set.
 
+A guest addresses a binding by name, and a provider's own handle uses the name `default`. A production backend serves `default` from its main connection and each further name from the configuration that declares it. `omnia-postgres`, for one, serves `default` from `POSTGRES_URL` and a guest's `SqlDb::named("eventstore")` from `POSTGRES_URL__EVENTSTORE`, once `POSTGRES_POOLS` lists `eventstore`.
+
 ## Verifying against the real service
 
 Backend crates ship `#[ignore]`-gated **live tests** (`tests/live.rs`) that drive the backend's `XxxClient` implementation against the real service. They never run in CI; run them locally with the service up and credentials set:

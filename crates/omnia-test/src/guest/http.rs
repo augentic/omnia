@@ -1,19 +1,15 @@
-//! A URL-matched `HttpRequest` recording every request.
+//! A URL-matched `HttpClient` recording every request.
 
-use std::any::Any;
-use std::error::Error;
 use std::fmt;
-use std::future::{Future, poll_fn};
+use std::future::{Future, ready};
 use std::sync::{Arc, Mutex};
-use std::task::{Poll, ready};
 
-use anyhow::Result;
 use bytes::Bytes;
 use http::{HeaderMap, Method, Request, Response, StatusCode, Uri};
-use http_body::{Body, Frame};
-use omnia_sdk::HttpRequest;
+use omnia_sdk::HttpClient;
+use omnia_sdk::capability::Result;
 
-/// One request the code under test sent, with its body collected.
+/// One request the code under test sent, with its body.
 #[derive(Clone, Debug)]
 pub struct Recorded {
     /// The request method.
@@ -22,7 +18,7 @@ pub struct Recorded {
     pub uri: Uri,
     /// The request headers.
     pub headers: HeaderMap,
-    /// The collected request body.
+    /// The request body.
     pub body: Vec<u8>,
 }
 
@@ -41,8 +37,7 @@ impl Recorded {
 /// ```
 /// use bytes::Bytes;
 /// use http::{Method, Request, Response};
-/// use http_body_util::Full;
-/// use omnia_sdk::HttpRequest as _;
+/// use omnia_sdk::HttpClient as _;
 /// use omnia_test::guest::MatchedHttp;
 ///
 /// # tokio::runtime::Runtime::new().unwrap().block_on(async {
@@ -51,7 +46,7 @@ impl Recorded {
 ///     "https://api.test/ping",
 ///     Response::new(Bytes::from_static(b"pong")),
 /// );
-/// let request = Request::get("https://api.test/ping").body(Full::<Bytes>::default()).unwrap();
+/// let request = Request::get("https://api.test/ping").body(Bytes::new()).unwrap();
 /// assert_eq!(http.fetch(request).await.unwrap().into_body(), "pong");
 /// assert_eq!(http.requests()[0].uri.to_string(), "https://api.test/ping");
 /// # });
@@ -130,24 +125,17 @@ impl fmt::Debug for MatchedHttp {
 }
 
 // panics when no route matches the request
-impl HttpRequest for MatchedHttp {
-    fn fetch<T>(&self, request: Request<T>) -> impl Future<Output = Result<Response<Bytes>>> + Send
-    where
-        T: Body + Any + Send,
-        T::Data: Into<Vec<u8>>,
-        T::Error: Into<Box<dyn Error + Send + Sync + 'static>>,
-    {
+impl HttpClient for MatchedHttp {
+    fn fetch(
+        &self, request: Request<Bytes>,
+    ) -> impl Future<Output = Result<Response<Bytes>>> + Send {
         let (parts, body) = request.into_parts();
-        let this = self.clone();
-        async move {
-            let body = collect(body).await.map_err(anyhow::Error::from_boxed)?;
-            Ok(this.answer(Recorded {
-                method: parts.method,
-                uri: parts.uri,
-                headers: parts.headers,
-                body,
-            }))
-        }
+        ready(Ok(self.answer(Recorded {
+            method: parts.method,
+            uri: parts.uri,
+            headers: parts.headers,
+            body: body.to_vec(),
+        })))
     }
 }
 
@@ -182,28 +170,3 @@ impl Route {
 }
 
 type BodyPredicate = Arc<dyn Fn(&[u8]) -> bool + Send + Sync>;
-
-// Frame by frame: `BodyExt::collect` would hold `T::Data`, which the trait
-// does not promise is `Send`, across an await.
-fn collect<T>(body: T) -> impl Future<Output = Result<Vec<u8>, Box<dyn Error + Send + Sync>>> + Send
-where
-    T: Body + Send,
-    T::Data: Into<Vec<u8>>,
-    T::Error: Into<Box<dyn Error + Send + Sync + 'static>>,
-{
-    let mut body = Box::pin(body);
-    let mut bytes = Vec::new();
-    poll_fn(move |cx| {
-        loop {
-            match ready!(body.as_mut().poll_frame(cx)) {
-                Some(Ok(frame)) => {
-                    if let Ok(data) = Frame::into_data(frame) {
-                        bytes.extend(data.into());
-                    }
-                }
-                Some(Err(error)) => return Poll::Ready(Err(error.into())),
-                None => return Poll::Ready(Ok(std::mem::take(&mut bytes))),
-            }
-        }
-    })
-}

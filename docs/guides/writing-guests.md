@@ -55,9 +55,9 @@ cargo build --example <name>-wasm --target wasm32-wasip2
 
 `omnia-sdk` keeps application logic independent of how it is invoked. Three pieces, defined once:
 
-- A **provider** is the struct your handlers run against — it carries their capabilities (implement `DocumentStore`, `Config`, etc. on it).
+- A **provider** is the struct your handlers run against — it carries their capabilities (implement `DocumentDb`, `Config`, etc. on it).
 - A **client** (`Client::new(provider)`) owns the provider. It is the state of an HTTP router and the thing a messaging router or command invokes handlers through.
-- A **context** (`Context<P>`) is what a handler receives: the provider, through `provider()` or one accessor per capability (`config()`, `state()`, `tables()`, `http()`, ...), and the public transport-neutral `metadata` (request, correlation, and causation ids, and the tenant when the transport names one). A handler bounds its `P` on the capability traits it uses and never names the provider; an accessor names the one capability a call means where two of them share a method name.
+- A **context** (`Context<P>`) is what a handler receives: the provider, through `provider()` or one accessor per capability (`config()`, `state()`, `sql()`, `http()`, `publisher()`, ...), and the public transport-neutral `metadata` (request, correlation, and causation ids, and the tenant when the transport names one). A handler bounds its `P` on the capability traits it uses and never names the provider; an accessor names the one capability a call means where two of them share a method name.
 
 An **HTTP handler** is a plain [Axum](https://github.com/tokio-rs/axum) handler. `Context<P>` is an extractor over the `Client` in the router state; the input comes through axum's own `Path`, `Query`, and `Json` extractors; the output is anything `IntoResponse`, typically `Json<Reply>`:
 
@@ -74,7 +74,23 @@ where
 
 A **messaging or command handler** is an `async fn(Context<P>, I) -> Result<O, E>` named for the operation, taking the context first as an HTTP handler does and the input DTO by value. Every fn of that shape is a `Handler<P, I>` through a blanket impl, as is any `Clone` closure of it — so a closure can carry configuration into a route. Implementing `Handler<P, I>` by hand on a local non-fn type is the escape hatch for the rare case a fn cannot express. To unit-test a fn that takes a context without a `Client` or a router, build its context with `Context::new(provider, metadata)`.
 
-On either transport a handler's bound on `P` is the capability traits it reaches and nothing more. The `Send + Sync + 'static` the routers need belong to the fn that registers the handler, which `Handlers<P>` carries and `omnia_sdk::Capabilities` (every capability trait plus those three) states in one name for a fn generic over the whole provider.
+On either transport a handler's bound on `P` is the capability traits it reaches and nothing more. The `Send + Sync + 'static` the routers need belong to the fn that registers the handler, which `Handlers<P>` carries. A module states them once in a `Requires` trait of its own: the capabilities its handlers reach plus those three, with a blanket impl for every provider that has them. Its `handlers<P>()` bounds `P` on it, and the guest root bounds its router fn on each module's `Requires`:
+
+```rust,noplayground
+// crates/orders/src/lib.rs
+pub trait Requires: Config + HttpClient + StateStore + Send + Sync + 'static {}
+
+impl<P> Requires for P where P: Config + HttpClient + StateStore + Send + Sync + 'static {}
+
+pub fn handlers<P: Requires>() -> Handlers<P> {
+    Handlers::from([placing::handlers(), catalogue::handlers()])
+}
+
+// src/lib.rs, the guest root
+pub fn router<P: orders::Requires + places::Requires>(provider: P) -> Router<P> {
+    Handlers::from([orders::handlers(), places::handlers()]).with_state(Client::new(provider))
+}
+```
 
 Logic shared by an HTTP route and a topic lives in a plain fn both call: the axum handler extracts and hands over, the messaging handler decodes and hands over.
 
@@ -83,7 +99,7 @@ For a guest that runs on the WASI-backed capability defaults, `omnia_sdk::WasiPr
 ```rust,noplayground
 pub fn http_router<P>(provider: P) -> axum::Router
 where
-    P: Config + HttpRequest + Identity + Publish + StateStore + 'static,
+    P: Config + HttpClient + Identity + Publisher + StateStore + 'static,
 {
     axum::Router::new()
         .route("/api/items", post(create_item))
@@ -119,7 +135,7 @@ pub fn http_router<P: Send + Sync + 'static>(provider: P) -> Router {
 http::export!(http_router);
 ```
 
-For **outbound** HTTP requests inside a handler, bound `P: HttpRequest` and call `context.provider().fetch(request).await` with a standard `http::Request` (or call `omnia_wasi_http::handle` directly in `wasm32`-only code; see `examples/http-proxy`).
+For **outbound** HTTP requests inside a handler, bound `P: HttpClient` and call `context.http().fetch(request).await` with a standard `http::Request<Bytes>`, or `fetch_json` from `HttpClientExt` to decode a JSON reply (or call `omnia_wasi_http::handle` directly in `wasm32`-only code; see `examples/http-proxy`).
 
 > **Advanced: raw WASI HTTP export.** When you need to customize the `wasi:http/incoming-handler` export directly (as the standalone `examples/` do to show the low-level binding), implement `wasip3::exports::http::handler::Guest` and hand the request to `omnia_wasi_http::serve`:
 >
@@ -138,7 +154,9 @@ For **outbound** HTTP requests inside a handler, bound `P: HttpRequest` and call
 
 ## Using WASI capabilities
 
-In handlers, access host capabilities through the portable traits on `context.provider()` — `WasiProvider` implements every trait on `wasm32` over the underlying `omnia-wasi-*` WIT bindings, while `omnia_test::guest::Provider` backs them with in-memory doubles in native tests. The guest never names a backend implementation — the host decides what backs each interface.
+In handlers, access host capabilities through the context's accessor for each portable trait — `WasiProvider` implements every trait on `wasm32` over the underlying `omnia-wasi-*` WIT bindings, while `omnia_test::guest::Provider` backs them with in-memory doubles in native tests. The guest never names a backend implementation — the host decides what backs each interface.
+
+Every capability call answers a `capability::Result`, whose `ErrorKind` a caller matches on, and `?` converts it into `omnia_sdk::Error`. Absence is `None` rather than an error, and bytes are `Bytes`. `Identity`, `SecretStore`, `SqlDb`, and `StateStore` address named bindings: the provider's own handle is `default`, and `named(name)` answers a handle on another binding the deployment declares.
 
 Key-value (`StateStore` over `omnia:keyvalue`):
 
@@ -160,11 +178,11 @@ A provider's own handle uses the `default` bucket, and `named(name)` selects ano
 - `compare_and_swap` and `increment` apply their TTL only to an entry they create.
 - A zero TTL fails with `ErrorKind::Invalid`.
 
-Publishing a message (`Publish` over `wasi:messaging`):
+Publishing a message (`Publisher` over `wasi:messaging`), with a key that orders and partitions it:
 
 ```rust,noplayground
-let message = Message::new(&payload);
-context.provider().send("my-topic", &message).await?;
+let message = Message::new(&payload).with_key("customer-7");
+context.publisher().publish("my-topic", &message).await?;
 ```
 
 When writing `wasm32`-only code (as in `examples/`), you can also call the `omnia-wasi-*` guest modules directly:
@@ -172,18 +190,18 @@ When writing `wasm32`-only code (as in `examples/`), you can also call the `omni
 | Capability | `WasiProvider` trait (`omnia_sdk`) | Raw guest module | Example | Deep dive |
 | ---------- | ---------------------------------- | ---------------- | ------- | --------- |
 | Key-value | `StateStore` | `omnia_wasi_keyvalue::omnia::store`, or the `wasi:keyvalue` draft's `omnia_wasi_keyvalue::store` | `examples/keyvalue` | — |
-| Messaging | `Publish` | `omnia_wasi_messaging::{producer, request_reply}` | `examples/messaging` | [Messaging](messaging.md) |
-| SQL | `TableStore` (feature `sql`) | `omnia_wasi_sql` | `examples/sql` | [SQL](sql.md) |
-| Document store | `DocumentStore` (feature `docstore`) | `omnia_wasi_docstore` | `examples/docstore` | [Document Store](document-store.md) |
+| Messaging | `Publisher` | `omnia_wasi_messaging::{producer, request_reply}` | `examples/messaging` | [Messaging](messaging.md) |
+| SQL | `SqlDb` | `omnia_wasi_sql` | `examples/sql` | [SQL](sql.md) |
+| Document store | `DocumentDb` | `omnia_wasi_docstore` | `examples/docstore` | [Document Store](document-store.md) |
 | Blob store | `BlobStore` | `omnia_wasi_blobstore` | `examples/blobstore` | — |
-| Secrets | `Vault` | `omnia_wasi_vault` | `examples/vault` | — |
+| Secrets | `SecretStore` | `omnia_wasi_vault` | `examples/vault` | — |
 | Config | `Config` | `omnia_wasi_config` | `examples/config` | — |
 | Identity/OAuth | `Identity` | `omnia_wasi_identity` | `examples/identity` | — |
-| Outbound HTTP | `HttpRequest` | `omnia_wasi_http` | `examples/http-proxy` | — |
+| Outbound HTTP | `HttpClient` | `omnia_wasi_http` | `examples/http-proxy` | — |
 | Model completions | `Model` | `omnia_wasi_model::completion` | `examples/model` | [Model Completions](model-completions.md) |
 | Version control | `Vcs` | `omnia_wasi_vcs` | — | — |
 | Dynamic plugins | `Plugins` | `omnia_sdk::plugins` | — | — |
-| WebSockets | `Broadcast` | `omnia_wasi_websocket` | `examples/websocket` | [Messaging § WebSockets](messaging.md#websockets) |
+| WebSockets | `WebSockets` | `omnia_wasi_websocket` | `examples/websocket` | [Messaging § WebSockets](messaging.md#websockets) |
 
 ## Handling incoming messages
 

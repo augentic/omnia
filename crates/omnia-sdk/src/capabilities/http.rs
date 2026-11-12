@@ -1,47 +1,43 @@
 //! Outbound HTTP capability.
 
-use std::any::Any;
-use std::error::Error;
 use std::future::Future;
 
-use anyhow::Result;
 use bytes::Bytes;
 use http::{Request, Response};
-use http_body::Body;
 use serde::de::DeserializeOwned;
 
-/// Fetches data from an outbound HTTP source.
+use crate::capability::Result;
+
+/// Send outbound HTTP requests.
 ///
-/// JSON reads of an upstream reply are [`HttpRequestExt`].
+/// Any status is a response, not an error. A request the upstream did not
+/// answer fails with
+/// [`ErrorKind::Unavailable`](crate::capability::ErrorKind::Unavailable).
+/// JSON reads of an upstream reply are [`HttpClientExt`].
 #[omnia_guest_macros::capability]
-pub trait HttpRequest: Send + Sync {
-    /// Make outbound HTTP request.
-    fn fetch<T>(&self, request: Request<T>) -> impl Future<Output = Result<Response<Bytes>>> + Send
-    where
-        T: Body + Any + Send,
-        T::Data: Into<Vec<u8>>,
-        T::Error: Into<Box<dyn Error + Send + Sync + 'static>>;
+pub trait HttpClient: Send + Sync {
+    /// Send `request` and return the upstream's response.
+    fn fetch(
+        &self, request: Request<Bytes>,
+    ) -> impl Future<Output = Result<Response<Bytes>>> + Send;
 }
 
-/// JSON reads over any [`HttpRequest`].
+/// JSON reads over any [`HttpClient`].
 ///
-/// Blanket-implemented for every [`HttpRequest`]; never implemented by hand.
-pub trait HttpRequestExt: HttpRequest {
-    /// Fetch an outbound HTTP request, require a 2xx status (`502 Bad Gateway`
-    /// otherwise), and deserialize the response body as JSON.
+/// Blanket-implemented for every [`HttpClient`]; never implemented by hand.
+pub trait HttpClientExt: HttpClient {
+    /// Send `request`, require a 2xx status, and deserialize the body as JSON.
     ///
     /// # Errors
     ///
-    /// Returns [`crate::Error::ServerError`] when the transport fails and
-    /// [`crate::Error::BadGateway`] when the upstream returns a non-success
-    /// status or an unreadable JSON body.
-    fn fetch_json<T, O>(&self, request: Request<T>) -> impl Future<Output = crate::Result<O>> + Send
-    where
-        T: Body + Any + Send,
-        T::Data: Into<Vec<u8>>,
-        T::Error: Into<Box<dyn Error + Send + Sync + 'static>>,
-        O: DeserializeOwned,
-    {
+    /// - [`crate::Error::BadGateway`] when the upstream does not answer,
+    ///   returns a non-2xx status, or returns a body that is not the JSON of
+    ///   an `O`.
+    /// - [`crate::Error::ServerError`] when the request fails for any other
+    ///   reason.
+    fn fetch_json<O: DeserializeOwned>(
+        &self, request: Request<Bytes>,
+    ) -> impl Future<Output = crate::Result<O>> + Send {
         async move {
             let response = self.fetch(request).await?;
             if !response.status().is_success() {
@@ -53,16 +49,16 @@ pub trait HttpRequestExt: HttpRequest {
     }
 }
 
-impl<P: HttpRequest + ?Sized> HttpRequestExt for P {}
+impl<P: HttpClient + ?Sized> HttpClientExt for P {}
 
 #[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
-impl HttpRequest for crate::WasiProvider {
-    async fn fetch<T>(&self, request: Request<T>) -> Result<Response<Bytes>>
-    where
-        T: Body + Any + Send,
-        T::Data: Into<Vec<u8>>,
-        T::Error: Into<Box<dyn Error + Send + Sync + 'static>>,
-    {
-        omnia_wasi_http::handle(request).await
+impl HttpClient for crate::WasiProvider {
+    async fn fetch(&self, request: Request<Bytes>) -> Result<Response<Bytes>> {
+        use crate::capability::{Error, ErrorKind};
+
+        let target = format!("{} {}", request.method(), request.uri());
+        omnia_wasi_http::handle(request.map(http_body_util::Full::new)).await.map_err(|err| {
+            Error::new(ErrorKind::Unavailable, format!("sending {target}")).with_source(err)
+        })
     }
 }

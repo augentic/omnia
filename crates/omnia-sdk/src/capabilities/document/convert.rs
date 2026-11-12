@@ -1,31 +1,51 @@
 //! Conversions between the docstore value types and the `omnia:docstore` bindings.
 
+use bytes::Bytes;
 use omnia_wasi_docstore::types;
 
-use crate::docstore::{
-    ComparisonOp, Document, Filter, QueryOptions, QueryResult, ScalarValue, SortField,
-};
+use crate::capability::{Error, ErrorKind, Page};
+use crate::docstore::{ComparisonOp, Document, Filter, Query, ScalarValue, SortField};
 
-impl From<Filter> for types::Filter {
-    fn from(filter: Filter) -> Self {
-        match filter {
-            Filter::Compare { field, op, value } => Self::compare(&field, op.into(), &value.into()),
-            Filter::InList { field, values } => {
-                Self::in_list(&field, &values.into_iter().map(Into::into).collect::<Vec<_>>())
-            }
-            Filter::NotInList { field, values } => {
-                Self::not_in_list(&field, &values.into_iter().map(Into::into).collect::<Vec<_>>())
-            }
-            Filter::IsNull(field) => Self::is_null(&field),
-            Filter::IsNotNull(field) => Self::is_not_null(&field),
-            Filter::Contains { field, pattern } => Self::contains(&field, &pattern),
-            Filter::StartsWith { field, pattern } => Self::starts_with(&field, &pattern),
-            Filter::EndsWith { field, pattern } => Self::ends_with(&field, &pattern),
-            Filter::And(children) => Self::and(children.into_iter().map(Into::into).collect()),
-            Filter::Or(children) => Self::or(children.into_iter().map(Into::into).collect()),
-            Filter::Not(inner) => Self::not((*inner).into()),
+// the in-memory host's duplicate-id message, the only `insert` failure that is
+// an outcome rather than a fault until `omnia:docstore` carries `already-exists`
+const EXISTS: &str = "document id already exists";
+
+pub(super) fn is_exists(err: &types::Error) -> bool {
+    matches!(err, types::Error::Other(message) if message == EXISTS)
+}
+
+impl From<types::Error> for Error {
+    fn from(err: types::Error) -> Self {
+        match err {
+            types::Error::NoSuchStore => Self::new(ErrorKind::NotFound, "no such collection"),
+            types::Error::AccessDenied => Self::new(ErrorKind::Denied, "access denied"),
+            types::Error::Other(message) => Self::new(ErrorKind::Other, message),
         }
     }
+}
+
+impl From<&Filter> for types::Filter {
+    fn from(filter: &Filter) -> Self {
+        match filter {
+            Filter::Compare { field, op, value } => {
+                Self::compare(field, (*op).into(), &value.clone().into())
+            }
+            Filter::InList { field, values } => Self::in_list(field, &scalars(values)),
+            Filter::NotInList { field, values } => Self::not_in_list(field, &scalars(values)),
+            Filter::IsNull(field) => Self::is_null(field),
+            Filter::IsNotNull(field) => Self::is_not_null(field),
+            Filter::Contains { field, pattern } => Self::contains(field, pattern),
+            Filter::StartsWith { field, pattern } => Self::starts_with(field, pattern),
+            Filter::EndsWith { field, pattern } => Self::ends_with(field, pattern),
+            Filter::And(children) => Self::and(children.iter().map(Into::into).collect()),
+            Filter::Or(children) => Self::or(children.iter().map(Into::into).collect()),
+            Filter::Not(inner) => Self::not((&**inner).into()),
+        }
+    }
+}
+
+fn scalars(values: &[ScalarValue]) -> Vec<types::ScalarValue> {
+    values.iter().cloned().map(Into::into).collect()
 }
 
 impl From<ComparisonOp> for types::ComparisonOp {
@@ -56,23 +76,23 @@ impl From<ScalarValue> for types::ScalarValue {
     }
 }
 
-impl From<SortField> for types::SortField {
-    fn from(sort: SortField) -> Self {
+impl From<&SortField> for types::SortField {
+    fn from(sort: &SortField) -> Self {
         Self {
-            field: sort.field,
+            field: sort.field.clone(),
             descending: sort.descending,
         }
     }
 }
 
-impl From<QueryOptions> for types::QueryOptions {
-    fn from(options: QueryOptions) -> Self {
+impl From<&Query> for types::QueryOptions {
+    fn from(query: &Query) -> Self {
         Self {
-            filter: options.filter.map(Into::into),
-            order_by: options.order_by.into_iter().map(Into::into).collect(),
-            limit: options.limit,
-            offset: options.offset,
-            continuation: options.continuation,
+            filter: query.filter.as_ref().map(Into::into),
+            order_by: query.order_by.iter().map(Into::into).collect(),
+            limit: query.limit,
+            offset: query.offset,
+            continuation: query.after.clone(),
         }
     }
 }
@@ -81,7 +101,7 @@ impl From<&Document> for types::Document {
     fn from(document: &Document) -> Self {
         Self {
             id: document.id.clone(),
-            data: document.data.clone(),
+            data: document.data.to_vec(),
         }
     }
 }
@@ -90,16 +110,13 @@ impl From<types::Document> for Document {
     fn from(document: types::Document) -> Self {
         Self {
             id: document.id,
-            data: document.data,
+            data: Bytes::from(document.data),
         }
     }
 }
 
-impl From<types::QueryResult> for QueryResult {
+impl From<types::QueryResult> for Page<Document> {
     fn from(result: types::QueryResult) -> Self {
-        Self {
-            documents: result.documents.into_iter().map(Into::into).collect(),
-            continuation: result.continuation,
-        }
+        Self::new(result.documents.into_iter().map(Into::into).collect(), result.continuation)
     }
 }

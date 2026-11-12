@@ -9,8 +9,8 @@ use crate::guest::{
 ///
 /// Each capability impl delegates to the `pub` field named for it, seeded
 /// through a consuming builder of the same name. `StateStore`, `BlobStore`,
-/// and `Vault` share the one `storage` field, as one [`Memory`] serves all
-/// three — the shape a production provider's storage backend has.
+/// and `SecretStore` share the one `storage` field, as one [`Memory`] serves
+/// all three — the shape a production provider's storage backend has.
 ///
 /// ```rust
 /// use omnia_sdk::model::{Model as _, Request};
@@ -23,7 +23,7 @@ use crate::guest::{
 ///     .model(ScriptedModel::answering(["ok"]));
 /// provider.storage.insert_state("seen", b"1");
 ///
-/// assert_eq!(Config::get(&provider, "region").await.unwrap(), "eu");
+/// assert_eq!(Config::get(&provider, "region").await.unwrap().as_deref(), Some("eu"));
 /// let request = Request::builder().messages(vec![]).build();
 /// assert_eq!(provider.complete(request).await.unwrap().answer, "ok");
 /// assert_eq!(provider.storage.state("seen"), Some(b"1".to_vec()));
@@ -34,27 +34,27 @@ pub struct Provider {
     /// The `Config` double.
     #[provider(Config)]
     pub config: MapConfig,
-    /// The `HttpRequest` double.
-    #[provider(HttpRequest)]
+    /// The `HttpClient` double.
+    #[provider(HttpClient)]
     pub http: MatchedHttp,
     /// The `Identity` double.
     #[provider(Identity)]
     pub identity: FixedIdentity,
-    /// The `Publish` double.
-    #[provider(Publish)]
-    pub publish: Sink,
-    /// The `Broadcast` double.
-    #[provider(Broadcast)]
-    pub broadcast: Sink,
-    /// The `StateStore` / `BlobStore` / `Vault` double: one shared `Memory`.
-    #[provider(StateStore, BlobStore, Vault)]
+    /// The `Publisher` double.
+    #[provider(Publisher)]
+    pub publisher: Sink,
+    /// The `WebSockets` double.
+    #[provider(WebSockets)]
+    pub websockets: Sink,
+    /// The `StateStore` / `BlobStore` / `SecretStore` double: one shared `Memory`.
+    #[provider(StateStore, BlobStore, SecretStore)]
     pub storage: Memory,
-    /// The `DocumentStore` double.
-    #[provider(DocumentStore)]
+    /// The `DocumentDb` double.
+    #[provider(DocumentDb)]
     pub docs: MemoryDocs,
-    /// The `TableStore` double.
-    #[provider(TableStore)]
-    pub tables: ScriptedTables,
+    /// The `SqlDb` double.
+    #[provider(SqlDb)]
+    pub sql: ScriptedTables,
     /// The `Model` double.
     #[provider(Model)]
     pub model: ScriptedModel,
@@ -88,17 +88,17 @@ impl Provider {
         self
     }
 
-    /// Replaces the `publish` double.
+    /// Replaces the `publisher` double.
     #[must_use]
-    pub fn publish(mut self, publish: Sink) -> Self {
-        self.publish = publish;
+    pub fn publisher(mut self, publisher: Sink) -> Self {
+        self.publisher = publisher;
         self
     }
 
-    /// Replaces the `broadcast` double.
+    /// Replaces the `websockets` double.
     #[must_use]
-    pub fn broadcast(mut self, broadcast: Sink) -> Self {
-        self.broadcast = broadcast;
+    pub fn websockets(mut self, websockets: Sink) -> Self {
+        self.websockets = websockets;
         self
     }
 
@@ -116,10 +116,10 @@ impl Provider {
         self
     }
 
-    /// Replaces the `tables` double.
+    /// Replaces the `sql` double.
     #[must_use]
-    pub fn tables(mut self, tables: ScriptedTables) -> Self {
-        self.tables = tables;
+    pub fn sql(mut self, sql: ScriptedTables) -> Self {
+        self.sql = sql;
         self
     }
 

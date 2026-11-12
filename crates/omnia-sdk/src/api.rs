@@ -265,16 +265,18 @@ macro_rules! accessors {
 
 accessors! {
     blobs: BlobStore,
-    broadcast: Broadcast,
     config: Config,
-    http: HttpRequest,
+    docs: DocumentDb,
+    http: HttpClient,
     identity: Identity,
     model: Model,
     plugins: Plugins,
-    publish: Publish,
+    publisher: Publisher,
+    secrets: SecretStore,
+    sql: SqlDb,
     state: StateStore,
-    vault: Vault,
     vcs: Vcs,
+    websockets: WebSockets,
 }
 
 /// An application handler: any `async fn(Context<P>, I) -> Result<O, E>`.

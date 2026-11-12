@@ -31,7 +31,7 @@ pub fn expand(input: &DeriveInput) -> Result<TokenStream> {
 
     Ok(quote! {
         impl #impl_generics ::omnia_sdk::sql::FromRow for #struct_ident #ty_generics #where_clause {
-            fn from_row(row: &::omnia_sdk::sql::Row) -> ::omnia_sdk::anyhow::Result<Self> {
+            fn from_row(row: &::omnia_sdk::sql::Row) -> ::omnia_sdk::capability::Result<Self> {
                 ::core::result::Result::Ok(Self {
                     #(#reads)*
                 })

@@ -7,8 +7,8 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_sdk::docstore::{Document, Filter, QueryOptions, SortField};
-use omnia_sdk::{DocumentStore as _, WasiProvider};
+use omnia_sdk::docstore::{Document, Filter, Query, SortField};
+use omnia_sdk::{DocumentDb as _, WasiProvider};
 use serde_json::{Value, json};
 
 omnia_sdk::api::command::export!(scenario);
@@ -18,12 +18,12 @@ const EDGES: &str = "edges";
 
 async fn scenario() {
     // seed documents mixing present, explicit null, and absent fields
-    insert("a", json!({"kind": "fruit", "rank": 3, "zone": "z1"})).await;
-    insert("b", json!({"kind": "fruit", "rank": 1, "zone": null})).await;
-    insert("c", json!({"kind": "veg", "rank": 2, "zone": "z2"})).await;
-    insert("d", json!({"kind": "fruit", "rank": 2, "zone": "z3"})).await;
-    insert("e", json!({"kind": "fruit", "rank": 5})).await;
-    insert("g", json!({"kind": "fruit", "rank": 4, "zone": "z4"})).await;
+    insert(ITEMS, "a", json!({"kind": "fruit", "rank": 3, "zone": "z1"})).await;
+    insert(ITEMS, "b", json!({"kind": "fruit", "rank": 1, "zone": null})).await;
+    insert(ITEMS, "c", json!({"kind": "veg", "rank": 2, "zone": "z2"})).await;
+    insert(ITEMS, "d", json!({"kind": "fruit", "rank": 2, "zone": "z3"})).await;
+    insert(ITEMS, "e", json!({"kind": "fruit", "rank": 5})).await;
+    insert(ITEMS, "g", json!({"kind": "fruit", "rank": 4, "zone": "z4"})).await;
 
     // point reads return the stored body or none
     assert_eq!(get("a").await, Some(json!({"kind": "fruit", "rank": 3, "zone": "z1"})));
@@ -39,35 +39,30 @@ async fn scenario() {
     assert_eq!(get("f").await, Some(json!({"kind": "veg", "rank": 0})));
 
     // unfiltered query lists every document in id order on one page
-    let all = WasiProvider.query(ITEMS, QueryOptions::default()).await.expect("query all");
-    assert_eq!(ids(&all.documents), ["a", "b", "c", "d", "e", "f", "g"]);
-    assert_eq!(all.continuation, None);
+    let all = WasiProvider.query(ITEMS, &Query::default()).await.expect("query all");
+    assert_eq!(ids(&all.items), ["a", "b", "c", "d", "e", "f", "g"]);
+    assert_eq!(all.next, None);
 
     // fruit with a zone, highest rank first, two per page
-    let page = QueryOptions {
+    let page = Query {
         filter: Some(Filter::and([Filter::eq("kind", "fruit"), Filter::is_not_null("zone")])),
         order_by: vec![SortField {
             field: "rank".to_owned(),
             descending: true,
         }],
         limit: Some(2),
-        ..QueryOptions::default()
+        ..Query::default()
     };
-    let first = WasiProvider.query(ITEMS, page.clone()).await.expect("query first page");
-    assert_eq!(ids(&first.documents), ["g", "a"]);
-    let continuation = first.continuation.expect("more pages");
-    let rest = WasiProvider
-        .query(
-            ITEMS,
-            QueryOptions {
-                continuation: Some(continuation),
-                ..page
-            },
-        )
-        .await
-        .expect("query last page");
-    assert_eq!(ids(&rest.documents), ["d"]);
-    assert_eq!(rest.continuation, None);
+    let first = WasiProvider.query(ITEMS, &page).await.expect("query first page");
+    assert_eq!(ids(&first.items), ["g", "a"]);
+    let after = first.next.expect("more pages");
+    let rest = Query {
+        after: Some(after),
+        ..page
+    };
+    let rest = WasiProvider.query(ITEMS, &rest).await.expect("query last page");
+    assert_eq!(ids(&rest.items), ["d"]);
+    assert_eq!(rest.next, None);
 
     // delete reports whether a document was removed
     assert!(WasiProvider.delete(ITEMS, "b").await.expect("delete"));
@@ -82,51 +77,39 @@ async fn scenario() {
         ("s", json!({"v": "1.5"})),
         ("z", json!({})),
     ] {
-        WasiProvider
-            .insert(EDGES, &document(id, &body))
-            .await
-            .unwrap_or_else(|e| panic!("insert {id}: {e}"));
+        insert(EDGES, id, body).await;
     }
     assert_eq!(filter_ids(EDGES, Filter::gte("v", 1.0_f64)).await, ["a", "m", "n"]);
     assert_eq!(filter_ids(EDGES, Filter::in_list("v", [2_i32])).await, ["m"]);
     assert_eq!(filter_ids(EDGES, Filter::not_in_list("v", [2_i32])).await, ["a", "n", "s", "z"]);
     assert_eq!(filter_ids(EDGES, Filter::contains("v", "5")).await, ["s"]);
 
-    let sorted = WasiProvider
-        .query(
-            EDGES,
-            QueryOptions {
-                order_by: vec![SortField {
-                    field: "v".to_owned(),
-                    descending: false,
-                }],
-                ..QueryOptions::default()
-            },
-        )
-        .await
-        .expect("query sorted edges");
-    assert_eq!(ids(&sorted.documents), ["z", "m", "a", "n", "s"]);
+    let sorted = Query {
+        order_by: vec![SortField {
+            field: "v".to_owned(),
+            descending: false,
+        }],
+        ..Query::default()
+    };
+    let sorted = WasiProvider.query(EDGES, &sorted).await.expect("query sorted edges");
+    assert_eq!(ids(&sorted.items), ["z", "m", "a", "n", "s"]);
 }
 
 async fn filter_ids(collection: &str, filter: Filter) -> Vec<String> {
-    let page = WasiProvider
-        .query(
-            collection,
-            QueryOptions {
-                filter: Some(filter),
-                ..QueryOptions::default()
-            },
-        )
-        .await
-        .expect("query filtered");
-    page.documents.into_iter().map(|doc| doc.id).collect()
+    let query = Query {
+        filter: Some(filter),
+        ..Query::default()
+    };
+    let page = WasiProvider.query(collection, &query).await.expect("query filtered");
+    page.items.into_iter().map(|doc| doc.id).collect()
 }
 
-async fn insert(id: &str, body: Value) {
-    WasiProvider
-        .insert(ITEMS, &document(id, &body))
+async fn insert(collection: &str, id: &str, body: Value) {
+    let inserted = WasiProvider
+        .insert(collection, &document(id, &body))
         .await
         .unwrap_or_else(|e| panic!("insert {id}: {e}"));
+    assert_eq!(inserted, Ok(()), "{id} is a fresh id");
 }
 
 async fn put(id: &str, body: Value) {
@@ -136,14 +119,11 @@ async fn put(id: &str, body: Value) {
 async fn get(id: &str) -> Option<Value> {
     let doc = WasiProvider.get(ITEMS, id).await.unwrap_or_else(|e| panic!("get {id}: {e}"))?;
     assert_eq!(doc.id, id);
-    Some(serde_json::from_slice(&doc.data).expect("JSON body"))
+    Some(doc.decode().expect("JSON body"))
 }
 
 fn document(id: &str, body: &Value) -> Document {
-    Document {
-        id: id.to_owned(),
-        data: serde_json::to_vec(body).expect("serialize body"),
-    }
+    Document::json(id, body).expect("serialize body")
 }
 
 fn ids(documents: &[Document]) -> Vec<&str> {

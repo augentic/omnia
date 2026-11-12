@@ -7,7 +7,7 @@
 #![cfg(target_arch = "wasm32")]
 
 use omnia_sdk::http::{Method, Request};
-use omnia_sdk::{Config, WasiProvider};
+use omnia_sdk::{ConfigExt as _, WasiProvider};
 use wasip3::http::client;
 use wasip3::http::types::{ErrorCode, RequestOptions};
 use wasip3::http_compat::{IncomingMessage as _, RequestOptionsExtension, http_into_wasi_request};
@@ -19,7 +19,7 @@ omnia_sdk::api::command::export!(scenario);
 const TIMEOUT: u64 = 200_000_000;
 
 async fn scenario() {
-    let origin = WasiProvider.get("ORIGIN").await.expect("ORIGIN seeded");
+    let origin: String = WasiProvider.require("ORIGIN").await.expect("ORIGIN seeded");
 
     // the head never comes; the connect is bounded too, as the first byte is
     // awaited on top of it

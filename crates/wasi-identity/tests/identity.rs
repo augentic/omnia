@@ -1,18 +1,19 @@
 //! End-to-end tests for `omnia:identity`: every scenario runs a real guest
-//! component from `crates/test-programs` through the omnia runtime against
-//! an inline recording backend. The guest asserts what it observes across
-//! the boundary (and traps on failure); the host side asserts what the
-//! backend was asked for. `IdentityStub` records nothing, so it is not the
-//! scenario backend here.
+//! component from `crates/test-programs` through the omnia runtime. The guest
+//! asserts what it observes across the boundary (and traps on failure).
+//! `IdentityStub` records nothing, so a scenario whose host side asserts
+//! what the backend was asked for runs against an inline recording backend.
 
 #![cfg(not(target_arch = "wasm32"))]
 
 use std::sync::{Arc, Mutex};
 
 use futures::FutureExt as _;
-use omnia::{ExitStatus, FutureResult, Provides};
+use omnia::{Connect as _, ExitStatus, FutureResult, Provides};
 use omnia_test::host::Deployment;
-use omnia_wasi_identity::{AccessToken, Identity, IdentityClient, WasiIdentity};
+use omnia_wasi_identity::{
+    AccessToken, Identity, IdentityClient, IdentityStub, StubOptions, WasiIdentity,
+};
 use omnia_wasi_otel::{OtelClient, OtelDefault, WasiOtel};
 
 // Every guest program in `crates/test-programs` must have a matching test
@@ -93,7 +94,7 @@ impl Identity for Recorded {
     }
 }
 
-async fn run_guest(wasm: &str, backends: Backends) {
+async fn run_guest<B: Provides<WasiIdentity> + Provides<WasiOtel>>(wasm: &str, backends: B) {
     let status = Deployment::new()
         .guest("guest", wasm)
         .run_host::<WasiIdentity, _>(backends)
@@ -114,4 +115,15 @@ async fn identity_stub_token() {
         backends.identity.requests(),
         [("default".to_owned(), vec!["read".to_owned(), "write".to_owned()])]
     );
+}
+
+#[tokio::test]
+async fn identity_named() {
+    let options = StubOptions {
+        names: vec!["default".to_owned(), "reports".to_owned()],
+    };
+    let stub = IdentityStub::connect_with(options).await.expect("identity stub");
+    let backends = omnia_test::host::Backends::defaults().await.identity(stub);
+
+    run_guest(test_programs::IDENTITY_NAMED, backends).await;
 }

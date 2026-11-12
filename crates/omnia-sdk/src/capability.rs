@@ -1,12 +1,36 @@
-//! The error and result a capability call returns.
+//! The error, result, and listing page a capability call returns.
 //!
 //! A failed call is an [`Error`] whose [`ErrorKind`] tells the caller what
-//! went wrong. Absence is not a failure: a missing key is `Ok(None)`.
+//! went wrong. Absence is not a failure: a missing key is `Ok(None)`. A
+//! listing answers one [`Page`] at a time.
 
 use std::fmt;
 
 /// The result of a capability call.
 pub type Result<T, E = Error> = std::result::Result<T, E>;
+
+/// One page of a listing, with the cursor that resumes it.
+///
+/// Pass [`next`](Self::next) back as the listing's `after` to read the
+/// following page. A page without one is the last. A cursor is opaque: it
+/// comes from a page and goes back to the listing that made it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Page<T> {
+    /// The items on this page.
+    pub items: Vec<T>,
+
+    /// The cursor that resumes the listing, or `None` on the last page.
+    pub next: Option<String>,
+}
+
+impl<T> Page<T> {
+    /// A page holding `items` that resumes at `next`.
+    #[must_use]
+    pub const fn new(items: Vec<T>, next: Option<String>) -> Self {
+        Self { items, next }
+    }
+}
 
 /// A failed capability call.
 ///
@@ -51,7 +75,7 @@ impl Error {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum ErrorKind {
-    /// The binding, container, or collection does not exist.
+    /// The binding, container, collection, or required setting does not exist.
     NotFound,
 
     /// The provider refused the call.

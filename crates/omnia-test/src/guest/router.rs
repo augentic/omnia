@@ -49,11 +49,5 @@ pub async fn deliver<P>(
 where
     P: Send + Sync + 'static,
 {
-    router
-        .handle(Delivery {
-            topic: Some(topic.to_owned()),
-            payload: payload.into(),
-            ..Delivery::default()
-        })
-        .await
+    router.handle(Delivery::new(topic, &payload.into())).await
 }

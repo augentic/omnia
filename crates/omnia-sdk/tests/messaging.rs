@@ -40,15 +40,12 @@ fn echo<P: Send + Sync + 'static>(
 }
 
 fn delivery(topic: Option<&str>, payload: &[u8]) -> Delivery {
-    Delivery {
-        topic: topic.map(str::to_owned),
-        payload: payload.to_vec(),
-        content_type: Some("application/json".to_string()),
-        metadata: vec![
-            ("correlation-id".to_string(), "delivery-1".to_string()),
-            ("tenant".to_string(), "acme".to_string()),
-        ],
-    }
+    let mut delivery = Delivery::new(topic.unwrap_or_default(), payload)
+        .with_content_type("application/json")
+        .with_metadata("correlation-id", "delivery-1")
+        .with_metadata("tenant", "acme");
+    delivery.topic = topic.map(str::to_owned);
+    delivery
 }
 
 #[tokio::test]
@@ -83,15 +80,9 @@ async fn malformed_delivery() {
 async fn topic_span() {
     let (spans, _guard) = Spans::install();
     let router = Handlers::new().topic("events.created", echo).with_state(Client::new(()));
-    let delivery = Delivery {
-        topic: Some("events.created".to_string()),
-        payload: br#"{"name":"message"}"#.to_vec(),
-        metadata: vec![
-            ("request-id".to_string(), "req-1".to_string()),
-            ("correlation-id".to_string(), "corr-1".to_string()),
-        ],
-        ..Delivery::default()
-    };
+    let delivery = Delivery::new("events.created", br#"{"name":"message"}"#)
+        .with_metadata("request-id", "req-1")
+        .with_metadata("correlation-id", "corr-1");
 
     router.handle(delivery).await.expect("the route handles the delivery");
 
@@ -109,15 +100,9 @@ async fn topic_span() {
 async fn invalid_payload_span() {
     let (spans, _guard) = Spans::install();
     let router = Handlers::new().topic("events.created", echo).with_state(Client::new(()));
-    let delivery = Delivery {
-        topic: Some("events.created".to_string()),
-        payload: b"not-json".to_vec(),
-        metadata: vec![
-            ("request-id".to_string(), "req-1".to_string()),
-            ("correlation-id".to_string(), "corr-1".to_string()),
-        ],
-        ..Delivery::default()
-    };
+    let delivery = Delivery::new("events.created", b"not-json")
+        .with_metadata("request-id", "req-1")
+        .with_metadata("correlation-id", "corr-1");
 
     assert!(matches!(router.handle(delivery).await, Err(DeliveryError::Rejected(_))));
     assert_eq!(

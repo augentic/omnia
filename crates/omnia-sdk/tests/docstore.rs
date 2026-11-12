@@ -1,7 +1,5 @@
 //! `Filter::on_date` across calendar edges, observed through `Filter::matches`.
 
-#![cfg(feature = "docstore")]
-
 use omnia_sdk::docstore::Filter;
 use serde_json::json;
 

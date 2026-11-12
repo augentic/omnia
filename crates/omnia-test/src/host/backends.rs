@@ -1,6 +1,7 @@
 //! The store's backend bundle: every `wasi-*` in-memory default, each
 //! swappable for another backend of its host.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use omnia::{Connect as _, HostCtx, NoOptions, Provides};
@@ -41,11 +42,14 @@ pub const STATE_BUCKET: &str = "default";
 /// The bundle is deterministic: [`defaults`](Self::defaults) reads no
 /// environment variable and opens no socket. Config answers from the map
 /// seeded by [`config`](Self::config) alone, the websocket backend serves no
-/// listener, and the HTTP client, keyvalue buckets, and `SQLite` connection
-/// are built from fixed options rather than `HTTP_CONNECT_TIMEOUT` /
-/// `KEYVALUE_BUCKETS` / `SQL_DATABASE`. The keyvalue backend declares
-/// [`STATE_BUCKET`] alone; a scenario that opens another sets its own with
-/// [`keyvalue`](Self::keyvalue).
+/// listener, and the HTTP client, keyvalue buckets, `SQLite` databases, and
+/// identities are built from fixed options rather than
+/// `HTTP_CONNECT_TIMEOUT` / `KEYVALUE_BUCKETS` / `SQL_DATABASES` /
+/// `IDENTITY_NAMES`. The keyvalue backend declares [`STATE_BUCKET`] alone,
+/// the `SQLite` backend a private `default` database alone, and the identity
+/// stub the `default` identity alone. A scenario that opens another name
+/// sets its own backend with [`keyvalue`](Self::keyvalue),
+/// [`sql`](Self::sql), or [`identity`](Self::identity).
 ///
 /// One type parameter per swappable host, each defaulting to the in-memory
 /// backend, so `Backends` with no arguments is the all-default bundle and a
@@ -111,7 +115,7 @@ impl Backends {
             http: HttpDefault::connect_with(HttpOptions { connect_timeout: 10 })
                 .await
                 .expect("outbound http client"),
-            identity: IdentityStub,
+            identity: IdentityStub::default(),
             keyvalue: KeyValueDefault::connect_with(KeyValueOptions::default())
                 .await
                 .expect("in-memory keyvalue"),
@@ -123,6 +127,7 @@ impl Backends {
             // a private database per bundle: the crate default is shared process-wide
             sql: SqlDefault::connect_with(SqlOptions {
                 database: ":memory:".to_owned(),
+                databases: BTreeMap::new(),
             })
             .await
             .expect("in-memory sqlite"),

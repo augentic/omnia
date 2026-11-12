@@ -17,7 +17,7 @@
 #![cfg(target_arch = "wasm32")]
 
 use omnia_sdk::http::{Method, Request, StatusCode};
-use omnia_sdk::{Config, WasiProvider};
+use omnia_sdk::{ConfigExt as _, WasiProvider};
 use wasip3::http::types::ErrorCode;
 
 omnia_sdk::api::command::export!(scenario);
@@ -41,7 +41,7 @@ const REFUSED: [(&str, &str, &str); 5] = [
 ];
 
 async fn scenario() {
-    let origin = WasiProvider.get("ORIGIN").await.expect("ORIGIN seeded");
+    let origin: String = WasiProvider.require("ORIGIN").await.expect("ORIGIN seeded");
 
     for (key, path) in ACCEPTED {
         let request = request(&origin, path, key).await;
@@ -64,7 +64,7 @@ async fn scenario() {
 }
 
 async fn request(origin: &str, path: &str, key: &str) -> Request<String> {
-    let bundle = WasiProvider.get(key).await.unwrap_or_else(|_| panic!("{key} seeded"));
+    let bundle: String = WasiProvider.require(key).await.unwrap_or_else(|_| panic!("{key} seeded"));
     Request::builder()
         .method(Method::GET)
         .uri(format!("{origin}{path}"))

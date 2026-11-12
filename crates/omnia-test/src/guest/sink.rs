@@ -1,34 +1,37 @@
-//! The trivial doubles: a recording `Publish` + `Broadcast` sink, a map
+//! The trivial doubles: a recording `Publisher` + `WebSockets` sink, a map
 //! `Config`, and a fixed-token `Identity`.
 
 use std::collections::BTreeMap;
 use std::future::{Future, ready};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
-use anyhow::{Result, anyhow};
-use omnia_sdk::{AccessToken, Broadcast, Config, Identity, Message, Publish};
+use omnia_sdk::capability::Result;
+use omnia_sdk::identity::{AccessToken, DEFAULT};
+use omnia_sdk::messaging::Message;
+use omnia_sdk::{Config, Identity, Publisher, WebSockets};
 
-/// One broadcast the code under test sent.
+/// One WebSocket send the code under test made.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Broadcasted {
-    /// The channel name.
-    pub name: String,
     /// The payload.
     pub data: Vec<u8>,
-    /// The targeted sockets; `None` is every subscriber.
+    /// The targeted sockets; `None` is every connected socket.
     pub sockets: Option<Vec<String>>,
 }
 
-/// Records every published message and broadcast; clones share one log.
+/// Records every published message and WebSocket send; clones share one log.
 ///
 /// ```
-/// use omnia_sdk::{Message, Publish as _};
+/// use omnia_sdk::Publisher as _;
+/// use omnia_sdk::messaging::Message;
 /// use omnia_test::guest::Sink;
 ///
 /// # tokio::runtime::Runtime::new().unwrap().block_on(async {
 /// let sink = Sink::default();
-/// sink.send("orders", &Message::new(b"one")).await.unwrap();
+/// sink.publish("orders", &Message::new(b"one").with_key("ann")).await.unwrap();
 /// assert_eq!(sink.sent()[0].0, "orders");
+/// assert_eq!(sink.sent()[0].1.key.as_deref(), Some("ann"));
 /// # });
 /// ```
 #[derive(Clone, Debug, Default)]
@@ -47,7 +50,7 @@ impl Sink {
         self.inner.sent.lock().expect("sent lock").clone()
     }
 
-    /// Every broadcast, in call order.
+    /// Every WebSocket send, in call order.
     ///
     /// # Panics
     ///
@@ -56,24 +59,30 @@ impl Sink {
     pub fn broadcasts(&self) -> Vec<Broadcasted> {
         self.inner.broadcasts.lock().expect("broadcasts lock").clone()
     }
+
+    fn record(&self, data: &[u8], sockets: Option<Vec<String>>) {
+        self.inner.broadcasts.lock().expect("broadcasts lock").push(Broadcasted {
+            data: data.to_vec(),
+            sockets,
+        });
+    }
 }
 
-impl Publish for Sink {
-    fn send(&self, topic: &str, message: &Message) -> impl Future<Output = Result<()>> + Send {
+impl Publisher for Sink {
+    fn publish(&self, topic: &str, message: &Message) -> impl Future<Output = Result<()>> + Send {
         self.inner.sent.lock().expect("sent lock").push((topic.to_owned(), message.clone()));
         ready(Ok(()))
     }
 }
 
-impl Broadcast for Sink {
-    fn send(
-        &self, name: &str, data: &[u8], sockets: Option<Vec<String>>,
-    ) -> impl Future<Output = Result<()>> + Send {
-        self.inner.broadcasts.lock().expect("broadcasts lock").push(Broadcasted {
-            name: name.to_owned(),
-            data: data.to_vec(),
-            sockets,
-        });
+impl WebSockets for Sink {
+    fn broadcast(&self, data: &[u8]) -> impl Future<Output = Result<()>> + Send {
+        self.record(data, None);
+        ready(Ok(()))
+    }
+
+    fn send_to(&self, sockets: &[&str], data: &[u8]) -> impl Future<Output = Result<()>> + Send {
+        self.record(data, Some(sockets.iter().map(|&socket| socket.to_owned()).collect()));
         ready(Ok(()))
     }
 }
@@ -84,8 +93,7 @@ struct SinkInner {
     broadcasts: Mutex<Vec<Broadcasted>>,
 }
 
-/// Configuration from a map; an unknown key is an error, as it is on the
-/// runtime.
+/// Configuration from a map; an unknown key reads as unset.
 ///
 /// ```
 /// use omnia_sdk::Config as _;
@@ -93,8 +101,8 @@ struct SinkInner {
 ///
 /// # tokio::runtime::Runtime::new().unwrap().block_on(async {
 /// let config = MapConfig::default().with([("region", "eu")]);
-/// assert_eq!(config.get("region").await.unwrap(), "eu");
-/// assert!(config.get("zone").await.is_err());
+/// assert_eq!(config.get("region").await.unwrap().as_deref(), Some("eu"));
+/// assert_eq!(config.get("zone").await.unwrap(), None);
 /// # });
 /// ```
 #[derive(Clone, Debug, Default)]
@@ -114,13 +122,17 @@ impl MapConfig {
 }
 
 impl Config for MapConfig {
-    fn get(&self, key: &str) -> impl Future<Output = Result<String>> + Send {
-        ready(self.values.get(key).cloned().ok_or_else(|| anyhow!("config key `{key}` is not set")))
+    fn get(&self, key: &str) -> impl Future<Output = Result<Option<String>>> + Send {
+        ready(Ok(self.values.get(key).cloned()))
     }
 }
 
-/// An identity provider answering every request with one fixed token and
-/// recording the identities asked for.
+/// An identity provider answering one fixed token per identity and recording
+/// the identities asked for.
+///
+/// The [`DEFAULT`] identity's token is the one passed to [`new`](Self::new).
+/// A [`named`](Identity::named) identity's token is that token, a colon,
+/// and the identity's name. Every token lasts an hour.
 ///
 /// ```
 /// use omnia_sdk::Identity as _;
@@ -128,21 +140,30 @@ impl Config for MapConfig {
 ///
 /// # tokio::runtime::Runtime::new().unwrap().block_on(async {
 /// let identity = FixedIdentity::new("tok");
-/// assert_eq!(identity.token("svc", &[]).await.unwrap().token, "tok");
-/// assert_eq!(identity.asked(), ["svc"]);
+/// assert_eq!(identity.token(&[]).await.unwrap().token, "tok");
+/// assert_eq!(identity.named("svc").token(&[]).await.unwrap().token, "tok:svc");
+/// assert_eq!(identity.asked(), ["default", "svc"]);
 /// # });
 /// ```
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct FixedIdentity {
     token: String,
+    name: Arc<str>,
     asked: Arc<Mutex<Vec<String>>>,
 }
 
+impl Default for FixedIdentity {
+    fn default() -> Self {
+        Self::new("")
+    }
+}
+
 impl FixedIdentity {
-    /// An identity whose every access token is `token`.
+    /// An identity provider whose [`DEFAULT`] identity's token is `token`.
     pub fn new(token: impl Into<String>) -> Self {
         Self {
             token: token.into(),
+            name: Arc::from(DEFAULT),
             asked: Arc::default(),
         }
     }
@@ -159,13 +180,23 @@ impl FixedIdentity {
 }
 
 impl Identity for FixedIdentity {
-    fn token(
-        &self, identity: &str, _scopes: &[String],
-    ) -> impl Future<Output = Result<AccessToken>> + Send {
-        self.asked.lock().expect("asked lock").push(identity.to_owned());
-        ready(Ok(AccessToken {
+    type Named = Self;
+
+    fn token(&self, _scopes: &[&str]) -> impl Future<Output = Result<AccessToken>> + Send {
+        self.asked.lock().expect("asked lock").push(self.name.to_string());
+        let token = if &*self.name == DEFAULT {
+            self.token.clone()
+        } else {
+            format!("{}:{}", self.token, self.name)
+        };
+        ready(Ok(AccessToken::new(token, Duration::from_secs(3600))))
+    }
+
+    fn named(&self, name: &str) -> Self {
+        Self {
             token: self.token.clone(),
-            expires_in: 3600,
-        }))
+            name: Arc::from(name),
+            asked: Arc::clone(&self.asked),
+        }
     }
 }

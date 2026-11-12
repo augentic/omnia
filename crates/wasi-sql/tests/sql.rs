@@ -6,9 +6,11 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
-use omnia::ExitStatus;
+use std::collections::BTreeMap;
+
+use omnia::{Connect as _, ExitStatus};
 use omnia_test::host::{Backends, Deployment};
-use omnia_wasi_sql::{DataType, SqlClient as _, WasiSql};
+use omnia_wasi_sql::{ConnectOptions, DataType, SqlClient as _, SqlDefault, WasiSql};
 
 // Every guest program in `crates/test-programs` must have a matching test
 // here; a new program without one fails to compile.
@@ -23,6 +25,24 @@ async fn run_guest(wasm: &str, backends: Backends) {
     assert_eq!(status, ExitStatus::SUCCESS, "guest `{wasm}` failed");
 }
 
+async fn names(sql: &SqlDefault, database: &str) -> Vec<String> {
+    let db = sql.open(database.to_owned()).await.expect("open");
+    let rows = db.query("SELECT name FROM items ORDER BY name".to_owned(), vec![]).await;
+    rows.expect("query")
+        .into_iter()
+        .map(|row| {
+            let [field] = &row.fields[..] else {
+                panic!("unexpected fields: {:?}", row.fields);
+            };
+            let DataType::Str(Some(name)) = &field.value else {
+                panic!("unexpected value: {:?}", field.value);
+            };
+            assert_eq!(field.name, "name");
+            name.clone()
+        })
+        .collect()
+}
+
 #[tokio::test]
 async fn sql_query_exec() {
     let backends = Backends::defaults().await;
@@ -31,13 +51,21 @@ async fn sql_query_exec() {
 
     // Persisted state: the same `:memory:` database the guest wrote holds the
     // one row its delete left behind.
-    let db = backends.sql.open("db".to_owned()).await.expect("open");
-    let rows = db.query("SELECT name FROM items".to_owned(), vec![]).await.expect("query");
-    assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].fields.len(), 1);
-    assert_eq!(rows[0].fields[0].name, "name");
-    let DataType::Str(Some(name)) = &rows[0].fields[0].value else {
-        panic!("unexpected value: {:?}", rows[0].fields[0].value);
+    assert_eq!(names(&backends.sql, "default").await, ["alpha"]);
+}
+
+#[tokio::test]
+async fn sql_bindings() {
+    let options = ConnectOptions {
+        database: ":memory:".to_owned(),
+        databases: BTreeMap::from([("second".to_owned(), ":memory:".to_owned())]),
     };
-    assert_eq!(name, "alpha");
+    let sql = SqlDefault::connect_with(options).await.expect("in-memory sqlite");
+    let backends = Backends::defaults().await.sql(sql.clone());
+
+    run_guest(test_programs::SQL_BINDINGS, backends).await;
+
+    // Persisted state: the declared name is its own database, which holds
+    // only what the guest wrote through it.
+    assert_eq!(names(&sql, "second").await, ["gamma"]);
 }

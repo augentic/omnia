@@ -50,6 +50,9 @@ impl omnia_core::FromEnv for ConnectOptions {
 }
 
 /// Default implementation for `wasi:identity`.
+///
+/// Its one set of client credentials is the identity `default`, and it
+/// refuses every other name.
 #[derive(Debug, Clone)]
 pub struct IdentityDefault {
     token_manager: TokenManager,
@@ -66,10 +69,14 @@ impl Connect for IdentityDefault {
 }
 
 impl IdentityClient for IdentityDefault {
-    fn get_identity(&self, _name: String) -> FutureResult<Arc<dyn Identity>> {
-        tracing::debug!("getting identity");
+    fn get_identity(&self, name: String) -> FutureResult<Arc<dyn Identity>> {
+        tracing::debug!("getting identity `{name}`");
         let token_manager = self.token_manager.clone();
-        async move { Ok(Arc::new(token_manager) as Arc<dyn Identity>) }.boxed()
+        async move {
+            anyhow::ensure!(name == "default", "identity `{name}` is not declared");
+            Ok(Arc::new(token_manager) as Arc<dyn Identity>)
+        }
+        .boxed()
     }
 }
 

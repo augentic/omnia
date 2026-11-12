@@ -1,21 +1,24 @@
 //! Typed capability helper contracts over the `omnia_test::guest` doubles.
 
-#![cfg(all(not(target_arch = "wasm32"), feature = "sql", feature = "docstore"))]
+#![cfg(not(target_arch = "wasm32"))]
+
+use std::error::Error as _;
 
 use bytes::Bytes;
 use http::{Method, Request, Response, StatusCode};
-use http_body_util::Full;
+use omnia_sdk::capability::ErrorKind;
 use omnia_sdk::docstore::Document;
-use omnia_sdk::sql::{DataType, Field, FromRow, Row};
+use omnia_sdk::messaging::Message;
+use omnia_sdk::sql::{Field, FromRow, Row, Value};
 use omnia_sdk::{
-    ConfigExt as _, DocumentStore as _, DocumentStoreExt as _, Error, HttpRequestExt as _,
-    IdentityExt as _, Message, Publish as _, Settings, StateStoreExt as _, TableStoreExt as _,
+    ConfigExt as _, DocumentDb as _, DocumentDbExt as _, Error, HttpClientExt as _, Identity as _,
+    IdentityExt as _, Publisher as _, Settings, SqlDb as _, SqlDbExt as _, StateStoreExt as _,
 };
 use omnia_test::guest::{
     FixedIdentity, MapConfig, MatchedHttp, MemoryDocs, Provider, ScriptedTables, Sink,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{Value as Json, json};
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 struct Cached {
@@ -45,19 +48,18 @@ struct Item {
 
 fn row(id: i64, label: &str, note: Option<&str>) -> Row {
     Row {
-        index: id.to_string(),
         fields: vec![
             Field {
                 name: "id".into(),
-                value: DataType::Int64(Some(id)),
+                value: id.into(),
             },
             Field {
                 name: "label".into(),
-                value: DataType::Str(Some(label.into())),
+                value: label.into(),
             },
             Field {
                 name: "note".into(),
-                value: DataType::Str(note.map(str::to_owned)),
+                value: note.into(),
             },
         ],
     }
@@ -90,7 +92,7 @@ async fn fetch_json() {
         "https://api.test/status",
         Response::new(Bytes::from_static(br#"{"status":"green"}"#)),
     );
-    let request = Request::get("https://api.test/status").body(Full::<Bytes>::default()).unwrap();
+    let request = Request::get("https://api.test/status").body(Bytes::new()).unwrap();
 
     let upstream: Upstream = http.fetch_json(request).await.expect("fetch");
 
@@ -102,31 +104,45 @@ async fn fetch_json_unavailable() {
     let mut unavailable = Response::new(Bytes::from_static(b"try later"));
     *unavailable.status_mut() = StatusCode::SERVICE_UNAVAILABLE;
     let http = MatchedHttp::default().on(Method::GET, "https://api.test/status", unavailable);
-    let request = Request::get("https://api.test/status").body(Full::<Bytes>::default()).unwrap();
+    let request = Request::get("https://api.test/status").body(Bytes::new()).unwrap();
 
-    let error = http.fetch_json::<_, Upstream>(request).await.expect_err("non-2xx fails");
+    let error = http.fetch_json::<Upstream>(request).await.expect_err("non-2xx fails");
 
     assert!(matches!(error, Error::BadGateway { .. }), "{error}");
     assert!(error.to_string().contains("503"), "{error}");
 }
 
 #[tokio::test]
-async fn config_parse_invalid() {
+async fn config_require() {
     let config = MapConfig::default().with([("PORT", "eighty")]);
 
-    let error = config.get_parsed::<u16>("PORT").await.expect_err("not a number");
+    let invalid = config.require::<u16>("PORT").await.expect_err("not a number");
+    let unset = config.require::<u16>("HOST").await.expect_err("not set");
+    let optional = config.parse::<u16>("HOST").await.expect("unset is not an error");
 
-    assert!(error.to_string().contains("`PORT` is invalid"), "{error}");
+    assert_eq!(invalid.kind(), ErrorKind::Invalid);
+    assert!(invalid.to_string().contains("`PORT` is invalid"), "{invalid}");
+    assert_eq!(unset.kind(), ErrorKind::NotFound);
+    assert_eq!(optional, None);
 }
 
 #[tokio::test]
 async fn identity_access_token() {
     let identity = FixedIdentity::new("tok");
 
-    let token = identity.access_token("svc").await.expect("token");
+    let token = identity.named("svc").access_token().await.expect("token");
 
-    assert_eq!(token, "tok");
-    assert_eq!(identity.asked(), ["svc"]);
+    assert_eq!(token, "tok:svc");
+}
+
+#[test]
+fn access_token_debug() {
+    let token = omnia_sdk::identity::AccessToken::new("secret", std::time::Duration::from_secs(60));
+
+    let debug = format!("{token:?}");
+
+    assert!(!debug.contains("secret"), "{debug}");
+    assert!(debug.contains("<redacted>"), "{debug}");
 }
 
 #[tokio::test]
@@ -142,14 +158,14 @@ async fn document_json() {
     let stored: Option<Cached> = docs.get_as("people", "ann").await.expect("get");
     let absent: Option<Cached> = docs.get_as("people", "bob").await.expect("get absent");
 
-    assert_eq!(document.data, br#"{"name":"ann","hits":2}"#);
+    assert_eq!(&document.data[..], br#"{"name":"ann","hits":2}"#);
     assert_eq!(stored, Some(value));
     assert_eq!(absent, None);
     let reached = docs.documents("people").await.expect("documents");
     assert_eq!(reached.len(), 1, "{reached:?}");
     assert_eq!(reached[0].id, "ann");
     assert_eq!(
-        serde_json::from_slice::<Value>(&reached[0].data).expect("JSON body"),
+        serde_json::from_slice::<Json>(&reached[0].data).expect("JSON body"),
         json!({"name": "ann", "hits": 2})
     );
 }
@@ -157,16 +173,15 @@ async fn document_json() {
 #[tokio::test]
 async fn document_decode_invalid() {
     let docs = MemoryDocs::default();
-    let document = Document {
-        id: "bob".into(),
-        data: br#"{"name":"bob"}"#.to_vec(),
-    };
+    let document = Document::new("bob", br#"{"name":"bob"}"#);
     docs.put("people", &document).await.expect("put");
 
     let error = docs.get_as::<Cached>("people", "bob").await.expect_err("no `hits` field");
 
-    assert_eq!(error.to_string(), "decoding document `bob`");
-    assert!(format!("{error:#}").contains("missing field `hits`"), "{error:#}");
+    assert_eq!(error.kind(), ErrorKind::Invalid);
+    assert!(error.to_string().contains("decoding document `bob`"), "{error}");
+    let source = error.source().map(ToString::to_string).unwrap_or_default();
+    assert!(source.contains("missing field `hits`"), "{source}");
 }
 
 #[tokio::test]
@@ -202,11 +217,8 @@ async fn query_as() {
     );
 
     let items: Vec<Item> = tables
-        .query_as(
-            "db",
-            "SELECT id, label, note FROM items WHERE id > $1",
-            &[DataType::Int64(Some(0))],
-        )
+        .named("orders")
+        .query_as("SELECT id, label, note FROM items WHERE id > $1", &[Value::from(0_i64)])
         .await
         .expect("query");
 
@@ -225,7 +237,23 @@ async fn query_as() {
             },
         ]
     );
-    assert_eq!(tables.statements()[0].connection, "db");
+    assert_eq!(tables.statements()[0].binding, "orders");
+}
+
+#[tokio::test]
+async fn query_as_mismatch() {
+    #[derive(Debug, FromRow)]
+    struct Numbered {
+        #[expect(dead_code, reason = "the row never decodes")]
+        label: i64,
+    }
+
+    let tables = ScriptedTables::default().on_query(|_, _| true, vec![row(1, "alpha", None)]);
+
+    let error =
+        tables.query_as::<Numbered>("SELECT label FROM items", &[]).await.expect_err("text");
+
+    assert_eq!(error.kind(), ErrorKind::Invalid);
 }
 
 #[test]
@@ -253,13 +281,17 @@ fn row_get_mismatch() {
 #[tokio::test]
 async fn message_json() {
     let sink = Sink::default();
-    let message =
-        Message::json(&json!({"id": 7})).expect("serialize").with_header("tenant", "acme");
+    let message = Message::json(&json!({"id": 7}))
+        .expect("serialize")
+        .with_key("order-7")
+        .with_header("tenant", "acme");
 
-    sink.send("orders", &message).await.expect("send");
+    sink.publish("orders", &message).await.expect("publish");
 
     let (topic, sent) = &sink.sent()[0];
     assert_eq!(topic, "orders");
-    assert_eq!(sent.payload, br#"{"id":7}"#);
+    assert_eq!(&sent.payload[..], br#"{"id":7}"#);
+    assert_eq!(sent.key.as_deref(), Some("order-7"));
+    assert_eq!(sent.content_type.as_deref(), Some("application/json"));
     assert_eq!(sent.headers.get("tenant").map(String::as_str), Some("acme"));
 }

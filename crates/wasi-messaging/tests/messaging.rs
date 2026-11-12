@@ -161,6 +161,31 @@ async fn messaging_produce_handle() {
     runtime.shutdown();
 }
 
+#[tokio::test]
+async fn messaging_keyed() {
+    let backends = Backends::defaults().await;
+    let mut stream = backends.messaging.subscribe();
+    let runtime = boot(&sole(test_programs::MESSAGING_KEYED), backends).await;
+    let handler = handler(&runtime);
+
+    // Producer: the message's key crossed as the `key` metadata entry,
+    // beside the header the guest set.
+    let status = runtime.run_command().await.expect("command runs");
+    assert_eq!(status, ExitStatus::SUCCESS);
+    let sent = next(&mut stream).await;
+    assert_eq!(sent.topic, "orders");
+    assert_eq!(sent.payload, b"order-7");
+    assert_eq!(
+        metadata(&sent),
+        [("key".to_owned(), "customer-7".to_owned()), ("tenant".to_owned(), "acme".to_owned())]
+    );
+
+    // Incoming handler: the guest's router finds the key on the delivery.
+    handler.handle(sent).await.expect("handled");
+
+    runtime.shutdown();
+}
+
 // A guest's returned `Err` comes back as its own outcome, carrying the
 // guest's error, rather than flattened into success or mistaken for a trap.
 #[tokio::test]

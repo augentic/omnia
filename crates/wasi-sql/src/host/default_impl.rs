@@ -2,9 +2,12 @@
 //!
 //! This is a lightweight implementation for development use only.
 
+use std::collections::{BTreeMap, HashMap};
+use std::env::{self, VarError};
+use std::iter;
 use std::sync::Arc;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, ensure};
 use futures::FutureExt;
 use omnia_core::Connect;
 use rusqlite::types::ValueRef;
@@ -14,35 +17,57 @@ use tracing::instrument;
 use crate::host::resource::{Connection, FutureResult};
 use crate::host::{DataType, Field, Row, SqlClient};
 
-#[expect(missing_docs, reason = "`FromEnv` has no docs")]
-mod config {
-    use fromenv::FromEnv;
+const DEFAULT: &str = "default";
 
-    /// Options used to connect to the SQL database.
-    ///
-    /// This struct is used to load connection options from environment variables.
-    #[derive(Debug, Clone, FromEnv)]
-    pub struct ConnectOptions {
-        /// The `SQLite` database URI (`SQL_DATABASE`, default: one shared in-memory database).
-        #[env(from = "SQL_DATABASE", default = "file::memory:?cache=shared")]
-        pub database: String,
-    }
+/// The databases a [`SqlDefault`] opens, by the name a guest opens each under.
+///
+/// [`FromEnv`](omnia_core::FromEnv) reads them from the environment:
+///
+/// - `SQL_DATABASE` is the URI of the `default` database, one in-memory
+///   database shared across the process when unset.
+/// - `SQL_DATABASES` lists the further names, comma-separated.
+/// - `SQL_DATABASE__<NAME>` is the URI of the listed name `<name>`, a private
+///   in-memory database when unset.
+#[derive(Clone, Debug)]
+pub struct ConnectOptions {
+    /// The `SQLite` URI of the `default` database.
+    pub database: String,
+
+    /// The `SQLite` URI of each further database, by name.
+    pub databases: BTreeMap<String, String>,
 }
-pub use config::ConnectOptions;
 
 impl omnia_core::FromEnv for ConnectOptions {
     fn load_env() -> Result<Self> {
-        // `Self::from_env()` is the builder the `FromEnv` derive emits
-        Self::from_env().finalize().context("issue loading connection options")
+        let database = var("SQL_DATABASE")?.unwrap_or_else(|| "file::memory:?cache=shared".into());
+        let mut databases = BTreeMap::new();
+        for name in var("SQL_DATABASES")?.unwrap_or_default().split(',').map(str::trim) {
+            if name.is_empty() {
+                continue;
+            }
+            let uri = var(&format!("SQL_DATABASE__{}", name.to_ascii_uppercase()))?;
+            databases.insert(name.to_owned(), uri.unwrap_or_else(|| ":memory:".into()));
+        }
+        Ok(Self { database, databases })
+    }
+}
+
+fn var(key: &str) -> Result<Option<String>> {
+    match env::var(key) {
+        Ok(value) => Ok(Some(value)),
+        Err(VarError::NotPresent) => Ok(None),
+        Err(err) => Err(err).with_context(|| format!("reading `{key}`")),
     }
 }
 
 /// Default implementation for `wasi:sql`.
+///
+/// It holds one connection per declared database and refuses to open any
+/// other name. Names match case-insensitively.
 #[derive(Debug, Clone)]
 pub struct SqlDefault {
-    // Store the database path to create new connections on demand
-    // Mutex is necessary since rusqlite::Connection isn't `Sync`
-    conn: Arc<parking_lot::Mutex<SqliteConnection>>,
+    // keyed by upper-cased name; the mutex is there because `rusqlite::Connection` is not `Sync`
+    databases: Arc<HashMap<String, Arc<parking_lot::Mutex<SqliteConnection>>>>,
 }
 
 impl Connect for SqlDefault {
@@ -50,25 +75,34 @@ impl Connect for SqlDefault {
 
     #[instrument]
     async fn connect_with(options: Self::ConnectOptions) -> Result<Self> {
-        tracing::debug!("initializing SQLite connection to: {}", options.database);
+        let declared = iter::once((DEFAULT, &options.database))
+            .chain(options.databases.iter().map(|(name, uri)| (name.as_str(), uri)));
 
         // open now, so a bad database path fails connect rather than the first query
-        let conn = Arc::new(parking_lot::Mutex::new(
-            SqliteConnection::open(&options.database).context("failed to open SQLite database")?,
-        ));
+        let mut databases = HashMap::new();
+        for (name, uri) in declared {
+            tracing::debug!("opening SQLite database `{name}` at: {uri}");
+            let conn = SqliteConnection::open(uri)
+                .with_context(|| format!("failed to open SQLite database `{name}`"))?;
+            let conn = Arc::new(parking_lot::Mutex::new(conn));
+            let replaced = databases.insert(name.to_ascii_uppercase(), conn);
+            ensure!(replaced.is_none(), "SQLite database `{name}` is declared twice");
+        }
 
-        Ok(Self { conn })
+        Ok(Self {
+            databases: Arc::new(databases),
+        })
     }
 }
 
 impl SqlClient for SqlDefault {
-    fn open(&self, _name: String) -> FutureResult<Arc<dyn Connection>> {
-        tracing::trace!("opening SQL connection");
-        let conn = Arc::clone(&self.conn);
+    fn open(&self, name: String) -> FutureResult<Arc<dyn Connection>> {
+        tracing::trace!("opening SQL connection `{name}`");
+        let conn = self.databases.get(&name.to_ascii_uppercase()).map(Arc::clone);
 
         async move {
-            let connection = SqliteConn { conn };
-            Ok(Arc::new(connection) as Arc<dyn Connection>)
+            let conn = conn.with_context(|| format!("database `{name}` is not declared"))?;
+            Ok(Arc::new(SqliteConn { conn }) as Arc<dyn Connection>)
         }
         .boxed()
     }

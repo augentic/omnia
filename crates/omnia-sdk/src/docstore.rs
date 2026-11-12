@@ -7,10 +7,12 @@
 use std::cmp::Ordering;
 use std::ops::Not;
 
-use anyhow::Context as _;
+use bytes::Bytes;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
+
+use crate::capability::{Error, ErrorKind, Result};
 
 /// Scalar values for filter comparisons.
 #[derive(Debug, Clone, PartialEq)]
@@ -488,62 +490,78 @@ fn json_cmp(a: &Value, b: &Value) -> Ordering {
     }
 }
 
-/// Options for listing or searching documents.
+/// A query over the documents in a collection.
 #[derive(Debug, Clone, Default)]
-pub struct QueryOptions {
+pub struct Query {
     /// Optional filter tree.
     pub filter: Option<Filter>,
+
     /// Sort order (first key wins, then next, etc.).
     pub order_by: Vec<SortField>,
+
     /// Maximum documents to return.
     pub limit: Option<u32>,
+
     /// Skip this many documents after filter/sort (offset pagination).
     pub offset: Option<u32>,
-    /// Opaque continuation token from a previous page.
-    pub continuation: Option<String>,
+
+    /// The [`next`](crate::capability::Page::next) cursor of the previous page,
+    /// or `None` for the first page.
+    pub after: Option<String>,
 }
 
 /// Stored document: identifier plus JSON body bytes.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Document {
     /// Primary key string.
     pub id: String,
+
     /// JSON payload.
-    pub data: Vec<u8>,
+    pub data: Bytes,
 }
 
 impl Document {
+    /// The document `id` names, with `data` as its JSON body.
+    pub fn new(id: impl Into<String>, data: &[u8]) -> Self {
+        Self {
+            id: id.into(),
+            data: Bytes::copy_from_slice(data),
+        }
+    }
+
     /// The document `id` names, with `value` serialized as its JSON body.
     ///
     /// # Errors
     ///
-    /// Returns an error when `value` cannot be serialized to JSON.
-    pub fn json<T: Serialize + ?Sized>(id: impl Into<String>, value: &T) -> anyhow::Result<Self> {
+    /// [`ErrorKind::Invalid`] when `value` does not serialize.
+    pub fn json<T: Serialize + ?Sized>(id: impl Into<String>, value: &T) -> Result<Self> {
         let id = id.into();
-        let data =
-            serde_json::to_vec(value).with_context(|| format!("encoding document `{id}`"))?;
-        Ok(Self { id, data })
+        let data = serde_json::to_vec(value).map_err(|err| {
+            Error::new(ErrorKind::Invalid, format!("encoding document `{id}`")).with_source(err)
+        })?;
+        Ok(Self {
+            id,
+            data: Bytes::from(data),
+        })
     }
 
     /// Deserialize the JSON body as `T`.
     ///
     /// # Errors
     ///
-    /// Returns an error when the body is not the JSON of a `T`.
-    pub fn decode<T: DeserializeOwned>(&self) -> anyhow::Result<T> {
-        serde_json::from_slice(&self.data)
-            .with_context(|| format!("decoding document `{}`", self.id))
+    /// [`ErrorKind::Invalid`] when the body is not the JSON of a `T`.
+    pub fn decode<T: DeserializeOwned>(&self) -> Result<T> {
+        serde_json::from_slice(&self.data).map_err(|err| {
+            let message = format!("decoding document `{}`", self.id);
+            Error::new(ErrorKind::Invalid, message).with_source(err)
+        })
     }
 }
 
-/// Result of a query with optional next-page token.
-#[derive(Debug, Clone, Default)]
-pub struct QueryResult {
-    /// Matching documents.
-    pub documents: Vec<Document>,
-    /// Continuation token for the next page, if any.
-    pub continuation: Option<String>,
-}
+/// The outcome of an [`insert`](crate::DocumentDb::insert) whose id is already stored.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Exists;
 
 /// Newtype for timestamp strings so `Filter::gte("ts", Timestamp(...))` is explicit.
 #[derive(Debug, Clone, PartialEq, Eq)]

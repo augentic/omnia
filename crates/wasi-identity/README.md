@@ -4,11 +4,14 @@ This crate provides the Identity interface for the Omnia runtime.
 
 ## Interface
 
-Implements the `wasi:identity` WIT interface.
+Implements the `omnia:identity` WIT interface.
+
+A guest reaches it through `omnia_sdk::Identity`. The provider's own handle asks for the identity `default`, and `named(name)` asks for another identity the host serves.
 
 ## Backend
 
-- **Default**: Uses `oauth2` crate to interact with OAuth2/OIDC providers.
+- **Default**: Uses `oauth2` crate to interact with OAuth2/OIDC providers. Its one set of client credentials is the identity `default`, and it refuses every other name.
+- **Stub**: `IdentityStub` issues a fixed token per identity with no identity provider, for tests and local development. It serves the identities `IDENTITY_NAMES` lists, comma-separated, and `default` alone when it is unset. Each identity's token is distinct, and every other name is refused.
 
 ## Cargo features
 

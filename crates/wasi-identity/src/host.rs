@@ -39,7 +39,7 @@ use wasmtime::component::Linker;
 pub use self::default_impl::IdentityDefault;
 use self::generated::omnia::identity::credentials;
 pub use self::resource::*;
-pub use self::stub_impl::IdentityStub;
+pub use self::stub_impl::{IdentityStub, StubOptions};
 use crate::host::generated::Error;
 
 /// Result type for identity operations.

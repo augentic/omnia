@@ -2,7 +2,7 @@
 //!
 //! Demonstrates the WASI SQL interface: opening connections, preparing
 //! parameterized statements (`$1`, `$2`, ...) for schema creation, and
-//! running hand-written CRUD SQL through the `TableStore` capability with
+//! running hand-written CRUD SQL through the `SqlDb` capability with
 //! rows decoded into a record type through `FromRow`.
 
 #![cfg(target_arch = "wasm32")]
@@ -12,12 +12,12 @@ use axum::extract::Path;
 use axum::routing::{delete, get};
 use axum::{Json, Router};
 use chrono::Utc;
-use omnia_sdk::sql::{DataType, FromRow};
-use omnia_sdk::{TableStore, TableStoreExt as _, WasiProvider};
+use omnia_sdk::sql::{self, FromRow, Value};
+use omnia_sdk::{SqlDb, SqlDbExt as _, WasiProvider};
 use omnia_wasi_sql::readwrite;
 use omnia_wasi_sql::types::{Connection, Statement};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::json;
 use tracing::Level;
 use wasip3::exports::http::handler::Guest;
 use wasip3::http::types::{ErrorCode, Request, Response};
@@ -37,12 +37,11 @@ impl Guest for Http {
 
 #[axum::debug_handler]
 #[omnia_wasi_otel::instrument]
-async fn list_agencies() -> omnia_sdk::Result<Json<Value>> {
+async fn list_agencies() -> omnia_sdk::Result<Json<serde_json::Value>> {
     ensure_schema().await?;
 
     let agencies: Vec<Agency> = WasiProvider
         .query_as(
-            "db",
             "SELECT agency_id, name, url, timezone, created_at FROM agency ORDER BY created_at DESC",
             &[],
         )
@@ -54,7 +53,9 @@ async fn list_agencies() -> omnia_sdk::Result<Json<Value>> {
 
 #[axum::debug_handler]
 #[omnia_wasi_otel::instrument]
-async fn create_agency(Json(req): Json<CreateAgencyRequest>) -> omnia_sdk::Result<Json<Value>> {
+async fn create_agency(
+    Json(req): Json<CreateAgencyRequest>,
+) -> omnia_sdk::Result<Json<serde_json::Value>> {
     ensure_schema().await?;
 
     let agency = Agency {
@@ -66,16 +67,15 @@ async fn create_agency(Json(req): Json<CreateAgencyRequest>) -> omnia_sdk::Resul
     };
 
     WasiProvider
-        .exec(
-            "db",
+        .execute(
             "INSERT INTO agency (agency_id, name, url, timezone, created_at) \
              VALUES ($1, $2, $3, $4, $5)",
             &[
-                DataType::Int64(Some(agency.agency_id)),
-                DataType::Str(Some(agency.name.clone())),
-                DataType::Str(agency.url.clone()),
-                DataType::Str(agency.timezone.clone()),
-                DataType::Str(Some(agency.created_at.clone())),
+                Value::from(agency.agency_id),
+                Value::from(agency.name.as_str()),
+                Value::from(agency.url.as_deref()),
+                Value::from(agency.timezone.as_deref()),
+                Value::from(agency.created_at.as_str()),
             ],
         )
         .await
@@ -87,11 +87,11 @@ async fn create_agency(Json(req): Json<CreateAgencyRequest>) -> omnia_sdk::Resul
 // zero affected rows means it did not exist
 #[axum::debug_handler]
 #[omnia_wasi_otel::instrument]
-async fn delete_agency(Path(id): Path<i64>) -> omnia_sdk::Result<Json<Value>> {
+async fn delete_agency(Path(id): Path<i64>) -> omnia_sdk::Result<Json<serde_json::Value>> {
     ensure_schema().await?;
 
     let rows_affected = WasiProvider
-        .exec("db", "DELETE FROM agency WHERE agency_id = $1", &[DataType::Int64(Some(id))])
+        .execute("DELETE FROM agency WHERE agency_id = $1", &[Value::from(id)])
         .await
         .context("deleting agency")?;
 
@@ -104,7 +104,7 @@ async fn delete_agency(Path(id): Path<i64>) -> omnia_sdk::Result<Json<Value>> {
 
 // runs per request, since each is handled by a fresh instance; fine for an example
 async fn ensure_schema() -> Result<()> {
-    let pool = Connection::open("db".to_string())
+    let pool = Connection::open(sql::DEFAULT.to_owned())
         .await
         .map_err(|e| anyhow!("opening connection: {}", e.trace()))?;
 

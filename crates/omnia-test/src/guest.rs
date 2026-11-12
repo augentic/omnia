@@ -19,10 +19,10 @@ mod vcs;
 
 pub use docs::MemoryDocs;
 pub use http::{MatchedHttp, Recorded};
-pub use memory::{BlobSnapshot, Memory, Namespaced, StateSnapshot};
+pub use memory::{BlobSnapshot, Memory, StateSnapshot};
 pub use provider::Provider;
 pub use router::{deliver, send};
 pub use scripted::{ScriptedLoader, ScriptedModel, Turn, function_tools};
 pub use sink::{Broadcasted, FixedIdentity, MapConfig, Sink};
-pub use tables::{Predicate, ScriptedTables, Statement};
+pub use tables::{Executed, Predicate, ScriptedTables};
 pub use vcs::{ScriptedVcs, SeenVcs, VcsTurn};

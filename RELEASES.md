@@ -10,9 +10,13 @@ Unreleased
   `WasiVcs`, and `WasiPlugins` handles.
 - `#[derive(Provider)]`, `#[derive(Settings)]`, and `#[derive(FromRow)]`,
   re-exported by `omnia_sdk`:
-  - `Provider` composes a provider from one field per capability.
+  - `Provider` composes a provider from one field per capability. A field
+    names an `omnia_sdk` capability bare, as in `#[provider(Config)]`, and
+    any other by path, as in `#[provider(crate::geo::Geocoder)]`.
   - `Settings` loads a part's required configuration in one call.
   - `FromRow` decodes a SQL row into a record type.
+- `#[omnia_sdk::capability]`, which makes a trait declared outside
+  `omnia_sdk` a capability a `Provider` field delegates.
 - `omnia_sdk::api::{Handlers, Router}`: a module registers its HTTP routes
   (`route`), messaging topics (`topic`, `topic_with`), and CLI subcommands
   (`command`, `command_with`, behind the `command` feature) on one
@@ -20,32 +24,52 @@ Unreleased
   the one `Router<P>`. `http::export!`, `messaging::export!`, and
   `command::export!` bind the WASI exports. `command::export!` stamps the
   guest crate's version and description as `--version` and `--help`.
-- `omnia_sdk::Capabilities`, every capability trait at once, and the
-  `Vault` capability.
+- `SecretStore`, the secrets capability over `omnia:vault`. A handle
+  addresses one locker, `default` until `named(name)` selects another, and
+  `keys(after)` lists it in key order.
+- One `Context` accessor per capability: `blobs`, `config`, `docs`, `http`,
+  `identity`, `model`, `plugins`, `publisher`, `secrets`, `sql`, `state`,
+  `vcs`, and `websockets`. Each borrows the provider as that one trait, so
+  a handler bounded on `Config + StateStore` calls `get` without UFCS.
 - `omnia:keyvalue`, the Omnia-owned interface `StateStore` calls.
   `WasiKeyValue` serves it beside the `wasi:keyvalue` draft over one
   `Bucket`. Each call names its bucket, and `set`, `compare-and-swap`, and
   `increment` take a TTL in milliseconds.
-- `omnia_sdk::capability::{Error, ErrorKind, Result}`, the error
-  `StateStore` returns. `ErrorKind` is one of `NotFound`, `Denied`,
+- `omnia_sdk::capability::{Error, ErrorKind, Result}`, the error every
+  capability trait returns. `ErrorKind` is one of `NotFound`, `Denied`,
   `Invalid`, `Unsupported`, `Unavailable`, and `Other`. `?` converts it into
   `omnia_sdk::Error`, as a `502` for `Unavailable` and a `500` otherwise.
+- `omnia_sdk::capability::Page`, one page of a listing and the cursor that
+  resumes it. `BlobStore::list`, `DocumentDb::query`, and
+  `SecretStore::keys` answer one.
 - `omnia_sdk::contract::state`, the `StateStore` behaviour rows: one
   generic `async fn` per invariant, run natively over
   `omnia_test::guest::Memory` and in a guest over `WasiProvider`.
 - `omnia_wasi_keyvalue::ConnectOptions`. `KeyValueDefault` serves the
   buckets `KEYVALUE_BUCKETS` lists, comma-separated, and `default` when it
   is unset.
+- `omnia_wasi_sql::ConnectOptions::databases`. `SqlDefault` serves one
+  `SQLite` database per declared name:
+  - `SQL_DATABASE` stays the URI of `default`.
+  - `SQL_DATABASES` lists the further names, comma-separated.
+  - `SQL_DATABASE__<NAME>` is the URI of the listed name, which is a
+    private in-memory database without one.
+- `omnia_wasi_identity::StubOptions`. `IdentityStub` serves the identities
+  `IDENTITY_NAMES` lists, comma-separated, and `default` when it is unset.
+  Each identity's token is distinct.
 - Extension traits, blanket-implemented over each capability:
-  `ConfigExt::get_parsed`, `DocumentStoreExt::get_as`,
-  `HttpRequestExt::fetch_json`, `IdentityExt::access_token`,
-  `StateStoreExt::{get_json, set_json}`, and `TableStoreExt::query_as`.
+  `ConfigExt::{require, parse}`, `DocumentDbExt::get_as`,
+  `HttpClientExt::fetch_json`, `IdentityExt::access_token`,
+  `StateStoreExt::{get_json, set_json}`, and `SqlDbExt::query_as`.
 - `Error::{bad_request, not_found, server_error, bad_gateway}(code,
   description)`, which name the wire `error` code.
-- `Document::{json, decode}`, `Filter::{depth, matches}`, and
+- `Document::{new, json, decode}`, `Filter::{depth, matches}`, and
   `SortField::compare` in `omnia_sdk::docstore`. `Filter::matches` and
   `SortField::compare` are the reference query semantics, and
   `omnia_test::guest::MemoryDocs` evaluates its queries with them.
+- `omnia_sdk::messaging::Message::with_key` and
+  `omnia_sdk::api::messaging::Delivery::key`. A message's key crosses the
+  wire as its `key` metadata entry.
 - `omnia_test::guest::{send, deliver}`, which drive a router natively, and
   `omnia_test::guest::ScriptedVcs`, a scripted `Vcs`.
 - `omnia_core::Backends`, the shape of a deployment's backend bundle:
@@ -79,13 +103,55 @@ Unreleased
 - `omnia_sdk::command!(main)` is `omnia_sdk::api::command::export!(main)`.
 - The value types live in the SDK's own modules:
   - `omnia_sdk::docstore`, which was `omnia_sdk::document_store`.
-  - `omnia_sdk::sql` (`DataType`, `Row`, `Field`, `FromRow`,
-    `ColumnError`), which `omnia_wasi_sql` exported.
-  - `omnia_sdk::blobstore`, `omnia_sdk::identity::AccessToken`,
-    `omnia_sdk::keyvalue::{DEFAULT, Conflict}`, and
-    `omnia_sdk::vault::LOCKER`.
-- `TableStore::{query, exec}` take `&str` and `&[DataType]`, and
-  `Identity::token(identity, scopes)` answers an `AccessToken`.
+  - `omnia_sdk::sql` (`Value`, `Row`, `Field`, `Statement`, `FromRow`,
+    `ColumnError`). `omnia_wasi_sql` exported `Row` and `Field`, and
+    `DataType` is `Value`.
+  - `omnia_sdk::messaging::Message`, which was `omnia_sdk::Message`.
+  - `omnia_sdk::blobstore::{ObjectMetadata, ContainerMetadata}` and
+    `omnia_sdk::identity::AccessToken`.
+  - A `DEFAULT` binding name in `omnia_sdk::{identity, keyvalue, sql,
+    vault}`, and `omnia_sdk::keyvalue::Conflict`.
+- Every capability trait returns `capability::Result`. A trait over named
+  bindings (`Identity`, `SecretStore`, `SqlDb`, and `StateStore`) addresses
+  `default` until `named(name)` selects another name the deployment
+  declares. Migrating a 0.37 guest:
+  - `Config::get` answers `Option<String>`, so an unset key is `Ok(None)`.
+    `ConfigExt::require` fails one with `ErrorKind::NotFound`, and
+    `ConfigExt::parse` answers it as `None`.
+  - `HttpRequest` is `HttpClient`, and `fetch` takes a `Request<Bytes>`.
+    `fetch_json` takes the output type alone.
+  - `Identity::access_token(identity)` is `named(identity)` and then
+    `token(scopes)`, which answers an `AccessToken`. Its `expires_in` is a
+    `Duration`, and its `Debug` redacts the token.
+    `IdentityExt::access_token()` answers the token alone.
+  - `Publish::send` is `Publisher::publish`. A `Message` payload is
+    `Bytes`, and `Message::new` takes `&[u8]`.
+  - `Broadcast::send(name, data, sockets)` is `WebSockets::broadcast(data)`
+    to every socket, or `WebSockets::send_to(sockets, data)`.
+  - `TableStore` is `SqlDb`. `query` and `execute`, which was `exec`, take
+    the SQL and its `&[Value]` on the handle, not a connection name.
+    `execute` answers a `u64`, and `batch` runs `Statement`s.
+  - `DocumentStore` is `DocumentDb`. `query` takes `&Query`, which was
+    `QueryOptions` with `after` for `continuation`, and answers a
+    `Page<Document>`. `insert` answers `Ok(Err(Exists))` for an id already
+    stored, and a `Document` payload is `Bytes`.
+  - `BlobStore` answers `None` for a missing object or container.
+    `get_range` takes a half-open `Range<u64>` clamped to the object, and
+    `list(container, prefix, after)` answers a `Page<ObjectMetadata>`.
+    `object_info` is `stat`. The `BlobStoreExt` methods `has`,
+    `delete_objects`, `copy_object`, `move_object`, and `clear` are the
+    provided `exists`, `delete_many`, `copy`, `rename`, and `clear`.
+  - `ObjectMetadata`, `ContainerMetadata`, `AccessToken`, `Document`,
+    `Message`, `Delivery`, and `Statement` are `#[non_exhaustive]`, so
+    code outside the SDK builds them with `new`. A metadata `created_at`
+    is a `SystemTime`.
+- Through `wasi:sql`, `SqlDb::batch` fails with `ErrorKind::Unsupported`,
+  as the interface has no transaction to run it in.
+- `SqlDefault` opens only the names it declares, and refuses any other.
+  A guest that opened a connection by another name, such as `db`, opens
+  `default` or lists the name in `SQL_DATABASES`.
+- `IdentityStub` refuses an identity `IDENTITY_NAMES` does not list, and
+  `IdentityDefault` serves the identity `default` alone.
 - `StateStore` calls `omnia:keyvalue`, one host call per method:
   - Every method returns `capability::Result`, and `get` answers
     `Option<Bytes>`.
@@ -117,10 +183,20 @@ Unreleased
   forward to the field's. A `pub` provider that derives `Provider` needs
   `pub` field types.
 - `omnia_test::guest::Scripted` is `ScriptedModel`, and
-  `omnia_test::guest::Memory` implements `Vault`.
-- `omnia_test::guest::Memory` keeps state per bucket. `Memory::bucket`
-  declares one beside `default`, and `Memory::snapshot` answers state by
-  bucket.
+  `omnia_test::guest::Memory` implements `SecretStore`.
+- `omnia_test::guest::Memory` keeps state per bucket and secrets per
+  locker. `Memory::bucket` declares a bucket beside `default`,
+  `Memory::named` addresses another bucket and locker of the same store,
+  and `Memory::snapshot` answers state by bucket.
+- The `omnia_test::guest` doubles follow the traits:
+  - `Provider`'s `publish`, `broadcast`, and `tables` fields and builders
+    are `publisher`, `websockets`, and `sql`.
+  - `ScriptedTables::statements` answers `Executed`, which was
+    `Statement`, and its `binding` was `connection`. `on_exec` takes a
+    `u64`.
+  - `Broadcasted` has no channel `name`.
+  - `MapConfig` answers an unknown key as unset.
+  - `FixedIdentity` answers a named identity's token as `<token>:<name>`.
 - `WasiHttp` is its own `HostCtx` carrier, like every other host. A bundle
   implements `Provides<WasiHttp>`, and `HttpBorrow` is
   `omnia_wasi_http::HttpBorrow`. `runtime!` no longer matches a `hosts:`
@@ -192,8 +268,12 @@ Unreleased
 - `omnia_wasi_docstore::document_store` and the SDK-typed
   `omnia_wasi_docstore::store` functions. The value types are
   `omnia_sdk::docstore`, a guest reaches the store through
-  `omnia_sdk::DocumentStore`, and `omnia_wasi_docstore::{store, types}` are
+  `omnia_sdk::DocumentDb`, and `omnia_wasi_docstore::{store, types}` are
   the raw `omnia:docstore` bindings.
+- The `sql` and `docstore` features of `omnia-sdk`. `SqlDb` and
+  `DocumentDb` are always built.
+- `omnia_test::guest::Namespaced`. A test addresses another bucket or
+  locker with `Memory::named`.
 - `omnia_test::guest::MemoryDocs::backend`.
 - `omnia_wasi_keyvalue::Cacheable` and the guest-side `cache` module, the
   envelope a value set with a TTL was stored in.

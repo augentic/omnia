@@ -10,11 +10,11 @@ Every capability Omnia exposes to guests, its interface crate, the zero-config d
 | Key-value storage | `wasi-keyvalue` | `WasiKeyValue` | `KeyValueDefault` — in-memory, serving the buckets `KEYVALUE_BUCKETS` declares (default `default`) | `omnia-redis`, `omnia-nats` |
 | Pub/sub messaging | `wasi-messaging` | `WasiMessaging` † | `MessagingDefault` — in-process broadcast | `omnia-kafka`, `omnia-nats` |
 | Blob storage | `wasi-blobstore` | `WasiBlobStore` | `BlobStoreDefault` — in-memory | `omnia-azure-blob`, `omnia-mongodb`, `omnia-nats` |
-| SQL | `wasi-sql` | `WasiSql` | `SqlDefault` — SQLite (`SQL_DATABASE`, default shared in-memory) | `omnia-postgres` |
+| SQL | `wasi-sql` | `WasiSql` | `SqlDefault` — SQLite, serving `default` (`SQL_DATABASE`, default shared in-memory) and the databases `SQL_DATABASES` declares | `omnia-postgres` |
 | Document store | `wasi-docstore` | `WasiDocStore` | `DocStoreDefault` — in-memory | `omnia-azure-table` |
 | Configuration | `wasi-config` | `WasiConfig` | `ConfigDefault` — host process environment snapshot | — |
 | Secrets vault | `wasi-vault` | `WasiVault` | `VaultDefault` — in-memory lockers | `omnia-azure-vault` |
-| Identity/OAuth | `wasi-identity` | `WasiIdentity` | `IdentityDefault` — OAuth2 client flow (`IDENTITY_CLIENT_ID`, `IDENTITY_CLIENT_SECRET`, `IDENTITY_TOKEN_URL`) | `omnia-azure-id` |
+| Identity/OAuth | `wasi-identity` | `WasiIdentity` | `IdentityDefault` — OAuth2 client flow for the identity `default` (`IDENTITY_CLIENT_ID`, `IDENTITY_CLIENT_SECRET`, `IDENTITY_TOKEN_URL`) | `omnia-azure-id` |
 | Observability | `wasi-otel` | `WasiOtel` | `OtelDefault` — log-only, no export | `omnia-opentelemetry` |
 | WebSockets | `wasi-websocket` | `WasiWebSocket` † | `WebSocketDefault` — tungstenite server (`WEBSOCKET_ADDR`, default `0.0.0.0:80`) | — |
 | Model completions | `wasi-model` | `WasiModel` | `ModelDefault` — deterministic echo (text/json echo the prompt; schema formats error) | `omnia-genai`, `omnia-cursor` |
@@ -55,6 +55,6 @@ wasi-keyvalue/
 | Crate | Purpose |
 | ----- | ------- |
 | `omnia` | Runtime core: engine, CLI, deployment, registry, dispatch, telemetry |
-| `omnia-sdk` | Guest SDK: `Handler`, `Client`, `Context`, the HTTP and messaging routers, the command façade (`parse`, `Command`, `Response`), each transport's `export!` macro, errors with their status/exit map, the `TableStore` and `DocumentStore` capabilities, and MCP. Features: `sql`, `docstore`, and `http` (default), `command` |
-| `omnia-guest-macros` | `#[instrument]` attribute |
+| `omnia-sdk` | Guest SDK: `Handler`, `Client`, `Context`, the HTTP and messaging routers, the command façade (`parse`, `Command`, `Response`), each transport's `export!` macro, errors with their status/exit map, the capability traits and `WasiProvider`, and MCP. Features: `http` (default), `command` |
+| `omnia-guest-macros` | `#[instrument]`, `#[capability]`, and the `Provider`, `Settings`, and `FromRow` derives |
 | `omnia-host-macros` | `runtime!` macro (use via `omnia::runtime!`) and `#[derive(HostCtx)]` (use via `omnia_core::HostCtx`, or `omnia::HostCtx` with `crate = omnia`) |

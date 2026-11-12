@@ -16,7 +16,7 @@ autoexamples = false
 axum = { workspace = true, features = ["query"] }
 clap.workspace = true
 futures.workspace = true
-omnia-sdk = { workspace = true, features = ["command", "docstore", "http"] }
+omnia-sdk = { workspace = true, features = ["command", "http"] }
 omnia-wasi-blobstore.workspace = true
 omnia-wasi-config.workspace = true
 omnia-wasi-http.workspace = true
@@ -45,6 +45,11 @@ omnia-test = { workspace = true, features = ["build"] }
 [[example]]
 name = "blobstore_copy_move"
 path = "programs/blobstore/copy_move.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "blobstore_listing"
+path = "programs/blobstore/listing.rs"
 crate-type = ["cdylib"]
 
 [[example]]
@@ -100,6 +105,11 @@ crate-type = ["cdylib"]
 [[example]]
 name = "http_outgoing_tls"
 path = "programs/http/outgoing_tls.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "identity_named"
+path = "programs/identity/named.rs"
 crate-type = ["cdylib"]
 
 [[example]]
@@ -165,6 +175,11 @@ crate-type = ["cdylib"]
 [[example]]
 name = "messaging_handle_sleep"
 path = "programs/messaging/handle_sleep.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "messaging_keyed"
+path = "programs/messaging/keyed.rs"
 crate-type = ["cdylib"]
 
 [[example]]
@@ -393,6 +408,11 @@ path = "programs/plugins/unlinked.rs"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "sql_bindings"
+path = "programs/sql/bindings.rs"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "sql_query_exec"
 path = "programs/sql/query_exec.rs"
 crate-type = ["cdylib"]
@@ -400,6 +420,11 @@ crate-type = ["cdylib"]
 [[example]]
 name = "vault_locker"
 path = "programs/vault/locker.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "vault_lockers"
+path = "programs/vault/lockers.rs"
 crate-type = ["cdylib"]
 
 [[example]]

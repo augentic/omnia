@@ -44,7 +44,7 @@ Each example directory has a `README.md` with test commands and example-specific
 | [`messaging`](messaging) | Pub-sub, request-reply, and fan-out (`wasi:messaging`) |
 | [`model`](model) | Model completion across the `omnia:model` boundary with the scripted test double |
 | [`otel`](otel) | Guest OpenTelemetry instrumentation (`wasi:otel`) |
-| [`sql`](sql) | CRUD over `wasi:sql` through the `TableStore` capability |
+| [`sql`](sql) | CRUD over `wasi:sql` through the `SqlDb` capability |
 | [`vault`](vault) | Secret storage (`wasi:vault`) |
 | [`websocket`](websocket) | Real-time bidirectional messaging (`wasi:websocket`) |
 

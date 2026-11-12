@@ -8,21 +8,23 @@ The [`docstore`](../../examples/docstore/) example is a minimal GTFS-flavoured s
 
 ## The provider
 
-Guest access goes through the `DocumentStore` trait from `omnia-sdk` — call its methods on `WasiProvider` (or through a generic provider `P: DocumentStore`):
+Guest access goes through the `DocumentDb` trait from `omnia-sdk` — call its methods on `WasiProvider` (or through a generic provider `P: DocumentDb`):
 
 ```rust,noplayground
-use omnia_sdk::docstore::{Document, Filter, QueryOptions, ScalarValue, SortField};
-use omnia_sdk::{DocumentStore, DocumentStoreExt as _, WasiProvider};
+use omnia_sdk::docstore::{Document, Exists, Filter, Query, ScalarValue, SortField};
+use omnia_sdk::{DocumentDb, DocumentDbExt as _, WasiProvider, bad_request};
 ```
 
 ## CRUD
 
-A `Document` is an id plus raw JSON bytes. `Document::json` serializes your own type into `data`, `Document::decode` reads it back, and `get_as` (from `DocumentStoreExt`, blanket-implemented for every `DocumentStore`) fetches and decodes in one call:
+A `Document` is an id plus raw JSON bytes. `Document::json` serializes your own type into `data`, `Document::decode` reads it back, and `get_as` (from `DocumentDbExt`, blanket-implemented for every `DocumentDb`) fetches and decodes in one call. A body that is not the JSON of the type fails with `ErrorKind::Invalid`:
 
 ```rust,noplayground
 async fn create_stop(Json(req): Json<CreateStopRequest>) -> omnia_sdk::Result<Json<Value>> {
     let doc = Document::json(req.id.clone(), &req.stop).context("serializing stop")?;
-    WasiProvider.insert("stops", &doc).await.context("inserting stop")?;
+    if let Err(Exists) = WasiProvider.insert("stops", &doc).await.context("inserting stop")? {
+        return Err(bad_request!("stop {} already exists", req.id));
+    }
     Ok(Json(json!({ "stop": req.stop, "id": req.id })))
 }
 
@@ -40,12 +42,12 @@ The four operations:
 
 | Method | Semantics |
 | ------ | --------- |
-| `insert(collection, &doc)` | Create; fails if the id exists |
+| `insert(collection, &doc)` | Create; answers `Ok(Err(Exists))` and leaves the stored document untouched if the id exists |
 | `get(collection, id)` | Fetch by id → `Option<Document>` |
 | `put(collection, &doc)` | Upsert (create or replace) |
 | `delete(collection, id)` | Remove → `bool` (whether anything was deleted) |
 
-`get_as::<T>(collection, id)` is `get` with the body decoded into `T`. Collections are created implicitly on first write.
+`get_as::<T>(collection, id)` is `get` with the body decoded into `T`. Collections are created implicitly on first write. Every method fails with a `capability::Error`, which `?` converts into `omnia_sdk::Error`.
 
 ## Filters
 
@@ -139,31 +141,26 @@ The backend translates the tree to its native query language (direct JSON evalua
 
 ## Queries, sorting, and pagination
 
-`query(collection, QueryOptions)` combines the filter with sorting and cursor pagination:
+`query(collection, &Query)` combines the filter with sorting and cursor pagination:
 
 ```rust,noplayground
-let result = WasiProvider
-    .query(
-        "stops",
-        QueryOptions {
-            filter,
-            order_by: vec![SortField {
-                field: "stop_name".into(),
-                descending: false,
-            }],
-            limit: p.limit,
-            continuation: p.continuation,
-            ..Default::default()
-        },
-    )
-    .await
-    .context("querying stops")?;
+let query = Query {
+    filter,
+    order_by: vec![SortField {
+        field: "stop_name".into(),
+        descending: false,
+    }],
+    limit: p.limit,
+    after: p.after,
+    ..Default::default()
+};
+let page = WasiProvider.query("stops", &query).await.context("querying stops")?;
 
-let stops: Vec<Stop> = result.documents.iter().map(Document::decode).collect::<Result<_, _>>()?;
-Ok(Json(json!({ "stops": stops, "continuation": result.continuation })))
+let stops: Vec<Stop> = page.items.iter().map(Document::decode).collect::<Result<_, _>>()?;
+Ok(Json(json!({ "stops": stops, "next": page.next })))
 ```
 
-The result carries `documents` plus an opaque `continuation` token when more pages exist; hand the token back in the next query's `continuation` to resume. Treat it as opaque — its format is backend-specific.
+The result is a `capability::Page<Document>`: the page's `items`, plus an opaque `next` cursor when more pages exist. Hand the cursor back as the next query's `after` to resume. Treat it as opaque — its format is backend-specific.
 
 ## Backends
 

@@ -59,7 +59,8 @@ Messaging routes are `Handler`s: any `async fn(Context<P>, I) -> Result<O, E>`, 
 use omnia_sdk::api::{Client, Context, Handlers, Router, messaging};
 
 async fn item_created<P: StateStore>(context: Context<P>, input: CreateItem) -> Result<(), Error> {
-    context.state().set(&input.name, b"created", None).await
+    context.state().set(&input.name, b"created", None).await?;
+    Ok(())
 }
 
 pub fn messaging_router<P: StateStore + 'static>(provider: P) -> Router<P> {
@@ -69,7 +70,19 @@ pub fn messaging_router<P: StateStore + 'static>(provider: P) -> Router<P> {
 messaging::export!(messaging_router);
 ```
 
-`topic(topic, handler)` decodes JSON and acknowledges successful output; `topic_with(topic, handler, decode)` takes a decoder `Fn(&Delivery) -> Result<I, DecodeError>` over the whole delivery for any other wire format. A module registers its HTTP routes, messaging topics, and subcommands on a `Handlers<P>` of its own, with no client, and the root merges each (`Handlers::from([..])` or `Handlers::merge`) and closes the whole into the one `Router<P>` with `Handlers::with_state`, the router's only constructor. A fn generic over the whole provider, such as a module's `handlers<P>()`, takes `omnia_sdk::Capabilities` as its bound in place of listing every trait. A delivery and a subcommand run inside the same `handler` span through the router's dispatch, which names the `topic` or the `command`.
+`topic(topic, handler)` decodes JSON and acknowledges successful output; `topic_with(topic, handler, decode)` takes a decoder `Fn(&Delivery) -> Result<I, DecodeError>` over the whole delivery for any other wire format. A module registers its HTTP routes, messaging topics, and subcommands on a `Handlers<P>` of its own, with no client, and the root merges each (`Handlers::from([..])` or `Handlers::merge`) and closes the whole into the one `Router<P>` with `Handlers::with_state`, the router's only constructor. A delivery and a subcommand run inside the same `handler` span through the router's dispatch, which names the `topic` or the `command`.
+
+A fn generic over a module's whole provider, such as its `handlers<P>()`, bounds `P` on a `Requires` trait the module declares. It names the capabilities the module's handlers reach, plus the `Send + Sync + 'static` a router needs, and a blanket impl gives it to every provider that has them. The guest root bounds its router fn on each module's `Requires`.
+
+```rust,ignore
+pub trait Requires: Config + StateStore + Send + Sync + 'static {}
+
+impl<P: Config + StateStore + Send + Sync + 'static> Requires for P {}
+
+pub fn handlers<P: Requires>() -> Handlers<P> {
+    Handlers::new().topic("items.created", item_created)
+}
+```
 
 ### Command-mode guests
 
@@ -103,38 +116,41 @@ The router is also the program: `--version` answers the guest crate's `CARGO_PKG
 
 ## Capabilities
 
-The guest crate exposes trait-based abstractions for host capabilities. `WasiProvider` implements every one of them on `wasm32` by calling the WASI host; a handler bounds its `P` on the traits it uses and never names the provider. `Capabilities` is every trait at once (plus `Send + Sync + 'static`), the bound for a fn generic over the whole provider rather than over the capabilities one handler reaches.
+The guest crate exposes trait-based abstractions for host capabilities. `WasiProvider` implements every one of them on `wasm32` by calling the WASI host; a handler bounds its `P` on the traits it uses and never names the provider. Every method answers a `capability::Result`, absence is `None`, and bytes are `Bytes`. A trait over named bindings (`Identity`, `SecretStore`, `SqlDb`, and `StateStore`) addresses the binding `default` from the provider's own handle, and `named(name)` answers a handle on another binding the deployment declares.
 
 | Trait | Purpose |
 | ----- | ------- |
-| `Config` | Read configuration values from the host. |
-| `HttpRequest` | Make outbound HTTP requests. |
-| `Publish` | Publish messages to a topic. |
-| `StateStore` | Key-value state in the deployment's declared buckets: `get`, `set` with an optional TTL the host enforces, `delete`, a one-shot `compare_and_swap` whose mismatch answers the `keyvalue::Conflict` it found, and atomic `increment`. A provider's own handle uses the `default` bucket, and `named(name)` selects another. |
-| `Identity` | Obtain access tokens from an identity provider. |
-| `TableStore` | Execute parameterized SQL queries and statements over `wasi:sql`. |
-| `Broadcast` | Send events over WebSocket channels. |
+| `Config` | Read configuration values from the host. `get` answers `None` for an unset key, and `ConfigExt::{require, parse}` read one as a typed value. |
+| `HttpClient` | Make outbound HTTP requests: `fetch` sends a `Request<Bytes>`, and `HttpClientExt::fetch_json` decodes a JSON reply. |
+| `Publisher` | Publish a `messaging::Message` to a topic, with an optional key that orders and partitions it. |
+| `StateStore` | Key-value state in the deployment's declared buckets: `get`, `set` with an optional TTL the host enforces, `delete`, a one-shot `compare_and_swap` whose mismatch answers the `keyvalue::Conflict` it found, and atomic `increment`. |
+| `Identity` | Obtain an `identity::AccessToken` for one identity. `IdentityExt::access_token` answers the token alone. |
+| `SqlDb` | Run parameterized SQL against one database: `query` answers rows, `execute` the number of rows changed, and `batch` one count per `Statement`. `SqlDbExt::query_as` decodes each row with `FromRow`. |
+| `WebSockets` | Send data to every connected WebSocket, or to the sockets named. |
 | `Plugins` | Request guest loads through `omnia:plugins/loader`: name a `Location` — one of the deployment's declared guests, a component path beneath one of its read-only mounts, or a registry package — with an optional `Digest` pin, and receive a typed `Plugin` handle once it is active. The `plugins` module carries the `Location` and `Digest` types and typed refusals convertible into `Error`. |
-| `BlobStore` | Object storage: the ten primitives an implementor writes plus five derived operations (`has`, `delete_objects`, `clear`, `copy_object`, `move_object`) — one host call each on `WasiProvider`, composed from the primitives by default. |
-| `DocumentStore` | Document CRUD and filtered queries. |
-| `Vault` | Read, write, delete, check, and list secrets in the vault locker. |
+| `BlobStore` | Object storage: the ten primitives an implementor writes, plus five provided operations (`exists`, `delete_many`, `clear`, `copy`, `rename`) composed from them by default and one host call each on `WasiProvider`. `get_range` reads a half-open byte range, and `list` answers a `capability::Page` of object metadata. |
+| `DocumentDb` | Document CRUD and filtered, sorted, paginated queries. `insert` answers `Ok(Err(Exists))` for an id already stored, and `DocumentDbExt::get_as` decodes a JSON body. |
+| `SecretStore` | Read, write, delete, check, and list secrets in one locker. |
 | `Vcs` | Version-control operations over lent repository and working-copy mounts. |
 | `Model` | Prompt completions, with tool calls answered by a guest closure. A request with `check` set has the guest judge each candidate answer (`Ok` accepts, `Err(text)` is the correction the backend sends back to the model); `model::Question<T>` runs that exchange for a `Deserialize + JsonSchema` answer type and returns the accepted `T`. |
 
-Every trait is annotated with `#[omnia_guest_macros::capability]`, which emits a companion `Has<Capability>` accessor trait with a blanket forwarding impl and implementations for `Arc<T>`, `&T`, and `Box<T>` where `T` implements the capability. `#[derive(omnia_sdk::Provider)]` implements those `Has*` traits for each `#[provider(...)]`-annotated field. Each `Has*` trait names the type it delegates to as `Inner`, so a capability's associated types, such as `StateStore::Named`, are the field's own. A `pub` provider therefore needs `pub` field types.
+Every trait is annotated with `#[capability]`, which emits a companion `Has<Capability>` accessor trait with a blanket forwarding impl and implementations for `Arc<T>`, `&T`, and `Box<T>` where `T` implements the capability. `#[derive(omnia_sdk::Provider)]` implements those `Has*` traits for each `#[provider(...)]`-annotated field. Each `Has*` trait names the type it delegates to as `Inner`, so a capability's associated types, such as `StateStore::Named`, are the field's own. A `pub` provider therefore needs `pub` field types.
+
+A crate declares a capability of its own with `#[omnia_sdk::capability]`, and a provider field names it by path, as `#[provider(crate::geo::Geocoder)]`, beside the `omnia_sdk` capabilities it names bare.
 
 ### Example: Using Capabilities
 
 ```rust,ignore
-use omnia_sdk::{StateStore, Publish, Message};
+use omnia_sdk::messaging::Message;
+use omnia_sdk::{Publisher, StateStore};
 
-async fn process(provider: &impl StateStore + Publish) -> anyhow::Result<()> {
-    // Store some state
+async fn process(provider: &(impl StateStore + Publisher)) -> omnia_sdk::capability::Result<()> {
+    // store some state
     provider.set("last_run", b"now", None).await?;
 
-    // Publish a message
-    let msg = Message::new(b"job_completed");
-    provider.send("jobs.events", &msg).await?;
+    // publish a message
+    let message = Message::new(b"job_completed").with_key("nightly");
+    provider.publish("jobs.events", &message).await?;
 
     Ok(())
 }
@@ -158,7 +174,7 @@ fn validate(name: &str) -> Result<(), Error> {
 }
 ```
 
-A capability that names its failure classes returns a `capability::Error`, as `StateStore` does. Its `ErrorKind` is one of `NotFound`, `Denied`, `Invalid`, `Unsupported`, `Unavailable`, or `Other`, and a caller matches on `kind()` rather than the message. `?` converts it into `Error`: `Unavailable` becomes a `BadGateway` and every other kind a `ServerError`, through any `anyhow` context wrapped around it.
+Every capability call fails with a `capability::Error`. Its `ErrorKind` is one of `NotFound`, `Denied`, `Invalid`, `Unsupported`, `Unavailable`, or `Other`, and a caller matches on `kind()` rather than the message. `?` converts it into `Error`: `Unavailable` becomes a `BadGateway` and every other kind a `ServerError`, through any `anyhow` context wrapped around it.
 
 ## Architecture
 
@@ -166,12 +182,10 @@ See the [workspace documentation](https://github.com/augentic/omnia) for the ful
 
 ## Cargo features
 
-- `sql` *(default)*: the `TableStore` capability over `wasi:sql`.
-- `docstore` *(default)*: the `DocumentStore` capability and the `docstore` value types.
-- `http` *(default)*: the axum-backed `api::http` handler support (the `Context` and `Metadata` extractors, `trace`, `Error: IntoResponse`, and `http::export!`) and the `mcp` server. The outbound `HttpRequest` capability and `Error::status()` need no feature.
+- `http` *(default)*: the axum-backed `api::http` handler support (the `Context` and `Metadata` extractors, `trace`, `Error: IntoResponse`, and `http::export!`) and the `mcp` server. The outbound `HttpClient` capability and `Error::status()` need no feature.
 - `command`: the clap-backed parts of `api::command` (`Handlers::command`, the `Router`'s program methods and `run`, `parse`, `completions`, `Response::usage`, the `clap_complete::Shell` re-export, and the `clap::ValueEnum` derive on `command::Format`). The `Command` projector, `Response`, `Failure`, `command::Format`, `command::Render`, and `command::export!` need no feature.
 
-Guests that do not use SQL, documents, or inbound HTTP can disable defaults to shrink wasm build time and size, naming only the capabilities they use (`features = ["sql"]` for `TableStore` alone); a command-only guest is `default-features = false, features = ["command"]`.
+Every capability is always built. A guest that serves no inbound HTTP can disable defaults to shrink wasm build time and size; a command-only guest is `default-features = false, features = ["command"]`.
 
 ## License
 

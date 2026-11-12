@@ -14,16 +14,10 @@ categories.workspace = true
 workspace = true
 
 [features]
-default = ["sql", "docstore", "http"]
-
-# Enables the `TableStore` capability over `wasi:sql`.
-sql = ["dep:omnia-wasi-sql"]
-
-# Enables the `DocumentStore` capability and the `docstore` value types.
-docstore = ["dep:omnia-wasi-docstore"]
+default = ["http"]
 
 # Enables the axum-backed `api::http` handler support and the `mcp` server.
-# The outbound `HttpRequest` capability and `Error::status()` need no feature.
+# The outbound `HttpClient` capability and `Error::status()` need no feature.
 http = ["dep:axum", "dep:tower"]
 
 # Enables the clap-backed `api::command` façade (argv parsing, `--format`,
@@ -49,16 +43,17 @@ tracing.workspace = true
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 futures.workspace = true
+http-body-util.workspace = true
 omnia-wasi-blobstore.workspace = true
 omnia-wasi-config.workspace = true
-omnia-wasi-docstore = { workspace = true, optional = true }
+omnia-wasi-docstore.workspace = true
 omnia-wasi-http.workspace = true
 omnia-wasi-identity.workspace = true
 omnia-wasi-keyvalue.workspace = true
 omnia-wasi-messaging.workspace = true
 omnia-wasi-model.workspace = true
 omnia-wasi-otel.workspace = true
-omnia-wasi-sql = { workspace = true, optional = true }
+omnia-wasi-sql.workspace = true
 omnia-wasi-vault.workspace = true
 omnia-wasi-vcs.workspace = true
 omnia-wasi-websocket.workspace = true

@@ -130,7 +130,7 @@ async fn invoke_direct() {
 async fn context_accessors() {
     async fn lookup<P: Config + StateStore>(
         context: Context<P>, key: String,
-    ) -> Result<(String, Option<bytes::Bytes>), omnia_sdk::Error> {
+    ) -> Result<(Option<String>, Option<bytes::Bytes>), omnia_sdk::Error> {
         let setting = context.config().get(&key).await?;
         let state = context.state().get(&key).await?;
         Ok((setting, state))
@@ -142,7 +142,7 @@ async fn context_accessors() {
 
     let (setting, state) = lookup(context, "region".to_string()).await.expect("lookup");
 
-    assert_eq!(setting, "eu");
+    assert_eq!(setting.as_deref(), Some("eu"));
     assert_eq!(state.as_deref(), Some(b"eu-west".as_slice()));
 }
 

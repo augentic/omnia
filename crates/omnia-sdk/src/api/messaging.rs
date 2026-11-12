@@ -17,6 +17,7 @@ use std::marker::PhantomData;
 use std::pin::Pin;
 use std::sync::Arc;
 
+use bytes::Bytes;
 use serde::de::DeserializeOwned;
 use tracing::Instrument as _;
 
@@ -70,15 +71,56 @@ pub use crate::__export_messaging as export;
 
 /// An owned inbound delivery independent of a messaging binding.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[non_exhaustive]
 pub struct Delivery {
     /// The exact topic supplied by the host.
     pub topic: Option<String>,
+
     /// The opaque message payload.
-    pub payload: Vec<u8>,
+    pub payload: Bytes,
+
+    /// The key that orders and partitions the message, when the publisher set
+    /// one with [`Message::with_key`](crate::messaging::Message::with_key).
+    pub key: Option<String>,
+
     /// The optional payload media type.
     pub content_type: Option<String>,
+
     /// Transport metadata in delivery order.
     pub metadata: Vec<(String, String)>,
+}
+
+impl Delivery {
+    /// A delivery of `payload` on `topic`, with no key, content type, or metadata.
+    #[must_use]
+    pub fn new(topic: impl Into<String>, payload: &[u8]) -> Self {
+        Self {
+            topic: Some(topic.into()),
+            payload: Bytes::copy_from_slice(payload),
+            ..Self::default()
+        }
+    }
+
+    /// Set the key that orders and partitions the message.
+    #[must_use]
+    pub fn with_key(mut self, key: impl Into<String>) -> Self {
+        self.key = Some(key.into());
+        self
+    }
+
+    /// Set the payload's media type.
+    #[must_use]
+    pub fn with_content_type(mut self, content_type: impl Into<String>) -> Self {
+        self.content_type = Some(content_type.into());
+        self
+    }
+
+    /// Append a transport metadata entry.
+    #[must_use]
+    pub fn with_metadata(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        self.metadata.push((name.into(), value.into()));
+        self
+    }
 }
 
 /// A delivery failure projected onto the current WIT error result.
@@ -117,11 +159,17 @@ impl Error for DeliveryError {}
 pub async fn handle<P: Send + Sync + 'static>(
     router: &crate::api::Router<P>, message: omnia_wasi_messaging::types::Message,
 ) -> Result<(), omnia_wasi_messaging::types::Error> {
+    let metadata = message.metadata().unwrap_or_default();
+    let key = metadata
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case(crate::messaging::KEY))
+        .map(|(_, value)| value.clone());
     let delivery = Delivery {
         topic: message.topic(),
-        payload: message.data(),
+        payload: Bytes::from(message.data()),
+        key,
         content_type: message.content_type(),
-        metadata: message.metadata().unwrap_or_default(),
+        metadata,
     };
     router
         .handle(delivery)

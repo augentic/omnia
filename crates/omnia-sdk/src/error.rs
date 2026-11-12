@@ -183,7 +183,6 @@ impl From<serde_json::Error> for Error {
     }
 }
 
-#[cfg(feature = "sql")]
 impl From<crate::sql::ColumnError> for Error {
     fn from(err: crate::sql::ColumnError) -> Self {
         Self::server_error("server_error", err.to_string())

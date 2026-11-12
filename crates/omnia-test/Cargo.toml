@@ -21,8 +21,6 @@ workspace = true
 default = []
 # Native doubles for the `omnia_sdk` capability traits, plus the `Provider` that bundles them
 # and the `send`/`deliver` router drivers.
-# `omnia-sdk/sql` and `omnia-sdk/docstore` carry the `TableStore` and
-# `DocumentStore` traits the `ScriptedTables` and `MemoryDocs` doubles implement.
 # No host crate belongs here: a stem's test build must not compile `wasmtime`.
 guest = [
     "dep:anyhow",
@@ -31,8 +29,6 @@ guest = [
     "dep:http-body",
     "dep:http-body-util",
     "dep:omnia-sdk",
-    "omnia-sdk/sql",
-    "omnia-sdk/docstore",
     "dep:serde_json",
     "dep:tower",
 ]

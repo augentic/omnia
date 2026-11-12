@@ -40,7 +40,7 @@ use crate::keyvalue::{DEFAULT, Handle};
 #[omnia_guest_macros::capability]
 pub trait StateStore: Send + Sync {
     /// The handle [`named`](Self::named) returns.
-    type Named: StateStore;
+    type Named: StateStore<Named = Self::Named>;
 
     /// Retrieve the value at `key`, or `None` when it is absent.
     fn get(&self, key: &str) -> impl Future<Output = Result<Option<Bytes>>> + Send;

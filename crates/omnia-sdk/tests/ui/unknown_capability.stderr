@@ -1,4 +1,4 @@
-error: unknown capability `NotACapability`; expected one of: BlobStore, Broadcast, Config, DocumentStore, HttpRequest, Identity, Model, Plugins, Publish, StateStore, TableStore, Vault, Vcs
+error: unknown capability `NotACapability`; expected one of: BlobStore, Config, DocumentDb, HttpClient, Identity, Model, Plugins, Publisher, SecretStore, SqlDb, StateStore, Vcs, WebSockets, or the path to a `#[capability]` trait, such as `crate::NotACapability`
  --> tests/ui/unknown_capability.rs:5:16
   |
 5 |     #[provider(NotACapability)]

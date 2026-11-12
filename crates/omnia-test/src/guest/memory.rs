@@ -1,16 +1,18 @@
-//! In-memory `StateStore` + `BlobStore` + `Vault` with real atomics and TTL.
+//! In-memory `StateStore` + `BlobStore` + `SecretStore` with real atomics and TTL.
 
 use std::collections::BTreeMap;
 use std::future::{Future, ready};
+use std::ops::Range;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Context, Result, anyhow};
 use bytes::Bytes;
-use omnia_sdk::capability::{self, ErrorKind};
+use omnia_sdk::blobstore::{ContainerMetadata, ObjectMetadata};
+use omnia_sdk::capability::{self, ErrorKind, Page};
 use omnia_sdk::keyvalue::{Conflict, DEFAULT};
-use omnia_sdk::{BlobStore, ContainerMetadata, ObjectMetadata, StateStore, Vault};
+use omnia_sdk::{BlobStore, SecretStore, StateStore};
 
 /// A state snapshot: bucket to key to raw bytes.
 pub type StateSnapshot = BTreeMap<String, BTreeMap<String, Vec<u8>>>;
@@ -21,16 +23,17 @@ pub type BlobSnapshot = BTreeMap<String, BTreeMap<String, Vec<u8>>>;
 ///
 /// Every method of all three traits is real: `compare_and_swap` and
 /// `increment` hold the store's lock across their read-modify-write, and
-/// `get_range` clamps an inclusive `end` the way the blobstore default does.
-/// Reads on a container that was never created see it as empty; writes
-/// create it. The derived `BlobStore` operations (`has`, `clear`,
-/// `copy_object`, ...) compose these primitives.
+/// `get_range` clamps its half-open range to the object. Reads on a
+/// container that was never created see it as empty; writes create it. The
+/// provided `BlobStore` operations (`exists`, `clear`, `copy`, ...) compose
+/// these primitives. A listing answers one page, and resumes after the key
+/// or name it is given.
 ///
-/// State follows the [`StateStore`] contract against the real clock:
+/// A handle addresses one state bucket and one secret locker, both named
+/// [`DEFAULT`] until [`named`](Self::named) returns a handle on another name
+/// of the same store. Lockers open on first use. State follows the
+/// [`StateStore`] contract against the real clock:
 ///
-/// - A handle addresses the bucket [`DEFAULT`] until
-///   [`named`](StateStore::named) returns one on another bucket of the same
-///   store.
 /// - [`bucket`](Self::bucket) declares a bucket, and a call on an undeclared
 ///   one fails with [`ErrorKind::NotFound`].
 /// - A zero TTL fails with [`ErrorKind::Invalid`] and writes nothing.
@@ -51,19 +54,30 @@ pub type BlobSnapshot = BTreeMap<String, BTreeMap<String, Vec<u8>>>;
 #[derive(Clone, Debug)]
 pub struct Memory {
     inner: Arc<Inner>,
-    bucket: Arc<str>,
+    name: Arc<str>,
 }
 
 impl Default for Memory {
     fn default() -> Self {
         Self {
             inner: Arc::default(),
-            bucket: Arc::from(DEFAULT),
+            name: Arc::from(DEFAULT),
         }
     }
 }
 
 impl Memory {
+    /// A handle on the bucket and locker `name` of the same store.
+    ///
+    /// [`StateStore::named`] and [`SecretStore::named`] both return it.
+    #[must_use]
+    pub fn named(&self, name: &str) -> Self {
+        Self {
+            inner: Arc::clone(&self.inner),
+            name: Arc::from(name),
+        }
+    }
+
     /// Declares the bucket `name`, which every clone and named handle shares.
     #[must_use]
     pub fn bucket(self, name: &str) -> Self {
@@ -84,7 +98,7 @@ impl Memory {
         self.inner.blobs.lock().expect("blob lock")
     }
 
-    fn lock_secrets(&self) -> MutexGuard<'_, BTreeMap<String, Vec<u8>>> {
+    fn lock_secrets(&self) -> MutexGuard<'_, BTreeMap<String, Locker>> {
         self.inner.secrets.lock().expect("secrets lock")
     }
 
@@ -95,13 +109,13 @@ impl Memory {
     /// The state value at `key` in this handle's bucket.
     #[must_use]
     pub fn state(&self, key: &str) -> Option<Vec<u8>> {
-        self.lock_state().get(&*self.bucket)?.get(key).map(|entry| entry.bytes.clone())
+        self.lock_state().get(&*self.name)?.get(key).map(|entry| entry.bytes.clone())
     }
 
-    /// The secret value at `key`.
+    /// The secret value at `key` in this handle's locker.
     #[must_use]
     pub fn secret(&self, key: &str) -> Option<Vec<u8>> {
-        self.lock_secrets().get(key).cloned()
+        self.lock_secrets().get(&*self.name)?.get(key).cloned()
     }
 
     /// The stored bytes of `name` in `container`.
@@ -130,9 +144,11 @@ impl Memory {
         }
     }
 
-    /// Seeds a secret entry.
+    /// Seeds a secret entry in this handle's locker.
     pub fn insert_secret(&self, key: &str, bytes: &[u8]) {
-        drop(self.lock_secrets().insert(key.to_owned(), bytes.to_vec()));
+        let mut secrets = self.lock_secrets();
+        let locker = secrets.entry(self.name.to_string()).or_default();
+        drop(locker.insert(key.to_owned(), bytes.to_vec()));
     }
 
     /// Seeds an object, creating its container.
@@ -173,7 +189,7 @@ impl Memory {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.lock_state().values().all(BTreeMap::is_empty)
-            && self.lock_secrets().is_empty()
+            && self.lock_secrets().values().all(BTreeMap::is_empty)
             && self.lock_blobs().values().all(|c| c.objects.is_empty())
     }
 
@@ -204,8 +220,8 @@ impl Memory {
     // -- state ------------------------------------------------------------
 
     fn in_bucket<T>(&self, f: impl FnOnce(&mut Bucket) -> T) -> capability::Result<T> {
-        self.lock_state().get_mut(&*self.bucket).map(f).ok_or_else(|| {
-            let message = format!("bucket `{}` is not declared", self.bucket);
+        self.lock_state().get_mut(&*self.name).map(f).ok_or_else(|| {
+            let message = format!("bucket `{}` is not declared", self.name);
             capability::Error::new(ErrorKind::NotFound, message)
         })
     }
@@ -268,44 +284,69 @@ impl Memory {
         drop(self.lock_blobs().remove(name));
     }
 
-    fn range(&self, container: &str, name: &str, start: u64, end: u64) -> Result<Vec<u8>> {
-        let data = self
-            .object(container, name)
-            .ok_or_else(|| anyhow!("object not found: {container}/{name}"))?;
-        // as the blobstore default: `end` of 0 or `u64::MAX` reads to the end, else inclusive
-        let unbounded = end == 0 || end == u64::MAX;
-        if !unbounded && end < start {
-            bail!("invalid byte range: end ({end}) < start ({start})");
-        }
+    fn range(&self, container: &str, name: &str, range: Range<u64>) -> Option<Bytes> {
+        let data = self.object(container, name)?;
         let len = data.len() as u64;
-        let from = start.min(len);
-        let to = if unbounded { len } else { end.saturating_add(1).min(len) };
-        let from = usize::try_from(from).expect("clamped to the object's length");
-        let to = usize::try_from(to).expect("clamped to the object's length");
-        Ok(data[from..to].to_vec())
+        let end = range.end.min(len);
+        let start = range.start.min(end);
+        let start = usize::try_from(start).expect("clamped to the object's length");
+        let end = usize::try_from(end).expect("clamped to the object's length");
+        Some(Bytes::copy_from_slice(&data[start..end]))
     }
 
-    fn object_info(&self, container: &str, name: &str) -> Result<ObjectMetadata> {
+    fn object_info(&self, container: &str, name: &str) -> Option<ObjectMetadata> {
         let blobs = self.lock_blobs();
-        let info =
-            blobs.get(container).and_then(|c| c.objects.get(name)).map(|object| ObjectMetadata {
-                name: name.to_owned(),
-                container: container.to_owned(),
-                created_at: object.created_at,
-                size: object.data.len() as u64,
-            });
-        drop(blobs);
-        info.ok_or_else(|| anyhow!("object not found: {container}/{name}"))
+        let object = blobs.get(container)?.objects.get(name)?;
+        Some(ObjectMetadata::new(
+            name,
+            container,
+            timestamp(object.created_at),
+            object.data.len() as u64,
+        ))
     }
 
-    fn container_info(&self, name: &str) -> Result<ContainerMetadata> {
+    fn listing(&self, container: &str, prefix: &str, after: Option<&str>) -> Vec<ObjectMetadata> {
         let blobs = self.lock_blobs();
-        let info = blobs.get(name).map(|container| ContainerMetadata {
-            name: name.to_owned(),
-            created_at: container.created_at,
-        });
-        drop(blobs);
-        info.ok_or_else(|| anyhow!("container not found: {name}"))
+        let Some(objects) = blobs.get(container).map(|container| &container.objects) else {
+            return Vec::new();
+        };
+        objects
+            .iter()
+            .filter(|(name, _)| {
+                name.starts_with(prefix) && after.is_none_or(|after| name.as_str() > after)
+            })
+            .map(|(name, object)| {
+                let size = object.data.len() as u64;
+                ObjectMetadata::new(name, container, timestamp(object.created_at), size)
+            })
+            .collect()
+    }
+
+    fn container_info(&self, name: &str) -> Option<ContainerMetadata> {
+        let blobs = self.lock_blobs();
+        let container = blobs.get(name)?;
+        Some(ContainerMetadata::new(name, timestamp(container.created_at)))
+    }
+
+    // -- secrets ----------------------------------------------------------
+
+    fn delete_secret(&self, key: &str) {
+        if let Some(locker) = self.lock_secrets().get_mut(&*self.name) {
+            drop(locker.remove(key));
+        }
+    }
+
+    fn secret_keys(&self, after: Option<&str>) -> Vec<String> {
+        self.lock_secrets()
+            .get(&*self.name)
+            .map(|locker| {
+                locker
+                    .keys()
+                    .filter(|key| after.is_none_or(|after| key.as_str() > after))
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 }
 
@@ -315,6 +356,12 @@ fn checked(ttl: Option<Duration>) -> capability::Result<Option<Duration>> {
         return Err(capability::Error::new(ErrorKind::Invalid, "a TTL must be greater than zero"));
     }
     Ok(ttl)
+}
+
+// metadata timestamps count ticks of the store's clock from the epoch, so
+// they are deterministic and ordered by creation
+fn timestamp(tick: u64) -> SystemTime {
+    UNIX_EPOCH + Duration::from_secs(tick)
 }
 
 impl StateStore for Memory {
@@ -347,90 +394,101 @@ impl StateStore for Memory {
     }
 
     fn named(&self, name: &str) -> Self {
-        Self {
-            inner: Arc::clone(&self.inner),
-            bucket: Arc::from(name),
-        }
+        Self::named(self, name)
     }
 }
 
 impl BlobStore for Memory {
     fn get(
         &self, container: &str, name: &str,
-    ) -> impl Future<Output = Result<Option<Vec<u8>>>> + Send {
-        ready(Ok(self.object(container, name)))
+    ) -> impl Future<Output = capability::Result<Option<Bytes>>> + Send {
+        ready(Ok(self.object(container, name).map(Bytes::from)))
+    }
+
+    fn get_range(
+        &self, container: &str, name: &str, range: Range<u64>,
+    ) -> impl Future<Output = capability::Result<Option<Bytes>>> + Send {
+        ready(Ok(self.range(container, name, range)))
     }
 
     fn put(
         &self, container: &str, name: &str, data: &[u8],
-    ) -> impl Future<Output = Result<()>> + Send {
+    ) -> impl Future<Output = capability::Result<()>> + Send {
         self.insert_object(container, name, data);
         ready(Ok(()))
     }
 
-    fn delete(&self, container: &str, name: &str) -> impl Future<Output = Result<()>> + Send {
+    fn delete(
+        &self, container: &str, name: &str,
+    ) -> impl Future<Output = capability::Result<()>> + Send {
         self.delete_object(container, name);
         ready(Ok(()))
     }
 
-    fn list(&self, container: &str) -> impl Future<Output = Result<Vec<String>>> + Send {
-        ready(Ok(self.objects(container)))
-    }
-
-    fn get_range(
-        &self, container: &str, name: &str, start: u64, end: u64,
-    ) -> impl Future<Output = Result<Vec<u8>>> + Send {
-        ready(self.range(container, name, start, end))
-    }
-
-    fn object_info(
+    fn stat(
         &self, container: &str, name: &str,
-    ) -> impl Future<Output = Result<ObjectMetadata>> + Send {
-        ready(Self::object_info(self, container, name))
+    ) -> impl Future<Output = capability::Result<Option<ObjectMetadata>>> + Send {
+        ready(Ok(self.object_info(container, name)))
     }
 
-    fn create_container(&self, name: &str) -> impl Future<Output = Result<()>> + Send {
-        self.insert_container(name);
+    fn list(
+        &self, container: &str, prefix: &str, after: Option<&str>,
+    ) -> impl Future<Output = capability::Result<Page<ObjectMetadata>>> + Send {
+        ready(Ok(Page::new(self.listing(container, prefix, after), None)))
+    }
+
+    fn create_container(
+        &self, container: &str,
+    ) -> impl Future<Output = capability::Result<()>> + Send {
+        self.insert_container(container);
         ready(Ok(()))
     }
 
-    fn delete_container(&self, name: &str) -> impl Future<Output = Result<()>> + Send {
-        Self::delete_container(self, name);
+    fn delete_container(
+        &self, container: &str,
+    ) -> impl Future<Output = capability::Result<()>> + Send {
+        Self::delete_container(self, container);
         ready(Ok(()))
     }
 
-    fn container_exists(&self, name: &str) -> impl Future<Output = Result<bool>> + Send {
-        ready(Ok(self.has_container(name)))
+    fn container_exists(
+        &self, container: &str,
+    ) -> impl Future<Output = capability::Result<bool>> + Send {
+        ready(Ok(self.has_container(container)))
     }
 
     fn container_info(
         &self, container: &str,
-    ) -> impl Future<Output = Result<ContainerMetadata>> + Send {
-        ready(Self::container_info(self, container))
+    ) -> impl Future<Output = capability::Result<Option<ContainerMetadata>>> + Send {
+        ready(Ok(Self::container_info(self, container)))
     }
 }
 
-impl Vault for Memory {
-    fn get(&self, key: &str) -> impl Future<Output = Result<Option<Vec<u8>>>> + Send {
-        ready(Ok(self.secret(key)))
+impl SecretStore for Memory {
+    type Named = Self;
+
+    fn get(&self, key: &str) -> impl Future<Output = capability::Result<Option<Bytes>>> + Send {
+        ready(Ok(self.secret(key).map(Bytes::from)))
     }
 
-    fn set(&self, key: &str, value: &[u8]) -> impl Future<Output = Result<()>> + Send {
+    fn set(&self, key: &str, value: &[u8]) -> impl Future<Output = capability::Result<()>> + Send {
         self.insert_secret(key, value);
         ready(Ok(()))
     }
 
-    fn delete(&self, key: &str) -> impl Future<Output = Result<()>> + Send {
-        drop(self.lock_secrets().remove(key));
+    fn delete(&self, key: &str) -> impl Future<Output = capability::Result<()>> + Send {
+        self.delete_secret(key);
         ready(Ok(()))
     }
 
-    fn exists(&self, key: &str) -> impl Future<Output = Result<bool>> + Send {
-        ready(Ok(self.lock_secrets().contains_key(key)))
+    fn keys(
+        &self, after: Option<&str>,
+    ) -> impl Future<Output = capability::Result<Page<String>>> + Send {
+        ready(Ok(Page::new(self.secret_keys(after), None)))
     }
 
-    fn list_ids(&self) -> impl Future<Output = Result<Vec<String>>> + Send {
-        ready(Ok(self.lock_secrets().keys().cloned().collect()))
+    fn named(&self, name: &str) -> Self {
+        Self::named(self, name)
     }
 }
 
@@ -439,9 +497,7 @@ struct Inner {
     // a bucket is declared once it has a map, even an empty one
     state: Mutex<BTreeMap<String, Bucket>>,
     blobs: Mutex<BTreeMap<String, Container>>,
-    secrets: Mutex<BTreeMap<String, Vec<u8>>>,
-    // Metadata timestamps come from this counter, not the wall clock, so
-    // `*_info` reads are deterministic and ordered by creation.
+    secrets: Mutex<BTreeMap<String, Locker>>,
     clock: AtomicU64,
 }
 
@@ -457,6 +513,8 @@ impl Default for Inner {
 }
 
 type Bucket = BTreeMap<String, StateEntry>;
+
+type Locker = BTreeMap<String, Vec<u8>>;
 
 #[derive(Clone, Debug)]
 struct StateEntry {
@@ -509,187 +567,4 @@ fn add_i64(current: Option<&[u8]>, delta: i64) -> Result<i64> {
         }
     };
     base.checked_add(delta).context("adding delta overflows i64")
-}
-
-/// A prefixed view over one shared [`Memory`]: every key, secret, and
-/// container is scoped under a prefix, modelling a tenant- or project-keyed
-/// host binding.
-///
-/// [`named`](StateStore::named) keeps the prefix over the bucket it selects.
-///
-/// ```
-/// use omnia_sdk::StateStore as _;
-/// use omnia_test::guest::{Memory, Namespaced};
-///
-/// # tokio::runtime::Runtime::new().unwrap().block_on(async {
-/// let memory = Memory::default();
-/// let tenant = Namespaced::new("acme", memory.clone());
-/// tenant.set("plan", b"pro", None).await.unwrap();
-/// assert_eq!(memory.state("acme/plan"), Some(b"pro".to_vec()));
-/// assert_eq!(memory.state("plan"), None);
-/// # });
-/// ```
-#[derive(Clone, Debug)]
-pub struct Namespaced {
-    prefix: String,
-    inner: Memory,
-}
-
-impl Namespaced {
-    /// Scopes `inner` under `prefix` (`Memory` is already a shared handle, so
-    /// the caller keeps its own clone as the probe).
-    pub fn new(prefix: impl Into<String>, inner: Memory) -> Self {
-        Self {
-            prefix: prefix.into(),
-            inner,
-        }
-    }
-
-    /// The underlying store.
-    #[must_use]
-    pub const fn memory(&self) -> &Memory {
-        &self.inner
-    }
-
-    fn scoped(&self, name: &str) -> String {
-        format!("{}/{name}", self.prefix)
-    }
-
-    fn unscoped(&self, name: &str) -> String {
-        name.strip_prefix(&format!("{}/", self.prefix)).unwrap_or(name).to_owned()
-    }
-}
-
-impl StateStore for Namespaced {
-    type Named = Self;
-
-    fn get(&self, key: &str) -> impl Future<Output = capability::Result<Option<Bytes>>> + Send {
-        ready(self.inner.get_state(&self.scoped(key)))
-    }
-
-    fn set(
-        &self, key: &str, value: &[u8], ttl: Option<Duration>,
-    ) -> impl Future<Output = capability::Result<()>> + Send {
-        ready(self.inner.set_state(&self.scoped(key), value, ttl))
-    }
-
-    fn delete(&self, key: &str) -> impl Future<Output = capability::Result<()>> + Send {
-        ready(self.inner.delete_state(&self.scoped(key)))
-    }
-
-    fn compare_and_swap(
-        &self, key: &str, current: Option<&[u8]>, new: &[u8], ttl: Option<Duration>,
-    ) -> impl Future<Output = capability::Result<Result<(), Conflict>>> + Send {
-        ready(self.inner.swap_state(&self.scoped(key), current, new, ttl))
-    }
-
-    fn increment(
-        &self, key: &str, delta: i64, ttl: Option<Duration>,
-    ) -> impl Future<Output = capability::Result<i64>> + Send {
-        ready(self.inner.increment_state(&self.scoped(key), delta, ttl))
-    }
-
-    fn named(&self, name: &str) -> Self {
-        Self {
-            prefix: self.prefix.clone(),
-            inner: self.inner.named(name),
-        }
-    }
-}
-
-impl BlobStore for Namespaced {
-    fn get(
-        &self, container: &str, name: &str,
-    ) -> impl Future<Output = Result<Option<Vec<u8>>>> + Send {
-        ready(Ok(self.inner.object(&self.scoped(container), name)))
-    }
-
-    fn put(
-        &self, container: &str, name: &str, data: &[u8],
-    ) -> impl Future<Output = Result<()>> + Send {
-        self.inner.insert_object(&self.scoped(container), name, data);
-        ready(Ok(()))
-    }
-
-    fn delete(&self, container: &str, name: &str) -> impl Future<Output = Result<()>> + Send {
-        self.inner.delete_object(&self.scoped(container), name);
-        ready(Ok(()))
-    }
-
-    fn list(&self, container: &str) -> impl Future<Output = Result<Vec<String>>> + Send {
-        ready(Ok(self.inner.objects(&self.scoped(container))))
-    }
-
-    fn get_range(
-        &self, container: &str, name: &str, start: u64, end: u64,
-    ) -> impl Future<Output = Result<Vec<u8>>> + Send {
-        ready(self.inner.range(&self.scoped(container), name, start, end))
-    }
-
-    fn object_info(
-        &self, container: &str, name: &str,
-    ) -> impl Future<Output = Result<ObjectMetadata>> + Send {
-        let info =
-            self.inner.object_info(&self.scoped(container), name).map(|info| ObjectMetadata {
-                container: self.unscoped(&info.container),
-                ..info
-            });
-        ready(info)
-    }
-
-    fn create_container(&self, name: &str) -> impl Future<Output = Result<()>> + Send {
-        self.inner.insert_container(&self.scoped(name));
-        ready(Ok(()))
-    }
-
-    fn delete_container(&self, name: &str) -> impl Future<Output = Result<()>> + Send {
-        self.inner.delete_container(&self.scoped(name));
-        ready(Ok(()))
-    }
-
-    fn container_exists(&self, name: &str) -> impl Future<Output = Result<bool>> + Send {
-        ready(Ok(self.inner.has_container(&self.scoped(name))))
-    }
-
-    fn container_info(
-        &self, container: &str,
-    ) -> impl Future<Output = Result<ContainerMetadata>> + Send {
-        let info =
-            self.inner.container_info(&self.scoped(container)).map(|info| ContainerMetadata {
-                name: self.unscoped(&info.name),
-                ..info
-            });
-        ready(info)
-    }
-}
-
-impl Vault for Namespaced {
-    fn get(&self, key: &str) -> impl Future<Output = Result<Option<Vec<u8>>>> + Send {
-        ready(Ok(self.inner.secret(&self.scoped(key))))
-    }
-
-    fn set(&self, key: &str, value: &[u8]) -> impl Future<Output = Result<()>> + Send {
-        self.inner.insert_secret(&self.scoped(key), value);
-        ready(Ok(()))
-    }
-
-    fn delete(&self, key: &str) -> impl Future<Output = Result<()>> + Send {
-        drop(self.inner.lock_secrets().remove(&self.scoped(key)));
-        ready(Ok(()))
-    }
-
-    fn exists(&self, key: &str) -> impl Future<Output = Result<bool>> + Send {
-        ready(Ok(self.inner.lock_secrets().contains_key(&self.scoped(key))))
-    }
-
-    fn list_ids(&self) -> impl Future<Output = Result<Vec<String>>> + Send {
-        let prefix = format!("{}/", self.prefix);
-        let ids: Vec<String> = self
-            .inner
-            .lock_secrets()
-            .keys()
-            .filter_map(|key| key.strip_prefix(&prefix).map(str::to_owned))
-            .collect();
-        ready(Ok(ids))
-    }
 }

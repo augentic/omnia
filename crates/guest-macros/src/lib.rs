@@ -42,12 +42,19 @@ pub fn instrument(args: TokenStream, item: TokenStream) -> TokenStream {
     TokenStream::from(new_fn)
 }
 
-/// Emits the `Has<Cap>` accessor trait, blanket forwarding impl, and pointer
-/// impls (`Arc<P>`, `&P`, `Box<P>`) for an `omnia_sdk` capability trait.
+/// Makes a trait a capability that `#[derive(Provider)]` can delegate to a field.
 ///
-/// The accessor trait names the type it delegates to as `Inner`, and each
-/// associated type of the capability forwards to `Inner`'s. A generic or
-/// defaulted associated type is rejected.
+/// Re-exported as `omnia_sdk::capability`. Beside the trait it emits:
+///
+/// - a hidden `Has<Trait>` accessor trait, naming the type it delegates to
+///   as `Inner`;
+/// - a blanket impl of the trait for every `Has<Trait>`, forwarding each
+///   method and associated type to `Inner`;
+/// - `Has<Trait>` impls for `Arc<P>`, `&P`, and `Box<P>`.
+///
+/// A crate that re-exports the trait re-exports `Has<Trait>` beside it, so
+/// `#[provider(path::Trait)]` finds `path::HasTrait`. A generic or defaulted
+/// associated type is rejected.
 #[proc_macro_attribute]
 pub fn capability(_args: TokenStream, item: TokenStream) -> TokenStream {
     let item_trait = parse_macro_input!(item as ItemTrait);
@@ -57,8 +64,13 @@ pub fn capability(_args: TokenStream, item: TokenStream) -> TokenStream {
     }
 }
 
-/// Derives `omnia_sdk` capability traits by delegating each named capability to
-/// the struct field annotated with `#[provider(Capability, ...)]`.
+/// Derives capability traits by delegating each one to the field that names it.
+///
+/// A field annotated `#[provider(..)]` serves the capabilities it lists:
+///
+/// - A bare name is an `omnia_sdk` capability, as `#[provider(Config, StateStore)]`.
+/// - A path names any other `#[capability]` trait, as `#[provider(crate::Geocoder)]`.
+///   Its `Has<Trait>` must be reachable at the same path.
 ///
 /// The field's type is part of the provider's interface, so a `pub` provider
 /// delegates only to `pub` field types.
@@ -73,7 +85,7 @@ pub fn derive_provider(item: TokenStream) -> TokenStream {
 
 /// Derives a `KEYS` list and an `async fn load(config)` that reads every field
 /// of a named-field struct from `omnia_sdk::Config` through
-/// `omnia_sdk::ConfigExt::get_parsed`.
+/// `omnia_sdk::ConfigExt::require`.
 ///
 /// A field's key is its name upper-cased behind the struct's
 /// `#[setting(prefix = "..")]`, or the literal in `#[setting(key = "..")]`.

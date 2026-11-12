@@ -40,3 +40,15 @@ async fn vault_locker() {
     assert_eq!(locker.get("seeded".to_owned()).await.expect("get"), Some(b"from-host".to_vec()));
     assert!(!locker.exists("doomed".to_owned()).await.expect("exists"));
 }
+
+#[tokio::test]
+async fn vault_lockers() {
+    let backends = Backends::defaults().await;
+
+    run_guest(test_programs::VAULT_LOCKERS, backends.clone()).await;
+
+    // Persisted state: the unnamed handle wrote to the locker named `default`.
+    let locker = backends.vault.open_locker("default".to_owned()).await.expect("locker");
+    assert_eq!(locker.list_ids().await.expect("list-ids"), ["api-key"]);
+    assert_eq!(locker.get("api-key".to_owned()).await.expect("get"), Some(b"default-key".to_vec()));
+}

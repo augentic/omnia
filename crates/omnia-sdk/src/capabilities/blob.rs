@@ -1,91 +1,75 @@
 //! Binary large object storage capability.
 
 use std::future::Future;
+use std::ops::Range;
 
-use anyhow::Result;
+use bytes::Bytes;
 
-/// Metadata for a blobstore container.
+use crate::blobstore::{ContainerMetadata, ObjectMetadata};
+use crate::capability::{Error, ErrorKind, Page, Result};
+
+/// Store and retrieve binary objects in a deployment's containers.
 ///
-/// Mirrors the `container-metadata` record from `wasi:blobstore/types`.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ContainerMetadata {
-    /// The container's name.
-    pub name: String,
-    /// Seconds since Unix epoch when the container was created.
-    pub created_at: u64,
-}
-
-/// Metadata for an object in a blobstore container.
-///
-/// Mirrors the `object-metadata` record from `wasi:blobstore/types`.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ObjectMetadata {
-    /// The object's name.
-    pub name: String,
-    /// The object's parent container.
-    pub container: String,
-    /// Seconds since Unix epoch when the object was created.
-    pub created_at: u64,
-    /// Size of the object in bytes.
-    pub size: u64,
-}
-
-/// Binary large object storage (WASI Blobstore).
-///
-/// [`WasiProvider`](crate::WasiProvider) delegates to `wasi:blobstore` via
-/// `omnia-wasi-blobstore`.
+/// An absent object is `Ok(None)`, and a call on a container that does not
+/// exist fails with [`ErrorKind::NotFound`].
 #[omnia_guest_macros::capability]
 pub trait BlobStore: Send + Sync {
-    /// Retrieve an object's data from a container.
+    /// Retrieve the object `name` in `container`, or `None` when it is absent.
     fn get(
         &self, container: &str, name: &str,
-    ) -> impl Future<Output = Result<Option<Vec<u8>>>> + Send;
+    ) -> impl Future<Output = Result<Option<Bytes>>> + Send;
 
-    /// Store an object in a container.
+    /// Retrieve the bytes of the object `name` in `range`, or `None` when it is absent.
+    ///
+    /// The range is half-open and clamped to the object's length, so a range
+    /// past the end reads as empty.
+    fn get_range(
+        &self, container: &str, name: &str, range: Range<u64>,
+    ) -> impl Future<Output = Result<Option<Bytes>>> + Send;
+
+    /// Store `data` as the object `name` in `container`, replacing any object there.
     fn put(
         &self, container: &str, name: &str, data: &[u8],
     ) -> impl Future<Output = Result<()>> + Send;
 
-    /// Delete an object from a container.
+    /// Delete the object `name` from `container`, succeeding when it is already absent.
     fn delete(&self, container: &str, name: &str) -> impl Future<Output = Result<()>> + Send;
 
-    /// List all object names in a container.
-    fn list(&self, container: &str) -> impl Future<Output = Result<Vec<String>>> + Send;
-
-    /// Retrieve a byte range of an object's data.
-    ///
-    /// Both `start` and `end` offsets are inclusive.
-    fn get_range(
-        &self, container: &str, name: &str, start: u64, end: u64,
-    ) -> impl Future<Output = Result<Vec<u8>>> + Send;
-
-    /// Return metadata for an object.
-    fn object_info(
+    /// The metadata of the object `name` in `container`, or `None` when it is absent.
+    fn stat(
         &self, container: &str, name: &str,
-    ) -> impl Future<Output = Result<ObjectMetadata>> + Send;
+    ) -> impl Future<Output = Result<Option<ObjectMetadata>>> + Send;
 
-    /// Create a new empty container.
-    fn create_container(&self, name: &str) -> impl Future<Output = Result<()>> + Send;
+    /// One page of the objects in `container` whose names start with `prefix`.
+    ///
+    /// `after` is the [`next`](Page::next) cursor of the previous page, or
+    /// `None` for the first page.
+    fn list(
+        &self, container: &str, prefix: &str, after: Option<&str>,
+    ) -> impl Future<Output = Result<Page<ObjectMetadata>>> + Send;
 
-    /// Delete a container and all objects within it.
-    fn delete_container(&self, name: &str) -> impl Future<Output = Result<()>> + Send;
+    /// Create the empty container `container`, succeeding when it already exists.
+    fn create_container(&self, container: &str) -> impl Future<Output = Result<()>> + Send;
 
-    /// Check whether a container exists.
-    fn container_exists(&self, name: &str) -> impl Future<Output = Result<bool>> + Send;
+    /// Delete `container` and every object in it.
+    fn delete_container(&self, container: &str) -> impl Future<Output = Result<()>> + Send;
 
-    /// Return metadata for a container.
+    /// Whether `container` exists.
+    fn container_exists(&self, container: &str) -> impl Future<Output = Result<bool>> + Send;
+
+    /// The metadata of `container`, or `None` when it does not exist.
     fn container_info(
         &self, container: &str,
-    ) -> impl Future<Output = Result<ContainerMetadata>> + Send;
+    ) -> impl Future<Output = Result<Option<ContainerMetadata>>> + Send;
 
-    /// Check whether an object exists in a container.
-    fn has(&self, container: &str, name: &str) -> impl Future<Output = Result<bool>> + Send {
-        async move { Ok(self.get(container, name).await?.is_some()) }
+    /// Whether the object `name` exists in `container`.
+    fn exists(&self, container: &str, name: &str) -> impl Future<Output = Result<bool>> + Send {
+        async move { Ok(self.stat(container, name).await?.is_some()) }
     }
 
-    /// Delete multiple objects from a container.
-    fn delete_objects(
-        &self, container: &str, names: &[String],
+    /// Delete each object in `names` from `container`.
+    fn delete_many(
+        &self, container: &str, names: &[&str],
     ) -> impl Future<Output = Result<()>> + Send {
         async move {
             for name in names {
@@ -95,10 +79,20 @@ pub trait BlobStore: Send + Sync {
         }
     }
 
-    /// Remove all objects from a container, leaving it empty.
+    /// Delete every object in `container`, leaving it empty.
     fn clear(&self, container: &str) -> impl Future<Output = Result<()>> + Send {
         async move {
-            for name in self.list(container).await? {
+            let mut names = Vec::new();
+            let mut after = None;
+            loop {
+                let page = self.list(container, "", after.as_deref()).await?;
+                names.extend(page.items.into_iter().map(|object| object.name));
+                match page.next {
+                    Some(next) => after = Some(next),
+                    None => break,
+                }
+            }
+            for name in names {
                 self.delete(container, &name).await?;
             }
             Ok(())
@@ -107,244 +101,280 @@ pub trait BlobStore: Send + Sync {
 
     /// Copy an object to the same or a different container.
     ///
-    /// Overwrites the destination object if it already exists; fails if the
-    /// source object is missing, or if `put` refuses the destination
-    /// container.
-    fn copy_object(
+    /// The copy replaces any object at the destination. An absent source fails
+    /// with [`ErrorKind::NotFound`].
+    fn copy(
         &self, src_container: &str, src_name: &str, dest_container: &str, dest_name: &str,
     ) -> impl Future<Output = Result<()>> + Send {
         async move {
             let data = self.get(src_container, src_name).await?.ok_or_else(|| {
-                anyhow::anyhow!("source object not found: {src_container}/{src_name}")
+                let message = format!("object `{src_name}` not found in `{src_container}`");
+                Error::new(ErrorKind::NotFound, message)
             })?;
             self.put(dest_container, dest_name, &data).await
         }
     }
 
-    /// Move or rename an object to the same or a different container.
+    /// Move an object to a new name in the same or a different container.
     ///
-    /// Overwrites the destination object if it already exists; fails as
-    /// [`copy_object`](Self::copy_object) does, leaving the source in place.
-    fn move_object(
+    /// The move replaces any object at the destination, and fails as
+    /// [`copy`](Self::copy) does, leaving the source in place.
+    fn rename(
         &self, src_container: &str, src_name: &str, dest_container: &str, dest_name: &str,
     ) -> impl Future<Output = Result<()>> + Send {
         async move {
             if src_container == dest_container && src_name == dest_name {
                 return Ok(());
             }
-            self.copy_object(src_container, src_name, dest_container, dest_name).await?;
+            self.copy(src_container, src_name, dest_container, dest_name).await?;
             self.delete(src_container, src_name).await
         }
     }
 }
 
 #[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
-impl BlobStore for crate::WasiProvider {
-    async fn get(&self, container: &str, name: &str) -> Result<Option<Vec<u8>>> {
-        use anyhow::anyhow;
-        use omnia_wasi_blobstore::types::IncomingValue;
+mod wasi {
+    use std::ops::Range;
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-        let ctr = open_container(container).await?;
+    use bytes::Bytes;
+    use omnia_wasi_blobstore::blobstore;
+    use omnia_wasi_blobstore::container::Container;
+    use omnia_wasi_blobstore::types::{IncomingValue, ObjectId, OutgoingValue};
 
-        // one round trip: a not-found error is `None`, rather than racing an existence check
-        let incoming = match ctr.get_data(name.to_string(), 0, u64::MAX).await {
-            Ok(incoming) => incoming,
-            // wasi-blobstore lowers a missing object to this message for every backend
-            Err(e) if e.contains("object not found") => return Ok(None),
-            Err(e) => return Err(anyhow!("reading object: {e}")),
-        };
-        let data = IncomingValue::incoming_value_consume_sync(incoming)
-            .map_err(|e| anyhow!("consuming incoming value: {e}"))?;
-        Ok(Some(data))
-    }
+    use super::BlobStore;
+    use crate::blobstore::{ContainerMetadata, ObjectMetadata};
+    use crate::capability::{Error, ErrorKind, Page, Result};
 
-    async fn put(&self, container: &str, name: &str, data: &[u8]) -> Result<()> {
-        use anyhow::anyhow;
-        use omnia_wasi_blobstore::types::OutgoingValue;
+    // the `wasi:io` write budget: `blocking-write-and-flush` takes at most 4096 bytes
+    const WRITE_CHUNK: usize = 4096;
 
-        // the wasi:io write budget: `blocking-write-and-flush` takes at most 4096 bytes
-        const WRITE_CHUNK: usize = 4096;
+    // `wasi-blobstore` lowers a missing object to this message for every backend
+    const OBJECT_NOT_FOUND: &str = "object not found";
 
-        let ctr = open_container(container).await?;
-        let outgoing = OutgoingValue::new_outgoing_value();
-        {
-            let body = outgoing
-                .outgoing_value_write_body()
-                .await
-                .map_err(|e| anyhow!("getting write body: {e:?}"))?;
-            for chunk in data.chunks(WRITE_CHUNK) {
-                body.blocking_write_and_flush(chunk).map_err(|e| anyhow!("writing data: {e}"))?;
-            }
-        };
-        ctr.write_data(name.to_string(), &outgoing)
-            .await
-            .map_err(|e| anyhow!("writing object: {e}"))?;
-        OutgoingValue::finish(outgoing).map_err(|e| anyhow!("finishing write: {e}"))?;
-        Ok(())
-    }
-
-    async fn delete(&self, container: &str, name: &str) -> Result<()> {
-        use anyhow::anyhow;
-
-        let ctr = open_container(container).await?;
-        ctr.delete_object(name.to_string()).await.map_err(|e| anyhow!("deleting object: {e}"))
-    }
-
-    async fn list(&self, container: &str) -> Result<Vec<String>> {
-        use anyhow::anyhow;
-
-        let ctr = open_container(container).await?;
-        let stream = ctr.list_objects().await.map_err(|e| anyhow!("listing objects: {e}"))?;
-        let mut names = Vec::new();
-        loop {
-            let (batch, done) = stream
-                .read_stream_object_names(100)
-                .await
-                .map_err(|e| anyhow!("reading object names: {e}"))?;
-            names.extend(batch);
-            if done {
-                break;
+    impl BlobStore for crate::WasiProvider {
+        async fn get(&self, container: &str, name: &str) -> Result<Option<Bytes>> {
+            let container = open(container).await?;
+            match container.get_data(name.to_owned(), 0, u64::MAX).await {
+                Ok(incoming) => consume(incoming).map(Some),
+                Err(message) if message.contains(OBJECT_NOT_FOUND) => Ok(None),
+                Err(message) => Err(fault("reading object", &message)),
             }
         }
-        Ok(names)
-    }
 
-    async fn get_range(
-        &self, container: &str, name: &str, start: u64, end: u64,
-    ) -> Result<Vec<u8>> {
-        use anyhow::anyhow;
-        use omnia_wasi_blobstore::types::IncomingValue;
+        async fn get_range(
+            &self, container: &str, name: &str, range: Range<u64>,
+        ) -> Result<Option<Bytes>> {
+            let container = open(container).await?;
+            if range.is_empty() {
+                let found = container
+                    .has_object(name.to_owned())
+                    .await
+                    .map_err(|message| fault("checking object", &message))?;
+                return Ok(found.then(Bytes::new));
+            }
 
-        let ctr = open_container(container).await?;
-        let incoming = ctr
-            .get_data(name.to_string(), start, end)
+            // HACK: the wire end is inclusive and reads an end of 0 as unbounded,
+            // so a read of the first byte asks for two and truncates
+            let end = (range.end - 1).max(1);
+            let data = match container.get_data(name.to_owned(), range.start, end).await {
+                Ok(incoming) => consume(incoming)?,
+                Err(message) if message.contains(OBJECT_NOT_FOUND) => return Ok(None),
+                Err(message) => return Err(fault("reading object range", &message)),
+            };
+            let len = usize::try_from(range.end - range.start).unwrap_or(usize::MAX);
+            Ok(Some(data.slice(..len.min(data.len()))))
+        }
+
+        async fn put(&self, container: &str, name: &str, data: &[u8]) -> Result<()> {
+            let container = open(container).await?;
+            let outgoing = OutgoingValue::new_outgoing_value();
+            {
+                let body = outgoing.outgoing_value_write_body().await.map_err(|err| {
+                    Error::new(ErrorKind::Other, format!("opening the write body: {err:?}"))
+                })?;
+                for chunk in data.chunks(WRITE_CHUNK) {
+                    body.blocking_write_and_flush(chunk).map_err(|err| {
+                        Error::new(ErrorKind::Other, format!("writing object data: {err}"))
+                    })?;
+                }
+            };
+            container
+                .write_data(name.to_owned(), &outgoing)
+                .await
+                .map_err(|message| fault("writing object", &message))?;
+            OutgoingValue::finish(outgoing).map_err(|message| fault("finishing write", &message))
+        }
+
+        async fn delete(&self, container: &str, name: &str) -> Result<()> {
+            let container = open(container).await?;
+            container
+                .delete_object(name.to_owned())
+                .await
+                .map_err(|message| fault("deleting object", &message))
+        }
+
+        async fn stat(&self, container: &str, name: &str) -> Result<Option<ObjectMetadata>> {
+            let container = open(container).await?;
+            stat_in(&container, name).await
+        }
+
+        async fn list(
+            &self, container: &str, prefix: &str, after: Option<&str>,
+        ) -> Result<Page<ObjectMetadata>> {
+            let container = open(container).await?;
+            let stream = container
+                .list_objects()
+                .await
+                .map_err(|message| fault("listing objects", &message))?;
+            let mut names = Vec::new();
+            loop {
+                let (batch, done) = stream
+                    .read_stream_object_names(100)
+                    .await
+                    .map_err(|message| fault("reading object names", &message))?;
+                names.extend(batch);
+                if done {
+                    break;
+                }
+            }
+
+            // `wasi:blobstore` lists every name, so the listing filters and orders
+            // them into one page that resumes after the name it is given
+            names.retain(|name| {
+                name.starts_with(prefix) && after.is_none_or(|after| name.as_str() > after)
+            });
+            names.sort_unstable();
+            let mut objects = Vec::with_capacity(names.len());
+            for name in names {
+                objects.extend(stat_in(&container, &name).await?);
+            }
+            Ok(Page::new(objects, None))
+        }
+
+        async fn create_container(&self, container: &str) -> Result<()> {
+            blobstore::create_container(container.to_owned())
+                .await
+                .map(drop)
+                .map_err(|message| fault("creating container", &message))
+        }
+
+        async fn delete_container(&self, container: &str) -> Result<()> {
+            blobstore::delete_container(container.to_owned())
+                .await
+                .map_err(|message| fault("deleting container", &message))
+        }
+
+        async fn container_exists(&self, container: &str) -> Result<bool> {
+            blobstore::container_exists(container.to_owned())
+                .await
+                .map_err(|message| fault("checking container", &message))
+        }
+
+        async fn container_info(&self, container: &str) -> Result<Option<ContainerMetadata>> {
+            if !self.container_exists(container).await? {
+                return Ok(None);
+            }
+            let info = open(container)
+                .await?
+                .info()
+                .map_err(|message| fault("reading container info", &message))?;
+            Ok(Some(ContainerMetadata::new(info.name, timestamp(info.created_at))))
+        }
+
+        async fn exists(&self, container: &str, name: &str) -> Result<bool> {
+            let container = open(container).await?;
+            container
+                .has_object(name.to_owned())
+                .await
+                .map_err(|message| fault("checking object", &message))
+        }
+
+        async fn delete_many(&self, container: &str, names: &[&str]) -> Result<()> {
+            let container = open(container).await?;
+            let names = names.iter().map(|&name| name.to_owned()).collect();
+            container
+                .delete_objects(names)
+                .await
+                .map_err(|message| fault("deleting objects", &message))
+        }
+
+        async fn clear(&self, container: &str) -> Result<()> {
+            let container = open(container).await?;
+            container.clear().await.map_err(|message| fault("clearing container", &message))
+        }
+
+        async fn copy(
+            &self, src_container: &str, src_name: &str, dest_container: &str, dest_name: &str,
+        ) -> Result<()> {
+            blobstore::copy_object(
+                object_id(src_container, src_name),
+                object_id(dest_container, dest_name),
+            )
             .await
-            .map_err(|e| anyhow!("reading object range: {e}"))?;
-        let data = IncomingValue::incoming_value_consume_sync(incoming)
-            .map_err(|e| anyhow!("consuming incoming value: {e}"))?;
-        Ok(data)
-    }
+            .map_err(|message| fault("copying object", &message))
+        }
 
-    async fn object_info(&self, container: &str, name: &str) -> Result<ObjectMetadata> {
-        use anyhow::anyhow;
-
-        let ctr = open_container(container).await?;
-        let info = ctr
-            .object_info(name.to_string())
+        async fn rename(
+            &self, src_container: &str, src_name: &str, dest_container: &str, dest_name: &str,
+        ) -> Result<()> {
+            blobstore::move_object(
+                object_id(src_container, src_name),
+                object_id(dest_container, dest_name),
+            )
             .await
-            .map_err(|e| anyhow!("getting object info: {e}"))?;
-        Ok(ObjectMetadata {
-            name: info.name,
-            container: info.container,
-            created_at: info.created_at,
-            size: info.size,
-        })
+            .map_err(|message| fault("moving object", &message))
+        }
     }
 
-    async fn create_container(&self, name: &str) -> Result<()> {
-        use anyhow::anyhow;
-
-        omnia_wasi_blobstore::blobstore::create_container(name.to_string())
+    async fn open(container: &str) -> Result<Container> {
+        blobstore::get_container(container.to_owned())
             .await
-            .map_err(|e| anyhow!("creating container: {e}"))?;
-        Ok(())
+            .map_err(|message| fault("opening container", &message))
     }
 
-    async fn delete_container(&self, name: &str) -> Result<()> {
-        use anyhow::anyhow;
-
-        omnia_wasi_blobstore::blobstore::delete_container(name.to_string())
-            .await
-            .map_err(|e| anyhow!("deleting container: {e}"))
+    // a missing object fails `object-info` with a backend's own message, so the
+    // failure is read as absence only once `has-object` agrees
+    async fn stat_in(container: &Container, name: &str) -> Result<Option<ObjectMetadata>> {
+        match container.object_info(name.to_owned()).await {
+            Ok(info) => Ok(Some(ObjectMetadata::new(
+                info.name,
+                info.container,
+                timestamp(info.created_at),
+                info.size,
+            ))),
+            Err(message) => {
+                let found = container
+                    .has_object(name.to_owned())
+                    .await
+                    .map_err(|message| fault("checking object", &message))?;
+                if found { Err(fault("reading object info", &message)) } else { Ok(None) }
+            }
+        }
     }
 
-    async fn container_exists(&self, name: &str) -> Result<bool> {
-        use anyhow::anyhow;
-
-        omnia_wasi_blobstore::blobstore::container_exists(name.to_string())
-            .await
-            .map_err(|e| anyhow!("checking container existence: {e}"))
+    fn consume(incoming: IncomingValue) -> Result<Bytes> {
+        IncomingValue::incoming_value_consume_sync(incoming)
+            .map(Bytes::from)
+            .map_err(|message| fault("reading object data", &message))
     }
 
-    async fn container_info(&self, container: &str) -> Result<ContainerMetadata> {
-        use anyhow::anyhow;
-
-        let ctr = open_container(container).await?;
-        let info = ctr.info().map_err(|e| anyhow!("getting container info: {e}"))?;
-        Ok(ContainerMetadata {
-            name: info.name,
-            created_at: info.created_at,
-        })
+    fn object_id(container: &str, name: &str) -> ObjectId {
+        ObjectId {
+            container: container.to_owned(),
+            object: name.to_owned(),
+        }
     }
 
-    async fn has(&self, container: &str, name: &str) -> Result<bool> {
-        use anyhow::anyhow;
-
-        let ctr = open_container(container).await?;
-        ctr.has_object(name.to_string())
-            .await
-            .map_err(|e| anyhow!("checking object existence: {e}"))
+    fn timestamp(seconds: u64) -> SystemTime {
+        UNIX_EPOCH + Duration::from_secs(seconds)
     }
 
-    async fn delete_objects(&self, container: &str, names: &[String]) -> Result<()> {
-        use anyhow::anyhow;
-
-        let names = names.to_vec();
-        let ctr = open_container(container).await?;
-        ctr.delete_objects(names).await.map_err(|e| anyhow!("deleting objects: {e}"))
+    // `wasi:blobstore` errors are strings, so a missing container or object is
+    // told apart by its message
+    fn fault(action: &str, message: &str) -> Error {
+        let kind =
+            if message.contains("not found") { ErrorKind::NotFound } else { ErrorKind::Other };
+        Error::new(kind, format!("{action}: {message}"))
     }
-
-    async fn clear(&self, container: &str) -> Result<()> {
-        use anyhow::anyhow;
-
-        let ctr = open_container(container).await?;
-        ctr.clear().await.map_err(|e| anyhow!("clearing container: {e}"))
-    }
-
-    async fn copy_object(
-        &self, src_container: &str, src_name: &str, dest_container: &str, dest_name: &str,
-    ) -> Result<()> {
-        use anyhow::anyhow;
-        use omnia_wasi_blobstore::types::ObjectId;
-
-        let src = ObjectId {
-            container: src_container.to_string(),
-            object: src_name.to_string(),
-        };
-        let dest = ObjectId {
-            container: dest_container.to_string(),
-            object: dest_name.to_string(),
-        };
-        omnia_wasi_blobstore::blobstore::copy_object(src, dest)
-            .await
-            .map_err(|e| anyhow!("copying object: {e}"))
-    }
-
-    async fn move_object(
-        &self, src_container: &str, src_name: &str, dest_container: &str, dest_name: &str,
-    ) -> Result<()> {
-        use anyhow::anyhow;
-        use omnia_wasi_blobstore::types::ObjectId;
-
-        let src = ObjectId {
-            container: src_container.to_string(),
-            object: src_name.to_string(),
-        };
-        let dest = ObjectId {
-            container: dest_container.to_string(),
-            object: dest_name.to_string(),
-        };
-        omnia_wasi_blobstore::blobstore::move_object(src, dest)
-            .await
-            .map_err(|e| anyhow!("moving object: {e}"))
-    }
-}
-
-#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
-async fn open_container(container: &str) -> Result<omnia_wasi_blobstore::container::Container> {
-    use anyhow::anyhow;
-
-    omnia_wasi_blobstore::blobstore::get_container(container.to_string())
-        .await
-        .map_err(|e| anyhow!("opening container: {e}"))
 }

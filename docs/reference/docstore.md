@@ -29,7 +29,11 @@ query: async func(collection: string, options: query-options) -> result<query-re
 
 Collections are named by string and created implicitly on first write; there is no open/close handshake and no collection resource.
 
-Guests normally call these through the `omnia_sdk::DocumentStore` trait, which `omnia_sdk::WasiProvider` implements on `wasm32` over the raw bindings. Those bindings are `omnia_wasi_docstore::store::{get, insert, put, delete, query}`, taking the WIT types in `omnia_wasi_docstore::types`.
+Guests normally call these through the `omnia_sdk::DocumentDb` trait, which `omnia_sdk::WasiProvider` implements on `wasm32` over the raw bindings. Those bindings are `omnia_wasi_docstore::store::{get, insert, put, delete, query}`, taking the WIT types in `omnia_wasi_docstore::types`. The trait renames the WIT shapes:
+
+- `query-options` is `omnia_sdk::docstore::Query`, whose `after` is the WIT `continuation`.
+- `query-result` is an `omnia_sdk::capability::Page<Document>`, whose `items` are the `documents` and whose `next` is the returned `continuation`.
+- `insert` on an id already stored answers `Ok(Err(Exists))` when the backend reports it as the default backend does, with `other("document id already exists")`. A backend that reports it in other words fails the call with `ErrorKind::Other`.
 
 ## Types
 
