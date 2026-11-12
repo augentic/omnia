@@ -4,7 +4,7 @@ use omnia_core::HostView;
 use wasmtime::component::Accessor;
 
 use crate::host::generated::omnia::docstore::store::{
-    Document, Host as StoreHost, HostWithStore, QueryOptions, QueryResult,
+    AlreadyExists, Document, Host as StoreHost, HostWithStore, QueryOptions, QueryResult,
 };
 use crate::host::{DocStoreClient, QueryOpts, Result, WasiDocStore};
 
@@ -16,9 +16,13 @@ impl<T> HostWithStore<T> for WasiDocStore {
         Ok(fut.await?)
     }
 
-    async fn insert(accessor: &Accessor<T, Self>, collection: String, doc: Document) -> Result<()> {
+    async fn insert(
+        accessor: &Accessor<T, Self>, collection: String, doc: Document,
+    ) -> Result<std::result::Result<(), AlreadyExists>> {
+        let id = doc.id.clone();
         let fut = accessor.with(|mut store| store.get().client.insert(collection, doc));
-        Ok(fut.await?)
+        let inserted = fut.await?;
+        Ok(if inserted { Ok(()) } else { Err(AlreadyExists { id }) })
     }
 
     async fn put(accessor: &Accessor<T, Self>, collection: String, doc: Document) -> Result<()> {

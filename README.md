@@ -70,7 +70,7 @@ The [`examples/`](examples/README.md) directory contains a complete working gues
 | [`omnia-wasi-messaging`](crates/wasi-messaging) | Messaging host and guest bindings                                                          |
 | [`omnia-wasi-model`](crates/wasi-model)         | omnia:model completion host and guest bindings                                             |
 | [`omnia-wasi-otel`](crates/wasi-otel)           | OpenTelemetry host and guest bindings                                                      |
-| [`omnia-wasi-sql`](crates/wasi-sql)             | wasi:sql host and guest bindings                                                           |
+| [`omnia-wasi-sql`](crates/wasi-sql)             | omnia:sql host and guest bindings, with the wasi:sql draft                                 |
 | [`omnia-wasi-vault`](crates/wasi-vault)         | Secrets-vault host and guest bindings                                                      |
 | [`omnia-wasi-vcs`](crates/wasi-vcs)             | omnia:vcs version-control host and guest bindings; no default backend                      |
 | [`omnia-wasi-websocket`](crates/wasi-websocket) | WebSocket host and guest bindings                                                          |

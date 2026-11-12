@@ -1,6 +1,6 @@
-//! # WASI SQL WIT implementation
+//! # WASI SQL Guest
 
-// Bindings for the `wasi:sql` world.
+// Bindings for `omnia:sql` and the `wasi:sql` draft.
 // See (<https://github.com/augentic/wasi-sql/>)
 mod generated {
     #![allow(missing_docs, clippy::same_length_and_capacity, reason = "wit-bindgen output")]
@@ -10,6 +10,11 @@ mod generated {
         path: "wit",
         generate_all,
     });
+}
+
+/// `omnia:sql`, the interface the SDK's `SqlDb` calls.
+pub mod omnia {
+    pub use crate::guest::generated::omnia::sql::database;
 }
 
 pub use self::generated::wasi::sql::*;

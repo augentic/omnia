@@ -80,7 +80,7 @@ What any provider owes the application beyond the trait signatures, each with ho
 
 ### Pass the shared rows
 
-Each behavioural invariant of a capability trait is one generic `async fn` in `omnia_sdk::contract`, which panics when the provider breaks it. A provider conforms when the rows of every trait it implements pass over it. Omnia runs the rows natively over its doubles, and through `test-programs` guests against its hosts and backends.
+Each behavioural invariant of a capability trait is one generic `async fn` in `omnia_sdk::contract`, which panics when the provider breaks it. A provider conforms when the rows of every trait it implements pass over it. Omnia runs the rows natively over its stateful doubles, and through `test-programs` guests against its hosts and backends.
 
 ### Enforce the argument rules
 
@@ -88,7 +88,7 @@ The same arguments fail the same way on every provider:
 
 - A zero TTL fails with `ErrorKind::Invalid`, and a TTL rounds up to the store's resolution.
 - A handle that names no binding addresses `default`, and a name the deployment does not declare fails with `ErrorKind::NotFound`.
-- A request the provider does not serve fails with `ErrorKind::Unsupported`.
+- A request the provider does not serve fails with `ErrorKind::Unsupported`, and is never partly served. The [portable SQL dialect](sql.md#the-portable-dialect) and the [document query contract](docstore.md#query-contract) list what every provider serves.
 
 Omnia enforces each rule once, in the host, for every backend.
 

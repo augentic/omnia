@@ -6,21 +6,17 @@ use omnia_wasi_docstore::types;
 use crate::capability::{Error, ErrorKind, Page};
 use crate::docstore::{ComparisonOp, Document, Filter, Query, ScalarValue, SortField};
 
-// the in-memory host's duplicate-id message, the only `insert` failure that is
-// an outcome rather than a fault until `omnia:docstore` carries `already-exists`
-const EXISTS: &str = "document id already exists";
-
-pub(super) fn is_exists(err: &types::Error) -> bool {
-    matches!(err, types::Error::Other(message) if message == EXISTS)
-}
-
 impl From<types::Error> for Error {
     fn from(err: types::Error) -> Self {
-        match err {
-            types::Error::NoSuchStore => Self::new(ErrorKind::NotFound, "no such collection"),
-            types::Error::AccessDenied => Self::new(ErrorKind::Denied, "access denied"),
-            types::Error::Other(message) => Self::new(ErrorKind::Other, message),
-        }
+        let (kind, message) = match err {
+            types::Error::NotFound(message) => (ErrorKind::NotFound, message),
+            types::Error::Denied(message) => (ErrorKind::Denied, message),
+            types::Error::Invalid(message) => (ErrorKind::Invalid, message),
+            types::Error::Unsupported(message) => (ErrorKind::Unsupported, message),
+            types::Error::Unavailable(message) => (ErrorKind::Unavailable, message),
+            types::Error::Other(message) => (ErrorKind::Other, message),
+        };
+        Self::new(kind, message)
     }
 }
 

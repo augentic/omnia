@@ -89,7 +89,7 @@ pub struct Backends<
     pub model: M,
     /// The `wasi:otel` backend.
     pub otel: O,
-    /// The `wasi:sql` backend.
+    /// The `omnia:sql` and `wasi:sql` backend.
     pub sql: S,
     /// The `wasi:vault` backend.
     pub vault: V,
@@ -238,7 +238,7 @@ impl<M, K, B, D, S, V, G, I, O, C> Backends<M, K, B, D, S, V, G, I, O, C> {
         }
     }
 
-    /// The same bundle serving `wasi:sql` from `sql`.
+    /// The same bundle serving `omnia:sql` and `wasi:sql` from `sql`.
     #[must_use]
     pub fn sql<N: SqlClient + Clone>(self, sql: N) -> Backends<M, K, B, D, N, V, G, I, O, C> {
         Backends {

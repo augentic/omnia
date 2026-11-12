@@ -1,9 +1,11 @@
 //! # Host implementation for WASI SQL Service
 //!
-//! This module implements the host-side logic for the WASI SQL service.
+//! This module implements the host side of `omnia:sql` and the `wasi:sql`
+//! draft.
 
 #[cfg(feature = "sqlite")]
 mod default_impl;
+mod omnia_impl;
 mod readwrite_impl;
 mod resource;
 mod types_impl;
@@ -11,7 +13,8 @@ mod types_impl;
 mod generated {
     #![allow(missing_docs, reason = "wasmtime bindgen output")]
 
-    pub use super::{ConnectionProxy, Error, Statement};
+    pub use self::omnia::sql::database::Error;
+    pub use super::resource::{ConnectionProxy, Prepared, Trace};
 
     wasmtime::component::bindgen!({
         world: "imports",
@@ -21,11 +24,12 @@ mod generated {
         },
         with: {
             "wasi:sql/types.connection": ConnectionProxy,
-            "wasi:sql/types.statement": Statement,
-            "wasi:sql/types.error": Error,
+            "wasi:sql/types.statement": Prepared,
+            "wasi:sql/types.error": Trace,
         },
         trappable_error_type: {
-            "wasi:sql/types.error" => Error,
+            "omnia:sql/database.error" => Error,
+            "wasi:sql/types.error" => Trace,
         },
     });
 }
@@ -37,47 +41,45 @@ pub use omnia_core::FutureResult;
 use omnia_core::{Host, HostCtx, Provides, StoreCtx};
 use wasmtime::component::Linker;
 
-use self::generated::wasi::sql::{readwrite, types};
 #[cfg(feature = "sqlite")]
-pub use crate::host::default_impl::{ConnectOptions, SqlDefault};
-pub use crate::host::generated::wasi::sql::types::{DataType, Field, Row};
-pub use crate::host::resource::*;
+pub use self::default_impl::{ConnectOptions, SqlDefault};
+pub use self::generated::Error;
+use self::generated::omnia::sql::database;
+pub use self::generated::omnia::sql::database::{Field, Row, Statement, Value};
+use self::generated::wasi::sql::{readwrite, types};
+pub use self::resource::{Connection, ConnectionProxy};
 
-/// Host error backing the `wasi:sql` error resource.
-#[derive(Debug)]
-pub enum Error {
-    /// Untyped host failure; the message preserves the backend context chain.
-    Other(String),
-}
+type Result<T> = std::result::Result<T, Error>;
 
-impl Error {
-    /// The failure trace exposed to guests via the WIT `error` resource.
-    #[must_use]
-    pub fn trace(&self) -> &str {
-        let Self::Other(msg) = self;
-        msg
-    }
-}
-
-/// Host-side service for `wasi:sql`.
+/// Host-side service for `omnia:sql` and the `wasi:sql` draft.
 #[derive(Debug, HostCtx)]
 #[host_ctx(client = SqlClient)]
 pub struct WasiSql;
 
 impl<B: Provides<Self>> Host<B> for WasiSql {
     fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
+        database::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
         readwrite::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
         Ok(types::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?)
     }
 }
 
-/// Service contract for `wasi:sql` backends.
+/// Service contract for SQL backends.
 ///
 /// This is implemented by the resource-specific provider of SQL
 /// functionality. For example, `PostgreSQL`, `MySQL`, `SQLite`, etc.
 pub trait SqlClient: Debug + Send + Sync + 'static {
-    /// Open a connection to the database.
+    /// Open a connection to the database `name`.
+    ///
+    /// A name the deployment does not declare fails with
+    /// [`Error::NotFound`].
     fn open(&self, name: String) -> FutureResult<Arc<dyn Connection>>;
 }
 
-omnia_core::host_error!(Error, Other);
+// a backend picks the kind by returning an `Error`; any other failure is
+// `other`, with its full context chain
+impl From<anyhow::Error> for Error {
+    fn from(err: anyhow::Error) -> Self {
+        err.downcast::<Self>().unwrap_or_else(|err| Self::Other(format!("{err:#}")))
+    }
+}

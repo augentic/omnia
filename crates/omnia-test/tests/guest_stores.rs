@@ -13,7 +13,7 @@ use std::time::Duration;
 use bytes::Bytes;
 use http::{Method, Request, Response};
 use omnia_sdk::capability::ErrorKind;
-use omnia_sdk::docstore::{Document, Exists, Filter, Query, SortField};
+use omnia_sdk::docstore::{Document, Filter, Query, SortField};
 use omnia_sdk::messaging::Message;
 use omnia_sdk::sql::{Field, Row, Statement, Value};
 use omnia_sdk::{
@@ -253,7 +253,6 @@ fn shared_handle() {
 fn documents() {
     let docs = MemoryDocs::default();
     assert_eq!(now(docs.insert("people", &doc("1", r#"{"name":"ann"}"#))).expect("insert"), Ok(()));
-    assert_eq!(now(docs.insert("people", &doc("1", "{}"))).expect("insert"), Err(Exists));
     now(docs.put("people", &doc("1", r#"{"name":"anne"}"#))).expect("put upserts");
     let stored = now(DocumentDb::get(&docs, "people", "1")).expect("get").expect("present");
     assert_eq!(&stored.data[..], br#"{"name":"anne"}"#);
@@ -297,12 +296,6 @@ fn queries() {
         ..Query::default()
     };
     let error = now(docs.query("people", &malformed)).expect_err("malformed cursor");
-    assert_eq!(error.kind(), ErrorKind::Invalid, "{error}");
-    let empty = Query {
-        limit: Some(0),
-        ..Query::default()
-    };
-    let error = now(docs.query("people", &empty)).expect_err("zero limit");
     assert_eq!(error.kind(), ErrorKind::Invalid, "{error}");
 }
 

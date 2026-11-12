@@ -35,6 +35,9 @@ Unreleased
   `WasiKeyValue` serves it beside the `wasi:keyvalue` draft over one
   `Bucket`. Each call names its bucket, and `set`, `compare-and-swap`, and
   `increment` take a TTL in milliseconds.
+- `omnia:sql`, the Omnia-owned interface `SqlDb` calls. `WasiSql` serves it
+  beside the `wasi:sql` draft over one `Connection`. Each call names its
+  database, and `batch` runs its statements in one transaction.
 - `omnia_sdk::capability::{Error, ErrorKind, Result}`, the error every
   capability trait returns. `ErrorKind` is one of `NotFound`, `Denied`,
   `Invalid`, `Unsupported`, `Unavailable`, and `Other`. `?` converts it into
@@ -45,6 +48,9 @@ Unreleased
 - `omnia_sdk::contract::state`, the `StateStore` behaviour rows: one
   generic `async fn` per invariant, run natively over
   `omnia_test::guest::Memory` and in a guest over `WasiProvider`.
+- `omnia_sdk::contract::{sql, document}`, the `SqlDb` and `DocumentDb`
+  behaviour rows. Both run in a guest over `WasiProvider`, and the document
+  rows run natively over `omnia_test::guest::MemoryDocs` too.
 - `omnia_wasi_keyvalue::ConnectOptions`. `KeyValueDefault` serves the
   buckets `KEYVALUE_BUCKETS` lists, comma-separated, and `default` when it
   is unset.
@@ -153,11 +159,32 @@ Unreleased
     `Message`, `Delivery`, and `Statement` are `#[non_exhaustive]`, so
     code outside the SDK builds them with `new`. A metadata `created_at`
     is a `SystemTime`.
-- Through `wasi:sql`, `SqlDb::batch` fails with `ErrorKind::Unsupported`,
-  as the interface has no transaction to run it in.
+- `SqlDb` calls `omnia:sql`, one host call per method, and `batch` runs its
+  statements in one transaction. A failing statement rolls back the whole
+  batch.
 - `SqlDefault` opens only the names it declares, and refuses any other.
   A guest that opened a connection by another name, such as `db`, opens
   `default` or lists the name in `SQL_DATABASES`.
+- `SqlClient::open` fails a name the deployment does not declare with
+  `omnia_wasi_sql::Error::NotFound`.
+- `omnia_wasi_sql::Connection` serves `omnia:sql` and the draft alike:
+  - `query` and `execute`, which was `exec`, take a `Vec<Value>`, and
+    `execute` answers a `u64`.
+  - `batch` runs a `Vec<Statement>` in one transaction. A `Statement` is
+    its `sql` and `params`.
+  - A `Row` has no `index`.
+  - A backend picks a failure's kind by returning an
+    `omnia_wasi_sql::Error`, whose six cases match `ErrorKind`.
+- `SqlDefault` stores a `date` or `time` as the text it is given. It stored
+  one as `NULL` before.
+- `Row::get` reads a `bool` from an integer `0` or `1` too, which is how
+  SQLite returns a `BOOLEAN`.
+- The `omnia:docstore` `error` has the six cases of `ErrorKind`, and
+  `insert` answers `already-exists` for an id already stored. The SDK
+  reads both without matching message text.
+- `DocStoreClient::insert` answers `false` for an id already stored, and a
+  backend picks a failure's kind by returning an
+  `omnia_wasi_docstore::Error`.
 - `IdentityStub` refuses an identity `IDENTITY_NAMES` does not list, and
   `IdentityDefault` serves the identity `default` alone.
 - `StateStore` calls `omnia:keyvalue`, one host call per method:
@@ -306,6 +333,9 @@ Unreleased
 - `omnia_wasi_keyvalue::Cacheable` and the guest-side `cache` module, the
   envelope a value set with a TTL was stored in.
 - `omnia_sdk::CasError`. A conflict is `omnia_sdk::keyvalue::Conflict`.
+- The host's `omnia_wasi_sql::DataType`, which is `omnia_wasi_sql::Value`,
+  and `omnia_wasi_sql::Error::trace`. The draft's `trace` is the message
+  of the `Error` case a backend returns.
 
 ---
 

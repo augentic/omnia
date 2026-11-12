@@ -78,8 +78,13 @@ path = "programs/docstore/crud_query.rs"
 crate-type = ["cdylib"]
 
 [[example]]
-name = "docstore_insert_conflict"
-path = "programs/docstore/insert_conflict.rs"
+name = "docstore_document_db"
+path = "programs/docstore/document_db.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "docstore_error_kinds"
+path = "programs/docstore/error_kinds.rs"
 crate-type = ["cdylib"]
 
 [[example]]
@@ -413,8 +418,18 @@ path = "programs/sql/bindings.rs"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "sql_error_kinds"
+path = "programs/sql/error_kinds.rs"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "sql_query_exec"
 path = "programs/sql/query_exec.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "sql_sql_db"
+path = "programs/sql/sql_db.rs"
 crate-type = ["cdylib"]
 
 [[example]]

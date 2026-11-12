@@ -1,15 +1,8 @@
-# WebAssembly Interface Types (WIT) Deps
+# WebAssembly Interface Types (WIT)
 
-## Prerequisites
+`sql.wit` is `omnia:sql`, owned by this crate and edited here. It mirrors the
+SDK's `SqlDb` one function per method.
 
-Install `wit-deps` from source (<https://github.com/bytecodealliance/wit-deps>)
-
-## Usage
-
-Add dependencies to `deps.toml`:
-
-```toml
-keyvalue = "https://github.com/augentic/wasi-keyvalue/archive/main.tar.gz"
-```
-
-Import/update dependencies using `wit-deps update` from the crate root.
+`deps/` holds the `wasi:sql` draft the host still serves for raw-binding
+guests. It is a copy of [augentic/wasi-sql](https://github.com/augentic/wasi-sql)
+and is not edited here.

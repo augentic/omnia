@@ -67,5 +67,5 @@ tokio = { workspace = true, features = ["macros", "rt"] }
 tracing-subscriber.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-omnia-test = { path = "../omnia-test", default-features = false, features = ["guest"] }
+omnia-test = { workspace = true, default-features = false, features = ["guest"] }
 trybuild.workspace = true

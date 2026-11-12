@@ -10,12 +10,12 @@
 //! A row that waits out a TTL takes a `wait` that returns once the duration
 //! has passed on the store's clock.
 
-use std::fmt::Debug;
 use std::time::Duration;
 
 use bytes::Bytes;
 
-use crate::capability::{ErrorKind, Result};
+use super::expect_kind;
+use crate::capability::ErrorKind;
 use crate::keyvalue::{Conflict, DEFAULT};
 use crate::{StateStore, StateStoreExt};
 
@@ -277,12 +277,4 @@ async fn value(store: &impl StateStore, key: &str) -> Option<Vec<u8>> {
 
 async fn counter_at(store: &impl StateStore, key: &str) -> i64 {
     store.increment(key, 0, None).await.unwrap_or_else(|err| panic!("read `{key}`: {err}"))
-}
-
-#[track_caller]
-fn expect_kind<T: Debug>(result: Result<T>, kind: ErrorKind, call: &str) {
-    match result {
-        Ok(value) => panic!("{call} returned {value:?}, not a `{kind}` failure"),
-        Err(err) => assert_eq!(err.kind(), kind, "{call} failed with `{err}`"),
-    }
 }

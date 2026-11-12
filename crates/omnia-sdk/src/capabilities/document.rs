@@ -16,6 +16,25 @@ use crate::docstore::{Document, Exists, Query};
 /// [`Filter::matches`](crate::docstore::Filter::matches) and
 /// [`SortField::compare`](crate::docstore::SortField::compare). Typed reads
 /// of a document body are [`DocumentDbExt`].
+///
+/// Every provider serves the portable subset of a query:
+///
+/// - [`Filter::Compare`](crate::docstore::Filter::Compare) with a value other
+///   than `null`, [`Filter::InList`](crate::docstore::Filter::InList), and
+///   [`Filter::NotInList`](crate::docstore::Filter::NotInList), on a
+///   top-level field;
+/// - [`Filter::And`](crate::docstore::Filter::And),
+///   [`Filter::Or`](crate::docstore::Filter::Or), and
+///   [`Filter::Not`](crate::docstore::Filter::Not);
+/// - a `limit`, with the [`Page::next`] cursor.
+///
+/// A zero `limit` fails with
+/// [`ErrorKind::Invalid`](crate::capability::ErrorKind::Invalid). A provider
+/// serves every other feature as defined, or fails the query with
+/// [`ErrorKind::Unsupported`](crate::capability::ErrorKind::Unsupported), and
+/// never ignores one. The
+/// [document store reference](https://github.com/augentic/omnia/blob/main/docs/reference/docstore.md#query-contract)
+/// lists the portable names and the optional features.
 #[omnia_guest_macros::capability]
 pub trait DocumentDb: Send + Sync {
     /// Fetch the document `id` from `collection`, or `None` when it is absent.
@@ -70,11 +89,9 @@ impl DocumentDb for crate::WasiProvider {
     }
 
     async fn insert(&self, collection: &str, document: &Document) -> Result<Result<(), Exists>> {
-        match omnia_wasi_docstore::store::insert(collection.to_owned(), document.into()).await {
-            Ok(()) => Ok(Ok(())),
-            Err(err) if convert::is_exists(&err) => Ok(Err(Exists)),
-            Err(err) => Err(err.into()),
-        }
+        let inserted =
+            omnia_wasi_docstore::store::insert(collection.to_owned(), document.into()).await?;
+        Ok(inserted.map_err(|_already_exists| Exists))
     }
 
     async fn put(&self, collection: &str, document: &Document) -> Result<()> {

@@ -27,9 +27,9 @@ wasm-pkg-client.workspace = true
 wasmtime = { workspace = true, features = ["runtime"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-omnia = { path = "../omnia", features = ["loader", "link"] }
-omnia-test = { path = "../omnia-test", default-features = false, features = ["host"] }
-omnia-wasi-otel = { path = "../wasi-otel" }
+omnia = { workspace = true, features = ["loader", "link"] }
+omnia-test = { workspace = true, default-features = false, features = ["host"] }
+omnia-wasi-otel.workspace = true
 serde = { workspace = true, features = ["derive"] }
 tempfile.workspace = true
 test-programs.workspace = true

@@ -1,0 +1,67 @@
+package wasi:sql@0.2.0-draft;
+
+interface types {
+  /// common data types
+  variant data-type {
+    int32(option<s32>),
+    int64(option<s64>),
+    uint32(option<u32>),
+    uint64(option<u64>),
+    float(option<f32>),
+    double(option<f64>),
+    str(option<string>),
+    boolean(option<bool>),
+    date(option<string>),
+    time(option<string>),
+    timestamp(option<string>),
+    binary(option<list<u8>>),
+  }
+
+  /// one field in a row
+  record field {
+    name: string,
+    value: data-type,
+  }
+
+  /// one single row item
+  record row {
+    index: string,
+    fields: list<field>,
+  }
+
+  /// allows parameterized queries
+  /// e.g., prepare("SELECT * FROM users WHERE name = ? AND age = ?", vec![DataType::String("John Doe"), DataType::Int32(32)])
+  resource statement {
+    prepare: static async func(query: string, params: list<data-type>) -> result<statement, error>;
+  }
+
+  /// An error resource type.
+  /// Currently, this provides only one function to return a string representation
+  /// of the error. In the future, this will be extended to provide more information.
+  resource error {
+    trace: func() -> string;
+  }
+
+  /// A connection to a sql store.
+  resource connection {
+    open: static async func(name: string) -> result<connection, error>;
+  }
+}
+
+interface readwrite {
+  use types.{statement, row, error, connection};
+
+  /// query is optimized for querying data, and
+  /// implementors can make use of that fact to optimize
+  /// the performance of query execution (e.g., using
+  /// indexes).
+  query: async func(c: borrow<connection>, q: borrow<statement>) -> result<list<row>, error>;
+
+  /// exec is for modifying data in the database.
+  exec: async func(c: borrow<connection>, q: borrow<statement>) -> result<u32, error>;
+}
+
+world imports {
+  import types;
+  import readwrite;
+}

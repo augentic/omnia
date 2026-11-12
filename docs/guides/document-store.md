@@ -1,6 +1,6 @@
 # Document Store
 
-The `omnia:docstore` interface is a JSON document store: named collections of `{ id, data }` documents with a rich, backend-portable filter language and cursor-based pagination. The default backend is in-memory; production deployments swap in Azure Table Storage (`omnia-azure-table`) without guest changes.
+The `omnia:docstore` interface is a JSON document store: named collections of `{ id, data }` documents with a rich filter language and cursor-based pagination. The default backend is in-memory; production deployments swap in Azure Table Storage (`omnia-azure-table`) without guest changes, for a guest whose queries keep to the [portable subset](#filters).
 
 The [`docstore`](../../examples/docstore/) example is a minimal GTFS-flavoured service (a `stops` collection) showing CRUD and a combined query endpoint; the snippets below extend its patterns to the full filter vocabulary.
 
@@ -137,7 +137,14 @@ if let (Some(agency), Some(rtype)) = (&p.not_agency, p.not_type) {
 }
 ```
 
-The backend translates the tree to its native query language (direct JSON evaluation in the default, OData `$filter` for Azure Table), so a filter that works locally works in production.
+The backend translates the tree to its native query language (direct JSON evaluation in the default, OData `$filter` for Azure Table). Only the [portable subset](../reference/docstore.md#query-contract) runs on every backend:
+
+- `eq`, `ne`, `gt`, `gte`, `lt`, and `lte` with a non-null value, on a top-level field;
+- `in_list` and `not_in_list` on a top-level field;
+- `and`, `or`, and `negate`;
+- `limit`, with the `next` cursor.
+
+The rest is optional: the string predicates, the null predicates, a comparison with `null`, a dotted field path, `order_by`, and `offset`. A backend serves each optional feature or fails it with `ErrorKind::Unsupported`, and never ignores one. A query that keeps to the portable subset runs alike locally and in production.
 
 ## Queries, sorting, and pagination
 

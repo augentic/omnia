@@ -13,6 +13,11 @@ use crate::sql::{FromRow, Row, Statement, Value};
 /// [`sql::DEFAULT`](crate::sql::DEFAULT), and [`named`](Self::named) selects
 /// another. A database the deployment does not declare fails on first use.
 /// Typed row decoding is [`SqlDbExt`].
+///
+/// A statement numbers its parameters `$1`, `$2`, and so on. Each binds the
+/// value at that position, in any order and as often as it appears. The
+/// [SQL reference](https://github.com/augentic/omnia/blob/main/docs/reference/sql.md)
+/// lists the dialect and column types every provider runs.
 #[omnia_guest_macros::capability]
 pub trait SqlDb: Send + Sync {
     /// The handle [`named`](Self::named) returns.
@@ -24,11 +29,9 @@ pub trait SqlDb: Send + Sync {
     /// Run `sql` with `params` bound and return the number of rows it changed.
     fn execute(&self, sql: &str, params: &[Value]) -> impl Future<Output = Result<u64>> + Send;
 
-    /// Run `statements` in one transaction and return each one's changed-row count.
+    /// Run `statements` in order, in one transaction, and return each one's changed-row count.
     ///
     /// A failing statement rolls back the whole batch and returns its error.
-    /// A provider without transactions fails with
-    /// [`ErrorKind::Unsupported`](crate::capability::ErrorKind::Unsupported).
     fn batch(&self, statements: &[Statement]) -> impl Future<Output = Result<Vec<u64>>> + Send;
 
     /// A handle to the database `name` on the same provider.

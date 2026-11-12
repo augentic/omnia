@@ -47,6 +47,7 @@
 - [WASI Interfaces](reference/wasi-interfaces.md)
 - [`runtime!` Macro](reference/runtime-macro.md)
 - [Model Interface](reference/model.md)
+- [SQL Interface](reference/sql.md)
 - [DocStore Interface](reference/docstore.md)
 - [Provider Contract](reference/provider-contract.md)
 - [CLI](reference/cli.md)

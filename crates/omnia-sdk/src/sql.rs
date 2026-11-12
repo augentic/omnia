@@ -238,9 +238,13 @@ impl From<ColumnError> for capability::Error {
 
 /// Decode a Rust value from one SQL column's [`Value`].
 ///
-/// Conversions only widen: a narrower integer reads as a wider one, `Float`
-/// reads as `f64`, and every string-shaped case (`Str`, `Date`, `Time`,
-/// `Timestamp`) reads as a string. `Option<T>` reads `NULL` as `None`.
+/// - Every integer case reads as any integer type its value fits.
+/// - `Float` and `Double` read as `f64`, and only `Float` reads as `f32`.
+/// - `Boolean` reads as `bool`, and so does an integer `0` or `1`, which is
+///   how `SQLite` returns a `BOOLEAN` column.
+/// - Every string-shaped case (`Str`, `Date`, `Time`, `Timestamp`) reads as
+///   a string.
+/// - `Option<T>` reads `NULL` as `None`.
 pub trait FromColumn<'a>: Sized {
     /// Decode `Self` from `value`, the content of `column`.
     ///
@@ -328,6 +332,14 @@ impl FromColumn<'_> for bool {
     fn from_column(column: &str, value: &Value) -> Result<Self, ColumnError> {
         match value {
             Value::Boolean(Some(v)) => Ok(*v),
+            Value::Int32(Some(0))
+            | Value::Int64(Some(0))
+            | Value::Uint32(Some(0))
+            | Value::Uint64(Some(0)) => Ok(false),
+            Value::Int32(Some(1))
+            | Value::Int64(Some(1))
+            | Value::Uint32(Some(1))
+            | Value::Uint64(Some(1)) => Ok(true),
             v if v.is_null() => Err(ColumnError::null(column)),
             other => Err(ColumnError::type_mismatch(column, "a boolean", other)),
         }

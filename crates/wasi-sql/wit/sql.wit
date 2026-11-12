@@ -1,67 +1,113 @@
-package wasi:sql@0.2.0-draft;
+package omnia:sql@0.1.0;
 
-interface types {
-  /// common data types
-  variant data-type {
+/// Relational databases, one function per `SqlDb` method.
+///
+/// `db` names a database the deployment declares. An unnamed SDK handle
+/// passes `default`.
+///
+/// A statement numbers its parameters `$1`, `$2`, and so on. Each binds the
+/// value at that position in `params`, in any order and as often as it
+/// appears.
+///
+/// `batch` runs its statements in order, in one transaction:
+///
+/// - The call returns each statement's changed-row count.
+/// - A failing statement rolls back the whole batch, and the call fails
+///   with that statement's error.
+///
+/// The host passes any SQL through. A guest that keeps to the portable
+/// dialect runs on every backend:
+///
+/// - The column types are `INTEGER`, `BIGINT`, `REAL`, `DOUBLE PRECISION`,
+///   `TEXT`, `BOOLEAN`, `BYTEA`, `DATE`, `TIME`, `TIMESTAMP`, and
+///   `TIMESTAMPTZ`.
+/// - The caller supplies ids.
+/// - A `RETURNING` clause runs through `query`, and `ON CONFLICT` is
+///   portable.
+/// - A `NULL` binds as its column's case.
+/// - `uint32` and `uint64` are not portable.
+interface database {
+  /// Why a call failed.
+  variant error {
+    /// The database is not declared by the deployment.
+    not-found(string),
+    /// The caller may not use the database.
+    denied(string),
+    /// The statement was rejected, such as SQL that does not prepare or
+    /// parameters that do not bind.
+    invalid(string),
+    /// A valid request this backend cannot serve.
+    unsupported(string),
+    /// The database did not answer, or the call exceeded its bound.
+    unavailable(string),
+    /// Any other failure.
+    other(string),
+  }
+
+  /// A statement parameter or a column value, where `none` is a typed `NULL`.
+  variant value {
+    /// A signed 32-bit integer.
     int32(option<s32>),
+    /// A signed 64-bit integer.
     int64(option<s64>),
+    /// An unsigned 32-bit integer.
     uint32(option<u32>),
+    /// An unsigned 64-bit integer.
     uint64(option<u64>),
+    /// A 32-bit floating-point number.
     float(option<f32>),
+    /// A 64-bit floating-point number.
     double(option<f64>),
+    /// A UTF-8 string.
     str(option<string>),
+    /// A boolean.
     boolean(option<bool>),
+    /// A `YYYY-MM-DD` date.
     date(option<string>),
+    /// An `HH:MM:SS` time.
     time(option<string>),
+    /// A `YYYY-MM-DD HH:MM:SS` timestamp, or RFC 3339 with a `+00:00`
+    /// offset for a `TIMESTAMPTZ` column.
     timestamp(option<string>),
+    /// Opaque bytes.
     binary(option<list<u8>>),
   }
 
-  /// one field in a row
+  /// One column of a row.
   record field {
+    /// The column name.
     name: string,
-    value: data-type,
+    /// The column value.
+    value: value,
   }
 
-  /// one single row item
+  /// One row a query selects.
   record row {
-    index: string,
+    /// The columns, in select order.
     fields: list<field>,
   }
 
-  /// allows parameterized queries
-  /// e.g., prepare("SELECT * FROM users WHERE name = ? AND age = ?", vec![DataType::String("John Doe"), DataType::Int32(32)])
-  resource statement {
-    prepare: static async func(query: string, params: list<data-type>) -> result<statement, error>;
+  /// One statement of a batch.
+  record statement {
+    /// The SQL text.
+    sql: string,
+    /// The values its `$n` parameters bind.
+    params: list<value>,
   }
 
-  /// An error resource type.
-  /// Currently, this provides only one function to return a string representation
-  /// of the error. In the future, this will be extended to provide more information.
-  resource error {
-    trace: func() -> string;
-  }
+  /// Run `sql` with `params` bound and return the rows it selects.
+  query: async func(db: string, sql: string, params: list<value>) -> result<list<row>, error>;
 
-  /// A connection to a sql store.
-  resource connection {
-    open: static async func(name: string) -> result<connection, error>;
-  }
+  /// Run `sql` with `params` bound and return the number of rows it changed.
+  execute: async func(db: string, sql: string, params: list<value>) -> result<u64, error>;
+
+  /// Run `statements` in one transaction and return each one's changed-row
+  /// count.
+  batch: async func(db: string, statements: list<statement>) -> result<list<u64>, error>;
 }
 
-interface readwrite {
-  use types.{statement, row, error, connection};
-
-  /// query is optimized for querying data, and
-  /// implementors can make use of that fact to optimize
-  /// the performance of query execution (e.g., using
-  /// indexes).
-  query: async func(c: borrow<connection>, q: borrow<statement>) -> result<list<row>, error>;
-
-  /// exec is for modifying data in the database.
-  exec: async func(c: borrow<connection>, q: borrow<statement>) -> result<u32, error>;
-}
-
+/// `omnia:sql/database` beside the `wasi:sql` draft it supersedes.
 world imports {
-  import types;
-  import readwrite;
+  import database;
+  include wasi:sql/imports@0.2.0-draft;
 }

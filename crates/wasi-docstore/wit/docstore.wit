@@ -1,9 +1,22 @@
 package omnia:docstore@0.1.0;
 
 interface types {
+    /// Why a call failed.
     variant error {
-        no-such-store,
-        access-denied,
+        /// The collection does not exist. An absent document is not an
+        /// error.
+        not-found(string),
+        /// The caller may not use the collection.
+        denied(string),
+        /// The request was rejected, such as a body that is not JSON, a zero
+        /// `limit`, or a malformed continuation.
+        invalid(string),
+        /// A valid request this backend cannot serve, such as an optional
+        /// query feature.
+        unsupported(string),
+        /// The backing store did not answer, or the call exceeded its bound.
+        unavailable(string),
+        /// Any other failure.
         other(string),
     }
 
@@ -52,6 +65,7 @@ interface types {
     record query-options {
         filter: option<filter>,
         order-by: list<sort-field>,
+        /// The most documents to return. Zero is `invalid`.
         limit: option<u32>,
         offset: option<u32>,
         /// Opaque pagination token. None = start from beginning.
@@ -66,19 +80,70 @@ interface types {
         data: list<u8>,
     }
 
+    /// An insert whose id was already stored.
+    record already-exists {
+        /// The id of the document left in place.
+        id: string,
+    }
+
     record query-result {
         documents: list<document>,
         continuation: option<string>,
     }
 }
 
+/// JSON documents in named collections, one function per `DocumentDb`
+/// method.
+///
+/// A collection is created by its first write. Every backend stores a
+/// portable collection name, id, and body:
+///
+/// - A collection name is 3 to 63 ASCII letters and digits, starting with a
+///   letter.
+/// - An id is not empty, holds only ASCII letters, digits, `.`, `_`, and
+///   `-`, and neither starts nor ends with `.`.
+/// - A body is a JSON object.
+///
+/// `query` selects and orders documents as the SDK's `Filter::matches` and
+/// `SortField::compare` define. Every backend serves:
+///
+/// - `compare` with a value other than `null`, `in-list`, and
+///   `not-in-list`, on a top-level field named `[A-Za-z_][A-Za-z0-9_]*`;
+/// - `and`, `or`, and `not`;
+/// - `limit`, with each `continuation` leading to the next page until every
+///   match is returned once.
+///
+/// A missing field reads as `null`, so a portable query names fields every
+/// document stores.
+///
+/// The rest is optional. A backend serves each as `Filter::matches` and
+/// `SortField::compare` define, or fails the query with `unsupported`, and
+/// never ignores it:
+///
+/// - `contains`, `starts-with`, and `ends-with`;
+/// - `is-null`, `is-not-null`, and a `compare` with `null`;
+/// - a dotted field path;
+/// - `order-by`;
+/// - `offset`.
 interface store {
-    use types.{document, query-options, query-result, error};
+    use types.{already-exists, document, query-options, query-result, error};
 
+    /// Get the document `id`, `none` when absent.
     get: async func(collection: string, id: string) -> result<option<document>, error>;
-    insert: async func(collection: string, doc: document) -> result<_, error>;
+
+    /// Store `doc` unless its id is already stored, which returns
+    /// `already-exists` and leaves the stored document untouched.
+    insert: async func(collection: string, doc: document)
+        -> result<result<_, already-exists>, error>;
+
+    /// Store `doc`, replacing any document with its id.
     put: async func(collection: string, doc: document) -> result<_, error>;
+
+    /// Delete the document `id`, returning whether one was removed.
     delete: async func(collection: string, id: string) -> result<bool, error>;
+
+    /// One page of the documents `options` selects, with the continuation of
+    /// the next page when more remain.
     query: async func(collection: string, options: query-options) -> result<query-result, error>;
 }
 

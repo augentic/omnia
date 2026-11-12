@@ -127,7 +127,7 @@ Each interface crate provides guest bindings, a host implementation, and, with o
 | `wasi-keyvalue`  | `omnia:keyvalue` | Key-value storage (+ wasi draft) | `KeyValueDefault` — in-memory             |
 | `wasi-messaging` | `wasi:messaging` | Pub/sub messaging (trigger)      | `MessagingDefault` — in-process broadcast |
 | `wasi-blobstore` | `wasi:blobstore` | Object/blob storage              | `BlobStoreDefault` — in-memory            |
-| `wasi-sql`       | `wasi:sql`       | Parameterized SQL access         | `SqlDefault` — SQLite                     |
+| `wasi-sql`       | `omnia:sql`      | Parameterized SQL (+ wasi draft) | `SqlDefault` — SQLite                     |
 | `wasi-docstore`  | `omnia:docstore` | JSON document store with filters | `DocStoreDefault` — in-memory             |
 | `wasi-config`    | `wasi:config`    | Runtime configuration            | `ConfigDefault` — process environment     |
 | `wasi-vault`     | Custom           | Secrets management               | `VaultDefault` — in-memory                |
