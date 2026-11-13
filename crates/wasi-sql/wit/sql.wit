@@ -106,7 +106,7 @@ interface database {
   batch: async func(db: string, statements: list<statement>) -> result<list<u64>, error>;
 }
 
-/// `omnia:sql/database` beside the `wasi:sql` draft it supersedes.
+/// `omnia:sql/database` beside the `wasi:sql` draft.
 world imports {
   import database;
   include wasi:sql/imports@0.2.0-draft;

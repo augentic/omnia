@@ -12,8 +12,9 @@ use crate::identity::{DEFAULT, Handle};
 /// A handle acts as one identity. A provider's own handle uses
 /// [`identity::DEFAULT`](crate::identity::DEFAULT), and
 /// [`named`](Self::named) selects another. An identity the deployment does
-/// not declare fails when a token is requested. The bare token string is
-/// [`IdentityExt`].
+/// not declare fails with
+/// [`ErrorKind::NotFound`](crate::capability::ErrorKind::NotFound) when a
+/// token is requested. The bare token string is [`IdentityExt`].
 #[omnia_guest_macros::capability]
 pub trait Identity: Send + Sync {
     /// The handle [`named`](Self::named) returns.

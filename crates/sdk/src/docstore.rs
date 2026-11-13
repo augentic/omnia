@@ -154,6 +154,11 @@ pub enum Filter {
 }
 
 impl Filter {
+    /// The deepest a filter tree may nest, as [`Filter::depth`] counts it.
+    pub const MAX_DEPTH: usize = 5;
+    /// The most values an [`InList`](Self::InList) or [`NotInList`](Self::NotInList) may hold.
+    pub const MAX_LIST_LEN: usize = 100;
+
     /// Compare `field` to `val` with `op`.
     #[must_use]
     pub fn cmp(field: &str, op: ComparisonOp, val: impl Into<ScalarValue>) -> Self {
@@ -299,6 +304,51 @@ impl Filter {
             }
             Self::Not(inner) => 1 + inner.depth(),
             _ => 1,
+        }
+    }
+
+    /// Check that this filter keeps to the limits of every document store query.
+    ///
+    /// A provider checks a query's filter before it serves the query, so a
+    /// filter past a limit fails the same way on every provider.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::Invalid`] when the tree nests deeper than
+    /// [`MAX_DEPTH`](Self::MAX_DEPTH), a list is empty or holds more than
+    /// [`MAX_LIST_LEN`](Self::MAX_LIST_LEN) values, or an [`And`](Self::And)
+    /// or [`Or`](Self::Or) has no children.
+    pub fn check(&self) -> Result<()> {
+        let depth = self.depth();
+        if depth > Self::MAX_DEPTH {
+            let message =
+                format!("the filter nests {depth} deep, past the limit of {}", Self::MAX_DEPTH);
+            return Err(Error::new(ErrorKind::Invalid, message));
+        }
+        self.check_node()
+    }
+
+    fn check_node(&self) -> Result<()> {
+        match self {
+            Self::InList { field, values } | Self::NotInList { field, values } => {
+                if (1..=Self::MAX_LIST_LEN).contains(&values.len()) {
+                    return Ok(());
+                }
+                let message = format!(
+                    "the list filter on `{field}` holds {} values, not 1 to {}",
+                    values.len(),
+                    Self::MAX_LIST_LEN
+                );
+                Err(Error::new(ErrorKind::Invalid, message))
+            }
+            Self::And(children) | Self::Or(children) => {
+                if children.is_empty() {
+                    return Err(Error::new(ErrorKind::Invalid, "an `and` or `or` has no children"));
+                }
+                children.iter().try_for_each(Self::check_node)
+            }
+            Self::Not(inner) => inner.check_node(),
+            _ => Ok(()),
         }
     }
 

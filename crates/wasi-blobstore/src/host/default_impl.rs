@@ -13,9 +13,9 @@ use omnia_core::Connect;
 use parking_lot::RwLock;
 use tracing::instrument;
 
-use crate::host::BlobStoreClient;
 use crate::host::generated::wasi::blobstore::container::{ContainerMetadata, ObjectMetadata};
 use crate::host::resource::{Container, FutureResult};
+use crate::host::{BlobStoreClient, Error};
 
 /// Default implementation for `wasi:blobstore`.
 #[derive(Debug, Clone)]
@@ -58,10 +58,7 @@ impl BlobStoreClient for BlobStoreDefault {
         async move {
             let container = {
                 let store = store.read();
-                store
-                    .get(&name)
-                    .cloned()
-                    .ok_or_else(|| wasmtime::Error::msg(format!("container not found: {name}")))?
+                store.get(&name).cloned().ok_or_else(|| Error::missing_container(&name))?
             };
             Ok(Arc::new(container) as Arc<dyn Container>)
         }

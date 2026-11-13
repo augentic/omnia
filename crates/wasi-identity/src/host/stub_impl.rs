@@ -6,9 +6,9 @@ use anyhow::{Context, Result};
 use futures::FutureExt;
 use omnia_core::Connect;
 
-use crate::host::IdentityClient;
 use crate::host::generated::omnia::identity::credentials::AccessToken;
 use crate::host::resource::{FutureResult, Identity};
+use crate::host::{Error, IdentityClient};
 
 const DEFAULT: &str = "default";
 
@@ -89,7 +89,7 @@ impl IdentityClient for IdentityStub {
     fn get_identity(&self, name: String) -> FutureResult<Arc<dyn Identity>> {
         let served = self.names.contains(&name);
         async move {
-            anyhow::ensure!(served, "identity `{name}` is not declared");
+            anyhow::ensure!(served, Error::NoSuchIdentity);
             let token = if name == DEFAULT { TOKEN.to_owned() } else { format!("{TOKEN}:{name}") };
             Ok(Arc::new(StubIdentity { token }) as Arc<dyn Identity>)
         }

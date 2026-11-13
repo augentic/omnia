@@ -6,6 +6,8 @@
 //! [document store reference](https://github.com/augentic/omnia/blob/main/docs/reference/docstore.md#portable-names-and-bodies)
 //! defines it. The store must start with the rows' collections empty.
 
+use std::iter;
+
 use serde_json::{Value, json};
 
 use super::expect_kind;
@@ -15,6 +17,7 @@ use crate::docstore::{Document, Exists, Filter, Query, ScalarValue, SortField};
 
 const EXISTS: &str = "insertexists";
 const PORTABLE: &str = "portablequery";
+const LIMITS: &str = "filterlimits";
 const OPTIONAL: &str = "optionalquery";
 
 // a cursor still running after this many pages never ends
@@ -89,6 +92,35 @@ pub async fn portable_query(db: &impl DocumentDb) {
         ..Query::default()
     };
     expect_kind(db.query(PORTABLE, &zero).await, ErrorKind::Invalid, "a query with a zero limit");
+}
+
+/// A filter past a limit [`Filter::check`] enforces fails the query with
+/// [`ErrorKind::Invalid`].
+///
+/// The row queries with each of these filters:
+///
+/// - one nested a level deeper than [`Filter::MAX_DEPTH`];
+/// - a list one value longer than [`Filter::MAX_LIST_LEN`];
+/// - an empty list;
+/// - an empty `and`, and an empty `or`.
+///
+/// # Panics
+///
+/// Panics if a query with one of those filters is served, or fails with
+/// another kind.
+pub async fn filter_limits(db: &impl DocumentDb) {
+    let deep = (0..Filter::MAX_DEPTH).fold(Filter::eq("rank", 1), |inner, _| !inner);
+    let long = Filter::in_list("rank", iter::repeat_n(1, Filter::MAX_LIST_LEN + 1));
+
+    for (filter, refused) in [
+        (deep, "a filter nested past the depth limit"),
+        (long, "a list past the length limit"),
+        (Filter::not_in_list("rank", Vec::<i32>::new()), "an empty list"),
+        (Filter::and([]), "an empty `and`"),
+        (Filter::or([]), "an empty `or`"),
+    ] {
+        expect_kind(db.query(LIMITS, &filtered(&filter)).await, ErrorKind::Invalid, refused);
+    }
 }
 
 /// Each optional query feature returns what [`Filter::matches`] and

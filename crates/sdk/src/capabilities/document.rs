@@ -28,7 +28,8 @@ use crate::docstore::{Document, Exists, Query};
 ///   [`Filter::Not`](crate::docstore::Filter::Not);
 /// - a `limit`, with the [`Page::next`] cursor.
 ///
-/// A zero `limit` fails with
+/// A zero `limit`, or a filter
+/// [`Filter::check`](crate::docstore::Filter::check) refuses, fails with
 /// [`ErrorKind::Invalid`](crate::capability::ErrorKind::Invalid). A provider
 /// serves every other feature as defined, or fails the query with
 /// [`ErrorKind::Unsupported`](crate::capability::ErrorKind::Unsupported), and
@@ -103,6 +104,9 @@ impl DocumentDb for crate::WasiProvider {
     }
 
     async fn query(&self, collection: &str, query: &Query) -> Result<Page<Document>> {
+        if let Some(filter) = &query.filter {
+            filter.check()?;
+        }
         let page = omnia_wasi_docstore::store::query(collection.to_owned(), query.into()).await?;
         Ok(page.into())
     }

@@ -30,6 +30,7 @@ async fn seeded_doubles() {
         StateStore::get(&provider, "seen").await.expect("state").as_deref(),
         Some(&b"1"[..])
     );
+    BlobStore::create_container(&provider, "c").await.expect("container");
     BlobStore::put(&provider, "c", "o", b"blob").await.expect("blob");
     SecretStore::set(&provider, "key", b"secret").await.expect("secret");
     assert_eq!(

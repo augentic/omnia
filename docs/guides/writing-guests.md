@@ -156,7 +156,7 @@ For **outbound** HTTP requests inside a handler, bound `P: HttpClient` and call 
 
 In handlers, access host capabilities through the context's accessor for each portable trait — `WasiProvider` implements every trait on `wasm32` over the underlying `omnia-wasi-*` WIT bindings, while `omnia_test::guest::Provider` backs them with in-memory doubles in native tests. The guest never names a backend implementation — the host decides what backs each interface.
 
-Every capability call answers a `capability::Result`, whose `ErrorKind` a caller matches on, and `?` converts it into `omnia_sdk::Error`. Absence is `None` rather than an error, and bytes are `Bytes`. `Identity`, `SecretStore`, `SqlDb`, and `StateStore` address named bindings: the provider's own handle is `default`, and `named(name)` answers a handle on another binding the deployment declares.
+Every capability call answers a `capability::Result`, whose `ErrorKind` a caller matches on, and `?` converts it into `omnia_sdk::Error`. The [provider contract](../reference/provider-contract.md#enforce-the-argument-rules) says which interfaces carry each kind exactly. Absence is `None` rather than an error, and bytes are `Bytes`. `Identity`, `SecretStore`, `SqlDb`, and `StateStore` address named bindings: the provider's own handle is `default`, and `named(name)` answers a handle on another binding the deployment declares.
 
 Key-value (`StateStore` over `omnia:keyvalue`):
 

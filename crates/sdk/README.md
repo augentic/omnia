@@ -174,7 +174,7 @@ fn validate(name: &str) -> Result<(), Error> {
 }
 ```
 
-Every capability call fails with a `capability::Error`. Its `ErrorKind` is one of `NotFound`, `Denied`, `Invalid`, `Unsupported`, `Unavailable`, or `Other`, and a caller matches on `kind()` rather than the message. `?` converts it into `Error`: `Unavailable` becomes a `BadGateway` and every other kind a `ServerError`, through any `anyhow` context wrapped around it.
+Every capability call fails with a `capability::Error`. Its `ErrorKind` is one of `NotFound`, `Denied`, `Invalid`, `Unsupported`, `Unavailable`, or `Other`, and a caller matches on `kind()` rather than the message. The [provider contract](https://github.com/augentic/omnia/blob/main/docs/reference/provider-contract.md#enforce-the-argument-rules) says which interfaces carry each kind exactly. `?` converts it into `Error`: `Unavailable` becomes a `BadGateway` and every other kind a `ServerError`, through any `anyhow` context wrapped around it.
 
 ## Architecture
 

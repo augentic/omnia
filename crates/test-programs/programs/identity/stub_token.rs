@@ -1,6 +1,6 @@
 //! One identity walked end to end over the raw `omnia:identity` bindings: a
 //! known name resolves and issues a scoped token whose fields cross the
-//! boundary intact, and a name the backend refuses surfaces as
+//! boundary intact, and a name the backend refuses untyped surfaces as
 //! `internal-failure` rather than trapping.
 
 #![cfg(target_arch = "wasm32")]
@@ -16,8 +16,7 @@ async fn scenario() {
     assert_eq!(token.token, "recorded-token");
     assert_eq!(token.expires_in, 900);
 
-    // The host maps a backend refusal to `internal-failure` carrying the
-    // backend's message; `no-such-identity` is reserved for stale handles.
+    // an untyped refusal keeps the backend's message
     match credentials::get_identity("missing".to_owned()).await {
         Err(Error::InternalFailure(message)) => {
             assert!(message.contains("missing"), "refusal lost its message: {message}");

@@ -23,11 +23,10 @@ pub type BlobSnapshot = BTreeMap<String, BTreeMap<String, Vec<u8>>>;
 ///
 /// Every method of all three traits is real: `compare_and_swap` and
 /// `increment` hold the store's lock across their read-modify-write, and
-/// `get_range` clamps its half-open range to the object. Reads on a
-/// container that was never created see it as empty; writes create it. The
-/// provided `BlobStore` operations (`exists`, `clear`, `copy`, ...) compose
-/// these primitives. A listing answers one page, and resumes after the key
-/// or name it is given.
+/// `get_range` clamps its half-open range to the object. The provided
+/// `BlobStore` operations (`exists`, `clear`, `copy`, ...) compose these
+/// primitives. A listing answers one page, and resumes after the key or
+/// name it is given.
 ///
 /// A handle addresses one state bucket and one secret locker, both named
 /// [`DEFAULT`] until [`named`](Self::named) returns a handle on another name
@@ -38,6 +37,12 @@ pub type BlobSnapshot = BTreeMap<String, BTreeMap<String, Vec<u8>>>;
 ///   one fails with [`ErrorKind::NotFound`].
 /// - A zero TTL fails with [`ErrorKind::Invalid`] and writes nothing.
 ///
+/// Blobs follow the [`BlobStore`] contract, so a call on an object in a
+/// container that was never created fails with [`ErrorKind::NotFound`].
+/// [`create_container`](BlobStore::create_container) creates one, and so do
+/// the seeding helpers [`insert_container`](Self::insert_container) and
+/// [`insert_object`](Self::insert_object).
+///
 /// ```
 /// use omnia_sdk::{BlobStore as _, StateStore as _};
 /// use omnia_test::guest::Memory;
@@ -47,6 +52,7 @@ pub type BlobSnapshot = BTreeMap<String, BTreeMap<String, Vec<u8>>>;
 /// memory.named("sessions").set("ann", b"token", None).await.unwrap();
 /// assert_eq!(memory.named("sessions").state("ann"), Some(b"token".to_vec()));
 /// assert_eq!(memory.increment("visits", 5, None).await.unwrap(), 5);
+/// memory.create_container("avatars").await.unwrap();
 /// memory.put("avatars", "ann.png", b"png").await.unwrap();
 /// assert_eq!(memory.object("avatars", "ann.png"), Some(b"png".to_vec()));
 /// # });
@@ -155,29 +161,16 @@ impl Memory {
     /// Seeds an object, creating its container.
     pub fn insert_object(&self, container: &str, name: &str, bytes: &[u8]) {
         let created_at = self.tick();
-        let mut blobs = self.lock_blobs();
-        let container = blobs.entry(container.to_owned()).or_insert_with(|| Container {
-            created_at,
-            objects: BTreeMap::new(),
-        });
-        let replaced = container.objects.insert(
-            name.to_owned(),
-            Object {
-                data: bytes.to_vec(),
-                created_at,
-            },
-        );
-        drop(blobs);
-        drop(replaced);
+        self.lock_blobs()
+            .entry(container.to_owned())
+            .or_insert_with(|| Container::new(created_at))
+            .put(name, bytes, created_at);
     }
 
     /// Creates an empty container; idempotent.
     pub fn insert_container(&self, name: &str) {
         let created_at = self.tick();
-        self.lock_blobs().entry(name.to_owned()).or_insert_with(|| Container {
-            created_at,
-            objects: BTreeMap::new(),
-        });
+        self.lock_blobs().entry(name.to_owned()).or_insert_with(|| Container::new(created_at));
     }
 
     /// Whether `name` was created or holds objects.
@@ -275,47 +268,17 @@ impl Memory {
 
     // -- blobs ------------------------------------------------------------
 
-    fn delete_object(&self, container: &str, name: &str) {
-        if let Some(container) = self.lock_blobs().get_mut(container) {
-            drop(container.objects.remove(name));
-        }
+    fn in_container<T>(
+        &self, container: &str, f: impl FnOnce(&mut Container) -> T,
+    ) -> capability::Result<T> {
+        self.lock_blobs().get_mut(container).map(f).ok_or_else(|| {
+            let message = format!("container `{container}` does not exist");
+            capability::Error::new(ErrorKind::NotFound, message)
+        })
     }
 
     fn delete_container(&self, name: &str) {
         drop(self.lock_blobs().remove(name));
-    }
-
-    fn range(&self, container: &str, name: &str, range: Range<u64>) -> Option<Bytes> {
-        let data = self.object(container, name)?;
-        let len = data.len() as u64;
-        let end = range.end.min(len);
-        let start = range.start.min(end);
-        let start = usize::try_from(start).expect("clamped to the object's length");
-        let end = usize::try_from(end).expect("clamped to the object's length");
-        Some(Bytes::copy_from_slice(&data[start..end]))
-    }
-
-    fn object_info(&self, container: &str, name: &str) -> Option<ObjectMetadata> {
-        self.lock_blobs().get(container)?.objects.get(name).map(|object| {
-            let size = object.data.len() as u64;
-            ObjectMetadata::new(name, container, timestamp(object.created_at), size)
-        })
-    }
-
-    fn listing(&self, container: &str, prefix: &str, after: Option<&str>) -> Vec<ObjectMetadata> {
-        self.lock_blobs().get(container).map_or_default(|stored| {
-            stored
-                .objects
-                .iter()
-                .filter(|(name, _)| {
-                    name.starts_with(prefix) && after.is_none_or(|after| name.as_str() > after)
-                })
-                .map(|(name, object)| {
-                    let size = object.data.len() as u64;
-                    ObjectMetadata::new(name, container, timestamp(object.created_at), size)
-                })
-                .collect()
-        })
     }
 
     fn container_info(&self, name: &str) -> Option<ContainerMetadata> {
@@ -394,39 +357,39 @@ impl BlobStore for Memory {
     fn get(
         &self, container: &str, name: &str,
     ) -> impl Future<Output = capability::Result<Option<Bytes>>> + Send {
-        ready(Ok(self.object(container, name).map(Bytes::from)))
+        ready(self.in_container(container, |stored| stored.range(name, 0..u64::MAX)))
     }
 
     fn get_range(
         &self, container: &str, name: &str, range: Range<u64>,
     ) -> impl Future<Output = capability::Result<Option<Bytes>>> + Send {
-        ready(Ok(self.range(container, name, range)))
+        ready(self.in_container(container, |stored| stored.range(name, range)))
     }
 
     fn put(
         &self, container: &str, name: &str, data: &[u8],
     ) -> impl Future<Output = capability::Result<()>> + Send {
-        self.insert_object(container, name, data);
-        ready(Ok(()))
+        ready(self.in_container(container, |stored| stored.put(name, data, self.tick())))
     }
 
     fn delete(
         &self, container: &str, name: &str,
     ) -> impl Future<Output = capability::Result<()>> + Send {
-        self.delete_object(container, name);
-        ready(Ok(()))
+        ready(self.in_container(container, |stored| drop(stored.objects.remove(name))))
     }
 
     fn stat(
         &self, container: &str, name: &str,
     ) -> impl Future<Output = capability::Result<Option<ObjectMetadata>>> + Send {
-        ready(Ok(self.object_info(container, name)))
+        ready(self.in_container(container, |stored| stored.info(container, name)))
     }
 
     fn list(
         &self, container: &str, prefix: &str, after: Option<&str>,
     ) -> impl Future<Output = capability::Result<Page<ObjectMetadata>>> + Send {
-        ready(Ok(Page::new(self.listing(container, prefix, after), None)))
+        let listing =
+            self.in_container(container, |stored| stored.listing(container, prefix, after));
+        ready(listing.map(|objects| Page::new(objects, None)))
     }
 
     fn create_container(
@@ -542,10 +505,58 @@ struct Container {
     objects: BTreeMap<String, Object>,
 }
 
+impl Container {
+    const fn new(created_at: u64) -> Self {
+        Self {
+            created_at,
+            objects: BTreeMap::new(),
+        }
+    }
+
+    fn put(&mut self, name: &str, data: &[u8], created_at: u64) {
+        let object = Object {
+            data: data.to_vec(),
+            created_at,
+        };
+        drop(self.objects.insert(name.to_owned(), object));
+    }
+
+    fn range(&self, name: &str, range: Range<u64>) -> Option<Bytes> {
+        let data = &self.objects.get(name)?.data;
+        let len = data.len() as u64;
+        let end = range.end.min(len);
+        let start = range.start.min(end);
+        let start = usize::try_from(start).expect("clamped to the object's length");
+        let end = usize::try_from(end).expect("clamped to the object's length");
+        Some(Bytes::copy_from_slice(&data[start..end]))
+    }
+
+    fn info(&self, container: &str, name: &str) -> Option<ObjectMetadata> {
+        self.objects.get(name).map(|object| object.metadata(container, name))
+    }
+
+    fn listing(&self, container: &str, prefix: &str, after: Option<&str>) -> Vec<ObjectMetadata> {
+        self.objects
+            .iter()
+            .filter(|(name, _)| {
+                name.starts_with(prefix) && after.is_none_or(|after| name.as_str() > after)
+            })
+            .map(|(name, object)| object.metadata(container, name))
+            .collect()
+    }
+}
+
 #[derive(Clone, Debug)]
 struct Object {
     data: Vec<u8>,
     created_at: u64,
+}
+
+impl Object {
+    fn metadata(&self, container: &str, name: &str) -> ObjectMetadata {
+        let size = self.data.len() as u64;
+        ObjectMetadata::new(name, container, timestamp(self.created_at), size)
+    }
 }
 
 fn add_i64(current: Option<&[u8]>, delta: i64) -> Result<i64> {

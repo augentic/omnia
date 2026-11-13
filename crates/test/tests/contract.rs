@@ -92,6 +92,11 @@ async fn document_portable_query() {
 }
 
 #[tokio::test]
+async fn document_filter_limits() {
+    document::filter_limits(&MemoryDocs::default()).await;
+}
+
+#[tokio::test]
 async fn document_optional_query() {
     document::optional_query(&MemoryDocs::default()).await;
 }

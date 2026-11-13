@@ -127,7 +127,10 @@ On the host side each constructor call builds a node of a filter tree (the WIT `
 | ----- | ----- | ---------- |
 | Maximum nesting depth | 5 | `and` / `or` / `not` combinators |
 | Maximum list size | 100 | `in_list` / `not_in_list` value lists |
+| Minimum list size | 1 | `in_list` / `not_in_list` (empty lists rejected) |
 | Minimum combinator children | 1 | `and` / `or` (empty lists rejected) |
+
+`Filter::check` holds a filter to the same limits, which it names `Filter::MAX_DEPTH` and `Filter::MAX_LIST_LEN`. `DocumentDb::query` calls it before the query reaches the host, so through the SDK a filter past a limit fails the query with `invalid`. The WIT constructors return no error, so a guest on the raw bindings that passes a limit traps.
 
 ## Sorting and pagination
 
@@ -142,12 +145,12 @@ On the host side each constructor call builds a node of a filter tree (the WIT `
 | ---- | ------- |
 | `not-found` | The collection does not exist. An absent document is not an error: `get` returns `none` and `delete` returns `false`. |
 | `denied` | The caller may not use the collection, such as for credentials or permissions. |
-| `invalid` | The request was rejected, such as a body that is not JSON, a zero `limit`, or a malformed continuation. |
+| `invalid` | The request was rejected, such as a body that is not JSON, a zero `limit`, a filter past its limits, or a malformed continuation. |
 | `unsupported` | A valid request this backend cannot serve, such as an optional query feature. |
 | `unavailable` | The backing store did not answer, or the call exceeded its bound. |
 | `other` | Any other failure. |
 
-`omnia_sdk::capability::ErrorKind` has one kind per case, and the SDK maps each case to its kind. Filter-limit violations (depth, list size, empty combinator) fail at filter construction, before `query` is ever called.
+`omnia_sdk::capability::ErrorKind` has one kind per case, and the SDK maps each case to its kind. A filter past the [host-enforced limits](#host-enforced-limits) fails with `invalid` through the SDK, and traps a guest on the raw bindings.
 
 ## Backends implementing this interface
 

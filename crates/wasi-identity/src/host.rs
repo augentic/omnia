@@ -33,14 +33,14 @@ use std::sync::Arc;
 
 pub use omnia_core::FutureResult;
 use omnia_core::{Host, HostCtx, Provides, StoreCtx};
-use wasmtime::component::Linker;
+use wasmtime::component::{Linker, ResourceTableError};
 
 #[cfg(feature = "oauth")]
 pub use self::default_impl::IdentityDefault;
+pub use self::generated::Error;
 use self::generated::omnia::identity::credentials;
 pub use self::resource::*;
 pub use self::stub_impl::{IdentityStub, StubOptions};
-use crate::host::generated::Error;
 
 /// Result type for identity operations.
 pub type Result<T> = std::result::Result<T, Error>;
@@ -61,8 +61,23 @@ impl<B: Provides<Self>> Host<B> for WasiIdentity {
 /// This is implemented by the resource-specific provider of Identity
 /// functionality.
 pub trait IdentityClient: Debug + Send + Sync + 'static {
-    /// Get the identity for the specified name.
+    /// Get the identity the deployment declares under `name`.
+    ///
+    /// A name the deployment does not declare fails with
+    /// [`Error::NoSuchIdentity`].
     fn get_identity(&self, name: String) -> FutureResult<Arc<dyn Identity>>;
 }
 
-omnia_core::host_error!(Error, InternalFailure);
+// a backend picks the kind by returning an `Error`; any other failure is
+// `internal-failure`, with its full context chain
+impl From<anyhow::Error> for Error {
+    fn from(err: anyhow::Error) -> Self {
+        err.downcast::<Self>().unwrap_or_else(|err| Self::InternalFailure(format!("{err:#}")))
+    }
+}
+
+impl From<ResourceTableError> for Error {
+    fn from(err: ResourceTableError) -> Self {
+        Self::InternalFailure(err.to_string())
+    }
+}

@@ -69,10 +69,12 @@ Unreleased
   `StateStoreExt::{get_json, set_json}`, and `SqlDbExt::query_as`.
 - `Error::{bad_request, not_found, server_error, bad_gateway}(code,
   description)`, which name the wire `error` code.
-- `Document::{new, json, decode}`, `Filter::{depth, matches}`, and
+- `Document::{new, json, decode}`, `Filter::{depth, check, matches}`, and
   `SortField::compare` in `omnia_sdk::docstore`. `Filter::matches` and
   `SortField::compare` are the reference query semantics, and
   `omnia_test::guest::MemoryDocs` evaluates its queries with them.
+  `Filter::check` holds a filter to `Filter::MAX_DEPTH` and
+  `Filter::MAX_LIST_LEN`.
 - `omnia_sdk::messaging::Message::with_key` and
   `omnia_sdk::api::messaging::Delivery::key`. A message's key crosses the
   wire as its `key` metadata entry.
@@ -149,7 +151,9 @@ Unreleased
     `QueryOptions` with `after` for `continuation`, and answers a
     `Page<Document>`. `insert` answers `Ok(Err(Exists))` for an id already
     stored, and a `Document` payload is `Bytes`.
-  - `BlobStore` answers `None` for a missing object or container.
+  - `BlobStore` answers `None` for a missing object. A call on an object
+    in a container that does not exist fails with `ErrorKind::NotFound`,
+    and `delete_container` succeeds when the container is absent.
     `get_range` takes a half-open `Range<u64>` clamped to the object, and
     `list(container, prefix, after)` answers a `Page<ObjectMetadata>`.
     `object_info` is `stat`. The `BlobStoreExt` methods `has`,
@@ -185,8 +189,25 @@ Unreleased
 - `DocStoreClient::insert` answers `false` for an id already stored, and a
   backend picks a failure's kind by returning an
   `omnia_wasi_docstore::Error`.
+- `DocumentDb::query` fails a filter past its limits with
+  `ErrorKind::Invalid` before the query reaches the host, where the guest
+  trapped before. A filter nests at most 5 deep, a list holds 1 to 100
+  values, and an `and` or `or` holds a child. `MemoryDocs` refuses the
+  same filters, and the host's `in-list` and `not-in-list` constructors
+  refuse an empty list.
 - `IdentityStub` refuses an identity `IDENTITY_NAMES` does not list, and
-  `IdentityDefault` serves the identity `default` alone.
+  `IdentityDefault` serves the identity `default` alone. A refused name is
+  `no-such-identity`, which `Identity` reports as `ErrorKind::NotFound`.
+  A backend picks a failure's kind by returning an
+  `omnia_wasi_identity::Error`.
+- `BlobStoreClient` states the container rules every backend keeps:
+  - `get_container` fails a container that does not exist with
+    `omnia_wasi_blobstore::Error::missing_container`.
+  - `create_container` opens a container that already exists.
+  - `delete_container` succeeds when the container is absent.
+
+  A backend picks a failure's kind by returning an
+  `omnia_wasi_blobstore::Error`, which implements `std::error::Error`.
 - `StateStore` calls `omnia:keyvalue`, one host call per method:
   - Every method returns `capability::Result`, and `get` answers
     `Option<Bytes>`.
@@ -223,6 +244,10 @@ Unreleased
   locker. `Memory::bucket` declares a bucket beside `default`,
   `Memory::named` addresses another bucket and locker of the same store,
   and `Memory::snapshot` answers state by bucket.
+- `omnia_test::guest::Memory` fails a call on an object in a container
+  nothing created with `ErrorKind::NotFound`, as the runtime does. A test
+  creates the container first, or seeds it with `insert_container` or
+  `insert_object`.
 - The `omnia_test::guest` doubles follow the traits:
   - `Provider`'s `publish`, `broadcast`, and `tables` fields and builders
     are `publisher`, `websockets`, and `sql`.

@@ -71,7 +71,7 @@ interface store {
     -> result<s64, error>;
 }
 
-/// `omnia:keyvalue/store` beside the `wasi:keyvalue` draft it supersedes.
+/// `omnia:keyvalue/store` beside the `wasi:keyvalue` draft.
 world imports {
   import store;
   include wasi:keyvalue/imports@0.2.0-draft2;

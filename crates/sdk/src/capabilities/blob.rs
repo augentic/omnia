@@ -10,8 +10,8 @@ use crate::capability::{Error, ErrorKind, Page, Result};
 
 /// Store and retrieve binary objects in a deployment's containers.
 ///
-/// An absent object is `Ok(None)`, and a call on a container that does not
-/// exist fails with [`ErrorKind::NotFound`].
+/// An absent object is `Ok(None)`, and a call on an object in a container
+/// that does not exist fails with [`ErrorKind::NotFound`].
 #[omnia_guest_macros::capability]
 pub trait BlobStore: Send + Sync {
     /// Retrieve the object `name` in `container`, or `None` when it is absent.
@@ -51,7 +51,7 @@ pub trait BlobStore: Send + Sync {
     /// Create the empty container `container`, succeeding when it already exists.
     fn create_container(&self, container: &str) -> impl Future<Output = Result<()>> + Send;
 
-    /// Delete `container` and every object in it.
+    /// Delete `container` and every object in it, succeeding when it is already absent.
     fn delete_container(&self, container: &str) -> impl Future<Output = Result<()>> + Send;
 
     /// Whether `container` exists.

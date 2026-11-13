@@ -22,7 +22,7 @@ pub trait Container: Debug + Send + Sync + 'static {
     /// Returns an error if the container metadata cannot be retrieved.
     fn info(&self) -> anyhow::Result<ContainerMetadata>;
 
-    /// Get the value associated with the key.
+    /// Get the value associated with the key, or `None` when the object is absent.
     fn get_data(&self, name: String, _start: u64, _end: u64) -> FutureResult<Option<Bytes>>;
 
     /// Set the value associated with the key.
@@ -31,7 +31,7 @@ pub trait Container: Debug + Send + Sync + 'static {
     /// List all objects in the container.
     fn list_objects(&self) -> FutureResult<Vec<String>>;
 
-    /// Delete the value associated with the key.
+    /// Delete the value associated with the key, succeeding when the object is already absent.
     fn delete_object(&self, name: String) -> FutureResult<()>;
 
     /// Check if the object exists.

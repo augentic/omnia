@@ -37,7 +37,7 @@ pub use bytes::Bytes;
 pub use omnia_core::FutureResult;
 use omnia_core::{Host, HostCtx, Provides, StoreCtx};
 pub use resource::*;
-use wasmtime::component::Linker;
+use wasmtime::component::{Linker, ResourceTableError};
 use wasmtime_wasi::p2::pipe::MemoryOutputPipe;
 
 pub use self::default_impl::BlobStoreDefault;
@@ -45,12 +45,24 @@ pub use self::generated::wasi::blobstore::container::{ContainerMetadata, ObjectM
 use self::generated::wasi::blobstore::{blobstore, container, types};
 
 /// Typed host error for `wasi:blobstore`, lowered to the WIT `error` string.
+///
+/// A backend picks the kind by returning an [`Error`] inside its
+/// [`anyhow::Error`], and any other failure is [`Other`](Self::Other). The
+/// message of either keeps the backend's full context chain.
 #[derive(Debug)]
 pub enum Error {
     /// A requested container or object does not exist.
     NotFound(String),
-    /// Any other host failure; the message preserves the backend context chain.
+    /// Any other host failure.
     Other(String),
+}
+
+impl Error {
+    /// The [`NotFound`](Self::NotFound) error for the container `name`, which does not exist.
+    #[must_use]
+    pub fn missing_container(name: &str) -> Self {
+        Self::NotFound(format!("container not found: {name}"))
+    }
 }
 
 impl std::fmt::Display for Error {
@@ -61,7 +73,29 @@ impl std::fmt::Display for Error {
     }
 }
 
-omnia_core::host_error!(Error, Other);
+impl std::error::Error for Error {}
+
+impl From<anyhow::Error> for Error {
+    fn from(err: anyhow::Error) -> Self {
+        let message = format!("{err:#}");
+        match err.downcast_ref::<Self>() {
+            Some(Self::NotFound(_)) => Self::NotFound(message),
+            Some(Self::Other(_)) | None => Self::Other(message),
+        }
+    }
+}
+
+impl From<wasmtime::Error> for Error {
+    fn from(err: wasmtime::Error) -> Self {
+        Self::Other(format!("{err:#}"))
+    }
+}
+
+impl From<ResourceTableError> for Error {
+    fn from(err: ResourceTableError) -> Self {
+        Self::Other(err.to_string())
+    }
+}
 
 /// Incoming value for a blobstore operation.
 pub type IncomingValue = Bytes;
@@ -140,13 +174,17 @@ impl<B: Provides<Self>> Host<B> for WasiBlobStore {
 /// This is implemented by the resource-specific provider of Blobstore
 /// functionality. For example, an in-memory store, or a Redis-backed store.
 pub trait BlobStoreClient: Debug + Send + Sync + 'static {
-    /// Open a container.
+    /// Create the container `name`, or open it when it already exists.
     fn create_container(&self, name: String) -> FutureResult<Arc<dyn Container>>;
 
-    /// Get a container.
+    /// Open the container `name`.
+    ///
+    /// A container that does not exist fails with
+    /// [`Error::missing_container`], here or at the first call on the
+    /// container returned.
     fn get_container(&self, name: String) -> FutureResult<Arc<dyn Container>>;
 
-    /// Delete a container.
+    /// Delete the container `name` and every object in it, succeeding when it is already absent.
     fn delete_container(&self, name: String) -> FutureResult<()>;
 
     /// Check if a container exists.

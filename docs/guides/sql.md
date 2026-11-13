@@ -114,7 +114,7 @@ async fn ensure_schema() -> Result<()> {
         .map_err(|e| anyhow!("opening connection: {}", e.trace()))?;
 
     let create_agency = "CREATE TABLE IF NOT EXISTS agency (
-        agency_id INTEGER PRIMARY KEY,
+        agency_id BIGINT PRIMARY KEY,
         name TEXT NOT NULL,
         url TEXT,
         timezone TEXT,

@@ -16,9 +16,9 @@ use oauth2::{
 use omnia_core::Connect;
 use tracing::instrument;
 
-use crate::host::IdentityClient;
 pub use crate::host::generated::omnia::identity::credentials::AccessToken;
 use crate::host::resource::{FutureResult, Identity};
+use crate::host::{Error, IdentityClient};
 
 #[derive(Clone, FromEnv)]
 pub struct ConnectOptions {
@@ -73,7 +73,7 @@ impl IdentityClient for IdentityDefault {
         tracing::debug!("getting identity `{name}`");
         let token_manager = self.token_manager.clone();
         async move {
-            anyhow::ensure!(name == "default", "identity `{name}` is not declared");
+            anyhow::ensure!(name == "default", Error::NoSuchIdentity);
             Ok(Arc::new(token_manager) as Arc<dyn Identity>)
         }
         .boxed()

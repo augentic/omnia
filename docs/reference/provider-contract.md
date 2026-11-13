@@ -87,10 +87,27 @@ Each behavioural invariant of a capability trait is one generic `async fn` in `o
 The same arguments fail the same way on every provider:
 
 - A zero TTL fails with `ErrorKind::Invalid`, and a TTL rounds up to the store's resolution.
-- A handle that names no binding addresses `default`, and a name the deployment does not declare fails with `ErrorKind::NotFound`.
+- A handle that names no binding addresses `default`, and a name the deployment does not declare fails with `ErrorKind::NotFound`. A secret locker is the exception, and opens under any name.
+- A document query whose filter `Filter::check` refuses fails with `ErrorKind::Invalid`.
+- A call on an object in a blob container that was never created fails with `ErrorKind::NotFound`.
 - A request the provider does not serve fails with `ErrorKind::Unsupported`, and is never partly served. The [portable SQL dialect](sql.md#the-portable-dialect) and the [document query contract](docstore.md#query-contract) list what every provider serves.
 
-Omnia enforces each rule once, in the host, for every backend.
+Omnia enforces each rule in the layer this table names, so a backend owes only the rules given to it:
+
+| Rule | Enforced by |
+| ---- | ----------- |
+| A zero TTL is `Invalid` | The `omnia:keyvalue` host, for every backend. |
+| A TTL rounds up | The SDK, to milliseconds, then each backend, to its store's resolution. |
+| A handle that names no binding is `default` | The SDK. |
+| An undeclared name is `NotFound` | Each backend, when it opens a bucket, a database, or an identity. |
+| A filter past its limits is `Invalid` | The SDK, before the query reaches the host. The host traps a guest that passes the raw `filter` constructors past the same limits. |
+| An uncreated container is `NotFound` | Each blob backend. |
+| An unserved request is `Unsupported` | Each backend. |
+
+The kind a backend picks reaches the guest exactly over `omnia:keyvalue`, `omnia:sql`, and `omnia:docstore`, which carry one error case per `ErrorKind`. `omnia:identity` carries `NotFound` and `Other`. Elsewhere a kind is best effort:
+
+- `wasi:blobstore` errors are strings, so the SDK reads a missing container or object from the message.
+- The other `wasi:*` interfaces have fewer error cases than `ErrorKind` has kinds, and the SDK maps each case to one kind.
 
 ### Bound every call
 

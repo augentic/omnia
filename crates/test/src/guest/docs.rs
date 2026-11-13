@@ -21,6 +21,8 @@ use serde_json::Value;
 ///   them field by field, with ties broken on the id.
 /// - A `limit` is capped at 1000, and a `limit` of zero fails with
 ///   [`ErrorKind::Invalid`].
+/// - A filter [`Filter::check`](omnia_sdk::docstore::Filter::check) refuses
+///   fails with [`ErrorKind::Invalid`].
 /// - The `offset` and the `after` cursor skip documents, and a malformed
 ///   cursor fails with [`ErrorKind::Invalid`].
 ///
@@ -105,6 +107,9 @@ impl MemoryDocs {
         let limit = query.limit.map_or(MAX_PAGE_SIZE, |limit| limit.min(MAX_PAGE_SIZE));
         if limit == 0 {
             return Err(Error::new(ErrorKind::Invalid, "query limit must be at least 1"));
+        }
+        if let Some(filter) = &query.filter {
+            filter.check()?;
         }
         let page_size = usize::try_from(limit).unwrap_or(usize::MAX);
         let offset = query.offset.map_or(0, |offset| usize::try_from(offset).unwrap_or(usize::MAX));

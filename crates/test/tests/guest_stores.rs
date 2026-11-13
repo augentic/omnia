@@ -147,7 +147,26 @@ fn listing() {
     assert_eq!(names(&memory, "c", "logs/", None), ["logs/1", "logs/2", "logs/3"]);
     assert_eq!(names(&memory, "c", "logs/", Some("logs/1")), ["logs/2", "logs/3"]);
     assert_eq!(names(&memory, "c", "", Some("images/a")), ["logs/1", "logs/2", "logs/3"]);
-    assert_eq!(names(&memory, "missing", "", None), Vec::<String>::new());
+}
+
+#[test]
+fn uncreated_container() {
+    let memory = Memory::default();
+    let refused = [
+        now(BlobStore::get(&memory, "c", "o")).map(drop),
+        now(memory.get_range("c", "o", 0..1)).map(drop),
+        now(memory.put("c", "o", b"x")),
+        now(BlobStore::delete(&memory, "c", "o")),
+        now(memory.stat("c", "o")).map(drop),
+        now(memory.list("c", "", None)).map(drop),
+    ];
+
+    for result in refused {
+        let error = result.expect_err("a call on an uncreated container");
+        assert_eq!(error.kind(), ErrorKind::NotFound, "{error}");
+    }
+    assert!(!memory.has_container("c"), "a refused call created the container");
+    now(memory.delete_container("c")).expect("delete an absent container");
 }
 
 #[test]
@@ -184,6 +203,7 @@ fn stat_timestamps() {
 fn copy_rename_clear() {
     let memory = Memory::default();
     memory.insert_object("src", "o", b"data");
+    now(memory.create_container("dst")).expect("create");
     now(memory.copy("src", "o", "dst", "copy")).expect("copy");
     now(memory.rename("src", "o", "dst", "moved")).expect("rename");
     assert_eq!(memory.objects("src"), Vec::<String>::new());
@@ -244,6 +264,7 @@ fn shared_handle() {
     assert_eq!(bump(&Box::new(memory.clone()), 1), 3);
     assert_eq!(bump(&StateStore::named(&shared, "sessions"), 1), 1);
     assert_eq!(bump(&memory, 0), 3);
+    memory.insert_container("c");
     assert!(now(BlobStore::exists(&Arc::new(memory), "c", "missing")).is_ok_and(|found| !found));
 }
 

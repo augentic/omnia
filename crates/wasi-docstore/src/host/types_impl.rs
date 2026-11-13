@@ -9,6 +9,8 @@ use crate::host::generated::omnia::docstore::types::{
 use crate::host::resource::{FilterProxy, FilterTree};
 use crate::host::{DocStoreClient, WasiDocStore};
 
+// `Filter::MAX_DEPTH` and `Filter::MAX_LIST_LEN` in the guest SDK hold the
+// same limits, so only a guest on the raw bindings reaches these traps
 const MAX_FILTER_DEPTH: usize = 5;
 const MAX_IN_LIST_SIZE: usize = 100;
 
@@ -23,11 +25,7 @@ impl<T> HostFilterWithStore<T> for WasiDocStore {
     fn in_list(
         mut host: Access<'_, T, Self>, field: String, values: Vec<ScalarValue>,
     ) -> wasmtime::Result<Resource<FilterProxy>> {
-        wasmtime::ensure!(
-            values.len() <= MAX_IN_LIST_SIZE,
-            "in-list exceeds maximum of {MAX_IN_LIST_SIZE} values (got {})",
-            values.len()
-        );
+        check_list(&values, "filter.in-list")?;
         let tree = FilterTree::InList { field, values };
         Ok(host.get().table.push(FilterProxy(tree))?)
     }
@@ -35,11 +33,7 @@ impl<T> HostFilterWithStore<T> for WasiDocStore {
     fn not_in_list(
         mut host: Access<'_, T, Self>, field: String, values: Vec<ScalarValue>,
     ) -> wasmtime::Result<Resource<FilterProxy>> {
-        wasmtime::ensure!(
-            values.len() <= MAX_IN_LIST_SIZE,
-            "not-in-list exceeds maximum of {MAX_IN_LIST_SIZE} values (got {})",
-            values.len()
-        );
+        check_list(&values, "filter.not-in-list")?;
         let tree = FilterTree::NotInList { field, values };
         Ok(host.get().table.push(FilterProxy(tree))?)
     }
@@ -103,6 +97,15 @@ impl<T> HostFilterWithStore<T> for WasiDocStore {
     fn drop(mut accessor: Access<'_, T, Self>, rep: Resource<FilterProxy>) -> wasmtime::Result<()> {
         Ok(accessor.get().table.delete(rep).map(|_| ())?)
     }
+}
+
+fn check_list(values: &[ScalarValue], verb: &str) -> wasmtime::Result<()> {
+    let len = values.len();
+    wasmtime::ensure!(
+        (1..=MAX_IN_LIST_SIZE).contains(&len),
+        "{verb} requires 1 to {MAX_IN_LIST_SIZE} values (got {len})"
+    );
+    Ok(())
 }
 
 // consumes the child filter resources into one `and` / `or` node

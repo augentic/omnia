@@ -43,6 +43,11 @@ interface types {
     /// Host-managed filter tree. The guest builds filters by calling
     /// static constructors; the host assembles a native recursive
     /// tree internally.
+    ///
+    /// A tree nests at most 5 deep, a list holds 1 to 100 values, and an
+    /// `and` or `or` holds at least one child. The constructors return no
+    /// error, so a call past a limit traps. The guest SDK checks a filter
+    /// against the same limits first, and fails the query with `invalid`.
     resource filter {
         compare: static func(field: string, op: comparison-op, value: scalar-value) -> filter;
         in-list: static func(field: string, values: list<scalar-value>) -> filter;

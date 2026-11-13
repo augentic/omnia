@@ -6,7 +6,7 @@ This crate provides the Identity interface for the Omnia runtime.
 
 Implements the `omnia:identity` WIT interface.
 
-A guest reaches it through `omnia_sdk::Identity`. The provider's own handle asks for the identity `default`, and `named(name)` asks for another identity the host serves.
+A guest reaches it through `omnia_sdk::Identity`. The provider's own handle asks for the identity `default`, and `named(name)` asks for another identity the host serves. A name the host does not serve fails with `no-such-identity`, which `Identity` reports as `ErrorKind::NotFound`. A backend refuses one by returning `omnia_wasi_identity::Error::NoSuchIdentity`, and any other backend error is `internal-failure`.
 
 ## Backend
 
