@@ -99,7 +99,7 @@ The rest is optional. A backend serves each optional feature as `Filter::matches
 
 ## Filters
 
-Filters reference fields *inside* the document JSON and compose into trees. On the guest side, build them with the `Filter` constructors from `omnia_sdk::docstore` (defined in [`crates/omnia-sdk/src/docstore.rs`](../../crates/omnia-sdk/src/docstore.rs)):
+Filters reference fields *inside* the document JSON and compose into trees. On the guest side, build them with the `Filter` constructors from `omnia_sdk::docstore` (defined in [`crates/sdk/src/docstore.rs`](../../crates/sdk/src/docstore.rs)):
 
 | Constructor | Predicate |
 | ----------- | --------- |
