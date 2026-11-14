@@ -93,29 +93,6 @@ pub async fn trace(mut request: Request, next: Next) -> Response {
     next.run(request).instrument(span).await
 }
 
-/// Serve one WASI HTTP request through a finished [`axum::Router`].
-#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
-pub use omnia_wasi_http::serve;
-
-/// Serve one WASI HTTP request through the router `router` builds over
-/// `provider`, inside the guest telemetry scope and the [`trace`] span.
-///
-/// # Errors
-///
-/// Returns the WASI error code [`serve`] reports.
-#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
-#[doc(hidden)]
-#[omnia_wasi_otel::instrument(name = "http_guest_handle")]
-pub async fn serve_wasi<P, R>(
-    router: impl FnOnce(P) -> R, provider: P, request: wasip3::http::types::Request,
-) -> Result<wasip3::http::types::Response, wasip3::http::types::ErrorCode>
-where
-    R: Into<axum::Router>,
-{
-    let router = router(provider).into().layer(axum::middleware::from_fn(trace));
-    serve(router, request).await
-}
-
 impl Metadata {
     /// Build metadata from HTTP request headers: `x-request-id`,
     /// `x-correlation-id`, `x-causation-id`, `x-tenant`, and `x-deadline`.
@@ -239,4 +216,30 @@ impl IntoResponse for crate::Error {
     fn into_response(self) -> Response {
         (self.status(), Json(ErrorBody::from(&self))).into_response()
     }
+}
+
+// WASI HTTP serve implementation.
+cfg_select! {
+    all(target_arch = "wasm32", target_os = "wasi") => {
+        pub use omnia_wasi_http::serve;
+
+        /// Serve one WASI HTTP request through the router `router` builds over
+        /// `provider`, inside the guest telemetry scope and the [`trace`] span.
+        ///
+        /// # Errors
+        ///
+        /// Returns the WASI error code [`serve`] reports.
+        #[doc(hidden)]
+        #[omnia_wasi_otel::instrument(name = "http_guest_handle")]
+        pub async fn serve_wasi<P, R>(
+            router: impl FnOnce(P) -> R, provider: P, request: wasip3::http::types::Request,
+        ) -> Result<wasip3::http::types::Response, wasip3::http::types::ErrorCode>
+        where
+            R: Into<axum::Router>,
+        {
+            let router = router(provider).into().layer(axum::middleware::from_fn(trace));
+            serve(router, request).await
+        }
+    }
+    _ => { }
 }
