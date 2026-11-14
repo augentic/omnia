@@ -34,7 +34,7 @@ Collections are named by string and created implicitly on first write; there is 
 Guests normally call these through the `omnia_sdk::DocumentDb` trait, which `omnia_sdk::WasiProvider` implements on `wasm32` over the raw bindings. Those bindings are `omnia_wasi_docstore::store::{get, insert, put, delete, query}`, taking the WIT types in `omnia_wasi_docstore::types`. The trait renames the WIT shapes:
 
 - `query-options` is `omnia_sdk::docstore::Query`, whose `after` is the WIT `continuation`.
-- `query-result` is an `omnia_sdk::capability::Page<Document>`, whose `items` are the `documents` and whose `next` is the returned `continuation`.
+- `query-result` is an `omnia_sdk::Page<Document>`, whose `items` are the `documents` and whose `next` is the returned `continuation`.
 - `already-exists` is `Ok(Err(Exists))`, an outcome rather than an error.
 
 ## Types
@@ -150,7 +150,7 @@ On the host side each constructor call builds a node of a filter tree (the WIT `
 | `unavailable` | The backing store did not answer, or the call exceeded its bound. |
 | `other` | Any other failure. |
 
-`omnia_sdk::capability::ErrorKind` has one kind per case, and the SDK maps each case to its kind. A filter past the [host-enforced limits](#host-enforced-limits) fails with `invalid` through the SDK, and traps a guest on the raw bindings.
+`omnia_sdk::ErrorKind` has one kind per case, and the SDK maps each case to its kind. A filter past the [host-enforced limits](#host-enforced-limits) fails with `invalid` through the SDK, and traps a guest on the raw bindings.
 
 ## Backends implementing this interface
 

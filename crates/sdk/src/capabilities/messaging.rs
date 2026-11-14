@@ -6,13 +6,15 @@ use std::future::Future;
 use bytes::Bytes;
 use serde::Serialize;
 
-use crate::capability::{Error, ErrorKind, Result};
+use crate::{CapabilityError, ErrorKind};
 
 /// Publish messages to the topics a deployment's broker serves.
 #[omnia_guest_macros::capability]
 pub trait Publisher: Send + Sync {
     /// Publish `message` to `topic`.
-    fn publish(&self, topic: &str, message: &Message) -> impl Future<Output = Result<()>> + Send;
+    fn publish(
+        &self, topic: &str, message: &Message,
+    ) -> impl Future<Output = Result<(), CapabilityError>> + Send;
 }
 
 /// Metadata entry name for [`Message::key`] over `wasi:messaging`.
@@ -54,9 +56,9 @@ impl Message {
     /// # Errors
     ///
     /// [`ErrorKind::Invalid`] when `value` does not serialize.
-    pub fn json<T: Serialize + ?Sized>(value: &T) -> Result<Self> {
+    pub fn json<T: Serialize + ?Sized>(value: &T) -> Result<Self, CapabilityError> {
         let payload = serde_json::to_vec(value).map_err(|err| {
-            Error::new(ErrorKind::Invalid, "encoding message payload").with_source(err)
+            CapabilityError::new(ErrorKind::Invalid, "encoding message payload").with_source(err)
         })?;
         Ok(Self {
             payload: Bytes::from(payload),

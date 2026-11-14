@@ -6,13 +6,13 @@ use std::error::Error as _;
 
 use bytes::Bytes;
 use http::{Method, Request, Response, StatusCode};
-use omnia_sdk::capability::ErrorKind;
 use omnia_sdk::docstore::Document;
 use omnia_sdk::messaging::Message;
 use omnia_sdk::sql::{Field, FromRow, Row, Value};
 use omnia_sdk::{
-    ConfigExt as _, DocumentDb as _, DocumentDbExt as _, Error, HttpClientExt as _, Identity as _,
-    IdentityExt as _, Publisher as _, Settings, SqlDb as _, SqlDbExt as _, StateStoreExt as _,
+    ConfigExt as _, DocumentDb as _, DocumentDbExt as _, Error, ErrorKind, HttpClientExt as _,
+    Identity as _, IdentityExt as _, Publisher as _, Settings, SqlDb as _, SqlDbExt as _,
+    StateStoreExt as _,
 };
 use omnia_test::guest::{
     FixedIdentity, MapConfig, MatchedHttp, MemoryDocs, Provider, ScriptedTables, Sink,

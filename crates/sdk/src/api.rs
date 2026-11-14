@@ -467,7 +467,7 @@ impl<P: Send + Sync + 'static> Router<P> {
     /// - It drops an [`Undecodable`](DeliveryError::Undecodable) delivery,
     ///   which no redelivery decodes.
     /// - It redelivers a [`Failed`](DeliveryError::Failed) one of kind
-    ///   [`Unavailable`](crate::capability::ErrorKind::Unavailable), which may
+    ///   [`Unavailable`](crate::ErrorKind::Unavailable), which may
     ///   succeed later.
     ///
     /// # Errors

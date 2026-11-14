@@ -7,8 +7,7 @@
 
 use std::fmt::Debug;
 
-use omnia_sdk::capability::{ErrorKind, Result};
-use omnia_sdk::{SqlDb as _, WasiProvider};
+use omnia_sdk::{CapabilityError, ErrorKind, SqlDb as _, WasiProvider};
 use omnia_wasi_sql::types::Connection;
 
 omnia_sdk::api::command::export!(scenario);
@@ -37,7 +36,7 @@ async fn scenario() {
     assert_eq!(error.trace(), "denied by the suite");
 }
 
-fn expect_kind<T: Debug>(result: Result<T>, kind: ErrorKind) {
+fn expect_kind<T: Debug>(result: Result<T, CapabilityError>, kind: ErrorKind) {
     match result {
         Ok(value) => panic!("returned {value:?}, not a `{kind}` failure"),
         Err(err) => assert_eq!(err.kind(), kind, "{err}"),

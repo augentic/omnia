@@ -8,8 +8,7 @@ use std::sync::{Arc, Mutex};
 
 use omnia_sdk::api::messaging::{Delivery, DeliveryError};
 use omnia_sdk::api::{Client, Context, DecodeError, Handlers};
-use omnia_sdk::capability::{self, ErrorKind};
-use omnia_sdk::{bad_gateway, bad_request, model, plugins, vcs};
+use omnia_sdk::{CapabilityError, ErrorKind, bad_gateway, bad_request, model, plugins, vcs};
 use serde::{Deserialize, Serialize};
 
 use self::support::{Spans, fields};
@@ -81,14 +80,14 @@ async fn malformed_delivery() {
 
 #[derive(Debug, thiserror::Error)]
 #[error("could not place the order")]
-struct PlaceError(#[source] capability::Error);
+struct PlaceError(#[source] CapabilityError);
 
 #[derive(Debug, thiserror::Error)]
 #[error("could not review")]
 struct ToolError(#[source] model::Error);
 
-fn unavailable() -> capability::Error {
-    capability::Error::new(ErrorKind::Unavailable, "store did not answer")
+fn unavailable() -> CapabilityError {
+    CapabilityError::new(ErrorKind::Unavailable, "store did not answer")
 }
 
 #[tokio::test]

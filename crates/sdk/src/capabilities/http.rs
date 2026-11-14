@@ -6,20 +6,19 @@ use bytes::Bytes;
 use http::{Request, Response};
 use serde::de::DeserializeOwned;
 
-use crate::capability::Result;
+use crate::CapabilityError;
 
 /// Send outbound HTTP requests.
 ///
 /// Any status is a response, not an error. A request the upstream did not
-/// answer fails with
-/// [`ErrorKind::Unavailable`](crate::capability::ErrorKind::Unavailable).
+/// answer fails with [`ErrorKind::Unavailable`](crate::ErrorKind::Unavailable).
 /// JSON reads of an upstream reply are [`HttpClientExt`].
 #[omnia_guest_macros::capability]
 pub trait HttpClient: Send + Sync {
     /// Send `request` and return the upstream's response.
     fn fetch(
         &self, request: Request<Bytes>,
-    ) -> impl Future<Output = Result<Response<Bytes>>> + Send;
+    ) -> impl Future<Output = Result<Response<Bytes>, CapabilityError>> + Send;
 }
 
 /// JSON reads over any [`HttpClient`].

@@ -6,8 +6,7 @@
 
 use std::time::Duration;
 
-use omnia_sdk::capability::ErrorKind;
-use omnia_sdk::{Identity, WasiProvider};
+use omnia_sdk::{ErrorKind, Identity, WasiProvider};
 
 omnia_sdk::api::command::export!(scenario);
 

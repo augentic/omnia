@@ -1,15 +1,14 @@
 //! Errors
 
 use std::error::Error as StdError;
+use std::fmt;
 
 use http::StatusCode;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::capability::{self, ErrorKind};
-
 /// Result type used across the crate.
-pub type Result<T> = std::result::Result<T, Error>;
+pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 /// Domain level error type returned by the adapter.
 #[derive(Error, Debug, Clone, Serialize, Deserialize)]
@@ -176,27 +175,8 @@ impl Error {
     }
 }
 
-/// The transport-neutral wire body of a failed invocation.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ErrorBody {
-    /// The error code discriminant.
-    pub error: String,
-
-    /// The human-readable error description.
-    pub message: String,
-}
-
-impl From<&Error> for ErrorBody {
-    fn from(error: &Error) -> Self {
-        Self {
-            error: error.code(),
-            message: error.description(),
-        }
-    }
-}
-
 // The first domain error in the chain keeps its variant and code. A
-// `capability::Error` is a `bad_gateway` when the upstream did not answer,
+// `CapabilityError` is a `bad_gateway` when the upstream did not answer,
 // and otherwise the deployment's own `server_error`. Both gain the context
 // wrapped around them, and anything else is a `server_error`.
 impl From<anyhow::Error> for Error {
@@ -204,7 +184,7 @@ impl From<anyhow::Error> for Error {
         let chain = err.chain().map(ToString::to_string).collect::<Vec<_>>().join(": ");
         let classified = err.chain().find_map(|error| {
             Self::from_domain(error).or_else(|| {
-                error.downcast_ref::<capability::Error>().map(|error| match error.kind() {
+                error.downcast_ref::<CapabilityError>().map(|error| match error.kind() {
                     ErrorKind::Unavailable => crate::bad_gateway!(error),
                     _ => crate::server_error!(error),
                 })
@@ -214,8 +194,8 @@ impl From<anyhow::Error> for Error {
     }
 }
 
-impl From<capability::Error> for Error {
-    fn from(err: capability::Error) -> Self {
+impl From<CapabilityError> for Error {
+    fn from(err: CapabilityError) -> Self {
         Self::from(anyhow::Error::from(err))
     }
 }
@@ -241,6 +221,98 @@ impl From<crate::model::Error> for Error {
             // a tool, or the transport
             Model::ToolFailed(_) | Model::Backend(_) => crate::bad_gateway!(err),
         }
+    }
+}
+
+/// The transport-neutral wire body of a failed invocation.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ErrorBody {
+    /// The error code discriminant.
+    pub error: String,
+
+    /// The human-readable error description.
+    pub message: String,
+}
+
+impl From<&Error> for ErrorBody {
+    fn from(error: &Error) -> Self {
+        Self {
+            error: error.code(),
+            message: error.description(),
+        }
+    }
+}
+
+/// A failed capability call.
+///
+/// A caller matches on [`kind`](Self::kind). The message is for people, and
+/// its text is not part of the contract.
+#[derive(Debug, thiserror::Error)]
+#[error("{kind}: {message}")]
+pub struct CapabilityError {
+    kind: ErrorKind,
+    message: String,
+    #[source]
+    source: Option<Box<dyn StdError + Send + Sync>>,
+}
+
+impl CapabilityError {
+    /// Create an error of `kind` described by `message`.
+    pub fn new(kind: ErrorKind, message: impl Into<String>) -> Self {
+        Self {
+            kind,
+            message: message.into(),
+            source: None,
+        }
+    }
+
+    /// Attach the error that caused this one.
+    #[must_use]
+    pub fn with_source(mut self, source: impl Into<Box<dyn StdError + Send + Sync>>) -> Self {
+        self.source = Some(source.into());
+        self
+    }
+
+    /// The kind of failure.
+    #[must_use]
+    pub const fn kind(&self) -> ErrorKind {
+        self.kind
+    }
+}
+
+/// What kind of failure a capability call met.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum ErrorKind {
+    /// The binding, container, collection, or required setting does not exist.
+    NotFound,
+
+    /// The provider refused the call.
+    Denied,
+
+    /// The input was rejected, such as a zero TTL, or stored bytes failed to decode.
+    Invalid,
+
+    /// The request is valid, but this provider cannot serve it.
+    Unsupported,
+
+    /// The upstream did not answer, or the call exceeded its time bound.
+    Unavailable,
+
+    /// Any other failure.
+    Other,
+}
+
+impl fmt::Display for ErrorKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::NotFound => "not found",
+            Self::Denied => "denied",
+            Self::Invalid => "invalid",
+            Self::Unsupported => "unsupported",
+            Self::Unavailable => "unavailable",
+            Self::Other => "other",
+        })
     }
 }
 

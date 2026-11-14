@@ -7,7 +7,7 @@ use std::future::Future;
 use bytes::Bytes;
 pub use omnia_guest_macros::FromRow;
 
-use crate::capability::{self, ErrorKind};
+use crate::{CapabilityError, ErrorKind};
 
 /// Run parameterized SQL against the databases a deployment declares.
 ///
@@ -28,19 +28,19 @@ pub trait SqlDb: Send + Sync {
     /// Run `sql` with `params` bound and return the rows it selects.
     fn query(
         &self, sql: &str, params: &[Value],
-    ) -> impl Future<Output = capability::Result<Vec<Row>>> + Send;
+    ) -> impl Future<Output = Result<Vec<Row>, CapabilityError>> + Send;
 
     /// Run `sql` with `params` bound and return the number of rows it changed.
     fn execute(
         &self, sql: &str, params: &[Value],
-    ) -> impl Future<Output = capability::Result<u64>> + Send;
+    ) -> impl Future<Output = Result<u64, CapabilityError>> + Send;
 
     /// Run `statements` in order, in one transaction, and return each one's changed-row count.
     ///
     /// A failing statement rolls back the whole batch and returns its error.
     fn batch(
         &self, statements: &[Statement],
-    ) -> impl Future<Output = capability::Result<Vec<u64>>> + Send;
+    ) -> impl Future<Output = Result<Vec<u64>, CapabilityError>> + Send;
 
     /// A handle to the database `name` on the same provider.
     fn named(&self, name: &str) -> Self::Named;
@@ -55,7 +55,7 @@ pub trait SqlDbExt: SqlDb {
     /// A row that does not decode fails with [`ErrorKind::Invalid`].
     fn query_as<T: FromRow>(
         &self, sql: &str, params: &[Value],
-    ) -> impl Future<Output = capability::Result<Vec<T>>> + Send {
+    ) -> impl Future<Output = Result<Vec<T>, CapabilityError>> + Send {
         async move { self.query(sql, params).await?.iter().map(T::from_row).collect() }
     }
 }
@@ -234,7 +234,7 @@ impl Statement {
 
 /// A failure while reading a typed column from a [`Row`].
 ///
-/// It converts into a [`capability::Error`] of kind [`ErrorKind::Invalid`].
+/// It converts into a [`CapabilityError`] of kind [`ErrorKind::Invalid`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ColumnError {
     description: String,
@@ -279,7 +279,7 @@ impl fmt::Display for ColumnError {
 
 impl Error for ColumnError {}
 
-impl From<ColumnError> for capability::Error {
+impl From<ColumnError> for CapabilityError {
     fn from(err: ColumnError) -> Self {
         Self::new(ErrorKind::Invalid, err.description)
     }
@@ -451,5 +451,5 @@ pub trait FromRow: Sized {
     ///
     /// [`ErrorKind::Invalid`] when a required column is missing, `NULL`, or
     /// of an incompatible [`Value`].
-    fn from_row(row: &Row) -> capability::Result<Self>;
+    fn from_row(row: &Row) -> Result<Self, CapabilityError>;
 }

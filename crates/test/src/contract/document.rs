@@ -8,9 +8,8 @@
 
 use std::iter;
 
-use omnia_sdk::DocumentDb;
-use omnia_sdk::capability::{ErrorKind, Result};
 use omnia_sdk::docstore::{Document, Exists, Filter, Query, ScalarValue, SortField};
+use omnia_sdk::{CapabilityError, DocumentDb, ErrorKind};
 use serde_json::{Value, json};
 
 use super::expect_kind;
@@ -186,7 +185,7 @@ pub async fn optional_query(db: &impl DocumentDb) {
 
 // an optional feature is served as the reference defines it, or refused
 #[track_caller]
-fn served(selected: Result<Vec<String>>, expected: &[String], feature: &str) {
+fn served(selected: Result<Vec<String>, CapabilityError>, expected: &[String], feature: &str) {
     match selected {
         Ok(ids) => assert_eq!(ids, expected, "{feature} returned other documents"),
         Err(err) => assert_eq!(err.kind(), ErrorKind::Unsupported, "{feature} failed with `{err}`"),
@@ -202,7 +201,9 @@ async fn seed(db: &impl DocumentDb, collection: &str, stored: &[(&str, Value)]) 
 }
 
 // the ids `query` selects, page by page, in the order the pages hold them
-async fn walk(db: &impl DocumentDb, collection: &str, query: &Query) -> Result<Vec<String>> {
+async fn walk(
+    db: &impl DocumentDb, collection: &str, query: &Query,
+) -> Result<Vec<String>, CapabilityError> {
     let mut query = query.clone();
     let mut ids = Vec::new();
     for _ in 0..MAX_PAGES {

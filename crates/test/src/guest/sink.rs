@@ -6,10 +6,9 @@ use std::future::{Future, ready};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use omnia_sdk::capability::Result;
 use omnia_sdk::identity::{AccessToken, DEFAULT};
 use omnia_sdk::messaging::Message;
-use omnia_sdk::{Config, Identity, Publisher, WebSockets};
+use omnia_sdk::{CapabilityError, Config, Identity, Publisher, WebSockets};
 
 /// One WebSocket send the code under test made.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -69,19 +68,23 @@ impl Sink {
 }
 
 impl Publisher for Sink {
-    fn publish(&self, topic: &str, message: &Message) -> impl Future<Output = Result<()>> + Send {
+    fn publish(
+        &self, topic: &str, message: &Message,
+    ) -> impl Future<Output = Result<(), CapabilityError>> + Send {
         self.inner.sent.lock().expect("sent lock").push((topic.to_owned(), message.clone()));
         ready(Ok(()))
     }
 }
 
 impl WebSockets for Sink {
-    fn broadcast(&self, data: &[u8]) -> impl Future<Output = Result<()>> + Send {
+    fn broadcast(&self, data: &[u8]) -> impl Future<Output = Result<(), CapabilityError>> + Send {
         self.record(data, None);
         ready(Ok(()))
     }
 
-    fn send_to(&self, sockets: &[&str], data: &[u8]) -> impl Future<Output = Result<()>> + Send {
+    fn send_to(
+        &self, sockets: &[&str], data: &[u8],
+    ) -> impl Future<Output = Result<(), CapabilityError>> + Send {
         self.record(data, Some(sockets.iter().map(|&socket| socket.to_owned()).collect()));
         ready(Ok(()))
     }
@@ -122,7 +125,9 @@ impl MapConfig {
 }
 
 impl Config for MapConfig {
-    fn get(&self, key: &str) -> impl Future<Output = Result<Option<String>>> + Send {
+    fn get(
+        &self, key: &str,
+    ) -> impl Future<Output = Result<Option<String>, CapabilityError>> + Send {
         ready(Ok(self.values.get(key).cloned()))
     }
 }
@@ -182,7 +187,9 @@ impl FixedIdentity {
 impl Identity for FixedIdentity {
     type Named = Self;
 
-    fn token(&self, _scopes: &[&str]) -> impl Future<Output = Result<AccessToken>> + Send {
+    fn token(
+        &self, _scopes: &[&str],
+    ) -> impl Future<Output = Result<AccessToken, CapabilityError>> + Send {
         self.asked.lock().expect("asked lock").push(self.name.to_string());
         let token = if &*self.name == DEFAULT {
             self.token.clone()

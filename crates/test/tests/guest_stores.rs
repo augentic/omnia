@@ -12,13 +12,12 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use http::{Method, Request, Response};
-use omnia_sdk::capability::ErrorKind;
 use omnia_sdk::docstore::{Document, Filter, Query, SortField};
 use omnia_sdk::messaging::Message;
 use omnia_sdk::sql::{Field, Row, Statement, Value};
 use omnia_sdk::{
-    BlobStore, DocumentDb, HttpClient, Identity, Publisher, SecretStore, SqlDb, StateStore,
-    WebSockets,
+    BlobStore, DocumentDb, ErrorKind, HttpClient, Identity, Publisher, SecretStore, SqlDb,
+    StateStore, WebSockets,
 };
 use omnia_test::guest::{
     Broadcasted, FixedIdentity, MatchedHttp, Memory, MemoryDocs, ScriptedTables, Sink,

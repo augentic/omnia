@@ -4,14 +4,14 @@ use std::fmt;
 use std::future::Future;
 use std::time::Duration;
 
-use crate::capability::Result;
+use crate::CapabilityError;
 
 /// Obtain access tokens for the identities a deployment declares.
 ///
 /// A handle acts as one identity. A provider's own handle uses
 /// [`identity::DEFAULT`](DEFAULT), and [`named`](Self::named) selects
 /// another. An identity the deployment does not declare fails with
-/// [`ErrorKind::NotFound`](crate::capability::ErrorKind::NotFound) when a
+/// [`ErrorKind::NotFound`](crate::ErrorKind::NotFound) when a
 /// token is requested. The bare token string is [`IdentityExt`].
 #[omnia_guest_macros::capability]
 pub trait Identity: Send + Sync {
@@ -21,7 +21,9 @@ pub trait Identity: Send + Sync {
     /// An access token for this identity, scoped to `scopes`.
     ///
     /// An empty `scopes` asks for the identity's default scopes.
-    fn token(&self, scopes: &[&str]) -> impl Future<Output = Result<AccessToken>> + Send;
+    fn token(
+        &self, scopes: &[&str],
+    ) -> impl Future<Output = Result<AccessToken, CapabilityError>> + Send;
 
     /// A handle to the identity `name` on the same provider.
     fn named(&self, name: &str) -> Self::Named;
@@ -32,7 +34,7 @@ pub trait Identity: Send + Sync {
 /// Blanket-implemented for every [`Identity`]; never implemented by hand.
 pub trait IdentityExt: Identity {
     /// The token string for this identity's default scopes.
-    fn access_token(&self) -> impl Future<Output = Result<String>> + Send {
+    fn access_token(&self) -> impl Future<Output = Result<String, CapabilityError>> + Send {
         async move { Ok(self.token(&[]).await?.token) }
     }
 }

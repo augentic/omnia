@@ -6,7 +6,7 @@ use std::time::SystemTime;
 
 use bytes::Bytes;
 
-use crate::capability::{Error, ErrorKind, Page, Result};
+use crate::{CapabilityError, ErrorKind, Page};
 
 /// Store and retrieve binary objects in a deployment's containers.
 ///
@@ -29,7 +29,7 @@ pub trait BlobStore: Send + Sync {
     /// Retrieve the object `name` in `container`, or `None` when it is absent.
     fn get(
         &self, container: &str, name: &str,
-    ) -> impl Future<Output = Result<Option<Bytes>>> + Send;
+    ) -> impl Future<Output = Result<Option<Bytes>, CapabilityError>> + Send;
 
     /// Retrieve the bytes of the object `name` in `range`, or `None` when it is absent.
     ///
@@ -37,20 +37,22 @@ pub trait BlobStore: Send + Sync {
     /// past the end reads as empty.
     fn get_range(
         &self, container: &str, name: &str, range: Range<u64>,
-    ) -> impl Future<Output = Result<Option<Bytes>>> + Send;
+    ) -> impl Future<Output = Result<Option<Bytes>, CapabilityError>> + Send;
 
     /// Store `data` as the object `name` in `container`, replacing any object there.
     fn put(
         &self, container: &str, name: &str, data: &[u8],
-    ) -> impl Future<Output = Result<()>> + Send;
+    ) -> impl Future<Output = Result<(), CapabilityError>> + Send;
 
     /// Delete the object `name` from `container`, succeeding when it is already absent.
-    fn delete(&self, container: &str, name: &str) -> impl Future<Output = Result<()>> + Send;
+    fn delete(
+        &self, container: &str, name: &str,
+    ) -> impl Future<Output = Result<(), CapabilityError>> + Send;
 
     /// The metadata of the object `name` in `container`, or `None` when it is absent.
     fn stat(
         &self, container: &str, name: &str,
-    ) -> impl Future<Output = Result<Option<ObjectMetadata>>> + Send;
+    ) -> impl Future<Output = Result<Option<ObjectMetadata>, CapabilityError>> + Send;
 
     /// One page of the objects in `container` whose names start with `prefix`.
     ///
@@ -58,31 +60,39 @@ pub trait BlobStore: Send + Sync {
     /// `None` for the first page.
     fn list(
         &self, container: &str, prefix: &str, after: Option<&str>,
-    ) -> impl Future<Output = Result<Page<ObjectMetadata>>> + Send;
+    ) -> impl Future<Output = Result<Page<ObjectMetadata>, CapabilityError>> + Send;
 
     /// Create the empty container `container`, succeeding when it already exists.
-    fn create_container(&self, container: &str) -> impl Future<Output = Result<()>> + Send;
+    fn create_container(
+        &self, container: &str,
+    ) -> impl Future<Output = Result<(), CapabilityError>> + Send;
 
     /// Delete `container` and every object in it, succeeding when it is already absent.
-    fn delete_container(&self, container: &str) -> impl Future<Output = Result<()>> + Send;
+    fn delete_container(
+        &self, container: &str,
+    ) -> impl Future<Output = Result<(), CapabilityError>> + Send;
 
     /// Whether `container` exists.
-    fn container_exists(&self, container: &str) -> impl Future<Output = Result<bool>> + Send;
+    fn container_exists(
+        &self, container: &str,
+    ) -> impl Future<Output = Result<bool, CapabilityError>> + Send;
 
     /// The metadata of `container`, or `None` when it does not exist.
     fn container_info(
         &self, container: &str,
-    ) -> impl Future<Output = Result<Option<ContainerMetadata>>> + Send;
+    ) -> impl Future<Output = Result<Option<ContainerMetadata>, CapabilityError>> + Send;
 
     /// Whether the object `name` exists in `container`.
-    fn exists(&self, container: &str, name: &str) -> impl Future<Output = Result<bool>> + Send {
+    fn exists(
+        &self, container: &str, name: &str,
+    ) -> impl Future<Output = Result<bool, CapabilityError>> + Send {
         async move { Ok(self.stat(container, name).await?.is_some()) }
     }
 
     /// Delete each object in `names` from `container`.
     fn delete_many(
         &self, container: &str, names: &[&str],
-    ) -> impl Future<Output = Result<()>> + Send {
+    ) -> impl Future<Output = Result<(), CapabilityError>> + Send {
         async move {
             for name in names {
                 self.delete(container, name).await?;
@@ -92,7 +102,7 @@ pub trait BlobStore: Send + Sync {
     }
 
     /// Delete every object in `container`, leaving it empty.
-    fn clear(&self, container: &str) -> impl Future<Output = Result<()>> + Send {
+    fn clear(&self, container: &str) -> impl Future<Output = Result<(), CapabilityError>> + Send {
         async move {
             let mut names = Vec::new();
             let mut after = None;
@@ -117,11 +127,11 @@ pub trait BlobStore: Send + Sync {
     /// with [`ErrorKind::NotFound`].
     fn copy(
         &self, src_container: &str, src_name: &str, dest_container: &str, dest_name: &str,
-    ) -> impl Future<Output = Result<()>> + Send {
+    ) -> impl Future<Output = Result<(), CapabilityError>> + Send {
         async move {
             let data = self.get(src_container, src_name).await?.ok_or_else(|| {
                 let message = format!("object `{src_name}` not found in `{src_container}`");
-                Error::new(ErrorKind::NotFound, message)
+                CapabilityError::new(ErrorKind::NotFound, message)
             })?;
             self.put(dest_container, dest_name, &data).await
         }
@@ -133,7 +143,7 @@ pub trait BlobStore: Send + Sync {
     /// [`copy`](Self::copy) does, leaving the source in place.
     fn rename(
         &self, src_container: &str, src_name: &str, dest_container: &str, dest_name: &str,
-    ) -> impl Future<Output = Result<()>> + Send {
+    ) -> impl Future<Output = Result<(), CapabilityError>> + Send {
         async move {
             if src_container == dest_container && src_name == dest_name {
                 return Ok(());

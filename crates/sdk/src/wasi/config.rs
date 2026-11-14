@@ -4,16 +4,17 @@ use std::future::Future;
 
 use omnia_wasi_config::store;
 
-use crate::capability::{Error, ErrorKind, Result};
-use crate::{Config, WasiProvider};
+use crate::{CapabilityError, Config, ErrorKind, WasiProvider};
 
 impl Config for WasiProvider {
-    fn get(&self, key: &str) -> impl Future<Output = Result<Option<String>>> + Send {
-        std::future::ready(store::get(key).map_err(Error::from))
+    fn get(
+        &self, key: &str,
+    ) -> impl Future<Output = Result<Option<String>, CapabilityError>> + Send {
+        std::future::ready(store::get(key).map_err(CapabilityError::from))
     }
 }
 
-impl From<store::Error> for Error {
+impl From<store::Error> for CapabilityError {
     fn from(err: store::Error) -> Self {
         match err {
             store::Error::Upstream(message) => Self::new(ErrorKind::Unavailable, message),

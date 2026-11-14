@@ -10,9 +10,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result, anyhow};
 use bytes::Bytes;
 use omnia_sdk::blobstore::{ContainerMetadata, ObjectMetadata};
-use omnia_sdk::capability::{self, ErrorKind, Page};
 use omnia_sdk::keyvalue::{Conflict, DEFAULT};
-use omnia_sdk::{BlobStore, SecretStore, StateStore};
+use omnia_sdk::{BlobStore, CapabilityError, ErrorKind, Page, SecretStore, StateStore};
 
 /// A state snapshot: bucket to key to raw bytes.
 pub type StateSnapshot = BTreeMap<String, BTreeMap<String, Vec<u8>>>;
@@ -213,31 +212,33 @@ impl Memory {
 
     // -- state ------------------------------------------------------------
 
-    fn in_bucket<T>(&self, f: impl FnOnce(&mut Bucket) -> T) -> capability::Result<T> {
+    fn in_bucket<T>(&self, f: impl FnOnce(&mut Bucket) -> T) -> Result<T, CapabilityError> {
         self.lock_state().get_mut(&*self.name).map(f).ok_or_else(|| {
             let message = format!("bucket `{}` is not declared", self.name);
-            capability::Error::new(ErrorKind::NotFound, message)
+            CapabilityError::new(ErrorKind::NotFound, message)
         })
     }
 
-    fn get_state(&self, key: &str) -> capability::Result<Option<Bytes>> {
+    fn get_state(&self, key: &str) -> Result<Option<Bytes>, CapabilityError> {
         self.in_bucket(|bucket| bucket.get(key).map(|entry| Bytes::from(entry.bytes.clone())))
     }
 
-    fn set_state(&self, key: &str, value: &[u8], ttl: Option<Duration>) -> capability::Result<()> {
+    fn set_state(
+        &self, key: &str, value: &[u8], ttl: Option<Duration>,
+    ) -> Result<(), CapabilityError> {
         let ttl = checked(ttl)?;
         self.in_bucket(|bucket| {
             drop(bucket.insert(key.to_owned(), StateEntry::new(value.to_vec(), ttl)));
         })
     }
 
-    fn delete_state(&self, key: &str) -> capability::Result<()> {
+    fn delete_state(&self, key: &str) -> Result<(), CapabilityError> {
         self.in_bucket(|bucket| drop(bucket.remove(key)))
     }
 
     fn swap_state(
         &self, key: &str, current: Option<&[u8]>, new: &[u8], ttl: Option<Duration>,
-    ) -> capability::Result<Result<(), Conflict>> {
+    ) -> Result<Result<(), Conflict>, CapabilityError> {
         let ttl = checked(ttl)?;
         self.in_bucket(|bucket| {
             let existing = bucket.get(key).cloned();
@@ -253,13 +254,13 @@ impl Memory {
 
     fn increment_state(
         &self, key: &str, delta: i64, ttl: Option<Duration>,
-    ) -> capability::Result<i64> {
+    ) -> Result<i64, CapabilityError> {
         let ttl = checked(ttl)?;
         self.in_bucket(|bucket| {
             let existing = bucket.get(key).cloned();
             let incremented = add_i64(existing.as_ref().map(|entry| entry.bytes.as_slice()), delta)
                 .with_context(|| format!("incrementing `{key}` by {delta}"))
-                .map_err(|err| capability::Error::new(ErrorKind::Invalid, format!("{err:#}")))?;
+                .map_err(|err| CapabilityError::new(ErrorKind::Invalid, format!("{err:#}")))?;
             let entry = StateEntry::atomic(existing, incremented.to_be_bytes().to_vec(), ttl);
             drop(bucket.insert(key.to_owned(), entry));
             Ok(incremented)
@@ -270,10 +271,10 @@ impl Memory {
 
     fn in_container<T>(
         &self, container: &str, f: impl FnOnce(&mut Container) -> T,
-    ) -> capability::Result<T> {
+    ) -> Result<T, CapabilityError> {
         self.lock_blobs().get_mut(container).map(f).ok_or_else(|| {
             let message = format!("container `{container}` does not exist");
-            capability::Error::new(ErrorKind::NotFound, message)
+            CapabilityError::new(ErrorKind::NotFound, message)
         })
     }
 
@@ -306,9 +307,9 @@ impl Memory {
 }
 
 // a zero TTL would expire the entry as it is written, so it writes nothing
-fn checked(ttl: Option<Duration>) -> capability::Result<Option<Duration>> {
+fn checked(ttl: Option<Duration>) -> Result<Option<Duration>, CapabilityError> {
     if ttl == Some(Duration::ZERO) {
-        return Err(capability::Error::new(ErrorKind::Invalid, "a TTL must be greater than zero"));
+        return Err(CapabilityError::new(ErrorKind::Invalid, "a TTL must be greater than zero"));
     }
     Ok(ttl)
 }
@@ -322,29 +323,31 @@ fn timestamp(tick: u64) -> SystemTime {
 impl StateStore for Memory {
     type Named = Self;
 
-    fn get(&self, key: &str) -> impl Future<Output = capability::Result<Option<Bytes>>> + Send {
+    fn get(
+        &self, key: &str,
+    ) -> impl Future<Output = Result<Option<Bytes>, CapabilityError>> + Send {
         ready(self.get_state(key))
     }
 
     fn set(
         &self, key: &str, value: &[u8], ttl: Option<Duration>,
-    ) -> impl Future<Output = capability::Result<()>> + Send {
+    ) -> impl Future<Output = Result<(), CapabilityError>> + Send {
         ready(self.set_state(key, value, ttl))
     }
 
-    fn delete(&self, key: &str) -> impl Future<Output = capability::Result<()>> + Send {
+    fn delete(&self, key: &str) -> impl Future<Output = Result<(), CapabilityError>> + Send {
         ready(self.delete_state(key))
     }
 
     fn compare_and_swap(
         &self, key: &str, current: Option<&[u8]>, new: &[u8], ttl: Option<Duration>,
-    ) -> impl Future<Output = capability::Result<Result<(), Conflict>>> + Send {
+    ) -> impl Future<Output = Result<Result<(), Conflict>, CapabilityError>> + Send {
         ready(self.swap_state(key, current, new, ttl))
     }
 
     fn increment(
         &self, key: &str, delta: i64, ttl: Option<Duration>,
-    ) -> impl Future<Output = capability::Result<i64>> + Send {
+    ) -> impl Future<Output = Result<i64, CapabilityError>> + Send {
         ready(self.increment_state(key, delta, ttl))
     }
 
@@ -356,37 +359,37 @@ impl StateStore for Memory {
 impl BlobStore for Memory {
     fn get(
         &self, container: &str, name: &str,
-    ) -> impl Future<Output = capability::Result<Option<Bytes>>> + Send {
+    ) -> impl Future<Output = Result<Option<Bytes>, CapabilityError>> + Send {
         ready(self.in_container(container, |stored| stored.range(name, 0..u64::MAX)))
     }
 
     fn get_range(
         &self, container: &str, name: &str, range: Range<u64>,
-    ) -> impl Future<Output = capability::Result<Option<Bytes>>> + Send {
+    ) -> impl Future<Output = Result<Option<Bytes>, CapabilityError>> + Send {
         ready(self.in_container(container, |stored| stored.range(name, range)))
     }
 
     fn put(
         &self, container: &str, name: &str, data: &[u8],
-    ) -> impl Future<Output = capability::Result<()>> + Send {
+    ) -> impl Future<Output = Result<(), CapabilityError>> + Send {
         ready(self.in_container(container, |stored| stored.put(name, data, self.tick())))
     }
 
     fn delete(
         &self, container: &str, name: &str,
-    ) -> impl Future<Output = capability::Result<()>> + Send {
+    ) -> impl Future<Output = Result<(), CapabilityError>> + Send {
         ready(self.in_container(container, |stored| drop(stored.objects.remove(name))))
     }
 
     fn stat(
         &self, container: &str, name: &str,
-    ) -> impl Future<Output = capability::Result<Option<ObjectMetadata>>> + Send {
+    ) -> impl Future<Output = Result<Option<ObjectMetadata>, CapabilityError>> + Send {
         ready(self.in_container(container, |stored| stored.info(container, name)))
     }
 
     fn list(
         &self, container: &str, prefix: &str, after: Option<&str>,
-    ) -> impl Future<Output = capability::Result<Page<ObjectMetadata>>> + Send {
+    ) -> impl Future<Output = Result<Page<ObjectMetadata>, CapabilityError>> + Send {
         let listing =
             self.in_container(container, |stored| stored.listing(container, prefix, after));
         ready(listing.map(|objects| Page::new(objects, None)))
@@ -394,27 +397,27 @@ impl BlobStore for Memory {
 
     fn create_container(
         &self, container: &str,
-    ) -> impl Future<Output = capability::Result<()>> + Send {
+    ) -> impl Future<Output = Result<(), CapabilityError>> + Send {
         self.insert_container(container);
         ready(Ok(()))
     }
 
     fn delete_container(
         &self, container: &str,
-    ) -> impl Future<Output = capability::Result<()>> + Send {
+    ) -> impl Future<Output = Result<(), CapabilityError>> + Send {
         Self::delete_container(self, container);
         ready(Ok(()))
     }
 
     fn container_exists(
         &self, container: &str,
-    ) -> impl Future<Output = capability::Result<bool>> + Send {
+    ) -> impl Future<Output = Result<bool, CapabilityError>> + Send {
         ready(Ok(self.has_container(container)))
     }
 
     fn container_info(
         &self, container: &str,
-    ) -> impl Future<Output = capability::Result<Option<ContainerMetadata>>> + Send {
+    ) -> impl Future<Output = Result<Option<ContainerMetadata>, CapabilityError>> + Send {
         ready(Ok(Self::container_info(self, container)))
     }
 }
@@ -422,23 +425,27 @@ impl BlobStore for Memory {
 impl SecretStore for Memory {
     type Named = Self;
 
-    fn get(&self, key: &str) -> impl Future<Output = capability::Result<Option<Bytes>>> + Send {
+    fn get(
+        &self, key: &str,
+    ) -> impl Future<Output = Result<Option<Bytes>, CapabilityError>> + Send {
         ready(Ok(self.secret(key).map(Bytes::from)))
     }
 
-    fn set(&self, key: &str, value: &[u8]) -> impl Future<Output = capability::Result<()>> + Send {
+    fn set(
+        &self, key: &str, value: &[u8],
+    ) -> impl Future<Output = Result<(), CapabilityError>> + Send {
         self.insert_secret(key, value);
         ready(Ok(()))
     }
 
-    fn delete(&self, key: &str) -> impl Future<Output = capability::Result<()>> + Send {
+    fn delete(&self, key: &str) -> impl Future<Output = Result<(), CapabilityError>> + Send {
         self.delete_secret(key);
         ready(Ok(()))
     }
 
     fn keys(
         &self, after: Option<&str>,
-    ) -> impl Future<Output = capability::Result<Page<String>>> + Send {
+    ) -> impl Future<Output = Result<Page<String>, CapabilityError>> + Send {
         ready(Ok(Page::new(self.secret_keys(after), None)))
     }
 

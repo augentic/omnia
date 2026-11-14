@@ -6,9 +6,8 @@ use std::time::Duration;
 use bytes::Bytes;
 use omnia_wasi_keyvalue::omnia::store;
 
-use crate::capability::{Error, ErrorKind, Result};
 use crate::keyvalue::{Conflict, DEFAULT};
-use crate::{HasStateStore, StateStore, WasiProvider};
+use crate::{CapabilityError, ErrorKind, HasStateStore, StateStore, WasiProvider};
 
 static DEFAULT_HANDLE: Handle = Handle {
     name: Cow::Borrowed(DEFAULT),
@@ -33,22 +32,24 @@ pub struct Handle {
 impl StateStore for Handle {
     type Named = Self;
 
-    async fn get(&self, key: &str) -> Result<Option<Bytes>> {
+    async fn get(&self, key: &str) -> Result<Option<Bytes>, CapabilityError> {
         Ok(store::get(self.name.to_string(), key.to_owned()).await?.map(Bytes::from))
     }
 
-    async fn set(&self, key: &str, value: &[u8], ttl: Option<Duration>) -> Result<()> {
+    async fn set(
+        &self, key: &str, value: &[u8], ttl: Option<Duration>,
+    ) -> Result<(), CapabilityError> {
         let ttl = ttl.map(millis);
         Ok(store::set(self.name.to_string(), key.to_owned(), value.to_vec(), ttl).await?)
     }
 
-    async fn delete(&self, key: &str) -> Result<()> {
+    async fn delete(&self, key: &str) -> Result<(), CapabilityError> {
         Ok(store::delete(self.name.to_string(), key.to_owned()).await?)
     }
 
     async fn compare_and_swap(
         &self, key: &str, current: Option<&[u8]>, new: &[u8], ttl: Option<Duration>,
-    ) -> Result<Result<(), Conflict>> {
+    ) -> Result<Result<(), Conflict>, CapabilityError> {
         let (current, ttl) = (current.map(<[u8]>::to_vec), ttl.map(millis));
         let swapped = store::compare_and_swap(
             self.name.to_string(),
@@ -63,7 +64,9 @@ impl StateStore for Handle {
         }))
     }
 
-    async fn increment(&self, key: &str, delta: i64, ttl: Option<Duration>) -> Result<i64> {
+    async fn increment(
+        &self, key: &str, delta: i64, ttl: Option<Duration>,
+    ) -> Result<i64, CapabilityError> {
         let ttl = ttl.map(millis);
         Ok(store::increment(self.name.to_string(), key.to_owned(), delta, ttl).await?)
     }
@@ -81,7 +84,7 @@ fn millis(ttl: Duration) -> u64 {
     u64::try_from(ttl.as_nanos().div_ceil(1_000_000)).unwrap_or(u64::MAX)
 }
 
-impl From<store::Error> for Error {
+impl From<store::Error> for CapabilityError {
     fn from(err: store::Error) -> Self {
         let (kind, message) = match err {
             store::Error::NotFound(message) => (ErrorKind::NotFound, message),

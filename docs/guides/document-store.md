@@ -47,7 +47,7 @@ The four operations:
 | `put(collection, &doc)` | Upsert (create or replace) |
 | `delete(collection, id)` | Remove → `bool` (whether anything was deleted) |
 
-`get_as::<T>(collection, id)` is `get` with the body decoded into `T`. Collections are created implicitly on first write. Every method fails with a `capability::Error`, which `?` converts into `omnia_sdk::Error`.
+`get_as::<T>(collection, id)` is `get` with the body decoded into `T`. Collections are created implicitly on first write. Every method fails with a `CapabilityError`, which `?` converts into `omnia_sdk::Error`.
 
 ## Filters
 
@@ -167,7 +167,7 @@ let stops: Vec<Stop> = page.items.iter().map(Document::decode).collect::<Result<
 Ok(Json(json!({ "stops": stops, "next": page.next })))
 ```
 
-The result is a `capability::Page<Document>`: the page's `items`, plus an opaque `next` cursor when more pages exist. Hand the cursor back as the next query's `after` to resume. Treat it as opaque — its format is backend-specific.
+The result is a `Page<Document>`: the page's `items`, plus an opaque `next` cursor when more pages exist. Hand the cursor back as the next query's `after` to resume. Treat it as opaque — its format is backend-specific.
 
 ## Backends
 

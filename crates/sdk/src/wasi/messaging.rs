@@ -3,12 +3,11 @@
 use omnia_wasi_messaging::producer;
 use omnia_wasi_messaging::types::{self as wire, Client};
 
-use crate::capability::{Error, ErrorKind, Result};
 use crate::messaging::{KEY, Message};
-use crate::{Publisher, WasiProvider};
+use crate::{CapabilityError, ErrorKind, Publisher, WasiProvider};
 
 impl Publisher for WasiProvider {
-    async fn publish(&self, topic: &str, message: &Message) -> Result<()> {
+    async fn publish(&self, topic: &str, message: &Message) -> Result<(), CapabilityError> {
         let client = Client::connect("host".to_owned()).await?;
         let outgoing = wire::Message::new(&message.payload);
         if let Some(content_type) = &message.content_type {
@@ -24,7 +23,7 @@ impl Publisher for WasiProvider {
     }
 }
 
-impl From<wire::Error> for Error {
+impl From<wire::Error> for CapabilityError {
     fn from(err: wire::Error) -> Self {
         match err {
             wire::Error::Timeout => Self::new(ErrorKind::Unavailable, "the broker timed out"),

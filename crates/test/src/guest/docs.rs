@@ -6,9 +6,8 @@ use std::collections::{BTreeMap, HashMap};
 use std::future::{Future, ready};
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
-use omnia_sdk::DocumentDb;
-use omnia_sdk::capability::{Error, ErrorKind, Page, Result};
 use omnia_sdk::docstore::{Document, Exists, Query};
+use omnia_sdk::{CapabilityError, DocumentDb, ErrorKind, Page};
 use serde_json::Value;
 
 /// In-memory documents queried with the SDK's reference semantics; clones share one store.
@@ -66,7 +65,7 @@ impl MemoryDocs {
     /// [`ErrorKind::Other`] when a stored body does not serialize.
     pub fn documents(
         &self, collection: &str,
-    ) -> impl Future<Output = Result<Vec<Document>>> + Send {
+    ) -> impl Future<Output = Result<Vec<Document>, CapabilityError>> + Send {
         let documents = self
             .read()
             .get(collection)
@@ -85,7 +84,9 @@ impl MemoryDocs {
         self.collections.write().expect("docs lock")
     }
 
-    fn insert_document(&self, collection: &str, doc: &Document) -> Result<Result<(), Exists>> {
+    fn insert_document(
+        &self, collection: &str, doc: &Document,
+    ) -> Result<Result<(), Exists>, CapabilityError> {
         let body = body(doc)?;
         let mut collections = self.write();
         match collections.entry(collection.to_owned()).or_default().entry(doc.id.clone()) {
@@ -97,16 +98,16 @@ impl MemoryDocs {
         }
     }
 
-    fn put_document(&self, collection: &str, doc: &Document) -> Result<()> {
+    fn put_document(&self, collection: &str, doc: &Document) -> Result<(), CapabilityError> {
         let body = body(doc)?;
         self.write().entry(collection.to_owned()).or_default().insert(doc.id.clone(), body);
         Ok(())
     }
 
-    fn page(&self, collection: &str, query: &Query) -> Result<Page<Document>> {
+    fn page(&self, collection: &str, query: &Query) -> Result<Page<Document>, CapabilityError> {
         let limit = query.limit.map_or(MAX_PAGE_SIZE, |limit| limit.min(MAX_PAGE_SIZE));
         if limit == 0 {
-            return Err(Error::new(ErrorKind::Invalid, "query limit must be at least 1"));
+            return Err(CapabilityError::new(ErrorKind::Invalid, "query limit must be at least 1"));
         }
         if let Some(filter) = &query.filter {
             filter.check()?;
@@ -137,7 +138,7 @@ impl MemoryDocs {
             .skip(skip)
             .take(page_size)
             .map(|(id, body)| document(id, body))
-            .collect::<Result<Vec<_>>>()?;
+            .collect::<Result<Vec<_>, _>>()?;
         let next = skip.saturating_add(documents.len());
         Ok(Page::new(documents, (next < total).then(|| next.to_string())))
     }
@@ -146,7 +147,7 @@ impl MemoryDocs {
 impl DocumentDb for MemoryDocs {
     fn get(
         &self, collection: &str, id: &str,
-    ) -> impl Future<Output = Result<Option<Document>>> + Send {
+    ) -> impl Future<Output = Result<Option<Document>, CapabilityError>> + Send {
         let found = self
             .read()
             .get(collection)
@@ -158,17 +159,19 @@ impl DocumentDb for MemoryDocs {
 
     fn insert(
         &self, collection: &str, document: &Document,
-    ) -> impl Future<Output = Result<Result<(), Exists>>> + Send {
+    ) -> impl Future<Output = Result<Result<(), Exists>, CapabilityError>> + Send {
         ready(self.insert_document(collection, document))
     }
 
     fn put(
         &self, collection: &str, document: &Document,
-    ) -> impl Future<Output = Result<()>> + Send {
+    ) -> impl Future<Output = Result<(), CapabilityError>> + Send {
         ready(self.put_document(collection, document))
     }
 
-    fn delete(&self, collection: &str, id: &str) -> impl Future<Output = Result<bool>> + Send {
+    fn delete(
+        &self, collection: &str, id: &str,
+    ) -> impl Future<Output = Result<bool, CapabilityError>> + Send {
         let removed = self
             .write()
             .get_mut(collection)
@@ -178,30 +181,31 @@ impl DocumentDb for MemoryDocs {
 
     fn query(
         &self, collection: &str, query: &Query,
-    ) -> impl Future<Output = Result<Page<Document>>> + Send {
+    ) -> impl Future<Output = Result<Page<Document>, CapabilityError>> + Send {
         ready(self.page(collection, query))
     }
 }
 
-fn cursor(after: Option<&str>) -> Result<usize> {
+fn cursor(after: Option<&str>) -> Result<usize, CapabilityError> {
     after.map_or(Ok(0), |after| {
         after.parse().map_err(|err| {
             let message = format!("invalid cursor: {after:?}");
-            Error::new(ErrorKind::Invalid, message).with_source(err)
+            CapabilityError::new(ErrorKind::Invalid, message).with_source(err)
         })
     })
 }
 
-fn document(id: &str, body: &Value) -> Result<Document> {
+fn document(id: &str, body: &Value) -> Result<Document, CapabilityError> {
     let data = serde_json::to_vec(body).map_err(|err| {
-        Error::new(ErrorKind::Other, format!("serializing document `{id}`")).with_source(err)
+        CapabilityError::new(ErrorKind::Other, format!("serializing document `{id}`"))
+            .with_source(err)
     })?;
     Ok(Document::new(id, &data))
 }
 
-fn body(doc: &Document) -> Result<Value> {
+fn body(doc: &Document) -> Result<Value, CapabilityError> {
     serde_json::from_slice(&doc.data).map_err(|err| {
         let message = format!("document `{}` is not JSON", doc.id);
-        Error::new(ErrorKind::Invalid, message).with_source(err)
+        CapabilityError::new(ErrorKind::Invalid, message).with_source(err)
     })
 }

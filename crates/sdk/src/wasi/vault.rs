@@ -5,9 +5,8 @@ use std::borrow::Cow;
 use bytes::Bytes;
 use omnia_wasi_vault::vault;
 
-use crate::capability::{Error, ErrorKind, Page, Result};
 use crate::vault::DEFAULT;
-use crate::{HasSecretStore, SecretStore, WasiProvider};
+use crate::{CapabilityError, ErrorKind, HasSecretStore, Page, SecretStore, WasiProvider};
 
 static DEFAULT_HANDLE: Handle = Handle {
     name: Cow::Borrowed(DEFAULT),
@@ -30,7 +29,7 @@ pub struct Handle {
 }
 
 impl Handle {
-    async fn open(&self) -> Result<vault::Locker> {
+    async fn open(&self) -> Result<vault::Locker, CapabilityError> {
         Ok(vault::open(self.name.to_string()).await?)
     }
 }
@@ -40,19 +39,19 @@ impl Handle {
 impl SecretStore for Handle {
     type Named = Self;
 
-    async fn get(&self, key: &str) -> Result<Option<Bytes>> {
+    async fn get(&self, key: &str) -> Result<Option<Bytes>, CapabilityError> {
         Ok(self.open().await?.get(key.to_owned()).await?.map(Bytes::from))
     }
 
-    async fn set(&self, key: &str, value: &[u8]) -> Result<()> {
+    async fn set(&self, key: &str, value: &[u8]) -> Result<(), CapabilityError> {
         Ok(self.open().await?.set(key.to_owned(), value.to_vec()).await?)
     }
 
-    async fn delete(&self, key: &str) -> Result<()> {
+    async fn delete(&self, key: &str) -> Result<(), CapabilityError> {
         Ok(self.open().await?.delete(key.to_owned()).await?)
     }
 
-    async fn keys(&self, after: Option<&str>) -> Result<Page<String>> {
+    async fn keys(&self, after: Option<&str>) -> Result<Page<String>, CapabilityError> {
         let mut keys = self.open().await?.list_ids().await?;
         keys.retain(|key| after.is_none_or(|after| key.as_str() > after));
         keys.sort_unstable();
@@ -65,12 +64,12 @@ impl SecretStore for Handle {
         }
     }
 
-    async fn exists(&self, key: &str) -> Result<bool> {
+    async fn exists(&self, key: &str) -> Result<bool, CapabilityError> {
         Ok(self.open().await?.exists(key.to_owned()).await?)
     }
 }
 
-impl From<vault::Error> for Error {
+impl From<vault::Error> for CapabilityError {
     fn from(err: vault::Error) -> Self {
         match err {
             vault::Error::NoSuchStore => Self::new(ErrorKind::NotFound, "no such locker"),

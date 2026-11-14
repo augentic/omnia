@@ -3,30 +3,33 @@
 use bytes::Bytes;
 use omnia_wasi_docstore::{store, types};
 
-use crate::capability::{Error, ErrorKind, Page, Result};
 use crate::docstore::{ComparisonOp, Document, Exists, Filter, Query, ScalarValue, SortField};
-use crate::{DocumentDb, WasiProvider};
+use crate::{CapabilityError, DocumentDb, ErrorKind, Page, WasiProvider};
 
 impl DocumentDb for WasiProvider {
-    async fn get(&self, collection: &str, id: &str) -> Result<Option<Document>> {
+    async fn get(&self, collection: &str, id: &str) -> Result<Option<Document>, CapabilityError> {
         let document = store::get(collection.to_owned(), id.to_owned()).await?;
         Ok(document.map(Into::into))
     }
 
-    async fn insert(&self, collection: &str, document: &Document) -> Result<Result<(), Exists>> {
+    async fn insert(
+        &self, collection: &str, document: &Document,
+    ) -> Result<Result<(), Exists>, CapabilityError> {
         let inserted = store::insert(collection.to_owned(), document.into()).await?;
         Ok(inserted.map_err(|_already_exists| Exists))
     }
 
-    async fn put(&self, collection: &str, document: &Document) -> Result<()> {
+    async fn put(&self, collection: &str, document: &Document) -> Result<(), CapabilityError> {
         Ok(store::put(collection.to_owned(), document.into()).await?)
     }
 
-    async fn delete(&self, collection: &str, id: &str) -> Result<bool> {
+    async fn delete(&self, collection: &str, id: &str) -> Result<bool, CapabilityError> {
         Ok(store::delete(collection.to_owned(), id.to_owned()).await?)
     }
 
-    async fn query(&self, collection: &str, query: &Query) -> Result<Page<Document>> {
+    async fn query(
+        &self, collection: &str, query: &Query,
+    ) -> Result<Page<Document>, CapabilityError> {
         if let Some(filter) = &query.filter {
             filter.check()?;
         }
@@ -35,7 +38,7 @@ impl DocumentDb for WasiProvider {
     }
 }
 
-impl From<types::Error> for Error {
+impl From<types::Error> for CapabilityError {
     fn from(err: types::Error) -> Self {
         let (kind, message) = match err {
             types::Error::NotFound(message) => (ErrorKind::NotFound, message),

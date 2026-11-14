@@ -22,7 +22,7 @@ use serde::de::DeserializeOwned;
 use tracing::Instrument as _;
 
 use crate::api::{Client, DecodeError, Handler, Metadata};
-use crate::capability::{self, ErrorKind};
+use crate::{CapabilityError, ErrorKind};
 
 #[doc(hidden)]
 #[macro_export]
@@ -145,7 +145,7 @@ pub enum DeliveryError {
         /// - A [`vcs::Error`](crate::vcs::Error), [`plugins::Error`](crate::plugins::Error),
         ///   or [`model::Error`](crate::model::Error) maps as the
         ///   [`Error`](crate::Error) it converts into.
-        /// - A [`capability::Error`] keeps its [`kind`](capability::Error::kind).
+        /// - A [`CapabilityError`] keeps its [`kind`](CapabilityError::kind).
         /// - Any other error is [`Other`](ErrorKind::Other).
         kind: ErrorKind,
         /// The handler's error, as it displays.
@@ -342,8 +342,8 @@ fn error_kind(error: &(dyn Error + 'static)) -> ErrorKind {
     iter::successors(Some(error), |&error| error.source())
         .find_map(|error| {
             error
-                .downcast_ref::<capability::Error>()
-                .map(capability::Error::kind)
+                .downcast_ref::<CapabilityError>()
+                .map(CapabilityError::kind)
                 .or_else(|| crate::Error::from_domain(error).as_ref().map(crate::Error::kind))
         })
         .unwrap_or(ErrorKind::Other)

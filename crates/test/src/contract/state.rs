@@ -13,9 +13,8 @@
 use std::time::Duration;
 
 use bytes::Bytes;
-use omnia_sdk::capability::ErrorKind;
 use omnia_sdk::keyvalue::{Conflict, DEFAULT};
-use omnia_sdk::{StateStore, StateStoreExt};
+use omnia_sdk::{ErrorKind, StateStore, StateStoreExt};
 
 use super::expect_kind;
 

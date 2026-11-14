@@ -116,7 +116,7 @@ The router is also the program: `--version` answers the guest crate's `CARGO_PKG
 
 ## Capabilities
 
-The guest crate exposes trait-based abstractions for host capabilities. `WasiProvider` implements every one of them on `wasm32` by calling the WASI host; a handler bounds its `P` on the traits it uses and never names the provider. Every method answers a `capability::Result`, absence is `None`, and bytes are `Bytes`. A trait over named bindings (`Identity`, `SecretStore`, `SqlDb`, and `StateStore`) addresses the binding `default` from the provider's own handle, and `named(name)` answers a handle on another binding the deployment declares.
+The guest crate exposes trait-based abstractions for host capabilities. `WasiProvider` implements every one of them on `wasm32` by calling the WASI host; a handler bounds its `P` on the traits it uses and never names the provider. Every method fails with `CapabilityError`, absence is `None`, and bytes are `Bytes`. A trait over named bindings (`Identity`, `SecretStore`, `SqlDb`, and `StateStore`) addresses the binding `default` from the provider's own handle, and `named(name)` answers a handle on another binding the deployment declares.
 
 | Trait | Purpose |
 | ----- | ------- |
@@ -128,7 +128,7 @@ The guest crate exposes trait-based abstractions for host capabilities. `WasiPro
 | `SqlDb` | Run parameterized SQL against one database: `query` answers rows, `execute` the number of rows changed, and `batch` one count per `Statement`. `SqlDbExt::query_as` decodes each row with `FromRow`. |
 | `WebSockets` | Send data to every connected WebSocket, or to the sockets named. |
 | `Plugins` | Request guest loads through `omnia:plugins/loader`: name a `Location` — one of the deployment's declared guests, a component path beneath one of its read-only mounts, or a registry package — with an optional `Digest` pin, and receive a typed `Plugin` handle once it is active. The `plugins` module carries the `Location` and `Digest` types and typed refusals convertible into `Error`. |
-| `BlobStore` | Object storage: the ten primitives an implementor writes, plus five provided operations (`exists`, `delete_many`, `clear`, `copy`, `rename`) composed from them by default and one host call each on `WasiProvider`. `get_range` reads a half-open byte range, and `list` answers a `capability::Page` of object metadata. |
+| `BlobStore` | Object storage: the ten primitives an implementor writes, plus five provided operations (`exists`, `delete_many`, `clear`, `copy`, `rename`) composed from them by default and one host call each on `WasiProvider`. `get_range` reads a half-open byte range, and `list` answers a `Page` of object metadata. |
 | `DocumentDb` | Document CRUD and filtered, sorted, paginated queries. `insert` answers `Ok(Err(Exists))` for an id already stored, and `DocumentDbExt::get_as` decodes a JSON body. |
 | `SecretStore` | Read, write, delete, check, and list secrets in one locker. |
 | `Vcs` | Version-control operations over lent repository and working-copy mounts. |
@@ -142,9 +142,9 @@ A crate declares a capability of its own with `#[omnia_sdk::capability]`, and a 
 
 ```rust,ignore
 use omnia_sdk::messaging::Message;
-use omnia_sdk::{Publisher, StateStore};
+use omnia_sdk::{CapabilityError, Publisher, StateStore};
 
-async fn process(provider: &(impl StateStore + Publisher)) -> omnia_sdk::capability::Result<()> {
+async fn process(provider: &(impl StateStore + Publisher)) -> Result<(), CapabilityError> {
     // store some state
     provider.set("last_run", b"now", None).await?;
 
@@ -174,7 +174,7 @@ fn validate(name: &str) -> Result<(), Error> {
 }
 ```
 
-Every capability call fails with a `capability::Error`. Its `ErrorKind` is one of `NotFound`, `Denied`, `Invalid`, `Unsupported`, `Unavailable`, or `Other`, and a caller matches on `kind()` rather than the message. The [provider contract](https://github.com/augentic/omnia/blob/main/docs/reference/provider-contract.md#enforce-the-argument-rules) says which interfaces carry each kind exactly. `?` converts it into `Error`: `Unavailable` becomes a `BadGateway` and every other kind a `ServerError`, through any `anyhow` context wrapped around it.
+Every capability call fails with a `CapabilityError`. Its `ErrorKind` is one of `NotFound`, `Denied`, `Invalid`, `Unsupported`, `Unavailable`, or `Other`, and a caller matches on `kind()` rather than the message. The [provider contract](https://github.com/augentic/omnia/blob/main/docs/reference/provider-contract.md#enforce-the-argument-rules) says which interfaces carry each kind exactly. `?` converts it into `Error`: `Unavailable` becomes a `BadGateway` and every other kind a `ServerError`, through any `anyhow` context wrapped around it.
 
 ## Architecture
 

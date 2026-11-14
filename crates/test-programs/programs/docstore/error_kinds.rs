@@ -6,9 +6,8 @@
 
 use std::fmt::Debug;
 
-use omnia_sdk::capability::{ErrorKind, Result};
 use omnia_sdk::docstore::Document;
-use omnia_sdk::{DocumentDb as _, WasiProvider};
+use omnia_sdk::{CapabilityError, DocumentDb as _, ErrorKind, WasiProvider};
 
 omnia_sdk::api::command::export!(scenario);
 
@@ -31,7 +30,7 @@ async fn scenario() {
     }
 }
 
-fn expect_kind<T: Debug>(result: Result<T>, kind: ErrorKind) {
+fn expect_kind<T: Debug>(result: Result<T, CapabilityError>, kind: ErrorKind) {
     match result {
         Ok(value) => panic!("returned {value:?}, not a `{kind}` failure"),
         Err(err) => assert_eq!(err.kind(), kind, "{err}"),

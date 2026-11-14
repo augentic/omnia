@@ -3,7 +3,7 @@
 
 use std::iter;
 
-use omnia_sdk::capability::ErrorKind;
+use omnia_sdk::ErrorKind;
 use omnia_sdk::docstore::Filter;
 use serde_json::json;
 

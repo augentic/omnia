@@ -40,13 +40,13 @@ Unreleased
 - `omnia:sql`, the Omnia-owned interface `SqlDb` calls. `WasiSql` serves it
   beside the `wasi:sql` draft over one `Connection`. Each call names its
   database, and `batch` runs its statements in one transaction.
-- `omnia_sdk::capability::{Error, ErrorKind, Result}`, the error every
-  capability trait returns. `ErrorKind` is one of `NotFound`, `Denied`,
-  `Invalid`, `Unsupported`, `Unavailable`, and `Other`. `?` converts it into
+- `omnia_sdk::{CapabilityError, ErrorKind}`, the error every capability
+  trait returns. `ErrorKind` is one of `NotFound`, `Denied`, `Invalid`,
+  `Unsupported`, `Unavailable`, and `Other`. `?` converts it into
   `omnia_sdk::Error`, as a `502` for `Unavailable` and a `500` otherwise.
-- `omnia_sdk::capability::Page`, one page of a listing and the cursor that
-  resumes it. `BlobStore::list`, `DocumentDb::query`, and
-  `SecretStore::keys` answer one.
+- `omnia_sdk::Page`, one page of a listing and the cursor that resumes it.
+  `BlobStore::list`, `DocumentDb::query`, and `SecretStore::keys` answer
+  one.
 - `omnia_test::contract::state` (behind the `contract` feature, natively
   and on `wasm32`), the `StateStore` behaviour rows: one generic `async fn`
   per invariant, run natively over `omnia_test::guest::Memory` and in a
@@ -139,7 +139,7 @@ Unreleased
     `omnia_sdk::identity::AccessToken`.
   - A `DEFAULT` binding name in `omnia_sdk::{identity, keyvalue, sql,
     vault}`, and `omnia_sdk::keyvalue::Conflict`.
-- Every capability trait returns `capability::Result`. A trait over named
+- Every capability trait fails with `CapabilityError`. A trait over named
   bindings (`Identity`, `SecretStore`, `SqlDb`, and `StateStore`) addresses
   `default` until `named(name)` selects another name the deployment
   declares. Migrating a 0.37 guest:
@@ -221,7 +221,7 @@ Unreleased
   A backend picks a failure's kind by returning an
   `omnia_wasi_blobstore::Error`, which implements `std::error::Error`.
 - `StateStore` calls `omnia:keyvalue`, one host call per method:
-  - Every method returns `capability::Result`, and `get` answers
+  - Every method fails with `CapabilityError`, and `get` answers
     `Option<Bytes>`.
   - `set` answers `()`, and a TTL is an `Option<Duration>`. A zero TTL
     fails with `ErrorKind::Invalid` and writes nothing.
@@ -233,7 +233,7 @@ Unreleased
   - A portable key works on every backend: it holds only ASCII letters,
     digits, `.`, `_`, and `-`, and neither starts nor ends with `.`. A
     backend may reject any other key with `ErrorKind::Invalid`.
-- `StateStoreExt::{get_json, set_json}` return `capability::Result`, and a
+- `StateStoreExt::{get_json, set_json}` fail with `CapabilityError`, and a
   value that does not encode or decode fails with `ErrorKind::Invalid`.
 - `StateStore` opens the `default` bucket, which was `cache`. The host
   stores a guest's bytes as they are and expires them itself, so a value a
@@ -317,7 +317,7 @@ Unreleased
   feature, link no `wasmtime`. `omnia-wasi-docstore` is a `wasm32`-only
   dependency of the SDK, and `MemoryDocs` keeps its own in-memory store.
 - `Filter::on_date` accepts only a zero-padded `YYYY-MM-DD` date, so
-  `2024-1-5` is an error. The error is a `capability::Error` of kind
+  `2024-1-5` is an error. The error is a `CapabilityError` of kind
   `Invalid`, which was an `anyhow::Error`.
 - An `omnia_sdk::vcs::Error`, `plugins::Error`, or `model::Error` under
   `anyhow` context converts into `omnia_sdk::Error` with the code and
@@ -327,7 +327,7 @@ Unreleased
     broker drops.
   - `Failed { kind, message }` is a handler error, which a broker
     redelivers when `kind` is `Unavailable`. The `kind` comes from the
-    first `omnia_sdk::Error`, `capability::Error`, `vcs::Error`,
+    first `omnia_sdk::Error`, `CapabilityError`, `vcs::Error`,
     `plugins::Error`, or `model::Error` in the error's source chain.
 
   Over the draft `wasi:messaging`, both still cross as `error.other` with

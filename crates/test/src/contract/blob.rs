@@ -15,8 +15,7 @@
 
 use std::ops::Range;
 
-use omnia_sdk::BlobStore;
-use omnia_sdk::capability::ErrorKind;
+use omnia_sdk::{BlobStore, ErrorKind};
 
 use super::expect_kind;
 

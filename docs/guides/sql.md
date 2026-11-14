@@ -64,7 +64,7 @@ events.execute("DELETE FROM event WHERE agency_id = $1", &[Value::from(id)]).awa
 
 The database name is what the backend resolves, and both backends refuse a name they do not declare. `SqlDefault` declares `default` plus the names in `SQL_DATABASES`, and `omnia-postgres` maps `default` to `POSTGRES_URL` and each name in `POSTGRES_POOLS` to `POSTGRES_URL__<NAME>`.
 
-Every method fails with a `capability::Error`, which `?` converts into `omnia_sdk::Error`. Its kind is the one the backend chose. An undeclared database fails with `ErrorKind::NotFound`, and a statement that does not prepare or bind with `ErrorKind::Invalid`. The [reference](../reference/sql.md#errors) lists every kind.
+Every method fails with a `CapabilityError`, which `?` converts into `omnia_sdk::Error`. Its kind is the one the backend chose. An undeclared database fails with `ErrorKind::NotFound`, and a statement that does not prepare or bind with `ErrorKind::Invalid`. The [reference](../reference/sql.md#errors) lists every kind.
 
 ### Mapping rows
 

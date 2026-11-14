@@ -7,7 +7,7 @@ use bytes::Bytes;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
-use crate::capability::{Error, ErrorKind, Result};
+use crate::{CapabilityError, ErrorKind};
 
 /// Store and retrieve key-value state in a deployment's buckets.
 ///
@@ -39,15 +39,16 @@ pub trait StateStore: Send + Sync {
     type Named: StateStore<Named = Self::Named>;
 
     /// Retrieve the value at `key`, or `None` when it is absent.
-    fn get(&self, key: &str) -> impl Future<Output = Result<Option<Bytes>>> + Send;
+    fn get(&self, key: &str)
+    -> impl Future<Output = Result<Option<Bytes>, CapabilityError>> + Send;
 
     /// Store `value` at `key`, replacing any value and its lifetime.
     fn set(
         &self, key: &str, value: &[u8], ttl: Option<Duration>,
-    ) -> impl Future<Output = Result<()>> + Send;
+    ) -> impl Future<Output = Result<(), CapabilityError>> + Send;
 
     /// Delete the value at `key`, succeeding when it is already absent.
-    fn delete(&self, key: &str) -> impl Future<Output = Result<()>> + Send;
+    fn delete(&self, key: &str) -> impl Future<Output = Result<(), CapabilityError>> + Send;
 
     /// Replace the value at `key` with `new` while it still equals `current`.
     ///
@@ -56,7 +57,7 @@ pub trait StateStore: Send + Sync {
     /// as a [`Conflict`]. There is no retry loop.
     fn compare_and_swap(
         &self, key: &str, current: Option<&[u8]>, new: &[u8], ttl: Option<Duration>,
-    ) -> impl Future<Output = Result<Result<(), Conflict>>> + Send;
+    ) -> impl Future<Output = Result<Result<(), Conflict>, CapabilityError>> + Send;
 
     /// Atomically add `delta` to the counter at `key` and return its new value.
     ///
@@ -65,7 +66,7 @@ pub trait StateStore: Send + Sync {
     /// [`get`](Self::get).
     fn increment(
         &self, key: &str, delta: i64, ttl: Option<Duration>,
-    ) -> impl Future<Output = Result<i64>> + Send;
+    ) -> impl Future<Output = Result<i64, CapabilityError>> + Send;
 
     /// A handle to the bucket `name` on the same provider.
     fn named(&self, name: &str) -> Self::Named;
@@ -81,13 +82,14 @@ pub trait StateStoreExt: StateStore {
     /// [`ErrorKind::Invalid`].
     fn get_json<T: DeserializeOwned>(
         &self, key: &str,
-    ) -> impl Future<Output = Result<Option<T>>> + Send {
+    ) -> impl Future<Output = Result<Option<T>, CapabilityError>> + Send {
         async move {
             let Some(bytes) = self.get(key).await? else {
                 return Ok(None);
             };
             serde_json::from_slice(&bytes).map(Some).map_err(|err| {
-                Error::new(ErrorKind::Invalid, format!("decoding `{key}`")).with_source(err)
+                CapabilityError::new(ErrorKind::Invalid, format!("decoding `{key}`"))
+                    .with_source(err)
             })
         }
     }
@@ -97,10 +99,11 @@ pub trait StateStoreExt: StateStore {
     /// A value that does not serialize fails with [`ErrorKind::Invalid`].
     fn set_json<T: Serialize + Sync + ?Sized>(
         &self, key: &str, value: &T, ttl: Option<Duration>,
-    ) -> impl Future<Output = Result<()>> + Send {
+    ) -> impl Future<Output = Result<(), CapabilityError>> + Send {
         async move {
             let bytes = serde_json::to_vec(value).map_err(|err| {
-                Error::new(ErrorKind::Invalid, format!("encoding `{key}`")).with_source(err)
+                CapabilityError::new(ErrorKind::Invalid, format!("encoding `{key}`"))
+                    .with_source(err)
             })?;
             self.set(key, &bytes, ttl).await
         }

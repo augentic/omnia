@@ -5,9 +5,8 @@ use std::borrow::Cow;
 use bytes::Bytes;
 use omnia_wasi_sql::omnia::database;
 
-use crate::capability::{Error, ErrorKind, Result};
 use crate::sql::{DEFAULT, Field, Row, Statement, Value};
-use crate::{HasSqlDb, SqlDb, WasiProvider};
+use crate::{CapabilityError, ErrorKind, HasSqlDb, SqlDb, WasiProvider};
 
 static DEFAULT_HANDLE: Handle = Handle {
     name: Cow::Borrowed(DEFAULT),
@@ -32,18 +31,18 @@ pub struct Handle {
 impl SqlDb for Handle {
     type Named = Self;
 
-    async fn query(&self, sql: &str, params: &[Value]) -> Result<Vec<Row>> {
+    async fn query(&self, sql: &str, params: &[Value]) -> Result<Vec<Row>, CapabilityError> {
         let params = params.iter().cloned().map(Into::into).collect();
         let rows = database::query(self.name.to_string(), sql.to_owned(), params).await?;
         Ok(rows.into_iter().map(Into::into).collect())
     }
 
-    async fn execute(&self, sql: &str, params: &[Value]) -> Result<u64> {
+    async fn execute(&self, sql: &str, params: &[Value]) -> Result<u64, CapabilityError> {
         let params = params.iter().cloned().map(Into::into).collect();
         Ok(database::execute(self.name.to_string(), sql.to_owned(), params).await?)
     }
 
-    async fn batch(&self, statements: &[Statement]) -> Result<Vec<u64>> {
+    async fn batch(&self, statements: &[Statement]) -> Result<Vec<u64>, CapabilityError> {
         let statements = statements.iter().cloned().map(Into::into).collect();
         Ok(database::batch(self.name.to_string(), statements).await?)
     }
@@ -55,7 +54,7 @@ impl SqlDb for Handle {
     }
 }
 
-impl From<database::Error> for Error {
+impl From<database::Error> for CapabilityError {
     fn from(err: database::Error) -> Self {
         let (kind, message) = match err {
             database::Error::NotFound(message) => (ErrorKind::NotFound, message),

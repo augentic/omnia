@@ -9,8 +9,6 @@
 //! - `sql::Handle`
 //! - `vault::Handle`
 
-#![cfg(all(target_arch = "wasm32", target_os = "wasi"))]
-
 mod blobstore;
 mod config;
 mod docstore;

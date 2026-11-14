@@ -9,8 +9,7 @@
 use std::fmt::Debug;
 use std::time::Duration;
 
-use omnia_sdk::capability::{ErrorKind, Result};
-use omnia_sdk::{StateStore as _, WasiProvider};
+use omnia_sdk::{CapabilityError, ErrorKind, StateStore as _, WasiProvider};
 use omnia_wasi_keyvalue::store;
 
 omnia_sdk::api::command::export!(scenario);
@@ -39,7 +38,7 @@ async fn scenario() {
     assert!(matches!(denied, Err(store::Error::AccessDenied)), "{denied:?}");
 }
 
-fn expect_kind<T: Debug>(result: Result<T>, kind: ErrorKind) {
+fn expect_kind<T: Debug>(result: Result<T, CapabilityError>, kind: ErrorKind) {
     match result {
         Ok(value) => panic!("returned {value:?}, not a `{kind}` failure"),
         Err(err) => assert_eq!(err.kind(), kind, "{err}"),

@@ -18,10 +18,10 @@ pub mod state;
 
 use std::fmt::Debug;
 
-use omnia_sdk::capability::{ErrorKind, Result};
+use omnia_sdk::{CapabilityError, ErrorKind};
 
 #[track_caller]
-fn expect_kind<T: Debug>(result: Result<T>, kind: ErrorKind, call: &str) {
+fn expect_kind<T: Debug>(result: Result<T, CapabilityError>, kind: ErrorKind, call: &str) {
     match result {
         Ok(value) => panic!("{call} returned {value:?}, not a `{kind}` failure"),
         Err(err) => assert_eq!(err.kind(), kind, "{call} failed with `{err}`"),

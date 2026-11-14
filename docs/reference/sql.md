@@ -73,7 +73,7 @@ A `NULL` binds as its column's case, such as `int64(none)` for a `BIGINT` column
 | `unavailable` | The database did not answer, or the call exceeded its bound. |
 | `other` | Any other failure. |
 
-`omnia_sdk::capability::ErrorKind` has one kind per case, and the SDK maps each case to its kind.
+`omnia_sdk::ErrorKind` has one kind per case, and the SDK maps each case to its kind.
 
 ## The `wasi:sql` draft
 

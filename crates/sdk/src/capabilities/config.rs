@@ -4,7 +4,7 @@ use std::fmt;
 use std::future::Future;
 use std::str::FromStr;
 
-use crate::capability::{Error, ErrorKind, Result};
+use crate::{CapabilityError, ErrorKind};
 
 /// Read the configuration a deployment sets for its guest.
 ///
@@ -13,7 +13,9 @@ use crate::capability::{Error, ErrorKind, Result};
 #[omnia_guest_macros::capability]
 pub trait Config: Send + Sync {
     /// The value set for `key`, or `None` when it is unset.
-    fn get(&self, key: &str) -> impl Future<Output = Result<Option<String>>> + Send;
+    fn get(
+        &self, key: &str,
+    ) -> impl Future<Output = Result<Option<String>, CapabilityError>> + Send;
 }
 
 /// Typed reads over any [`Config`].
@@ -24,22 +26,22 @@ pub trait ConfigExt: Config {
     ///
     /// An unset key fails with [`ErrorKind::NotFound`], and a value that does
     /// not parse as `T` with [`ErrorKind::Invalid`].
-    fn require<T>(&self, key: &str) -> impl Future<Output = Result<T>> + Send
+    fn require<T>(&self, key: &str) -> impl Future<Output = Result<T, CapabilityError>> + Send
     where
         T: FromStr,
         T::Err: fmt::Display,
     {
         async move {
-            self.parse(key)
-                .await?
-                .ok_or_else(|| Error::new(ErrorKind::NotFound, format!("`{key}` is not set")))
+            self.parse(key).await?.ok_or_else(|| {
+                CapabilityError::new(ErrorKind::NotFound, format!("`{key}` is not set"))
+            })
         }
     }
 
     /// The value set for `key` parsed as `T`, or `None` when it is unset.
     ///
     /// A value that does not parse as `T` fails with [`ErrorKind::Invalid`].
-    fn parse<T>(&self, key: &str) -> impl Future<Output = Result<Option<T>>> + Send
+    fn parse<T>(&self, key: &str) -> impl Future<Output = Result<Option<T>, CapabilityError>> + Send
     where
         T: FromStr,
         T::Err: fmt::Display,
@@ -48,10 +50,9 @@ pub trait ConfigExt: Config {
             let Some(value) = self.get(key).await? else {
                 return Ok(None);
             };
-            value
-                .parse::<T>()
-                .map(Some)
-                .map_err(|err| Error::new(ErrorKind::Invalid, format!("`{key}` is invalid: {err}")))
+            value.parse::<T>().map(Some).map_err(|err| {
+                CapabilityError::new(ErrorKind::Invalid, format!("`{key}` is invalid: {err}"))
+            })
         }
     }
 }
