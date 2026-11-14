@@ -15,7 +15,7 @@ use std::fmt;
 
 use clap::{Args, ValueEnum};
 use omnia_sdk::api::command::{self, Render};
-use omnia_sdk::api::{Client, Context, Handlers, Router};
+use omnia_sdk::api::{Context, Handlers, Router};
 use omnia_sdk::{Error, bad_gateway, bad_request, not_found, server_error};
 use serde::Serialize;
 
@@ -125,7 +125,7 @@ fn command_router(provider: Provider) -> Router<Provider> {
         .command("add", add)
         .command("env", env)
         .command("fail", fail)
-        .with_state(Client::new(provider))
+        .with_state(provider)
         .name("cli")
         .about("Omnia wasi:cli/command example")
 }

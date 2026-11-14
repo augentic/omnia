@@ -2,8 +2,7 @@
 //!
 //! Demonstrates the `omnia:docstore` document store interface: CRUD on a
 //! single `stops` collection plus one query endpoint showing filters
-//! (`contains`, `eq`, `gte`/`lte`), sorting, limits, and continuation-token
-//! pagination.
+//! (`contains`, `eq`, `gte`/`lte`), sorting, limits, and cursor pagination.
 
 #![cfg(target_arch = "wasm32")]
 
@@ -11,8 +10,8 @@ use anyhow::{Context, Result, anyhow};
 use axum::extract::{Path, Query};
 use axum::routing::get;
 use axum::{Json, Router};
-use omnia_sdk::docstore::{Document, Filter, QueryOptions, SortField};
-use omnia_sdk::{DocumentStore, WasiProvider};
+use omnia_sdk::docstore::{self, Document, Filter, SortField};
+use omnia_sdk::{DocumentDb, WasiProvider, bad_request};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tracing::Level;
@@ -60,11 +59,10 @@ struct StopQuery {
 #[axum::debug_handler]
 #[omnia_wasi_otel::instrument]
 async fn create_stop(Json(req): Json<CreateStopRequest>) -> omnia_sdk::Result<Json<Value>> {
-    let doc = Document {
-        id: req.id.clone(),
-        data: serde_json::to_vec(&req.stop).context("serializing stop")?,
-    };
-    WasiProvider.insert("stops", &doc).await.context("inserting stop")?;
+    let doc = Document::json(req.id.clone(), &req.stop).context("serializing stop")?;
+    if WasiProvider.insert("stops", &doc).await.context("inserting stop")?.is_err() {
+        return Err(bad_request!("stop {} already exists", req.id));
+    }
     Ok(Json(json!({ "stop": req.stop, "id": req.id })))
 }
 
@@ -76,7 +74,7 @@ async fn get_stop(Path(id): Path<String>) -> omnia_sdk::Result<Json<Value>> {
         .await
         .context("fetching stop")?
         .ok_or_else(|| anyhow!("stop not found"))?;
-    let stop: Stop = serde_json::from_slice(&doc.data).context("deserializing stop")?;
+    let stop: Stop = doc.decode().context("deserializing stop")?;
     Ok(Json(json!({ "id": doc.id, "stop": stop })))
 }
 
@@ -85,10 +83,7 @@ async fn get_stop(Path(id): Path<String>) -> omnia_sdk::Result<Json<Value>> {
 async fn upsert_stop(
     Path(id): Path<String>, Json(stop): Json<Stop>,
 ) -> omnia_sdk::Result<Json<Value>> {
-    let doc = Document {
-        id: id.clone(),
-        data: serde_json::to_vec(&stop).context("serializing stop")?,
-    };
+    let doc = Document::json(id.clone(), &stop).context("serializing stop")?;
     WasiProvider.put("stops", &doc).await.context("upserting stop")?;
     Ok(Json(json!({ "id": id, "stop": stop })))
 }
@@ -123,34 +118,28 @@ async fn list_stops(Query(p): Query<StopQuery>) -> omnia_sdk::Result<Json<Value>
 
     let filter = if filters.is_empty() { None } else { Some(Filter::and(filters)) };
 
-    let result = WasiProvider
-        .query(
-            "stops",
-            QueryOptions {
-                filter,
-                order_by: vec![SortField {
-                    field: "stop_name".into(),
-                    descending: false,
-                }],
-                limit: p.limit,
-                continuation: p.continuation,
-                ..Default::default()
-            },
-        )
-        .await
-        .context("querying stops")?;
+    let query = docstore::Query {
+        filter,
+        order_by: vec![SortField {
+            field: "stop_name".into(),
+            descending: false,
+        }],
+        limit: p.limit,
+        after: p.continuation,
+        ..Default::default()
+    };
+    let page = WasiProvider.query("stops", &query).await.context("querying stops")?;
 
-    let stops = result
-        .documents
+    let stops = page
+        .items
         .iter()
         .map(|doc| {
-            let mut val: Value =
-                serde_json::from_slice(&doc.data).context("deserializing document")?;
+            let mut val: Value = doc.decode().context("deserializing document")?;
             if let Value::Object(ref mut m) = val {
                 m.insert("id".to_string(), Value::String(doc.id.clone()));
             }
             Ok(val)
         })
         .collect::<Result<Vec<_>>>()?;
-    Ok(Json(json!({ "stops": stops, "continuation": result.continuation })))
+    Ok(Json(json!({ "stops": stops, "continuation": page.next })))
 }

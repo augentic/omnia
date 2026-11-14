@@ -133,10 +133,7 @@ impl Locker for InMemLocker {
         async move {
             let ids = {
                 let store = store.read();
-                store
-                    .get(&locker_id)
-                    .map(|locker| locker.keys().cloned().collect())
-                    .unwrap_or_default()
+                store.get(&locker_id).map_or_default(|locker| locker.keys().cloned().collect())
             };
             Ok(ids)
         }

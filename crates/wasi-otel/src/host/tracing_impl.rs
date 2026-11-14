@@ -93,7 +93,7 @@ pub fn resource_spans(
             entity_refs: vec![],
         }),
         scope_spans,
-        schema_url: resource.schema_url().map(Into::into).unwrap_or_default(),
+        schema_url: resource.schema_url().map_or_default(Into::into),
     }]
 }
 

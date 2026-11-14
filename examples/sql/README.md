@@ -2,7 +2,7 @@
 
 Demonstrates `wasi-sql` using the default (in-memory) implementation: raw
 prepared statements for schema creation, then CRUD over a single `agency`
-table with hand-written parameterized SQL executed through the `TableStore`
+table with hand-written parameterized SQL executed through the `SqlDb`
 capability, mapping result `Row`s back into a Rust struct.
 
 ## Quick Start
@@ -38,10 +38,10 @@ curl -X DELETE http://localhost:8080/agencies/1
 
 ## Features Demonstrated
 
-- **Prepared statements** — schema creation via `Statement::prepare` + `readwrite::exec`
-- **`TableStore`** — a unit `Provider` implementing the capability, executing SQL with `query` / `exec`
-- **Parameterized filters** — `$1`, `$2`, ... placeholders bound from `DataType` values
-- **Row mapping** — reading `Row` fields by name into a `Serialize` struct
+- **Prepared statements** — schema creation via `Statement::prepare` + `readwrite::exec` on the `default` database
+- **`SqlDb`** — `WasiProvider` implementing the capability, executing SQL with `query_as` / `execute`
+- **Parameterized filters** — `$1`, `$2`, ... placeholders bound from `Value`s
+- **Row mapping** — decoding each `Row` into a `Serialize` struct with `FromRow`
 
 See the [SQL guide](../../docs/guides/sql.md) for raw `wasi:sql` usage,
-the `TableStore` capability, and backend selection.
+the `SqlDb` capability, and backend selection.

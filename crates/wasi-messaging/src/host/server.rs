@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Result, anyhow};
 use futures::FutureExt as _;
@@ -10,6 +11,9 @@ use tracing::{Instrument, info_span, instrument};
 use crate::host::WasiMessaging;
 use crate::host::generated::MessagingRequestReplyIndices;
 use crate::host::resource::{Endpoint, HandleError, Handler, Message};
+
+// the metadata entry omnia-sdk's `Metadata` reads a guest's deadline from
+const DEADLINE: &str = "deadline";
 
 #[instrument("messaging-server", skip(state))]
 pub async fn run<B>(state: &Runtime<B>) -> Result<()>
@@ -85,7 +89,10 @@ where
     ///
     /// A topic with no route is dropped silently with `Ok`; the message has
     /// no handler in this deployment. Every message is counted, and every
-    /// failure logged and counted, before it is returned.
+    /// failure logged and counted, before it is returned. The guest receives
+    /// the message with its `deadline` metadata entry set to the instant the
+    /// guest timeout expires, in milliseconds since the Unix epoch, replacing
+    /// any the backend delivered.
     ///
     /// # Errors
     ///
@@ -110,7 +117,7 @@ where
         outcome
     }
 
-    async fn deliver(&self, message: Message) -> Result<(), HandleError> {
+    async fn deliver(&self, mut message: Message) -> Result<(), HandleError> {
         // resolve the guest by topic; unmatched is dropped, not an error
         let Some(guest_id) = self.routing.resolve(&message.topic) else {
             tracing::debug!(topic = %message.topic, "no route for topic; dropping message");
@@ -130,6 +137,12 @@ where
                 "routed guest `{guest_id}` does not export the messaging handler: {error:#}"
             ))
         })?;
+
+        // stamp the guest's deadline over any the delivery carried, in any case
+        let deadline = deadline_millis(self.state.options().guest_timeout);
+        let metadata = message.metadata.get_or_insert_default();
+        metadata.retain(|name, _| !name.eq_ignore_ascii_case(DEADLINE));
+        metadata.insert(DEADLINE.to_owned(), deadline.to_string());
 
         let mut store_data = self.state.store();
         let msg_res =
@@ -175,4 +188,10 @@ where
         let handler = self.clone();
         async move { handler.handle(message).await }.boxed()
     }
+}
+
+// saturates rather than panics, so no configured timeout can fail a delivery
+fn deadline_millis(timeout: Duration) -> u64 {
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
+    u64::try_from(now.saturating_add(timeout).as_millis()).unwrap_or(u64::MAX)
 }

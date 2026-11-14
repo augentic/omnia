@@ -56,7 +56,7 @@ impl ModelClient for ModelDefault {
 
 // Echo the last message's content, shaped to the request's `format`.
 fn echo(request: &Request) -> Result<String> {
-    let prompt = request.messages.last().map(|message| message.content.clone()).unwrap_or_default();
+    let prompt = request.messages.last().map_or_default(|message| message.content.clone());
     match &request.format {
         Format::Text => Ok(prompt),
         Format::Json => Ok(json!({ "echo": prompt }).to_string()),

@@ -220,7 +220,7 @@ pub async fn export(buffer: &SpanBuffer) {
 
 // A `MutexGuard` binding inside `export` would make its future `!Send`.
 fn take(buffer: &SpanBuffer) -> Vec<wasi::SpanData> {
-    buffer.lock().map(|mut spans| std::mem::take(&mut *spans)).unwrap_or_default()
+    buffer.lock().map_or_default(|mut spans| std::mem::take(&mut *spans))
 }
 
 impl From<SpanContext> for wasi::SpanContext {

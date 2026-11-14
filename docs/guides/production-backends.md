@@ -63,9 +63,12 @@ Every backend reads its connection settings from environment variables at startu
 | Azure Blob | `AZURE_BLOB_ENDPOINT`; service-principal via `AZURE_TENANT_ID`/`AZURE_CLIENT_ID`/`AZURE_CLIENT_SECRET`, else `az login` |
 | Azure Table | `AZURE_STORAGE_ACCOUNT`, `AZURE_STORAGE_KEY`, optional `AZURE_TABLE_ENDPOINT` (Azurite) |
 | Azure Key Vault | `AZURE_KEYVAULT_URL` + Azure credentials |
+| Azure Identity | `IDENTITY_CLIENT_ID` (the user-assigned identity behind `default`; unset, the system-assigned one); named identities via `IDENTITY_NAMES` + `IDENTITY_CLIENT_ID__<NAME>` |
 | OpenTelemetry | `OTEL_EXPORTER_OTLP_ENDPOINT` (unset exports nothing) |
 
 Each crate's README in the `omnia-backends` repository documents its complete variable set.
+
+A guest addresses a binding by name, and a provider's own handle uses the name `default`. A production backend serves `default` from its main connection and each further name from the configuration that declares it. `omnia-postgres`, for one, serves `default` from `POSTGRES_URL` and a guest's `SqlDb::named("eventstore")` from `POSTGRES_URL__EVENTSTORE`, once `POSTGRES_POOLS` lists `eventstore`.
 
 ## Verifying against the real service
 

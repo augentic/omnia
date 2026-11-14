@@ -90,7 +90,14 @@ impl<T> HostOutgoingValueWithStore<T> for WasiBlobStore {
 
 impl Host for HostView<'_, dyn BlobStoreClient> {
     fn convert_error(&mut self, err: Error) -> wasmtime::Result<String> {
-        Ok(err.to_string())
+        match err {
+            Error::NotFound(message)
+            | Error::Denied(message)
+            | Error::Invalid(message)
+            | Error::Unsupported(message)
+            | Error::Unavailable(message)
+            | Error::Other(message) => Ok(message),
+        }
     }
 }
 impl HostIncomingValue for HostView<'_, dyn BlobStoreClient> {}

@@ -1,8 +1,8 @@
 # DocStore Example
 
-Demonstrates `omnia:docstore` using the default in-memory backend: CRUD on a
-single `stops` collection plus one query endpoint with filters, sorting,
-limits, and continuation-token pagination.
+Demonstrates `omnia:docstore` through the `DocumentDb` capability, using the
+default in-memory backend: CRUD on a single `stops` collection plus one query
+endpoint with filters, sorting, limits, and cursor pagination.
 
 ## Quick Start
 
@@ -65,7 +65,8 @@ curl -s -X DELETE http://localhost:8080/stops/stop-003
 ```
 
 The query endpoint builds `Filter::and(...)` from whichever query params are
-present and sorts by `stop_name`. See the [Document Store
+present, sorts by `stop_name`, and passes `continuation` as the `Query`'s
+`after` cursor. A page's `next` cursor comes back as `continuation`. See the [Document Store
 guide](../../docs/guides/document-store.md) for the full filter vocabulary
 (`ne`, `in_list`, `is_null`, `or`, `not`, `on_date`, ...) and the
 [docstore reference](../../docs/reference/docstore.md) for the interface

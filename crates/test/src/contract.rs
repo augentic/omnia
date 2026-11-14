@@ -1,0 +1,35 @@
+//! Behaviour rows every provider of a capability meets.
+//!
+//! A row is one invariant of a capability trait, written once as a generic
+//! `async fn` that panics when the provider breaks it. A provider's suite
+//! runs every row of the traits it implements:
+//!
+//! - `omnia-test` runs them natively over its stateful doubles.
+//! - A guest runs them over `omnia_sdk::WasiProvider`, against a real host and
+//!   its backend.
+//!
+//! The rows are the testable half of the
+//! [provider obligations](https://github.com/augentic/omnia/blob/main/docs/reference/provider-contract.md#obligations).
+
+pub mod blob;
+pub mod document;
+pub mod sql;
+pub mod state;
+
+use std::fmt::Debug;
+
+use omnia_sdk::{Error, Result};
+
+#[track_caller]
+fn expect_code<T: Debug>(result: Result<T>, code: &str, call: &str) {
+    match result {
+        Ok(value) => panic!("{call} returned {value:?}, not a `{code}` failure"),
+        Err(err) => assert!(is_code(&err, code), "{call} failed with `{err}`, not `{code}`"),
+    }
+}
+
+// a capability failure the rows expect is a `ServerError`, so a provider
+// answering with another variant breaks the row even under the right code
+fn is_code(err: &Error, code: &str) -> bool {
+    matches!(err, Error::ServerError { code: found, .. } if found == code)
+}

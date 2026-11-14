@@ -8,6 +8,7 @@ use std::future::Future;
 use std::pin::{Pin, pin};
 use std::sync::Arc;
 use std::task::{Context as TaskContext, Poll};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow};
 use bytes::Bytes;
@@ -16,7 +17,7 @@ use http::uri::{PathAndQuery, Uri};
 use http_body_util::combinators::UnsyncBoxBody;
 use http_body_util::{BodyExt, Full};
 use hyper::body::{Body, Frame, SizeHint};
-use hyper::header::{FORWARDED, HOST};
+use hyper::header::{FORWARDED, HOST, HeaderValue};
 use hyper::service::service_fn;
 use hyper_util::rt::TokioExecutor;
 use hyper_util::server::conn::auto;
@@ -37,6 +38,9 @@ use super::{WasiHttp, WasiHttpCtxView};
 pub type OutgoingBody = UnsyncBoxBody<Bytes, anyhow::Error>;
 
 const HTTP_ADDR: &str = "0.0.0.0:8080";
+
+// the header omnia-sdk's `Metadata` reads a guest's deadline from
+const DEADLINE: &str = "x-deadline";
 
 #[instrument("http-server", skip(state))]
 pub async fn run<B>(state: &Runtime<B>) -> Result<()>
@@ -172,7 +176,9 @@ where
     /// Forward a request to the routed guest and return its response.
     ///
     /// The request is normalised first (scheme and authority from `Forwarded`,
-    /// the URI, or `Host`). Outcomes the handler can answer itself come back as
+    /// the URI, or `Host`). Its `x-deadline` header is set to the instant the
+    /// guest timeout expires, in milliseconds since the Unix epoch, replacing
+    /// any the client sent. Outcomes the handler can answer itself come back as
     /// responses: a request with no authority `400`, an unrouted path `404`,
     /// and a guest that times out, cannot be loaded at its first use, or is no
     /// longer registered `500`.
@@ -189,8 +195,9 @@ where
     {
         tracing::debug!(method = %request.method(), uri = %request.uri(), "handling request");
 
-        // normalise the request; a bad `Host` header is a 400, not a 500
-        let request = match fix_request(request) {
+        // normalise the request and stamp the guest's deadline; a bad `Host`
+        // header is a 400, not a 500
+        let request = match fix_request(request, self.state.options().guest_timeout) {
             Ok(request) => request,
             Err(error) => {
                 tracing::debug!(%error, "rejecting malformed request");
@@ -341,8 +348,9 @@ where
     }
 }
 
-// rebuild the uri with scheme and authority set, so they reach the guest
-fn fix_request<T>(request: http::Request<T>) -> Result<http::Request<T>> {
+// rebuild the uri with scheme and authority set, so they reach the guest, and
+// stamp the guest's deadline over any the client sent
+fn fix_request<T>(request: http::Request<T>, timeout: Duration) -> Result<http::Request<T>> {
     let p_and_q =
         request.uri().path_and_query().map_or_else(|| PathAndQuery::from_static("/"), Clone::clone);
     let mut uri_builder = Uri::builder().path_and_query(p_and_q);
@@ -381,9 +389,16 @@ fn fix_request<T>(request: http::Request<T>) -> Result<http::Request<T>> {
 
     let (mut parts, body) = request.into_parts();
     parts.uri = uri_builder.build()?;
+    parts.headers.insert(DEADLINE, HeaderValue::from(deadline_millis(timeout)));
     let request = http::Request::from_parts(parts, body);
 
     Ok(request)
+}
+
+// saturates rather than panics, so no configured timeout can fail a request
+fn deadline_millis(timeout: Duration) -> u64 {
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
+    u64::try_from(now.saturating_add(timeout).as_millis()).unwrap_or(u64::MAX)
 }
 
 fn bad_request() -> hyper::Response<OutgoingBody> {

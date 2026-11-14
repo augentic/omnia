@@ -3,13 +3,15 @@
 mod blobstore_impl;
 mod container_impl;
 mod default_impl;
+mod omnia_impl;
 mod resource;
 mod types_impl;
 
 mod generated {
     #![allow(missing_docs, reason = "wasmtime bindgen output")]
 
-    pub use super::{ContainerProxy, Error, IncomingValue, OutgoingValue, StreamObjectNames};
+    pub use self::omnia::blobstore::store::Error;
+    pub use super::{ContainerProxy, IncomingValue, OutgoingValue, StreamObjectNames};
 
     wasmtime::component::bindgen!({
         world: "imports",
@@ -25,6 +27,7 @@ mod generated {
             "wasi:blobstore/container.stream-object-names": StreamObjectNames,
         },
         trappable_error_type: {
+            "omnia:blobstore/store.error" => Error,
             "wasi:blobstore/types.error" => Error,
         },
     });
@@ -37,31 +40,42 @@ pub use bytes::Bytes;
 pub use omnia_core::FutureResult;
 use omnia_core::{Host, HostCtx, Provides, StoreCtx};
 pub use resource::*;
-use wasmtime::component::Linker;
+use wasmtime::component::{Linker, ResourceTableError};
 use wasmtime_wasi::p2::pipe::MemoryOutputPipe;
 
 pub use self::default_impl::BlobStoreDefault;
-pub use self::generated::wasi::blobstore::container::{ContainerMetadata, ObjectMetadata};
+pub use self::generated::Error;
+use self::generated::omnia::blobstore::store as omnia_store;
+pub use self::generated::omnia::blobstore::store::{ContainerMetadata, ObjectMetadata, Page};
 use self::generated::wasi::blobstore::{blobstore, container, types};
 
-/// Typed host error for `wasi:blobstore`, lowered to the WIT `error` string.
-#[derive(Debug)]
-pub enum Error {
-    /// A requested container or object does not exist.
-    NotFound(String),
-    /// Any other host failure; the message preserves the backend context chain.
-    Other(String),
-}
-
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::NotFound(msg) | Self::Other(msg) => f.write_str(msg),
-        }
+impl Error {
+    /// The [`NotFound`](Self::NotFound) error for the container `name`, which does not exist.
+    #[must_use]
+    pub fn missing_container(name: &str) -> Self {
+        Self::NotFound(format!("container not found: {name}"))
     }
 }
 
-omnia_core::host_error!(Error, Other);
+// a backend picks the kind by returning an `Error`; any other failure is
+// `other`, with its full context chain
+impl From<anyhow::Error> for Error {
+    fn from(err: anyhow::Error) -> Self {
+        err.downcast::<Self>().unwrap_or_else(|err| Self::Other(format!("{err:#}")))
+    }
+}
+
+impl From<wasmtime::Error> for Error {
+    fn from(err: wasmtime::Error) -> Self {
+        Self::Other(format!("{err:#}"))
+    }
+}
+
+impl From<ResourceTableError> for Error {
+    fn from(err: ResourceTableError) -> Self {
+        Self::Other(err.to_string())
+    }
+}
 
 /// Incoming value for a blobstore operation.
 pub type IncomingValue = Bytes;
@@ -122,31 +136,39 @@ impl StreamObjectNames {
 /// Result type for blobstore operations.
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// Host-side service for `wasi:blobstore`.
+/// Host-side service for `omnia:blobstore` and the `wasi:blobstore` draft.
 #[derive(Debug, HostCtx)]
 #[host_ctx(client = BlobStoreClient)]
 pub struct WasiBlobStore;
 
 impl<B: Provides<Self>> Host<B> for WasiBlobStore {
     fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
+        omnia_store::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
         blobstore::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
         container::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
         Ok(types::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?)
     }
 }
 
-/// Service contract for `wasi:blobstore` backends.
+/// Service contract for blobstore backends.
 ///
 /// This is implemented by the resource-specific provider of Blobstore
 /// functionality. For example, an in-memory store, or a Redis-backed store.
+///
+/// A backend picks a failure's kind by returning an [`Error`] inside its
+/// [`anyhow::Error`], and any other failure is [`Error::Other`].
 pub trait BlobStoreClient: Debug + Send + Sync + 'static {
-    /// Open a container.
+    /// Create the container `name`, or open it when it already exists.
     fn create_container(&self, name: String) -> FutureResult<Arc<dyn Container>>;
 
-    /// Get a container.
+    /// Open the container `name`.
+    ///
+    /// A container that does not exist fails with
+    /// [`Error::missing_container`], here or at the first call on the
+    /// container returned.
     fn get_container(&self, name: String) -> FutureResult<Arc<dyn Container>>;
 
-    /// Delete a container.
+    /// Delete the container `name` and every object in it, succeeding when it is already absent.
     fn delete_container(&self, name: String) -> FutureResult<()>;
 
     /// Check if a container exists.

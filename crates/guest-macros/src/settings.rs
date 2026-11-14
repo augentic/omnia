@@ -30,7 +30,7 @@ pub fn expand(input: &DeriveInput) -> Result<TokenStream> {
         let ty = &field.ty;
         keys.push(key.clone());
         loads.push(quote! {
-            #ident: ::omnia_sdk::ConfigExt::get_parsed::<#ty>(config, #key).await?,
+            #ident: ::omnia_sdk::ConfigExt::require::<#ty>(config, #key).await?,
         });
     }
 
@@ -46,8 +46,10 @@ pub fn expand(input: &DeriveInput) -> Result<TokenStream> {
             ///
             /// # Errors
             ///
-            /// Returns [`ServerError`](::omnia_sdk::Error::ServerError) when a
-            /// key is missing or its value does not parse as the field's type.
+            /// - [`ServerError`](::omnia_sdk::Error::ServerError) when a key is
+            ///   unset or its value does not parse as the field's type.
+            /// - [`BadGateway`](::omnia_sdk::Error::BadGateway) when the
+            ///   configuration source does not answer.
             pub async fn load<__C: ::omnia_sdk::Config + ?Sized>(
                 config: &__C,
             ) -> ::omnia_sdk::Result<Self> {

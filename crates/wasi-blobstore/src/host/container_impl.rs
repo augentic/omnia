@@ -4,12 +4,14 @@ use omnia_core::HostView;
 use wasmtime::component::{Access, Accessor, Resource};
 
 use crate::host::generated::wasi::blobstore::container::{
-    ContainerMetadata, Host, HostContainer, HostContainerWithStore, HostStreamObjectNames,
-    HostStreamObjectNamesWithStore, ObjectMetadata,
+    Host, HostContainer, HostContainerWithStore, HostStreamObjectNames,
+    HostStreamObjectNamesWithStore,
 };
+use crate::host::generated::wasi::blobstore::types;
 use crate::host::resource::ContainerProxy;
 use crate::host::{
-    BlobStoreClient, Error, IncomingValue, OutgoingValue, Result, StreamObjectNames, WasiBlobStore,
+    BlobStoreClient, ContainerMetadata, Error, IncomingValue, ObjectMetadata, OutgoingValue,
+    Result, StreamObjectNames, WasiBlobStore,
 };
 
 impl<T> HostContainerWithStore<T> for WasiBlobStore {
@@ -20,9 +22,9 @@ impl<T> HostContainerWithStore<T> for WasiBlobStore {
 
     fn info(
         mut host: Access<'_, T, Self>, self_: Resource<ContainerProxy>,
-    ) -> Result<ContainerMetadata> {
+    ) -> Result<types::ContainerMetadata> {
         let container = host.get().table.get(&self_).context("Container not found")?;
-        Ok(container.info().context("getting info")?)
+        Ok(container.info().context("getting info")?.into())
     }
 
     async fn get_data(
@@ -31,13 +33,18 @@ impl<T> HostContainerWithStore<T> for WasiBlobStore {
     ) -> Result<Resource<IncomingValue>> {
         let container = get_container(accessor, &self_)?;
 
-        let data_opt =
-            container.get_data(name.clone(), start, end).await.context("getting data")?;
+        // translate the draft's inclusive end, where 0 and `u64::MAX` read to the end
+        let unbounded = end == 0 || end == u64::MAX;
+        if !unbounded && end < start {
+            let message = format!("invalid byte range: end ({end}) < start ({start})");
+            return Err(Error::Invalid(message));
+        }
+        let end = if unbounded { u64::MAX } else { end + 1 };
 
-        let Some(data) = data_opt else {
+        let data = container.get_data(name.clone(), start..end).await.context("getting data")?;
+        let Some(data) = data else {
             return Err(Error::NotFound(format!("object not found: {name}")));
         };
-
         Ok(accessor.with(|mut store| store.get().table.push(data))?)
     }
 
@@ -60,7 +67,7 @@ impl<T> HostContainerWithStore<T> for WasiBlobStore {
         accessor: &Accessor<T, Self>, self_: Resource<ContainerProxy>,
     ) -> Result<Resource<StreamObjectNames>> {
         let container = get_container(accessor, &self_)?;
-        let names = container.list_objects().await.context("listing objects")?;
+        let names = container.names().await.context("listing objects")?;
         let stream = StreamObjectNames::new(names);
         Ok(accessor.with(|mut store| store.get().table.push(stream))?)
     }
@@ -93,20 +100,20 @@ impl<T> HostContainerWithStore<T> for WasiBlobStore {
 
     async fn object_info(
         accessor: &Accessor<T, Self>, self_: Resource<ContainerProxy>, name: String,
-    ) -> Result<ObjectMetadata> {
+    ) -> Result<types::ObjectMetadata> {
         let container = get_container(accessor, &self_)?;
-        Ok(container.object_info(name).await.context("getting object info")?)
+        let info = container.object_info(name.clone()).await.context("getting object info")?;
+        let Some(info) = info else {
+            return Err(Error::NotFound(format!("object not found: {name}")));
+        };
+        Ok(info.into())
     }
 
     async fn clear(accessor: &Accessor<T, Self>, self_: Resource<ContainerProxy>) -> Result<()> {
         let container = get_container(accessor, &self_)?;
-
-        let all_objects = container.list_objects().await.context("listing objects")?;
-
-        for name in all_objects {
+        for name in container.names().await.context("listing objects")? {
             container.delete_object(name).await.context("deleting object")?;
         }
-
         Ok(())
     }
 
@@ -159,6 +166,26 @@ impl<T> HostStreamObjectNamesWithStore<T> for WasiBlobStore {
         mut accessor: Access<'_, T, Self>, rep: Resource<StreamObjectNames>,
     ) -> wasmtime::Result<()> {
         Ok(accessor.get().table.delete(rep).map(|_| ())?)
+    }
+}
+
+impl From<ContainerMetadata> for types::ContainerMetadata {
+    fn from(info: ContainerMetadata) -> Self {
+        Self {
+            name: info.name,
+            created_at: info.created_at,
+        }
+    }
+}
+
+impl From<ObjectMetadata> for types::ObjectMetadata {
+    fn from(info: ObjectMetadata) -> Self {
+        Self {
+            name: info.name,
+            container: info.container,
+            created_at: info.created_at,
+            size: info.size,
+        }
     }
 }
 

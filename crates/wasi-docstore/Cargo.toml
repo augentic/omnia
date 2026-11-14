@@ -15,17 +15,12 @@ version.workspace = true
 [lints]
 workspace = true
 
-# dependencies shared across host and guest
-[dependencies]
-anyhow.workspace = true
-chrono.workspace = true
-serde.workspace = true
-serde_json.workspace = true
-
 # host dependencies
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+anyhow.workspace = true
 futures.workspace = true
 omnia-core.workspace = true
+serde_json.workspace = true
 tracing.workspace = true
 wasmtime.workspace = true
 wasmtime-wasi.workspace = true
@@ -35,7 +30,7 @@ wasmtime-wasi.workspace = true
 wit-bindgen.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-omnia = { path = "../omnia" }
-omnia-test = { path = "../omnia-test", default-features = false, features = ["host"] }
+omnia.workspace = true
+omnia-test = { workspace = true, default-features = false, features = ["host"] }
 test-programs.workspace = true
 tokio = { workspace = true, features = ["macros", "rt"] }

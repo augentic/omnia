@@ -24,12 +24,19 @@ producer::send(&client, "orders.created".to_string(), message).await?;
 
 Metadata and content type travel with the message; on Kafka, `add_metadata("key", ...)` also drives partition assignment.
 
+A handler reaches the same producer through the `Publisher` capability, which publishes an `omnia_sdk::messaging::Message`. `Message::json` serializes a value under the `application/json` content type, and `with_key` sets the key, which crosses the wire as the `key` metadata entry:
+
+```rust,noplayground
+let message = Message::json(&order)?.with_key(&order.customer_id).with_header("tenant", "acme");
+context.publisher().publish("orders.created", &message).await?;
+```
+
 ## Handling incoming messages
 
 Messaging is a **trigger**: the host (`WasiMessaging`) subscribes to topics and delivers each message to the guest's exported handler, instantiating a fresh guest instance per message:
 
 ```rust,noplayground
-use omnia_sdk::api::{Client, Context, Handlers, Router};
+use omnia_sdk::api::{Context, Handlers, Router};
 use omnia_wasi_messaging::types::{Error, Message};
 
 pub struct Messaging;
@@ -42,19 +49,19 @@ async fn create_order(
 }
 
 fn router() -> Router<MyProvider> {
-    Handlers::new().topic("orders.created", create_order).with_state(Client::new(MyProvider))
+    Handlers::new().topic("orders.created", create_order).with_state(MyProvider)
 }
 
 impl omnia_wasi_messaging::incoming_handler::Guest for Messaging {
     async fn handle(message: Message) -> anyhow::Result<(), Error> {
-        omnia_sdk::api::messaging::handle(&router(), message).await
+        omnia_sdk::wasi::messaging::handle(&router(), message).await
     }
 }
 ```
 
-The guest router matches registered topics exactly; broker subscription patterns remain host configuration (`KAFKA_TOPICS`, `NATS_TOPICS`). `topic` decodes JSON and returns `Ok(())` for successful handler output. The current WIT handler returns only `result<_, error>`: the host logs and counts a returned `error.other`, a trap, and a timeout alike, and the backend decides what each means for the message — the in-memory default and NATS are finished with it, while Kafka ends its consumer so the process restarts and the record is redelivered (see the [`omnia-kafka` README](https://github.com/augentic/omnia-backends/tree/main/crates/kafka)). In multi-guest deployments, each guest's `routes.messaging` patterns select it by NATS-style topic match — see [Multi-Guest Deployments](multi-guest-deployments.md#routing-inbound-traffic).
+The guest router matches registered topics exactly; broker subscription patterns remain host configuration (`KAFKA_TOPICS`, `NATS_TOPICS`). `topic` decodes JSON and returns `Ok(())` for successful handler output. `Router::handle` reports a failure as an `omnia_sdk::Error`, whose code names it. A payload that does not decode is a `BadRequest` with the code `undecodable`. A delivery with no topic is a `BadRequest` with the code `missing-topic`, and one no route takes is a `NotFound` with the code `unhandled-topic`. A handler's failure takes its class and code from the first `omnia_sdk::Error`, `vcs::Error`, `plugins::Error`, or `model::Error` in its source chain, and anything else is a `ServerError`. The current WIT handler returns only `result<_, error>`, so every failure crosses as `error.other` carrying its text: the host logs and counts a returned `error.other`, a trap, and a timeout alike, and the backend decides what each means for the message — the in-memory default and NATS are finished with it, while Kafka ends its consumer so the process restarts and the record is redelivered (see the [`omnia-kafka` README](https://github.com/augentic/omnia-backends/tree/main/crates/kafka)). In multi-guest deployments, each guest's `routes.messaging` patterns select it by NATS-style topic match — see [Multi-Guest Deployments](multi-guest-deployments.md#routing-inbound-traffic).
 
-For non-JSON payloads, register the route with `topic_with(topic, handler, decode)` instead: the decoder `Fn(&Delivery) -> Result<I, DecodeError>` sees the whole delivery (payload, `content_type`, metadata), and a decode failure rejects the message just as malformed JSON does under `topic`.
+For non-JSON payloads, register the route with `topic_with(topic, handler, decode)` instead: the decoder `Fn(&Delivery) -> omnia_sdk::Result<I>` sees the whole delivery (payload, `key`, `content_type`, metadata) and refuses with an `omnia_sdk::Error`, usually `bad_request!`. Whatever it returns, the router reports a refusal as a `BadRequest` with the code `undecodable` and keeps its description, just as it does malformed JSON under `topic`.
 
 ## Request-reply
 
@@ -124,5 +131,7 @@ impl omnia_wasi_websocket::handler::Guest for WebSocket {
     }
 }
 ```
+
+A handler sends through the `WebSockets` capability instead: `broadcast(data)` reaches every connected socket, and `send_to(sockets, data)` the sockets named.
 
 The [`websocket`](../../examples/websocket/) example pairs an HTTP control endpoint (POST a message) with a WebSocket broadcast to all connected clients. In manifests, `routes.websocket` entries use the same pattern syntax as messaging routes.

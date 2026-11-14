@@ -12,6 +12,7 @@ use std::convert::Infallible;
 use std::future::ready;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use base64ct::{Base64, Encoding};
 use bytes::Bytes;
@@ -340,6 +341,8 @@ async fn http_outgoing_timeout() {
 
 #[tokio::test]
 async fn http_incoming_echo() {
+    const GUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
     // no `wasi:cli/run` to drive: boot, then dispatch through the in-process handler
     let guest = std::fs::read(test_programs::HTTP_INCOMING_ECHO).expect("guest bytes");
     // declared from a path that does not exist, so it loads (and fails) at first use
@@ -347,6 +350,7 @@ async fn http_incoming_echo() {
     let runtime = Deployment::new()
         .entry(GuestEntry::new("guest", guest).route_http("/echo"))
         .entry(GuestEntry::new("absent", absent).route_http("/echo/absent"))
+        .guest_timeout(GUEST_TIMEOUT)
         .boot(Backends::defaults().await, |deployment| {
             deployment.host::<WasiHttp>()?;
             deployment.host::<WasiOtel>()?;
@@ -358,15 +362,24 @@ async fn http_incoming_echo() {
         .expect("http routes consistent")
         .expect("the guest exports the http handler");
 
-    // get: the message is the query parameter; the request id comes back from the metadata
+    // get: the message is the query parameter; the request id comes back from
+    // the metadata, and the host's deadline replaces the one the client sent
     let request = Request::get("/echo?message=hi")
         .header(HOST, "echo.test")
         .header("x-request-id", "req-get")
+        .header("x-deadline", "1")
         .body(Full::new(Bytes::new()))
         .expect("request");
+    let earliest = epoch_millis(SystemTime::now() + GUEST_TIMEOUT);
     let response = handler.handle(request).await.expect("handled");
+    let latest = epoch_millis(SystemTime::now() + GUEST_TIMEOUT);
     assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(collect(response).await, json!({ "message": "hi", "request_id": "req-get" }));
+    let (echo, deadline) = echoed(response).await;
+    assert_eq!(echo, json!({ "message": "hi", "request_id": "req-get" }));
+    assert!(
+        deadline.is_some_and(|deadline| (earliest..=latest).contains(&deadline)),
+        "{deadline:?}"
+    );
 
     // post: the message is the json body
     let request = Request::post("/echo")
@@ -377,7 +390,7 @@ async fn http_incoming_echo() {
         .expect("request");
     let response = handler.handle(request).await.expect("handled");
     assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(collect(response).await, json!({ "message": "posted", "request_id": "req-post" }));
+    assert_eq!(echoed(response).await.0, json!({ "message": "posted", "request_id": "req-post" }));
 
     // http/2: authority and scheme arrive on the request URI with no `Host` header
     let request = Request::get("http://echo.test/echo?message=h2")
@@ -386,7 +399,7 @@ async fn http_incoming_echo() {
         .expect("request");
     let response = handler.handle(request).await.expect("handled");
     assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(collect(response).await, json!({ "message": "h2", "request_id": "req-h2" }));
+    assert_eq!(echoed(response).await.0, json!({ "message": "h2", "request_id": "req-h2" }));
 
     // the declared routes drive the trigger: the longest prefix wins, matched
     // by whole segment, so `/echo/absentee` runs the echo guest (which has no
@@ -413,4 +426,16 @@ async fn http_incoming_echo() {
 async fn collect(response: Response<omnia_wasi_http::OutgoingBody>) -> Value {
     let body = response.into_body().collect().await.expect("body streams").to_bytes();
     serde_json::from_slice(&body).expect("JSON body")
+}
+
+// the echo with its deadline split out, since the deadline differs per request
+async fn echoed(response: Response<omnia_wasi_http::OutgoingBody>) -> (Value, Option<u64>) {
+    let mut echo = collect(response).await;
+    let deadline = echo.as_object_mut().and_then(|fields| fields.remove("deadline"));
+    (echo, deadline.as_ref().and_then(Value::as_u64))
+}
+
+fn epoch_millis(instant: SystemTime) -> u64 {
+    let since_epoch = instant.duration_since(UNIX_EPOCH).expect("after the epoch");
+    u64::try_from(since_epoch.as_millis()).expect("fits in u64 milliseconds")
 }

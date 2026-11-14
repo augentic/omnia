@@ -54,14 +54,14 @@ The [`examples/`](examples/README.md) directory contains a complete working gues
 | Crate                                           | Description                                                                                |
 | ----------------------------------------------- | ------------------------------------------------------------------------------------------ |
 | [`omnia`](crates/omnia)                         | Composition root — assembly, lifecycle, optional-crate composition, and `runtime!` |
-| [`omnia-core`](crates/omnia-core)               | Live-runtime SDK — wasmtime engine, registry, dispatch, stores, and the tracing subscriber |
-| [`omnia-plugin`](crates/omnia-plugin)           | `omnia:plugins/loader` capability — loader host, the deployment's grant (declared guest names, read-only mount roots, registry routing), registry acquisition, and plugin stores; selected by omnia's `loader` feature |
-| [`omnia-cli`](crates/omnia-cli)                 | Leaf `run` grammar — clap plus argv-precedence; selected by omnia's `cli` feature |
-| [`omnia-compile`](crates/omnia-compile)         | Leaf ahead-of-time compiler — `CompileOptions` and `compile`, over wasmtime alone; its Cranelift backend is what omnia's `jit` feature turns on |
-| [`omnia-sdk`](crates/omnia-sdk)                 | Guest SDK — `Handler`/`Client`/`Context`, HTTP/messaging routers and the command façade, errors, capabilities, and MCP support |
+| [`omnia-core`](crates/core)               | Live-runtime SDK — wasmtime engine, registry, dispatch, stores, and the tracing subscriber |
+| [`omnia-plugin`](crates/plugin)           | `omnia:plugins/loader` capability — loader host, the deployment's grant (declared guest names, read-only mount roots, registry routing), registry acquisition, and plugin stores; selected by omnia's `loader` feature |
+| [`omnia-cli`](crates/cli)                 | Leaf `run` grammar — clap plus argv-precedence; selected by omnia's `cli` feature |
+| [`omnia-compile`](crates/compile)         | Leaf ahead-of-time compiler — `CompileOptions` and `compile`, over wasmtime alone; its Cranelift backend is what omnia's `jit` feature turns on |
+| [`omnia-sdk`](crates/sdk)                 | Guest SDK — `Handler`/`Context`/`Handlers`, HTTP/messaging routers and the command façade, errors, capabilities, and MCP support |
 | [`omnia-guest-macros`](crates/guest-macros)     | `#[instrument]` observability attribute and `#[derive(Provider)]` for guests               |
 | [`omnia-host-macros`](crates/host-macros)       | `runtime!` for host runtime generation and `#[derive(HostCtx)]` for host crates            |
-| [`omnia-wasi-blobstore`](crates/wasi-blobstore) | wasi:blobstore host and guest bindings                                                     |
+| [`omnia-wasi-blobstore`](crates/wasi-blobstore) | omnia:blobstore host and guest bindings, with the wasi:blobstore draft                     |
 | [`omnia-wasi-config`](crates/wasi-config)       | wasi:config host and guest bindings                                                        |
 | [`omnia-wasi-docstore`](crates/wasi-docstore)   | Document-store host and guest bindings                                                     |
 | [`omnia-wasi-http`](crates/wasi-http)           | wasi:http host and guest bindings                                                          |
@@ -70,7 +70,7 @@ The [`examples/`](examples/README.md) directory contains a complete working gues
 | [`omnia-wasi-messaging`](crates/wasi-messaging) | Messaging host and guest bindings                                                          |
 | [`omnia-wasi-model`](crates/wasi-model)         | omnia:model completion host and guest bindings                                             |
 | [`omnia-wasi-otel`](crates/wasi-otel)           | OpenTelemetry host and guest bindings                                                      |
-| [`omnia-wasi-sql`](crates/wasi-sql)             | wasi:sql host and guest bindings                                                           |
+| [`omnia-wasi-sql`](crates/wasi-sql)             | omnia:sql host and guest bindings, with the wasi:sql draft                                 |
 | [`omnia-wasi-vault`](crates/wasi-vault)         | Secrets-vault host and guest bindings                                                      |
 | [`omnia-wasi-vcs`](crates/wasi-vcs)             | omnia:vcs version-control host and guest bindings; no default backend                      |
 | [`omnia-wasi-websocket`](crates/wasi-websocket) | WebSocket host and guest bindings                                                          |

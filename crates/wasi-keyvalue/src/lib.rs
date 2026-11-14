@@ -2,12 +2,8 @@
 
 //! # WASI Key-Value
 //!
-//! This module implements a runtime service for `wasi:keyvalue`
-//! (<https://github.com/WebAssembly/wasi-keyvalue>).
-
-mod cacheable;
-
-pub use self::cacheable::Cacheable;
+//! This module implements a runtime service for `omnia:keyvalue` and the
+//! `wasi:keyvalue` draft (<https://github.com/WebAssembly/wasi-keyvalue>).
 
 cfg_select! {
     target_arch = "wasm32" => {

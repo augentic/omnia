@@ -1,7 +1,8 @@
 //! A dual-export messaging guest. The command publishes one message through
 //! `wasi:messaging/producer`; the `incoming-handler` export asserts the
-//! message it is handed carries exactly those fields, then answers it
-//! through `request-reply::reply` on the reply topic the host attached.
+//! message it is handed carries exactly those fields, beside the `deadline`
+//! entry the host stamps on every delivery, then answers it through
+//! `request-reply::reply` on the reply topic the host attached.
 
 #![cfg(target_arch = "wasm32")]
 
@@ -27,7 +28,12 @@ impl Guest for Messaging {
         assert_eq!(message.topic().as_deref(), Some("orders"));
         assert_eq!(message.data(), b"order-1");
         assert_eq!(message.content_type(), None, "no content type was set");
-        assert_eq!(message.metadata(), Some(vec![("key".to_owned(), "value".to_owned())]));
+        let mut metadata = message.metadata().unwrap_or_default();
+        metadata.sort();
+        let [(deadline, _), (key, value)] = &metadata[..] else {
+            panic!("expected the publisher's entry and the host's deadline: {metadata:?}");
+        };
+        assert_eq!([deadline, key, value], ["deadline", "key", "value"]);
 
         request_reply::reply(&message, Message::new(b"handled")).await
     }

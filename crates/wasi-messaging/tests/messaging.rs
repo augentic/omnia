@@ -119,8 +119,7 @@ fn metadata(message: &Message) -> Vec<(String, String)> {
     let mut pairs: Vec<_> = message
         .metadata
         .as_ref()
-        .map(|md| md.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
-        .unwrap_or_default();
+        .map_or_default(|md| md.iter().map(|(k, v)| (k.clone(), v.clone())).collect());
     pairs.sort();
     pairs
 }
@@ -157,6 +156,33 @@ async fn messaging_produce_handle() {
     let reply = next(&mut stream).await;
     assert_eq!(reply.topic, "orders.reply");
     assert_eq!(reply.payload, b"handled");
+
+    runtime.shutdown();
+}
+
+#[tokio::test]
+async fn messaging_keyed() {
+    let backends = Backends::defaults().await;
+    let mut stream = backends.messaging.subscribe();
+    let runtime = boot(&sole(test_programs::MESSAGING_KEYED), backends).await;
+    let handler = handler(&runtime);
+
+    // Producer: the message's key crossed as the `key` metadata entry,
+    // beside the header the guest set.
+    let status = runtime.run_command().await.expect("command runs");
+    assert_eq!(status, ExitStatus::SUCCESS);
+    let mut sent = next(&mut stream).await;
+    assert_eq!(sent.topic, "orders");
+    assert_eq!(sent.payload, b"order-7");
+    assert_eq!(
+        metadata(&sent),
+        [("key".to_owned(), "customer-7".to_owned()), ("tenant".to_owned(), "acme".to_owned())]
+    );
+
+    // Incoming handler: the guest's router finds the key on the delivery, and
+    // the host's deadline replaces one the delivery carried, whatever its case.
+    sent.metadata.get_or_insert_default().insert("Deadline".to_owned(), "1".to_owned());
+    handler.handle(sent).await.expect("handled");
 
     runtime.shutdown();
 }

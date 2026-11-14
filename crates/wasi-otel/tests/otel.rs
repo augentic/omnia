@@ -56,7 +56,7 @@ impl Recording {
             .flat_map(|request| &request.resource_spans)
             .flat_map(|resource| &resource.scope_spans)
             .flat_map(|scope| {
-                let name = scope.scope.as_ref().map(|s| s.name.clone()).unwrap_or_default();
+                let name = scope.scope.as_ref().map_or_default(|s| s.name.clone());
                 scope.spans.iter().map(move |span| (name.clone(), span.clone()))
             })
             .collect()

@@ -4,14 +4,14 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_sdk::http::header::ETAG;
-use omnia_sdk::http::{Method, Request, StatusCode};
-use omnia_sdk::{Config, WasiProvider};
+use http::header::ETAG;
+use http::{Method, Request, StatusCode};
+use omnia_sdk::{ConfigExt as _, WasiProvider};
 
 omnia_sdk::api::command::export!(scenario);
 
 async fn scenario() {
-    let origin = WasiProvider.get("ORIGIN").await.expect("ORIGIN seeded");
+    let origin: String = WasiProvider.require("ORIGIN").await.expect("ORIGIN seeded");
 
     let request = Request::builder()
         .method(Method::GET)

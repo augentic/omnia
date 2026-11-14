@@ -18,7 +18,11 @@ fn main() {
             "crates/test-programs/wit-skew",
             "crates/test-programs/src",
             "crates/test-programs/Cargo.toml",
+            "crates/wasi-blobstore/wit",
+            "crates/wasi-docstore/wit",
+            "crates/wasi-keyvalue/wit",
             "crates/wasi-otel/wit",
+            "crates/wasi-sql/wit",
         ])
         .build()
         .write_gen("gen.rs");

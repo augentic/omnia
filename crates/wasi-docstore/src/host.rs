@@ -30,7 +30,7 @@ use std::fmt::Debug;
 
 pub use omnia_core::FutureResult;
 use omnia_core::{Host, HostCtx, Provides, StoreCtx};
-use wasmtime::component::Linker;
+use wasmtime::component::{Linker, ResourceTableError};
 
 pub use self::default_impl::DocStoreDefault;
 pub use self::generated::omnia::docstore::types::{
@@ -59,12 +59,18 @@ impl<B: Provides<Self>> Host<B> for WasiDocStore {
 /// This is implemented by the resource-specific provider of `DocStore`
 /// functionality. For example, the in-memory default, or Azure Table
 /// Storage.
+///
+/// A backend picks the kind of a failure by returning an [`Error`], and any
+/// other error reaches the guest as [`Error::Other`].
 pub trait DocStoreClient: Debug + Send + Sync + 'static {
     /// Point read by primary id.
     fn get(&self, collection: String, id: String) -> FutureResult<Option<Document>>;
 
-    /// Insert if absent.
-    fn insert(&self, collection: String, doc: Document) -> FutureResult<()>;
+    /// Insert `doc` unless its id is already stored.
+    ///
+    /// Returns `false`, and leaves the stored document untouched, when the id
+    /// is already stored.
+    fn insert(&self, collection: String, doc: Document) -> FutureResult<bool>;
 
     /// Upsert by id.
     fn put(&self, collection: String, doc: Document) -> FutureResult<()>;
@@ -72,7 +78,12 @@ pub trait DocStoreClient: Debug + Send + Sync + 'static {
     /// Delete by id; `Ok(true)` if a document was removed.
     fn delete(&self, collection: String, id: String) -> FutureResult<bool>;
 
-    /// Filtered listing with sort and pagination.
+    /// One page of the documents in `collection` that `filter` and `options` select.
+    ///
+    /// A backend serves the portable subset the
+    /// [document store reference](https://github.com/augentic/omnia/blob/main/docs/reference/docstore.md#query-contract)
+    /// lists. It fails any other feature it cannot serve with
+    /// [`Error::Unsupported`], and never ignores one.
     fn query(
         &self, collection: String, filter: Option<FilterTree>, options: QueryOpts,
     ) -> FutureResult<QueryResult>;
@@ -91,4 +102,16 @@ pub struct QueryOpts {
     pub continuation: Option<String>,
 }
 
-omnia_core::host_error!(Error, Other);
+// a backend picks the kind by returning an `Error`; any other failure is
+// `other`, with its full context chain
+impl From<anyhow::Error> for Error {
+    fn from(err: anyhow::Error) -> Self {
+        err.downcast::<Self>().unwrap_or_else(|err| Self::Other(format!("{err:#}")))
+    }
+}
+
+impl From<ResourceTableError> for Error {
+    fn from(err: ResourceTableError) -> Self {
+        Self::Other(err.to_string())
+    }
+}

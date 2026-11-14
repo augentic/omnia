@@ -1,8 +1,8 @@
-//! End-to-end tests for `wasi:blobstore`: every scenario runs a real guest
-//! component from `crates/test-programs` through the omnia runtime against
-//! the in-memory default. The guest asserts what it observes across the
-//! boundary (and traps on failure); the host side seeds a container and
-//! asserts what persisted after the run.
+//! End-to-end tests for `omnia:blobstore` and the `wasi:blobstore` draft:
+//! every scenario runs a real guest component from `crates/test-programs`
+//! through the omnia runtime against the in-memory default. The guest
+//! asserts what it observes across the boundary (and traps on failure); the
+//! host side seeds a container and asserts what persisted after the run.
 
 #![cfg(not(target_arch = "wasm32"))]
 
@@ -53,4 +53,14 @@ async fn blobstore_copy_move() {
     assert_eq!(backends.object("b", "x").await, None);
     assert_eq!(backends.object("c", "doc").await, Some(b"payload".to_vec()));
     assert!(!backends.blobstore.container_exists("nowhere".to_owned()).await.expect("exists"));
+}
+
+#[tokio::test]
+async fn blobstore_blob_store() {
+    let backends = Backends::defaults().await;
+
+    run_guest(test_programs::BLOBSTORE_BLOB_STORE, backends.clone()).await;
+
+    // the guest's bytes are stored as they are
+    assert_eq!(backends.object("contract-host", "raw").await, Some(b"raw".to_vec()));
 }

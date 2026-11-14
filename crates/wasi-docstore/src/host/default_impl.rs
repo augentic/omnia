@@ -17,7 +17,7 @@ use serde_json::Value;
 use tracing::instrument;
 
 use crate::host::resource::FilterTree;
-use crate::host::{DocStoreClient, Document, FutureResult, QueryOpts, QueryResult};
+use crate::host::{DocStoreClient, Document, Error, FutureResult, QueryOpts, QueryResult};
 
 const MAX_PAGE_SIZE: u64 = 1000;
 
@@ -70,7 +70,7 @@ impl DocStoreClient for DocStoreDefault {
         .boxed()
     }
 
-    fn insert(&self, collection: String, doc: Document) -> FutureResult<()> {
+    fn insert(&self, collection: String, doc: Document) -> FutureResult<bool> {
         let store = self.clone();
         async move {
             let body = parse_body(&doc)?;
@@ -81,8 +81,7 @@ impl DocStoreClient for DocStoreDefault {
                 }
                 Entry::Occupied(_) => false,
             };
-            anyhow::ensure!(inserted, "document id already exists");
-            Ok(())
+            Ok(inserted)
         }
         .boxed()
     }
@@ -112,7 +111,9 @@ impl DocStoreClient for DocStoreDefault {
         async move {
             // clamp the guest-supplied page size to the host maximum
             let limit = options.limit.map_or(MAX_PAGE_SIZE, u64::from).min(MAX_PAGE_SIZE);
-            anyhow::ensure!(limit > 0, "query limit must be at least 1");
+            if limit == 0 {
+                return Err(Error::Invalid("query limit must be at least 1".to_owned()).into());
+            }
             let page_size = usize::try_from(limit).unwrap_or(usize::MAX);
 
             let skip = parse_continuation(options.continuation.as_deref())?
@@ -164,13 +165,18 @@ fn to_document(id: &str, body: &Value) -> Result<Document> {
 }
 
 fn parse_body(doc: &Document) -> Result<Value> {
-    serde_json::from_slice(&doc.data).context("invalid JSON in document body")
+    serde_json::from_slice(&doc.data)
+        .map_err(|err| Error::Invalid(format!("document `{}` is not JSON: {err}", doc.id)).into())
 }
 
 fn parse_continuation(continuation: Option<&str>) -> Result<u64> {
     continuation.map_or_else(
         || Ok(0),
-        |s| s.parse().with_context(|| format!("invalid continuation token: {s:?}")),
+        |s| {
+            s.parse().map_err(|err| {
+                Error::Invalid(format!("invalid continuation token {s:?}: {err}")).into()
+            })
+        },
     )
 }
 

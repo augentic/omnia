@@ -43,7 +43,7 @@ unused_result_ok = "warn"
 anyhow = "1.0.104"
 axum = { version = "0.8.9", default-features = false, features = ["json"] }
 base64ct = { version = "1.8.3", features = ["std"] }
-bon = "3.10.2"
+bon = "3.10.3"
 bytes = "1.12.1"
 cap-fs-ext = "4.0.3"
 cap-std = "4.0.3"
@@ -55,6 +55,7 @@ fromenv = "0.1.0"
 futures = "0.3.34"
 futures-channel = "0.3.34"
 futures-util = "0.3.34"
+getrandom = "0.4.3"
 http = "1.5.0"
 http-body = "1.1.0"
 http-body-util = "0.1.5"
@@ -77,41 +78,39 @@ schemars = "1.2.3"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 sha2 = "0.11.1"
-syn = { version = "3.0.9", features = ["full"] }
+syn = { version = "3.0.10", features = ["full"] }
 tempfile = "3.27.0"
 thiserror = "2.0.21"
 tokio = { version = "1.54.1", default-features = false }
 tokio-stream = { version = "0.1.19", features = ["sync"] }
 tokio-tungstenite = "0.30.0"
 tokio-util = { version = "0.7.20", features = ["codec"] }
-toml = { version = "1.1.8", default-features = false, features = ["parse", "serde", "std"] }
+toml = { version = "1.2.1", default-features = false, features = ["parse", "serde", "std"] }
 tower = "0.5.3"
 tracing = "0.1.44"
 tracing-opentelemetry = { version = "0.34.0", default-features = false }
 tracing-subscriber = { version = "0.3.23", default-features = false, features = ["env-filter", "fmt"] }
 trybuild = "1"
 wasip3 = { version = "0.10.0", features = ["http-compat"] }
-wasm-pkg-client = "0.16.1"
+wasm-pkg-client = "0.16.2"
 wasmtime = { version = "50.0.1", default-features = false, features = ["anyhow", "component-model-bytes", "parallel-compilation"] }
 wasmtime-wasi = { version = "50.0.1", default-features = false, features = ["p2", "p3"] }
 wasmtime-wasi-config = "50.0.1"
 wasmtime-wasi-http = { version = "50.0.1", default-features = false, features = ["p3"] }
-# pinned to the wit-bindgen `wasip3` depends on: a guest links both, and a
-# newer wit-bindgen's `spawn_local` panics over the older task context
 wit-bindgen = { version = "0.63.0", features = ["async-spawn"] }
 x509-cert = { version = "0.3.0", default-features = false, features = ["std"] }
 
 # internally referenced crates
 omnia = { path = "crates/omnia", version = "0.38.0" }
-omnia-cli = { path = "crates/omnia-cli", version = "0.38.0" }
-omnia-compile = { path = "crates/omnia-compile", version = "0.38.0", default-features = false }
-omnia-core = { path = "crates/omnia-core", version = "0.38.0", default-features = false }
+omnia-cli = { path = "crates/cli", version = "0.38.0" }
+omnia-compile = { path = "crates/compile", version = "0.38.0", default-features = false }
+omnia-core = { path = "crates/core", version = "0.38.0", default-features = false }
 omnia-guest-macros = { path = "crates/guest-macros", version = "0.38.0" }
 omnia-host-macros = { path = "crates/host-macros", version = "0.38.0" }
-omnia-link = { path = "crates/omnia-link", version = "0.38.0" }
-omnia-plugin = { path = "crates/omnia-plugin", version = "0.38.0" }
-omnia-sdk = { path = "crates/omnia-sdk", version = "0.38.0", default-features = false }
-omnia-test = { path = "crates/omnia-test", version = "0.38.0", default-features = false }
+omnia-link = { path = "crates/link", version = "0.38.0" }
+omnia-plugin = { path = "crates/plugin", version = "0.38.0" }
+omnia-sdk = { path = "crates/sdk", version = "0.38.0", default-features = false }
+omnia-test = { path = "crates/test", version = "0.38.0", default-features = false }
 omnia-wasi-blobstore = { path = "crates/wasi-blobstore", version = "0.38.0" }
 omnia-wasi-config = { path = "crates/wasi-config", version = "0.38.0" }
 omnia-wasi-docstore = { path = "crates/wasi-docstore", version = "0.38.0" }
