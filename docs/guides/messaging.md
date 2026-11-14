@@ -54,7 +54,7 @@ fn router() -> Router<MyProvider> {
 
 impl omnia_wasi_messaging::incoming_handler::Guest for Messaging {
     async fn handle(message: Message) -> anyhow::Result<(), Error> {
-        omnia_sdk::api::messaging::handle(&router(), message).await
+        omnia_sdk::wasi::messaging::handle(&router(), message).await
     }
 }
 ```

@@ -42,7 +42,7 @@ macro_rules! __export_messaging {
                     message: $crate::omnia_wasi_messaging::types::Message,
                 ) -> ::core::result::Result<(), $crate::omnia_wasi_messaging::types::Error>
                 {
-                    $crate::api::messaging::handle_wasi($router, $provider, message).await
+                    $crate::wasi::messaging::handle(&$router($provider), message).await
                 }
             }
         };
@@ -117,53 +117,6 @@ impl Delivery {
         self.metadata.push((name.into(), value.into()));
         self
     }
-}
-
-/// Adapt a WIT message to an owned delivery and dispatch it.
-///
-/// The current WIT contract carries only `result<_, error>`. Success
-/// acknowledges the delivery, and every failure crosses as `error.other`
-/// carrying its [`Error`](crate::Error)'s text.
-///
-/// # Errors
-///
-/// Returns the WIT delivery failure.
-#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
-pub async fn handle<P: Send + Sync + 'static>(
-    router: &crate::api::Router<P>, message: omnia_wasi_messaging::types::Message,
-) -> Result<(), omnia_wasi_messaging::types::Error> {
-    let metadata = message.metadata().unwrap_or_default();
-    let key = metadata
-        .iter()
-        .find(|(name, _)| name.eq_ignore_ascii_case(crate::messaging::KEY))
-        .map(|(_, value)| value.clone());
-    let delivery = Delivery {
-        topic: message.topic(),
-        payload: Bytes::from(message.data()),
-        key,
-        content_type: message.content_type(),
-        metadata,
-    };
-    router
-        .handle(delivery)
-        .await
-        .map_err(|error| omnia_wasi_messaging::types::Error::Other(error.to_string()))
-}
-
-/// Dispatch one WIT message through the router `router` builds over
-/// `provider`, inside the guest telemetry scope.
-///
-/// # Errors
-///
-/// Returns the WIT delivery failure [`handle`] reports.
-#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
-#[doc(hidden)]
-#[omnia_wasi_otel::instrument(name = "messaging_guest_handle")]
-pub async fn handle_wasi<P: Send + Sync + 'static>(
-    router: impl FnOnce(P) -> crate::api::Router<P>, provider: P,
-    message: omnia_wasi_messaging::types::Message,
-) -> Result<(), omnia_wasi_messaging::types::Error> {
-    handle(&router(provider), message).await
 }
 
 pub(crate) struct Topics<P: Send + Sync + 'static> {

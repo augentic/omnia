@@ -217,7 +217,7 @@ pub fn messaging_router<P: StateStore + 'static>(provider: P) -> Router<P> {
 messaging::export!(messaging_router);
 ```
 
-For guests that need direct control over the raw `wasi:messaging/incoming-handler` export (for example, `examples/messaging` demonstrating request-reply and fan-out), implement `omnia_wasi_messaging::incoming_handler::Guest` and dispatch via `omnia_sdk::api::messaging::handle`:
+For guests that need direct control over the raw `wasi:messaging/incoming-handler` export (for example, `examples/messaging` demonstrating request-reply and fan-out), implement `omnia_wasi_messaging::incoming_handler::Guest` and dispatch via `omnia_sdk::wasi::messaging::handle`, which opens the guest telemetry scope around the delivery:
 
 ```rust,noplayground
 pub struct Messaging;
@@ -225,7 +225,7 @@ omnia_wasi_messaging::export!(Messaging with_types_in omnia_wasi_messaging);
 
 impl omnia_wasi_messaging::incoming_handler::Guest for Messaging {
     async fn handle(message: Message) -> anyhow::Result<(), Error> {
-        omnia_sdk::api::messaging::handle(&router(), message).await
+        omnia_sdk::wasi::messaging::handle(&router(), message).await
     }
 }
 ```
@@ -282,7 +282,7 @@ The pieces, in the order argv flows through them:
 - **`Handlers::command(name, handler)`** registers a subcommand whose input implements `clap::Args` (`()` included) and whose output implements `Serialize` and `command::Render`; the input's doc comments are its help text, the struct's for the subcommand and each field's for its argument. **`command_with(subcommand, handler, decode)`** takes a `clap::Command` and a decoder `Fn(&ArgMatches) -> omnia_sdk::Result<I>` for any other grammar, as `topic_with` does for a wire format; a decoder's refusal is its error's envelope, so `bad_request!` answers a `bad_request` one rather than a clap usage error. The closed `Router` declares global `--format text|json` and `-v`/`--verbose` / `-q`/`--quiet` (`Verbosity`), answers `--help` and `--version` on stdout at exit 0, and renders clap usage errors on stderr at `USAGE_EXIT` (64, `EX_USAGE`). `Router::completions(shell)` (or `completions::<App>(shell, name)` for a custom grammar) produces a shell-completion script as a `Response`; `Shell` is re-exported from `clap_complete`.
 - **The program** is the router: `--version` answers the guest crate's `CARGO_PKG_VERSION` and `--help` opens with its `CARGO_PKG_DESCRIPTION`, both stamped by `command::export!`; `Router::name` (default `argv[0]`), `version`, `about`, and `env_prefix` override them, and `Router::hints(|error| ..)` attaches a remedy hint to every failure that carries none.
 - **`Command::new(&client, &metadata, format)`** is the underlying projector the router dispatches through, and the escape hatch for a hand-written clap grammar: `parse::<App>(argv) -> Parsed` classifies argv, and `command.call(handler, input)` runs one verb over the client, encoding a success body in the selected `command::Format` onto stdout at exit 0 — `Format::Text` is the output's `Render` form, `Format::Json` the output pretty-printed with a trailing newline.
-- **`Response { stdout, stderr, exit }`** buffers both channels. `command::export!(command_router)` binds a router fn (or a zero-argument `async fn` returning `IntoExit`) as the `wasi:cli/run` export and writes the channels at that boundary through `IntoExit`: a `BrokenPipe` on either channel (a reader that went away) keeps the response's own exit, any other refused channel exits 3. Because the channels are whole buffers, a command that must stream writes to the process channels itself and returns `Result<(), u8>` or `()`, which the export also accepts; a guest that needs its own export writes the raw `wasip3` export and calls `command::execute_wasi` itself.
+- **`Response { stdout, stderr, exit }`** buffers both channels. `command::export!(command_router)` binds a router fn (or a zero-argument `async fn` returning `IntoExit`) as the `wasi:cli/run` export and writes the channels at that boundary through `IntoExit`: a `BrokenPipe` on either channel (a reader that went away) keeps the response's own exit, any other refused channel exits 3. Because the channels are whole buffers, a command that must stream writes to the process channels itself and returns `Result<(), u8>` or `()`, which the export also accepts; a guest that needs its own export writes the raw `wasip3` export and calls `omnia_sdk::wasi::command::execute` itself.
 - **`Metadata::from_env(prefix)`** reads `<PREFIX>_REQUEST_ID`, `<PREFIX>_CORRELATION_ID`, `<PREFIX>_CAUSATION_ID`, `<PREFIX>_TENANT`, and `<PREFIX>_DEADLINE` from the environment (`Router::run` derives the default prefix from the program name, or `.env_prefix(..)` sets it; `run_with` takes explicit metadata). A missing request id is minted from the platform's CSPRNG (`wasi:random` in a guest), as on every transport, so a command invocation is as observable as an HTTP request: the router runs the verb in a `handler` span carrying the request and correlation ids and the `command`.
 
 ### Failures and the exit map

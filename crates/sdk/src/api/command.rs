@@ -80,10 +80,10 @@ macro_rules! __export_command {
 
             impl $crate::wasip3::exports::cli::run::Guest for CliGuest {
                 async fn run() -> ::core::result::Result<(), ()> {
-                    $crate::api::command::Export::run(
+                    $crate::wasi::command::Export::run(
                         $entry,
                         $provider,
-                        $crate::api::command::Package {
+                        $crate::wasi::command::Package {
                             version: ::core::env!("CARGO_PKG_VERSION"),
                             description: ::core::env!("CARGO_PKG_DESCRIPTION"),
                         },
@@ -439,49 +439,6 @@ impl<P> fmt::Debug for Command<'_, P> {
     }
 }
 
-#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
-#[doc(hidden)]
-pub struct Package {
-    pub version: &'static str,
-    pub description: &'static str,
-}
-
-#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
-#[doc(hidden)]
-pub trait Export<P, M> {
-    fn run(self, provider: P, package: Package) -> impl Future<Output = ()>;
-}
-
-#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
-impl<F, Fut, P, E> Export<P, ()> for F
-where
-    F: FnOnce() -> Fut,
-    Fut: Future<Output = E>,
-    E: IntoExit,
-{
-    async fn run(self, _provider: P, _package: Package) {
-        execute_wasi(self()).await;
-    }
-}
-
-/// Execute a guest command entry at the WASI CLI boundary.
-///
-/// Initializes guest telemetry, awaits `entry`, and flushes telemetry and
-/// stdout.
-#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
-#[doc(hidden)]
-pub async fn execute_wasi<E: IntoExit>(entry: impl Future<Output = E>) {
-    // `scope` exports telemetry before an `exit-with-code`, which never returns.
-    let result = omnia_wasi_otel::scope(|| entry).await.into_exit();
-    // `exit-with-code` exits immediately, meaning stdout never flushes
-    let _ = std::io::stdout().flush();
-    if let Err(code) = result
-        && code != 0
-    {
-        wasip3::cli::exit::exit_with_code(code);
-    }
-}
-
 cfg_select! {
     feature = "command" => {
         use std::collections::BTreeMap;
@@ -711,11 +668,10 @@ cfg_select! {
             }
 
             // Cargo stamps an empty description where the manifest sets none.
-            #[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
-            pub(crate) fn package(&mut self, package: &Package) {
-                self.version.get_or_insert_with(|| package.version.to_owned());
-                if !package.description.is_empty() {
-                    self.about.get_or_insert_with(|| package.description.to_owned());
+            pub(crate) fn package(&mut self, version: &str, description: &str) {
+                self.version.get_or_insert_with(|| version.to_owned());
+                if !description.is_empty() {
+                    self.about.get_or_insert_with(|| description.to_owned());
                 }
             }
 
@@ -980,21 +936,13 @@ cfg_select! {
             ) -> Response {
                 self.program.run_with(&self.client, argv, metadata).await
             }
-        }
 
-        #[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
-        impl<F, P> Export<P, crate::api::Router<P>> for F
-        where
-            F: FnOnce(P) -> crate::api::Router<P>,
-            P: Send + Sync + 'static,
-        {
-            async fn run(self, provider: P, package: Package) {
-                execute_wasi(async move {
-                    let mut router = self(provider);
-                    router.program.package(&package);
-                    router.run(wasip3::cli::environment::get_arguments()).await
-                })
-                .await;
+            // The defaults `export!` stamps from the guest crate's manifest.
+            // A version or description the router already set stands.
+            #[doc(hidden)]
+            pub fn package(mut self, version: &str, description: &str) -> Self {
+                self.program.package(version, description);
+                self
             }
         }
     }

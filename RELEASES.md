@@ -131,6 +131,14 @@ Unreleased
 - `omnia_sdk::Error` implements `IntoResponse`, so a handler answers
   `omnia_sdk::Result<T>`. `HttpResult` and `HttpError` are gone.
 - `omnia_sdk::command!(main)` is `omnia_sdk::api::command::export!(main)`.
+- The fns a hand-written WASI export calls live in `omnia_sdk::wasi`, on
+  `wasm32`:
+  - `wasi::http::serve`, which was `api::http::serve`. It takes any router
+    that converts into an `axum::Router`, opens the guest telemetry scope,
+    and layers `api::http::trace`, so the export does neither itself.
+  - `wasi::messaging::handle`, which was `api::messaging::handle`. It opens
+    the guest telemetry scope.
+  - `wasi::command::execute`, which was `api::command::execute_wasi`.
 - The value types live in the SDK's own modules:
   - `omnia_sdk::docstore`, which was `omnia_sdk::document_store`.
   - `omnia_sdk::sql` (`Value`, `Row`, `Field`, `Statement`, `FromRow`).
