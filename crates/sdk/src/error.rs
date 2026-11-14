@@ -1,5 +1,7 @@
 //! Errors
 
+use std::error::Error as StdError;
+
 use http::StatusCode;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -148,35 +150,48 @@ impl Error {
             Self::BadGateway { .. } => ErrorKind::Unavailable,
         }
     }
+
+    // The `Error` a domain error maps to: this type, or a `vcs`, `plugins`,
+    // or `model` error through its own conversion.
+    pub(crate) fn from_domain(error: &(dyn StdError + 'static)) -> Option<Self> {
+        if let Some(error) = error.downcast_ref::<Self>() {
+            return Some(error.clone());
+        }
+        if let Some(error) = error.downcast_ref::<crate::vcs::Error>() {
+            return Some(error.clone().into());
+        }
+        if let Some(error) = error.downcast_ref::<crate::plugins::Error>() {
+            return Some(error.clone().into());
+        }
+        error.downcast_ref::<crate::model::Error>().map(|error| error.clone().into())
+    }
+
+    fn with_description(self, description: String) -> Self {
+        match self {
+            Self::BadRequest { code, .. } => Self::BadRequest { code, description },
+            Self::NotFound { code, .. } => Self::NotFound { code, description },
+            Self::ServerError { code, .. } => Self::ServerError { code, description },
+            Self::BadGateway { code, .. } => Self::BadGateway { code, description },
+        }
+    }
 }
 
-// An `Error` inside the chain keeps its variant and code. A
+// The first domain error in the chain keeps its variant and code. A
 // `capability::Error` is a `bad_gateway` when the upstream did not answer,
 // and otherwise the deployment's own `server_error`. Both gain the context
 // wrapped around them, and anything else is a `server_error`.
 impl From<anyhow::Error> for Error {
     fn from(err: anyhow::Error) -> Self {
         let chain = err.chain().map(ToString::to_string).collect::<Vec<_>>().join(": ");
-
-        if let Some(inner) = err.downcast_ref::<Self>() {
-            tracing::debug!("Error: {err}, caused by: {inner}");
-
-            return match inner {
-                Self::BadRequest { code, .. } => Self::bad_request(code, chain),
-                Self::NotFound { code, .. } => Self::not_found(code, chain),
-                Self::ServerError { code, .. } => Self::server_error(code, chain),
-                Self::BadGateway { code, .. } => Self::bad_gateway(code, chain),
-            };
-        }
-
-        if let Some(inner) = err.downcast_ref::<capability::Error>() {
-            return match inner.kind() {
-                ErrorKind::Unavailable => Self::bad_gateway("bad_gateway", chain),
-                _ => Self::server_error("server_error", chain),
-            };
-        }
-
-        Self::server_error("server_error", chain)
+        let classified = err.chain().find_map(|error| {
+            Self::from_domain(error).or_else(|| {
+                error.downcast_ref::<capability::Error>().map(|error| match error.kind() {
+                    ErrorKind::Unavailable => crate::bad_gateway!(error),
+                    _ => crate::server_error!(error),
+                })
+            })
+        });
+        classified.unwrap_or_else(|| crate::server_error!(err)).with_description(chain)
     }
 }
 

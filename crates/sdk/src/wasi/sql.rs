@@ -1,29 +1,23 @@
 //! [`SqlDb`] over `omnia:sql`.
 
+use std::borrow::Cow;
+
 use bytes::Bytes;
 use omnia_wasi_sql::omnia::database;
 
 use crate::capability::{Error, ErrorKind, Result};
 use crate::sql::{DEFAULT, Field, Row, Statement, Value};
-use crate::{SqlDb, WasiProvider};
+use crate::{HasSqlDb, SqlDb, WasiProvider};
 
-impl SqlDb for WasiProvider {
-    type Named = Handle;
+static DEFAULT_HANDLE: Handle = Handle {
+    name: Cow::Borrowed(DEFAULT),
+};
 
-    async fn query(&self, sql: &str, params: &[Value]) -> Result<Vec<Row>> {
-        Handle::new(DEFAULT).query(sql, params).await
-    }
+impl HasSqlDb for WasiProvider {
+    type Inner = Handle;
 
-    async fn execute(&self, sql: &str, params: &[Value]) -> Result<u64> {
-        Handle::new(DEFAULT).execute(sql, params).await
-    }
-
-    async fn batch(&self, statements: &[Statement]) -> Result<Vec<u64>> {
-        Handle::new(DEFAULT).batch(statements).await
-    }
-
-    fn named(&self, name: &str) -> Handle {
-        Handle::new(name)
+    fn sql_db(&self) -> &Handle {
+        &DEFAULT_HANDLE
     }
 }
 
@@ -32,15 +26,7 @@ impl SqlDb for WasiProvider {
 /// [`SqlDb::named`] on [`WasiProvider`] returns one.
 #[derive(Clone, Debug)]
 pub struct Handle {
-    name: String,
-}
-
-impl Handle {
-    fn new(name: &str) -> Self {
-        Self {
-            name: name.to_owned(),
-        }
-    }
+    name: Cow<'static, str>,
 }
 
 impl SqlDb for Handle {
@@ -48,22 +34,24 @@ impl SqlDb for Handle {
 
     async fn query(&self, sql: &str, params: &[Value]) -> Result<Vec<Row>> {
         let params = params.iter().cloned().map(Into::into).collect();
-        let rows = database::query(self.name.clone(), sql.to_owned(), params).await?;
+        let rows = database::query(self.name.to_string(), sql.to_owned(), params).await?;
         Ok(rows.into_iter().map(Into::into).collect())
     }
 
     async fn execute(&self, sql: &str, params: &[Value]) -> Result<u64> {
         let params = params.iter().cloned().map(Into::into).collect();
-        Ok(database::execute(self.name.clone(), sql.to_owned(), params).await?)
+        Ok(database::execute(self.name.to_string(), sql.to_owned(), params).await?)
     }
 
     async fn batch(&self, statements: &[Statement]) -> Result<Vec<u64>> {
         let statements = statements.iter().cloned().map(Into::into).collect();
-        Ok(database::batch(self.name.clone(), statements).await?)
+        Ok(database::batch(self.name.to_string(), statements).await?)
     }
 
     fn named(&self, name: &str) -> Self {
-        Self::new(name)
+        Self {
+            name: Cow::Owned(name.to_owned()),
+        }
     }
 }
 

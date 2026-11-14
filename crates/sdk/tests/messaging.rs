@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use omnia_sdk::api::messaging::{Delivery, DeliveryError};
 use omnia_sdk::api::{Client, Context, DecodeError, Handlers};
 use omnia_sdk::capability::{self, ErrorKind};
-use omnia_sdk::{bad_gateway, bad_request};
+use omnia_sdk::{bad_gateway, bad_request, model, plugins, vcs};
 use serde::{Deserialize, Serialize};
 
 use self::support::{Spans, fields};
@@ -83,6 +83,10 @@ async fn malformed_delivery() {
 #[error("could not place the order")]
 struct PlaceError(#[source] capability::Error);
 
+#[derive(Debug, thiserror::Error)]
+#[error("could not review")]
+struct ToolError(#[source] model::Error);
+
 fn unavailable() -> capability::Error {
     capability::Error::new(ErrorKind::Unavailable, "store did not answer")
 }
@@ -101,6 +105,15 @@ async fn failing_handler() {
             ready(Err::<(), _>(bad_request!("no name")))
         })
         .topic("format", |_: Context<()>, _: EchoInput| ready(Err::<(), _>(fmt::Error)))
+        .topic("revision", |_: Context<()>, _: EchoInput| {
+            ready(Err::<(), _>(vcs::Error::NotFound("v1".into())))
+        })
+        .topic("plugin", |_: Context<()>, _: EchoInput| {
+            ready(Err::<(), _>(plugins::Error::Refused("unsigned".into())))
+        })
+        .topic("tool", |_: Context<()>, _: EchoInput| {
+            ready(Err::<(), _>(ToolError(model::Error::ToolFailed("lint".into()))))
+        })
         .with_state(Client::new(()));
 
     for (topic, expected, text) in [
@@ -109,6 +122,9 @@ async fn failing_handler() {
         ("order", ErrorKind::Unavailable, "could not place the order"),
         ("request", ErrorKind::Invalid, "no name"),
         ("format", ErrorKind::Other, "when formatting"),
+        ("revision", ErrorKind::NotFound, "not found: v1"),
+        ("plugin", ErrorKind::Invalid, "unsigned"),
+        ("tool", ErrorKind::Unavailable, "could not review"),
     ] {
         match router.handle(delivery(Some(topic), br#"{"name":"message"}"#)).await {
             Err(DeliveryError::Failed { kind, message }) => {

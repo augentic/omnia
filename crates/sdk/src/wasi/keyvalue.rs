@@ -1,5 +1,6 @@
 //! [`StateStore`] over `omnia:keyvalue`.
 
+use std::borrow::Cow;
 use std::time::Duration;
 
 use bytes::Bytes;
@@ -7,35 +8,17 @@ use omnia_wasi_keyvalue::omnia::store;
 
 use crate::capability::{Error, ErrorKind, Result};
 use crate::keyvalue::{Conflict, DEFAULT};
-use crate::{StateStore, WasiProvider};
+use crate::{HasStateStore, StateStore, WasiProvider};
 
-impl StateStore for WasiProvider {
-    type Named = Handle;
+static DEFAULT_HANDLE: Handle = Handle {
+    name: Cow::Borrowed(DEFAULT),
+};
 
-    async fn get(&self, key: &str) -> Result<Option<Bytes>> {
-        Handle::new(DEFAULT).get(key).await
-    }
+impl HasStateStore for WasiProvider {
+    type Inner = Handle;
 
-    async fn set(&self, key: &str, value: &[u8], ttl: Option<Duration>) -> Result<()> {
-        Handle::new(DEFAULT).set(key, value, ttl).await
-    }
-
-    async fn delete(&self, key: &str) -> Result<()> {
-        Handle::new(DEFAULT).delete(key).await
-    }
-
-    async fn compare_and_swap(
-        &self, key: &str, current: Option<&[u8]>, new: &[u8], ttl: Option<Duration>,
-    ) -> Result<Result<(), Conflict>> {
-        Handle::new(DEFAULT).compare_and_swap(key, current, new, ttl).await
-    }
-
-    async fn increment(&self, key: &str, delta: i64, ttl: Option<Duration>) -> Result<i64> {
-        Handle::new(DEFAULT).increment(key, delta, ttl).await
-    }
-
-    fn named(&self, name: &str) -> Handle {
-        Handle::new(name)
+    fn state_store(&self) -> &Handle {
+        &DEFAULT_HANDLE
     }
 }
 
@@ -44,40 +27,37 @@ impl StateStore for WasiProvider {
 /// [`StateStore::named`] on [`WasiProvider`] returns one.
 #[derive(Clone, Debug)]
 pub struct Handle {
-    name: String,
-}
-
-impl Handle {
-    fn new(name: &str) -> Self {
-        Self {
-            name: name.to_owned(),
-        }
-    }
+    name: Cow<'static, str>,
 }
 
 impl StateStore for Handle {
     type Named = Self;
 
     async fn get(&self, key: &str) -> Result<Option<Bytes>> {
-        Ok(store::get(self.name.clone(), key.to_owned()).await?.map(Bytes::from))
+        Ok(store::get(self.name.to_string(), key.to_owned()).await?.map(Bytes::from))
     }
 
     async fn set(&self, key: &str, value: &[u8], ttl: Option<Duration>) -> Result<()> {
         let ttl = ttl.map(millis);
-        Ok(store::set(self.name.clone(), key.to_owned(), value.to_vec(), ttl).await?)
+        Ok(store::set(self.name.to_string(), key.to_owned(), value.to_vec(), ttl).await?)
     }
 
     async fn delete(&self, key: &str) -> Result<()> {
-        Ok(store::delete(self.name.clone(), key.to_owned()).await?)
+        Ok(store::delete(self.name.to_string(), key.to_owned()).await?)
     }
 
     async fn compare_and_swap(
         &self, key: &str, current: Option<&[u8]>, new: &[u8], ttl: Option<Duration>,
     ) -> Result<Result<(), Conflict>> {
         let (current, ttl) = (current.map(<[u8]>::to_vec), ttl.map(millis));
-        let swapped =
-            store::compare_and_swap(self.name.clone(), key.to_owned(), current, new.to_vec(), ttl)
-                .await?;
+        let swapped = store::compare_and_swap(
+            self.name.to_string(),
+            key.to_owned(),
+            current,
+            new.to_vec(),
+            ttl,
+        )
+        .await?;
         Ok(swapped.map_err(|conflict| Conflict {
             current: conflict.current.map(Bytes::from),
         }))
@@ -85,11 +65,13 @@ impl StateStore for Handle {
 
     async fn increment(&self, key: &str, delta: i64, ttl: Option<Duration>) -> Result<i64> {
         let ttl = ttl.map(millis);
-        Ok(store::increment(self.name.clone(), key.to_owned(), delta, ttl).await?)
+        Ok(store::increment(self.name.to_string(), key.to_owned(), delta, ttl).await?)
     }
 
     fn named(&self, name: &str) -> Self {
-        Self::new(name)
+        Self {
+            name: Cow::Owned(name.to_owned()),
+        }
     }
 }
 

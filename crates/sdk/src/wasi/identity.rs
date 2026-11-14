@@ -1,22 +1,23 @@
 //! [`Identity`] over `omnia:identity`.
 
+use std::borrow::Cow;
 use std::time::Duration;
 
 use omnia_wasi_identity::credentials;
 
 use crate::capability::{Error, ErrorKind, Result};
 use crate::identity::{AccessToken, DEFAULT};
-use crate::{Identity, WasiProvider};
+use crate::{HasIdentity, Identity, WasiProvider};
 
-impl Identity for WasiProvider {
-    type Named = Handle;
+static DEFAULT_HANDLE: Handle = Handle {
+    name: Cow::Borrowed(DEFAULT),
+};
 
-    async fn token(&self, scopes: &[&str]) -> Result<AccessToken> {
-        Handle::new(DEFAULT).token(scopes).await
-    }
+impl HasIdentity for WasiProvider {
+    type Inner = Handle;
 
-    fn named(&self, name: &str) -> Handle {
-        Handle::new(name)
+    fn identity(&self) -> &Handle {
+        &DEFAULT_HANDLE
     }
 }
 
@@ -25,29 +26,23 @@ impl Identity for WasiProvider {
 /// [`Identity::named`] on [`WasiProvider`] returns one.
 #[derive(Clone, Debug)]
 pub struct Handle {
-    name: String,
-}
-
-impl Handle {
-    fn new(name: &str) -> Self {
-        Self {
-            name: name.to_owned(),
-        }
-    }
+    name: Cow<'static, str>,
 }
 
 impl Identity for Handle {
     type Named = Self;
 
     async fn token(&self, scopes: &[&str]) -> Result<AccessToken> {
-        let identity = credentials::get_identity(self.name.clone()).await?;
+        let identity = credentials::get_identity(self.name.to_string()).await?;
         let scopes = scopes.iter().map(|&scope| scope.to_owned()).collect();
         let token = identity.get_token(scopes).await?;
         Ok(AccessToken::new(token.token, Duration::from_secs(token.expires_in)))
     }
 
     fn named(&self, name: &str) -> Self {
-        Self::new(name)
+        Self {
+            name: Cow::Owned(name.to_owned()),
+        }
     }
 }
 

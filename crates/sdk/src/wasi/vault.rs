@@ -1,37 +1,23 @@
 //! [`SecretStore`] over `omnia:vault`.
 
+use std::borrow::Cow;
+
 use bytes::Bytes;
 use omnia_wasi_vault::vault;
 
 use crate::capability::{Error, ErrorKind, Page, Result};
 use crate::vault::DEFAULT;
-use crate::{SecretStore, WasiProvider};
+use crate::{HasSecretStore, SecretStore, WasiProvider};
 
-impl SecretStore for WasiProvider {
-    type Named = Handle;
+static DEFAULT_HANDLE: Handle = Handle {
+    name: Cow::Borrowed(DEFAULT),
+};
 
-    async fn get(&self, key: &str) -> Result<Option<Bytes>> {
-        Handle::new(DEFAULT).get(key).await
-    }
+impl HasSecretStore for WasiProvider {
+    type Inner = Handle;
 
-    async fn set(&self, key: &str, value: &[u8]) -> Result<()> {
-        Handle::new(DEFAULT).set(key, value).await
-    }
-
-    async fn delete(&self, key: &str) -> Result<()> {
-        Handle::new(DEFAULT).delete(key).await
-    }
-
-    async fn keys(&self, after: Option<&str>) -> Result<Page<String>> {
-        Handle::new(DEFAULT).keys(after).await
-    }
-
-    fn named(&self, name: &str) -> Handle {
-        Handle::new(name)
-    }
-
-    async fn exists(&self, key: &str) -> Result<bool> {
-        Handle::new(DEFAULT).exists(key).await
+    fn secret_store(&self) -> &Handle {
+        &DEFAULT_HANDLE
     }
 }
 
@@ -40,18 +26,12 @@ impl SecretStore for WasiProvider {
 /// [`SecretStore::named`] on [`WasiProvider`] returns one.
 #[derive(Clone, Debug)]
 pub struct Handle {
-    name: String,
+    name: Cow<'static, str>,
 }
 
 impl Handle {
-    fn new(name: &str) -> Self {
-        Self {
-            name: name.to_owned(),
-        }
-    }
-
     async fn open(&self) -> Result<vault::Locker> {
-        Ok(vault::open(self.name.clone()).await?)
+        Ok(vault::open(self.name.to_string()).await?)
     }
 }
 
@@ -80,7 +60,9 @@ impl SecretStore for Handle {
     }
 
     fn named(&self, name: &str) -> Self {
-        Self::new(name)
+        Self {
+            name: Cow::Owned(name.to_owned()),
+        }
     }
 
     async fn exists(&self, key: &str) -> Result<bool> {

@@ -40,7 +40,8 @@ fn invalid_dates() {
         "",
         "9999-12-31",
     ] {
-        Filter::on_date("at", date).expect_err(date);
+        let err = Filter::on_date("at", date).expect_err(date);
+        assert_eq!(err.kind(), ErrorKind::Invalid, "{date}: {err}");
     }
 }
 

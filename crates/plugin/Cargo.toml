@@ -15,6 +15,7 @@ version.workspace = true
 [lints]
 workspace = true
 
+# host dependencies
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 anyhow.workspace = true
 cap-std.workspace = true
@@ -25,6 +26,10 @@ tokio = { workspace = true, features = ["fs", "rt"] }
 tracing.workspace = true
 wasm-pkg-client.workspace = true
 wasmtime = { workspace = true, features = ["runtime"] }
+
+# guest dependencies
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wit-bindgen.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 omnia = { workspace = true, features = ["loader", "link"] }

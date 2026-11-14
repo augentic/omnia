@@ -4,8 +4,8 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_sdk::http::header::ETAG;
-use omnia_sdk::http::{Method, Request, StatusCode};
+use http::header::ETAG;
+use http::{Method, Request, StatusCode};
 use omnia_sdk::{ConfigExt as _, WasiProvider};
 
 omnia_sdk::api::command::export!(scenario);

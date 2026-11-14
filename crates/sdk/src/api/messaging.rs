@@ -33,8 +33,6 @@ macro_rules! __export_messaging {
     ($router:path, $provider:expr $(,)?) => {
         #[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
         const _: () = {
-            use $crate::omnia_wasi_otel;
-
             struct MessagingGuest;
 
             $crate::omnia_wasi_messaging::export!(
@@ -42,13 +40,11 @@ macro_rules! __export_messaging {
             );
 
             impl $crate::omnia_wasi_messaging::incoming_handler::Guest for MessagingGuest {
-                #[omnia_wasi_otel::instrument(name = "messaging_guest_handle")]
                 async fn handle(
                     message: $crate::omnia_wasi_messaging::types::Message,
                 ) -> ::core::result::Result<(), $crate::omnia_wasi_messaging::types::Error>
                 {
-                    let router = $router($provider);
-                    $crate::api::messaging::handle(&router, message).await
+                    $crate::api::messaging::handle_wasi($router, $provider, message).await
                 }
             }
         };
@@ -145,6 +141,9 @@ pub enum DeliveryError {
         ///   [`Other`](ErrorKind::Other), and
         ///   [`BadGateway`](crate::Error::BadGateway) is
         ///   [`Unavailable`](ErrorKind::Unavailable).
+        /// - A [`vcs::Error`](crate::vcs::Error), [`plugins::Error`](crate::plugins::Error),
+        ///   or [`model::Error`](crate::model::Error) maps as the
+        ///   [`Error`](crate::Error) it converts into.
         /// - A [`capability::Error`] keeps its [`kind`](capability::Error::kind).
         /// - Any other error is [`Other`](ErrorKind::Other).
         kind: ErrorKind,
@@ -194,6 +193,22 @@ pub async fn handle<P: Send + Sync + 'static>(
         .handle(delivery)
         .await
         .map_err(|error| omnia_wasi_messaging::types::Error::Other(error.to_string()))
+}
+
+/// Dispatch one WIT message through the router `router` builds over
+/// `provider`, inside the guest telemetry scope.
+///
+/// # Errors
+///
+/// Returns the WIT delivery failure [`handle`] reports.
+#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
+#[doc(hidden)]
+#[omnia_wasi_otel::instrument(name = "messaging_guest_handle")]
+pub async fn handle_wasi<P: Send + Sync + 'static>(
+    router: impl FnOnce(P) -> crate::api::Router<P>, provider: P,
+    message: omnia_wasi_messaging::types::Message,
+) -> Result<(), omnia_wasi_messaging::types::Error> {
+    handle(&router(provider), message).await
 }
 
 pub(crate) struct Topics<P: Send + Sync + 'static> {
@@ -326,9 +341,9 @@ fn error_kind(error: &(dyn Error + 'static)) -> ErrorKind {
     iter::successors(Some(error), |&error| error.source())
         .find_map(|error| {
             error
-                .downcast_ref::<crate::Error>()
-                .map(crate::Error::kind)
-                .or_else(|| error.downcast_ref::<capability::Error>().map(capability::Error::kind))
+                .downcast_ref::<capability::Error>()
+                .map(capability::Error::kind)
+                .or_else(|| crate::Error::from_domain(error).as_ref().map(crate::Error::kind))
         })
         .unwrap_or(ErrorKind::Other)
 }

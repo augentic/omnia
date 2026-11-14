@@ -967,19 +967,13 @@ async fn reregister() {
     runtime.shutdown();
 }
 
-// The guest-side copies exist because published crates cannot reference WIT
-// outside their package root; the host copy stays canonical.
+// test-programs resolves its worlds from its own `wit/deps`; this crate's copy
+// stays canonical.
 #[test]
 fn wit_copies() {
-    let canonical = include_str!("../wit/plugins.wit");
-    assert_eq!(
-        include_str!("../../sdk/wit/plugins.wit"),
-        canonical,
-        "omnia-sdk's plugins.wit copy drifted from crates/plugin/wit/plugins.wit"
-    );
     assert_eq!(
         include_str!("../../test-programs/wit/deps/plugins/plugins.wit"),
-        canonical,
+        include_str!("../wit/plugins.wit"),
         "test-programs' plugins.wit copy drifted from crates/plugin/wit/plugins.wit"
     );
 }

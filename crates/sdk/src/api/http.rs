@@ -41,25 +41,18 @@ macro_rules! __export_http {
     ($router:path, $provider:expr $(,)?) => {
         #[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
         const _: () = {
-            use $crate::omnia_wasi_otel;
-
             struct HttpGuest;
 
             $crate::wasip3::http::service::export!(HttpGuest);
 
             impl $crate::wasip3::exports::http::handler::Guest for HttpGuest {
-                #[omnia_wasi_otel::instrument(name = "http_guest_handle", level = $crate::tracing::Level::INFO)]
                 async fn handle(
                     request: $crate::wasip3::http::types::Request,
                 ) -> ::core::result::Result<
                     $crate::wasip3::http::types::Response,
                     $crate::wasip3::http::types::ErrorCode,
                 > {
-                    let router = $crate::axum::Router::layer(
-                        $crate::axum::Router::from($router($provider)),
-                        $crate::axum::middleware::from_fn($crate::api::http::trace),
-                    );
-                    $crate::api::http::serve(router, request).await
+                    $crate::api::http::serve_wasi($router, $provider, request).await
                 }
             }
         };
@@ -106,6 +99,25 @@ pub async fn trace(mut request: Request, next: Next) -> Response {
 /// Serve one WASI HTTP request through a finished [`axum::Router`].
 #[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
 pub use omnia_wasi_http::serve;
+
+/// Serve one WASI HTTP request through the router `router` builds over
+/// `provider`, inside the guest telemetry scope and the [`trace`] span.
+///
+/// # Errors
+///
+/// Returns the WASI error code [`serve`] reports.
+#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
+#[doc(hidden)]
+#[omnia_wasi_otel::instrument(name = "http_guest_handle")]
+pub async fn serve_wasi<P, R>(
+    router: impl FnOnce(P) -> R, provider: P, request: wasip3::http::types::Request,
+) -> Result<wasip3::http::types::Response, wasip3::http::types::ErrorCode>
+where
+    R: Into<axum::Router>,
+{
+    let router = router(provider).into().layer(axum::middleware::from_fn(trace));
+    serve(router, request).await
+}
 
 impl Metadata {
     /// Build metadata from HTTP request headers: `x-request-id`,

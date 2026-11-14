@@ -7,7 +7,7 @@
 
 use std::ops::Range;
 
-use omnia_sdk::bytes::Bytes;
+use bytes::Bytes;
 use omnia_sdk::capability::ErrorKind;
 use omnia_sdk::{BlobStore, WasiProvider};
 

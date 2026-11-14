@@ -402,6 +402,9 @@ async fn capability_errors() {
             "plugin-refused" => Err(plugins::Error::Refused("r".into()))?,
             "plugin-unavailable" => Err(plugins::Error::Unavailable("u".into()))?,
             "plugin-internal" => Err(plugins::Error::Internal("x".into()))?,
+            "vcs-access-context" => {
+                Err(anyhow::Error::from(vcs::Error::Access("denied".into())).context("push"))?
+            }
             _ => Ok(Json(())),
         }
     }
@@ -419,14 +422,17 @@ async fn capability_errors() {
         ("/err/plugin-refused", StatusCode::BAD_REQUEST, "refused"),
         ("/err/plugin-unavailable", StatusCode::BAD_GATEWAY, "unavailable"),
         ("/err/plugin-internal", StatusCode::INTERNAL_SERVER_ERROR, "internal"),
+        ("/err/vcs-access-context", StatusCode::BAD_GATEWAY, "access"),
     ] {
         let request = Request::get(path).body(Body::empty()).expect("build request");
         let (status, _, body) = send_raw(router.clone(), request).await;
         assert_eq!(status, expected_status, "{path}");
         let body: ErrorBody = serde_json::from_str(&body).expect("decode error body");
         assert_eq!(body.error, expected_code, "{path}");
-        if path == "/err/vcs-pending" {
-            assert_eq!(body.message, "pending changes: a.rs, b.md");
+        match path {
+            "/err/vcs-pending" => assert_eq!(body.message, "pending changes: a.rs, b.md"),
+            "/err/vcs-access-context" => assert_eq!(body.message, "push: access: denied"),
+            _ => {}
         }
     }
 }

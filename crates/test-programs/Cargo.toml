@@ -14,8 +14,10 @@ autoexamples = false
 # artifact paths alone.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 axum = { workspace = true, features = ["query"] }
+bytes.workspace = true
 clap.workspace = true
 futures.workspace = true
+http.workspace = true
 omnia-sdk = { workspace = true, features = ["command", "http"] }
 omnia-test = { workspace = true, features = ["contract"] }
 omnia-wasi-blobstore.workspace = true

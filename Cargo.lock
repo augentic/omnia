@@ -2390,6 +2390,7 @@ dependencies = [
  "tracing",
  "wasm-pkg-client",
  "wasmtime",
+ "wit-bindgen 0.63.0",
 ]
 
 [[package]]
@@ -2408,6 +2409,7 @@ dependencies = [
  "http-body",
  "http-body-util",
  "omnia-guest-macros",
+ "omnia-plugin",
  "omnia-test",
  "omnia-wasi-blobstore",
  "omnia-wasi-config",
@@ -2432,7 +2434,6 @@ dependencies = [
  "tracing-subscriber",
  "trybuild",
  "wasip3",
- "wit-bindgen 0.63.0",
 ]
 
 [[package]]
@@ -4081,8 +4082,10 @@ name = "test-programs"
 version = "0.38.0"
 dependencies = [
  "axum",
+ "bytes",
  "clap",
  "futures",
+ "http",
  "omnia-sdk",
  "omnia-test",
  "omnia-wasi-blobstore",

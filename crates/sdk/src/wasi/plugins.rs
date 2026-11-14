@@ -1,18 +1,9 @@
 //! [`Plugins`] over `omnia:plugins/loader`.
 
-use self::generated::omnia::plugins::loader;
+use omnia_plugin::loader;
+
 use crate::plugins::{Digest, Error, Location, Plugin};
 use crate::{Plugins, WasiProvider};
-
-mod generated {
-    #![expect(clippy::same_length_and_capacity, reason = "wit-bindgen output")]
-
-    wit_bindgen::generate!({
-        world: "imports",
-        path: "wit",
-        generate_all,
-    });
-}
 
 impl Plugins for WasiProvider {
     async fn load(&self, from: &Location, digest: Option<&Digest>) -> Result<Plugin, Error> {

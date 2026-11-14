@@ -4,7 +4,7 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_sdk::http::{Method, Request};
+use http::{Method, Request};
 use omnia_sdk::{ConfigExt as _, WasiProvider};
 use wasip3::http::types::ErrorCode;
 

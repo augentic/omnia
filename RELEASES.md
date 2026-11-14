@@ -109,6 +109,9 @@ Unreleased
 - `Runtime::stop` and `Runtime::stopped`. A trigger server waits on
   `stopped` to stop accepting work and drain. `Runtime::shutdown` stops
   the runtime too.
+- `omnia_plugin::loader`, on `wasm32`: the guest bindings for
+  `omnia:plugins/loader`. `omnia-sdk` serves `Plugins` through them and
+  carries no WIT of its own.
 
 ### Changed
 
@@ -308,14 +311,18 @@ Unreleased
   feature, link no `wasmtime`. `omnia-wasi-docstore` is a `wasm32`-only
   dependency of the SDK, and `MemoryDocs` keeps its own in-memory store.
 - `Filter::on_date` accepts only a zero-padded `YYYY-MM-DD` date, so
-  `2024-1-5` is an error.
+  `2024-1-5` is an error. The error is a `capability::Error` of kind
+  `Invalid`, which was an `anyhow::Error`.
+- An `omnia_sdk::vcs::Error`, `plugins::Error`, or `model::Error` under
+  `anyhow` context converts into `omnia_sdk::Error` with the code and
+  status it has unwrapped, which was a `server_error`.
 - `DeliveryError::Rejected` splits in two:
   - `Undecodable(message)` is a payload that did not decode, which a
     broker drops.
   - `Failed { kind, message }` is a handler error, which a broker
     redelivers when `kind` is `Unavailable`. The `kind` comes from the
-    first `omnia_sdk::Error` or `capability::Error` in the error's source
-    chain.
+    first `omnia_sdk::Error`, `capability::Error`, `vcs::Error`,
+    `plugins::Error`, or `model::Error` in the error's source chain.
 
   Over the draft `wasi:messaging`, both still cross as `error.other` with
   the same text. A match on `Rejected(message)` becomes
@@ -338,6 +345,10 @@ Unreleased
 - `omnia_sdk::api::messaging::{consume, consume_with, Consume, Routes}`. A
   topic is bound with `Handlers::topic` or `Handlers::topic_with`.
 - `Client::owner`.
+- The hidden `omnia_sdk` re-exports of `axum`, `http`, `anyhow`, `bytes`,
+  `http_body`, `tracing`, `wit_bindgen`, and the `omnia_wasi_*` crates
+  other than `omnia_wasi_messaging`. A guest depends on the crates it
+  names. `omnia_sdk::wasip3` stays.
 - `BlobStoreExt`.
 - `omnia::HttpCtx`, and the `WasiHttpView` re-export from `omnia_wasi_http`.
 - `omnia::Server`, folded into `Host::run`.

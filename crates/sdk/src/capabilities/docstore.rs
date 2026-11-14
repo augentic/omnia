@@ -350,9 +350,10 @@ impl Filter {
     ///
     /// # Errors
     ///
-    /// Returns an error if `iso_date` is not a zero-padded `YYYY-MM-DD` date,
-    /// or is `9999-12-31`, which has no next day in that form.
-    pub fn on_date(field: &str, iso_date: &str) -> anyhow::Result<Self> {
+    /// Returns an [`Invalid`](ErrorKind::Invalid) error if `iso_date` is not a
+    /// zero-padded `YYYY-MM-DD` date, or is `9999-12-31`, which has no next
+    /// day in that form.
+    pub fn on_date(field: &str, iso_date: &str) -> Result<Self> {
         let next = next_iso_date(iso_date)?;
         let start = format!("{iso_date}T00:00:00Z");
         let end = format!("{next}T00:00:00Z");
@@ -481,9 +482,9 @@ impl Not for Filter {
     }
 }
 
-fn next_iso_date(iso_date: &str) -> anyhow::Result<String> {
+fn next_iso_date(iso_date: &str) -> Result<String> {
     let (year, month, day) = parse_iso_date(iso_date)
-        .ok_or_else(|| anyhow::anyhow!("invalid ISO date: {iso_date:?}"))?;
+        .ok_or_else(|| Error::new(ErrorKind::Invalid, format!("invalid ISO date: {iso_date:?}")))?;
     let (year, month, day) = if day < days_in_month(year, month) {
         (year, month, day + 1)
     } else if month < 12 {
@@ -491,7 +492,10 @@ fn next_iso_date(iso_date: &str) -> anyhow::Result<String> {
     } else if year < 9999 {
         (year + 1, 1, 1)
     } else {
-        anyhow::bail!("cannot compute next day for date: {iso_date}");
+        return Err(Error::new(
+            ErrorKind::Invalid,
+            format!("cannot compute next day for date: {iso_date}"),
+        ));
     };
     Ok(format!("{year:04}-{month:02}-{day:02}"))
 }

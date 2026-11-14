@@ -9,25 +9,22 @@
 //! - `sql::Handle`
 //! - `vault::Handle`
 
-cfg_select! {
-    all(target_arch = "wasm32", target_os = "wasi") => {
-        mod blobstore;
-        mod config;
-        mod docstore;
-        mod http;
-        pub mod identity;
-        pub mod keyvalue;
-        mod lend;
-        pub(crate) mod messaging;
-        mod model;
-        mod plugins;
-        pub mod sql;
-        pub mod vault;
-        mod vcs;
-        mod websockets;
-    }
-    _ => {}
-}
+#![cfg(all(target_arch = "wasm32", target_os = "wasi"))]
+
+mod blobstore;
+mod config;
+mod docstore;
+mod http;
+pub mod identity;
+pub mod keyvalue;
+mod lend;
+pub mod messaging;
+mod model;
+mod plugins;
+pub mod sql;
+pub mod vault;
+mod vcs;
+mod websockets;
 
 /// Zero-sized WASI provider implementing every capability trait on `wasm32`.
 ///
