@@ -18,7 +18,7 @@ mod http;
 pub mod identity;
 pub mod keyvalue;
 mod lend;
-pub(crate) mod messaging;
+mod messaging;
 mod model;
 mod plugins;
 pub mod sql;

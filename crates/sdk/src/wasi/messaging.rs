@@ -4,11 +4,8 @@ use omnia_wasi_messaging::producer;
 use omnia_wasi_messaging::types::{self as wire, Client};
 
 use crate::capability::{Error, ErrorKind, Result};
-use crate::messaging::Message;
+use crate::messaging::{KEY, Message};
 use crate::{Publisher, WasiProvider};
-
-// the metadata entry a partition key travels in over `wasi:messaging`
-pub const KEY: &str = "key";
 
 impl Publisher for WasiProvider {
     async fn publish(&self, topic: &str, message: &Message) -> Result<()> {

@@ -181,7 +181,7 @@ pub async fn handle<P: Send + Sync + 'static>(
     let metadata = message.metadata().unwrap_or_default();
     let key = metadata
         .iter()
-        .find(|(name, _)| name.eq_ignore_ascii_case(crate::wasi::messaging::KEY))
+        .find(|(name, _)| name.eq_ignore_ascii_case(crate::messaging::KEY))
         .map(|(_, value)| value.clone());
     let delivery = Delivery {
         topic: message.topic(),
