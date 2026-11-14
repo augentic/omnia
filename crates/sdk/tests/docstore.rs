@@ -3,7 +3,7 @@
 
 use std::iter;
 
-use omnia_sdk::ErrorKind;
+use omnia_sdk::Error;
 use omnia_sdk::docstore::Filter;
 use serde_json::json;
 
@@ -41,7 +41,10 @@ fn invalid_dates() {
         "9999-12-31",
     ] {
         let err = Filter::on_date("at", date).expect_err(date);
-        assert_eq!(err.kind(), ErrorKind::Invalid, "{date}: {err}");
+        assert!(
+            matches!(&err, Error::ServerError { code, .. } if code == "invalid"),
+            "{date}: {err}"
+        );
     }
 }
 
@@ -56,7 +59,7 @@ fn list(len: usize) -> Filter {
 #[track_caller]
 fn refused(filter: &Filter) {
     let err = filter.check().expect_err("a filter past a limit");
-    assert_eq!(err.kind(), ErrorKind::Invalid, "{err}");
+    assert!(matches!(&err, Error::ServerError { code, .. } if code == "invalid"), "{err}");
 }
 
 #[test]

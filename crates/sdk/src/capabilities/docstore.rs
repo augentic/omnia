@@ -13,7 +13,7 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
-use crate::{CapabilityError, ErrorKind, Page};
+use crate::{Error, Page, Result};
 
 /// Store and query JSON documents in a deployment's collections.
 ///
@@ -28,10 +28,9 @@ use crate::{CapabilityError, ErrorKind, Page};
 /// - [`Filter::And`], [`Filter::Or`], and [`Filter::Not`];
 /// - a `limit`, with the [`Page::next`] cursor.
 ///
-/// A zero `limit`, or a filter [`Filter::check`] refuses, fails with
-/// [`ErrorKind::Invalid`]. A provider serves every other feature as defined,
-/// or fails the query with [`ErrorKind::Unsupported`], and never ignores
-/// one. The
+/// A zero `limit`, or a filter [`Filter::check`] refuses, fails with the
+/// code `invalid`. A provider serves every other feature as defined, or
+/// fails the query with the code `unsupported`, and never ignores one. The
 /// [document store reference](https://github.com/augentic/omnia/blob/main/docs/reference/docstore.md#query-contract)
 /// lists the portable names and the optional features.
 #[omnia_guest_macros::capability]
@@ -39,7 +38,7 @@ pub trait DocumentDb: Send + Sync {
     /// Fetch the document `id` from `collection`, or `None` when it is absent.
     fn get(
         &self, collection: &str, id: &str,
-    ) -> impl Future<Output = Result<Option<Document>, CapabilityError>> + Send;
+    ) -> impl Future<Output = Result<Option<Document>>> + Send;
 
     /// Insert `document` into `collection`, unless its id is already stored.
     ///
@@ -47,22 +46,19 @@ pub trait DocumentDb: Send + Sync {
     /// untouched.
     fn insert(
         &self, collection: &str, document: &Document,
-    ) -> impl Future<Output = Result<Result<(), Exists>, CapabilityError>> + Send;
+    ) -> impl Future<Output = Result<Result<(), Exists>>> + Send;
 
     /// Store `document` in `collection`, replacing any document with its id.
-    fn put(
-        &self, collection: &str, document: &Document,
-    ) -> impl Future<Output = Result<(), CapabilityError>> + Send;
+    fn put(&self, collection: &str, document: &Document)
+    -> impl Future<Output = Result<()>> + Send;
 
     /// Delete the document `id` from `collection`, answering whether one was removed.
-    fn delete(
-        &self, collection: &str, id: &str,
-    ) -> impl Future<Output = Result<bool, CapabilityError>> + Send;
+    fn delete(&self, collection: &str, id: &str) -> impl Future<Output = Result<bool>> + Send;
 
     /// One page of the documents in `collection` that `query` selects.
     fn query(
         &self, collection: &str, query: &Query,
-    ) -> impl Future<Output = Result<Page<Document>, CapabilityError>> + Send;
+    ) -> impl Future<Output = Result<Page<Document>>> + Send;
 }
 
 /// Typed reads over any [`DocumentDb`].
@@ -71,10 +67,10 @@ pub trait DocumentDb: Send + Sync {
 pub trait DocumentDbExt: DocumentDb {
     /// Fetch the document `id` and decode its JSON body as `T`.
     ///
-    /// A body that is not the JSON of a `T` fails with [`ErrorKind::Invalid`].
+    /// A body that is not the JSON of a `T` fails with the code `invalid`.
     fn get_as<T: DeserializeOwned>(
         &self, collection: &str, id: &str,
-    ) -> impl Future<Output = Result<Option<T>, CapabilityError>> + Send {
+    ) -> impl Future<Output = Result<Option<T>>> + Send {
         async move { self.get(collection, id).await?.map(|document| document.decode()).transpose() }
     }
 }
@@ -353,10 +349,10 @@ impl Filter {
     ///
     /// # Errors
     ///
-    /// Returns an [`Invalid`](ErrorKind::Invalid) error if `iso_date` is not a
-    /// zero-padded `YYYY-MM-DD` date, or is `9999-12-31`, which has no next
-    /// day in that form.
-    pub fn on_date(field: &str, iso_date: &str) -> Result<Self, CapabilityError> {
+    /// A [`ServerError`](Error::ServerError) with the code `invalid` if
+    /// `iso_date` is not a zero-padded `YYYY-MM-DD` date, or is `9999-12-31`,
+    /// which has no next day in that form.
+    pub fn on_date(field: &str, iso_date: &str) -> Result<Self> {
         let next = next_iso_date(iso_date)?;
         let start = format!("{iso_date}T00:00:00Z");
         let end = format!("{next}T00:00:00Z");
@@ -382,21 +378,21 @@ impl Filter {
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::Invalid`] when the tree nests deeper than
-    /// [`MAX_DEPTH`](Self::MAX_DEPTH), a list is empty or holds more than
-    /// [`MAX_LIST_LEN`](Self::MAX_LIST_LEN) values, or an [`And`](Self::And)
-    /// or [`Or`](Self::Or) has no children.
-    pub fn check(&self) -> Result<(), CapabilityError> {
+    /// A [`ServerError`](Error::ServerError) with the code `invalid` when the
+    /// tree nests deeper than [`MAX_DEPTH`](Self::MAX_DEPTH), a list is empty
+    /// or holds more than [`MAX_LIST_LEN`](Self::MAX_LIST_LEN) values, or an
+    /// [`And`](Self::And) or [`Or`](Self::Or) has no children.
+    pub fn check(&self) -> Result<()> {
         let depth = self.depth();
         if depth > Self::MAX_DEPTH {
             let message =
                 format!("the filter nests {depth} deep, past the limit of {}", Self::MAX_DEPTH);
-            return Err(CapabilityError::new(ErrorKind::Invalid, message));
+            return Err(Error::server_error("invalid", message));
         }
         self.check_node()
     }
 
-    fn check_node(&self) -> Result<(), CapabilityError> {
+    fn check_node(&self) -> Result<()> {
         match self {
             Self::InList { field, values } | Self::NotInList { field, values } => {
                 if (1..=Self::MAX_LIST_LEN).contains(&values.len()) {
@@ -407,14 +403,11 @@ impl Filter {
                     values.len(),
                     Self::MAX_LIST_LEN
                 );
-                Err(CapabilityError::new(ErrorKind::Invalid, message))
+                Err(Error::server_error("invalid", message))
             }
             Self::And(children) | Self::Or(children) => {
                 if children.is_empty() {
-                    return Err(CapabilityError::new(
-                        ErrorKind::Invalid,
-                        "an `and` or `or` has no children",
-                    ));
+                    return Err(Error::server_error("invalid", "an `and` or `or` has no children"));
                 }
                 children.iter().try_for_each(Self::check_node)
             }
@@ -488,10 +481,9 @@ impl Not for Filter {
     }
 }
 
-fn next_iso_date(iso_date: &str) -> Result<String, CapabilityError> {
-    let (year, month, day) = parse_iso_date(iso_date).ok_or_else(|| {
-        CapabilityError::new(ErrorKind::Invalid, format!("invalid ISO date: {iso_date:?}"))
-    })?;
+fn next_iso_date(iso_date: &str) -> Result<String> {
+    let (year, month, day) = parse_iso_date(iso_date)
+        .ok_or_else(|| Error::server_error("invalid", format!("invalid ISO date: {iso_date:?}")))?;
     let (year, month, day) = if day < days_in_month(year, month) {
         (year, month, day + 1)
     } else if month < 12 {
@@ -499,8 +491,8 @@ fn next_iso_date(iso_date: &str) -> Result<String, CapabilityError> {
     } else if year < 9999 {
         (year + 1, 1, 1)
     } else {
-        return Err(CapabilityError::new(
-            ErrorKind::Invalid,
+        return Err(Error::server_error(
+            "invalid",
             format!("cannot compute next day for date: {iso_date}"),
         ));
     };
@@ -659,14 +651,12 @@ impl Document {
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::Invalid`] when `value` does not serialize.
-    pub fn json<T: Serialize + ?Sized>(
-        id: impl Into<String>, value: &T,
-    ) -> Result<Self, CapabilityError> {
+    /// A [`ServerError`](Error::ServerError) with the code `invalid` when
+    /// `value` does not serialize.
+    pub fn json<T: Serialize + ?Sized>(id: impl Into<String>, value: &T) -> Result<Self> {
         let id = id.into();
         let data = serde_json::to_vec(value).map_err(|err| {
-            CapabilityError::new(ErrorKind::Invalid, format!("encoding document `{id}`"))
-                .with_source(err)
+            Error::server_error("invalid", format!("encoding document `{id}`: {err}"))
         })?;
         Ok(Self {
             id,
@@ -678,11 +668,11 @@ impl Document {
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::Invalid`] when the body is not the JSON of a `T`.
-    pub fn decode<T: DeserializeOwned>(&self) -> Result<T, CapabilityError> {
+    /// A [`ServerError`](Error::ServerError) with the code `invalid` when the
+    /// body is not the JSON of a `T`.
+    pub fn decode<T: DeserializeOwned>(&self) -> Result<T> {
         serde_json::from_slice(&self.data).map_err(|err| {
-            let message = format!("decoding document `{}`", self.id);
-            CapabilityError::new(ErrorKind::Invalid, message).with_source(err)
+            Error::server_error("invalid", format!("decoding document `{}`: {err}", self.id))
         })
     }
 }

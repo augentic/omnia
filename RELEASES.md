@@ -40,10 +40,12 @@ Unreleased
 - `omnia:sql`, the Omnia-owned interface `SqlDb` calls. `WasiSql` serves it
   beside the `wasi:sql` draft over one `Connection`. Each call names its
   database, and `batch` runs its statements in one transaction.
-- `omnia_sdk::{CapabilityError, ErrorKind}`, the error every capability
-  trait returns. `ErrorKind` is one of `NotFound`, `Denied`, `Invalid`,
-  `Unsupported`, `Unavailable`, and `Other`. `?` converts it into
-  `omnia_sdk::Error`, as a `502` for `Unavailable` and a `500` otherwise.
+- The codes of a failed capability call. Its `omnia_sdk::Error` names the
+  class of failure in its code:
+  - `not-found`, `denied`, `invalid`, `unsupported`, or `other` on a
+    `ServerError`, a `500`.
+  - `unavailable` on a `BadGateway`, a `502`, when the upstream did not
+    answer or the call exceeded its time bound.
 - `omnia_sdk::Page`, one page of a listing and the cursor that resumes it.
   `BlobStore::list`, `DocumentDb::query`, and `SecretStore::keys` answer
   one.
@@ -139,12 +141,12 @@ Unreleased
     `omnia_sdk::identity::AccessToken`.
   - A `DEFAULT` binding name in `omnia_sdk::{identity, keyvalue, sql,
     vault}`, and `omnia_sdk::keyvalue::Conflict`.
-- Every capability trait fails with `CapabilityError`. A trait over named
+- Every capability trait answers `omnia_sdk::Result`. A trait over named
   bindings (`Identity`, `SecretStore`, `SqlDb`, and `StateStore`) addresses
   `default` until `named(name)` selects another name the deployment
   declares. Migrating a 0.37 guest:
   - `Config::get` answers `Option<String>`, so an unset key is `Ok(None)`.
-    `ConfigExt::require` fails one with `ErrorKind::NotFound`, and
+    `ConfigExt::require` fails one with the code `not-found`, and
     `ConfigExt::parse` answers it as `None`.
   - `HttpRequest` is `HttpClient`, and `fetch` takes a `Request<Bytes>`.
     `fetch_json` takes the output type alone.
@@ -164,7 +166,7 @@ Unreleased
     `Page<Document>`. `insert` answers `Ok(Err(Exists))` for an id already
     stored, and a `Document` payload is `Bytes`.
   - `BlobStore` answers `None` for a missing object. A call on an object
-    in a container that does not exist fails with `ErrorKind::NotFound`,
+    in a container that does not exist fails with the code `not-found`,
     and `delete_container` succeeds when the container is absent.
     `get_range` takes a half-open `Range<u64>` clamped to the object, and
     `list(container, prefix, after)` answers a `Page<ObjectMetadata>`.
@@ -189,28 +191,29 @@ Unreleased
   - `batch` runs a `Vec<Statement>` in one transaction. A `Statement` is
     its `sql` and `params`.
   - A `Row` has no `index`.
-  - A backend picks a failure's kind by returning an
-    `omnia_wasi_sql::Error`, whose six cases match `ErrorKind`.
+  - A backend picks a failure's code by returning an
+    `omnia_wasi_sql::Error`, whose six cases are the six capability error
+    codes.
 - `SqlDefault` stores a `date` or `time` as the text it is given. It stored
   one as `NULL` before.
 - `Row::get` reads a `bool` from an integer `0` or `1` too, which is how
   SQLite returns a `BOOLEAN`.
-- The `omnia:docstore` `error` has the six cases of `ErrorKind`, and
+- The `omnia:docstore` `error` has one case per capability error code, and
   `insert` answers `already-exists` for an id already stored. The SDK
   reads both without matching message text.
 - `DocStoreClient::insert` answers `false` for an id already stored, and a
-  backend picks a failure's kind by returning an
+  backend picks a failure's code by returning an
   `omnia_wasi_docstore::Error`.
-- `DocumentDb::query` fails a filter past its limits with
-  `ErrorKind::Invalid` before the query reaches the host, where the guest
+- `DocumentDb::query` fails a filter past its limits with the code
+  `invalid` before the query reaches the host, where the guest
   trapped before. A filter nests at most 5 deep, a list holds 1 to 100
   values, and an `and` or `or` holds a child. `MemoryDocs` refuses the
   same filters, and the host's `in-list` and `not-in-list` constructors
   refuse an empty list.
 - `IdentityStub` refuses an identity `IDENTITY_NAMES` does not list, and
   `IdentityDefault` serves the identity `default` alone. A refused name is
-  `no-such-identity`, which `Identity` reports as `ErrorKind::NotFound`.
-  A backend picks a failure's kind by returning an
+  `no-such-identity`, which `Identity` reports with the code `not-found`.
+  A backend picks a failure's code by returning an
   `omnia_wasi_identity::Error`.
 - `BlobStoreClient` states the container rules every backend keeps:
   - `get_container` fails a container that does not exist with
@@ -218,13 +221,12 @@ Unreleased
   - `create_container` opens a container that already exists.
   - `delete_container` succeeds when the container is absent.
 
-  A backend picks a failure's kind by returning an
+  A backend picks a failure's code by returning an
   `omnia_wasi_blobstore::Error`, which implements `std::error::Error`.
 - `StateStore` calls `omnia:keyvalue`, one host call per method:
-  - Every method fails with `CapabilityError`, and `get` answers
-    `Option<Bytes>`.
+  - `get` answers `Option<Bytes>`.
   - `set` answers `()`, and a TTL is an `Option<Duration>`. A zero TTL
-    fails with `ErrorKind::Invalid` and writes nothing.
+    fails with the code `invalid` and writes nothing.
   - `cas` is `compare_and_swap`. A mismatch answers `Ok(Err(Conflict))`
     with the value it found.
   - `increment` takes a TTL. Like `compare_and_swap`, it applies the TTL
@@ -232,9 +234,9 @@ Unreleased
   - `named(name)` selects another bucket the deployment declares.
   - A portable key works on every backend: it holds only ASCII letters,
     digits, `.`, `_`, and `-`, and neither starts nor ends with `.`. A
-    backend may reject any other key with `ErrorKind::Invalid`.
-- `StateStoreExt::{get_json, set_json}` fail with `CapabilityError`, and a
-  value that does not encode or decode fails with `ErrorKind::Invalid`.
+    backend may reject any other key with the code `invalid`.
+- `StateStoreExt::{get_json, set_json}` fail a value that does not encode
+  or decode with the code `invalid`.
 - `StateStore` opens the `default` bucket, which was `cache`. The host
   stores a guest's bytes as they are and expires them itself, so a value a
   0.37 guest set with a TTL reads back as its JSON `Cacheable` envelope.
@@ -244,7 +246,7 @@ Unreleased
   `no-such-store` on the draft. A deployment whose guests open a bucket
   other than `default` lists it in `KEYVALUE_BUCKETS`.
 - `Bucket::{set, increment}` take a TTL, and `Bucket::compare_and_swap`
-  replaces `swap`. A backend picks a failure's kind by returning an
+  replaces `swap`. A backend picks a failure's code by returning an
   `omnia_wasi_keyvalue::Error`.
 - Each `Has<Trait>` names the type it delegates to as `Inner`, and its
   accessor returns `&Self::Inner`, so a capability's associated types
@@ -257,7 +259,7 @@ Unreleased
   `Memory::named` addresses another bucket and locker of the same store,
   and `Memory::snapshot` answers state by bucket.
 - `omnia_test::guest::Memory` fails a call on an object in a container
-  nothing created with `ErrorKind::NotFound`, as the runtime does. A test
+  nothing created with the code `not-found`, as the runtime does. A test
   creates the container first, or seeds it with `insert_container` or
   `insert_object`.
 - The `omnia_test::guest` doubles follow the traits:
@@ -317,22 +319,28 @@ Unreleased
   feature, link no `wasmtime`. `omnia-wasi-docstore` is a `wasm32`-only
   dependency of the SDK, and `MemoryDocs` keeps its own in-memory store.
 - `Filter::on_date` accepts only a zero-padded `YYYY-MM-DD` date, so
-  `2024-1-5` is an error. The error is a `CapabilityError` of kind
-  `Invalid`, which was an `anyhow::Error`.
+  `2024-1-5` is an error. The error is an `omnia_sdk::Error` with the code
+  `invalid`, which was an `anyhow::Error`.
 - An `omnia_sdk::vcs::Error`, `plugins::Error`, or `model::Error` under
   `anyhow` context converts into `omnia_sdk::Error` with the code and
   status it has unwrapped, which was a `server_error`.
+- An `omnia_sdk::Error` under `anyhow` context adds its description, not
+  its display, to the context. `bad_request!("no name")` under the
+  context `saving` describes itself as `saving: no name`, which was
+  `saving: code: bad_request, description: no name`.
+- `omnia_sdk::Error` implements `PartialEq` and `Eq`.
 - `DeliveryError::Rejected` splits in two:
   - `Undecodable(message)` is a payload that did not decode, which a
     broker drops.
-  - `Failed { kind, message }` is a handler error, which a broker
-    redelivers when `kind` is `Unavailable`. The `kind` comes from the
-    first `omnia_sdk::Error`, `CapabilityError`, `vcs::Error`,
-    `plugins::Error`, or `model::Error` in the error's source chain.
+  - `Failed(error)` is a handler error as an `omnia_sdk::Error`, which a
+    broker redelivers when it is a `BadGateway`. The first
+    `omnia_sdk::Error`, `vcs::Error`, `plugins::Error`, or `model::Error`
+    in the error's source chain sets its variant and code, and the
+    description is the whole chain.
 
-  Over the draft `wasi:messaging`, both still cross as `error.other` with
-  the same text. A match on `Rejected(message)` becomes
-  `Undecodable(message) | Failed { message, .. }`.
+  Over the draft `wasi:messaging`, both still cross as `error.other`, and
+  a `Failed` one carries its error's display. A match on
+  `Rejected(message)` becomes `Undecodable(message)` or `Failed(error)`.
 - `omnia_sdk::api::Metadata` is `#[non_exhaustive]`. Code outside the SDK
   builds one with `Metadata::default()` and assigns its fields, or with
   `from_lookup`, `from_headers`, `from_env`, or `minted`.

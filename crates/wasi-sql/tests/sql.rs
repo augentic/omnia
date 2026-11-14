@@ -102,7 +102,7 @@ impl SqlClient for Faulting {
 }
 
 #[tokio::test]
-async fn sql_error_kinds() {
+async fn sql_error_codes() {
     let backends = Backends::defaults().await;
     let faulting = Faulting {
         inner: backends.sql.clone(),
@@ -111,7 +111,7 @@ async fn sql_error_kinds() {
     let backends = backends.sql(faulting);
 
     let status = Deployment::new()
-        .guest("guest", test_programs::SQL_ERROR_KINDS)
+        .guest("guest", test_programs::SQL_ERROR_CODES)
         .run_host::<WasiSql, _>(backends.clone())
         .await
         .expect("guest runs");

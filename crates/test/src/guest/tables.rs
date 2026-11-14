@@ -5,7 +5,7 @@ use std::future::{Future, ready};
 use std::sync::{Arc, Mutex};
 
 use omnia_sdk::sql::{DEFAULT, Row, Statement, Value};
-use omnia_sdk::{CapabilityError, SqlDb};
+use omnia_sdk::{Result, SqlDb};
 
 /// A statement predicate over the SQL text and its bound parameters.
 pub type Predicate = Arc<dyn Fn(&str, &[Value]) -> bool + Send + Sync>;
@@ -145,9 +145,7 @@ impl fmt::Debug for ScriptedTables {
 impl SqlDb for ScriptedTables {
     type Named = Self;
 
-    fn query(
-        &self, sql: &str, params: &[Value],
-    ) -> impl Future<Output = Result<Vec<Row>, CapabilityError>> + Send {
+    fn query(&self, sql: &str, params: &[Value]) -> impl Future<Output = Result<Vec<Row>>> + Send {
         let executed = self.record(sql, params);
         let rows = Self::first_match(&self.inner.queries, &executed).unwrap_or_else(|| {
             panic!("no on_query rule matches `{}` with {:?}", executed.sql, executed.params)
@@ -155,15 +153,11 @@ impl SqlDb for ScriptedTables {
         ready(Ok(rows))
     }
 
-    fn execute(
-        &self, sql: &str, params: &[Value],
-    ) -> impl Future<Output = Result<u64, CapabilityError>> + Send {
+    fn execute(&self, sql: &str, params: &[Value]) -> impl Future<Output = Result<u64>> + Send {
         ready(Ok(self.affected(sql, params)))
     }
 
-    fn batch(
-        &self, statements: &[Statement],
-    ) -> impl Future<Output = Result<Vec<u64>, CapabilityError>> + Send {
+    fn batch(&self, statements: &[Statement]) -> impl Future<Output = Result<Vec<u64>>> + Send {
         let affected = statements
             .iter()
             .map(|statement| self.affected(&statement.sql, &statement.params))

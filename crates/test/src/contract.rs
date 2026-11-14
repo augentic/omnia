@@ -18,12 +18,18 @@ pub mod state;
 
 use std::fmt::Debug;
 
-use omnia_sdk::{CapabilityError, ErrorKind};
+use omnia_sdk::{Error, Result};
 
 #[track_caller]
-fn expect_kind<T: Debug>(result: Result<T, CapabilityError>, kind: ErrorKind, call: &str) {
+fn expect_code<T: Debug>(result: Result<T>, code: &str, call: &str) {
     match result {
-        Ok(value) => panic!("{call} returned {value:?}, not a `{kind}` failure"),
-        Err(err) => assert_eq!(err.kind(), kind, "{call} failed with `{err}`"),
+        Ok(value) => panic!("{call} returned {value:?}, not a `{code}` failure"),
+        Err(err) => assert!(is_code(&err, code), "{call} failed with `{err}`, not `{code}`"),
     }
+}
+
+// a capability failure the rows expect is a `ServerError`, so a provider
+// answering with another variant breaks the row even under the right code
+fn is_code(err: &Error, code: &str) -> bool {
+    matches!(err, Error::ServerError { code: found, .. } if found == code)
 }

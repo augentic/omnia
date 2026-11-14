@@ -54,7 +54,7 @@ The deadline layer is added last, so it runs first and `trace` reads the stamped
 The host subscribes to each of `Router::topics` and hands every delivery to `Router::handle`. Before it does, it sets the delivery's `deadline` metadata entry, replacing any entry of that name the broker delivered, whatever its case. It then acts on the `DeliveryError` a failure returns:
 
 - It drops an `Undecodable` delivery, which no redelivery decodes.
-- It redelivers a `Failed` delivery of kind `ErrorKind::Unavailable`, which may succeed later.
+- It redelivers a `Failed` delivery whose error is a `BadGateway`, which may succeed later.
 
 What becomes of any other failure is the host's own policy.
 
@@ -84,34 +84,34 @@ Each behavioural invariant of a capability trait is one generic `async fn` in `o
 
 ### Enforce the argument rules
 
-The same arguments fail the same way on every provider:
+The same arguments fail the same way on every provider. Each failure is an `omnia_sdk::Error` whose code names its class, a `ServerError` for every code but `unavailable`, which is a `BadGateway`:
 
-- A zero TTL fails with `ErrorKind::Invalid`, and a TTL rounds up to the store's resolution.
-- A handle that names no binding addresses `default`, and a name the deployment does not declare fails with `ErrorKind::NotFound`. A secret locker is the exception, and opens under any name.
-- A document query whose filter `Filter::check` refuses fails with `ErrorKind::Invalid`.
-- A call on an object in a blob container that was never created fails with `ErrorKind::NotFound`.
-- A request the provider does not serve fails with `ErrorKind::Unsupported`, and is never partly served. The [portable SQL dialect](sql.md#the-portable-dialect) and the [document query contract](docstore.md#query-contract) list what every provider serves.
+- A zero TTL fails with the code `invalid`, and a TTL rounds up to the store's resolution.
+- A handle that names no binding addresses `default`, and a name the deployment does not declare fails with the code `not-found`. A secret locker is the exception, and opens under any name.
+- A document query whose filter `Filter::check` refuses fails with the code `invalid`.
+- A call on an object in a blob container that was never created fails with the code `not-found`.
+- A request the provider does not serve fails with the code `unsupported`, and is never partly served. The [portable SQL dialect](sql.md#the-portable-dialect) and the [document query contract](docstore.md#query-contract) list what every provider serves.
 
 Omnia enforces each rule in the layer this table names, so a backend owes only the rules given to it:
 
 | Rule | Enforced by |
 | ---- | ----------- |
-| A zero TTL is `Invalid` | The `omnia:keyvalue` host, for every backend. |
+| A zero TTL is `invalid` | The `omnia:keyvalue` host, for every backend. |
 | A TTL rounds up | The SDK, to milliseconds, then each backend, to its store's resolution. |
 | A handle that names no binding is `default` | The SDK. |
-| An undeclared name is `NotFound` | Each backend, when it opens a bucket, a database, or an identity. |
-| A filter past its limits is `Invalid` | The SDK, before the query reaches the host. The host traps a guest that passes the raw `filter` constructors past the same limits. |
-| An uncreated container is `NotFound` | Each blob backend. |
-| An unserved request is `Unsupported` | Each backend. |
+| An undeclared name is `not-found` | Each backend, when it opens a bucket, a database, or an identity. |
+| A filter past its limits is `invalid` | The SDK, before the query reaches the host. The host traps a guest that passes the raw `filter` constructors past the same limits. |
+| An uncreated container is `not-found` | Each blob backend. |
+| An unserved request is `unsupported` | Each backend. |
 
-The kind a backend picks reaches the guest exactly over `omnia:keyvalue`, `omnia:sql`, and `omnia:docstore`, which carry one error case per `ErrorKind`. `omnia:identity` carries `NotFound` and `Other`. Elsewhere a kind is best effort:
+The code a backend picks reaches the guest exactly over `omnia:keyvalue`, `omnia:sql`, and `omnia:docstore`, which carry one error case per code. `omnia:identity` carries `not-found` and `other`. Elsewhere a code is best effort:
 
 - `wasi:blobstore` errors are strings, so the SDK reads a missing container or object from the message.
-- The other `wasi:*` interfaces have fewer error cases than `ErrorKind` has kinds, and the SDK maps each case to one kind.
+- The other `wasi:*` interfaces have fewer error cases than there are codes, and the SDK maps each case to one code.
 
 ### Bound every call
 
-No capability call waits for ever, and a call that exceeds its bound fails with `ErrorKind::Unavailable`. Handlers set no timeouts of their own, so the transport also sets `Metadata::deadline` to the handler's budget. Omnia caps each HTTP and messaging invocation at `GUEST_TIMEOUT_MS` (30 seconds by default; see [Guest limits](configuration.md#guest-limits)) and stamps that expiry as the deadline. A command runs uncapped and carries none.
+No capability call waits for ever, and a call that exceeds its bound fails with the code `unavailable`. Handlers set no timeouts of their own, so the transport also sets `Metadata::deadline` to the handler's budget. Omnia caps each HTTP and messaging invocation at `GUEST_TIMEOUT_MS` (30 seconds by default; see [Guest limits](configuration.md#guest-limits)) and stamps that expiry as the deadline. A command runs uncapped and carries none.
 
 ### Serve concurrent handlers from one provider
 

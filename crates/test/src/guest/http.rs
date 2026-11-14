@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
 use http::{HeaderMap, Method, Request, Response, StatusCode, Uri};
-use omnia_sdk::{CapabilityError, HttpClient};
+use omnia_sdk::{HttpClient, Result};
 
 /// One request the code under test sent, with its body.
 #[derive(Clone, Debug)]
@@ -127,7 +127,7 @@ impl fmt::Debug for MatchedHttp {
 impl HttpClient for MatchedHttp {
     fn fetch(
         &self, request: Request<Bytes>,
-    ) -> impl Future<Output = Result<Response<Bytes>, CapabilityError>> + Send {
+    ) -> impl Future<Output = Result<Response<Bytes>>> + Send {
         let (parts, body) = request.into_parts();
         ready(Ok(self.answer(Recorded {
             method: parts.method,

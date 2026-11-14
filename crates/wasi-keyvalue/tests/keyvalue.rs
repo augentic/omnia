@@ -96,7 +96,7 @@ impl KeyValueClient for Faulting {
 }
 
 #[tokio::test]
-async fn keyvalue_error_kinds() {
+async fn keyvalue_error_codes() {
     let faulting = Faulting {
         inner: declaring(&["default"]).await,
         opened: Arc::default(),
@@ -104,7 +104,7 @@ async fn keyvalue_error_kinds() {
     let backends = Backends::defaults().await.keyvalue(faulting);
 
     let status = Deployment::new()
-        .guest("guest", test_programs::KEYVALUE_ERROR_KINDS)
+        .guest("guest", test_programs::KEYVALUE_ERROR_CODES)
         .run_host::<WasiKeyValue, _>(backends.clone())
         .await
         .expect("guest runs");

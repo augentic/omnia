@@ -6,7 +6,7 @@ use std::time::Duration;
 use omnia_wasi_identity::credentials;
 
 use crate::identity::{AccessToken, DEFAULT};
-use crate::{CapabilityError, ErrorKind, HasIdentity, Identity, WasiProvider};
+use crate::{Error, HasIdentity, Identity, Result, WasiProvider};
 
 static DEFAULT_HANDLE: Handle = Handle {
     name: Cow::Borrowed(DEFAULT),
@@ -31,7 +31,7 @@ pub struct Handle {
 impl Identity for Handle {
     type Named = Self;
 
-    async fn token(&self, scopes: &[&str]) -> Result<AccessToken, CapabilityError> {
+    async fn token(&self, scopes: &[&str]) -> Result<AccessToken> {
         let identity = credentials::get_identity(self.name.to_string()).await?;
         let scopes = scopes.iter().map(|&scope| scope.to_owned()).collect();
         let token = identity.get_token(scopes).await?;
@@ -45,13 +45,13 @@ impl Identity for Handle {
     }
 }
 
-impl From<credentials::Error> for CapabilityError {
+impl From<credentials::Error> for Error {
     fn from(err: credentials::Error) -> Self {
         match err {
             credentials::Error::NoSuchIdentity => {
-                Self::new(ErrorKind::NotFound, "no such identity")
+                Self::server_error("not-found", "no such identity")
             }
-            credentials::Error::InternalFailure(message) => Self::new(ErrorKind::Other, message),
+            credentials::Error::InternalFailure(message) => Self::server_error("other", message),
         }
     }
 }

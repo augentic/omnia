@@ -6,7 +6,7 @@ use bytes::Bytes;
 use omnia_wasi_vault::vault;
 
 use crate::vault::DEFAULT;
-use crate::{CapabilityError, ErrorKind, HasSecretStore, Page, SecretStore, WasiProvider};
+use crate::{Error, HasSecretStore, Page, Result, SecretStore, WasiProvider};
 
 static DEFAULT_HANDLE: Handle = Handle {
     name: Cow::Borrowed(DEFAULT),
@@ -29,7 +29,7 @@ pub struct Handle {
 }
 
 impl Handle {
-    async fn open(&self) -> Result<vault::Locker, CapabilityError> {
+    async fn open(&self) -> Result<vault::Locker> {
         Ok(vault::open(self.name.to_string()).await?)
     }
 }
@@ -39,19 +39,19 @@ impl Handle {
 impl SecretStore for Handle {
     type Named = Self;
 
-    async fn get(&self, key: &str) -> Result<Option<Bytes>, CapabilityError> {
+    async fn get(&self, key: &str) -> Result<Option<Bytes>> {
         Ok(self.open().await?.get(key.to_owned()).await?.map(Bytes::from))
     }
 
-    async fn set(&self, key: &str, value: &[u8]) -> Result<(), CapabilityError> {
+    async fn set(&self, key: &str, value: &[u8]) -> Result<()> {
         Ok(self.open().await?.set(key.to_owned(), value.to_vec()).await?)
     }
 
-    async fn delete(&self, key: &str) -> Result<(), CapabilityError> {
+    async fn delete(&self, key: &str) -> Result<()> {
         Ok(self.open().await?.delete(key.to_owned()).await?)
     }
 
-    async fn keys(&self, after: Option<&str>) -> Result<Page<String>, CapabilityError> {
+    async fn keys(&self, after: Option<&str>) -> Result<Page<String>> {
         let mut keys = self.open().await?.list_ids().await?;
         keys.retain(|key| after.is_none_or(|after| key.as_str() > after));
         keys.sort_unstable();
@@ -64,17 +64,17 @@ impl SecretStore for Handle {
         }
     }
 
-    async fn exists(&self, key: &str) -> Result<bool, CapabilityError> {
+    async fn exists(&self, key: &str) -> Result<bool> {
         Ok(self.open().await?.exists(key.to_owned()).await?)
     }
 }
 
-impl From<vault::Error> for CapabilityError {
+impl From<vault::Error> for Error {
     fn from(err: vault::Error) -> Self {
         match err {
-            vault::Error::NoSuchStore => Self::new(ErrorKind::NotFound, "no such locker"),
-            vault::Error::AccessDenied => Self::new(ErrorKind::Denied, "access denied"),
-            vault::Error::Other(message) => Self::new(ErrorKind::Other, message),
+            vault::Error::NoSuchStore => Self::server_error("not-found", "no such locker"),
+            vault::Error::AccessDenied => Self::server_error("denied", "access denied"),
+            vault::Error::Other(message) => Self::server_error("other", message),
         }
     }
 }

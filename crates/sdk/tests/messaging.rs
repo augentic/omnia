@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 
 use omnia_sdk::api::messaging::{Delivery, DeliveryError};
 use omnia_sdk::api::{Client, Context, DecodeError, Handlers};
-use omnia_sdk::{CapabilityError, ErrorKind, bad_gateway, bad_request, model, plugins, vcs};
+use omnia_sdk::{bad_gateway, bad_request, model, plugins, vcs};
 use serde::{Deserialize, Serialize};
 
 use self::support::{Spans, fields};
@@ -80,14 +80,14 @@ async fn malformed_delivery() {
 
 #[derive(Debug, thiserror::Error)]
 #[error("could not place the order")]
-struct PlaceError(#[source] CapabilityError);
+struct PlaceError(#[source] omnia_sdk::Error);
 
 #[derive(Debug, thiserror::Error)]
 #[error("could not review")]
 struct ToolError(#[source] model::Error);
 
-fn unavailable() -> CapabilityError {
-    CapabilityError::new(ErrorKind::Unavailable, "store did not answer")
+fn unavailable() -> omnia_sdk::Error {
+    omnia_sdk::Error::bad_gateway("unavailable", "store did not answer")
 }
 
 #[tokio::test]
@@ -115,20 +115,21 @@ async fn failing_handler() {
         })
         .with_state(Client::new(()));
 
-    for (topic, expected, text) in [
-        ("gateway", ErrorKind::Unavailable, "upstream did not answer"),
-        ("store", ErrorKind::Unavailable, "store did not answer"),
-        ("order", ErrorKind::Unavailable, "could not place the order"),
-        ("request", ErrorKind::Invalid, "no name"),
-        ("format", ErrorKind::Other, "when formatting"),
-        ("revision", ErrorKind::NotFound, "not found: v1"),
-        ("plugin", ErrorKind::Invalid, "unsigned"),
-        ("tool", ErrorKind::Unavailable, "could not review"),
+    for (topic, status, code, text) in [
+        ("gateway", 502, "bad_gateway", "upstream did not answer"),
+        ("store", 502, "unavailable", "store did not answer"),
+        ("order", 502, "unavailable", "could not place the order: store did not answer"),
+        ("request", 400, "bad_request", "no name"),
+        ("format", 500, "server_error", "when formatting"),
+        ("revision", 404, "not-found", "not found: v1"),
+        ("plugin", 400, "refused", "unsigned"),
+        ("tool", 502, "bad_gateway", "could not review"),
     ] {
         match router.handle(delivery(Some(topic), br#"{"name":"message"}"#)).await {
-            Err(DeliveryError::Failed { kind, message }) => {
-                assert_eq!(kind, expected, "{topic}: {message}");
-                assert!(message.contains(text), "{topic}: {message}");
+            Err(DeliveryError::Failed(error)) => {
+                assert_eq!(error.status().as_u16(), status, "{topic}: {error}");
+                assert_eq!(error.code(), code, "{topic}: {error}");
+                assert!(error.description().contains(text), "{topic}: {error}");
             }
             outcome => panic!("`{topic}` fails in its handler: {outcome:?}"),
         }

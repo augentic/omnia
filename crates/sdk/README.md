@@ -116,7 +116,7 @@ The router is also the program: `--version` answers the guest crate's `CARGO_PKG
 
 ## Capabilities
 
-The guest crate exposes trait-based abstractions for host capabilities. `WasiProvider` implements every one of them on `wasm32` by calling the WASI host; a handler bounds its `P` on the traits it uses and never names the provider. Every method fails with `CapabilityError`, absence is `None`, and bytes are `Bytes`. A trait over named bindings (`Identity`, `SecretStore`, `SqlDb`, and `StateStore`) addresses the binding `default` from the provider's own handle, and `named(name)` answers a handle on another binding the deployment declares.
+The guest crate exposes trait-based abstractions for host capabilities. `WasiProvider` implements every one of them on `wasm32` by calling the WASI host; a handler bounds its `P` on the traits it uses and never names the provider. Every method answers `omnia_sdk::Result`, absence is `None`, and bytes are `Bytes`. A trait over named bindings (`Identity`, `SecretStore`, `SqlDb`, and `StateStore`) addresses the binding `default` from the provider's own handle, and `named(name)` answers a handle on another binding the deployment declares.
 
 | Trait | Purpose |
 | ----- | ------- |
@@ -142,9 +142,9 @@ A crate declares a capability of its own with `#[omnia_sdk::capability]`, and a 
 
 ```rust,ignore
 use omnia_sdk::messaging::Message;
-use omnia_sdk::{CapabilityError, Publisher, StateStore};
+use omnia_sdk::{Publisher, Result, StateStore};
 
-async fn process(provider: &(impl StateStore + Publisher)) -> Result<(), CapabilityError> {
+async fn process(provider: &(impl StateStore + Publisher)) -> Result<()> {
     // store some state
     provider.set("last_run", b"now", None).await?;
 
@@ -174,7 +174,12 @@ fn validate(name: &str) -> Result<(), Error> {
 }
 ```
 
-Every capability call fails with a `CapabilityError`. Its `ErrorKind` is one of `NotFound`, `Denied`, `Invalid`, `Unsupported`, `Unavailable`, or `Other`, and a caller matches on `kind()` rather than the message. The [provider contract](https://github.com/augentic/omnia/blob/main/docs/reference/provider-contract.md#enforce-the-argument-rules) says which interfaces carry each kind exactly. `?` converts it into `Error`: `Unavailable` becomes a `BadGateway` and every other kind a `ServerError`, through any `anyhow` context wrapped around it.
+A capability call fails with an `Error` whose code names the class of failure, and a caller matches on the variant and `code()` rather than the description:
+
+- `not-found`, `denied`, `invalid`, `unsupported`, or `other` on a `ServerError`;
+- `unavailable` on a `BadGateway`, when the upstream did not answer or the call exceeded its time bound.
+
+The [provider contract](https://github.com/augentic/omnia/blob/main/docs/reference/provider-contract.md#enforce-the-argument-rules) says which interfaces carry each code exactly. A capability error keeps its variant and code through any `anyhow` context wrapped around it.
 
 ## Architecture
 

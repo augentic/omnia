@@ -156,7 +156,7 @@ For **outbound** HTTP requests inside a handler, bound `P: HttpClient` and call 
 
 In handlers, access host capabilities through the context's accessor for each portable trait — `WasiProvider` implements every trait on `wasm32` over the underlying `omnia-wasi-*` WIT bindings, while `omnia_test::guest::Provider` backs them with in-memory doubles in native tests. The guest never names a backend implementation — the host decides what backs each interface.
 
-Every capability call fails with `CapabilityError`, whose `ErrorKind` a caller matches on, and `?` converts it into `omnia_sdk::Error`. The [provider contract](../reference/provider-contract.md#enforce-the-argument-rules) says which interfaces carry each kind exactly. Absence is `None` rather than an error, and bytes are `Bytes`. `Identity`, `SecretStore`, `SqlDb`, and `StateStore` address named bindings: the provider's own handle is `default`, and `named(name)` answers a handle on another binding the deployment declares.
+Every capability call fails with an `omnia_sdk::Error` whose code names the class of failure, such as `not-found`, `invalid`, or `unavailable`, and a caller matches on that code. The [provider contract](../reference/provider-contract.md#enforce-the-argument-rules) says which interfaces carry each code exactly. Absence is `None` rather than an error, and bytes are `Bytes`. `Identity`, `SecretStore`, `SqlDb`, and `StateStore` address named bindings: the provider's own handle is `default`, and `named(name)` answers a handle on another binding the deployment declares.
 
 Key-value (`StateStore` over `omnia:keyvalue`):
 
@@ -171,12 +171,12 @@ if let Err(Conflict { current }) = locks.compare_and_swap("job", None, b"held", 
 }
 ```
 
-A provider's own handle uses the `default` bucket, and `named(name)` selects another. The deployment declares every bucket a guest names, and a call on an undeclared one fails with `ErrorKind::NotFound`. A key that holds only ASCII letters, digits, `.`, `_`, and `-`, and neither starts nor ends with `.`, works on every backend. A backend may reject any other key with `ErrorKind::Invalid`. The host enforces a TTL:
+A provider's own handle uses the `default` bucket, and `named(name)` selects another. The deployment declares every bucket a guest names, and a call on an undeclared one fails with the code `not-found`. A key that holds only ASCII letters, digits, `.`, `_`, and `-`, and neither starts nor ends with `.`, works on every backend. A backend may reject any other key with the code `invalid`. The host enforces a TTL:
 
 - A value set without one stays until deleted.
 - `set` replaces a value's lifetime along with its bytes.
 - `compare_and_swap` and `increment` apply their TTL only to an entry they create.
-- A zero TTL fails with `ErrorKind::Invalid`.
+- A zero TTL fails with the code `invalid`.
 
 Publishing a message (`Publisher` over `wasi:messaging`), with a key that orders and partitions it:
 

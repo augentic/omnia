@@ -1,7 +1,7 @@
 //! Errors
 
 use std::error::Error as StdError;
-use std::fmt;
+use std::iter;
 
 use http::StatusCode;
 use serde::{Deserialize, Serialize};
@@ -11,7 +11,21 @@ use thiserror::Error;
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 /// Domain level error type returned by the adapter.
-#[derive(Error, Debug, Clone, Serialize, Deserialize)]
+///
+/// A failed capability call is a [`ServerError`](Self::ServerError) whose
+/// code names the class of failure:
+///
+/// - `not-found`: the binding, container, collection, or required setting
+///   does not exist.
+/// - `denied`: the provider refused the call.
+/// - `invalid`: the input was rejected, such as a zero TTL, or stored bytes
+///   failed to decode.
+/// - `unsupported`: the request is valid, but this provider cannot serve it.
+/// - `other`: any other failure.
+///
+/// A call the upstream did not answer, or one that exceeded its time bound,
+/// is a [`BadGateway`](Self::BadGateway) with the code `unavailable`.
+#[derive(Error, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Error {
     /// Request payload is invalid or missing required fields.
     #[error("code: {code}, description: {description}")]
@@ -141,18 +155,26 @@ impl Error {
         }
     }
 
-    pub(crate) const fn kind(&self) -> ErrorKind {
-        match self {
-            Self::BadRequest { .. } => ErrorKind::Invalid,
-            Self::NotFound { .. } => ErrorKind::NotFound,
-            Self::ServerError { .. } => ErrorKind::Other,
-            Self::BadGateway { .. } => ErrorKind::Unavailable,
+    // The first domain error in the source chain keeps its variant and code,
+    // and anything else is a `server_error`. The description is the whole
+    // chain, where an `Error` reads as its own description.
+    pub(crate) fn from_chain(error: &(dyn StdError + 'static)) -> Self {
+        let links = || iter::successors(Some(error), |&link| link.source());
+        let description = links()
+            .map(|link| {
+                link.downcast_ref::<Self>().map_or_else(|| link.to_string(), Self::description)
+            })
+            .collect::<Vec<_>>()
+            .join(": ");
+        match links().find_map(Self::from_domain) {
+            Some(error) => error.with_description(description),
+            None => Self::server_error("server_error", description),
         }
     }
 
     // The `Error` a domain error maps to: this type, or a `vcs`, `plugins`,
     // or `model` error through its own conversion.
-    pub(crate) fn from_domain(error: &(dyn StdError + 'static)) -> Option<Self> {
+    fn from_domain(error: &(dyn StdError + 'static)) -> Option<Self> {
         if let Some(error) = error.downcast_ref::<Self>() {
             return Some(error.clone());
         }
@@ -175,28 +197,9 @@ impl Error {
     }
 }
 
-// The first domain error in the chain keeps its variant and code. A
-// `CapabilityError` is a `bad_gateway` when the upstream did not answer,
-// and otherwise the deployment's own `server_error`. Both gain the context
-// wrapped around them, and anything else is a `server_error`.
 impl From<anyhow::Error> for Error {
     fn from(err: anyhow::Error) -> Self {
-        let chain = err.chain().map(ToString::to_string).collect::<Vec<_>>().join(": ");
-        let classified = err.chain().find_map(|error| {
-            Self::from_domain(error).or_else(|| {
-                error.downcast_ref::<CapabilityError>().map(|error| match error.kind() {
-                    ErrorKind::Unavailable => crate::bad_gateway!(error),
-                    _ => crate::server_error!(error),
-                })
-            })
-        });
-        classified.unwrap_or_else(|| crate::server_error!(err)).with_description(chain)
-    }
-}
-
-impl From<CapabilityError> for Error {
-    fn from(err: CapabilityError) -> Self {
-        Self::from(anyhow::Error::from(err))
+        Self::from_chain(err.as_ref())
     }
 }
 
@@ -208,7 +211,7 @@ impl From<serde_json::Error> for Error {
 
 impl From<crate::sql::ColumnError> for Error {
     fn from(err: crate::sql::ColumnError) -> Self {
-        Self::server_error("server_error", err.to_string())
+        Self::server_error("invalid", err.to_string())
     }
 }
 
@@ -240,79 +243,6 @@ impl From<&Error> for ErrorBody {
             error: error.code(),
             message: error.description(),
         }
-    }
-}
-
-/// A failed capability call.
-///
-/// A caller matches on [`kind`](Self::kind). The message is for people, and
-/// its text is not part of the contract.
-#[derive(Debug, thiserror::Error)]
-#[error("{kind}: {message}")]
-pub struct CapabilityError {
-    kind: ErrorKind,
-    message: String,
-    #[source]
-    source: Option<Box<dyn StdError + Send + Sync>>,
-}
-
-impl CapabilityError {
-    /// Create an error of `kind` described by `message`.
-    pub fn new(kind: ErrorKind, message: impl Into<String>) -> Self {
-        Self {
-            kind,
-            message: message.into(),
-            source: None,
-        }
-    }
-
-    /// Attach the error that caused this one.
-    #[must_use]
-    pub fn with_source(mut self, source: impl Into<Box<dyn StdError + Send + Sync>>) -> Self {
-        self.source = Some(source.into());
-        self
-    }
-
-    /// The kind of failure.
-    #[must_use]
-    pub const fn kind(&self) -> ErrorKind {
-        self.kind
-    }
-}
-
-/// What kind of failure a capability call met.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-#[non_exhaustive]
-pub enum ErrorKind {
-    /// The binding, container, collection, or required setting does not exist.
-    NotFound,
-
-    /// The provider refused the call.
-    Denied,
-
-    /// The input was rejected, such as a zero TTL, or stored bytes failed to decode.
-    Invalid,
-
-    /// The request is valid, but this provider cannot serve it.
-    Unsupported,
-
-    /// The upstream did not answer, or the call exceeded its time bound.
-    Unavailable,
-
-    /// Any other failure.
-    Other,
-}
-
-impl fmt::Display for ErrorKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Self::NotFound => "not found",
-            Self::Denied => "denied",
-            Self::Invalid => "invalid",
-            Self::Unsupported => "unsupported",
-            Self::Unavailable => "unavailable",
-            Self::Other => "other",
-        })
     }
 }
 

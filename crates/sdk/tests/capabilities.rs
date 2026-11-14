@@ -2,17 +2,14 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
-use std::error::Error as _;
-
 use bytes::Bytes;
 use http::{Method, Request, Response, StatusCode};
 use omnia_sdk::docstore::Document;
 use omnia_sdk::messaging::Message;
 use omnia_sdk::sql::{Field, FromRow, Row, Value};
 use omnia_sdk::{
-    ConfigExt as _, DocumentDb as _, DocumentDbExt as _, Error, ErrorKind, HttpClientExt as _,
-    Identity as _, IdentityExt as _, Publisher as _, Settings, SqlDb as _, SqlDbExt as _,
-    StateStoreExt as _,
+    ConfigExt as _, DocumentDb as _, DocumentDbExt as _, Error, HttpClientExt as _, Identity as _,
+    IdentityExt as _, Publisher as _, Settings, SqlDb as _, SqlDbExt as _, StateStoreExt as _,
 };
 use omnia_test::guest::{
     FixedIdentity, MapConfig, MatchedHttp, MemoryDocs, Provider, ScriptedTables, Sink,
@@ -120,9 +117,9 @@ async fn config_require() {
     let unset = config.require::<u16>("HOST").await.expect_err("not set");
     let optional = config.parse::<u16>("HOST").await.expect("unset is not an error");
 
-    assert_eq!(invalid.kind(), ErrorKind::Invalid);
-    assert!(invalid.to_string().contains("`PORT` is invalid"), "{invalid}");
-    assert_eq!(unset.kind(), ErrorKind::NotFound);
+    assert!(matches!(&invalid, Error::ServerError { code, .. } if code == "invalid"), "{invalid}");
+    assert!(invalid.description().contains("`PORT` is invalid"), "{invalid}");
+    assert!(matches!(&unset, Error::ServerError { code, .. } if code == "not-found"), "{unset}");
     assert_eq!(optional, None);
 }
 
@@ -178,10 +175,9 @@ async fn document_decode_invalid() {
 
     let error = docs.get_as::<Cached>("people", "bob").await.expect_err("no `hits` field");
 
-    assert_eq!(error.kind(), ErrorKind::Invalid);
-    assert!(error.to_string().contains("decoding document `bob`"), "{error}");
-    let source = error.source().map_or_default(ToString::to_string);
-    assert!(source.contains("missing field `hits`"), "{source}");
+    assert!(matches!(&error, Error::ServerError { code, .. } if code == "invalid"), "{error}");
+    assert!(error.description().contains("decoding document `bob`"), "{error}");
+    assert!(error.description().contains("missing field `hits`"), "{error}");
 }
 
 #[tokio::test]
@@ -253,7 +249,7 @@ async fn query_as_mismatch() {
     let error =
         tables.query_as::<Numbered>("SELECT label FROM items", &[]).await.expect_err("text");
 
-    assert_eq!(error.kind(), ErrorKind::Invalid);
+    assert!(matches!(&error, Error::ServerError { code, .. } if code == "invalid"), "{error}");
 }
 
 #[test]

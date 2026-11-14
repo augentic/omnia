@@ -1,12 +1,13 @@
 //! Named identities through the `omnia_sdk` `Identity`: the unnamed handle is
 //! `default`, two declared names issue distinct tokens, a token's lifetime
-//! arrives as a `Duration`, and an undeclared name fails with `NotFound`.
+//! arrives as a `Duration`, and an undeclared name fails with the code
+//! `not-found`.
 
 #![cfg(target_arch = "wasm32")]
 
 use std::time::Duration;
 
-use omnia_sdk::{ErrorKind, Identity, WasiProvider};
+use omnia_sdk::{Error, Identity, WasiProvider};
 
 omnia_sdk::api::command::export!(scenario);
 
@@ -20,5 +21,8 @@ async fn scenario() {
     assert_eq!(reports.expires_in, Duration::from_secs(3600));
 
     let error = WasiProvider.named("undeclared").token(&[]).await.expect_err("undeclared");
-    assert_eq!(error.kind(), ErrorKind::NotFound, "unexpected error: {error}");
+    assert!(
+        matches!(&error, Error::ServerError { code, .. } if code == "not-found"),
+        "unexpected error: {error}"
+    );
 }

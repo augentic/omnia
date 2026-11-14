@@ -11,18 +11,17 @@
 
 use std::collections::BTreeMap;
 use std::error::Error;
+use std::fmt;
 use std::future::Future;
 use std::marker::PhantomData;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::{fmt, iter};
 
 use bytes::Bytes;
 use serde::de::DeserializeOwned;
 use tracing::Instrument as _;
 
 use crate::api::{Client, DecodeError, Handler, Metadata};
-use crate::{CapabilityError, ErrorKind};
 
 #[doc(hidden)]
 #[macro_export]
@@ -130,27 +129,15 @@ pub enum DeliveryError {
     UnhandledTopic(String),
     /// The payload did not decode into the route's input.
     Undecodable(String),
-    /// The handler returned an error.
-    Failed {
-        /// The class of the handler's error, from the first match in its source chain.
-        ///
-        /// - An [`Error`](crate::Error) maps by variant:
-        ///   [`BadRequest`](crate::Error::BadRequest) is
-        ///   [`Invalid`](ErrorKind::Invalid), [`NotFound`](crate::Error::NotFound)
-        ///   is [`NotFound`](ErrorKind::NotFound),
-        ///   [`ServerError`](crate::Error::ServerError) is
-        ///   [`Other`](ErrorKind::Other), and
-        ///   [`BadGateway`](crate::Error::BadGateway) is
-        ///   [`Unavailable`](ErrorKind::Unavailable).
-        /// - A [`vcs::Error`](crate::vcs::Error), [`plugins::Error`](crate::plugins::Error),
-        ///   or [`model::Error`](crate::model::Error) maps as the
-        ///   [`Error`](crate::Error) it converts into.
-        /// - A [`CapabilityError`] keeps its [`kind`](CapabilityError::kind).
-        /// - Any other error is [`Other`](ErrorKind::Other).
-        kind: ErrorKind,
-        /// The handler's error, as it displays.
-        message: String,
-    },
+    /// The handler failed with this [`Error`](crate::Error).
+    ///
+    /// The first [`Error`](crate::Error), [`vcs::Error`](crate::vcs::Error),
+    /// [`plugins::Error`](crate::plugins::Error), or
+    /// [`model::Error`](crate::model::Error) in the handler error's source
+    /// chain sets its variant and code. Any other error is a
+    /// [`ServerError`](crate::Error::ServerError). The description is the
+    /// whole chain.
+    Failed(crate::Error),
 }
 
 impl fmt::Display for DeliveryError {
@@ -158,7 +145,8 @@ impl fmt::Display for DeliveryError {
         match self {
             Self::MissingTopic => f.write_str("message is missing topic"),
             Self::UnhandledTopic(topic) => write!(f, "unhandled topic: {topic}"),
-            Self::Undecodable(message) | Self::Failed { message, .. } => f.write_str(message),
+            Self::Undecodable(message) => f.write_str(message),
+            Self::Failed(error) => write!(f, "{error}"),
         }
     }
 }
@@ -326,25 +314,13 @@ where
             async move {
                 let input = (self.decode)(delivery)
                     .map_err(|error| DeliveryError::Undecodable(error.to_string()))?;
-                client.call(self.handler.clone(), input, &metadata).await.map(|_| ()).map_err(
-                    |error| DeliveryError::Failed {
-                        kind: error_kind(&error),
-                        message: error.to_string(),
-                    },
-                )
+                client
+                    .call(self.handler.clone(), input, &metadata)
+                    .await
+                    .map(|_| ())
+                    .map_err(|error| DeliveryError::Failed(crate::Error::from_chain(&error)))
             }
             .instrument(span),
         )
     }
-}
-
-fn error_kind(error: &(dyn Error + 'static)) -> ErrorKind {
-    iter::successors(Some(error), |&error| error.source())
-        .find_map(|error| {
-            error
-                .downcast_ref::<CapabilityError>()
-                .map(CapabilityError::kind)
-                .or_else(|| crate::Error::from_domain(error).as_ref().map(crate::Error::kind))
-        })
-        .unwrap_or(ErrorKind::Other)
 }

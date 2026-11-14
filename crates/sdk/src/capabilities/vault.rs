@@ -4,7 +4,7 @@ use std::future::Future;
 
 use bytes::Bytes;
 
-use crate::{CapabilityError, Page};
+use crate::{Page, Result};
 
 /// Read and write secrets in a deployment's lockers.
 ///
@@ -16,30 +16,25 @@ pub trait SecretStore: Send + Sync {
     type Named: SecretStore<Named = Self::Named>;
 
     /// Retrieve the secret at `key`, or `None` when it is absent.
-    fn get(&self, key: &str)
-    -> impl Future<Output = Result<Option<Bytes>, CapabilityError>> + Send;
+    fn get(&self, key: &str) -> impl Future<Output = Result<Option<Bytes>>> + Send;
 
     /// Store `value` at `key`, replacing any secret there.
-    fn set(
-        &self, key: &str, value: &[u8],
-    ) -> impl Future<Output = Result<(), CapabilityError>> + Send;
+    fn set(&self, key: &str, value: &[u8]) -> impl Future<Output = Result<()>> + Send;
 
     /// Delete the secret at `key`, succeeding when it is already absent.
-    fn delete(&self, key: &str) -> impl Future<Output = Result<(), CapabilityError>> + Send;
+    fn delete(&self, key: &str) -> impl Future<Output = Result<()>> + Send;
 
     /// One page of the keys in this locker.
     ///
     /// `after` is the [`next`](Page::next) cursor of the previous page, or
     /// `None` for the first page.
-    fn keys(
-        &self, after: Option<&str>,
-    ) -> impl Future<Output = Result<Page<String>, CapabilityError>> + Send;
+    fn keys(&self, after: Option<&str>) -> impl Future<Output = Result<Page<String>>> + Send;
 
     /// A handle to the locker `name` on the same provider.
     fn named(&self, name: &str) -> Self::Named;
 
     /// Whether a secret is stored at `key`.
-    fn exists(&self, key: &str) -> impl Future<Output = Result<bool, CapabilityError>> + Send {
+    fn exists(&self, key: &str) -> impl Future<Output = Result<bool>> + Send {
         async move { Ok(self.get(key).await?.is_some()) }
     }
 }

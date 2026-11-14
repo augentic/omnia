@@ -4,32 +4,28 @@ use bytes::Bytes;
 use omnia_wasi_docstore::{store, types};
 
 use crate::docstore::{ComparisonOp, Document, Exists, Filter, Query, ScalarValue, SortField};
-use crate::{CapabilityError, DocumentDb, ErrorKind, Page, WasiProvider};
+use crate::{DocumentDb, Error, Page, Result, WasiProvider};
 
 impl DocumentDb for WasiProvider {
-    async fn get(&self, collection: &str, id: &str) -> Result<Option<Document>, CapabilityError> {
+    async fn get(&self, collection: &str, id: &str) -> Result<Option<Document>> {
         let document = store::get(collection.to_owned(), id.to_owned()).await?;
         Ok(document.map(Into::into))
     }
 
-    async fn insert(
-        &self, collection: &str, document: &Document,
-    ) -> Result<Result<(), Exists>, CapabilityError> {
+    async fn insert(&self, collection: &str, document: &Document) -> Result<Result<(), Exists>> {
         let inserted = store::insert(collection.to_owned(), document.into()).await?;
         Ok(inserted.map_err(|_already_exists| Exists))
     }
 
-    async fn put(&self, collection: &str, document: &Document) -> Result<(), CapabilityError> {
+    async fn put(&self, collection: &str, document: &Document) -> Result<()> {
         Ok(store::put(collection.to_owned(), document.into()).await?)
     }
 
-    async fn delete(&self, collection: &str, id: &str) -> Result<bool, CapabilityError> {
+    async fn delete(&self, collection: &str, id: &str) -> Result<bool> {
         Ok(store::delete(collection.to_owned(), id.to_owned()).await?)
     }
 
-    async fn query(
-        &self, collection: &str, query: &Query,
-    ) -> Result<Page<Document>, CapabilityError> {
+    async fn query(&self, collection: &str, query: &Query) -> Result<Page<Document>> {
         if let Some(filter) = &query.filter {
             filter.check()?;
         }
@@ -38,17 +34,16 @@ impl DocumentDb for WasiProvider {
     }
 }
 
-impl From<types::Error> for CapabilityError {
+impl From<types::Error> for Error {
     fn from(err: types::Error) -> Self {
-        let (kind, message) = match err {
-            types::Error::NotFound(message) => (ErrorKind::NotFound, message),
-            types::Error::Denied(message) => (ErrorKind::Denied, message),
-            types::Error::Invalid(message) => (ErrorKind::Invalid, message),
-            types::Error::Unsupported(message) => (ErrorKind::Unsupported, message),
-            types::Error::Unavailable(message) => (ErrorKind::Unavailable, message),
-            types::Error::Other(message) => (ErrorKind::Other, message),
-        };
-        Self::new(kind, message)
+        match err {
+            types::Error::NotFound(message) => Self::server_error("not-found", message),
+            types::Error::Denied(message) => Self::server_error("denied", message),
+            types::Error::Invalid(message) => Self::server_error("invalid", message),
+            types::Error::Unsupported(message) => Self::server_error("unsupported", message),
+            types::Error::Unavailable(message) => Self::bad_gateway("unavailable", message),
+            types::Error::Other(message) => Self::server_error("other", message),
+        }
     }
 }
 

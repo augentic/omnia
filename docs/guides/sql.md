@@ -64,7 +64,7 @@ events.execute("DELETE FROM event WHERE agency_id = $1", &[Value::from(id)]).awa
 
 The database name is what the backend resolves, and both backends refuse a name they do not declare. `SqlDefault` declares `default` plus the names in `SQL_DATABASES`, and `omnia-postgres` maps `default` to `POSTGRES_URL` and each name in `POSTGRES_POOLS` to `POSTGRES_URL__<NAME>`.
 
-Every method fails with a `CapabilityError`, which `?` converts into `omnia_sdk::Error`. Its kind is the one the backend chose. An undeclared database fails with `ErrorKind::NotFound`, and a statement that does not prepare or bind with `ErrorKind::Invalid`. The [reference](../reference/sql.md#errors) lists every kind.
+Every method fails with an `omnia_sdk::Error` whose code is the one the backend chose. An undeclared database fails with the code `not-found`, and a statement that does not prepare or bind with the code `invalid`. The [reference](../reference/sql.md#errors) lists every code.
 
 ### Mapping rows
 
@@ -75,7 +75,7 @@ let name: String = row.get("name")?;
 let url: Option<String> = row.get("url")?;
 ```
 
-A record type derives `FromRow` to read every field from the column of the same name, and `query_as` (from `SqlDbExt`, blanket-implemented for every `SqlDb`) runs a query and decodes each row. A row that does not decode fails with `ErrorKind::Invalid`:
+A record type derives `FromRow` to read every field from the column of the same name, and `query_as` (from `SqlDbExt`, blanket-implemented for every `SqlDb`) runs a query and decodes each row. A row that does not decode fails with the code `invalid`:
 
 ```rust,noplayground
 use omnia_sdk::SqlDbExt as _;
@@ -133,7 +133,7 @@ async fn ensure_schema() -> Result<()> {
 }
 ```
 
-`SqlDb` covers everything the draft does, so new code has no need for it: DDL runs through `execute` too. The draft has no `batch`, and its `error` resource carries the message without a kind. The [reference](../reference/sql.md#the-wasisql-draft) lists every difference.
+`SqlDb` covers everything the draft does, so new code has no need for it: DDL runs through `execute` too. The draft has no `batch`, and its `error` resource carries the message without a code. The [reference](../reference/sql.md#the-wasisql-draft) lists every difference.
 
 > Each request runs in a fresh guest instance, so anything like `ensure_schema` runs per request. Real deployments manage schema migrations host-side or out-of-band; the in-example DDL is a demo convenience.
 

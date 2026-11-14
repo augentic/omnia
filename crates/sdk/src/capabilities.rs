@@ -10,6 +10,10 @@
 //! types stay scoped to their module, where a generic name such as `Message`
 //! or `Error` is unambiguous.
 //!
+//! A capability call fails with an [`Error`](crate::Error) whose code names
+//! the class of failure. Absence is not a failure: a missing key is
+//! `Ok(None)`.
+//!
 //! Every capability has a companion `Has<Capability>` accessor trait (emitted
 //! by `#[capability]`) with a blanket forwarding impl and implementations for
 //! `Arc<P>`, `&P`, and `Box<P>`, so `#[derive(Provider)]` and pointer
@@ -18,13 +22,10 @@
 //! A `<Capability>Ext` trait ([`StateStoreExt`], [`ConfigExt`], ...) holds the
 //! caller-side codecs and parsers over a capability's primitives. It is
 //! blanket-implemented for every implementor and never implemented by hand, so
-//! one encoding holds across providers. Its methods fail with
-//! [`CapabilityError`](crate::CapabilityError), with a codec failure as
-//! [`ErrorKind::Invalid`](crate::ErrorKind::Invalid).
-//! [`HttpClientExt::fetch_json`] alone returns [`crate::Result`], since it
-//! also maps a non-2xx status to [`Error::BadGateway`](crate::Error::BadGateway).
-//!
-//! Absence is not a failure: a missing key is `Ok(None)`.
+//! one encoding holds across providers. A codec failure has the code
+//! `invalid`, except in [`HttpClientExt::fetch_json`], where an upstream's
+//! non-2xx status or unparseable body is an
+//! [`Error::BadGateway`](crate::Error::BadGateway).
 
 pub mod blobstore;
 mod config;

@@ -150,7 +150,7 @@ On the host side each constructor call builds a node of a filter tree (the WIT `
 | `unavailable` | The backing store did not answer, or the call exceeded its bound. |
 | `other` | Any other failure. |
 
-`omnia_sdk::ErrorKind` has one kind per case, and the SDK maps each case to its kind. A filter past the [host-enforced limits](#host-enforced-limits) fails with `invalid` through the SDK, and traps a guest on the raw bindings.
+The SDK reports each case as an `omnia_sdk::Error` coded with the case's name: a `BadGateway` for `unavailable`, and a `ServerError` for the rest. A filter past the [host-enforced limits](#host-enforced-limits) fails with `invalid` through the SDK, and traps a guest on the raw bindings.
 
 ## Backends implementing this interface
 

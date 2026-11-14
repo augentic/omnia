@@ -14,9 +14,9 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use omnia_sdk::keyvalue::{Conflict, DEFAULT};
-use omnia_sdk::{ErrorKind, StateStore, StateStoreExt};
+use omnia_sdk::{StateStore, StateStoreExt};
 
-use super::expect_kind;
+use super::expect_code;
 
 /// A bucket the store declares beside its own.
 pub const SECOND: &str = "second";
@@ -66,12 +66,12 @@ pub async fn set_ttl(store: &impl StateStore, wait: impl AsyncFn(Duration)) {
     assert_eq!(value(store, "set_ttl.kept").await, Some(b"two".to_vec()), "a set kept the old TTL");
 }
 
-/// A zero TTL fails with [`ErrorKind::Invalid`] on every method that takes
-/// one, and writes nothing.
+/// A zero TTL fails with the code `invalid` on every method that takes one,
+/// and writes nothing.
 ///
 /// # Panics
 ///
-/// Panics if a zero-TTL call succeeds, fails with another kind, or writes.
+/// Panics if a zero-TTL call succeeds, fails with another code, or writes.
 pub async fn zero_ttl(store: &impl StateStore) {
     let zero = Some(Duration::ZERO);
     store.set("zero_ttl", b"old", None).await.expect("set without a TTL");
@@ -80,9 +80,9 @@ pub async fn zero_ttl(store: &impl StateStore) {
     let swap = store.compare_and_swap("zero_ttl", Some(b"old"), b"new", zero).await;
     let increment = store.increment("zero_ttl.counter", 1, zero).await;
 
-    expect_kind(set, ErrorKind::Invalid, "set with a zero TTL");
-    expect_kind(swap, ErrorKind::Invalid, "compare_and_swap with a zero TTL");
-    expect_kind(increment, ErrorKind::Invalid, "increment with a zero TTL");
+    expect_code(set, "invalid", "set with a zero TTL");
+    expect_code(swap, "invalid", "compare_and_swap with a zero TTL");
+    expect_code(increment, "invalid", "increment with a zero TTL");
     assert_eq!(value(store, "zero_ttl").await, Some(b"old".to_vec()), "a zero TTL wrote the value");
     assert_eq!(counter_at(store, "zero_ttl.counter").await, 0, "a zero TTL wrote the counter");
 }
@@ -203,12 +203,12 @@ pub async fn named(store: &impl StateStore) {
     );
 }
 
-/// Every call on a bucket the deployment does not declare fails with
-/// [`ErrorKind::NotFound`].
+/// Every call on a bucket the deployment does not declare fails with the code
+/// `not-found`.
 ///
 /// # Panics
 ///
-/// Panics if a call on [`UNDECLARED`] succeeds or fails with another kind.
+/// Panics if a call on [`UNDECLARED`] succeeds or fails with another code.
 pub async fn undeclared(store: &impl StateStore) {
     let undeclared = store.named(UNDECLARED);
 
@@ -218,11 +218,11 @@ pub async fn undeclared(store: &impl StateStore) {
     let swap = undeclared.compare_and_swap("undeclared", None, b"v", None).await;
     let increment = undeclared.increment("undeclared", 1, None).await;
 
-    expect_kind(get, ErrorKind::NotFound, "get on an undeclared bucket");
-    expect_kind(set, ErrorKind::NotFound, "set on an undeclared bucket");
-    expect_kind(delete, ErrorKind::NotFound, "delete on an undeclared bucket");
-    expect_kind(swap, ErrorKind::NotFound, "compare_and_swap on an undeclared bucket");
-    expect_kind(increment, ErrorKind::NotFound, "increment on an undeclared bucket");
+    expect_code(get, "not-found", "get on an undeclared bucket");
+    expect_code(set, "not-found", "set on an undeclared bucket");
+    expect_code(delete, "not-found", "delete on an undeclared bucket");
+    expect_code(swap, "not-found", "compare_and_swap on an undeclared bucket");
+    expect_code(increment, "not-found", "increment on an undeclared bucket");
 }
 
 /// Deleting an absent key succeeds.
@@ -257,17 +257,17 @@ pub async fn portable_key(store: &impl StateStore) {
 }
 
 /// [`get_json`](StateStoreExt::get_json) over bytes that do not decode fails
-/// with [`ErrorKind::Invalid`].
+/// with the code `invalid`.
 ///
 /// # Panics
 ///
-/// Panics if the read succeeds or fails with another kind.
+/// Panics if the read succeeds or fails with another code.
 pub async fn malformed_json(store: &impl StateStore) {
     store.set("malformed_json", b"{not json", None).await.expect("set");
 
     let decoded = store.get_json::<serde_json::Value>("malformed_json").await;
 
-    expect_kind(decoded, ErrorKind::Invalid, "get_json over malformed bytes");
+    expect_code(decoded, "invalid", "get_json over malformed bytes");
 }
 
 async fn value(store: &impl StateStore, key: &str) -> Option<Vec<u8>> {

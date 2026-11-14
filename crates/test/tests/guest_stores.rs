@@ -16,8 +16,8 @@ use omnia_sdk::docstore::{Document, Filter, Query, SortField};
 use omnia_sdk::messaging::Message;
 use omnia_sdk::sql::{Field, Row, Statement, Value};
 use omnia_sdk::{
-    BlobStore, DocumentDb, ErrorKind, HttpClient, Identity, Publisher, SecretStore, SqlDb,
-    StateStore, WebSockets,
+    BlobStore, DocumentDb, Error, HttpClient, Identity, Publisher, SecretStore, SqlDb, StateStore,
+    WebSockets,
 };
 use omnia_test::guest::{
     Broadcasted, FixedIdentity, MatchedHttp, Memory, MemoryDocs, ScriptedTables, Sink,
@@ -109,8 +109,8 @@ fn increment_text() {
 
     let error = now(memory.increment("text", 1, None)).expect_err("non-integer bytes fail");
 
-    assert_eq!(error.kind(), ErrorKind::Invalid, "{error}");
-    assert!(error.to_string().contains("8-byte"), "{error}");
+    assert!(matches!(&error, Error::ServerError { code, .. } if code == "invalid"), "{error}");
+    assert!(error.description().contains("8-byte"), "{error}");
 }
 
 // -- Memory: blobs -----------------------------------------------------------
@@ -228,7 +228,7 @@ fn documents() {
     assert!(!now(DocumentDb::delete(&docs, "people", "1")).expect("delete"));
 
     let error = now(docs.put("people", &doc("2", "not json"))).expect_err("not JSON");
-    assert_eq!(error.kind(), ErrorKind::Invalid, "{error}");
+    assert!(matches!(&error, Error::ServerError { code, .. } if code == "invalid"), "{error}");
 }
 
 #[test]
@@ -264,7 +264,7 @@ fn queries() {
         ..Query::default()
     };
     let error = now(docs.query("people", &malformed)).expect_err("malformed cursor");
-    assert_eq!(error.kind(), ErrorKind::Invalid, "{error}");
+    assert!(matches!(&error, Error::ServerError { code, .. } if code == "invalid"), "{error}");
 }
 
 #[test]

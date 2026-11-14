@@ -9,7 +9,7 @@ use omnia_wasi_blobstore::container::Container;
 use omnia_wasi_blobstore::types::{IncomingValue, ObjectId, OutgoingValue};
 
 use crate::blobstore::{ContainerMetadata, ObjectMetadata};
-use crate::{BlobStore, CapabilityError, ErrorKind, Page, WasiProvider};
+use crate::{BlobStore, Error, Page, Result, WasiProvider};
 
 // the `wasi:io` write budget: `blocking-write-and-flush` takes at most 4096 bytes
 const WRITE_CHUNK: usize = 4096;
@@ -18,7 +18,7 @@ const WRITE_CHUNK: usize = 4096;
 const OBJECT_NOT_FOUND: &str = "object not found";
 
 impl BlobStore for WasiProvider {
-    async fn get(&self, container: &str, name: &str) -> Result<Option<Bytes>, CapabilityError> {
+    async fn get(&self, container: &str, name: &str) -> Result<Option<Bytes>> {
         let container = open(container).await?;
         match container.get_data(name.to_owned(), 0, u64::MAX).await {
             Ok(incoming) => consume(incoming).map(Some),
@@ -29,7 +29,7 @@ impl BlobStore for WasiProvider {
 
     async fn get_range(
         &self, container: &str, name: &str, range: Range<u64>,
-    ) -> Result<Option<Bytes>, CapabilityError> {
+    ) -> Result<Option<Bytes>> {
         let container = open(container).await?;
         if range.is_empty() {
             let found = container
@@ -51,16 +51,16 @@ impl BlobStore for WasiProvider {
         Ok(Some(data.slice(..len.min(data.len()))))
     }
 
-    async fn put(&self, container: &str, name: &str, data: &[u8]) -> Result<(), CapabilityError> {
+    async fn put(&self, container: &str, name: &str, data: &[u8]) -> Result<()> {
         let container = open(container).await?;
         let outgoing = OutgoingValue::new_outgoing_value();
         {
             let body = outgoing.outgoing_value_write_body().await.map_err(|err| {
-                CapabilityError::new(ErrorKind::Other, format!("opening the write body: {err:?}"))
+                Error::server_error("other", format!("opening the write body: {err:?}"))
             })?;
             for chunk in data.chunks(WRITE_CHUNK) {
                 body.blocking_write_and_flush(chunk).map_err(|err| {
-                    CapabilityError::new(ErrorKind::Other, format!("writing object data: {err}"))
+                    Error::server_error("other", format!("writing object data: {err}"))
                 })?;
             }
         };
@@ -71,7 +71,7 @@ impl BlobStore for WasiProvider {
         OutgoingValue::finish(outgoing).map_err(|message| fault("finishing write", &message))
     }
 
-    async fn delete(&self, container: &str, name: &str) -> Result<(), CapabilityError> {
+    async fn delete(&self, container: &str, name: &str) -> Result<()> {
         let container = open(container).await?;
         container
             .delete_object(name.to_owned())
@@ -79,16 +79,14 @@ impl BlobStore for WasiProvider {
             .map_err(|message| fault("deleting object", &message))
     }
 
-    async fn stat(
-        &self, container: &str, name: &str,
-    ) -> Result<Option<ObjectMetadata>, CapabilityError> {
+    async fn stat(&self, container: &str, name: &str) -> Result<Option<ObjectMetadata>> {
         let container = open(container).await?;
         stat_in(&container, name).await
     }
 
     async fn list(
         &self, container: &str, prefix: &str, after: Option<&str>,
-    ) -> Result<Page<ObjectMetadata>, CapabilityError> {
+    ) -> Result<Page<ObjectMetadata>> {
         let container = open(container).await?;
         let stream =
             container.list_objects().await.map_err(|message| fault("listing objects", &message))?;
@@ -117,28 +115,26 @@ impl BlobStore for WasiProvider {
         Ok(Page::new(objects, None))
     }
 
-    async fn create_container(&self, container: &str) -> Result<(), CapabilityError> {
+    async fn create_container(&self, container: &str) -> Result<()> {
         blobstore::create_container(container.to_owned())
             .await
             .map(drop)
             .map_err(|message| fault("creating container", &message))
     }
 
-    async fn delete_container(&self, container: &str) -> Result<(), CapabilityError> {
+    async fn delete_container(&self, container: &str) -> Result<()> {
         blobstore::delete_container(container.to_owned())
             .await
             .map_err(|message| fault("deleting container", &message))
     }
 
-    async fn container_exists(&self, container: &str) -> Result<bool, CapabilityError> {
+    async fn container_exists(&self, container: &str) -> Result<bool> {
         blobstore::container_exists(container.to_owned())
             .await
             .map_err(|message| fault("checking container", &message))
     }
 
-    async fn container_info(
-        &self, container: &str,
-    ) -> Result<Option<ContainerMetadata>, CapabilityError> {
+    async fn container_info(&self, container: &str) -> Result<Option<ContainerMetadata>> {
         if !self.container_exists(container).await? {
             return Ok(None);
         }
@@ -149,7 +145,7 @@ impl BlobStore for WasiProvider {
         Ok(Some(ContainerMetadata::new(info.name, timestamp(info.created_at))))
     }
 
-    async fn exists(&self, container: &str, name: &str) -> Result<bool, CapabilityError> {
+    async fn exists(&self, container: &str, name: &str) -> Result<bool> {
         let container = open(container).await?;
         container
             .has_object(name.to_owned())
@@ -157,20 +153,20 @@ impl BlobStore for WasiProvider {
             .map_err(|message| fault("checking object", &message))
     }
 
-    async fn delete_many(&self, container: &str, names: &[&str]) -> Result<(), CapabilityError> {
+    async fn delete_many(&self, container: &str, names: &[&str]) -> Result<()> {
         let container = open(container).await?;
         let names = names.iter().map(|&name| name.to_owned()).collect();
         container.delete_objects(names).await.map_err(|message| fault("deleting objects", &message))
     }
 
-    async fn clear(&self, container: &str) -> Result<(), CapabilityError> {
+    async fn clear(&self, container: &str) -> Result<()> {
         let container = open(container).await?;
         container.clear().await.map_err(|message| fault("clearing container", &message))
     }
 
     async fn copy(
         &self, src_container: &str, src_name: &str, dest_container: &str, dest_name: &str,
-    ) -> Result<(), CapabilityError> {
+    ) -> Result<()> {
         blobstore::copy_object(
             object_id(src_container, src_name),
             object_id(dest_container, dest_name),
@@ -181,7 +177,7 @@ impl BlobStore for WasiProvider {
 
     async fn rename(
         &self, src_container: &str, src_name: &str, dest_container: &str, dest_name: &str,
-    ) -> Result<(), CapabilityError> {
+    ) -> Result<()> {
         blobstore::move_object(
             object_id(src_container, src_name),
             object_id(dest_container, dest_name),
@@ -191,7 +187,7 @@ impl BlobStore for WasiProvider {
     }
 }
 
-async fn open(container: &str) -> Result<Container, CapabilityError> {
+async fn open(container: &str) -> Result<Container> {
     blobstore::get_container(container.to_owned())
         .await
         .map_err(|message| fault("opening container", &message))
@@ -199,9 +195,7 @@ async fn open(container: &str) -> Result<Container, CapabilityError> {
 
 // a missing object fails `object-info` with a backend's own message, so the
 // failure is read as absence only once `has-object` agrees
-async fn stat_in(
-    container: &Container, name: &str,
-) -> Result<Option<ObjectMetadata>, CapabilityError> {
+async fn stat_in(container: &Container, name: &str) -> Result<Option<ObjectMetadata>> {
     match container.object_info(name.to_owned()).await {
         Ok(info) => Ok(Some(ObjectMetadata::new(
             info.name,
@@ -219,7 +213,7 @@ async fn stat_in(
     }
 }
 
-fn consume(incoming: IncomingValue) -> Result<Bytes, CapabilityError> {
+fn consume(incoming: IncomingValue) -> Result<Bytes> {
     IncomingValue::incoming_value_consume_sync(incoming)
         .map(Bytes::from)
         .map_err(|message| fault("reading object data", &message))
@@ -238,7 +232,7 @@ fn timestamp(seconds: u64) -> SystemTime {
 
 // `wasi:blobstore` errors are strings, so a missing container or object is
 // told apart by its message
-fn fault(action: &str, message: &str) -> CapabilityError {
-    let kind = if message.contains("not found") { ErrorKind::NotFound } else { ErrorKind::Other };
-    CapabilityError::new(kind, format!("{action}: {message}"))
+fn fault(action: &str, message: &str) -> Error {
+    let code = if message.contains("not found") { "not-found" } else { "other" };
+    Error::server_error(code, format!("{action}: {message}"))
 }

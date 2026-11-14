@@ -6,7 +6,7 @@ This crate provides the Config interface for the Omnia runtime.
 
 Implements the `wasi:config` WIT interface.
 
-A guest reaches it through `omnia_sdk::Config`. `get` answers `None` for a key the host does not set, and `ConfigExt::require` fails one with `ErrorKind::NotFound`.
+A guest reaches it through `omnia_sdk::Config`. `get` answers `None` for a key the host does not set, and `ConfigExt::require` fails one with the code `not-found`.
 
 ## Backend
 

@@ -15,9 +15,9 @@
 
 use std::ops::Range;
 
-use omnia_sdk::{BlobStore, ErrorKind};
+use omnia_sdk::BlobStore;
 
-use super::expect_kind;
+use super::expect_code;
 
 // a cursor still running after this many pages never ends
 const MAX_PAGES: usize = 32;
@@ -97,15 +97,15 @@ pub async fn delete_absent(store: &impl BlobStore, scope: &str) {
     remove(store, &container).await;
 }
 
-/// Every object call on a container nothing created fails with
-/// [`ErrorKind::NotFound`] and creates nothing.
+/// Every object call on a container nothing created fails with the code
+/// `not-found` and creates nothing.
 ///
 /// The container then reads as absent, and deleting it succeeds.
 ///
 /// # Panics
 ///
 /// Panics if an object call on the container succeeds, fails with another
-/// kind, or creates the container.
+/// code, or creates the container.
 pub async fn uncreated(store: &impl BlobStore, scope: &str) {
     let uncreated = scoped(scope, "uncreated");
     let source = create(store, scope, "uncreated-source").await;
@@ -122,16 +122,16 @@ pub async fn uncreated(store: &impl BlobStore, scope: &str) {
     let clear = store.clear(&uncreated).await;
     let copy = store.copy(&source, "doc", &uncreated, "doc").await;
 
-    expect_kind(get, ErrorKind::NotFound, "get on an uncreated container");
-    expect_kind(range, ErrorKind::NotFound, "get_range on an uncreated container");
-    expect_kind(put, ErrorKind::NotFound, "put on an uncreated container");
-    expect_kind(delete, ErrorKind::NotFound, "delete on an uncreated container");
-    expect_kind(stat, ErrorKind::NotFound, "stat on an uncreated container");
-    expect_kind(list, ErrorKind::NotFound, "list on an uncreated container");
-    expect_kind(exists, ErrorKind::NotFound, "exists on an uncreated container");
-    expect_kind(delete_many, ErrorKind::NotFound, "delete_many on an uncreated container");
-    expect_kind(clear, ErrorKind::NotFound, "clear on an uncreated container");
-    expect_kind(copy, ErrorKind::NotFound, "copy into an uncreated container");
+    expect_code(get, "not-found", "get on an uncreated container");
+    expect_code(range, "not-found", "get_range on an uncreated container");
+    expect_code(put, "not-found", "put on an uncreated container");
+    expect_code(delete, "not-found", "delete on an uncreated container");
+    expect_code(stat, "not-found", "stat on an uncreated container");
+    expect_code(list, "not-found", "list on an uncreated container");
+    expect_code(exists, "not-found", "exists on an uncreated container");
+    expect_code(delete_many, "not-found", "delete_many on an uncreated container");
+    expect_code(clear, "not-found", "clear on an uncreated container");
+    expect_code(copy, "not-found", "copy into an uncreated container");
     let exists = store.container_exists(&uncreated).await.expect("container_exists");
     assert!(!exists, "an object call created the container");
     let info = store.container_info(&uncreated).await.expect("container_info");
@@ -168,7 +168,7 @@ pub async fn containers(store: &impl BlobStore, scope: &str) {
     let exists = store.container_exists(&container).await.expect("container_exists");
     assert!(!exists, "a deleted container exists");
     let get = store.get(&container, "doc").await;
-    expect_kind(get, ErrorKind::NotFound, "get in a deleted container");
+    expect_code(get, "not-found", "get in a deleted container");
     store.delete_container(&container).await.expect("delete the container again");
 }
 
@@ -223,7 +223,7 @@ pub async fn listing(store: &impl BlobStore, scope: &str) {
 /// [`copy`](BlobStore::copy) duplicates an object, and
 /// [`rename`](BlobStore::rename) moves one, each replacing the destination.
 ///
-/// A copy of a missing object fails with [`ErrorKind::NotFound`] and writes
+/// A copy of a missing object fails with the code `not-found` and writes
 /// nothing, and a rename onto itself keeps the object.
 ///
 /// # Panics
@@ -244,7 +244,7 @@ pub async fn copy_rename(store: &impl BlobStore, scope: &str) {
     assert_eq!(read(store, &source, "doc").await, payload, "a copy disturbed its source");
 
     let missing = store.copy(&source, "missing", &target, "lost").await;
-    expect_kind(missing, ErrorKind::NotFound, "copy of a missing object");
+    expect_code(missing, "not-found", "copy of a missing object");
     assert_eq!(read(store, &target, "lost").await, None, "a refused copy wrote");
 
     store.rename(&source, "doc", &source, "doc").await.expect("rename onto itself");

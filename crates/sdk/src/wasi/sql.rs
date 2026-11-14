@@ -6,7 +6,7 @@ use bytes::Bytes;
 use omnia_wasi_sql::omnia::database;
 
 use crate::sql::{DEFAULT, Field, Row, Statement, Value};
-use crate::{CapabilityError, ErrorKind, HasSqlDb, SqlDb, WasiProvider};
+use crate::{Error, HasSqlDb, Result, SqlDb, WasiProvider};
 
 static DEFAULT_HANDLE: Handle = Handle {
     name: Cow::Borrowed(DEFAULT),
@@ -31,18 +31,18 @@ pub struct Handle {
 impl SqlDb for Handle {
     type Named = Self;
 
-    async fn query(&self, sql: &str, params: &[Value]) -> Result<Vec<Row>, CapabilityError> {
+    async fn query(&self, sql: &str, params: &[Value]) -> Result<Vec<Row>> {
         let params = params.iter().cloned().map(Into::into).collect();
         let rows = database::query(self.name.to_string(), sql.to_owned(), params).await?;
         Ok(rows.into_iter().map(Into::into).collect())
     }
 
-    async fn execute(&self, sql: &str, params: &[Value]) -> Result<u64, CapabilityError> {
+    async fn execute(&self, sql: &str, params: &[Value]) -> Result<u64> {
         let params = params.iter().cloned().map(Into::into).collect();
         Ok(database::execute(self.name.to_string(), sql.to_owned(), params).await?)
     }
 
-    async fn batch(&self, statements: &[Statement]) -> Result<Vec<u64>, CapabilityError> {
+    async fn batch(&self, statements: &[Statement]) -> Result<Vec<u64>> {
         let statements = statements.iter().cloned().map(Into::into).collect();
         Ok(database::batch(self.name.to_string(), statements).await?)
     }
@@ -54,17 +54,16 @@ impl SqlDb for Handle {
     }
 }
 
-impl From<database::Error> for CapabilityError {
+impl From<database::Error> for Error {
     fn from(err: database::Error) -> Self {
-        let (kind, message) = match err {
-            database::Error::NotFound(message) => (ErrorKind::NotFound, message),
-            database::Error::Denied(message) => (ErrorKind::Denied, message),
-            database::Error::Invalid(message) => (ErrorKind::Invalid, message),
-            database::Error::Unsupported(message) => (ErrorKind::Unsupported, message),
-            database::Error::Unavailable(message) => (ErrorKind::Unavailable, message),
-            database::Error::Other(message) => (ErrorKind::Other, message),
-        };
-        Self::new(kind, message)
+        match err {
+            database::Error::NotFound(message) => Self::server_error("not-found", message),
+            database::Error::Denied(message) => Self::server_error("denied", message),
+            database::Error::Invalid(message) => Self::server_error("invalid", message),
+            database::Error::Unsupported(message) => Self::server_error("unsupported", message),
+            database::Error::Unavailable(message) => Self::bad_gateway("unavailable", message),
+            database::Error::Other(message) => Self::server_error("other", message),
+        }
     }
 }
 

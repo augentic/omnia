@@ -86,8 +86,8 @@ path = "programs/docstore/document_db.rs"
 crate-type = ["cdylib"]
 
 [[example]]
-name = "docstore_error_kinds"
-path = "programs/docstore/error_kinds.rs"
+name = "docstore_error_codes"
+path = "programs/docstore/error_codes.rs"
 crate-type = ["cdylib"]
 
 [[example]]
@@ -131,8 +131,8 @@ path = "programs/keyvalue/bucket.rs"
 crate-type = ["cdylib"]
 
 [[example]]
-name = "keyvalue_error_kinds"
-path = "programs/keyvalue/error_kinds.rs"
+name = "keyvalue_error_codes"
+path = "programs/keyvalue/error_codes.rs"
 crate-type = ["cdylib"]
 
 [[example]]
@@ -421,8 +421,8 @@ path = "programs/sql/bindings.rs"
 crate-type = ["cdylib"]
 
 [[example]]
-name = "sql_error_kinds"
-path = "programs/sql/error_kinds.rs"
+name = "sql_error_codes"
+path = "programs/sql/error_codes.rs"
 crate-type = ["cdylib"]
 
 [[example]]

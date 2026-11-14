@@ -114,11 +114,11 @@ fn failed<T: 'static>(fault: anyhow::Error) -> FutureResult<T> {
 }
 
 #[tokio::test]
-async fn docstore_error_kinds() {
+async fn docstore_error_codes() {
     let backends = Backends::defaults().await.docstore(Faulting::default());
 
     let status = Deployment::new()
-        .guest("guest", test_programs::DOCSTORE_ERROR_KINDS)
+        .guest("guest", test_programs::DOCSTORE_ERROR_CODES)
         .run_host::<WasiDocStore, _>(backends.clone())
         .await
         .expect("guest runs");

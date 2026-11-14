@@ -9,10 +9,10 @@
 use std::iter;
 
 use omnia_sdk::docstore::{Document, Exists, Filter, Query, ScalarValue, SortField};
-use omnia_sdk::{CapabilityError, DocumentDb, ErrorKind};
+use omnia_sdk::{DocumentDb, Result};
 use serde_json::{Value, json};
 
-use super::expect_kind;
+use super::{expect_code, is_code};
 
 const EXISTS: &str = "insertexists";
 const PORTABLE: &str = "portablequery";
@@ -41,14 +41,14 @@ pub async fn insert_exists(db: &impl DocumentDb) {
 }
 
 /// Every portable filter selects what [`Filter::matches`] selects, a small
-/// `limit` pages through each match once, and a zero `limit` fails with
-/// [`ErrorKind::Invalid`].
+/// `limit` pages through each match once, and a zero `limit` fails with the
+/// code `invalid`.
 ///
 /// # Panics
 ///
 /// Panics if a filter selects other documents, a page holds more than its
 /// `limit`, the cursor repeats or skips a match, or a zero `limit` does not
-/// fail with [`ErrorKind::Invalid`].
+/// fail with the code `invalid`.
 pub async fn portable_query(db: &impl DocumentDb) {
     let stored = [
         ("a", json!({"kind": "fruit", "rank": 3, "weight": 0.5, "fresh": true})),
@@ -90,11 +90,11 @@ pub async fn portable_query(db: &impl DocumentDb) {
         limit: Some(0),
         ..Query::default()
     };
-    expect_kind(db.query(PORTABLE, &zero).await, ErrorKind::Invalid, "a query with a zero limit");
+    expect_code(db.query(PORTABLE, &zero).await, "invalid", "a query with a zero limit");
 }
 
-/// A filter past a limit [`Filter::check`] enforces fails the query with
-/// [`ErrorKind::Invalid`].
+/// A filter past a limit [`Filter::check`] enforces fails the query with the
+/// code `invalid`.
 ///
 /// The row queries with each of these filters:
 ///
@@ -106,7 +106,7 @@ pub async fn portable_query(db: &impl DocumentDb) {
 /// # Panics
 ///
 /// Panics if a query with one of those filters is served, or fails with
-/// another kind.
+/// another code.
 pub async fn filter_limits(db: &impl DocumentDb) {
     let deep = (0..Filter::MAX_DEPTH).fold(Filter::eq("rank", 1), |inner, _| !inner);
     let long = Filter::in_list("rank", iter::repeat_n(1, Filter::MAX_LIST_LEN + 1));
@@ -118,12 +118,12 @@ pub async fn filter_limits(db: &impl DocumentDb) {
         (Filter::and([]), "an empty `and`"),
         (Filter::or([]), "an empty `or`"),
     ] {
-        expect_kind(db.query(LIMITS, &filtered(&filter)).await, ErrorKind::Invalid, refused);
+        expect_code(db.query(LIMITS, &filtered(&filter)).await, "invalid", refused);
     }
 }
 
 /// Each optional query feature returns what [`Filter::matches`] and
-/// [`SortField::compare`] define, or fails with [`ErrorKind::Unsupported`].
+/// [`SortField::compare`] define, or fails with the code `unsupported`.
 ///
 /// The optional features are:
 ///
@@ -136,7 +136,7 @@ pub async fn filter_limits(db: &impl DocumentDb) {
 /// # Panics
 ///
 /// Panics if a feature selects or orders other documents, or fails with
-/// another kind.
+/// another code.
 pub async fn optional_query(db: &impl DocumentDb) {
     let stored = [
         ("a", json!({"name": "apple", "rank": 3, "tag": "x", "meta": {"level": 1}})),
@@ -185,10 +185,10 @@ pub async fn optional_query(db: &impl DocumentDb) {
 
 // an optional feature is served as the reference defines it, or refused
 #[track_caller]
-fn served(selected: Result<Vec<String>, CapabilityError>, expected: &[String], feature: &str) {
+fn served(selected: Result<Vec<String>>, expected: &[String], feature: &str) {
     match selected {
         Ok(ids) => assert_eq!(ids, expected, "{feature} returned other documents"),
-        Err(err) => assert_eq!(err.kind(), ErrorKind::Unsupported, "{feature} failed with `{err}`"),
+        Err(err) => assert!(is_code(&err, "unsupported"), "{feature} failed with `{err}`"),
     }
 }
 
@@ -201,9 +201,7 @@ async fn seed(db: &impl DocumentDb, collection: &str, stored: &[(&str, Value)]) 
 }
 
 // the ids `query` selects, page by page, in the order the pages hold them
-async fn walk(
-    db: &impl DocumentDb, collection: &str, query: &Query,
-) -> Result<Vec<String>, CapabilityError> {
+async fn walk(db: &impl DocumentDb, collection: &str, query: &Query) -> Result<Vec<String>> {
     let mut query = query.clone();
     let mut ids = Vec::new();
     for _ in 0..MAX_PAGES {

@@ -17,7 +17,7 @@ use omnia_sdk::{DocumentDb, DocumentDbExt as _, WasiProvider, bad_request};
 
 ## CRUD
 
-A `Document` is an id plus raw JSON bytes. `Document::json` serializes your own type into `data`, `Document::decode` reads it back, and `get_as` (from `DocumentDbExt`, blanket-implemented for every `DocumentDb`) fetches and decodes in one call. A body that is not the JSON of the type fails with `ErrorKind::Invalid`:
+A `Document` is an id plus raw JSON bytes. `Document::json` serializes your own type into `data`, `Document::decode` reads it back, and `get_as` (from `DocumentDbExt`, blanket-implemented for every `DocumentDb`) fetches and decodes in one call. A body that is not the JSON of the type fails with the code `invalid`:
 
 ```rust,noplayground
 async fn create_stop(Json(req): Json<CreateStopRequest>) -> omnia_sdk::Result<Json<Value>> {
@@ -47,7 +47,7 @@ The four operations:
 | `put(collection, &doc)` | Upsert (create or replace) |
 | `delete(collection, id)` | Remove → `bool` (whether anything was deleted) |
 
-`get_as::<T>(collection, id)` is `get` with the body decoded into `T`. Collections are created implicitly on first write. Every method fails with a `CapabilityError`, which `?` converts into `omnia_sdk::Error`.
+`get_as::<T>(collection, id)` is `get` with the body decoded into `T`. Collections are created implicitly on first write. Every method fails with an `omnia_sdk::Error`, coded as the [reference](../reference/docstore.md#errors) lists.
 
 ## Filters
 
@@ -144,7 +144,7 @@ The backend translates the tree to its native query language (direct JSON evalua
 - `and`, `or`, and `negate`;
 - `limit`, with the `next` cursor.
 
-The rest is optional: the string predicates, the null predicates, a comparison with `null`, a dotted field path, `order_by`, and `offset`. A backend serves each optional feature or fails it with `ErrorKind::Unsupported`, and never ignores one. A query that keeps to the portable subset runs alike locally and in production.
+The rest is optional: the string predicates, the null predicates, a comparison with `null`, a dotted field path, `order_by`, and `offset`. A backend serves each optional feature or fails it with the code `unsupported`, and never ignores one. A query that keeps to the portable subset runs alike locally and in production.
 
 ## Queries, sorting, and pagination
 
