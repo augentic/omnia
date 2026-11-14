@@ -378,16 +378,17 @@ impl<P: Send + Sync + 'static> fmt::Debug for Handlers<P> {
     }
 }
 
+// links to `command`-only methods take an anchor, which resolves without the feature
 /// A finished router over one shared provider, ready to serve HTTP requests,
 /// dispatch messaging deliveries, and run argv.
 ///
 /// [`Handlers::with_state`] is the one way to build it: every route, topic,
 /// and subcommand is registered on a [`Handlers`] first. With the `command`
 /// feature the router is also the program clap shows around its subcommands:
-/// [`name`](Self::name), [`version`](Self::version), [`about`](Self::about),
-/// and [`env_prefix`](Self::env_prefix) set what `--help`, `--version`, and
-/// [`Metadata::from_env`] read, and [`hints`](Self::hints) the remedy every
-/// failure may carry.
+/// [`name`](Self#method.name), [`version`](Self#method.version),
+/// [`about`](Self#method.about), and [`env_prefix`](Self#method.env_prefix)
+/// set what `--help`, `--version`, and [`Metadata::from_env`] read, and
+/// [`hints`](Self#method.hints) the remedy every failure may carry.
 #[must_use = "a router serves nothing until it handles a request or delivery or runs argv"]
 pub struct Router<P: Send + Sync + 'static = ()> {
     provider: Arc<P>,

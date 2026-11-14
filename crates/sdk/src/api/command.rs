@@ -1,11 +1,13 @@
+// links to `command`-only items take an anchor, which resolves without the feature
 //! The command façade: argv in, buffered channels and an exit status out.
 //!
-//! A subcommand is one more handler on a [`Handlers`](crate::api::Handlers).
-//! [`Handlers::command`](crate::api::Handlers::command) registers it beside
-//! the paths and topics, decoding its arguments through [`clap::Args`];
-//! [`Handlers::command_with`](crate::api::Handlers::command_with) takes a
-//! decoder over the [`clap::ArgMatches`] instead. The closed
-//! [`Router`](crate::api::Router) [`run`](crate::api::Router::run)s argv:
+//! With the `command` feature, a subcommand is one more handler on a
+//! [`Handlers`](crate::api::Handlers).
+//! [`Handlers::command`](crate::api::Handlers#method.command) registers it
+//! beside the paths and topics, decoding its arguments with clap, and
+//! [`Handlers::command_with`](crate::api::Handlers#method.command_with) takes
+//! a decoder of its own. The closed [`Router`](crate::api::Router)
+//! [`run`](crate::api::Router#method.run)s argv:
 //!
 //! - the verb's [`Handler`] runs over the router's provider
 //! - a success body is encoded onto stdout in the selected [`Format`], its
@@ -112,8 +114,8 @@ macro_rules! __export_command {
 /// telemetry scope. The router's program answers `--version` with the
 /// invoking crate's `CARGO_PKG_VERSION` and opens `--help` with its
 /// `CARGO_PKG_DESCRIPTION` unless
-/// [`Router::version`](crate::api::Router::version) or
-/// [`Router::about`](crate::api::Router::about) set them. Expands to nothing
+/// [`Router::version`](crate::api::Router#method.version) or
+/// [`Router::about`](crate::api::Router#method.about) set them. Expands to nothing
 /// on native targets, where a test or a native host serves the router itself.
 ///
 /// ```rust,ignore

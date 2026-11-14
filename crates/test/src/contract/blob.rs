@@ -14,6 +14,7 @@
 //! Storage does, runs the rows again under a fresh `scope`.
 
 use std::ops::Range;
+use std::time::{Duration, UNIX_EPOCH};
 
 use omnia_sdk::BlobStore;
 
@@ -25,13 +26,17 @@ const MAX_PAGES: usize = 32;
 // not UTF-8, so a provider that stores text cannot pass
 const BINARY: &[u8] = &[0, 159, 146, 150, 255];
 
+// the start of 2100: a store that dates an object later dated it in milliseconds
+const YEAR_2100: Duration = Duration::from_hours(1_139_568);
+
 /// An object reads back as written, and a second [`put`](BlobStore::put)
 /// replaces all of it.
 ///
 /// # Panics
 ///
 /// Panics if an object reads back other bytes, keeps part of an earlier
-/// write, or [`stat`](BlobStore::stat) describes another object.
+/// write, or [`stat`](BlobStore::stat) describes another object or dates it
+/// after 2100.
 pub async fn objects(store: &impl BlobStore, scope: &str) {
     let container = create(store, scope, "objects").await;
     write(store, &container, "doc", BINARY).await;
@@ -43,6 +48,7 @@ pub async fn objects(store: &impl BlobStore, scope: &str) {
     assert_eq!(stored, Some(b"second".to_vec()), "a put kept part of the old object");
     let stat = store.stat(&container, "doc").await.expect("stat").expect("the object is stored");
     assert_eq!((stat.name.as_str(), stat.container.as_str(), stat.size), ("doc", &*container, 6));
+    assert!(stat.created_at < UNIX_EPOCH + YEAR_2100, "stat dated the write after 2100");
     assert!(store.exists(&container, "doc").await.expect("exists"), "a stored object is absent");
     remove(store, &container).await;
 }
