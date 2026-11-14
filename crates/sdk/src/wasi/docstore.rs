@@ -1,10 +1,39 @@
-//! Conversions between the docstore value types and the `omnia:docstore` bindings.
+//! [`DocumentDb`] over `omnia:docstore`.
 
 use bytes::Bytes;
-use omnia_wasi_docstore::types;
+use omnia_wasi_docstore::{store, types};
 
-use crate::capability::{Error, ErrorKind, Page};
-use crate::docstore::{ComparisonOp, Document, Filter, Query, ScalarValue, SortField};
+use crate::capability::{Error, ErrorKind, Page, Result};
+use crate::docstore::{ComparisonOp, Document, Exists, Filter, Query, ScalarValue, SortField};
+use crate::{DocumentDb, WasiProvider};
+
+impl DocumentDb for WasiProvider {
+    async fn get(&self, collection: &str, id: &str) -> Result<Option<Document>> {
+        let document = store::get(collection.to_owned(), id.to_owned()).await?;
+        Ok(document.map(Into::into))
+    }
+
+    async fn insert(&self, collection: &str, document: &Document) -> Result<Result<(), Exists>> {
+        let inserted = store::insert(collection.to_owned(), document.into()).await?;
+        Ok(inserted.map_err(|_already_exists| Exists))
+    }
+
+    async fn put(&self, collection: &str, document: &Document) -> Result<()> {
+        Ok(store::put(collection.to_owned(), document.into()).await?)
+    }
+
+    async fn delete(&self, collection: &str, id: &str) -> Result<bool> {
+        Ok(store::delete(collection.to_owned(), id.to_owned()).await?)
+    }
+
+    async fn query(&self, collection: &str, query: &Query) -> Result<Page<Document>> {
+        if let Some(filter) = &query.filter {
+            filter.check()?;
+        }
+        let page = store::query(collection.to_owned(), query.into()).await?;
+        Ok(page.into())
+    }
+}
 
 impl From<types::Error> for Error {
     fn from(err: types::Error) -> Self {

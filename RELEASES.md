@@ -8,6 +8,8 @@ Unreleased
   capability trait over the WASI bindings on `wasm32`. It replaces a guest's
   provider struct with one empty impl per capability, and the `WasiModel`,
   `WasiVcs`, and `WasiPlugins` handles.
+- `omnia_sdk::wasi::{identity, keyvalue, sql, vault}::Handle`, on `wasm32`:
+  the handle `named(name)` answers on `WasiProvider`.
 - `#[derive(Provider)]`, `#[derive(Settings)]`, and `#[derive(FromRow)]`,
   re-exported by `omnia_sdk`:
   - `Provider` composes a provider from one field per capability. A field

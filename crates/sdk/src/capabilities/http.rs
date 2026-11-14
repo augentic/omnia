@@ -50,15 +50,3 @@ pub trait HttpClientExt: HttpClient {
 }
 
 impl<P: HttpClient + ?Sized> HttpClientExt for P {}
-
-#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
-impl HttpClient for crate::WasiProvider {
-    async fn fetch(&self, request: Request<Bytes>) -> Result<Response<Bytes>> {
-        use crate::capability::{Error, ErrorKind};
-
-        let target = format!("{} {}", request.method(), request.uri());
-        omnia_wasi_http::handle(request.map(http_body_util::Full::new)).await.map_err(|err| {
-            Error::new(ErrorKind::Unavailable, format!("sending {target}")).with_source(err)
-        })
-    }
-}

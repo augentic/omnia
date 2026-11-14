@@ -8,17 +8,13 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 use crate::capability::{Error, ErrorKind, Result};
-use crate::keyvalue::Conflict;
-#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
-use crate::keyvalue::{DEFAULT, Handle};
 
 /// Store and retrieve key-value state in a deployment's buckets.
 ///
 /// A handle reads and writes one bucket. A provider's own handle uses
-/// [`keyvalue::DEFAULT`](crate::keyvalue::DEFAULT), and
-/// [`named`](Self::named) selects another. The deployment declares its
-/// buckets, and a call on an undeclared one fails with
-/// [`ErrorKind::NotFound`].
+/// [`keyvalue::DEFAULT`](DEFAULT), and [`named`](Self::named) selects
+/// another. The deployment declares its buckets, and a call on an undeclared
+/// one fails with [`ErrorKind::NotFound`].
 ///
 /// Every provider accepts a portable key, and a provider may reject any
 /// other with [`ErrorKind::Invalid`]. A portable key:
@@ -113,33 +109,13 @@ pub trait StateStoreExt: StateStore {
 
 impl<P: StateStore + ?Sized> StateStoreExt for P {}
 
-#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
-impl StateStore for crate::WasiProvider {
-    type Named = Handle;
+/// The bucket a provider's own [`StateStore`] handle uses.
+pub const DEFAULT: &str = "default";
 
-    async fn get(&self, key: &str) -> Result<Option<Bytes>> {
-        Handle::new(DEFAULT).get(key).await
-    }
-
-    async fn set(&self, key: &str, value: &[u8], ttl: Option<Duration>) -> Result<()> {
-        Handle::new(DEFAULT).set(key, value, ttl).await
-    }
-
-    async fn delete(&self, key: &str) -> Result<()> {
-        Handle::new(DEFAULT).delete(key).await
-    }
-
-    async fn compare_and_swap(
-        &self, key: &str, current: Option<&[u8]>, new: &[u8], ttl: Option<Duration>,
-    ) -> Result<Result<(), Conflict>> {
-        Handle::new(DEFAULT).compare_and_swap(key, current, new, ttl).await
-    }
-
-    async fn increment(&self, key: &str, delta: i64, ttl: Option<Duration>) -> Result<i64> {
-        Handle::new(DEFAULT).increment(key, delta, ttl).await
-    }
-
-    fn named(&self, name: &str) -> Handle {
-        Handle::new(name)
-    }
+/// The value a [`compare_and_swap`](StateStore::compare_and_swap) found in
+/// place of the one it expected.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Conflict {
+    /// The value stored at the key, or `None` when it is absent.
+    pub current: Option<Bytes>,
 }

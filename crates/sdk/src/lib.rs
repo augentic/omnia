@@ -1,18 +1,12 @@
 #![doc = include_str!("../README.md")]
 
 pub mod api;
-pub mod blobstore;
 mod capabilities;
 pub mod capability;
-pub mod docstore;
 mod error;
-pub mod identity;
-pub mod keyvalue;
 #[cfg(feature = "http")]
 pub mod mcp;
-pub mod messaging;
-pub mod sql;
-pub mod vault;
+pub mod wasi;
 
 #[cfg(feature = "http")]
 #[doc(hidden)]
@@ -21,6 +15,7 @@ pub use omnia_guest_macros::{Provider, Settings, capability};
 
 pub use crate::capabilities::*;
 pub use crate::error::*;
+pub use crate::wasi::WasiProvider;
 #[doc(hidden)]
 pub mod http {
     pub use ::http::*;

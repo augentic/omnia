@@ -1,10 +1,11 @@
-//! Document store value types, filter builders, and the reference query semantics.
+//! JSON document store capability.
 //!
 //! [`Filter::matches`] and [`SortField::compare`] define how a query selects
 //! and orders JSON documents. A provider that evaluates queries itself calls
 //! them rather than writing its own evaluator.
 
 use std::cmp::Ordering;
+use std::future::Future;
 use std::ops::Not;
 
 use bytes::Bytes;
@@ -12,7 +13,70 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
-use crate::capability::{Error, ErrorKind, Result};
+use crate::capability::{Error, ErrorKind, Page, Result};
+
+/// Store and query JSON documents in a deployment's collections.
+///
+/// A query's filters and paging are defined by [`Filter::matches`] and
+/// [`SortField::compare`]. Typed reads of a document body are
+/// [`DocumentDbExt`].
+///
+/// Every provider serves the portable subset of a query:
+///
+/// - [`Filter::Compare`] with a value other than `null`, [`Filter::InList`],
+///   and [`Filter::NotInList`], on a top-level field;
+/// - [`Filter::And`], [`Filter::Or`], and [`Filter::Not`];
+/// - a `limit`, with the [`Page::next`] cursor.
+///
+/// A zero `limit`, or a filter [`Filter::check`] refuses, fails with
+/// [`ErrorKind::Invalid`]. A provider serves every other feature as defined,
+/// or fails the query with [`ErrorKind::Unsupported`], and never ignores
+/// one. The
+/// [document store reference](https://github.com/augentic/omnia/blob/main/docs/reference/docstore.md#query-contract)
+/// lists the portable names and the optional features.
+#[omnia_guest_macros::capability]
+pub trait DocumentDb: Send + Sync {
+    /// Fetch the document `id` from `collection`, or `None` when it is absent.
+    fn get(
+        &self, collection: &str, id: &str,
+    ) -> impl Future<Output = Result<Option<Document>>> + Send;
+
+    /// Insert `document` into `collection`, unless its id is already stored.
+    ///
+    /// A stored id answers `Ok(Err(Exists))` and leaves the stored document
+    /// untouched.
+    fn insert(
+        &self, collection: &str, document: &Document,
+    ) -> impl Future<Output = Result<Result<(), Exists>>> + Send;
+
+    /// Store `document` in `collection`, replacing any document with its id.
+    fn put(&self, collection: &str, document: &Document)
+    -> impl Future<Output = Result<()>> + Send;
+
+    /// Delete the document `id` from `collection`, answering whether one was removed.
+    fn delete(&self, collection: &str, id: &str) -> impl Future<Output = Result<bool>> + Send;
+
+    /// One page of the documents in `collection` that `query` selects.
+    fn query(
+        &self, collection: &str, query: &Query,
+    ) -> impl Future<Output = Result<Page<Document>>> + Send;
+}
+
+/// Typed reads over any [`DocumentDb`].
+///
+/// Blanket-implemented for every [`DocumentDb`]; never implemented by hand.
+pub trait DocumentDbExt: DocumentDb {
+    /// Fetch the document `id` and decode its JSON body as `T`.
+    ///
+    /// A body that is not the JSON of a `T` fails with [`ErrorKind::Invalid`].
+    fn get_as<T: DeserializeOwned>(
+        &self, collection: &str, id: &str,
+    ) -> impl Future<Output = Result<Option<T>>> + Send {
+        async move { self.get(collection, id).await?.map(|document| document.decode()).transpose() }
+    }
+}
+
+impl<P: DocumentDb + ?Sized> DocumentDbExt for P {}
 
 /// Scalar values for filter comparisons.
 #[derive(Debug, Clone, PartialEq)]
@@ -555,8 +619,8 @@ pub struct Query {
     /// Skip this many documents after filter/sort (offset pagination).
     pub offset: Option<u32>,
 
-    /// The [`next`](crate::capability::Page::next) cursor of the previous page,
-    /// or `None` for the first page.
+    /// The [`next`](Page::next) cursor of the previous page, or `None` for the
+    /// first page.
     pub after: Option<String>,
 }
 
@@ -609,7 +673,7 @@ impl Document {
     }
 }
 
-/// The outcome of an [`insert`](crate::DocumentDb::insert) whose id is already stored.
+/// The outcome of an [`insert`](DocumentDb::insert) whose id is already stored.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Exists;
 

@@ -57,22 +57,3 @@ pub trait ConfigExt: Config {
 }
 
 impl<P: Config + ?Sized> ConfigExt for P {}
-
-#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
-impl Config for crate::WasiProvider {
-    fn get(&self, key: &str) -> impl Future<Output = Result<Option<String>>> + Send {
-        std::future::ready(omnia_wasi_config::store::get(key).map_err(Error::from))
-    }
-}
-
-#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
-impl From<omnia_wasi_config::store::Error> for Error {
-    fn from(err: omnia_wasi_config::store::Error) -> Self {
-        use omnia_wasi_config::store::Error as Wire;
-
-        match err {
-            Wire::Upstream(message) => Self::new(ErrorKind::Unavailable, message),
-            Wire::Io(message) => Self::new(ErrorKind::Other, message),
-        }
-    }
-}

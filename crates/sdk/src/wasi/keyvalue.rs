@@ -1,48 +1,60 @@
-//! Key-value wire types.
+//! [`StateStore`] over `omnia:keyvalue`.
 
-#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
 use std::time::Duration;
 
 use bytes::Bytes;
-#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
 use omnia_wasi_keyvalue::omnia::store;
 
-#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
-use crate::StateStore;
-#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
 use crate::capability::{Error, ErrorKind, Result};
+use crate::keyvalue::{Conflict, DEFAULT};
+use crate::{StateStore, WasiProvider};
 
-/// The bucket a provider's own [`StateStore`](crate::StateStore) handle uses.
-pub const DEFAULT: &str = "default";
+impl StateStore for WasiProvider {
+    type Named = Handle;
 
-/// The value a [`compare_and_swap`](crate::StateStore::compare_and_swap)
-/// found in place of the one it expected.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Conflict {
-    /// The value stored at the key, or `None` when it is absent.
-    pub current: Option<Bytes>,
+    async fn get(&self, key: &str) -> Result<Option<Bytes>> {
+        Handle::new(DEFAULT).get(key).await
+    }
+
+    async fn set(&self, key: &str, value: &[u8], ttl: Option<Duration>) -> Result<()> {
+        Handle::new(DEFAULT).set(key, value, ttl).await
+    }
+
+    async fn delete(&self, key: &str) -> Result<()> {
+        Handle::new(DEFAULT).delete(key).await
+    }
+
+    async fn compare_and_swap(
+        &self, key: &str, current: Option<&[u8]>, new: &[u8], ttl: Option<Duration>,
+    ) -> Result<Result<(), Conflict>> {
+        Handle::new(DEFAULT).compare_and_swap(key, current, new, ttl).await
+    }
+
+    async fn increment(&self, key: &str, delta: i64, ttl: Option<Duration>) -> Result<i64> {
+        Handle::new(DEFAULT).increment(key, delta, ttl).await
+    }
+
+    fn named(&self, name: &str) -> Handle {
+        Handle::new(name)
+    }
 }
 
-/// A [`StateStore`](crate::StateStore) handle on one bucket of the WASI host.
+/// A [`StateStore`] handle on one bucket of the WASI host.
 ///
-/// [`StateStore::named`](crate::StateStore::named) on
-/// [`WasiProvider`](crate::WasiProvider) returns one.
-#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
+/// [`StateStore::named`] on [`WasiProvider`] returns one.
 #[derive(Clone, Debug)]
 pub struct Handle {
     name: String,
 }
 
-#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
 impl Handle {
-    pub(crate) fn new(name: &str) -> Self {
+    fn new(name: &str) -> Self {
         Self {
             name: name.to_owned(),
         }
     }
 }
 
-#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
 impl StateStore for Handle {
     type Named = Self;
 
@@ -83,12 +95,10 @@ impl StateStore for Handle {
 
 // rounds up, so a sub-millisecond TTL still expires and only `Duration::ZERO`
 // sends the zero the host rejects
-#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
 fn millis(ttl: Duration) -> u64 {
     u64::try_from(ttl.as_nanos().div_ceil(1_000_000)).unwrap_or(u64::MAX)
 }
 
-#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
 impl From<store::Error> for Error {
     fn from(err: store::Error) -> Self {
         let (kind, message) = match err {

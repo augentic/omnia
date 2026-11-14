@@ -1,23 +1,42 @@
-//! The `omnia:sql` handle and the conversions between the SQL values and the bindings.
+//! [`SqlDb`] over `omnia:sql`.
 
 use bytes::Bytes;
 use omnia_wasi_sql::omnia::database;
 
-use super::{Field, Row, Statement, Value};
-use crate::SqlDb;
 use crate::capability::{Error, ErrorKind, Result};
+use crate::sql::{DEFAULT, Field, Row, Statement, Value};
+use crate::{SqlDb, WasiProvider};
 
-/// A [`SqlDb`](crate::SqlDb) handle on one database of the WASI host.
+impl SqlDb for WasiProvider {
+    type Named = Handle;
+
+    async fn query(&self, sql: &str, params: &[Value]) -> Result<Vec<Row>> {
+        Handle::new(DEFAULT).query(sql, params).await
+    }
+
+    async fn execute(&self, sql: &str, params: &[Value]) -> Result<u64> {
+        Handle::new(DEFAULT).execute(sql, params).await
+    }
+
+    async fn batch(&self, statements: &[Statement]) -> Result<Vec<u64>> {
+        Handle::new(DEFAULT).batch(statements).await
+    }
+
+    fn named(&self, name: &str) -> Handle {
+        Handle::new(name)
+    }
+}
+
+/// A [`SqlDb`] handle on one database of the WASI host.
 ///
-/// [`SqlDb::named`](crate::SqlDb::named) on [`WasiProvider`](crate::WasiProvider)
-/// returns one.
+/// [`SqlDb::named`] on [`WasiProvider`] returns one.
 #[derive(Clone, Debug)]
 pub struct Handle {
     name: String,
 }
 
 impl Handle {
-    pub(crate) fn new(name: &str) -> Self {
+    fn new(name: &str) -> Self {
         Self {
             name: name.to_owned(),
         }
