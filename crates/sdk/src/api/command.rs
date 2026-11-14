@@ -62,7 +62,8 @@ use std::sync::Arc;
 
 use serde::{Serialize, Serializer};
 
-use crate::api::{Client, ErrorBody, Handler, Metadata};
+use crate::ErrorBody;
+use crate::api::{Client, Handler, Metadata};
 
 #[doc(hidden)]
 #[macro_export]

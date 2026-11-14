@@ -88,7 +88,7 @@ The one value a guest's handlers run against: it implements the capability trait
 
 ### Failure envelope
 
-What a command reports on stderr when a verb fails: the `Failure` type wrapping an `omnia_sdk::Error` plus an optional remedy hint. As text, `error[<code>]: <message>` then `hint: <hint>`; as JSON, flat `{"error","message","exit-code","hint"?}`. Its `error` and `message` are the transport-neutral `api::ErrorBody` that `Error::into_response` also emits as a JSON body, so one discriminant identifies a failure over HTTP and over a shell.
+What a command reports on stderr when a verb fails: the `Failure` type wrapping an `omnia_sdk::Error` plus an optional remedy hint. As text, `error[<code>]: <message>` then `hint: <hint>`; as JSON, flat `{"error","message","exit-code","hint"?}`. Its `error` and `message` are the transport-neutral `ErrorBody` that `Error::into_response` also emits as a JSON body, so one discriminant identifies a failure over HTTP and over a shell.
 
 ### Exit map
 

@@ -176,6 +176,25 @@ impl Error {
     }
 }
 
+/// The transport-neutral wire body of a failed invocation.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ErrorBody {
+    /// The error code discriminant.
+    pub error: String,
+
+    /// The human-readable error description.
+    pub message: String,
+}
+
+impl From<&Error> for ErrorBody {
+    fn from(error: &Error) -> Self {
+        Self {
+            error: error.code(),
+            message: error.description(),
+        }
+    }
+}
+
 // The first domain error in the chain keeps its variant and code. A
 // `capability::Error` is a `bad_gateway` when the upstream did not answer,
 // and otherwise the deployment's own `server_error`. Both gain the context

@@ -40,7 +40,6 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
 
 pub mod command;
 #[cfg(feature = "http")]
@@ -50,54 +49,6 @@ pub mod messaging;
 #[cfg(feature = "command")]
 use self::command::{Commands, Program};
 use self::messaging::{Delivery, DeliveryError, Topics};
-
-/// An input that could not be decoded into handler input.
-#[derive(Debug)]
-pub struct DecodeError {
-    description: String,
-}
-
-impl DecodeError {
-    /// Create a decode error from its description.
-    pub fn new(description: impl Into<String>) -> Self {
-        Self {
-            description: description.into(),
-        }
-    }
-
-    /// Describe why the input could not be decoded.
-    #[must_use]
-    pub fn description(&self) -> &str {
-        &self.description
-    }
-}
-
-impl fmt::Display for DecodeError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.description)
-    }
-}
-
-impl Error for DecodeError {}
-
-/// The transport-neutral wire body of a failed invocation.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ErrorBody {
-    /// The error code discriminant.
-    pub error: String,
-
-    /// The human-readable error description.
-    pub message: String,
-}
-
-impl From<&crate::Error> for ErrorBody {
-    fn from(error: &crate::Error) -> Self {
-        Self {
-            error: error.code(),
-            message: error.description(),
-        }
-    }
-}
 
 /// Transport-neutral invocation metadata.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -136,13 +87,16 @@ impl Metadata {
     ///
     /// Panics if the platform's random source fails while minting a request id.
     pub fn from_lookup(lookup: impl Fn(&str) -> Option<String>) -> Self {
-        let request_id = lookup("request-id").unwrap_or_else(mint_request_id);
+        let request_id = lookup("request-id").unwrap_or_else(request_id);
+
         Self {
             correlation_id: Some(lookup("correlation-id").unwrap_or_else(|| request_id.clone())),
             request_id: Some(request_id),
             causation_id: lookup("causation-id"),
             tenant: lookup("tenant"),
-            deadline: lookup("deadline").as_deref().and_then(parse_deadline),
+            deadline: lookup("deadline").and_then(|millis| {
+                SystemTime::UNIX_EPOCH.checked_add(Duration::from_millis(millis.parse().ok()?))
+            }),
         }
     }
 
@@ -163,14 +117,10 @@ impl Metadata {
 
 // A fresh request id: 32 lowercase hex chars from 128 bits of the platform's
 // CSPRNG, which is `wasi:random` in a guest and the OS on native.
-fn mint_request_id() -> String {
+fn request_id() -> String {
     let mut bytes = [0_u8; 16];
     getrandom::fill(&mut bytes).expect("the platform's random source is available");
     format!("{:032x}", u128::from_be_bytes(bytes))
-}
-
-fn parse_deadline(millis: &str) -> Option<SystemTime> {
-    SystemTime::UNIX_EPOCH.checked_add(Duration::from_millis(millis.parse().ok()?))
 }
 
 /// Context owned by one handler call.
@@ -200,6 +150,35 @@ impl<P> Context<P> {
         &self.provider
     }
 }
+
+/// An input that could not be decoded into handler input.
+#[derive(Debug)]
+pub struct DecodeError {
+    description: String,
+}
+
+impl DecodeError {
+    /// Create a decode error from its description.
+    pub fn new(description: impl Into<String>) -> Self {
+        Self {
+            description: description.into(),
+        }
+    }
+
+    /// Describe why the input could not be decoded.
+    #[must_use]
+    pub fn description(&self) -> &str {
+        &self.description
+    }
+}
+
+impl fmt::Display for DecodeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.description)
+    }
+}
+
+impl Error for DecodeError {}
 
 // one accessor per capability, so a handler bounded on two traits that both
 // define a method (`Config::get`, `StateStore::get`) names the one it means

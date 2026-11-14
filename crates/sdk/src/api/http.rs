@@ -26,7 +26,8 @@ use http::HeaderMap;
 use http::request::Parts;
 use tracing::Instrument as _;
 
-use crate::api::{Client, Context, ErrorBody, Handlers, Metadata, Router};
+use crate::ErrorBody;
+use crate::api::{Client, Context, Handlers, Metadata, Router};
 
 #[doc(hidden)]
 #[macro_export]

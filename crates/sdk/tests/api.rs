@@ -16,8 +16,8 @@ use axum::routing::get;
 use http::header::CONTENT_TYPE;
 use http::{Request, StatusCode};
 use omnia_sdk::api::http::trace;
-use omnia_sdk::api::{Client, Context, ErrorBody, Handlers, Metadata, Router};
-use omnia_sdk::{Config, StateStore, not_found};
+use omnia_sdk::api::{Client, Context, Handlers, Metadata, Router};
+use omnia_sdk::{Config, ErrorBody, StateStore, not_found};
 use omnia_test::guest::{self, MapConfig, Provider};
 use serde::{Deserialize, Serialize};
 

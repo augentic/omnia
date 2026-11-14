@@ -49,7 +49,7 @@ Each transport module's `export!` (`http::export!`, `messaging::export!`, `comma
 
 ### Errors
 
-A handler's error is anything `IntoResponse`. `omnia_sdk::Error` (`bad_request!`, `not_found!`, `server_error!`, `bad_gateway!`, or `Error::bad_request(code, description)` and its siblings when the specification names the `error` code a client reads) answers the JSON `api::ErrorBody` (`{"error","message"}`) at the variant's status, the same envelope the command transport writes to stderr, and `?` on an `anyhow::Error` or a `serde_json::Error` converts into it. A domain error with its own wire shape (another status, another content type) implements `IntoResponse` itself and delegates its host-failure variant to `omnia_sdk::Error::into_response`.
+A handler's error is anything `IntoResponse`. `omnia_sdk::Error` (`bad_request!`, `not_found!`, `server_error!`, `bad_gateway!`, or `Error::bad_request(code, description)` and its siblings when the specification names the `error` code a client reads) answers the JSON `ErrorBody` (`{"error","message"}`) at the variant's status, the same envelope the command transport writes to stderr, and `?` on an `anyhow::Error` or a `serde_json::Error` converts into it. A domain error with its own wire shape (another status, another content type) implements `IntoResponse` itself and delegates its host-failure variant to `omnia_sdk::Error::into_response`.
 
 ### Messaging
 
@@ -158,7 +158,7 @@ async fn process(provider: &(impl StateStore + Publisher)) -> omnia_sdk::capabil
 
 ## Error Handling
 
-The crate provides an `Error` enum with four variants (`BadRequest`, `NotFound`, `ServerError`, `BadGateway`), each mapped to an HTTP status (`Error::status()`) and a process exit code (`Error::exit_code()`: 1 / 2 / 3 / 4). Every transport reports a failure as the same `api::ErrorBody { error, message }` (`code()` and `description()`). The macros `bad_request!`, `not_found!`, `server_error!`, and `bad_gateway!` build a variant under its default code (`bad_request`, ...); the constructors `Error::bad_request(code, description)` and siblings name the code, for a specification's own reason codes.
+The crate provides an `Error` enum with four variants (`BadRequest`, `NotFound`, `ServerError`, `BadGateway`), each mapped to an HTTP status (`Error::status()`) and a process exit code (`Error::exit_code()`: 1 / 2 / 3 / 4). Every transport reports a failure as the same `ErrorBody { error, message }` (`code()` and `description()`). The macros `bad_request!`, `not_found!`, `server_error!`, and `bad_gateway!` build a variant under its default code (`bad_request`, ...); the constructors `Error::bad_request(code, description)` and siblings name the code, for a specification's own reason codes.
 
 ```rust,ignore
 use omnia_sdk::{Error, bad_request};

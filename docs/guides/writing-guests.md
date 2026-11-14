@@ -115,7 +115,7 @@ Messaging is `topic("items.created", item_created)` on the same `Handlers<P>`; t
 
 ### Errors
 
-An HTTP handler's error is anything `IntoResponse`. An `omnia_sdk::Error` becomes the JSON `api::ErrorBody` (`{"error","message"}`) at the variant's status, the same envelope the command transport writes to stderr; `?` on an `anyhow::Error` or a `serde_json::Error` converts into it. The macros `bad_request!`, `not_found!`, `server_error!`, and `bad_gateway!` build a variant under its default code; `Error::bad_request(code, description)` and its siblings name the code, for a specification's own reason code (`"segment_unknown"`). A domain error with its own wire shape (another status, another content type such as an XML fault) implements `IntoResponse` itself and delegates its host-failure variant to `omnia_sdk::Error::into_response`. A malformed body or query is refused by axum's extractor before the handler runs (`400`, or `415` without `Content-Type: application/json`).
+An HTTP handler's error is anything `IntoResponse`. An `omnia_sdk::Error` becomes the JSON `ErrorBody` (`{"error","message"}`) at the variant's status, the same envelope the command transport writes to stderr; `?` on an `anyhow::Error` or a `serde_json::Error` converts into it. The macros `bad_request!`, `not_found!`, `server_error!`, and `bad_gateway!` build a variant under its default code; `Error::bad_request(code, description)` and its siblings name the code, for a specification's own reason code (`"segment_unknown"`). A domain error with its own wire shape (another status, another content type such as an XML fault) implements `IntoResponse` itself and delegates its host-failure variant to `omnia_sdk::Error::into_response`. A malformed body or query is refused by axum's extractor before the handler runs (`400`, or `415` without `Content-Type: application/json`).
 
 ## HTTP handlers
 
@@ -297,7 +297,7 @@ A decode or handler error becomes a `Failure` envelope on stderr, in the same `F
 | `BadGateway` | `bad_gateway` | 4 | 502 |
 | clap usage error | — | 64 | — |
 
-As text the envelope is `error[<code>]: <message>` followed by `hint: <hint>` when a hint is attached; as JSON it is flat: `{"error","message","exit-code","hint"?}` (the hint key is omitted when absent). `error` and `message` are the transport-neutral `api::ErrorBody` — `Error::into_response` emits the same two fields as an `application/json` body at the variant's status — so a client reads one discriminant whether it reached the handler over HTTP or a shell. Usage errors exit 64 rather than clap's default 2, so exit 2 always means a `NotFound` envelope.
+As text the envelope is `error[<code>]: <message>` followed by `hint: <hint>` when a hint is attached; as JSON it is flat: `{"error","message","exit-code","hint"?}` (the hint key is omitted when absent). `error` and `message` are the transport-neutral `ErrorBody` — `Error::into_response` emits the same two fields as an `application/json` body at the variant's status — so a client reads one discriminant whether it reached the handler over HTTP or a shell. Usage errors exit 64 rather than clap's default 2, so exit 2 always means a `NotFound` envelope.
 
 - Arguments after `--` on the host command line arrive as the guest's argv (`args[0]` is the program name, supplied by the runtime).
 - The host runtime must be built with `mode: command` — see [Composing a Runtime](composing-a-runtime.md).

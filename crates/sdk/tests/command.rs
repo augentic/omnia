@@ -474,7 +474,7 @@ mod http_parity {
     use axum::extract::Query;
     use axum::routing::get;
     use http::{Request, StatusCode};
-    use omnia_sdk::api::ErrorBody;
+    use omnia_sdk::ErrorBody;
     use tower::ServiceExt as _;
 
     use super::*;
