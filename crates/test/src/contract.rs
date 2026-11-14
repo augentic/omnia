@@ -11,6 +11,7 @@
 //! The rows are the testable half of the
 //! [provider obligations](https://github.com/augentic/omnia/blob/main/docs/reference/provider-contract.md#obligations).
 
+pub mod blob;
 pub mod document;
 pub mod sql;
 pub mod state;

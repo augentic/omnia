@@ -54,6 +54,12 @@ Unreleased
 - `omnia_test::contract::{sql, document}`, the `SqlDb` and `DocumentDb`
   behaviour rows. Both run in a guest over `WasiProvider`, and the document
   rows run natively over `omnia_test::guest::MemoryDocs` too.
+- `omnia_test::contract::blob`, the `BlobStore` behaviour rows, run natively
+  over `omnia_test::guest::Memory` and in a guest over `WasiProvider`. Each
+  row takes a `scope` that prefixes its container names, so a rerun against
+  a live store uses fresh names.
+- `BlobStore` documents the portable container and object names every
+  provider accepts.
 - `omnia_wasi_keyvalue::ConnectOptions`. `KeyValueDefault` serves the
   buckets `KEYVALUE_BUCKETS` lists, comma-separated, and `default` when it
   is unset.

@@ -4,8 +4,10 @@
 
 use std::time::Duration;
 
-use omnia_test::contract::{document, state};
+use omnia_test::contract::{blob, document, state};
 use omnia_test::guest::{Memory, MemoryDocs};
+
+const SCOPE: &str = "contract";
 
 fn memory() -> Memory {
     Memory::default().bucket(state::SECOND)
@@ -99,4 +101,49 @@ async fn document_filter_limits() {
 #[tokio::test]
 async fn document_optional_query() {
     document::optional_query(&MemoryDocs::default()).await;
+}
+
+#[tokio::test]
+async fn blob_objects() {
+    blob::objects(&Memory::default(), SCOPE).await;
+}
+
+#[tokio::test]
+async fn blob_absent() {
+    blob::absent(&Memory::default(), SCOPE).await;
+}
+
+#[tokio::test]
+async fn blob_delete_absent() {
+    blob::delete_absent(&Memory::default(), SCOPE).await;
+}
+
+#[tokio::test]
+async fn blob_uncreated() {
+    blob::uncreated(&Memory::default(), SCOPE).await;
+}
+
+#[tokio::test]
+async fn blob_containers() {
+    blob::containers(&Memory::default(), SCOPE).await;
+}
+
+#[tokio::test]
+async fn blob_range() {
+    blob::range(&Memory::default(), SCOPE).await;
+}
+
+#[tokio::test]
+async fn blob_listing() {
+    blob::listing(&Memory::default(), SCOPE).await;
+}
+
+#[tokio::test]
+async fn blob_copy_rename() {
+    blob::copy_rename(&Memory::default(), SCOPE).await;
+}
+
+#[tokio::test]
+async fn blob_clear() {
+    blob::clear(&Memory::default(), SCOPE).await;
 }

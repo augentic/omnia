@@ -56,14 +56,11 @@ async fn blobstore_copy_move() {
 }
 
 #[tokio::test]
-async fn blobstore_listing() {
+async fn blobstore_blob_store() {
     let backends = Backends::defaults().await;
 
-    run_guest(test_programs::BLOBSTORE_LISTING, backends.clone()).await;
+    run_guest(test_programs::BLOBSTORE_BLOB_STORE, backends.clone()).await;
 
-    // Persisted state: every object the guest wrote landed whole, whatever
-    // range it read back.
-    for name in ["app/1", "app/2", "app/3", "db/1"] {
-        assert_eq!(backends.object("logs", name).await, Some(b"0123456789".to_vec()), "{name}");
-    }
+    // the guest's bytes are stored as they are
+    assert_eq!(backends.object("contract-host", "raw").await, Some(b"raw".to_vec()));
 }

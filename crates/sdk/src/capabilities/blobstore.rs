@@ -12,6 +12,18 @@ use crate::capability::{Error, ErrorKind, Page, Result};
 ///
 /// An absent object is `Ok(None)`, and a call on an object in a container
 /// that does not exist fails with [`ErrorKind::NotFound`].
+///
+/// Every provider accepts portable names, and a provider may reject any other
+/// with [`ErrorKind::Invalid`]. A portable container name:
+///
+/// - is 3 to 63 characters long;
+/// - holds only lowercase ASCII letters, digits, and `-`;
+/// - starts and ends with a letter or digit, and never holds `--`.
+///
+/// A portable object name is one or more segments joined by `/`. Each segment
+/// is not empty, holds only ASCII letters, digits, `.`, `_`, and `-`, and is
+/// neither `.` nor `..`. A portable container never holds both an object `a`
+/// and an object under `a/`.
 #[omnia_guest_macros::capability]
 pub trait BlobStore: Send + Sync {
     /// Retrieve the object `name` in `container`, or `None` when it is absent.

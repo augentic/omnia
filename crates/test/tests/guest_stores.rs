@@ -150,40 +150,6 @@ fn listing() {
 }
 
 #[test]
-fn uncreated_container() {
-    let memory = Memory::default();
-    let refused = [
-        now(BlobStore::get(&memory, "c", "o")).map(drop),
-        now(memory.get_range("c", "o", 0..1)).map(drop),
-        now(memory.put("c", "o", b"x")),
-        now(BlobStore::delete(&memory, "c", "o")),
-        now(memory.stat("c", "o")).map(drop),
-        now(memory.list("c", "", None)).map(drop),
-    ];
-
-    for result in refused {
-        let error = result.expect_err("a call on an uncreated container");
-        assert_eq!(error.kind(), ErrorKind::NotFound, "{error}");
-    }
-    assert!(!memory.has_container("c"), "a refused call created the container");
-    now(memory.delete_container("c")).expect("delete an absent container");
-}
-
-#[test]
-fn get_range() {
-    let memory = Memory::default();
-    memory.insert_object("c", "o", b"0123456789");
-    let range = |range| now(memory.get_range("c", "o", range)).expect("range");
-
-    assert_eq!(range(2..5).as_deref(), Some(&b"234"[..]));
-    assert_eq!(range(7..u64::MAX).as_deref(), Some(&b"789"[..]));
-    assert_eq!(range(5..100).as_deref(), Some(&b"56789"[..]));
-    assert_eq!(range(4..4).as_deref(), Some(&b""[..]));
-    assert_eq!(range(20..30).as_deref(), Some(&b""[..]));
-    assert_eq!(now(memory.get_range("c", "missing", 0..1)).expect("range"), None);
-}
-
-#[test]
 fn stat_timestamps() {
     let memory = Memory::default();
     now(memory.create_container("c")).expect("create");
@@ -197,24 +163,6 @@ fn stat_timestamps() {
     assert_eq!((second.size, second.container.as_str()), (2, "c"));
     assert_eq!(now(memory.stat("c", "missing")).expect("stat"), None);
     assert_eq!(now(memory.container_info("missing")).expect("container info"), None);
-}
-
-#[test]
-fn copy_rename_clear() {
-    let memory = Memory::default();
-    memory.insert_object("src", "o", b"data");
-    now(memory.create_container("dst")).expect("create");
-    now(memory.copy("src", "o", "dst", "copy")).expect("copy");
-    now(memory.rename("src", "o", "dst", "moved")).expect("rename");
-    assert_eq!(memory.objects("src"), Vec::<String>::new());
-    assert_eq!(memory.objects("dst"), ["copy", "moved"]);
-    now(memory.rename("dst", "moved", "dst", "moved")).expect("rename onto itself");
-    assert_eq!(memory.object("dst", "moved"), Some(b"data".to_vec()));
-
-    now(memory.clear("dst")).expect("clear");
-    assert!(memory.objects("dst").is_empty() && memory.has_container("dst"));
-    let error = now(memory.copy("src", "gone", "dst", "x")).expect_err("no source");
-    assert_eq!(error.kind(), ErrorKind::NotFound, "{error}");
 }
 
 // -- Memory: secrets ---------------------------------------------------------
