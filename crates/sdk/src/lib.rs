@@ -4,7 +4,6 @@ pub mod api;
 pub mod blobstore;
 mod capabilities;
 pub mod capability;
-pub mod contract;
 pub mod docstore;
 mod error;
 pub mod identity;

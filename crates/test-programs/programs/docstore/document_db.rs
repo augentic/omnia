@@ -1,13 +1,13 @@
-//! The `omnia_sdk::contract::document` rows over `WasiProvider`, all at
+//! The `omnia_test::contract::document` rows over `WasiProvider`, all at
 //! once, so the host's `omnia:docstore` and its backend meet the
 //! `DocumentDb` contract the native doubles do. One filter at both limits
 //! then pins the host's limits to the SDK's.
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_sdk::contract::document;
 use omnia_sdk::docstore::{Document, Filter, Query};
 use omnia_sdk::{DocumentDb as _, WasiProvider};
+use omnia_test::contract::document;
 
 omnia_sdk::api::command::export!(scenario);
 

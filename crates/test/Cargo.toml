@@ -19,6 +19,13 @@ workspace = true
 # No default: a consumer names the rung it uses, and a build-dependency line
 # that forgets `default-features = false` still pulls nothing but `std`.
 default = []
+# Behaviour rows every provider of a capability trait meets, on both
+# native and `wasm32` targets.
+contract = [
+    "dep:bytes",
+    "dep:omnia-sdk",
+    "dep:serde_json",
+]
 # Native doubles for the `omnia_sdk` capability traits, plus the `Provider` that bundles them
 # and the `send`/`deliver` router drivers.
 # No host crate belongs here: a stem's test build must not compile `wasmtime`.
@@ -60,14 +67,17 @@ build = []
 # Every dependency is optional so `--no-default-features --features build`
 # resolves to `std` alone on a consumer's build-dependency line.
 [dependencies]
-anyhow = { workspace = true, optional = true }
 bytes = { workspace = true, optional = true }
+omnia-sdk = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+anyhow = { workspace = true, optional = true }
 futures = { workspace = true, optional = true }
 http = { workspace = true, optional = true }
 http-body = { workspace = true, optional = true }
 http-body-util = { workspace = true, optional = true }
 omnia = { workspace = true, optional = true }
-omnia-sdk = { workspace = true, optional = true }
 omnia-wasi-blobstore = { workspace = true, optional = true }
 omnia-wasi-config = { workspace = true, optional = true }
 omnia-wasi-docstore = { workspace = true, optional = true }
@@ -81,7 +91,6 @@ omnia-wasi-sql = { workspace = true, optional = true }
 omnia-wasi-vault = { workspace = true, optional = true }
 omnia-wasi-vcs = { workspace = true, optional = true }
 omnia-wasi-websocket = { workspace = true, optional = true }
-serde_json = { workspace = true, optional = true }
 tempfile = { workspace = true, optional = true }
 tower = { workspace = true, features = ["util"], optional = true }
 
@@ -120,7 +129,7 @@ required-features = ["guest"]
 
 [[test]]
 name = "contract"
-required-features = ["guest"]
+required-features = ["contract", "guest"]
 
 [[test]]
 name = "guest_router"

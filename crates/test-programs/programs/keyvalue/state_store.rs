@@ -1,4 +1,4 @@
-//! The `omnia_sdk::contract::state` rows over `WasiProvider`, all at once,
+//! The `omnia_test::contract::state` rows over `WasiProvider`, all at once,
 //! so the host's `omnia:keyvalue` meets the contract the native doubles do.
 //! Three keys of the program's own are left for the host to read back.
 
@@ -6,8 +6,8 @@
 
 use std::time::Duration;
 
-use omnia_sdk::contract::state;
 use omnia_sdk::{StateStore as _, WasiProvider};
+use omnia_test::contract::state;
 
 omnia_sdk::api::command::export!(scenario);
 

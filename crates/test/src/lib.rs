@@ -14,15 +14,19 @@
 //! [`Script`] underlies both scripted models: a shared FIFO of turns that
 //! records the requests consuming them and fails the test when turns are
 //! left over.
-#![cfg(not(target_arch = "wasm32"))]
+#![cfg(any(not(target_arch = "wasm32"), feature = "contract"))]
 
+#[cfg(not(target_arch = "wasm32"))]
 mod script;
 
-#[cfg(feature = "build")]
+#[cfg(all(not(target_arch = "wasm32"), feature = "build"))]
 pub mod build;
-#[cfg(feature = "guest")]
+#[cfg(feature = "contract")]
+pub mod contract;
+#[cfg(all(not(target_arch = "wasm32"), feature = "guest"))]
 pub mod guest;
-#[cfg(feature = "host")]
+#[cfg(all(not(target_arch = "wasm32"), feature = "host"))]
 pub mod host;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use script::{Exchange, Script, Seen, SeenFormat, SeenWorker};

@@ -8,12 +8,12 @@
 
 use std::iter;
 
+use omnia_sdk::DocumentDb;
+use omnia_sdk::capability::{ErrorKind, Result};
+use omnia_sdk::docstore::{Document, Exists, Filter, Query, ScalarValue, SortField};
 use serde_json::{Value, json};
 
 use super::expect_kind;
-use crate::DocumentDb;
-use crate::capability::{ErrorKind, Result};
-use crate::docstore::{Document, Exists, Filter, Query, ScalarValue, SortField};
 
 const EXISTS: &str = "insertexists";
 const PORTABLE: &str = "portablequery";

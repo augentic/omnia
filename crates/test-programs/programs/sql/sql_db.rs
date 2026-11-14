@@ -1,10 +1,10 @@
-//! The `omnia_sdk::contract::sql` rows over `WasiProvider`, all at once, so
+//! The `omnia_test::contract::sql` rows over `WasiProvider`, all at once, so
 //! the host's `omnia:sql` and its backend meet the `SqlDb` contract.
 
 #![cfg(target_arch = "wasm32")]
 
 use omnia_sdk::WasiProvider;
-use omnia_sdk::contract::sql;
+use omnia_test::contract::sql;
 
 omnia_sdk::api::command::export!(scenario);
 

@@ -1,10 +1,10 @@
-//! The `omnia_sdk::contract` rows over the native doubles.
+//! The `omnia_test::contract` rows over the native doubles.
 
 #![cfg(not(target_arch = "wasm32"))]
 
 use std::time::Duration;
 
-use omnia_sdk::contract::{document, state};
+use omnia_test::contract::{document, state};
 use omnia_test::guest::{Memory, MemoryDocs};
 
 fn memory() -> Memory {

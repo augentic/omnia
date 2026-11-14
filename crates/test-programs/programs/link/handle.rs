@@ -16,6 +16,6 @@ export!(Handle);
 impl Guest for Handle {
     // the call keeps `take` from being pruned at componentization
     fn poke() {
-        omnia_test::link::tokens::take(None);
+        crate::omnia_test::link::tokens::take(None);
     }
 }

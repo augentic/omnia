@@ -5,8 +5,8 @@
 //! the [SQL reference](https://github.com/augentic/omnia/blob/main/docs/reference/sql.md#the-portable-dialect)
 //! defines. The database must start without the rows' tables.
 
-use crate::SqlDb;
-use crate::sql::{FromColumn, Row, Statement, Value};
+use omnia_sdk::SqlDb;
+use omnia_sdk::sql::{FromColumn, Row, Statement, Value};
 
 const DATE: &str = "2024-02-29";
 const TIME: &str = "23:59:58";
