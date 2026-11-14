@@ -68,7 +68,7 @@ Every method fails with an `omnia_sdk::Error` whose code is the one the backend 
 
 ### Mapping rows
 
-`query` returns `Vec<Row>`; each `Row` carries `fields`, a list of `Field { name, value }` in column order. `Row::get` reads one column by name as a Rust type — an integer, float, boolean, string, or binary scalar, or `Option` of one for a nullable column — and fails with a `ColumnError` when the column is absent, holds `NULL` for a non-`Option` type, or holds another kind of `Value`:
+`query` returns `Vec<Row>`; each `Row` carries `fields`, a list of `Field { name, value }` in column order. `Row::get` reads one column by name as a Rust type — an integer, float, boolean, string, or binary scalar, or `Option` of one for a nullable column — and fails with a `ServerError` with the code `invalid` when the column is absent, holds `NULL` for a non-`Option` type, or holds another kind of `Value`:
 
 ```rust,noplayground
 let name: String = row.get("name")?;

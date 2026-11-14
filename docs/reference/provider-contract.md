@@ -51,10 +51,10 @@ The deadline layer is added last, so it runs first and `trace` reads the stamped
 
 ### Messaging
 
-The host subscribes to each of `Router::topics` and hands every delivery to `Router::handle`. Before it does, it sets the delivery's `deadline` metadata entry, replacing any entry of that name the broker delivered, whatever its case. It then acts on the `DeliveryError` a failure returns:
+The host subscribes to each of `Router::topics` and hands every delivery to `Router::handle`. Before it does, it sets the delivery's `deadline` metadata entry, replacing any entry of that name the broker delivered, whatever its case. It then acts on the `omnia_sdk::Error` a failure returns:
 
-- It drops an `Undecodable` delivery, which no redelivery decodes.
-- It redelivers a `Failed` delivery whose error is a `BadGateway`, which may succeed later.
+- It drops a delivery that fails with the code `undecodable`, which no redelivery decodes.
+- It redelivers a delivery that fails with a `BadGateway`, which may succeed later.
 
 What becomes of any other failure is the host's own policy.
 

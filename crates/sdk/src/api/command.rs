@@ -494,7 +494,7 @@ cfg_select! {
         pub use clap_complete::Shell;
         use tracing::Instrument as _;
 
-        use crate::api::{DecodeError, Handlers, Router};
+        use crate::api::{Handlers, Router};
 
         impl Response {
             /// A usage error rendered by clap, exiting [`USAGE_EXIT`].
@@ -576,8 +576,7 @@ cfg_select! {
                 assert!(!name.is_empty(), "command name cannot be empty");
                 let command = I::augment_args(clap::Command::new(name));
                 self.route_with(command, handler, |matches| {
-                    I::from_arg_matches(matches)
-                        .map_err(|error| DecodeError::new(error.to_string()))
+                    I::from_arg_matches(matches).map_err(|error| crate::bad_request!(error))
                 })
             }
 
@@ -589,7 +588,7 @@ cfg_select! {
                 F::Output: Serialize + Render,
                 F::Error: Into<Failure>,
                 I: Send + 'static,
-                D: Fn(&clap::ArgMatches) -> Result<I, DecodeError> + Send + Sync + 'static,
+                D: Fn(&clap::ArgMatches) -> crate::Result<I> + Send + Sync + 'static,
             {
                 let name = command.get_name().to_owned();
                 let route = Route::<P, F, I, D> {
@@ -674,7 +673,7 @@ cfg_select! {
             F::Output: Serialize + Render,
             F::Error: Into<Failure>,
             I: Send + 'static,
-            D: Fn(&clap::ArgMatches) -> Result<I, DecodeError> + Send + Sync + 'static,
+            D: Fn(&clap::ArgMatches) -> crate::Result<I> + Send + Sync + 'static,
         {
             fn dispatch<'a>(
                 &'a self, matches: &'a clap::ArgMatches, command: &'a Command<'a, P>,
@@ -682,7 +681,7 @@ cfg_select! {
                 Box::pin(async move {
                     match (self.decode)(matches) {
                         Ok(input) => command.call(self.handler.clone(), input).await,
-                        Err(error) => command.refuse(crate::bad_request!("{error}").into()),
+                        Err(error) => command.refuse(error.into()),
                     }
                 })
             }
@@ -892,6 +891,9 @@ cfg_select! {
             /// Register one handler for one [`clap::Command`] subcommand with a
             /// decoder over its [`clap::ArgMatches`].
             ///
+            /// A decoder's refusal fails the run with its own
+            /// [`Error`](crate::Error), as a handler's error does.
+            ///
             /// # Panics
             ///
             /// Panics when the subcommand's name is empty or already registered.
@@ -903,7 +905,7 @@ cfg_select! {
                 F::Output: Serialize + Render,
                 F::Error: Into<Failure>,
                 I: Send + 'static,
-                D: Fn(&clap::ArgMatches) -> Result<I, DecodeError> + Send + Sync + 'static,
+                D: Fn(&clap::ArgMatches) -> crate::Result<I> + Send + Sync + 'static,
             {
                 self.commands = self.commands.route_with(command, handler, decode);
                 self

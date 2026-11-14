@@ -1,6 +1,5 @@
 //! Relational database capability, SQL value types, and typed row decoding.
 
-use std::error::Error;
 use std::fmt;
 use std::future::Future;
 
@@ -192,15 +191,16 @@ impl Row {
     ///
     /// # Errors
     ///
-    /// Returns [`ColumnError`] when `column` is absent from the row, holds
-    /// `NULL` for a non-`Option` `T`, or has an incompatible [`Value`].
-    pub fn get<'a, T: FromColumn<'a>>(&'a self, column: &str) -> Result<T, ColumnError> {
+    /// A [`ServerError`](crate::Error::ServerError) with the code `invalid`
+    /// when `column` is absent from the row, holds `NULL` for a non-`Option`
+    /// `T`, or has an incompatible [`Value`].
+    pub fn get<'a, T: FromColumn<'a>>(&'a self, column: &str) -> Result<T> {
         let value = self
             .fields
             .iter()
             .find(|field| field.name == column)
             .map(|field| &field.value)
-            .ok_or_else(|| ColumnError::missing(column))?;
+            .ok_or_else(|| column_missing(column))?;
         T::from_column(column, value)
     }
 }
@@ -226,53 +226,24 @@ impl Statement {
     }
 }
 
-/// A failure while reading a typed column from a [`Row`].
-///
-/// It converts into a [`ServerError`](crate::Error::ServerError) with the
-/// code `invalid`.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ColumnError {
-    description: String,
+fn column_missing(column: &str) -> crate::Error {
+    crate::Error::server_error("invalid", format!("row lacks column `{column}`"))
 }
 
-impl ColumnError {
-    /// Create a column error from its description.
-    pub fn new(description: impl Into<String>) -> Self {
-        Self {
-            description: description.into(),
-        }
-    }
-
-    /// Describe why the column could not be read.
-    #[must_use]
-    pub fn description(&self) -> &str {
-        &self.description
-    }
-
-    fn missing(column: &str) -> Self {
-        Self::new(format!("row lacks column `{column}`"))
-    }
-
-    fn null(column: &str) -> Self {
-        Self::new(format!("column `{column}` is null"))
-    }
-
-    fn type_mismatch(column: &str, expected: &str, actual: &Value) -> Self {
-        Self::new(format!("column `{column}` is not {expected}: {actual:?}"))
-    }
-
-    fn overflow(column: &str, target: &str, err: impl fmt::Display) -> Self {
-        Self::new(format!("column `{column}` overflows {target}: {err}"))
-    }
+fn column_null(column: &str) -> crate::Error {
+    crate::Error::server_error("invalid", format!("column `{column}` is null"))
 }
 
-impl fmt::Display for ColumnError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.description)
-    }
+fn column_mismatch(column: &str, expected: &str, actual: &Value) -> crate::Error {
+    crate::Error::server_error(
+        "invalid",
+        format!("column `{column}` is not {expected}: {actual:?}"),
+    )
 }
 
-impl Error for ColumnError {}
+fn column_overflow(column: &str, target: &str, err: impl fmt::Display) -> crate::Error {
+    crate::Error::server_error("invalid", format!("column `{column}` overflows {target}: {err}"))
+}
 
 /// Decode a Rust value from one SQL column's [`Value`].
 ///
@@ -288,86 +259,87 @@ pub trait FromColumn<'a>: Sized {
     ///
     /// # Errors
     ///
-    /// Returns [`ColumnError`] when `value` is `NULL` for a non-`Option`
-    /// `Self` or has an incompatible [`Value`].
-    fn from_column(column: &str, value: &'a Value) -> Result<Self, ColumnError>;
+    /// A [`ServerError`](crate::Error::ServerError) with the code `invalid`
+    /// when `value` is `NULL` for a non-`Option` `Self` or has an
+    /// incompatible [`Value`].
+    fn from_column(column: &str, value: &'a Value) -> Result<Self>;
 }
 
 impl<'a, T: FromColumn<'a>> FromColumn<'a> for Option<T> {
-    fn from_column(column: &str, value: &'a Value) -> Result<Self, ColumnError> {
+    fn from_column(column: &str, value: &'a Value) -> Result<Self> {
         if value.is_null() { Ok(None) } else { T::from_column(column, value).map(Some) }
     }
 }
 
 impl FromColumn<'_> for i64 {
-    fn from_column(column: &str, value: &Value) -> Result<Self, ColumnError> {
+    fn from_column(column: &str, value: &Value) -> Result<Self> {
         match value {
             Value::Int64(Some(v)) => Ok(*v),
             Value::Int32(Some(v)) => Ok(Self::from(*v)),
             Value::Uint32(Some(v)) => Ok(Self::from(*v)),
             Value::Uint64(Some(v)) => {
-                Self::try_from(*v).map_err(|err| ColumnError::overflow(column, "i64", err))
+                Self::try_from(*v).map_err(|err| column_overflow(column, "i64", err))
             }
-            v if v.is_null() => Err(ColumnError::null(column)),
-            other => Err(ColumnError::type_mismatch(column, "an integer", other)),
+            v if v.is_null() => Err(column_null(column)),
+            other => Err(column_mismatch(column, "an integer", other)),
         }
     }
 }
 
 impl FromColumn<'_> for i32 {
-    fn from_column(column: &str, value: &Value) -> Result<Self, ColumnError> {
+    fn from_column(column: &str, value: &Value) -> Result<Self> {
         let wide = i64::from_column(column, value)?;
-        Self::try_from(wide).map_err(|err| ColumnError::overflow(column, "i32", err))
+        Self::try_from(wide).map_err(|err| column_overflow(column, "i32", err))
     }
 }
 
 impl FromColumn<'_> for u64 {
-    fn from_column(column: &str, value: &Value) -> Result<Self, ColumnError> {
+    fn from_column(column: &str, value: &Value) -> Result<Self> {
         match value {
             Value::Uint64(Some(v)) => Ok(*v),
             Value::Uint32(Some(v)) => Ok(Self::from(*v)),
             Value::Int64(Some(v)) => {
-                Self::try_from(*v).map_err(|err| ColumnError::overflow(column, "u64", err))
+                Self::try_from(*v).map_err(|err| column_overflow(column, "u64", err))
             }
             Value::Int32(Some(v)) => {
-                Self::try_from(*v).map_err(|err| ColumnError::overflow(column, "u64", err))
+                Self::try_from(*v).map_err(|err| column_overflow(column, "u64", err))
             }
-            v if v.is_null() => Err(ColumnError::null(column)),
-            other => Err(ColumnError::type_mismatch(column, "an integer", other)),
+            v if v.is_null() => Err(column_null(column)),
+            other => Err(column_mismatch(column, "an integer", other)),
         }
     }
 }
 
 impl FromColumn<'_> for u32 {
-    fn from_column(column: &str, value: &Value) -> Result<Self, ColumnError> {
+    fn from_column(column: &str, value: &Value) -> Result<Self> {
         let wide = u64::from_column(column, value)?;
-        Self::try_from(wide).map_err(|err| ColumnError::overflow(column, "u32", err))
+        Self::try_from(wide).map_err(|err| column_overflow(column, "u32", err))
     }
 }
 
 impl FromColumn<'_> for f64 {
-    fn from_column(column: &str, value: &Value) -> Result<Self, ColumnError> {
+    fn from_column(column: &str, value: &Value) -> Result<Self> {
         match value {
             Value::Double(Some(v)) => Ok(*v),
             Value::Float(Some(v)) => Ok(Self::from(*v)),
-            v if v.is_null() => Err(ColumnError::null(column)),
-            other => Err(ColumnError::type_mismatch(column, "a float", other)),
+            v if v.is_null() => Err(column_null(column)),
+            other => Err(column_mismatch(column, "a float", other)),
         }
     }
 }
 
 impl FromColumn<'_> for f32 {
-    fn from_column(column: &str, value: &Value) -> Result<Self, ColumnError> {
+    fn from_column(column: &str, value: &Value) -> Result<Self> {
         match value {
             Value::Float(Some(v)) => Ok(*v),
-            v if v.is_null() => Err(ColumnError::null(column)),
-            other => Err(ColumnError::type_mismatch(column, "a 32-bit float", other)),
+            v if v.is_null() => Err(column_null(column)),
+            other => Err(column_mismatch(column, "a 32-bit float", other)),
         }
     }
 }
 
 impl FromColumn<'_> for bool {
-    fn from_column(column: &str, value: &Value) -> Result<Self, ColumnError> {
+    fn from_column(column: &str, value: &Value) -> Result<Self> {
         match value {
             Value::Boolean(Some(v)) => Ok(*v),
             Value::Int32(Some(0))
@@ -378,53 +350,53 @@ impl FromColumn<'_> for bool {
             | Value::Int64(Some(1))
             | Value::Uint32(Some(1))
             | Value::Uint64(Some(1)) => Ok(true),
-            v if v.is_null() => Err(ColumnError::null(column)),
-            other => Err(ColumnError::type_mismatch(column, "a boolean", other)),
+            v if v.is_null() => Err(column_null(column)),
+            other => Err(column_mismatch(column, "a boolean", other)),
         }
     }
 }
 
 impl<'a> FromColumn<'a> for &'a str {
-    fn from_column(column: &str, value: &'a Value) -> Result<Self, ColumnError> {
+    fn from_column(column: &str, value: &'a Value) -> Result<Self> {
         match value {
             Value::Str(Some(v))
             | Value::Date(Some(v))
             | Value::Time(Some(v))
             | Value::Timestamp(Some(v)) => Ok(v.as_str()),
-            v if v.is_null() => Err(ColumnError::null(column)),
-            other => Err(ColumnError::type_mismatch(column, "a string", other)),
+            v if v.is_null() => Err(column_null(column)),
+            other => Err(column_mismatch(column, "a string", other)),
         }
     }
 }
 
 impl<'a> FromColumn<'a> for String {
-    fn from_column(column: &str, value: &'a Value) -> Result<Self, ColumnError> {
+    fn from_column(column: &str, value: &'a Value) -> Result<Self> {
         <&'a str as FromColumn<'a>>::from_column(column, value).map(str::to_owned)
     }
 }
 
 impl<'a> FromColumn<'a> for &'a [u8] {
-    fn from_column(column: &str, value: &'a Value) -> Result<Self, ColumnError> {
+    fn from_column(column: &str, value: &'a Value) -> Result<Self> {
         match value {
             Value::Binary(Some(v)) => Ok(v.as_ref()),
-            v if v.is_null() => Err(ColumnError::null(column)),
-            other => Err(ColumnError::type_mismatch(column, "binary bytes", other)),
+            v if v.is_null() => Err(column_null(column)),
+            other => Err(column_mismatch(column, "binary bytes", other)),
         }
     }
 }
 
 impl<'a> FromColumn<'a> for Vec<u8> {
-    fn from_column(column: &str, value: &'a Value) -> Result<Self, ColumnError> {
+    fn from_column(column: &str, value: &'a Value) -> Result<Self> {
         <&'a [u8] as FromColumn<'a>>::from_column(column, value).map(<[u8]>::to_vec)
     }
 }
 
 impl FromColumn<'_> for Bytes {
-    fn from_column(column: &str, value: &Value) -> Result<Self, ColumnError> {
+    fn from_column(column: &str, value: &Value) -> Result<Self> {
         match value {
             Value::Binary(Some(v)) => Ok(v.clone()),
-            v if v.is_null() => Err(ColumnError::null(column)),
-            other => Err(ColumnError::type_mismatch(column, "binary bytes", other)),
+            v if v.is_null() => Err(column_null(column)),
+            other => Err(column_mismatch(column, "binary bytes", other)),
         }
     }
 }

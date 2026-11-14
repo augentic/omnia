@@ -48,7 +48,7 @@ pub mod messaging;
 
 #[cfg(feature = "command")]
 use self::command::{Commands, Program};
-use self::messaging::{Delivery, DeliveryError, Topics};
+use self::messaging::{Delivery, Topics};
 
 /// Transport-neutral invocation metadata.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -150,35 +150,6 @@ impl<P> Context<P> {
         &self.provider
     }
 }
-
-/// An input that could not be decoded into handler input.
-#[derive(Debug)]
-pub struct DecodeError {
-    description: String,
-}
-
-impl DecodeError {
-    /// Create a decode error from its description.
-    pub fn new(description: impl Into<String>) -> Self {
-        Self {
-            description: description.into(),
-        }
-    }
-
-    /// Describe why the input could not be decoded.
-    #[must_use]
-    pub fn description(&self) -> &str {
-        &self.description
-    }
-}
-
-impl fmt::Display for DecodeError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.description)
-    }
-}
-
-impl Error for DecodeError {}
 
 // one accessor per capability, so a handler bounded on two traits that both
 // define a method (`Config::get`, `StateStore::get`) names the one it means
@@ -355,6 +326,10 @@ impl<P: Send + Sync + 'static> Handlers<P> {
 
     /// Register one handler for one exact topic with a decoder over the whole delivery.
     ///
+    /// A decoder's refusal fails the delivery as a
+    /// [`BadRequest`](crate::Error::BadRequest) with the code `undecodable`,
+    /// whatever its own variant and code, and keeps its description.
+    ///
     /// # Panics
     ///
     /// Panics when the topic is empty or already registered.
@@ -362,7 +337,7 @@ impl<P: Send + Sync + 'static> Handlers<P> {
     where
         F: Handler<P, I>,
         I: Send + 'static,
-        D: Fn(&Delivery) -> Result<I, DecodeError> + Send + Sync + 'static,
+        D: Fn(&Delivery) -> crate::Result<I> + Send + Sync + 'static,
     {
         self.topics = self.topics.route_with(topic, handler, decode);
         self
@@ -462,20 +437,28 @@ impl<P: Send + Sync + 'static> Router<P> {
 
     /// Dispatch one delivery by exact topic.
     ///
-    /// A broker serving the router acts on a failure by its variant:
+    /// A broker serving the router acts on a failure by its code and variant:
     ///
-    /// - It drops an [`Undecodable`](DeliveryError::Undecodable) delivery,
-    ///   which no redelivery decodes.
-    /// - It redelivers a [`Failed`](DeliveryError::Failed) one whose error is
-    ///   a [`BadGateway`](crate::Error::BadGateway), which may succeed later.
+    /// - It drops one with the code `undecodable`, which no redelivery decodes.
+    /// - It redelivers a [`BadGateway`](crate::Error::BadGateway), which may
+    ///   succeed later.
     ///
     /// # Errors
     ///
-    /// Returns [`DeliveryError::MissingTopic`] or
-    /// [`DeliveryError::UnhandledTopic`] when no route takes the delivery,
-    /// [`DeliveryError::Undecodable`] when its payload does not decode, and
-    /// [`DeliveryError::Failed`] when the handler fails.
-    pub async fn handle(&self, delivery: Delivery) -> Result<(), DeliveryError> {
+    /// - A [`BadRequest`](crate::Error::BadRequest) with the code
+    ///   `missing-topic` when the delivery has no topic.
+    /// - A [`NotFound`](crate::Error::NotFound) with the code `unhandled-topic`
+    ///   when no route takes the topic.
+    /// - A [`BadRequest`](crate::Error::BadRequest) with the code
+    ///   `undecodable` when the payload does not decode.
+    /// - The handler's error when it fails. The first
+    ///   [`Error`](crate::Error), [`vcs::Error`](crate::vcs::Error),
+    ///   [`plugins::Error`](crate::plugins::Error), or
+    ///   [`model::Error`](crate::model::Error) in its source chain sets its
+    ///   variant and code, and any other error is a
+    ///   [`ServerError`](crate::Error::ServerError). The description is the
+    ///   whole chain.
+    pub async fn handle(&self, delivery: Delivery) -> crate::Result<()> {
         self.topics.handle(delivery, &self.client).await
     }
 }

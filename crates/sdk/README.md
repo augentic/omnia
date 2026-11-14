@@ -70,7 +70,7 @@ pub fn messaging_router<P: StateStore + 'static>(provider: P) -> Router<P> {
 messaging::export!(messaging_router);
 ```
 
-`topic(topic, handler)` decodes JSON and acknowledges successful output; `topic_with(topic, handler, decode)` takes a decoder `Fn(&Delivery) -> Result<I, DecodeError>` over the whole delivery for any other wire format. A module registers its HTTP routes, messaging topics, and subcommands on a `Handlers<P>` of its own, with no client, and the root merges each (`Handlers::from([..])` or `Handlers::merge`) and closes the whole into the one `Router<P>` with `Handlers::with_state`, the router's only constructor. A delivery and a subcommand run inside the same `handler` span through the router's dispatch, which names the `topic` or the `command`.
+`topic(topic, handler)` decodes JSON and acknowledges successful output; `topic_with(topic, handler, decode)` takes a decoder `Fn(&Delivery) -> omnia_sdk::Result<I>` over the whole delivery for any other wire format. A module registers its HTTP routes, messaging topics, and subcommands on a `Handlers<P>` of its own, with no client, and the root merges each (`Handlers::from([..])` or `Handlers::merge`) and closes the whole into the one `Router<P>` with `Handlers::with_state`, the router's only constructor. A delivery and a subcommand run inside the same `handler` span through the router's dispatch, which names the `topic` or the `command`.
 
 A fn generic over a module's whole provider, such as its `handlers<P>()`, bounds `P` on a `Requires` trait the module declares. It names the capabilities the module's handlers reach, plus the `Send + Sync + 'static` a router needs, and a blanket impl gives it to every provider that has them. The guest root bounds its router fn on each module's `Requires`.
 
@@ -86,7 +86,7 @@ pub fn handlers<P: Requires>() -> Handlers<P> {
 
 ### Command-mode guests
 
-A subcommand is one more handler on the same `Handlers<P>` (`command` feature): `command(name, handler)` registers it beside the paths and topics, where the handler's input implements `clap::Args` (`()` included) and its output `Serialize` and `command::Render`, and `command_with(subcommand, handler, decode)` takes a `clap::Command` with a decoder `Fn(&ArgMatches) -> Result<I, DecodeError>` for any other grammar. The same `with_state(Client::new(provider))` closes the whole into the `Router<P>` that `run`s argv, and `command::export!(command_router)` binds the router fn as the `wasi:cli/run` export (or a zero-argument `async fn` returning `IntoExit`), writing the channels at that boundary. Omnia creates a fresh component instance for each command invocation.
+A subcommand is one more handler on the same `Handlers<P>` (`command` feature): `command(name, handler)` registers it beside the paths and topics, where the handler's input implements `clap::Args` (`()` included) and its output `Serialize` and `command::Render`, and `command_with(subcommand, handler, decode)` takes a `clap::Command` with a decoder `Fn(&ArgMatches) -> omnia_sdk::Result<I>` for any other grammar. The same `with_state(Client::new(provider))` closes the whole into the `Router<P>` that `run`s argv, and `command::export!(command_router)` binds the router fn as the `wasi:cli/run` export (or a zero-argument `async fn` returning `IntoExit`), writing the channels at that boundary. Omnia creates a fresh component instance for each command invocation.
 
 ```rust,ignore
 use clap::Args;

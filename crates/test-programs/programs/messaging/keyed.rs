@@ -10,7 +10,7 @@
 use std::time::SystemTime;
 
 use omnia_sdk::api::messaging::{self, Delivery};
-use omnia_sdk::api::{Client, Context, DecodeError, Handlers, Router};
+use omnia_sdk::api::{Client, Context, Handlers, Router};
 use omnia_sdk::messaging::Message;
 use omnia_sdk::{Publisher, WasiProvider};
 
@@ -25,9 +25,7 @@ async fn scenario() {
 // the decoder hands the handler the whole delivery, key included
 fn router(provider: WasiProvider) -> Router<WasiProvider> {
     Handlers::new()
-        .topic_with("orders", received, |delivery: &Delivery| {
-            Ok::<_, DecodeError>(delivery.clone())
-        })
+        .topic_with("orders", received, |delivery: &Delivery| Ok(delivery.clone()))
         .with_state(Client::new(provider))
 }
 

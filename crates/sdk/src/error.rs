@@ -209,12 +209,6 @@ impl From<serde_json::Error> for Error {
     }
 }
 
-impl From<crate::sql::ColumnError> for Error {
-    fn from(err: crate::sql::ColumnError) -> Self {
-        Self::server_error("invalid", err.to_string())
-    }
-}
-
 impl From<crate::model::Error> for Error {
     fn from(err: crate::model::Error) -> Self {
         use crate::model::Error as Model;

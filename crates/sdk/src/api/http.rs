@@ -241,5 +241,5 @@ cfg_select! {
             serve(router, request).await
         }
     }
-    _ => { }
+    _ => {}
 }

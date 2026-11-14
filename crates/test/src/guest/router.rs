@@ -8,7 +8,7 @@ use http::{Request, Response};
 use http_body::Body;
 use http_body_util::BodyExt as _;
 use omnia_sdk::api::Router;
-use omnia_sdk::api::messaging::{Delivery, DeliveryError};
+use omnia_sdk::api::messaging::Delivery;
 use tower::{Service, ServiceExt as _};
 
 /// Send one request through `service` and collect the reply's body.
@@ -41,11 +41,11 @@ where
 ///
 /// # Errors
 ///
-/// Returns the router's [`DeliveryError`]: the topic is unhandled, the payload
-/// does not decode, or the handler failed.
+/// Returns the [`omnia_sdk::Error`] that [`Router::handle`] answers: the topic
+/// is unhandled, the payload does not decode, or the handler failed.
 pub async fn deliver<P>(
     router: &Router<P>, topic: &str, payload: impl Into<Vec<u8>>,
-) -> Result<(), DeliveryError>
+) -> omnia_sdk::Result<()>
 where
     P: Send + Sync + 'static,
 {

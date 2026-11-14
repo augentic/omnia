@@ -8,7 +8,6 @@ use axum::extract::Path;
 use axum::routing::get;
 use http::{Request, StatusCode};
 use omnia_sdk::StateStore as _;
-use omnia_sdk::api::messaging::DeliveryError;
 use omnia_sdk::api::{Client, Context, Handlers, Router};
 use omnia_test::guest::{Provider, deliver, send};
 
@@ -67,6 +66,6 @@ async fn unhandled_topic() {
 
     assert_eq!(
         deliver(&router, "other", b"{}").await,
-        Err(DeliveryError::UnhandledTopic("other".to_owned()))
+        Err(omnia_sdk::Error::not_found("unhandled-topic", "no route for topic `other`"))
     );
 }

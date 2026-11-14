@@ -133,9 +133,8 @@ Unreleased
 - `omnia_sdk::command!(main)` is `omnia_sdk::api::command::export!(main)`.
 - The value types live in the SDK's own modules:
   - `omnia_sdk::docstore`, which was `omnia_sdk::document_store`.
-  - `omnia_sdk::sql` (`Value`, `Row`, `Field`, `Statement`, `FromRow`,
-    `ColumnError`). `omnia_wasi_sql` exported `Row` and `Field`, and
-    `DataType` is `Value`.
+  - `omnia_sdk::sql` (`Value`, `Row`, `Field`, `Statement`, `FromRow`).
+    `omnia_wasi_sql` exported `Row` and `Field`, and `DataType` is `Value`.
   - `omnia_sdk::messaging::Message`, which was `omnia_sdk::Message`.
   - `omnia_sdk::blobstore::{ObjectMetadata, ContainerMetadata}` and
     `omnia_sdk::identity::AccessToken`.
@@ -329,18 +328,22 @@ Unreleased
   context `saving` describes itself as `saving: no name`, which was
   `saving: code: bad_request, description: no name`.
 - `omnia_sdk::Error` implements `PartialEq` and `Eq`.
-- `DeliveryError::Rejected` splits in two:
-  - `Undecodable(message)` is a payload that did not decode, which a
-    broker drops.
-  - `Failed(error)` is a handler error as an `omnia_sdk::Error`, which a
-    broker redelivers when it is a `BadGateway`. The first
+- A messaging failure is an `omnia_sdk::Error`, so `Router::handle`
+  answers `omnia_sdk::Result<()>`. Its code names the failure:
+  - `missing-topic`, a `BadRequest`, is a delivery with no topic, which
+    was `DeliveryError::MissingTopic`.
+  - `unhandled-topic`, a `NotFound`, is a topic no route takes, which was
+    `DeliveryError::UnhandledTopic`.
+  - `undecodable`, a `BadRequest`, is a payload that did not decode,
+    whatever error a decoder refused it with. A broker drops it.
+  - A handler's error takes the variant and code of the first
     `omnia_sdk::Error`, `vcs::Error`, `plugins::Error`, or `model::Error`
-    in the error's source chain sets its variant and code, and the
-    description is the whole chain.
+    in its source chain, and is otherwise a `ServerError`. Its description
+    is the whole chain. A broker redelivers it when it is a `BadGateway`.
 
-  Over the draft `wasi:messaging`, both still cross as `error.other`, and
-  a `Failed` one carries its error's display. A match on
-  `Rejected(message)` becomes `Undecodable(message)` or `Failed(error)`.
+  Over the draft `wasi:messaging`, every failure still crosses as
+  `error.other` carrying the error's display. A match on a `DeliveryError`
+  variant becomes a match on the code.
 - `omnia_sdk::api::Metadata` is `#[non_exhaustive]`. Code outside the SDK
   builds one with `Metadata::default()` and assigns its fields, or with
   `from_lookup`, `from_headers`, `from_env`, or `minted`.
@@ -386,6 +389,9 @@ Unreleased
 - `omnia_wasi_keyvalue::Cacheable` and the guest-side `cache` module, the
   envelope a value set with a TTL was stored in.
 - `omnia_sdk::CasError`. A conflict is `omnia_sdk::keyvalue::Conflict`.
+- `omnia_sdk::api::DecodeError` and its `api::http` re-export. A
+  `topic_with` or `command_with` decoder answers `omnia_sdk::Result<I>`, so
+  `DecodeError::new(message)` becomes `bad_request!("{message}")`.
 - The host's `omnia_wasi_sql::DataType`, which is `omnia_wasi_sql::Value`,
   and `omnia_wasi_sql::Error::trace`. The draft's `trace` is the message
   of the `Error` case a backend returns.

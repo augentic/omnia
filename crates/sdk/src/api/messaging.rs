@@ -10,7 +10,6 @@
 //! [`export!`] binds the router fn as the guest's `wasi:messaging` handler.
 
 use std::collections::BTreeMap;
-use std::error::Error;
 use std::fmt;
 use std::future::Future;
 use std::marker::PhantomData;
@@ -21,7 +20,7 @@ use bytes::Bytes;
 use serde::de::DeserializeOwned;
 use tracing::Instrument as _;
 
-use crate::api::{Client, DecodeError, Handler, Metadata};
+use crate::api::{Client, Handler, Metadata};
 
 #[doc(hidden)]
 #[macro_export]
@@ -120,44 +119,11 @@ impl Delivery {
     }
 }
 
-/// Why a [`Router`](crate::api::Router) did not handle a delivery.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum DeliveryError {
-    /// The delivery had no topic.
-    MissingTopic,
-    /// No route was registered for the exact topic.
-    UnhandledTopic(String),
-    /// The payload did not decode into the route's input.
-    Undecodable(String),
-    /// The handler failed with this [`Error`](crate::Error).
-    ///
-    /// The first [`Error`](crate::Error), [`vcs::Error`](crate::vcs::Error),
-    /// [`plugins::Error`](crate::plugins::Error), or
-    /// [`model::Error`](crate::model::Error) in the handler error's source
-    /// chain sets its variant and code. Any other error is a
-    /// [`ServerError`](crate::Error::ServerError). The description is the
-    /// whole chain.
-    Failed(crate::Error),
-}
-
-impl fmt::Display for DeliveryError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::MissingTopic => f.write_str("message is missing topic"),
-            Self::UnhandledTopic(topic) => write!(f, "unhandled topic: {topic}"),
-            Self::Undecodable(message) => f.write_str(message),
-            Self::Failed(error) => write!(f, "{error}"),
-        }
-    }
-}
-
-impl Error for DeliveryError {}
-
 /// Adapt a WIT message to an owned delivery and dispatch it.
 ///
 /// The current WIT contract carries only `result<_, error>`. Success
-/// acknowledges the delivery, and every [`DeliveryError`] crosses as
-/// `error.other` carrying its text.
+/// acknowledges the delivery, and every failure crosses as `error.other`
+/// carrying its [`Error`](crate::Error)'s text.
 ///
 /// # Errors
 ///
@@ -218,7 +184,7 @@ impl<P: Send + Sync + 'static> Topics<P> {
     {
         self.route_with(topic, handler, |delivery: &Delivery| {
             serde_json::from_slice(&delivery.payload)
-                .map_err(|error| DecodeError::new(format!("malformed JSON payload: {error}")))
+                .map_err(|error| crate::bad_request!("malformed JSON payload: {error}"))
         })
     }
 
@@ -226,7 +192,7 @@ impl<P: Send + Sync + 'static> Topics<P> {
     where
         F: Handler<P, I>,
         I: Send + 'static,
-        D: Fn(&Delivery) -> Result<I, DecodeError> + Send + Sync + 'static,
+        D: Fn(&Delivery) -> crate::Result<I> + Send + Sync + 'static,
     {
         let route = Route::<P, F, I, D> {
             handler,
@@ -244,14 +210,13 @@ impl<P: Send + Sync + 'static> Topics<P> {
         self.routes.keys().map(String::as_str)
     }
 
-    pub(crate) async fn handle(
-        &self, delivery: Delivery, client: &Client<P>,
-    ) -> Result<(), DeliveryError> {
-        let topic = delivery.topic.as_deref().ok_or(DeliveryError::MissingTopic)?;
-        let route = self
-            .routes
-            .get(topic)
-            .ok_or_else(|| DeliveryError::UnhandledTopic(topic.to_owned()))?;
+    pub(crate) async fn handle(&self, delivery: Delivery, client: &Client<P>) -> crate::Result<()> {
+        let topic = delivery.topic.as_deref().ok_or_else(|| {
+            crate::Error::bad_request("missing-topic", "the delivery has no topic")
+        })?;
+        let route = self.routes.get(topic).ok_or_else(|| {
+            crate::Error::not_found("unhandled-topic", format!("no route for topic `{topic}`"))
+        })?;
         route.dispatch(&delivery, client).await
     }
 
@@ -277,7 +242,7 @@ impl<P: Send + Sync + 'static> fmt::Debug for Topics<P> {
     }
 }
 
-type DispatchFuture<'a> = Pin<Box<dyn Future<Output = Result<(), DeliveryError>> + Send + 'a>>;
+type DispatchFuture<'a> = Pin<Box<dyn Future<Output = crate::Result<()>> + Send + 'a>>;
 
 trait ErasedRoute<P: Send + Sync + 'static>: Send + Sync {
     fn dispatch<'a>(&'a self, delivery: &'a Delivery, client: &'a Client<P>) -> DispatchFuture<'a>;
@@ -294,7 +259,7 @@ where
     P: Send + Sync + 'static,
     F: Handler<P, I>,
     I: Send + 'static,
-    D: Fn(&Delivery) -> Result<I, DecodeError> + Send + Sync + 'static,
+    D: Fn(&Delivery) -> crate::Result<I> + Send + Sync + 'static,
 {
     fn dispatch<'a>(&'a self, delivery: &'a Delivery, client: &'a Client<P>) -> DispatchFuture<'a> {
         let metadata = Metadata::from_lookup(|name| {
@@ -312,13 +277,14 @@ where
         );
         Box::pin(
             async move {
-                let input = (self.decode)(delivery)
-                    .map_err(|error| DeliveryError::Undecodable(error.to_string()))?;
+                let input = (self.decode)(delivery).map_err(|error| {
+                    crate::Error::bad_request("undecodable", error.description())
+                })?;
                 client
                     .call(self.handler.clone(), input, &metadata)
                     .await
                     .map(|_| ())
-                    .map_err(|error| DeliveryError::Failed(crate::Error::from_chain(&error)))
+                    .map_err(|error| crate::Error::from_chain(&error))
             }
             .instrument(span),
         )

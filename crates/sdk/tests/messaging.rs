@@ -6,8 +6,8 @@ use std::fmt;
 use std::future::{Ready, ready};
 use std::sync::{Arc, Mutex};
 
-use omnia_sdk::api::messaging::{Delivery, DeliveryError};
-use omnia_sdk::api::{Client, Context, DecodeError, Handlers};
+use omnia_sdk::api::messaging::Delivery;
+use omnia_sdk::api::{Client, Context, Handlers};
 use omnia_sdk::{bad_gateway, bad_request, model, plugins, vcs};
 use serde::{Deserialize, Serialize};
 
@@ -60,7 +60,7 @@ async fn exact_topic() {
         .expect("exact route handles delivery");
     assert_eq!(
         router.handle(delivery(Some("events.*"), br#"{"name":"message"}"#)).await,
-        Err(DeliveryError::UnhandledTopic("events.*".to_string()))
+        Err(omnia_sdk::Error::not_found("unhandled-topic", "no route for topic `events.*`"))
     );
 }
 
@@ -70,12 +70,13 @@ async fn malformed_delivery() {
 
     assert_eq!(
         router.handle(delivery(None, br#"{"name":"message"}"#)).await,
-        Err(DeliveryError::MissingTopic)
+        Err(omnia_sdk::Error::bad_request("missing-topic", "the delivery has no topic"))
     );
-    assert!(matches!(
-        router.handle(delivery(Some("events"), b"not-json")).await,
-        Err(DeliveryError::Undecodable(_))
-    ));
+    let undecodable = router.handle(delivery(Some("events"), b"not-json")).await;
+    assert!(
+        matches!(&undecodable, Err(omnia_sdk::Error::BadRequest { code, .. }) if code == "undecodable"),
+        "{undecodable:?}"
+    );
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -125,14 +126,13 @@ async fn failing_handler() {
         ("plugin", 400, "refused", "unsigned"),
         ("tool", 502, "bad_gateway", "could not review"),
     ] {
-        match router.handle(delivery(Some(topic), br#"{"name":"message"}"#)).await {
-            Err(DeliveryError::Failed(error)) => {
-                assert_eq!(error.status().as_u16(), status, "{topic}: {error}");
-                assert_eq!(error.code(), code, "{topic}: {error}");
-                assert!(error.description().contains(text), "{topic}: {error}");
-            }
-            outcome => panic!("`{topic}` fails in its handler: {outcome:?}"),
-        }
+        let Err(error) = router.handle(delivery(Some(topic), br#"{"name":"message"}"#)).await
+        else {
+            panic!("`{topic}` fails in its handler");
+        };
+        assert_eq!(error.status().as_u16(), status, "{topic}: {error}");
+        assert_eq!(error.code(), code, "{topic}: {error}");
+        assert!(error.description().contains(text), "{topic}: {error}");
     }
 }
 
@@ -164,7 +164,10 @@ async fn invalid_payload_span() {
         .with_metadata("request-id", "req-1")
         .with_metadata("correlation-id", "corr-1");
 
-    assert!(matches!(router.handle(delivery).await, Err(DeliveryError::Undecodable(_))));
+    assert!(matches!(
+        router.handle(delivery).await,
+        Err(omnia_sdk::Error::BadRequest { code, .. }) if code == "undecodable"
+    ));
     assert_eq!(
         spans.handler(),
         fields([
@@ -200,7 +203,7 @@ async fn merged_routes() {
     );
     assert_eq!(
         router.handle(delivery(Some("events"), br#"{"name":"message"}"#)).await,
-        Err(DeliveryError::UnhandledTopic("events".to_string()))
+        Err(omnia_sdk::Error::not_found("unhandled-topic", "no route for topic `events`"))
     );
 }
 
@@ -225,7 +228,7 @@ async fn topic_with_raw_payload() {
                 .map(|text| RawText {
                     text: text.to_owned(),
                 })
-                .map_err(|error| DecodeError::new(format!("payload is not utf-8: {error}")))
+                .map_err(|error| bad_request!("payload is not utf-8: {error}"))
         })
         .with_state(Client::new(()));
 
@@ -233,6 +236,15 @@ async fn topic_with_raw_payload() {
         .handle(delivery(Some("events.raw"), b"not-json"))
         .await
         .expect("the raw decoder handles a payload the JSON route rejects");
+    let refused = router.handle(delivery(Some("events.raw"), b"\xff")).await;
+    assert!(
+        matches!(
+            &refused,
+            Err(omnia_sdk::Error::BadRequest { code, description })
+                if code == "undecodable" && description.starts_with("payload is not utf-8")
+        ),
+        "{refused:?}"
+    );
 }
 
 #[tokio::test]

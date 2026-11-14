@@ -14,7 +14,7 @@ use omnia_sdk::api::command::{
     Command, Failure, Format, IntoExit, Parsed, Render, Response, Shell, USAGE_EXIT, Verbosity,
     completions, parse,
 };
-use omnia_sdk::api::{Client, Context, DecodeError, Handlers, Metadata};
+use omnia_sdk::api::{Client, Context, Handlers, Metadata};
 use omnia_sdk::{bad_request, not_found};
 use serde::{Deserialize, Serialize};
 
@@ -426,8 +426,7 @@ async fn help_from_docs() {
     assert!(text.contains("<NAME>  Who to greet"), "{text}");
 }
 
-// A decoder's refusal is a `bad_request` envelope, as a malformed payload
-// is on every transport, not a clap usage error.
+// A decoder's refusal is its own error's envelope, not a clap usage error.
 #[tokio::test]
 async fn command_with_decoder() {
     let router = Handlers::new()
@@ -439,7 +438,10 @@ async fn command_with_decoder() {
                 if id.chars().all(|c| c.is_ascii_digit()) {
                     Ok(Lookup { id: id.clone() })
                 } else {
-                    Err(DecodeError::new(format!("`{id}` is not an item id")))
+                    Err(omnia_sdk::Error::bad_request(
+                        "not-an-id",
+                        format!("`{id}` is not an item id"),
+                    ))
                 }
             },
         )
@@ -454,7 +456,7 @@ async fn command_with_decoder() {
     assert_eq!(
         stderr_json(&refused),
         serde_json::json!({
-            "error": "bad_request",
+            "error": "not-an-id",
             "message": "`forty-two` is not an item id",
             "exit-code": 1
         })
