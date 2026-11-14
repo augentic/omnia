@@ -5,8 +5,8 @@
 //! runs every row of the traits it implements:
 //!
 //! - `omnia-test` runs them natively over its stateful doubles.
-//! - A guest runs them over [`WasiProvider`](omnia_sdk::WasiProvider), against
-//!   a real host and its backend.
+//! - A guest runs them over `omnia_sdk::WasiProvider`, against a real host and
+//!   its backend.
 //!
 //! The rows are the testable half of the
 //! [provider obligations](https://github.com/augentic/omnia/blob/main/docs/reference/provider-contract.md#obligations).

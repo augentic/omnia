@@ -4,10 +4,9 @@
 //! trait over them. The one record that cannot cross off `wasm32` is the
 //! `location` — a borrowed `wasi:filesystem` descriptor plus a subpath — so
 //! a guest names every repository and working copy with a deployment-local
-//! path (`"."` the project mount, `"./.cache/repo"` or `"/mount/sub"`
-//! beneath one) and [`WasiProvider`](crate::WasiProvider) resolves it against
-//! the guest's preopens at the call site, by the lend rule [`Model`] uses for
-//! its workspace.
+//! path (`"."` the project mount, `"./.cache/repo"` or `"/mount/sub"` beneath
+//! one) and `WasiProvider` resolves it against the guest's preopens at the
+//! call site, by the lend rule [`Model`] uses for its workspace.
 //!
 //! [`Model`]: crate::Model
 
@@ -18,8 +17,8 @@ use std::future::Future;
 /// Every location is a deployment-local path resolved against the guest's
 /// preopens on `wasm32`: `"."` names the project mount, `"./sub"` or
 /// `"/mount/sub"` a directory beneath one, which need not exist yet where
-/// the operation creates it. [`WasiProvider`](crate::WasiProvider) delegates
-/// to `omnia:vcs` via `omnia-wasi-vcs`.
+/// the operation creates it. `WasiProvider` delegates to `omnia:vcs` via
+/// `omnia-wasi-vcs`.
 ///
 /// The transport operation `clone` is [`clone_repo`](Self::clone_repo)
 /// here, since `clone(&self, ..)` would shadow [`Clone::clone`] on every

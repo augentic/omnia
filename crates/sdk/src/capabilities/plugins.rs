@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 
 /// Plugin loading (Omnia Plugins).
 ///
-/// [`WasiProvider`](crate::WasiProvider) delegates to `omnia:plugins/loader`.
+/// `WasiProvider` delegates to `omnia:plugins/loader`.
 #[omnia_guest_macros::capability]
 pub trait Plugins: Send + Sync {
     /// Ensure the guest `from` names is active and return its handle, held

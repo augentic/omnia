@@ -53,10 +53,11 @@ macro_rules! __export_messaging {
 
 /// Bind a router fn as the guest's `wasi:messaging` export.
 ///
-/// Calls the router fn on each delivery with [`WasiProvider`](crate::WasiProvider),
-/// or with the provider expression passed as a second argument, and dispatches
-/// the delivery through the resulting [`Router`](crate::api::Router). Expands to nothing on native
-/// targets, where a test or a native host serves the router itself.
+/// Calls the router fn on each delivery with `WasiProvider`, or with the
+/// provider expression passed as a second argument, and dispatches the
+/// delivery through the resulting [`Router`](crate::api::Router). Expands to
+/// nothing on native targets, where a test or a native host serves the router
+/// itself.
 ///
 /// ```rust,ignore
 /// use omnia_sdk::api::messaging;

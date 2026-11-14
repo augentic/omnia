@@ -98,10 +98,9 @@ macro_rules! __export_command {
 /// Bind a command router fn (or a zero-argument `async fn` entry) as the
 /// guest's `wasi:cli/run` export.
 ///
-/// Calls a router fn with [`WasiProvider`](crate::WasiProvider) (or with the
-/// provider expression passed as a second argument) and runs the WASI
-/// command-line arguments through the resulting
-/// [`Router`], or awaits a zero-argument `async fn`
+/// Calls a router fn with `WasiProvider` (or with the provider expression
+/// passed as a second argument) and runs the WASI command-line arguments
+/// through the resulting [`Router`], or awaits a zero-argument `async fn`
 /// returning [`IntoExit`], inside the guest telemetry scope. The router's
 /// program answers `--version` with the invoking crate's `CARGO_PKG_VERSION`
 /// and opens `--help` with its `CARGO_PKG_DESCRIPTION` unless
@@ -996,54 +995,7 @@ cfg_select! {
             }
         }
     }
-    _ => {
-        use std::marker::PhantomData;
-
-        // What `Handlers` and `Router` hold for subcommands when clap is not built.
-        pub(crate) struct Commands<P>(PhantomData<fn() -> P>);
-
-        impl<P> fmt::Debug for Commands<P> {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                f.write_str("Commands")
-            }
-        }
-
-        impl<P> Commands<P> {
-            pub(crate) const fn new() -> Self {
-                Self(PhantomData)
-            }
-
-            pub(crate) const fn merge(self, _other: Self) -> Self {
-                self
-            }
-        }
-
-        impl<P> Clone for Commands<P> {
-            fn clone(&self) -> Self {
-                Self(PhantomData)
-            }
-        }
-
-        pub(crate) struct Program<P>(PhantomData<fn() -> P>);
-
-        impl<P> fmt::Debug for Program<P> {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                f.write_str("Program")
-            }
-        }
-
-        impl<P> Program<P> {
-            pub(crate) const fn new(_commands: Commands<P>) -> Self {
-                Self(PhantomData)
-            }
-        }
-
-        impl<P> Clone for Program<P> {
-            fn clone(&self) -> Self {
-                Self(PhantomData)
-            }
-        }
-    }
+    _ => {}
 }
 
 impl Metadata {

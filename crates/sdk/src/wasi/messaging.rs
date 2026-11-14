@@ -7,7 +7,7 @@ use crate::capability::{Error, ErrorKind, Result};
 use crate::messaging::Message;
 use crate::{Publisher, WasiProvider};
 
-/// Metadata entry name a partition key travels in over `wasi:messaging`.
+// the metadata entry a partition key travels in over `wasi:messaging`
 pub const KEY: &str = "key";
 
 impl Publisher for WasiProvider {

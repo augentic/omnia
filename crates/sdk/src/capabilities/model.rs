@@ -4,11 +4,10 @@
 //! one record that cannot cross off `wasm32` is the `grants.workspace`
 //! descriptor lend — a `wasi:filesystem` resource that only exists on
 //! `wasm32` — so a guest names the directory with the plain
-//! [`Request::workspace`] path and [`WasiProvider`](crate::WasiProvider)
-//! resolves it against the guest's preopens at the call site, by the lend rule
-//! every lending capability shares: the longest preopen whose name prefixes the
-//! path becomes the lent root descriptor and the remainder rides as the
-//! grant's subpath.
+//! [`Request::workspace`] path and `WasiProvider` resolves it against the
+//! guest's preopens at the call site, by the lend rule every lending
+//! capability shares: the longest preopen whose name prefixes the path becomes
+//! the lent root descriptor and the remainder rides as the grant's subpath.
 //!
 //! Acceptance of an answer is the guest's: a request with [`Request::check`]
 //! set receives each candidate as a tool call named `check` and answers
@@ -27,9 +26,9 @@ pub use self::question::{Findings, Question, ToolFuture, Tools};
 
 /// Prompt completion (Omnia Model).
 ///
-/// [`WasiProvider`](crate::WasiProvider) delegates to `omnia:model/completion`
-/// via `omnia-wasi-model`, opening the completion session and answering the
-/// model's tool calls with the supplied closure.
+/// `WasiProvider` delegates to `omnia:model/completion` via `omnia-wasi-model`,
+/// opening the completion session and answering the model's tool calls with
+/// the supplied closure.
 #[omnia_guest_macros::capability]
 pub trait Model: Send + Sync {
     /// Single-shot completion returning one reply. Any tool call the model

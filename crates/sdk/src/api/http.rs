@@ -28,10 +28,6 @@ use tracing::Instrument as _;
 
 use crate::api::{Client, Context, ErrorBody, Handlers, Metadata, Router};
 
-// What `Handlers` and `Router` hold for HTTP.
-pub(crate) type Routes<P> = axum::Router<Client<P>>;
-pub(crate) type Served = axum::Router;
-
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __export_http {
@@ -61,11 +57,11 @@ macro_rules! __export_http {
 
 /// Bind a router fn as the guest's `wasi:http` export.
 ///
-/// Calls the router fn on each request with [`WasiProvider`](crate::WasiProvider),
-/// or with the provider expression passed as a second argument, and serves the
-/// request through the resulting router inside the `handler` span [`trace`]
-/// opens. Expands to nothing on native targets, where a test or a native host
-/// serves the router itself.
+/// Calls the router fn on each request with `WasiProvider`, or with the
+/// provider expression passed as a second argument, and serves the request
+/// through the resulting router inside the `handler` span [`trace`] opens.
+/// Expands to nothing on native targets, where a test or a native host serves
+/// the router itself.
 ///
 /// ```rust,ignore
 /// use omnia_sdk::api::http;

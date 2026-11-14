@@ -47,47 +47,7 @@ pub mod command;
 pub mod http;
 pub mod messaging;
 
-// What `Handlers` and `Router` hold for HTTP when the transport is not built.
-#[cfg(not(feature = "http"))]
-mod http {
-    use std::fmt;
-    use std::marker::PhantomData;
-
-    use super::Client;
-
-    pub(super) struct Routes<P>(PhantomData<fn() -> P>);
-
-    impl<P> fmt::Debug for Routes<P> {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            f.write_str("Routes")
-        }
-    }
-
-    impl<P> Routes<P> {
-        pub(super) const fn new() -> Self {
-            Self(PhantomData)
-        }
-
-        pub(super) const fn merge(self, _other: Self) -> Self {
-            self
-        }
-
-        #[expect(clippy::unused_self, reason = "the signature `axum::Router::with_state` has")]
-        pub(super) fn with_state(self, _client: Client<P>) -> Served {
-            Served
-        }
-    }
-
-    impl<P> Clone for Routes<P> {
-        fn clone(&self) -> Self {
-            Self(PhantomData)
-        }
-    }
-
-    #[derive(Clone, Debug)]
-    pub(super) struct Served;
-}
-
+#[cfg(feature = "command")]
 use self::command::{Commands, Program};
 use self::messaging::{Delivery, DeliveryError, Topics};
 
@@ -381,8 +341,10 @@ impl<P: Send + Sync + 'static> fmt::Debug for Client<P> {
 /// refused when they meet.
 #[must_use = "handlers serve nothing until closed into a `Router` with `with_state`"]
 pub struct Handlers<P: Send + Sync + 'static> {
-    http: http::Routes<P>,
+    #[cfg(feature = "http")]
+    http: axum::Router<Client<P>>,
     topics: Topics<P>,
+    #[cfg(feature = "command")]
     commands: Commands<P>,
 }
 
@@ -390,8 +352,10 @@ impl<P: Send + Sync + 'static> Handlers<P> {
     /// Create an empty set of handlers.
     pub fn new() -> Self {
         Self {
-            http: http::Routes::new(),
+            #[cfg(feature = "http")]
+            http: axum::Router::new(),
             topics: Topics::new(),
+            #[cfg(feature = "command")]
             commands: Commands::new(),
         }
     }
@@ -433,8 +397,10 @@ impl<P: Send + Sync + 'static> Handlers<P> {
     /// method, or a topic or subcommand of `other` is already registered.
     pub fn merge(self, other: Self) -> Self {
         Self {
+            #[cfg(feature = "http")]
             http: self.http.merge(other.http),
             topics: self.topics.merge(other.topics),
+            #[cfg(feature = "command")]
             commands: self.commands.merge(other.commands),
         }
     }
@@ -443,9 +409,11 @@ impl<P: Send + Sync + 'static> Handlers<P> {
     /// requests, dispatches messaging deliveries, and runs argv.
     pub fn with_state(self, client: Client<P>) -> Router<P> {
         Router {
+            #[cfg(feature = "http")]
             http: self.http.with_state(client.clone()),
             client,
             topics: self.topics,
+            #[cfg(feature = "command")]
             program: Program::new(self.commands),
         }
     }
@@ -466,8 +434,10 @@ impl<P: Send + Sync + 'static, const N: usize> From<[Self; N]> for Handlers<P> {
 impl<P: Send + Sync + 'static> Clone for Handlers<P> {
     fn clone(&self) -> Self {
         Self {
+            #[cfg(feature = "http")]
             http: self.http.clone(),
             topics: self.topics.clone(),
+            #[cfg(feature = "command")]
             commands: self.commands.clone(),
         }
     }
@@ -475,11 +445,13 @@ impl<P: Send + Sync + 'static> Clone for Handlers<P> {
 
 impl<P: Send + Sync + 'static> fmt::Debug for Handlers<P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Handlers")
-            .field("http", &self.http)
-            .field("topics", &self.topics)
-            .field("commands", &self.commands)
-            .finish()
+        let mut debug = f.debug_struct("Handlers");
+        #[cfg(feature = "http")]
+        debug.field("http", &self.http);
+        debug.field("topics", &self.topics);
+        #[cfg(feature = "command")]
+        debug.field("commands", &self.commands);
+        debug.finish()
     }
 }
 
@@ -496,8 +468,10 @@ impl<P: Send + Sync + 'static> fmt::Debug for Handlers<P> {
 #[must_use = "a router serves nothing until it handles a request or delivery or runs argv"]
 pub struct Router<P: Send + Sync + 'static = ()> {
     client: Client<P>,
-    http: http::Served,
+    #[cfg(feature = "http")]
+    http: axum::Router,
     topics: Topics<P>,
+    #[cfg(feature = "command")]
     program: Program<P>,
 }
 
@@ -532,8 +506,10 @@ impl<P: Send + Sync + 'static> Clone for Router<P> {
     fn clone(&self) -> Self {
         Self {
             client: self.client.clone(),
+            #[cfg(feature = "http")]
             http: self.http.clone(),
             topics: self.topics.clone(),
+            #[cfg(feature = "command")]
             program: self.program.clone(),
         }
     }
@@ -541,10 +517,12 @@ impl<P: Send + Sync + 'static> Clone for Router<P> {
 
 impl<P: Send + Sync + 'static> fmt::Debug for Router<P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Router")
-            .field("http", &self.http)
-            .field("topics", &self.topics)
-            .field("program", &self.program)
-            .finish_non_exhaustive()
+        let mut debug = f.debug_struct("Router");
+        #[cfg(feature = "http")]
+        debug.field("http", &self.http);
+        debug.field("topics", &self.topics);
+        #[cfg(feature = "command")]
+        debug.field("program", &self.program);
+        debug.finish_non_exhaustive()
     }
 }
