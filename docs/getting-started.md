@@ -19,13 +19,13 @@ cargo build --example http-wasm --target wasm32-wasip2
 
 This produces `target/wasm32-wasip2/debug/examples/http_wasm.wasm` (note: the file name uses underscores).
 
-The guest itself is ordinary Rust. In an Omnia service, you write plain [Axum](https://github.com/tokio-rs/axum) handlers on a `Router` whose state is a capability-owning `Client`, and export the WASI HTTP interface with `omnia_sdk::api::http::export!`:
+The guest itself is ordinary Rust. In an Omnia service, you write plain [Axum](https://github.com/tokio-rs/axum) handlers on a `Router` whose state is the capability-serving provider, shared as an `Arc<P>`, and export the WASI HTTP interface with `omnia_sdk::api::http::export!`:
 
 ```rust,noplayground
 pub fn http_router<P: Send + Sync + 'static>(provider: P) -> Router {
     Router::new()
         .route("/", get(echo_get).post(echo_post))
-        .with_state(Client::new(provider))
+        .with_state(Arc::new(provider))
 }
 
 omnia_sdk::api::http::export!(http_router);

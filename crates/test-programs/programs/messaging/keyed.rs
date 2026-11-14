@@ -10,7 +10,7 @@
 use std::time::SystemTime;
 
 use omnia_sdk::api::messaging::{self, Delivery};
-use omnia_sdk::api::{Client, Context, Handlers, Router};
+use omnia_sdk::api::{Context, Handlers, Router};
 use omnia_sdk::messaging::Message;
 use omnia_sdk::{Publisher, WasiProvider};
 
@@ -26,7 +26,7 @@ async fn scenario() {
 fn router(provider: WasiProvider) -> Router<WasiProvider> {
     Handlers::new()
         .topic_with("orders", received, |delivery: &Delivery| Ok(delivery.clone()))
-        .with_state(Client::new(provider))
+        .with_state(provider)
 }
 
 async fn received(context: Context<WasiProvider>, delivery: Delivery) -> omnia_sdk::Result<()> {

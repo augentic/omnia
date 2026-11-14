@@ -5,16 +5,15 @@
 //! topics, and subcommands on a [`Handlers`] of its own and the guest merges
 //! them (`Handlers::from([..])` or [`Handlers::merge`]), closing the whole
 //! with [`Handlers::with_state`] into a [`Router`] that serves HTTP
-//! requests, dispatches messaging deliveries, and runs argv. The [`Client`]
-//! the router closes over owns the provider, and the router's dispatch
-//! builds each handler's [`Context`] over it. [`Context::new`] builds one
-//! directly to unit-test a handler. Each transport's `export!` macro binds
-//! the router as the guest's WASI export.
+//! requests, dispatches messaging deliveries, and runs argv. The router owns
+//! the provider, and its dispatch builds each handler's [`Context`] over it.
+//! [`Context::new`] builds one directly to unit-test a handler. Each
+//! transport's `export!` macro binds the router as the guest's WASI export.
 //!
 //! ```rust,ignore
 //! use std::convert::Infallible;
 //!
-//! use omnia_sdk::api::{Client, Context, Handlers, Router};
+//! use omnia_sdk::api::{Context, Handlers, Router};
 //! use serde::Deserialize;
 //!
 //! struct Provider;
@@ -29,7 +28,7 @@
 //! }
 //!
 //! fn router(provider: Provider) -> Router<Provider> {
-//!     Handlers::new().topic("greet", greet).with_state(Client::new(provider))
+//!     Handlers::new().topic("greet", greet).with_state(provider)
 //! }
 //! ```
 
@@ -47,7 +46,7 @@ pub mod http;
 pub mod messaging;
 
 #[cfg(feature = "command")]
-use self::command::{Commands, Program};
+use self::command::program::{Commands, Program};
 use self::messaging::{Delivery, Topics};
 
 /// Transport-neutral invocation metadata.
@@ -125,8 +124,8 @@ fn request_id() -> String {
 
 /// Context owned by one handler call.
 ///
-/// With the `http` feature it is also an axum extractor over the [`Client`]
-/// in the router state, so an HTTP handler is `async fn(Context<P>, ..)`.
+/// With the `http` feature it is also an axum extractor over the `Arc<P>` in
+/// the router state, so an HTTP handler is `async fn(Context<P>, ..)`.
 #[derive(Clone, Debug)]
 pub struct Context<P> {
     pub(crate) provider: Arc<P>,
@@ -136,11 +135,18 @@ pub struct Context<P> {
 }
 
 impl<P> Context<P> {
-    /// Create a context outside a [`Client`], typically to unit-test a handler.
+    /// Create a context outside a [`Router`], typically to unit-test a handler.
     pub fn new(provider: P, metadata: Metadata) -> Self {
         Self {
             provider: Arc::new(provider),
             metadata,
+        }
+    }
+
+    pub(crate) fn shared(provider: &Arc<P>, metadata: &Metadata) -> Self {
+        Self {
+            provider: Arc::clone(provider),
+            metadata: metadata.clone(),
         }
     }
 
@@ -199,6 +205,16 @@ pub trait Handler<P, I>: Clone + Send + Sync + 'static {
     type Output: Send;
 
     /// The handler failure.
+    ///
+    /// A topic or subcommand reports it as an [`Error`](crate::Error):
+    ///
+    /// - The first [`Error`](crate::Error), [`vcs::Error`](crate::vcs::Error),
+    ///   [`plugins::Error`](crate::plugins::Error), or
+    ///   [`model::Error`](crate::model::Error) in its source chain sets the
+    ///   variant and code.
+    /// - Any other error is a [`ServerError`](crate::Error::ServerError) with
+    ///   the code `server_error`.
+    /// - The description is the whole chain.
     type Error: Error + Send + Sync + 'static;
 
     /// Execute the handler.
@@ -230,59 +246,8 @@ where
     }
 }
 
-/// Provider-owning handler client.
-///
-/// Clones share one provider allocation. Transports define its lifetime; HTTP
-/// constructs one client per WASI request and keeps durable state host-side.
-pub struct Client<P> {
-    pub(crate) provider: Arc<P>,
-}
-
-impl<P: Send + Sync + 'static> Client<P> {
-    /// Create a client with one clone-shared provider allocation.
-    pub fn new(provider: P) -> Self {
-        Self {
-            provider: Arc::new(provider),
-        }
-    }
-
-    /// Return the shared provider.
-    #[must_use]
-    pub fn provider(&self) -> &P {
-        &self.provider
-    }
-
-    // Opens no `handler` span; the transport's dispatch does.
-    pub(crate) async fn call<F, I>(
-        &self, handler: F, input: I, metadata: &Metadata,
-    ) -> Result<F::Output, F::Error>
-    where
-        F: Handler<P, I>,
-    {
-        let context = Context {
-            provider: Arc::clone(&self.provider),
-            metadata: metadata.clone(),
-        };
-        handler.call(context, input).await
-    }
-}
-
-impl<P: Send + Sync + 'static> Clone for Client<P> {
-    fn clone(&self) -> Self {
-        Self {
-            provider: Arc::clone(&self.provider),
-        }
-    }
-}
-
-impl<P: Send + Sync + 'static> fmt::Debug for Client<P> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Client").finish_non_exhaustive()
-    }
-}
-
-/// HTTP routes, messaging topics, and subcommands over a provider-owning
-/// [`Client`], awaiting their state.
+/// HTTP routes, messaging topics, and subcommands awaiting the provider they
+/// run over.
 ///
 /// A module registers its paths, topics, and subcommands on one of these and
 /// the guest merges them (`Handlers::from([..])` or [`merge`](Self::merge)),
@@ -292,7 +257,7 @@ impl<P: Send + Sync + 'static> fmt::Debug for Client<P> {
 #[must_use = "handlers serve nothing until closed into a `Router` with `with_state`"]
 pub struct Handlers<P: Send + Sync + 'static> {
     #[cfg(feature = "http")]
-    http: axum::Router<Client<P>>,
+    http: axum::Router<Arc<P>>,
     topics: Topics<P>,
     #[cfg(feature = "command")]
     commands: Commands<P>,
@@ -359,13 +324,17 @@ impl<P: Send + Sync + 'static> Handlers<P> {
         }
     }
 
-    /// Close the handlers over `client` as the [`Router`] that serves HTTP
+    /// Close the handlers over `provider` as the [`Router`] that serves HTTP
     /// requests, dispatches messaging deliveries, and runs argv.
-    pub fn with_state(self, client: Client<P>) -> Router<P> {
+    ///
+    /// Every handler call, on the router or a clone of it, shares the one
+    /// provider.
+    pub fn with_state(self, provider: P) -> Router<P> {
+        let provider = Arc::new(provider);
         Router {
             #[cfg(feature = "http")]
-            http: self.http.with_state(client.clone()),
-            client,
+            http: self.http.with_state(Arc::clone(&provider)),
+            provider,
             topics: self.topics,
             #[cfg(feature = "command")]
             program: Program::new(self.commands),
@@ -409,7 +378,7 @@ impl<P: Send + Sync + 'static> fmt::Debug for Handlers<P> {
     }
 }
 
-/// A finished router backed by a [`Client`], ready to serve HTTP requests,
+/// A finished router over one shared provider, ready to serve HTTP requests,
 /// dispatch messaging deliveries, and run argv.
 ///
 /// [`Handlers::with_state`] is the one way to build it: every route, topic,
@@ -421,7 +390,7 @@ impl<P: Send + Sync + 'static> fmt::Debug for Handlers<P> {
 /// failure may carry.
 #[must_use = "a router serves nothing until it handles a request or delivery or runs argv"]
 pub struct Router<P: Send + Sync + 'static = ()> {
-    client: Client<P>,
+    provider: Arc<P>,
     #[cfg(feature = "http")]
     http: axum::Router,
     topics: Topics<P>,
@@ -451,22 +420,16 @@ impl<P: Send + Sync + 'static> Router<P> {
     ///   when no route takes the topic.
     /// - A [`BadRequest`](crate::Error::BadRequest) with the code
     ///   `undecodable` when the payload does not decode.
-    /// - The handler's error when it fails. The first
-    ///   [`Error`](crate::Error), [`vcs::Error`](crate::vcs::Error),
-    ///   [`plugins::Error`](crate::plugins::Error), or
-    ///   [`model::Error`](crate::model::Error) in its source chain sets its
-    ///   variant and code, and any other error is a
-    ///   [`ServerError`](crate::Error::ServerError). The description is the
-    ///   whole chain.
+    /// - The handler's error when it fails, as [`Handler::Error`] describes.
     pub async fn handle(&self, delivery: Delivery) -> crate::Result<()> {
-        self.topics.handle(delivery, &self.client).await
+        self.topics.handle(delivery, &self.provider).await
     }
 }
 
 impl<P: Send + Sync + 'static> Clone for Router<P> {
     fn clone(&self) -> Self {
         Self {
-            client: self.client.clone(),
+            provider: Arc::clone(&self.provider),
             #[cfg(feature = "http")]
             http: self.http.clone(),
             topics: self.topics.clone(),

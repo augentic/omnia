@@ -3,19 +3,19 @@
 //! This is a lightweight implementation for development use only.
 
 use std::collections::HashMap;
+use std::ops::Range;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use bytes::Bytes;
 use futures::FutureExt;
 use omnia_core::Connect;
 use parking_lot::RwLock;
 use tracing::instrument;
 
-use crate::host::generated::wasi::blobstore::container::{ContainerMetadata, ObjectMetadata};
 use crate::host::resource::{Container, FutureResult};
-use crate::host::{BlobStoreClient, Error};
+use crate::host::{BlobStoreClient, ContainerMetadata, Error, ObjectMetadata, Page};
 
 /// Default implementation for `wasi:blobstore`.
 #[derive(Debug, Clone)]
@@ -123,7 +123,7 @@ impl Container for InMemContainer {
         })
     }
 
-    fn get_data(&self, name: String, start: u64, end: u64) -> FutureResult<Option<Bytes>> {
+    fn get_data(&self, name: String, range: Range<u64>) -> FutureResult<Option<Bytes>> {
         tracing::trace!("getting object: {name} from container: {}", self.name);
         let objects = Arc::clone(&self.objects);
 
@@ -135,16 +135,10 @@ impl Container for InMemContainer {
                 return Ok(None);
             };
 
-            // as azure-blob: `end` of 0 or `u64::MAX` reads to the end, else inclusive
-            let unbounded = end == 0 || end == u64::MAX;
-            if !unbounded && end < start {
-                return Err(anyhow!("invalid byte range: end ({end}) < start ({start})"));
-            }
             let len = data.len();
             let clamp = |bound: u64| usize::try_from(bound).map_or(len, |bound| bound.min(len));
-            let from = clamp(start);
-            let to = if unbounded { len } else { clamp(end.saturating_add(1)) };
-            Ok(Some(data.slice(from..to)))
+            let end = clamp(range.end);
+            Ok(Some(data.slice(clamp(range.start).min(end)..end)))
         }
         .boxed()
     }
@@ -169,16 +163,28 @@ impl Container for InMemContainer {
         .boxed()
     }
 
-    fn list_objects(&self) -> FutureResult<Vec<String>> {
+    fn list_objects(&self, prefix: String, after: Option<String>) -> FutureResult<Page> {
         tracing::trace!("listing objects in container: {}", self.name);
         let objects = Arc::clone(&self.objects);
+        let container = self.name.clone();
 
         async move {
-            let result = {
+            let mut listed: Vec<_> = {
                 let objects = objects.read();
-                objects.keys().cloned().collect()
+                objects
+                    .iter()
+                    .filter(|(name, _)| {
+                        name.starts_with(&prefix)
+                            && after.as_ref().is_none_or(|after| *name > after)
+                    })
+                    .map(|(name, object)| object.metadata(name.clone(), container.clone()))
+                    .collect()
             };
-            Ok(result)
+            listed.sort_unstable_by(|a, b| a.name.cmp(&b.name));
+            Ok(Page {
+                objects: listed,
+                next: None,
+            })
         }
         .boxed()
     }
@@ -208,25 +214,14 @@ impl Container for InMemContainer {
         .boxed()
     }
 
-    fn object_info(&self, name: String) -> FutureResult<ObjectMetadata> {
+    fn object_info(&self, name: String) -> FutureResult<Option<ObjectMetadata>> {
         tracing::trace!("getting info for object: {name} in container: {}", self.name);
         let objects = Arc::clone(&self.objects);
-        let container_name = self.name.clone();
+        let container = self.name.clone();
 
         async move {
-            let guard = objects.read();
-            let object = guard
-                .get(&name)
-                .ok_or_else(|| wasmtime::Error::msg(format!("object not found: {name}")))?;
-            let (size, created_at) = (object.data.len(), object.created_at);
-            drop(guard);
-
-            Ok(ObjectMetadata {
-                name,
-                container: container_name,
-                created_at: created_at.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs(),
-                size: size as u64,
-            })
+            let objects = objects.read();
+            Ok(objects.get(&name).map(|object| object.metadata(name, container)))
         }
         .boxed()
     }
@@ -236,4 +231,15 @@ impl Container for InMemContainer {
 struct Object {
     data: Bytes,
     created_at: SystemTime,
+}
+
+impl Object {
+    fn metadata(&self, name: String, container: String) -> ObjectMetadata {
+        ObjectMetadata {
+            name,
+            container,
+            created_at: self.created_at.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs(),
+            size: self.data.len() as u64,
+        }
+    }
 }

@@ -34,7 +34,7 @@ pub trait BlobStore: Send + Sync {
     /// Retrieve the bytes of the object `name` in `range`, or `None` when it is absent.
     ///
     /// The range is half-open and clamped to the object's length, so a range
-    /// past the end reads as empty.
+    /// past the end, or one that ends before it starts, reads as empty.
     fn get_range(
         &self, container: &str, name: &str, range: Range<u64>,
     ) -> impl Future<Output = Result<Option<Bytes>>> + Send;

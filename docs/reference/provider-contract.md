@@ -9,7 +9,7 @@ What a provider owes the application beyond the capability trait signatures, and
 
 ## What a provider is
 
-A provider is the one value a guest's handlers run against. It implements the capability traits (`StateStore`, `Config`, `SqlDb`, ...) their bounds name, and the `Client` a `Router` closes over owns it. A handler never names it. Three kinds serve the same handlers:
+A provider is the one value a guest's handlers run against. It implements the capability traits (`StateStore`, `Config`, `SqlDb`, ...) their bounds name, and the `Router` that `Handlers::with_state(provider)` builds owns it. A handler never names it. Three kinds serve the same handlers:
 
 - `omnia_sdk::WasiProvider` serves every capability through the WASI host, inside a guest component on `wasm32`.
 - `omnia_test::guest::Provider` serves them natively with in-memory doubles, for handler tests.
@@ -104,10 +104,7 @@ Omnia enforces each rule in the layer this table names, so a backend owes only t
 | An uncreated container is `not-found` | Each blob backend. |
 | An unserved request is `unsupported` | Each backend. |
 
-The code a backend picks reaches the guest exactly over `omnia:keyvalue`, `omnia:sql`, and `omnia:docstore`, which carry one error case per code. `omnia:identity` carries `not-found` and `other`. Elsewhere a code is best effort:
-
-- `wasi:blobstore` errors are strings, so the SDK reads a missing container or object from the message.
-- The other `wasi:*` interfaces have fewer error cases than there are codes, and the SDK maps each case to one code.
+The code a backend picks reaches the guest exactly over `omnia:keyvalue`, `omnia:blobstore`, `omnia:sql`, and `omnia:docstore`, which carry one error case per code. `omnia:identity` carries `not-found` and `other`. Elsewhere a code is best effort: the other `wasi:*` interfaces have fewer error cases than there are codes, and the SDK maps each case to one code.
 
 ### Bound every call
 
@@ -115,7 +112,7 @@ No capability call waits for ever, and a call that exceeds its bound fails with 
 
 ### Serve concurrent handlers from one provider
 
-The provider is `Send + Sync + 'static`, and `Client::new` shares the one value behind an `Arc` with every handler the router runs. Handlers keep no global state. Omnia instantiates a fresh guest for each request, so a native host is the first to share one provider across concurrent handlers.
+The provider is `Send + Sync + 'static`, and `Handlers::with_state` shares the one value behind an `Arc` with every handler the router runs. Handlers keep no global state. Omnia instantiates a fresh guest for each request, so a native host is the first to share one provider across concurrent handlers.
 
 ### Mint request ids from a CSPRNG
 

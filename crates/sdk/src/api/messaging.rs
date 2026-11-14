@@ -2,11 +2,10 @@
 //!
 //! A module registers its topics on a [`Handlers`](crate::api::Handlers) of
 //! its own and the guest merges each (`Handlers::from([..])` or
-//! [`Handlers::merge`](crate::api::Handlers::merge)) into its one
-//! [`Router`](crate::api::Router) over a [`Client`], closing the whole with
-//! [`Handlers::with_state`](crate::api::Handlers::with_state). A topic
-//! decodes JSON unless registered with
-//! [`Handlers::topic_with`](crate::api::Handlers::topic_with).
+//! [`Handlers::merge`](crate::api::Handlers::merge)), closing the whole with
+//! [`Handlers::with_state`](crate::api::Handlers::with_state) into its one
+//! [`Router`](crate::api::Router). A topic decodes JSON unless registered
+//! with [`Handlers::topic_with`](crate::api::Handlers::topic_with).
 //! [`export!`] binds the router fn as the guest's `wasi:messaging` handler.
 
 use std::collections::BTreeMap;
@@ -20,7 +19,7 @@ use bytes::Bytes;
 use serde::de::DeserializeOwned;
 use tracing::Instrument as _;
 
-use crate::api::{Client, Handler, Metadata};
+use crate::api::{Context, Handler, Metadata};
 
 #[doc(hidden)]
 #[macro_export]
@@ -163,14 +162,14 @@ impl<P: Send + Sync + 'static> Topics<P> {
         self.routes.keys().map(String::as_str)
     }
 
-    pub(crate) async fn handle(&self, delivery: Delivery, client: &Client<P>) -> crate::Result<()> {
+    pub(crate) async fn handle(&self, delivery: Delivery, provider: &Arc<P>) -> crate::Result<()> {
         let topic = delivery.topic.as_deref().ok_or_else(|| {
             crate::Error::bad_request("missing-topic", "the delivery has no topic")
         })?;
         let route = self.routes.get(topic).ok_or_else(|| {
             crate::Error::not_found("unhandled-topic", format!("no route for topic `{topic}`"))
         })?;
-        route.dispatch(&delivery, client).await
+        route.dispatch(&delivery, provider).await
     }
 
     fn insert(mut self, topic: String, route: Arc<dyn ErasedRoute<P>>) -> Self {
@@ -198,7 +197,7 @@ impl<P: Send + Sync + 'static> fmt::Debug for Topics<P> {
 type DispatchFuture<'a> = Pin<Box<dyn Future<Output = crate::Result<()>> + Send + 'a>>;
 
 trait ErasedRoute<P: Send + Sync + 'static>: Send + Sync {
-    fn dispatch<'a>(&'a self, delivery: &'a Delivery, client: &'a Client<P>) -> DispatchFuture<'a>;
+    fn dispatch<'a>(&'a self, delivery: &'a Delivery, provider: &'a Arc<P>) -> DispatchFuture<'a>;
 }
 
 struct Route<P, F, I, D> {
@@ -214,7 +213,7 @@ where
     I: Send + 'static,
     D: Fn(&Delivery) -> crate::Result<I> + Send + Sync + 'static,
 {
-    fn dispatch<'a>(&'a self, delivery: &'a Delivery, client: &'a Client<P>) -> DispatchFuture<'a> {
+    fn dispatch<'a>(&'a self, delivery: &'a Delivery, provider: &'a Arc<P>) -> DispatchFuture<'a> {
         let metadata = Metadata::from_lookup(|name| {
             delivery
                 .metadata
@@ -233,8 +232,9 @@ where
                 let input = (self.decode)(delivery).map_err(|error| {
                     crate::Error::bad_request("undecodable", error.description())
                 })?;
-                client
-                    .call(self.handler.clone(), input, &metadata)
+                self.handler
+                    .clone()
+                    .call(Context::shared(provider, &metadata), input)
                     .await
                     .map(|_| ())
                     .map_err(|error| crate::Error::from_chain(&error))

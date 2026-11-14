@@ -41,7 +41,7 @@ fn expect_code<T: Debug>(result: Result<T>, status: u16, code: &str) {
     match result {
         Ok(value) => panic!("returned {value:?}, not a `{code}` failure"),
         Err(err) => {
-            assert_eq!((err.status().as_u16(), err.code().as_str()), (status, code), "{err}");
+            assert_eq!((err.status().as_u16(), err.code()), (status, code), "{err}");
         }
     }
 }

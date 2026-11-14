@@ -5,6 +5,7 @@
 mod support;
 
 use std::future::{Ready, ready};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, UNIX_EPOCH};
 
@@ -16,7 +17,7 @@ use axum::routing::get;
 use http::header::CONTENT_TYPE;
 use http::{Request, StatusCode};
 use omnia_sdk::api::http::trace;
-use omnia_sdk::api::{Client, Context, Handlers, Metadata, Router};
+use omnia_sdk::api::{Context, Handlers, Metadata, Router};
 use omnia_sdk::{Config, ErrorBody, StateStore, not_found};
 use omnia_test::guest::{self, MapConfig, Provider};
 use serde::{Deserialize, Serialize};
@@ -79,7 +80,7 @@ fn handlers<P: Send + Sync + 'static>() -> Handlers<P> {
 }
 
 fn router() -> Router {
-    handlers().with_state(Client::new(())).layer(from_fn(trace))
+    handlers().with_state(()).layer(from_fn(trace))
 }
 
 async fn send(
@@ -168,7 +169,7 @@ async fn context_extractor() {
 // The extractor stands alone: without the `trace` layer it reads the headers itself.
 #[tokio::test]
 async fn extractor_no_trace() {
-    let router = axum::Router::new().route("/echo", get(echo_route)).with_state(Client::new(()));
+    let router = axum::Router::new().route("/echo", get(echo_route)).with_state(Arc::new(()));
     let request = Request::get("/echo?name=plan")
         .header("x-request-id", "req-1")
         .body(Body::empty())
@@ -195,10 +196,8 @@ async fn ids(metadata: Metadata, context: Context<()>) -> Json<Ids> {
 // extractor, and the `Context` extractor all carry.
 #[tokio::test]
 async fn missing_request_id() {
-    let router = axum::Router::new()
-        .route("/ids", get(ids))
-        .layer(from_fn(trace))
-        .with_state(Client::new(()));
+    let router =
+        axum::Router::new().route("/ids", get(ids)).layer(from_fn(trace)).with_state(Arc::new(()));
     let request = Request::get("/ids").body(Body::empty()).expect("build request");
     let (status, value) = send(router, request).await;
 
@@ -237,7 +236,7 @@ async fn trace_route_template() {
     let router = axum::Router::new()
         .route("/items/{id}", get(lookup))
         .layer(from_fn(trace))
-        .with_state(Client::new(()));
+        .with_state(Arc::new(()));
     let request = Request::get("/items/42").body(Body::empty()).expect("build request");
 
     let (status, _) = send(router, request).await;
@@ -276,7 +275,7 @@ async fn shared_provider() {
     let router = axum::Router::new()
         .route("/first", get(observe))
         .route("/second", get(observe))
-        .with_state(Client::new(StatefulProvider {
+        .with_state(Arc::new(StatefulProvider {
             calls: AtomicUsize::new(0),
         }));
 
@@ -297,7 +296,7 @@ async fn lookup(Path(id): Path<String>) -> Result<Json<String>, omnia_sdk::Error
 
 #[tokio::test]
 async fn error_body_json() {
-    let router = axum::Router::new().route("/items/{id}", get(lookup)).with_state(Client::new(()));
+    let router = axum::Router::new().route("/items/{id}", get(lookup)).with_state(Arc::new(()));
     let request = Request::get("/items/42").body(Body::empty()).expect("build request");
     let (status, content_type, body) = send_raw(router, request).await;
 
@@ -316,7 +315,7 @@ async fn save() -> Result<Json<serde_json::Value>, omnia_sdk::Error> {
 
 #[tokio::test]
 async fn anyhow_error_body() {
-    let router = axum::Router::new().route("/save", get(save)).with_state(Client::new(()));
+    let router = axum::Router::new().route("/save", get(save)).with_state(Arc::new(()));
     let request = Request::get("/save").body(Body::empty()).expect("build request");
     let (status, content_type, body) = send_raw(router, request).await;
 
@@ -388,7 +387,7 @@ async fn route_and_topic() {
 
 #[tokio::test]
 async fn capability_errors() {
-    use omnia_sdk::{plugins, vcs};
+    use omnia_sdk::{model, plugins, vcs};
 
     async fn route(Path(kind): Path<String>) -> Result<Json<()>, omnia_sdk::Error> {
         match kind.as_str() {
@@ -402,6 +401,10 @@ async fn capability_errors() {
             "plugin-refused" => Err(plugins::Error::Refused("r".into()))?,
             "plugin-unavailable" => Err(plugins::Error::Unavailable("u".into()))?,
             "plugin-internal" => Err(plugins::Error::Internal("x".into()))?,
+            "model-invalid" => Err(model::Error::InvalidRequest("no messages".into()))?,
+            "model-budget" => Err(model::Error::BudgetExhausted("3 rounds".into()))?,
+            "model-tool" => Err(model::Error::ToolFailed("lint".into()))?,
+            "model-backend" => Err(model::Error::Backend("bridge gone".into()))?,
             "vcs-access-context" => {
                 Err(anyhow::Error::from(vcs::Error::Access("denied".into())).context("push"))?
             }
@@ -409,7 +412,7 @@ async fn capability_errors() {
         }
     }
 
-    let router = axum::Router::new().route("/err/{kind}", get(route)).with_state(Client::new(()));
+    let router = axum::Router::new().route("/err/{kind}", get(route)).with_state(Arc::new(()));
 
     for (path, expected_status, expected_code) in [
         ("/err/vcs-not-a-repository", StatusCode::BAD_REQUEST, "not-a-repository"),
@@ -422,6 +425,10 @@ async fn capability_errors() {
         ("/err/plugin-refused", StatusCode::BAD_REQUEST, "refused"),
         ("/err/plugin-unavailable", StatusCode::BAD_GATEWAY, "unavailable"),
         ("/err/plugin-internal", StatusCode::INTERNAL_SERVER_ERROR, "internal"),
+        ("/err/model-invalid", StatusCode::BAD_REQUEST, "invalid-request"),
+        ("/err/model-budget", StatusCode::BAD_REQUEST, "budget-exhausted"),
+        ("/err/model-tool", StatusCode::BAD_GATEWAY, "tool-failed"),
+        ("/err/model-backend", StatusCode::BAD_GATEWAY, "backend"),
         ("/err/vcs-access-context", StatusCode::BAD_GATEWAY, "access"),
     ] {
         let request = Request::get(path).body(Body::empty()).expect("build request");

@@ -3,13 +3,15 @@
 mod blobstore_impl;
 mod container_impl;
 mod default_impl;
+mod omnia_impl;
 mod resource;
 mod types_impl;
 
 mod generated {
     #![allow(missing_docs, reason = "wasmtime bindgen output")]
 
-    pub use super::{ContainerProxy, Error, IncomingValue, OutgoingValue, StreamObjectNames};
+    pub use self::omnia::blobstore::store::Error;
+    pub use super::{ContainerProxy, IncomingValue, OutgoingValue, StreamObjectNames};
 
     wasmtime::component::bindgen!({
         world: "imports",
@@ -25,6 +27,7 @@ mod generated {
             "wasi:blobstore/container.stream-object-names": StreamObjectNames,
         },
         trappable_error_type: {
+            "omnia:blobstore/store.error" => Error,
             "wasi:blobstore/types.error" => Error,
         },
     });
@@ -41,21 +44,10 @@ use wasmtime::component::{Linker, ResourceTableError};
 use wasmtime_wasi::p2::pipe::MemoryOutputPipe;
 
 pub use self::default_impl::BlobStoreDefault;
-pub use self::generated::wasi::blobstore::container::{ContainerMetadata, ObjectMetadata};
+pub use self::generated::Error;
+use self::generated::omnia::blobstore::store as omnia_store;
+pub use self::generated::omnia::blobstore::store::{ContainerMetadata, ObjectMetadata, Page};
 use self::generated::wasi::blobstore::{blobstore, container, types};
-
-/// Typed host error for `wasi:blobstore`, lowered to the WIT `error` string.
-///
-/// A backend picks the kind by returning an [`Error`] inside its
-/// [`anyhow::Error`], and any other failure is [`Other`](Self::Other). The
-/// message of either keeps the backend's full context chain.
-#[derive(Debug)]
-pub enum Error {
-    /// A requested container or object does not exist.
-    NotFound(String),
-    /// Any other host failure.
-    Other(String),
-}
 
 impl Error {
     /// The [`NotFound`](Self::NotFound) error for the container `name`, which does not exist.
@@ -65,23 +57,11 @@ impl Error {
     }
 }
 
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::NotFound(msg) | Self::Other(msg) => f.write_str(msg),
-        }
-    }
-}
-
-impl std::error::Error for Error {}
-
+// a backend picks the kind by returning an `Error`; any other failure is
+// `other`, with its full context chain
 impl From<anyhow::Error> for Error {
     fn from(err: anyhow::Error) -> Self {
-        let message = format!("{err:#}");
-        match err.downcast_ref::<Self>() {
-            Some(Self::NotFound(_)) => Self::NotFound(message),
-            Some(Self::Other(_)) | None => Self::Other(message),
-        }
+        err.downcast::<Self>().unwrap_or_else(|err| Self::Other(format!("{err:#}")))
     }
 }
 
@@ -156,23 +136,27 @@ impl StreamObjectNames {
 /// Result type for blobstore operations.
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// Host-side service for `wasi:blobstore`.
+/// Host-side service for `omnia:blobstore` and the `wasi:blobstore` draft.
 #[derive(Debug, HostCtx)]
 #[host_ctx(client = BlobStoreClient)]
 pub struct WasiBlobStore;
 
 impl<B: Provides<Self>> Host<B> for WasiBlobStore {
     fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
+        omnia_store::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
         blobstore::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
         container::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
         Ok(types::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?)
     }
 }
 
-/// Service contract for `wasi:blobstore` backends.
+/// Service contract for blobstore backends.
 ///
 /// This is implemented by the resource-specific provider of Blobstore
 /// functionality. For example, an in-memory store, or a Redis-backed store.
+///
+/// A backend picks a failure's kind by returning an [`Error`] inside its
+/// [`anyhow::Error`], and any other failure is [`Error::Other`].
 pub trait BlobStoreClient: Debug + Send + Sync + 'static {
     /// Create the container `name`, or open it when it already exists.
     fn create_container(&self, name: String) -> FutureResult<Arc<dyn Container>>;

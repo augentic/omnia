@@ -8,14 +8,15 @@ mod support;
 use std::borrow::Cow;
 use std::fmt;
 use std::future::{Ready, ready};
+use std::sync::Arc;
 
 use clap::{Args, Parser, Subcommand};
 use omnia_sdk::api::command::{
     Command, Failure, Format, IntoExit, Parsed, Render, Response, Shell, USAGE_EXIT, Verbosity,
     completions, parse,
 };
-use omnia_sdk::api::{Client, Context, Handlers, Metadata};
-use omnia_sdk::{bad_request, not_found};
+use omnia_sdk::api::{Context, Handlers, Metadata};
+use omnia_sdk::{bad_request, not_found, vcs};
 use serde::{Deserialize, Serialize};
 
 use self::support::{Spans, fields};
@@ -275,9 +276,9 @@ fn stderr_json(response: &Response) -> serde_json::Value {
 
 #[tokio::test]
 async fn call_text() {
-    let client = Client::new(());
+    let provider = Arc::new(());
     let metadata = Metadata::default();
-    let response = Command::new(&client, &metadata, Format::Text).call(greet, ada()).await;
+    let response = Command::new(&provider, &metadata, Format::Text).call(greet, ada()).await;
 
     assert_eq!(response.exit, 0);
     assert_eq!(response.stderr, b"");
@@ -286,9 +287,9 @@ async fn call_text() {
 
 #[tokio::test]
 async fn call_json() {
-    let client = Client::new(());
+    let provider = Arc::new(());
     let metadata = Metadata::default();
-    let response = Command::new(&client, &metadata, Format::Json).call(greet, ada()).await;
+    let response = Command::new(&provider, &metadata, Format::Json).call(greet, ada()).await;
 
     assert_eq!(response.exit, 0);
     let stdout = String::from_utf8(response.stdout).expect("json is utf-8");
@@ -302,9 +303,9 @@ async fn call_json() {
 
 #[tokio::test]
 async fn call_handler_error() {
-    let client = Client::new(());
+    let provider = Arc::new(());
     let metadata = Metadata::default();
-    let command = Command::new(&client, &metadata, Format::Json);
+    let command = Command::new(&provider, &metadata, Format::Json);
 
     let response = command.call(lookup, item("42")).await;
 
@@ -315,16 +316,16 @@ async fn call_handler_error() {
         serde_json::json!({ "error": "not_found", "message": "no item 42", "exit-code": 2 })
     );
 
-    let text = Command::new(&client, &metadata, Format::Text).call(lookup, item("42")).await;
+    let text = Command::new(&provider, &metadata, Format::Text).call(lookup, item("42")).await;
     assert_eq!(text.exit, 2);
     assert_eq!(text.stderr, b"error[not_found]: no item 42\n");
 }
 
 #[tokio::test]
 async fn hints_by_error() {
-    let client = Client::new(());
+    let provider = Arc::new(());
     let metadata = Metadata::default();
-    let command = Command::new(&client, &metadata, Format::Text).hints(|error| {
+    let command = Command::new(&provider, &metadata, Format::Text).hints(|error| {
         (error.code() == "not_found").then_some(Cow::Borrowed("run `app list` to see the items"))
     });
 
@@ -346,7 +347,7 @@ async fn merged_commands() {
     let looking = Handlers::new().command("lookup", lookup);
     let pinging = Handlers::new().command("ping", ping);
     let router = Handlers::from([greeting, looking, pinging])
-        .with_state(Client::new(()))
+        .with_state(())
         .name("app")
         .version("1.2.3")
         .about("Greets people")
@@ -389,7 +390,7 @@ async fn merged_commands() {
 #[tokio::test]
 async fn command_span() {
     let (spans, _guard) = Spans::install();
-    let router = Handlers::new().command("greet", greet).with_state(Client::new(())).name("app");
+    let router = Handlers::new().command("greet", greet).with_state(()).name("app");
     let mut metadata = Metadata::default();
     metadata.request_id = Some("req-1".to_string());
     metadata.correlation_id = Some("corr-1".to_string());
@@ -407,11 +408,8 @@ async fn command_span() {
 // subcommand's `about`, each field's for its argument.
 #[tokio::test]
 async fn help_from_docs() {
-    let router = Handlers::new()
-        .command("greet", greet)
-        .with_state(Client::new(()))
-        .name("app")
-        .about("Greets people");
+    let router =
+        Handlers::new().command("greet", greet).with_state(()).name("app").about("Greets people");
 
     let help = router.run(["app", "--help"]).await;
     assert_eq!(help.exit, 0);
@@ -445,7 +443,7 @@ async fn command_with_decoder() {
                 }
             },
         )
-        .with_state(Client::new(()));
+        .with_state(());
 
     let decoded = router.run(["app", "lookup", "42"]).await;
     assert_eq!(decoded.exit, 2);
@@ -461,6 +459,37 @@ async fn command_with_decoder() {
             "exit-code": 1
         })
     );
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("could not look up the item")]
+struct LookupError(#[source] omnia_sdk::Error);
+
+// A subcommand reads a handler's error by the same rule a topic does.
+#[tokio::test]
+async fn typed_handler_error() {
+    let router = Handlers::new()
+        .command("revision", |_: Context<()>, (): ()| {
+            ready(Err::<(), _>(vcs::Error::NotFound("v1".into())))
+        })
+        .command("lookup", |_: Context<()>, (): ()| {
+            ready(Err::<(), _>(LookupError(not_found!("no item 42"))))
+        })
+        .command("format", |_: Context<()>, (): ()| ready(Err::<(), _>(fmt::Error)))
+        .with_state(());
+
+    for (verb, exit, code, text) in [
+        ("revision", 2, "not-found", "not found: v1"),
+        ("lookup", 2, "not_found", "could not look up the item: no item 42"),
+        ("format", 3, "server_error", "when formatting"),
+    ] {
+        let response = router.run(["app", "--format", "json", verb]).await;
+        let body = stderr_json(&response);
+        assert_eq!(response.exit, exit, "{verb}: {body}");
+        assert_eq!(body["error"], code, "{verb}: {body}");
+        assert_eq!(body["exit-code"], exit, "{verb}: {body}");
+        assert!(body["message"].as_str().is_some_and(|message| message.contains(text)), "{body}");
+    }
 }
 
 #[test]
@@ -494,7 +523,7 @@ mod http_parity {
         let router = Handlers::new()
             .route("/items", get(lookup_route))
             .command("lookup", lookup)
-            .with_state(Client::new(()));
+            .with_state(());
 
         let response = router.run(["app", "--format", "json", "lookup", "42"]).await;
         let command_body: ErrorBody =

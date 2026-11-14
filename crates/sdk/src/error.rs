@@ -135,23 +135,23 @@ impl Error {
 
     /// Returns the error code for the variant.
     #[must_use]
-    pub fn code(&self) -> String {
+    pub const fn code(&self) -> &str {
         match self {
             Self::BadRequest { code, .. }
             | Self::NotFound { code, .. }
             | Self::ServerError { code, .. }
-            | Self::BadGateway { code, .. } => code.clone(),
+            | Self::BadGateway { code, .. } => code.as_str(),
         }
     }
 
     /// Returns the error description.
     #[must_use]
-    pub fn description(&self) -> String {
+    pub const fn description(&self) -> &str {
         match self {
             Self::BadRequest { description, .. }
             | Self::NotFound { description, .. }
             | Self::ServerError { description, .. }
-            | Self::BadGateway { description, .. } => description.clone(),
+            | Self::BadGateway { description, .. } => description.as_str(),
         }
     }
 
@@ -162,7 +162,8 @@ impl Error {
         let links = || iter::successors(Some(error), |&link| link.source());
         let description = links()
             .map(|link| {
-                link.downcast_ref::<Self>().map_or_else(|| link.to_string(), Self::description)
+                link.downcast_ref::<Self>()
+                    .map_or_else(|| link.to_string(), |error| error.description().to_owned())
             })
             .collect::<Vec<_>>()
             .join(": ");
@@ -209,18 +210,6 @@ impl From<serde_json::Error> for Error {
     }
 }
 
-impl From<crate::model::Error> for Error {
-    fn from(err: crate::model::Error) -> Self {
-        use crate::model::Error as Model;
-        match err {
-            // the guest's own request, or findings the model could not resolve
-            Model::InvalidRequest(_) | Model::BudgetExhausted(_) => crate::bad_request!(err),
-            // a tool, or the transport
-            Model::ToolFailed(_) | Model::Backend(_) => crate::bad_gateway!(err),
-        }
-    }
-}
-
 /// The transport-neutral wire body of a failed invocation.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ErrorBody {
@@ -234,8 +223,8 @@ pub struct ErrorBody {
 impl From<&Error> for ErrorBody {
     fn from(error: &Error) -> Self {
         Self {
-            error: error.code(),
-            message: error.description(),
+            error: error.code().to_owned(),
+            message: error.description().to_owned(),
         }
     }
 }

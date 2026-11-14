@@ -1,238 +1,132 @@
-//! [`BlobStore`] over `wasi:blobstore`.
+//! [`BlobStore`] over `omnia:blobstore`.
 
 use std::ops::Range;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, UNIX_EPOCH};
 
 use bytes::Bytes;
-use omnia_wasi_blobstore::blobstore;
-use omnia_wasi_blobstore::container::Container;
-use omnia_wasi_blobstore::types::{IncomingValue, ObjectId, OutgoingValue};
+use omnia_wasi_blobstore::omnia::store;
 
 use crate::blobstore::{ContainerMetadata, ObjectMetadata};
 use crate::{BlobStore, Error, Page, Result, WasiProvider};
 
-// the `wasi:io` write budget: `blocking-write-and-flush` takes at most 4096 bytes
-const WRITE_CHUNK: usize = 4096;
-
-// `wasi-blobstore` lowers a missing object to this message for every backend
-const OBJECT_NOT_FOUND: &str = "object not found";
-
 impl BlobStore for WasiProvider {
     async fn get(&self, container: &str, name: &str) -> Result<Option<Bytes>> {
-        let container = open(container).await?;
-        match container.get_data(name.to_owned(), 0, u64::MAX).await {
-            Ok(incoming) => consume(incoming).map(Some),
-            Err(message) if message.contains(OBJECT_NOT_FOUND) => Ok(None),
-            Err(message) => Err(fault("reading object", &message)),
-        }
+        let data = store::get(container.to_owned(), name.to_owned()).await?;
+        Ok(data.map(Bytes::from))
     }
 
     async fn get_range(
         &self, container: &str, name: &str, range: Range<u64>,
     ) -> Result<Option<Bytes>> {
-        let container = open(container).await?;
-        if range.is_empty() {
-            let found = container
-                .has_object(name.to_owned())
-                .await
-                .map_err(|message| fault("checking object", &message))?;
-            return Ok(found.then(Bytes::new));
-        }
-
-        // HACK: the wire end is inclusive and reads an end of 0 as unbounded,
-        // so a read of the first byte asks for two and truncates
-        let end = (range.end - 1).max(1);
-        let data = match container.get_data(name.to_owned(), range.start, end).await {
-            Ok(incoming) => consume(incoming)?,
-            Err(message) if message.contains(OBJECT_NOT_FOUND) => return Ok(None),
-            Err(message) => return Err(fault("reading object range", &message)),
-        };
-        let len = usize::try_from(range.end - range.start).unwrap_or(usize::MAX);
-        Ok(Some(data.slice(..len.min(data.len()))))
+        let data =
+            store::get_range(container.to_owned(), name.to_owned(), range.start, range.end).await?;
+        Ok(data.map(Bytes::from))
     }
 
     async fn put(&self, container: &str, name: &str, data: &[u8]) -> Result<()> {
-        let container = open(container).await?;
-        let outgoing = OutgoingValue::new_outgoing_value();
-        {
-            let body = outgoing.outgoing_value_write_body().await.map_err(|err| {
-                Error::server_error("other", format!("opening the write body: {err:?}"))
-            })?;
-            for chunk in data.chunks(WRITE_CHUNK) {
-                body.blocking_write_and_flush(chunk).map_err(|err| {
-                    Error::server_error("other", format!("writing object data: {err}"))
-                })?;
-            }
-        };
-        container
-            .write_data(name.to_owned(), &outgoing)
-            .await
-            .map_err(|message| fault("writing object", &message))?;
-        OutgoingValue::finish(outgoing).map_err(|message| fault("finishing write", &message))
+        Ok(store::put(container.to_owned(), name.to_owned(), data.to_vec()).await?)
     }
 
     async fn delete(&self, container: &str, name: &str) -> Result<()> {
-        let container = open(container).await?;
-        container
-            .delete_object(name.to_owned())
-            .await
-            .map_err(|message| fault("deleting object", &message))
+        Ok(store::delete(container.to_owned(), name.to_owned()).await?)
     }
 
     async fn stat(&self, container: &str, name: &str) -> Result<Option<ObjectMetadata>> {
-        let container = open(container).await?;
-        stat_in(&container, name).await
+        let info = store::stat(container.to_owned(), name.to_owned()).await?;
+        Ok(info.map(Into::into))
     }
 
     async fn list(
         &self, container: &str, prefix: &str, after: Option<&str>,
     ) -> Result<Page<ObjectMetadata>> {
-        let container = open(container).await?;
-        let stream =
-            container.list_objects().await.map_err(|message| fault("listing objects", &message))?;
-        let mut names = Vec::new();
-        loop {
-            let (batch, done) = stream
-                .read_stream_object_names(100)
-                .await
-                .map_err(|message| fault("reading object names", &message))?;
-            names.extend(batch);
-            if done {
-                break;
-            }
-        }
-
-        // `wasi:blobstore` lists every name, so the listing filters and orders
-        // them into one page that resumes after the name it is given
-        names.retain(|name| {
-            name.starts_with(prefix) && after.is_none_or(|after| name.as_str() > after)
-        });
-        names.sort_unstable();
-        let mut objects = Vec::with_capacity(names.len());
-        for name in names {
-            objects.extend(stat_in(&container, &name).await?);
-        }
-        Ok(Page::new(objects, None))
+        let after = after.map(str::to_owned);
+        let page = store::list(container.to_owned(), prefix.to_owned(), after).await?;
+        Ok(page.into())
     }
 
     async fn create_container(&self, container: &str) -> Result<()> {
-        blobstore::create_container(container.to_owned())
-            .await
-            .map(drop)
-            .map_err(|message| fault("creating container", &message))
+        Ok(store::create_container(container.to_owned()).await?)
     }
 
     async fn delete_container(&self, container: &str) -> Result<()> {
-        blobstore::delete_container(container.to_owned())
-            .await
-            .map_err(|message| fault("deleting container", &message))
+        Ok(store::delete_container(container.to_owned()).await?)
     }
 
     async fn container_exists(&self, container: &str) -> Result<bool> {
-        blobstore::container_exists(container.to_owned())
-            .await
-            .map_err(|message| fault("checking container", &message))
+        Ok(store::container_exists(container.to_owned()).await?)
     }
 
     async fn container_info(&self, container: &str) -> Result<Option<ContainerMetadata>> {
-        if !self.container_exists(container).await? {
-            return Ok(None);
-        }
-        let info = open(container)
-            .await?
-            .info()
-            .map_err(|message| fault("reading container info", &message))?;
-        Ok(Some(ContainerMetadata::new(info.name, timestamp(info.created_at))))
+        let info = store::container_info(container.to_owned()).await?;
+        Ok(info.map(Into::into))
     }
 
     async fn exists(&self, container: &str, name: &str) -> Result<bool> {
-        let container = open(container).await?;
-        container
-            .has_object(name.to_owned())
-            .await
-            .map_err(|message| fault("checking object", &message))
+        Ok(store::exists(container.to_owned(), name.to_owned()).await?)
     }
 
     async fn delete_many(&self, container: &str, names: &[&str]) -> Result<()> {
-        let container = open(container).await?;
         let names = names.iter().map(|&name| name.to_owned()).collect();
-        container.delete_objects(names).await.map_err(|message| fault("deleting objects", &message))
+        Ok(store::delete_many(container.to_owned(), names).await?)
     }
 
     async fn clear(&self, container: &str) -> Result<()> {
-        let container = open(container).await?;
-        container.clear().await.map_err(|message| fault("clearing container", &message))
+        Ok(store::clear(container.to_owned()).await?)
     }
 
     async fn copy(
         &self, src_container: &str, src_name: &str, dest_container: &str, dest_name: &str,
     ) -> Result<()> {
-        blobstore::copy_object(
-            object_id(src_container, src_name),
-            object_id(dest_container, dest_name),
+        Ok(store::copy(
+            src_container.to_owned(),
+            src_name.to_owned(),
+            dest_container.to_owned(),
+            dest_name.to_owned(),
         )
-        .await
-        .map_err(|message| fault("copying object", &message))
+        .await?)
     }
 
     async fn rename(
         &self, src_container: &str, src_name: &str, dest_container: &str, dest_name: &str,
     ) -> Result<()> {
-        blobstore::move_object(
-            object_id(src_container, src_name),
-            object_id(dest_container, dest_name),
+        Ok(store::rename(
+            src_container.to_owned(),
+            src_name.to_owned(),
+            dest_container.to_owned(),
+            dest_name.to_owned(),
         )
-        .await
-        .map_err(|message| fault("moving object", &message))
+        .await?)
     }
 }
 
-async fn open(container: &str) -> Result<Container> {
-    blobstore::get_container(container.to_owned())
-        .await
-        .map_err(|message| fault("opening container", &message))
-}
-
-// a missing object fails `object-info` with a backend's own message, so the
-// failure is read as absence only once `has-object` agrees
-async fn stat_in(container: &Container, name: &str) -> Result<Option<ObjectMetadata>> {
-    match container.object_info(name.to_owned()).await {
-        Ok(info) => Ok(Some(ObjectMetadata::new(
-            info.name,
-            info.container,
-            timestamp(info.created_at),
-            info.size,
-        ))),
-        Err(message) => {
-            let found = container
-                .has_object(name.to_owned())
-                .await
-                .map_err(|message| fault("checking object", &message))?;
-            if found { Err(fault("reading object info", &message)) } else { Ok(None) }
+impl From<store::Error> for Error {
+    fn from(err: store::Error) -> Self {
+        match err {
+            store::Error::NotFound(message) => Self::server_error("not-found", message),
+            store::Error::Denied(message) => Self::server_error("denied", message),
+            store::Error::Invalid(message) => Self::server_error("invalid", message),
+            store::Error::Unsupported(message) => Self::server_error("unsupported", message),
+            store::Error::Unavailable(message) => Self::bad_gateway("unavailable", message),
+            store::Error::Other(message) => Self::server_error("other", message),
         }
     }
 }
 
-fn consume(incoming: IncomingValue) -> Result<Bytes> {
-    IncomingValue::incoming_value_consume_sync(incoming)
-        .map(Bytes::from)
-        .map_err(|message| fault("reading object data", &message))
-}
-
-fn object_id(container: &str, name: &str) -> ObjectId {
-    ObjectId {
-        container: container.to_owned(),
-        object: name.to_owned(),
+impl From<store::ObjectMetadata> for ObjectMetadata {
+    fn from(info: store::ObjectMetadata) -> Self {
+        let created_at = UNIX_EPOCH + Duration::from_secs(info.created_at);
+        Self::new(info.name, info.container, created_at, info.size)
     }
 }
 
-fn timestamp(seconds: u64) -> SystemTime {
-    UNIX_EPOCH + Duration::from_secs(seconds)
+impl From<store::ContainerMetadata> for ContainerMetadata {
+    fn from(info: store::ContainerMetadata) -> Self {
+        Self::new(info.name, UNIX_EPOCH + Duration::from_secs(info.created_at))
+    }
 }
 
-// `wasi:blobstore` errors are strings, so a missing container or object is
-// told apart by its message
-fn fault(action: &str, message: &str) -> Error {
-    let code = if message.contains("not found") { "not-found" } else { "other" };
-    Error::server_error(code, format!("{action}: {message}"))
+impl From<store::Page> for Page<ObjectMetadata> {
+    fn from(page: store::Page) -> Self {
+        Self::new(page.objects.into_iter().map(Into::into).collect(), page.next)
+    }
 }

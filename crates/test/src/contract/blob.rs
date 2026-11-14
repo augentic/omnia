@@ -175,7 +175,8 @@ pub async fn containers(store: &impl BlobStore, scope: &str) {
 /// [`get_range`](BlobStore::get_range) reads a half-open range, clamped to
 /// the object.
 ///
-/// An empty range, and a range past the end, read as empty bytes.
+/// An empty range, an inverted one, and a range past the end read as empty
+/// bytes.
 ///
 /// # Panics
 ///
@@ -184,8 +185,16 @@ pub async fn range(store: &impl BlobStore, scope: &str) {
     let container = create(store, scope, "range").await;
     write(store, &container, "digits", b"0123456789").await;
 
-    let cases: [(Range<u64>, &[u8]); 5] =
-        [(2..5, b"234"), (0..1, b"0"), (7..100, b"789"), (4..4, b""), (20..30, b"")];
+    #[expect(clippy::reversed_empty_ranges, reason = "an inverted range is a case")]
+    let cases: [(Range<u64>, &[u8]); 7] = [
+        (2..5, b"234"),
+        (0..1, b"0"),
+        (7..100, b"789"),
+        (8..u64::MAX, b"89"),
+        (4..4, b""),
+        (6..3, b""),
+        (20..30, b""),
+    ];
     for (bounds, expected) in cases {
         let bytes = store.get_range(&container, "digits", bounds.clone()).await;
         let bytes = bytes.unwrap_or_else(|err| panic!("get_range {bounds:?}: {err}"));

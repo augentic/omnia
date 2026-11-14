@@ -36,7 +36,7 @@ context.publisher().publish("orders.created", &message).await?;
 Messaging is a **trigger**: the host (`WasiMessaging`) subscribes to topics and delivers each message to the guest's exported handler, instantiating a fresh guest instance per message:
 
 ```rust,noplayground
-use omnia_sdk::api::{Client, Context, Handlers, Router};
+use omnia_sdk::api::{Context, Handlers, Router};
 use omnia_wasi_messaging::types::{Error, Message};
 
 pub struct Messaging;
@@ -49,7 +49,7 @@ async fn create_order(
 }
 
 fn router() -> Router<MyProvider> {
-    Handlers::new().topic("orders.created", create_order).with_state(Client::new(MyProvider))
+    Handlers::new().topic("orders.created", create_order).with_state(MyProvider)
 }
 
 impl omnia_wasi_messaging::incoming_handler::Guest for Messaging {

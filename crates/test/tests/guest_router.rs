@@ -8,7 +8,7 @@ use axum::extract::Path;
 use axum::routing::get;
 use http::{Request, StatusCode};
 use omnia_sdk::StateStore as _;
-use omnia_sdk::api::{Client, Context, Handlers, Router};
+use omnia_sdk::api::{Context, Handlers, Router};
 use omnia_test::guest::{Provider, deliver, send};
 
 async fn shout(Path(word): Path<String>) -> Json<String> {
@@ -25,7 +25,7 @@ fn router() -> (Provider, Router<Provider>) {
     let router = Handlers::new()
         .route("/shout/{word}", get(shout))
         .topic("notes", note)
-        .with_state(Client::new(provider.clone()));
+        .with_state(provider.clone());
     (provider, router)
 }
 

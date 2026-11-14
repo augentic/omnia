@@ -4,7 +4,17 @@ This crate provides the Blobstore interface for the Omnia runtime.
 
 ## Interface
 
-Implements the `wasi:blobstore` WIT interface.
+Implements `omnia:blobstore`, the interface the SDK's `BlobStore` calls, and
+the `wasi:blobstore` draft for raw-binding guests. Both are served from one
+`BlobStoreClient` per backend.
+
+- A call on an object in a container that does not exist fails with
+  `not-found`. An absent object is `none`, not an error.
+- Every backend stores the portable container and object names the SDK's
+  `BlobStore` defines. A backend may reject any other name with `invalid`.
+- `get-range` reads a half-open range, clamped to the object's length.
+- `list` answers one page of the objects under a prefix, with the cursor
+  that resumes it.
 
 ## Backend
 

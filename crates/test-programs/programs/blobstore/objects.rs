@@ -1,10 +1,11 @@
 //! One container walked end to end over the raw `wasi:blobstore` bindings: a
 //! host-seeded container is readable, a chunked `outgoing-value` lands as one
 //! object, an `outgoing-value` lends its write body once and cannot `finish`
-//! without it, `get-data` honours whole and inclusive ranged reads, `has-object`
-//! and `object-info` distinguish present from absent, `list-objects` pages
-//! and skips, single and batch deletes are idempotent, `clear` empties, and
-//! `delete-container` removes the container.
+//! without it, `get-data` honours whole, inclusive and open-ended reads and
+//! refuses an inverted range, `has-object` and `object-info` distinguish
+//! present from absent, `list-objects` pages and skips, single and batch
+//! deletes are idempotent, `clear` empties, and `delete-container` removes the
+//! container.
 
 #![cfg(target_arch = "wasm32")]
 
@@ -36,7 +37,8 @@ async fn scenario() {
     let again = blobstore::create_container("objects".to_owned()).await.expect("re-create");
     assert!(again.has_object("alpha".to_owned()).await.expect("has-object"), "create kept data");
 
-    // Read back whole, then an inclusive range; a missing object is an error.
+    // Read back whole, then an inclusive range, then to the end from an end of
+    // 0; an inverted range and a missing object are errors.
     let incoming = container.get_data("alpha".to_owned(), 0, u64::MAX).await.expect("get-data");
     assert_eq!(incoming.size(), LARGE as u64);
     assert_eq!(IncomingValue::incoming_value_consume_sync(incoming).expect("consume"), large);
@@ -46,6 +48,14 @@ async fn scenario() {
         IncomingValue::incoming_value_consume_sync(incoming).expect("consume"),
         large[2..=5]
     );
+    let start = LARGE as u64 - 3;
+    let incoming = container.get_data("alpha".to_owned(), start, 0).await.expect("open get-data");
+    assert_eq!(
+        IncomingValue::incoming_value_consume_sync(incoming).expect("consume"),
+        large[LARGE - 3..]
+    );
+    let error = container.get_data("alpha".to_owned(), 5, 2).await.expect_err("inverted");
+    assert!(error.contains("invalid byte range"), "unexpected error: {error}");
     let error = container.get_data("missing".to_owned(), 0, u64::MAX).await.expect_err("absent");
     assert!(error.contains("object not found"), "unexpected error: {error}");
 

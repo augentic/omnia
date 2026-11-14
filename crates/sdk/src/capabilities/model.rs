@@ -316,9 +316,37 @@ pub enum Error {
     Backend(String),
 }
 
+impl Error {
+    /// The kebab-case wire discriminant, stable for callers to branch on.
+    #[must_use]
+    pub const fn code(&self) -> &'static str {
+        match self {
+            Self::InvalidRequest(_) => "invalid-request",
+            Self::BudgetExhausted(_) => "budget-exhausted",
+            Self::ToolFailed(_) => "tool-failed",
+            Self::Backend(_) => "backend",
+        }
+    }
+}
+
 impl From<anyhow::Error> for Error {
     fn from(error: anyhow::Error) -> Self {
         error.downcast().unwrap_or_else(|other| Self::Backend(format!("{other:#}")))
+    }
+}
+
+// The default taxonomy: the guest's own request, and findings the model could
+// not resolve, are the request's, and a tool or the transport is the gateway's.
+impl From<Error> for crate::Error {
+    fn from(error: Error) -> Self {
+        let code = error.code().to_owned();
+        let description = error.to_string();
+        match error {
+            Error::InvalidRequest(_) | Error::BudgetExhausted(_) => {
+                Self::BadRequest { code, description }
+            }
+            Error::ToolFailed(_) | Error::Backend(_) => Self::BadGateway { code, description },
+        }
     }
 }
 

@@ -6,7 +6,7 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_sdk::api::{Client, Context, Handlers, Router, command};
+use omnia_sdk::api::{Context, Handlers, Router, command};
 use omnia_sdk::{Error, bad_gateway, bad_request, not_found};
 
 struct Provider;
@@ -33,7 +33,7 @@ fn command_router(provider: Provider) -> Router<Provider> {
         .command("bad", bad)
         .command("missing", missing)
         .command("upstream", upstream)
-        .with_state(Client::new(provider))
+        .with_state(provider)
         .name("exit-map")
 }
 

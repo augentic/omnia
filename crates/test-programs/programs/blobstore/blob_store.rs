@@ -1,5 +1,5 @@
 //! The `omnia_test::contract::blob` rows over `WasiProvider`, all at once,
-//! so the host's `wasi:blobstore` meets the contract the native double does.
+//! so the host's `omnia:blobstore` meets the contract the native double does.
 //! One object of the program's own is left for the host to read back.
 
 #![cfg(target_arch = "wasm32")]

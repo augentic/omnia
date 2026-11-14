@@ -25,6 +25,7 @@ Every capability Omnia exposes to guests, its interface crate, the zero-config d
 Notes:
 
 - Package names on crates.io carry the `omnia-` prefix (`omnia-wasi-keyvalue`, and so on); directory names in `crates/` drop it.
+- `wasi-keyvalue`, `wasi-blobstore`, and `wasi-sql` each serve the Omnia-owned interface the SDK calls (`omnia:keyvalue`, `omnia:blobstore`, `omnia:sql`) beside the WASI draft for guests that bind it directly. A backend implements one client trait and serves both.
 - Most defaults are genuinely zero-config and in-memory. The exceptions: `HttpDefault` and `WebSocketDefault` bind real TCP ports, and `IdentityDefault` needs OAuth credentials. `ModelDefault` is a zero-config echo — it answers text/json completions with the prompt itself but rejects `format::schema`, so deployments bind a real backend and tests define inline canned backends. `wasi-vcs` ships no default at all: a repository is a tree on disk, so a deployment that links `WasiVcs` names a production backend, and a test scripts a `VcsClient` of its own.
 - `omnia:vcs` operations name a repository or working copy as a `location` — a lent mount-root descriptor plus a relative subpath — and the host resolves it beneath the authorized mount before the backend runs: a descriptor that is not a mount root, a subpath that leaves the mount or starts at `/`, and a mutation beneath a read-only mount are refused with no backend call. The backend works through a `Place`, an open directory handle the host holds for the whole operation, never a path it would walk again.
 - Each interface crate compiles to guest bindings on `wasm32` and the host implementation on native targets, so guests and hosts depend on the same crate name.
@@ -55,6 +56,6 @@ wasi-keyvalue/
 | Crate | Purpose |
 | ----- | ------- |
 | `omnia` | Runtime core: engine, CLI, deployment, registry, dispatch, telemetry |
-| `omnia-sdk` | Guest SDK: `Handler`, `Client`, `Context`, the HTTP and messaging routers, the command façade (`parse`, `Command`, `Response`), each transport's `export!` macro, errors with their status/exit map, the capability traits and `WasiProvider`, and MCP. Features: `http` (default), `command` |
+| `omnia-sdk` | Guest SDK: `Handler`, `Context`, `Handlers`, the HTTP and messaging routers, the command façade (`parse`, `Command`, `Response`), each transport's `export!` macro, errors with their status/exit map, the capability traits and `WasiProvider`, and MCP. Features: `http` (default), `command` |
 | `omnia-guest-macros` | `#[instrument]`, `#[capability]`, and the `Provider`, `Settings`, and `FromRow` derives |
 | `omnia-host-macros` | `runtime!` macro (use via `omnia::runtime!`) and `#[derive(HostCtx)]` (use via `omnia_core::HostCtx`, or `omnia::HostCtx` with `crate = omnia`) |

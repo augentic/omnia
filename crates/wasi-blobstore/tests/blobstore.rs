@@ -1,8 +1,8 @@
-//! End-to-end tests for `wasi:blobstore`: every scenario runs a real guest
-//! component from `crates/test-programs` through the omnia runtime against
-//! the in-memory default. The guest asserts what it observes across the
-//! boundary (and traps on failure); the host side seeds a container and
-//! asserts what persisted after the run.
+//! End-to-end tests for `omnia:blobstore` and the `wasi:blobstore` draft:
+//! every scenario runs a real guest component from `crates/test-programs`
+//! through the omnia runtime against the in-memory default. The guest
+//! asserts what it observes across the boundary (and traps on failure); the
+//! host side seeds a container and asserts what persisted after the run.
 
 #![cfg(not(target_arch = "wasm32"))]
 

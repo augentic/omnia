@@ -7,6 +7,7 @@
 
 #![cfg(target_arch = "wasm32")]
 
+use std::sync::Arc;
 use std::time::UNIX_EPOCH;
 
 use axum::Router;
@@ -17,7 +18,7 @@ use axum::http::uri::Authority;
 use axum::middleware::map_request;
 use axum::routing::get;
 use omnia_sdk::Error;
-use omnia_sdk::api::{Client, Context, http};
+use omnia_sdk::api::{Context, http};
 use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize)]
@@ -38,7 +39,7 @@ fn router<P: Send + Sync + 'static>(provider: P) -> Router {
     Router::new()
         .route("/echo", get(echo_get).post(echo_post))
         .layer(map_request(check_uri))
-        .with_state(Client::new(provider))
+        .with_state(Arc::new(provider))
 }
 
 async fn check_uri(request: Request<Body>) -> Request<Body> {

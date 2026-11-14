@@ -7,7 +7,7 @@ use std::future::{Ready, ready};
 use std::sync::{Arc, Mutex};
 
 use omnia_sdk::api::messaging::Delivery;
-use omnia_sdk::api::{Client, Context, Handlers};
+use omnia_sdk::api::{Context, Handlers};
 use omnia_sdk::{bad_gateway, bad_request, model, plugins, vcs};
 use serde::{Deserialize, Serialize};
 
@@ -52,7 +52,7 @@ fn delivery(topic: Option<&str>, payload: &[u8]) -> Delivery {
 
 #[tokio::test]
 async fn exact_topic() {
-    let router = Handlers::new().topic("events.created", echo).with_state(Client::new(()));
+    let router = Handlers::new().topic("events.created", echo).with_state(());
 
     router
         .handle(delivery(Some("events.created"), br#"{"name":"message","count":2}"#))
@@ -66,7 +66,7 @@ async fn exact_topic() {
 
 #[tokio::test]
 async fn malformed_delivery() {
-    let router = Handlers::new().topic("events", echo).with_state(Client::new(()));
+    let router = Handlers::new().topic("events", echo).with_state(());
 
     assert_eq!(
         router.handle(delivery(None, br#"{"name":"message"}"#)).await,
@@ -114,7 +114,7 @@ async fn failing_handler() {
         .topic("tool", |_: Context<()>, _: EchoInput| {
             ready(Err::<(), _>(ToolError(model::Error::ToolFailed("lint".into()))))
         })
-        .with_state(Client::new(()));
+        .with_state(());
 
     for (topic, status, code, text) in [
         ("gateway", 502, "bad_gateway", "upstream did not answer"),
@@ -124,7 +124,7 @@ async fn failing_handler() {
         ("format", 500, "server_error", "when formatting"),
         ("revision", 404, "not-found", "not found: v1"),
         ("plugin", 400, "refused", "unsigned"),
-        ("tool", 502, "bad_gateway", "could not review"),
+        ("tool", 502, "tool-failed", "could not review"),
     ] {
         let Err(error) = router.handle(delivery(Some(topic), br#"{"name":"message"}"#)).await
         else {
@@ -139,7 +139,7 @@ async fn failing_handler() {
 #[tokio::test]
 async fn topic_span() {
     let (spans, _guard) = Spans::install();
-    let router = Handlers::new().topic("events.created", echo).with_state(Client::new(()));
+    let router = Handlers::new().topic("events.created", echo).with_state(());
     let delivery = Delivery::new("events.created", br#"{"name":"message"}"#)
         .with_metadata("request-id", "req-1")
         .with_metadata("correlation-id", "corr-1");
@@ -159,7 +159,7 @@ async fn topic_span() {
 #[tokio::test]
 async fn invalid_payload_span() {
     let (spans, _guard) = Spans::install();
-    let router = Handlers::new().topic("events.created", echo).with_state(Client::new(()));
+    let router = Handlers::new().topic("events.created", echo).with_state(());
     let delivery = Delivery::new("events.created", b"not-json")
         .with_metadata("request-id", "req-1")
         .with_metadata("correlation-id", "corr-1");
@@ -189,7 +189,7 @@ async fn merged_routes() {
     let created = Handlers::new().topic("events.created", echo);
     let deleted = Handlers::new().topic("events.deleted", echo);
     let updated = Handlers::new().topic("events.updated", echo);
-    let router = Handlers::from([created, deleted, updated]).with_state(Client::new(()));
+    let router = Handlers::from([created, deleted, updated]).with_state(());
 
     for topic in ["events.created", "events.deleted", "events.updated"] {
         router
@@ -230,7 +230,7 @@ async fn topic_with_raw_payload() {
                 })
                 .map_err(|error| bad_request!("payload is not utf-8: {error}"))
         })
-        .with_state(Client::new(()));
+        .with_state(());
 
     router
         .handle(delivery(Some("events.raw"), b"not-json"))
@@ -257,7 +257,7 @@ async fn tenant_metadata() {
             ready(Ok::<(), omnia_sdk::Error>(()))
         }
     };
-    let router = Handlers::new().topic("events", record).with_state(Client::new(()));
+    let router = Handlers::new().topic("events", record).with_state(());
 
     router
         .handle(delivery(Some("events"), br#"{"name":"message"}"#))

@@ -36,6 +36,6 @@ where
             return None;
         }
         let container = self.blobstore.get_container(container.to_owned()).await.ok()?;
-        container.get_data(name.to_owned(), 0, u64::MAX).await.ok().flatten().map(Into::into)
+        container.get_data(name.to_owned(), 0..u64::MAX).await.ok().flatten().map(Into::into)
     }
 }

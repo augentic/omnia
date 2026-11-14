@@ -58,10 +58,10 @@ The [`examples/`](examples/README.md) directory contains a complete working gues
 | [`omnia-plugin`](crates/plugin)           | `omnia:plugins/loader` capability — loader host, the deployment's grant (declared guest names, read-only mount roots, registry routing), registry acquisition, and plugin stores; selected by omnia's `loader` feature |
 | [`omnia-cli`](crates/cli)                 | Leaf `run` grammar — clap plus argv-precedence; selected by omnia's `cli` feature |
 | [`omnia-compile`](crates/compile)         | Leaf ahead-of-time compiler — `CompileOptions` and `compile`, over wasmtime alone; its Cranelift backend is what omnia's `jit` feature turns on |
-| [`omnia-sdk`](crates/sdk)                 | Guest SDK — `Handler`/`Client`/`Context`, HTTP/messaging routers and the command façade, errors, capabilities, and MCP support |
+| [`omnia-sdk`](crates/sdk)                 | Guest SDK — `Handler`/`Context`/`Handlers`, HTTP/messaging routers and the command façade, errors, capabilities, and MCP support |
 | [`omnia-guest-macros`](crates/guest-macros)     | `#[instrument]` observability attribute and `#[derive(Provider)]` for guests               |
 | [`omnia-host-macros`](crates/host-macros)       | `runtime!` for host runtime generation and `#[derive(HostCtx)]` for host crates            |
-| [`omnia-wasi-blobstore`](crates/wasi-blobstore) | wasi:blobstore host and guest bindings                                                     |
+| [`omnia-wasi-blobstore`](crates/wasi-blobstore) | omnia:blobstore host and guest bindings, with the wasi:blobstore draft                     |
 | [`omnia-wasi-config`](crates/wasi-config)       | wasi:config host and guest bindings                                                        |
 | [`omnia-wasi-docstore`](crates/wasi-docstore)   | Document-store host and guest bindings                                                     |
 | [`omnia-wasi-http`](crates/wasi-http)           | wasi:http host and guest bindings                                                          |

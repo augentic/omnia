@@ -11,8 +11,15 @@
 //! or `Error` is unambiguous.
 //!
 //! A capability call fails with an [`Error`](crate::Error) whose code names
-//! the class of failure. Absence is not a failure: a missing key is
-//! `Ok(None)`.
+//! the class of failure. Three capabilities fail with a typed error of their
+//! own, which `?` converts into an [`Error`](crate::Error) under the same
+//! code:
+//!
+//! - [`Vcs`] with [`vcs::Error`]
+//! - [`Plugins`] with [`plugins::Error`]
+//! - [`Model`] with [`model::Error`]
+//!
+//! Absence is not a failure: a missing key is `Ok(None)`.
 //!
 //! Every capability has a companion `Has<Capability>` accessor trait (emitted
 //! by `#[capability]`) with a blanket forwarding impl and implementations for

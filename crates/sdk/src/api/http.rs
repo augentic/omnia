@@ -1,7 +1,7 @@
 //! HTTP handlers over plain axum.
 //!
 //! A route is an ordinary axum handler on an `axum::Router` whose state is
-//! one provider-owning [`Client`]. The handler reaches its capabilities
+//! the shared provider, an `Arc<P>`. The handler reaches its capabilities
 //! through the [`Context`] extractor, reads its input with axum's `Path`,
 //! `Query`, and `Json` extractors, and answers a `Result` whose error is an
 //! [`Error`](crate::Error), the JSON [`ErrorBody`] at its status; `?` on an
@@ -9,7 +9,7 @@
 //! of its own implements `IntoResponse` itself. A module builds its routes
 //! and topics on a [`Handlers`] of its own and the guest merges them
 //! (`Handlers::from([..])` or [`Handlers::merge`]) into its one
-//! [`api::Router`](Router) with `with_state(Client::new(provider))`.
+//! [`api::Router`](Router) with `with_state(provider)`.
 //! [`export!`] binds the router fn as the guest's `wasi:http` handler and
 //! serves each request inside the `handler` span [`trace`] opens.
 
@@ -27,7 +27,7 @@ use http::request::Parts;
 use tracing::Instrument as _;
 
 use crate::ErrorBody;
-use crate::api::{Client, Context, Handlers, Metadata, Router};
+use crate::api::{Context, Handlers, Metadata, Router};
 
 #[doc(hidden)]
 #[macro_export]
@@ -134,15 +134,14 @@ impl<P, S> FromRequestParts<S> for Context<P>
 where
     P: Send + Sync + 'static,
     S: Send + Sync,
-    Client<P>: FromRef<S>,
+    Arc<P>: FromRef<S>,
 {
     type Rejection = Infallible;
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
-        let client = Client::from_ref(state);
         let metadata = Metadata::from_request_parts(parts, state).await?;
         Ok(Self {
-            provider: Arc::clone(&client.provider),
+            provider: Arc::from_ref(state),
             metadata,
         })
     }
@@ -154,13 +153,13 @@ impl<P: Send + Sync + 'static> Handlers<P> {
     /// # Panics
     ///
     /// Panics when `path` overlaps an existing route for the same method.
-    pub fn route(mut self, path: &str, method_router: MethodRouter<Client<P>>) -> Self {
+    pub fn route(mut self, path: &str, method_router: MethodRouter<Arc<P>>) -> Self {
         self.http = self.http.route(path, method_router);
         self
     }
 }
 
-impl<P: Send + Sync + 'static> From<Handlers<P>> for axum::Router<Client<P>> {
+impl<P: Send + Sync + 'static> From<Handlers<P>> for axum::Router<Arc<P>> {
     fn from(handlers: Handlers<P>) -> Self {
         handlers.http
     }

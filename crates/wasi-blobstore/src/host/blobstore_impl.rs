@@ -2,9 +2,10 @@ use anyhow::Context;
 use omnia_core::HostView;
 use wasmtime::component::{Accessor, Resource};
 
+use crate::host::generated::omnia::blobstore::store;
 use crate::host::generated::wasi::blobstore::blobstore::{Host, HostWithStore, ObjectId};
 use crate::host::resource::ContainerProxy;
-use crate::host::{BlobStoreClient, Error, Result, WasiBlobStore};
+use crate::host::{BlobStoreClient, Result, WasiBlobStore};
 
 impl<T> HostWithStore<T> for WasiBlobStore {
     async fn create_container(
@@ -58,8 +59,14 @@ impl<T> HostWithStore<T> for WasiBlobStore {
             dest.container,
             dest.object
         );
-        copy(accessor, &src, dest).await?;
-        Ok(())
+        <Self as store::HostWithStore<T>>::copy(
+            accessor,
+            src.container,
+            src.object,
+            dest.container,
+            dest.object,
+        )
+        .await
     }
 
     async fn move_object(
@@ -72,46 +79,15 @@ impl<T> HostWithStore<T> for WasiBlobStore {
             dest.container,
             dest.object
         );
-
-        if same_object(&src, &dest) {
-            // deleting the source would destroy the destination
-            return Ok(());
-        }
-
-        let src_container = copy(accessor, &src, dest).await?;
-        src_container.delete_object(src.object).await.context("deleting source object")?;
-        Ok(())
+        <Self as store::HostWithStore<T>>::rename(
+            accessor,
+            src.container,
+            src.object,
+            dest.container,
+            dest.object,
+        )
+        .await
     }
-}
-
-// returns the source container so `move_object` can delete the source after
-async fn copy<T>(
-    accessor: &Accessor<T, WasiBlobStore>, src: &ObjectId, dest: ObjectId,
-) -> Result<std::sync::Arc<dyn crate::host::resource::Container>> {
-    let src_container = accessor
-        .with(|mut store| store.get().client.get_container(src.container.clone()))
-        .await
-        .context("getting source container")?;
-
-    let data = src_container
-        .get_data(src.object.clone(), 0, u64::MAX)
-        .await
-        .context("reading source object")?
-        .ok_or_else(|| {
-            Error::NotFound(format!("source object not found: {}/{}", src.container, src.object))
-        })?;
-
-    let dest_container = accessor
-        .with(|mut store| store.get().client.get_container(dest.container.clone()))
-        .await
-        .context("getting destination container")?;
-
-    dest_container.write_data(dest.object, data).await.context("writing object")?;
-    Ok(src_container)
-}
-
-fn same_object(src: &ObjectId, dest: &ObjectId) -> bool {
-    src.container == dest.container && src.object == dest.object
 }
 
 impl Host for HostView<'_, dyn BlobStoreClient> {}

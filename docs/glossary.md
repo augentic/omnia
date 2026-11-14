@@ -76,11 +76,11 @@ A [guest entry](#guest-entry) whose component is not compiled into the runtime �
 
 ### Handler contract
 
-The transport-neutral unit of guest application logic: an `async fn(Context<P>, I) -> Result<O, E>`, registered on a `Handlers<P>` and invoked by the closed `Router`'s dispatch over the `Client` in its state. The messaging router and the command façade are adapters that decode a transport event into `I` and encode the result back; an HTTP route is a plain axum handler that takes the same `Context<P>` as an extractor over that `Client`. A unit test calls the fn directly with `Context::new(provider, metadata)`. See [Writing Guests](guides/writing-guests.md#the-handler-contract).
+The transport-neutral unit of guest application logic: an `async fn(Context<P>, I) -> Result<O, E>`, registered on a `Handlers<P>` and invoked by the closed `Router`'s dispatch over the provider it owns. The messaging router and the command façade are adapters that decode a transport event into `I` and encode the result back; an HTTP route is a plain axum handler that takes the same `Context<P>` as an extractor over that provider. A unit test calls the fn directly with `Context::new(provider, metadata)`. See [Writing Guests](guides/writing-guests.md#the-handler-contract).
 
 ### Provider
 
-The one value a guest's handlers run against: it implements the capability traits their bounds name, and the `Client` a `Router` closes over owns it. `WasiProvider` serves every capability through the WASI host on `wasm32`, `omnia_test::guest::Provider` serves them natively with in-memory doubles, and a native provider written outside omnia serves them over real services. Omnia ships no native provider. What any provider, and the host serving it, owes the application is the [Provider Contract](reference/provider-contract.md).
+The one value a guest's handlers run against: it implements the capability traits their bounds name, and the `Router` that `Handlers::with_state(provider)` builds owns it. `WasiProvider` serves every capability through the WASI host on `wasm32`, `omnia_test::guest::Provider` serves them natively with in-memory doubles, and a native provider written outside omnia serves them over real services. Omnia ships no native provider. What any provider, and the host serving it, owes the application is the [Provider Contract](reference/provider-contract.md).
 
 ### Command façade
 

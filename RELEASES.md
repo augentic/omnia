@@ -22,8 +22,8 @@ Unreleased
 - `omnia_sdk::api::{Handlers, Router}`: a module registers its HTTP routes
   (`route`), messaging topics (`topic`, `topic_with`), and CLI subcommands
   (`command`, `command_with`, behind the `command` feature) on one
-  `Handlers<P>`, and `with_state(Client::new(provider))` closes them into
-  the one `Router<P>`. `http::export!`, `messaging::export!`, and
+  `Handlers<P>`, and `with_state(provider)` closes them into the one
+  `Router<P>`. `http::export!`, `messaging::export!`, and
   `command::export!` bind the WASI exports. `command::export!` stamps the
   guest crate's version and description as `--version` and `--help`.
 - `SecretStore`, the secrets capability over `omnia:vault`. A handle
@@ -40,6 +40,10 @@ Unreleased
 - `omnia:sql`, the Omnia-owned interface `SqlDb` calls. `WasiSql` serves it
   beside the `wasi:sql` draft over one `Connection`. Each call names its
   database, and `batch` runs its statements in one transaction.
+- `omnia:blobstore`, the Omnia-owned interface `BlobStore` calls.
+  `WasiBlobStore` serves it beside the `wasi:blobstore` draft over one
+  `BlobStoreClient`. Each call names its container, and `get-range` takes
+  a half-open range.
 - The codes of a failed capability call. Its `omnia_sdk::Error` names the
   class of failure in its code:
   - `not-found`, `denied`, `invalid`, `unsupported`, or `other` on a
@@ -125,9 +129,12 @@ Unreleased
 
 - A handler takes its `Context<P>` first and its input second. An HTTP
   handler is a plain axum handler that takes `Context<P>` as an extractor
-  over the `Client` in the router state. `Client::new(provider)` takes no
-  owner. A handler that takes `Json<T>` answers `415` to a request without
-  `content-type: application/json`.
+  over the `Arc<P>` in the router state. A handler that takes `Json<T>`
+  answers `415` to a request without `content-type: application/json`.
+- `omnia_sdk::api::Client` is gone, and the provider is the router's state:
+  - `with_state(Client::new(provider))` becomes `with_state(provider)`.
+  - A raw axum router closes with `with_state(Arc::new(provider))`.
+  - `Command::new` takes the `&Arc<P>` where it took a `&Client<P>`.
 - `omnia_sdk::Error` implements `IntoResponse`, so a handler answers
   `omnia_sdk::Result<T>`. `HttpResult` and `HttpError` are gone.
 - `omnia_sdk::command!(main)` is `omnia_sdk::api::command::export!(main)`.
@@ -148,10 +155,12 @@ Unreleased
     `omnia_sdk::identity::AccessToken`.
   - A `DEFAULT` binding name in `omnia_sdk::{identity, keyvalue, sql,
     vault}`, and `omnia_sdk::keyvalue::Conflict`.
-- Every capability trait answers `omnia_sdk::Result`. A trait over named
-  bindings (`Identity`, `SecretStore`, `SqlDb`, and `StateStore`) addresses
-  `default` until `named(name)` selects another name the deployment
-  declares. Migrating a 0.37 guest:
+- Every capability trait but `Vcs`, `Plugins`, and `Model` answers
+  `omnia_sdk::Result`. Those three answer their module's typed `Error`,
+  which converts into an `omnia_sdk::Error` under its `code()`. A trait
+  over named bindings (`Identity`, `SecretStore`, `SqlDb`, and
+  `StateStore`) addresses `default` until `named(name)` selects another
+  name the deployment declares. Migrating a 0.37 guest:
   - `Config::get` answers `Option<String>`, so an unset key is `Ok(None)`.
     `ConfigExt::require` fails one with the code `not-found`, and
     `ConfigExt::parse` answers it as `None`.
@@ -187,6 +196,9 @@ Unreleased
 - `SqlDb` calls `omnia:sql`, one host call per method, and `batch` runs its
   statements in one transaction. A failing statement rolls back the whole
   batch.
+- `BlobStore` calls `omnia:blobstore`, one host call per method. Its codes
+  come from the error's case, where the SDK read a missing container or
+  object from the message.
 - `SqlDefault` opens only the names it declares, and refuses any other.
   A guest that opened a connection by another name, such as `db`, opens
   `default` or lists the name in `SQL_DATABASES`.
@@ -229,7 +241,18 @@ Unreleased
   - `delete_container` succeeds when the container is absent.
 
   A backend picks a failure's code by returning an
-  `omnia_wasi_blobstore::Error`, which implements `std::error::Error`.
+  `omnia_wasi_blobstore::Error`, whose six cases are the six capability
+  error codes.
+- `omnia_wasi_blobstore::Container` takes the `omnia:blobstore` shapes:
+  - `get_data` takes a half-open `Range<u64>`, clamped to the object. An
+    inverted range, which a backend refused, reads as empty.
+  - `object_info` answers `None` for an absent object.
+  - `list_objects(prefix, after)` answers one name-ordered `Page` of
+    `ObjectMetadata`.
+
+  `ContainerMetadata`, `ObjectMetadata`, and `Page` are the
+  `omnia:blobstore` records. The host translates the draft's inclusive
+  range and its name stream itself.
 - `StateStore` calls `omnia:keyvalue`, one host call per method:
   - `get` answers `Option<Bytes>`.
   - `set` answers `()`, and a TTL is an `Option<Duration>`. A zero TTL
@@ -331,11 +354,19 @@ Unreleased
 - An `omnia_sdk::vcs::Error`, `plugins::Error`, or `model::Error` under
   `anyhow` context converts into `omnia_sdk::Error` with the code and
   status it has unwrapped, which was a `server_error`.
+- A `model::Error` converts into `omnia_sdk::Error` under the code its
+  `code()` names, as a `vcs::Error` or `plugins::Error` does:
+  - `invalid-request` and `budget-exhausted` on a `BadRequest`, which were
+    `bad_request`.
+  - `tool-failed` and `backend` on a `BadGateway`, which were
+    `bad_gateway`.
 - An `omnia_sdk::Error` under `anyhow` context adds its description, not
   its display, to the context. `bad_request!("no name")` under the
   context `saving` describes itself as `saving: no name`, which was
   `saving: code: bad_request, description: no name`.
 - `omnia_sdk::Error` implements `PartialEq` and `Eq`.
+- `omnia_sdk::Error::code()` and `description()` answer `&str`, which was
+  a cloned `String`.
 - A messaging failure is an `omnia_sdk::Error`, so `Router::handle`
   answers `omnia_sdk::Result<()>`. Its code names the failure:
   - `missing-topic`, a `BadRequest`, is a delivery with no topic, which
@@ -352,6 +383,10 @@ Unreleased
   Over the draft `wasi:messaging`, every failure still crosses as
   `error.other` carrying the error's display. A match on a `DeliveryError`
   variant becomes a match on the code.
+- A subcommand reads its handler's error by the messaging rule above, so
+  `Command::call` takes any handler, where it took one whose error
+  converted into `Failure`. `Command::hints` and `Router::hints` consult
+  their fn for every failure.
 - `omnia_sdk::api::Metadata` is `#[non_exhaustive]`. Code outside the SDK
   builds one with `Metadata::default()` and assigns its fields, or with
   `from_lookup`, `from_headers`, `from_env`, or `minted`.
