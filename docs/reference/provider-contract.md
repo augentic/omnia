@@ -80,7 +80,7 @@ What any provider owes the application beyond the trait signatures, each with ho
 
 ### Pass the shared rows
 
-Each behavioural invariant of a capability trait is one generic `async fn` in `omnia_sdk::contract`, which panics when the provider breaks it. A provider conforms when the rows of every trait it implements pass over it. Omnia runs the rows natively over its stateful doubles, and through `test-programs` guests against its hosts and backends.
+Each behavioural invariant of a capability trait is one generic `async fn` in `omnia_test::contract` (behind the `contract` feature), which panics when the provider breaks it. A provider conforms when the rows of every trait it implements pass over it. Omnia runs the rows natively over its stateful doubles, and through `test-programs` guests against its hosts and backends.
 
 ### Enforce the argument rules
 

@@ -62,7 +62,7 @@ async fn keyvalue_bucket() {
 
 #[tokio::test]
 async fn keyvalue_state_store() {
-    // `omnia_sdk::contract::state` runs over the store's own bucket and `state::SECOND`
+    // `omnia_test::contract::state` runs over the store's own bucket and `state::SECOND`
     let backends = Backends::defaults().await.keyvalue(declaring(&["default", "second"]).await);
 
     run_guest(test_programs::KEYVALUE_STATE_STORE, backends.clone()).await;

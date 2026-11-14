@@ -45,10 +45,11 @@ Unreleased
 - `omnia_sdk::capability::Page`, one page of a listing and the cursor that
   resumes it. `BlobStore::list`, `DocumentDb::query`, and
   `SecretStore::keys` answer one.
-- `omnia_sdk::contract::state`, the `StateStore` behaviour rows: one
-  generic `async fn` per invariant, run natively over
-  `omnia_test::guest::Memory` and in a guest over `WasiProvider`.
-- `omnia_sdk::contract::{sql, document}`, the `SqlDb` and `DocumentDb`
+- `omnia_test::contract::state` (behind the `contract` feature, natively
+  and on `wasm32`), the `StateStore` behaviour rows: one generic `async fn`
+  per invariant, run natively over `omnia_test::guest::Memory` and in a
+  guest over `WasiProvider`.
+- `omnia_test::contract::{sql, document}`, the `SqlDb` and `DocumentDb`
   behaviour rows. Both run in a guest over `WasiProvider`, and the document
   rows run natively over `omnia_test::guest::MemoryDocs` too.
 - `omnia_wasi_keyvalue::ConnectOptions`. `KeyValueDefault` serves the

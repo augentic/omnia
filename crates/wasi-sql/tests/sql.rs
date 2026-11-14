@@ -59,7 +59,7 @@ async fn sql_query_exec() {
 
 #[tokio::test]
 async fn sql_sql_db() {
-    // `omnia_sdk::contract::sql` runs over the bundle's own `default` database
+    // `omnia_test::contract::sql` runs over the bundle's own `default` database
     run_guest(test_programs::SQL_SQL_DB, Backends::defaults().await).await;
 }
 
