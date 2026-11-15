@@ -14,9 +14,13 @@ pub fn decode_id(id: &str) -> Vec<u8> {
     })
 }
 
-pub fn datetime_nanos(dt: types::Datetime) -> u64 {
-    // Saturate: a timestamp past the year 2554 clamps instead of panicking or wrapping.
-    dt.seconds.saturating_mul(1_000_000_000).saturating_add(u64::from(dt.nanoseconds))
+pub fn instant_nanos(instant: types::Instant) -> u64 {
+    // Clamp: an instant before the epoch reads as the epoch, and one past the
+    // year 2554 saturates instead of panicking or wrapping.
+    let Ok(seconds) = u64::try_from(instant.seconds) else {
+        return 0;
+    };
+    seconds.saturating_mul(1_000_000_000).saturating_add(u64::from(instant.nanoseconds))
 }
 
 impl types::Host for HostView<'_, dyn OtelClient> {

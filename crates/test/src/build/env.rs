@@ -6,7 +6,7 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-pub const WASM_TARGET: &str = "wasm32-wasip2";
+pub const WASM_TARGET: &str = "wasm32-wasip3";
 
 /// A cargo-provided variable, or a panic naming it: the pipeline only runs
 /// under `cargo` as a build script.

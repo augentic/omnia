@@ -13,7 +13,7 @@ architecture. There are many ways to help besides contributing code:
 ## Getting started
 
 - [AGENTS.md](AGENTS.md) — repository overview, key commands, and gotchas
-  (toolchain pins, `wasm32-wasip2` target, nightly rustfmt).
+  (toolchain pins, `wasm32-wasip3` target, nightly rustfmt).
 - [docs/getting-started.md](docs/getting-started.md) — building and running
   your first guest.
 - [docs/guides/testing-policy.md](docs/guides/testing-policy.md) — what earns
@@ -33,7 +33,7 @@ All contributions are made via pull request. All patches from all contributors g
 
 Normally, all pull requests must include tests that cover your change. Occasionally, a change will be very difficult to test for; in those cases, include a note in your commit message explaining why.
 
-`make ci` runs the formatting check, clippy with warnings denied (natively, then for `wasm32-wasip2` over lib, bins and examples), the test suite (`cargo nextest`), doc tests, rustdoc, `cargo vet`, and `cargo deny`. `make check` adds the local advisory extras (`cargo audit`, `cargo outdated`, `cargo udeps`) and rewrites formatting in place. After changing dependencies, `make vet-regen` refreshes the `supply-chain/` files that `vet` only checks.
+`make ci` runs the formatting check, clippy with warnings denied (natively, then for `wasm32-wasip3` over lib, bins and examples), the test suite (`cargo nextest`), doc tests, rustdoc, `cargo vet`, and `cargo deny`. `make check` adds the local advisory extras (`cargo audit`, `cargo outdated`, `cargo udeps`) and rewrites formatting in place. After changing dependencies, `make vet-regen` refreshes the `supply-chain/` files that `vet` only checks.
 
 Tests follow the testing policy above. Give each commit a conventional prefix describing the change (`fix:`, `feat:`, `perf:`, `docs:`, ...). A maintainer with write access merges their own pull request after approval.
 

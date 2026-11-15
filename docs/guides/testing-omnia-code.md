@@ -4,7 +4,7 @@ How to test a guest crate or an embedder built on omnia, using the `omnia-test` 
 
 ## The three rungs
 
-A guest is a handler compiled to a `wasm32-wasip2` component and run by a host runtime. Each of those layers is a place to test, and `omnia-test` puts one feature behind each:
+A guest is a handler compiled to a `wasm32-wasip3` component and run by a host runtime. Each of those layers is a place to test, and `omnia-test` puts one feature behind each:
 
 | Rung | Feature | What runs | Against |
 | ---- | ------- | --------- | ------- |
@@ -117,7 +117,7 @@ fn main() {
 }
 ```
 
-`Components` runs the nested `wasm32-wasip2` build into `target/wasm32-fixtures` — a sibling of the outer profile directory shared by every outer configuration, so plain `cargo test` is self-contained and a version or toolchain bump rebuilds the tree incrementally instead of leaving the last one behind under a per-hash `OUT_DIR` — and `write_gen` emits one `pub const <GROUP>_<SCENARIO>: &str` artifact path per program plus a `foreach_<group>!` macro that fails to compile unless an identically named test exists at the invocation site. `scan` discovers programs from a `<group>/<scenario>.rs` tree and `sync_examples` keeps the `[[example]]` stanzas in step; `examples([..])` names them explicitly instead. A repository whose components under test are shipped `cdylib` packages adds them to the same build with `scan_packages(dir).group(name)` (or `packages([..])`), so one `gen.rs` carries the components and the programs that drive them.
+`Components` runs the nested `wasm32-wasip3` build into `target/wasm32-fixtures` — a sibling of the outer profile directory shared by every outer configuration, so plain `cargo test` is self-contained and a version or toolchain bump rebuilds the tree incrementally instead of leaving the last one behind under a per-hash `OUT_DIR` — and `write_gen` emits one `pub const <GROUP>_<SCENARIO>: &str` artifact path per program plus a `foreach_<group>!` macro that fails to compile unless an identically named test exists at the invocation site. `scan` discovers programs from a `<group>/<scenario>.rs` tree and `sync_examples` keeps the `[[example]]` stanzas in step; `examples([..])` names them explicitly instead. A repository whose components under test are shipped `cdylib` packages adds them to the same build with `scan_packages(dir).group(name)` (or `packages([..])`), so one `gen.rs` carries the components and the programs that drive them.
 
 ## Examples to read
 

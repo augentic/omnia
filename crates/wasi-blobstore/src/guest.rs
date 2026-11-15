@@ -1,7 +1,6 @@
 //! # WASI Blobstore WIT implementation
 
-// Bindings for `omnia:blobstore` and the `wasi:blobstore` draft.
-// See (<https://github.com/WebAssembly/wasi-blobstore/>)
+// Bindings for `omnia:blobstore`.
 mod generated {
     #![allow(missing_docs, clippy::same_length_and_capacity, reason = "wit-bindgen output")]
     wit_bindgen::generate!({
@@ -15,5 +14,3 @@ mod generated {
 pub mod omnia {
     pub use crate::guest::generated::omnia::blobstore::store;
 }
-
-pub use self::generated::wasi::blobstore::*;

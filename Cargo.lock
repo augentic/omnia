@@ -2469,7 +2469,6 @@ dependencies = [
  "tokio",
  "tracing",
  "wasmtime",
- "wasmtime-wasi",
  "wit-bindgen 0.63.0",
 ]
 

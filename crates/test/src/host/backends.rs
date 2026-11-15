@@ -71,7 +71,7 @@ pub struct Backends<
     O = OtelDefault,
     C = NoVcs,
 > {
-    /// The `omnia:blobstore` and `wasi:blobstore` backend.
+    /// The `omnia:blobstore` backend.
     pub blobstore: B,
     /// Map-backed `wasi:config`, empty until seeded by [`Backends::config`].
     pub config: ConfigDefault,
@@ -194,7 +194,7 @@ impl<M, K, B, D, S, V, G, I, O, C> Backends<M, K, B, D, S, V, G, I, O, C> {
         }
     }
 
-    /// The same bundle serving `omnia:blobstore` and `wasi:blobstore` from `blobstore`.
+    /// The same bundle serving `omnia:blobstore` from `blobstore`.
     #[must_use]
     pub fn blobstore<N: BlobStoreClient + Clone>(
         self, blobstore: N,

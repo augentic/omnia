@@ -22,7 +22,7 @@
 # drive it.
 [[guest]]
 name = "model"
-source.path = "../../target/wasm32-wasip2/debug/examples/model_wasm.wasm"
+source.path = "../../target/wasm32-wasip3/debug/examples/model_wasm.wasm"
 command = true
 
 # Read-only workspace the `model` guest lends through `grants.workspace`.

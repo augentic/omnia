@@ -14,10 +14,10 @@ Or, more manually, for debugging:
 
 ```bash
 # build the guest
-cargo build --example otel-wasm --target wasm32-wasip2
+cargo build --example otel-wasm --target wasm32-wasip3
 
 # run the host
-cargo run --example otel -- -v run ./target/wasm32-wasip2/debug/examples/otel_wasm.wasm
+cargo run --example otel -- -v run ./target/wasm32-wasip3/debug/examples/otel_wasm.wasm
 ```
 
 ## Test
@@ -55,7 +55,7 @@ omnia::runtime!({
 
 ```bash
 export OTEL_EXPORTER_OTLP_ENDPOINT="http://localhost:4317"
-cargo run --example otel -- -v run ./target/wasm32-wasip2/debug/examples/otel_wasm.wasm
+cargo run --example otel -- -v run ./target/wasm32-wasip3/debug/examples/otel_wasm.wasm
 ```
 
 

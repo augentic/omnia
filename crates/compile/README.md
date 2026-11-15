@@ -1,7 +1,7 @@
 # omnia-compile
 
 The ahead-of-time compiler of [omnia](https://github.com/augentic/omnia):
-[`compile`] turns a `wasm32-wasip2` component into the artifact the runtime
+[`compile`] turns a `wasm32-wasip3` component into the artifact the runtime
 deserializes instead of compiling at startup, and [`CompileOptions`] is the
 one value of settings that shape such an artifact.
 

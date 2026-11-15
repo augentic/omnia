@@ -56,7 +56,7 @@ pub enum Command {
         #[arg(last = true)]
         args: Vec<String>,
     },
-    /// Compile the specified wasm32-wasip2 component.
+    /// Compile the specified wasm32-wasip3 component.
     #[cfg(feature = "jit")]
     Compile {
         /// The path to the wasm file to compile.

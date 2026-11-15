@@ -286,7 +286,8 @@ async fn link_relay() {
 
 // The sleeper takes the id `echoer` for the same reason as the relay. Only
 // the caller is awaited, so the test finishes well inside the 2 s the sleeper
-// would otherwise hold its store.
+// would otherwise hold its store. The sleep goes through `poke-async`, since
+// a sync-typed export that blocks traps instead of waiting.
 #[tokio::test]
 async fn link_sleeper() {
     let runtime = boot_with(
@@ -296,7 +297,8 @@ async fn link_sleeper() {
     .await
     .expect("deployment boots");
 
-    let err = call(&runtime, "full", "poke", "sleep").await.expect_err("callee outlives the bound");
+    let err =
+        call(&runtime, "full", "poke-async", "sleep").await.expect_err("callee outlives the bound");
     assert!(format!("{err:#}").contains("timed out"), "unexpected error: {err:#}");
 
     // The target is still reachable after the timed-out call was abandoned.

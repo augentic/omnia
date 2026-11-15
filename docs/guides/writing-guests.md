@@ -15,7 +15,7 @@ Every pattern here is drawn from [`omnia-exemplar`](https://github.com/augentic/
 
 ## Project setup
 
-A guest is a library crate with `crate-type = ["cdylib", "rlib"]`: `cdylib` produces the WebAssembly component on `wasm32-wasip2`, and `rlib` lets a native build link your routers and handlers. Native integration tests run them against `omnia_test::guest::Provider` doubles, and a native host can serve them over a provider of its own (see the [Provider Contract](../reference/provider-contract.md)).
+A guest is a library crate with `crate-type = ["cdylib", "rlib"]`: `cdylib` produces the WebAssembly component on `wasm32-wasip3`, and `rlib` lets a native build link your routers and handlers. Native integration tests run them against `omnia_test::guest::Provider` doubles, and a native host can serve them over a provider of its own (see the [Provider Contract](../reference/provider-contract.md)).
 
 Typical guest dependencies:
 
@@ -42,13 +42,15 @@ serde_json = "1"
 
 `omnia-sdk` re-exports `wasip3`, `wit-bindgen`, and the `omnia-wasi-*` guest bindings internally for the `export!` macro's expansion on `wasm32`, so you do not need to list `wasip3` or `wit-bindgen` in `Cargo.toml` or gate your crate with `#![cfg(target_arch = "wasm32")]`. (If you write a raw WASI export or call `omnia-wasi-*` modules directly as the standalone `examples/` do, gate wasm-only modules with `#![cfg(target_arch = "wasm32")]` and align `wasip3`/`wit-bindgen` with the versions the omnia workspace pins — see [Troubleshooting](../troubleshooting.md#outbound-http-or-spawned-work-inside-a-handler-deadlocks).)
 
+A raw export that may wait must be an `async func` in its WIT. On `wasm32-wasip3`, `std::thread::sleep` and every async-typed import suspend the task, and a sync-typed (`func`) export that suspends traps — see [Troubleshooting](../troubleshooting.md#cannot-block-a-synchronous-task-before-returning). The exports behind the `export!` macros are already async-typed.
+
 Build a guest with:
 
 ```bash
-cargo build -p my-guest --target wasm32-wasip2
+cargo build -p my-guest --target wasm32-wasip3
 # or for an in-repo example:
-cargo build --example <name>-wasm --target wasm32-wasip2
-# output: target/wasm32-wasip2/debug/examples/<name>_wasm.wasm  (underscores)
+cargo build --example <name>-wasm --target wasm32-wasip3
+# output: target/wasm32-wasip3/debug/examples/<name>_wasm.wasm  (underscores)
 ```
 
 ## The handler contract
@@ -138,7 +140,7 @@ http::export!(http_router);
 
 For **outbound** HTTP requests inside a handler, bound `P: HttpClient` and call `context.http().fetch(request).await` with a standard `http::Request<Bytes>`, or `fetch_json` from `HttpClientExt` to decode a JSON reply (or call `omnia_wasi_http::handle` directly in `wasm32`-only code; see `examples/http-proxy`).
 
-> **Advanced: raw WASI HTTP export.** When you need to customize the `wasi:http/incoming-handler` export directly (as the standalone `examples/` do to show the low-level binding), implement `wasip3::exports::http::handler::Guest` and hand the request to `omnia_wasi_http::serve`:
+> **Advanced: raw WASI HTTP export.** When you need to customize the `wasi:http/handler` export directly (as the standalone `examples/` do to show the low-level binding), implement `wasip3::exports::http::handler::Guest` and hand the request to `omnia_wasi_http::serve`:
 >
 > ```rust,noplayground
 > struct HttpGuest;

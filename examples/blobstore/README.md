@@ -1,6 +1,7 @@
 # Blobstore Example
 
-Demonstrates `wasi-blobstore` using the default (in-memory) implementation.
+Demonstrates `omnia:blobstore`, through `BlobStore` over `WasiProvider`, using
+the default (in-memory) implementation.
 
 ## Quick Start
 
@@ -12,10 +13,10 @@ Or, more manually, for debugging:
 
 ```bash
 # build the guest
-cargo build --example blobstore-wasm --target wasm32-wasip2
+cargo build --example blobstore-wasm --target wasm32-wasip3
 
 # run the host
-cargo run --example blobstore -- -v run ./target/wasm32-wasip2/debug/examples/blobstore_wasm.wasm
+cargo run --example blobstore -- -v run ./target/wasm32-wasip3/debug/examples/blobstore_wasm.wasm
 ```
 
 ## Test

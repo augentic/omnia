@@ -140,7 +140,7 @@ impl<B: 'static> Guest<B> {
     }
 
     /// The names the component exports — its interfaces
-    /// (`wasi:cli/run@0.2.0`) and bare functions — as the component type
+    /// (`wasi:cli/run@0.3.2`) and bare functions — as the component type
     /// lists them, so a caller can tell what a guest serves before any
     /// dispatch.
     #[must_use]
@@ -235,9 +235,10 @@ impl<B: 'static> Registry<B> {
     /// # Errors
     ///
     /// Returns an error if there are no guests at all (unless `allow_empty`),
-    /// link imports cannot be polyfilled, a component cannot be
-    /// pre-instantiated, an identity repeats, or a route targets a guest that
-    /// is neither loaded nor declared.
+    /// a guest was built for WASI 0.2 (`wasm32-wasip2`), link imports cannot
+    /// be polyfilled, a component cannot be pre-instantiated, an identity
+    /// repeats, or a route targets a guest that is neither loaded nor
+    /// declared.
     pub fn assemble(parts: RegistryParts<B>) -> Result<Self> {
         let RegistryParts {
             engine,
@@ -253,6 +254,9 @@ impl<B: 'static> Registry<B> {
             bail!("cannot build a guest registry with no guests");
         }
 
+        for guest in &loaded {
+            ensure_wasi_03(&guest.id, &guest.component, &engine)?;
+        }
         seam.polyfill(&engine, &mut linker, &loaded)?;
 
         let mut guests = BTreeMap::new();
@@ -312,6 +316,7 @@ impl<B: 'static> Registry<B> {
     pub(crate) fn instantiate_late(
         &self, id: &GuestId, component: &Component,
     ) -> Result<InstancePre<StoreCtx<B>>> {
+        ensure_wasi_03(id, component, &self.engine)?;
         let mut linker = self.linker.clone();
         self.seam.polyfill_late(&self.engine, &mut linker, id, component)?;
         linker
@@ -448,6 +453,40 @@ impl<B: 'static> Registry<B> {
     }
 }
 
+// names the rebuild a guest needs, in place of the linker's first unmet import
+fn ensure_wasi_03(id: &GuestId, component: &Component, engine: &Engine) -> Result<()> {
+    let component_type = component.component_type();
+    let imports = component_type.imports(engine).map(|(name, _)| name);
+    if let Some(import) = wasi_02_import(imports) {
+        bail!(
+            "guest `{id}` targets WASI 0.2 (wasm32-wasip2), importing `{import}`; rebuild it for \
+             wasm32-wasip3"
+        );
+    }
+    Ok(())
+}
+
+// the packages wasmtime-wasi served at 0.2; the 0.2 drafts omnia's own hosts
+// serve, such as `wasi:keyvalue`, stay importable
+const WASI_02_PACKAGES: [&str; 7] = [
+    "wasi:cli/",
+    "wasi:clocks/",
+    "wasi:filesystem/",
+    "wasi:http/",
+    "wasi:io/",
+    "wasi:random/",
+    "wasi:sockets/",
+];
+
+fn wasi_02_import<'a>(imports: impl IntoIterator<Item = &'a str>) -> Option<&'a str> {
+    imports.into_iter().find(|import| {
+        import.split_once('@').is_some_and(|(interface, version)| {
+            version.starts_with("0.2.")
+                && WASI_02_PACKAGES.iter().any(|package| interface.starts_with(package))
+        })
+    })
+}
+
 /// Why [`Registry::publish`] refused a late guest; `Occupied` is distinct so
 /// callers can treat an identity conflict as a race, not a fault.
 #[derive(Debug)]
@@ -456,4 +495,32 @@ pub enum PublishError {
     Occupied,
     /// Link-endpoint installation failed.
     Transport(anyhow::Error),
+}
+
+// a private rule over import names, since no guest pipeline builds for
+// `wasm32-wasip2` any more
+#[cfg(test)]
+mod tests {
+    use super::wasi_02_import;
+
+    #[test]
+    fn wasip2_guest() {
+        let imports =
+            ["omnia:otel/tracing@0.2.0", "wasi:cli/environment@0.2.6", "wasi:io/streams@0.2.6"];
+        assert_eq!(wasi_02_import(imports), Some("wasi:cli/environment@0.2.6"));
+    }
+
+    #[test]
+    fn wasip3_guest() {
+        let imports = [
+            "wasi:cli/environment@0.3.2",
+            "wasi:clocks/system-clock@0.3.2",
+            "wasi:config/store@0.2.0-rc.1",
+            "wasi:keyvalue/store@0.2.0-draft2",
+            "wasi:messaging/producer@0.2.0-draft",
+            "wasi:sql/readwrite@0.2.0-draft",
+            "omnia:otel/tracing@0.2.0",
+        ];
+        assert_eq!(wasi_02_import(imports), None);
+    }
 }

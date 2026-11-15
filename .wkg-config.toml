@@ -5,7 +5,6 @@ omnia = "omnia.host"
 wasi = "wasi.dev"
 
 [package_registry_overrides]
-"wasi:blobstore" = "omnia.host"
 "wasi:keyvalue" = "omnia.host"
 "wasi:messaging" = "omnia.host"
 "wasi:sql" = "omnia.host"

@@ -57,7 +57,7 @@ omnia::runtime!({
 In command mode, arguments after `--` on the command line are forwarded to the guest as its argv:
 
 ```bash
-cargo run --example cli -- run ./target/wasm32-wasip2/debug/examples/cli_wasm.wasm -- greet omnia
+cargo run --example cli -- run ./target/wasm32-wasip3/debug/examples/cli_wasm.wasm -- greet omnia
 ```
 
 A backend-less command runtime is valid too: `omnia::runtime!({ mode: command });`.

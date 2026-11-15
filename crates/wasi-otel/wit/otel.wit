@@ -1,7 +1,7 @@
-package omnia:otel@0.1.0;
+package omnia:otel@0.2.0;
 
 interface types {
-  use wasi:clocks/wall-clock@0.2.8.{datetime};
+  use wasi:clocks/system-clock@0.3.2.{instant};
 
   /// The key part of attribute `key-value` pairs.
   type key = string;
@@ -68,7 +68,7 @@ interface types {
 }
 
 interface metrics {
-  use wasi:clocks/wall-clock@0.2.8.{datetime};
+  use wasi:clocks/system-clock@0.3.2.{instant};
   use types.{key, value, key-value, instrumentation-scope, %resource, error};
 
   /// A set of bucket counts, encoded in a contiguous array of counts.
@@ -115,7 +115,7 @@ interface metrics {
     /// time series' aggregated data.
     filtered-attributes: list<key-value>,
     /// The time when the measurement was recorded.
-    time: datetime,
+    time: instant,
     /// The measured value.
     value: data-value,
     /// The ID of the span that was active during the measurement.
@@ -144,9 +144,9 @@ interface metrics {
     /// Represents individual aggregated measurements with unique attributes.
     data-points: list<gauge-data-point>,
     /// The time when the time series was started.
-    start-time: option<datetime>,
+    start-time: option<instant>,
     /// The time when the time series was recorded.
-    time: datetime,
+    time: instant,
   }
 
   /// DataPoint is a single data point in a time series.
@@ -165,9 +165,9 @@ interface metrics {
     /// Represents individual aggregated measurements with unique attributes.
     data-points: list<sum-data-point>,
     /// The time when the time series was started.
-    start-time: datetime,
+    start-time: instant,
     /// The time when the time series was recorded.
-    time: datetime,
+    time: instant,
     /// Describes if the aggregation is reported as the change from the last report
     /// time, or the cumulative changes since a fixed start time.
     temporality: temporality,
@@ -202,9 +202,9 @@ interface metrics {
     /// Individual aggregated measurements with unique attributes.
     data-points: list<histogram-data-point>,
     /// The time when the time series was started.
-    start-time: datetime,
+    start-time: instant,
     /// The time when the time series was recorded.
-    time: datetime,
+    time: instant,
     /// Describes if the aggregation is reported as the change from the last report
     /// time, or the cumulative changes since a fixed start time.
     temporality: temporality,
@@ -253,9 +253,9 @@ interface metrics {
     /// The individual aggregated measurements with unique attributes.
     data-points: list<exponential-histogram-data-point>,
     /// When the time series was started.
-    start-time: datetime,
+    start-time: instant,
     /// The time when the time series was recorded.
-    time: datetime,
+    time: instant,
     /// Describes if the aggregation is reported as the change from the last report
     /// time, or the cumulative changes since a fixed start time.
     temporality: temporality,
@@ -351,7 +351,7 @@ interface %resource {
 }
 
 interface tracing {
-  use wasi:clocks/wall-clock@0.2.8.{datetime};
+  use wasi:clocks/system-clock@0.3.2.{instant};
   use types.{key, value, key-value, instrumentation-scope, error};
 
   /// The trace that this `span-context` belongs to.
@@ -408,7 +408,7 @@ interface tracing {
     /// Event name.
     name: string,
     /// Event time.
-    time: datetime,
+    time: instant,
     /// Event attributes.
     attributes: list<key-value>,
   }
@@ -442,9 +442,9 @@ interface tracing {
     /// Span name.
     name: string,
     /// Span start time.
-    start-time: datetime,
+    start-time: instant,
     /// Span end time.
-    end-time: datetime,
+    end-time: instant,
     /// Span attributes.
     attributes: list<key-value>,
     /// Span events.
@@ -468,7 +468,7 @@ interface tracing {
 }
 
 world imports {
-  import wasi:clocks/wall-clock@0.2.8;
+  import wasi:clocks/system-clock@0.3.2;
   import types;
   import tracing;
   import metrics;

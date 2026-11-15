@@ -114,7 +114,7 @@ fn egress_host(entry: &str) -> Result<(), &'static str> {
     if entry.contains('/') {
         return Err("carries a path");
     }
-    let name = entry.strip_prefix("*.").unwrap_or(entry);
+    let name = entry.trim_prefix("*.");
     if name.starts_with('[') || name.parse::<IpAddr>().is_ok() {
         return Err("is an IP literal, not a host name");
     }

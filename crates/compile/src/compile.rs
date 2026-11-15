@@ -12,7 +12,7 @@ use wasmtime::{Config, Engine};
 
 use crate::CompileOptions;
 
-/// Compile the `wasm32-wasip2` component at `wasm` ahead of time.
+/// Compile the `wasm32-wasip3` component at `wasm` ahead of time.
 ///
 /// The artifact is written to `output` — a file path (written exactly there,
 /// parent directories created) or an existing directory (the artifact lands

@@ -1,26 +1,26 @@
 //! # Blobstore Wasm Guest
 //!
-//! This module demonstrates the WASI Blobstore interface for storing and
-//! retrieving binary data (blobs). It shows how to:
+//! This module demonstrates the `omnia:blobstore` interface for storing and
+//! retrieving binary data (blobs) through `BlobStore` over `WasiProvider`.
+//! It shows how to:
 //! - Create containers (namespaces for blobs)
-//! - Write data using streaming `OutgoingValue`
-//! - Read data using `IncomingValue`
+//! - Put an object in a container
+//! - Get the object back
 //!
 //! ## Backend Flexibility
 //!
-//! This guest code works with any WASI Blobstore backend:
+//! This guest code works with any `omnia:blobstore` backend:
 //! - In-memory (this example's host)
 //! - MongoDB (blobstore-mongodb example)
 //! - NATS Object Store (blobstore-nats example)
 
 #![cfg(target_arch = "wasm32")]
 
-use anyhow::anyhow;
+use anyhow::{Context, anyhow};
 use axum::routing::post;
 use axum::{Json, Router};
 use bytes::Bytes;
-use omnia_wasi_blobstore::blobstore;
-use omnia_wasi_blobstore::types::{IncomingValue, OutgoingValue};
+use omnia_sdk::{BlobStore, WasiProvider};
 use serde_json::Value;
 use tracing::Level;
 use wasip3::exports::http::handler::Guest;
@@ -39,34 +39,16 @@ impl Guest for Http {
 
 #[omnia_wasi_otel::instrument]
 async fn handler(body: Bytes) -> omnia_sdk::Result<Json<Value>> {
-    // create an outgoing value to hold the data we want to store
-    let outgoing = OutgoingValue::new_outgoing_value();
-    {
-        let stream = outgoing
-            .outgoing_value_write_body()
-            .await
-            .map_err(|()| anyhow!("failed to create stream"))?;
-        stream.blocking_write_and_flush(&body).map_err(|e| anyhow!("writing body: {e}"))?;
-    }
+    // store the request body as an object
+    WasiProvider.create_container("container").await.context("creating container")?;
+    WasiProvider.put("container", "request", &body).await.context("writing data")?;
 
-    // write the blob to the container
-    let container = blobstore::create_container("container".to_string())
+    // read the object back
+    let data = WasiProvider
+        .get("container", "request")
         .await
-        .map_err(|e| anyhow!("failed to create container: {e}"))?;
-    container
-        .write_data("request".to_string(), &outgoing)
-        .await
-        .map_err(|e| anyhow!("failed to write data: {e}"))?;
-
-    OutgoingValue::finish(outgoing).map_err(|e| anyhow!("issue finishing: {e}"))?;
-
-    // read the blob back from the container
-    let incoming = container
-        .get_data("request".to_string(), 0, 0)
-        .await
-        .map_err(|e| anyhow!("failed to read data: {e}"))?;
-    let data = IncomingValue::incoming_value_consume_sync(incoming)
-        .map_err(|e| anyhow!("failed to create incoming value: {e}"))?;
+        .context("reading data")?
+        .ok_or_else(|| anyhow!("object not found"))?;
 
     // verify the round-trip was successful (an error, not a guest trap)
     if data != body {
@@ -78,7 +60,6 @@ async fn handler(body: Bytes) -> omnia_sdk::Result<Json<Value>> {
         .into());
     }
 
-    let response =
-        serde_json::from_slice::<Value>(&data).map_err(|e| anyhow!("deserializing data: {e}"))?;
+    let response = serde_json::from_slice::<Value>(&data).context("deserializing data")?;
     Ok(Json(response))
 }

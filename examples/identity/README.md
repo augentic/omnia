@@ -12,13 +12,13 @@ Or, more manually, for debugging:
 
 ```bash
 # build the guest
-cargo build --example identity-wasm --target wasm32-wasip2
+cargo build --example identity-wasm --target wasm32-wasip3
 
 # configure credentials (copy .env.example to .env first)
 set -a && source .env && set +a
 
 # run the host
-cargo run --example identity -- -v run ./target/wasm32-wasip2/debug/examples/identity_wasm.wasm
+cargo run --example identity -- -v run ./target/wasm32-wasip3/debug/examples/identity_wasm.wasm
 ```
 
 ## Test

@@ -15,10 +15,10 @@ Or, more manually, for debugging:
 
 ```bash
 # build the guest
-cargo build --example sql-wasm --target wasm32-wasip2
+cargo build --example sql-wasm --target wasm32-wasip3
 
 # run the host
-cargo run --example sql -- -v run ./target/wasm32-wasip2/debug/examples/sql_wasm.wasm
+cargo run --example sql -- -v run ./target/wasm32-wasip3/debug/examples/sql_wasm.wasm
 ```
 
 ## Test

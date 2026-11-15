@@ -1,4 +1,4 @@
-//! Default in-memory implementation for wasi-blobstore
+//! Default in-memory implementation for `omnia:blobstore`
 //!
 //! This is a lightweight implementation for development use only.
 
@@ -17,7 +17,7 @@ use tracing::instrument;
 use crate::host::resource::{Container, FutureResult};
 use crate::host::{BlobStoreClient, ContainerMetadata, Error, ObjectMetadata, Page};
 
-/// Default implementation for `wasi:blobstore`.
+/// Default implementation for `omnia:blobstore`.
 #[derive(Debug, Clone)]
 pub struct BlobStoreDefault {
     store: Arc<RwLock<HashMap<String, InMemContainer>>>,

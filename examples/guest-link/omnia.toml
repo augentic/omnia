@@ -25,11 +25,11 @@
 # router dispatches to `responder`, so the name is given.
 [[guest]]
 name = "responder"
-source.path = "../../target/wasm32-wasip2/debug/examples/guest_link_responder_wasm.wasm"
+source.path = "../../target/wasm32-wasip3/debug/examples/guest_link_responder_wasm.wasm"
 
 [[guest]]
 name = "router"
-source.path = "../../target/wasm32-wasip2/debug/examples/guest_link_router_wasm.wasm"
+source.path = "../../target/wasm32-wasip3/debug/examples/guest_link_router_wasm.wasm"
 
 # In-process is the default transport; named here for clarity. UDS / NATS / QUIC
 # slot in behind the same seam in Phase 3 with no guest or dispatch change.

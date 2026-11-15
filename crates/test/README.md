@@ -1,7 +1,7 @@
 # omnia-test
 
 Test doubles, capability contract rows, a component runtime harness, and a
-`wasm32-wasip2` fixture pipeline for code built on omnia.
+`wasm32-wasip3` fixture pipeline for code built on omnia.
 
 | Feature | Carries | Depends on |
 | ------- | ------- | ---------- |
@@ -39,7 +39,7 @@ line resolves on both targets and contributes nothing to the component.
 `mise run ci` checks the shapes a consumer sees, not just `--all-features`:
 
 ```sh
-mise run lint          # clippy --all-features then cargo hack clippy --each-feature, natively and for wasm32-wasip2
+mise run lint          # clippy --all-features then cargo hack clippy --each-feature, natively and for wasm32-wasip3
 mise run test          # cargo nextest run --workspace --all-features
 ```
 

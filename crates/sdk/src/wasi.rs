@@ -34,6 +34,6 @@ mod websockets;
 
 /// Zero-sized WASI provider implementing every capability trait on `wasm32`.
 ///
-/// Delegates to the `omnia-wasi-*` guest bindings on `wasm32-wasip2`.
+/// Delegates to the `omnia-wasi-*` guest bindings on `wasm32-wasip3`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct WasiProvider;

@@ -14,10 +14,10 @@ Or, more manually, for debugging:
 
 ```bash
 # build the guest
-cargo build --example mcp-wasm --target wasm32-wasip2
+cargo build --example mcp-wasm --target wasm32-wasip3
 
 # run the host
-cargo run --example mcp -- -v run ./target/wasm32-wasip2/debug/examples/mcp_wasm.wasm
+cargo run --example mcp -- -v run ./target/wasm32-wasip3/debug/examples/mcp_wasm.wasm
 ```
 
 ## Test

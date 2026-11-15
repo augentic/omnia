@@ -56,8 +56,7 @@ fn emit_backends(host_entries: &[HostEntry]) -> (TokenStream, TokenStream) {
     }
 
     // positional, so two backends sharing a type name never share a field
-    let idents: Vec<Ident> =
-        (0..backends.len()).map(|slot| format_ident!("backend_{slot}")).collect();
+    let idents: Vec<Ident> = Vec::from_fn(backends.len(), |slot| format_ident!("backend_{slot}"));
     let types: Vec<&Path> = backends.iter().map(|(backend, _)| *backend).collect();
 
     if idents.is_empty() {

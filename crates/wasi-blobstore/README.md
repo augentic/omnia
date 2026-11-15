@@ -4,9 +4,8 @@ This crate provides the Blobstore interface for the Omnia runtime.
 
 ## Interface
 
-Implements `omnia:blobstore`, the interface the SDK's `BlobStore` calls, and
-the `wasi:blobstore` draft for raw-binding guests. Both are served from one
-`BlobStoreClient` per backend.
+Implements `omnia:blobstore`, the interface the SDK's `BlobStore` calls, over
+one `BlobStoreClient` per backend.
 
 - A call on an object in a container that does not exist fails with
   `not-found`. An absent object is `none`, not an error.

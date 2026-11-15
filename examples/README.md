@@ -13,8 +13,8 @@ make example http
 Or use Cargo directly — the two steps behind `make example`:
 
 ```bash
-cargo build --example http-wasm --target wasm32-wasip2
-cargo run --example http -- run ./target/wasm32-wasip2/debug/examples/http_wasm.wasm
+cargo build --example http-wasm --target wasm32-wasip3
+cargo run --example http -- run ./target/wasm32-wasip3/debug/examples/http_wasm.wasm
 ```
 
 (Guest artifact names use underscores: `http_wasm.wasm`, not `http-wasm.wasm`.)
@@ -37,7 +37,7 @@ Each example directory has a `README.md` with test commands and example-specific
 
 | Example | Demonstrates |
 | ------- | ------------ |
-| [`blobstore`](blobstore) | Object storage containers and blobs (`wasi:blobstore`) |
+| [`blobstore`](blobstore) | Object storage containers and blobs (`omnia:blobstore`) |
 | [`config`](config) | Reading runtime configuration (`wasi:config`) |
 | [`docstore`](docstore) | JSON documents with filters, sorting, and pagination (`omnia:docstore`) |
 | [`identity`](identity) | OAuth token acquisition (`wasi:identity`) |

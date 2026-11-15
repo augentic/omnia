@@ -1,4 +1,4 @@
-//! A `wasi:http/incoming-handler` guest behind `http::export!`, plain axum
+//! A `wasi:http/handler` guest behind `http::export!`, plain axum
 //! handlers, and `WasiProvider`: the one route echoes a `message` taken from
 //! the JSON body (POST) or the query string (GET), alongside the request id
 //! and deadline the `Context` extractor carried in, the deadline in

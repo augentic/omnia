@@ -1,6 +1,6 @@
 //! The fixture pipeline a consumer's `build.rs` drives.
 //!
-//! Guest programs are compiled to `wasm32-wasip2` components in a nested
+//! Guest programs are compiled to `wasm32-wasip3` components in a nested
 //! cargo build, then `gen.rs` is generated with one path constant per
 //! program plus a `foreach_<group>!` completeness macro per group.
 //!

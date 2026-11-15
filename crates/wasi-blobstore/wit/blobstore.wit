@@ -133,8 +133,6 @@ interface store {
   ) -> result<_, error>;
 }
 
-/// `omnia:blobstore/store` beside the `wasi:blobstore` draft.
 world imports {
   import store;
-  include wasi:blobstore/imports@0.2.0-draft;
 }

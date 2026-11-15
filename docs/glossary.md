@@ -6,7 +6,7 @@ Shared vocabulary for Omnia, Specify, and the `omnia-backends` repo. Older docs 
 
 ### Guest
 
-Application code compiled to a WebAssembly component (`.wasm`), targeting `wasm32-wasip2`. A guest talks only to WASI interfaces; it never names an implementation.
+Application code compiled to a WebAssembly component (`.wasm`), targeting `wasm32-wasip3`. A guest talks only to WASI interfaces; it never names an implementation.
 
 ### Host
 

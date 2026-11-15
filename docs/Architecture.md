@@ -42,7 +42,7 @@ Omnia is a thin, opinionated wrapper around [wasmtime](https://github.com/byteco
 
 Omnia follows the WebAssembly Component Model's guest/host pattern:
 
-- **Guest**: Application code compiled to WebAssembly (`.wasm`), targeting `wasm32-wasip2` and using WASI Preview 3 bindings. The guest is portable and backend-agnostic.
+- **Guest**: Application code compiled to WebAssembly (`.wasm`), targeting `wasm32-wasip3` (WASI 0.3). The guest is portable and backend-agnostic.
 - **Host**: The native runtime that loads and executes guests. It provides concrete implementations of WASI interfaces by connecting to actual backends.
 
 This separation allows the same guest to run with different backends — swap the in-memory key-value store for Redis without changing application logic.
@@ -126,7 +126,7 @@ Each interface crate provides guest bindings, a host implementation, and, with o
 | `wasi-http`      | `wasi:http`       | HTTP client/server (trigger)     | `HttpDefault` — hyper client, axum server |
 | `wasi-keyvalue`  | `omnia:keyvalue`  | Key-value storage (+ wasi draft) | `KeyValueDefault` — in-memory             |
 | `wasi-messaging` | `wasi:messaging`  | Pub/sub messaging (trigger)      | `MessagingDefault` — in-process broadcast |
-| `wasi-blobstore` | `omnia:blobstore` | Blob storage (+ wasi draft)      | `BlobStoreDefault` — in-memory            |
+| `wasi-blobstore` | `omnia:blobstore` | Blob storage                     | `BlobStoreDefault` — in-memory            |
 | `wasi-sql`       | `omnia:sql`       | Parameterized SQL (+ wasi draft) | `SqlDefault` — SQLite                     |
 | `wasi-docstore`  | `omnia:docstore`  | JSON document store with filters | `DocStoreDefault` — in-memory             |
 | `wasi-config`    | `wasi:config`     | Runtime configuration            | `ConfigDefault` — process environment     |

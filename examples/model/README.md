@@ -22,10 +22,10 @@ The runtime core stays generic (Law 2): no model id, provider, or schema dialect
 
 ```bash
 # build the guest
-cargo build -p examples --example model-wasm --target wasm32-wasip2
+cargo build -p examples --example model-wasm --target wasm32-wasip3
 ```
 
-This emits `target/wasm32-wasip2/debug/examples/model_wasm.wasm` (the underscored name the manifest points at).
+This emits `target/wasm32-wasip3/debug/examples/model_wasm.wasm` (the underscored name the manifest points at).
 
 ## Run
 

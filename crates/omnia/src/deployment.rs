@@ -301,7 +301,6 @@ fn engine_and_linker<B: Send + 'static>() -> Result<(Engine, Linker<StoreCtx<B>>
 
     // register services with runtime's Linker
     let mut linker = Linker::new(&engine);
-    omnia_core::wasmtime_wasi::p2::add_to_linker_async(&mut linker)?;
     omnia_core::wasmtime_wasi::p3::add_to_linker(&mut linker)?;
 
     Ok((engine, linker, options))

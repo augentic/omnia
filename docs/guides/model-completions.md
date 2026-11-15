@@ -111,7 +111,7 @@ The default backend connects with zero configuration and answers every completio
 For tests, CI, and local development of model guests, define an inline `ModelClient` impl that returns a fixed answer — no network, no credentials, fully deterministic, and (unlike an echo) able to satisfy `format::schema` (see the recipe in [Testing Policy](testing-policy.md#canned-model-backends)). The [`model` example](../../examples/model/) serves its fixed schema answer that way:
 
 ```bash
-cargo build --example model-wasm --target wasm32-wasip2
+cargo build --example model-wasm --target wasm32-wasip3
 cargo run --example model
 ```
 

@@ -17,8 +17,8 @@ While it can be used standalone, Omnia is primarily designed to be the runtime f
 Build a guest and run it with an example host runtime:
 
 ```bash
-cargo build --example http-wasm --target wasm32-wasip2
-cargo run --example http -- -v run ./target/wasm32-wasip2/debug/examples/http_wasm.wasm
+cargo build --example http-wasm --target wasm32-wasip3
+cargo run --example http -- -v run ./target/wasm32-wasip3/debug/examples/http_wasm.wasm
 ```
 
 A host runtime is a single macro invocation — each entry pairs a WASI interface with the backend that implements it:
@@ -61,7 +61,7 @@ The [`examples/`](examples/README.md) directory contains a complete working gues
 | [`omnia-sdk`](crates/sdk)                 | Guest SDK — `Handler`/`Context`/`Handlers`, HTTP/messaging routers and the command façade, errors, capabilities, and MCP support |
 | [`omnia-guest-macros`](crates/guest-macros)     | `#[instrument]` observability attribute and `#[derive(Provider)]` for guests               |
 | [`omnia-host-macros`](crates/host-macros)       | `runtime!` for host runtime generation and `#[derive(HostCtx)]` for host crates            |
-| [`omnia-wasi-blobstore`](crates/wasi-blobstore) | omnia:blobstore host and guest bindings, with the wasi:blobstore draft                     |
+| [`omnia-wasi-blobstore`](crates/wasi-blobstore) | omnia:blobstore host and guest bindings                                                    |
 | [`omnia-wasi-config`](crates/wasi-config)       | wasi:config host and guest bindings                                                        |
 | [`omnia-wasi-docstore`](crates/wasi-docstore)   | Document-store host and guest bindings                                                     |
 | [`omnia-wasi-http`](crates/wasi-http)           | wasi:http host and guest bindings                                                          |

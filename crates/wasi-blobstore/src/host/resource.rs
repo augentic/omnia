@@ -64,6 +64,3 @@ impl dyn Container {
         }
     }
 }
-
-/// Proxy for a blobstore container.
-pub type ContainerProxy = omnia_core::Proxy<dyn Container>;

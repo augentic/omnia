@@ -7,7 +7,7 @@
 //!   `guest::Provider` or handed to a hand-written provider directly.
 //!   [`contract`] holds the behaviour rows a provider meets, natively and on
 //!   `wasm32`.
-//! - **Component rung** ([`host`]) — the compiled `wasm32-wasip2` component
+//! - **Component rung** ([`host`]) — the compiled `wasm32-wasip3` component
 //!   driven through omnia's own runtime over `Backends`, the twelve in-memory
 //!   defaults with the model swapped for a `ScriptedModel`.
 //! - **Fixture rung** ([`build`]) — the nested cargo build a consumer's

@@ -18,10 +18,10 @@ Or, more manually, for debugging:
 
 ```bash
 # build the guest
-cargo build --example http-proxy-wasm --target wasm32-wasip2
+cargo build --example http-proxy-wasm --target wasm32-wasip3
 
 # run the host
-cargo run --example http-proxy -- -v run ./target/wasm32-wasip2/debug/examples/http_proxy_wasm.wasm
+cargo run --example http-proxy -- -v run ./target/wasm32-wasip3/debug/examples/http_proxy_wasm.wasm
 ```
 
 ## Test
