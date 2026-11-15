@@ -19,7 +19,7 @@ use opentelemetry_proto::tonic::resource::v1::Resource;
 use wasmtime::component::Accessor;
 
 use crate::host::generated::omnia::otel::metrics::{self as wasi, HostWithStore};
-use crate::host::types_impl::{datetime_nanos, decode_id};
+use crate::host::types_impl::{decode_id, instant_nanos};
 use crate::host::{OtelClient, WasiOtel};
 
 impl<T> HostWithStore<T> for WasiOtel {
@@ -153,8 +153,8 @@ impl From<wasi::MetricData> for MetricData {
 
 impl From<wasi::Gauge> for Gauge {
     fn from(gauge: wasi::Gauge) -> Self {
-        let start = gauge.start_time.map_or_default(datetime_nanos);
-        let time = datetime_nanos(gauge.time);
+        let start = gauge.start_time.map_or_default(instant_nanos);
+        let time = instant_nanos(gauge.time);
         Self {
             data_points: gauge
                 .data_points
@@ -185,8 +185,8 @@ const DATA_POINT_FLAGS_DO_NOT_USE: u32 = 0;
 
 impl From<wasi::Sum> for Sum {
     fn from(sum: wasi::Sum) -> Self {
-        let start = datetime_nanos(sum.start_time);
-        let time = datetime_nanos(sum.time);
+        let start = instant_nanos(sum.start_time);
+        let time = instant_nanos(sum.time);
         Self {
             data_points: sum
                 .data_points
@@ -207,8 +207,8 @@ impl From<wasi::Histogram> for Histogram {
                 .into_iter()
                 .map(|dp| HistogramDataPoint {
                     attributes: dp.attributes.into_iter().map(Into::into).collect(),
-                    start_time_unix_nano: datetime_nanos(hist.start_time),
-                    time_unix_nano: datetime_nanos(hist.time),
+                    start_time_unix_nano: instant_nanos(hist.start_time),
+                    time_unix_nano: instant_nanos(hist.time),
                     count: dp.count,
                     sum: Some(dp.sum.into()),
                     bucket_counts: dp.bucket_counts,
@@ -232,8 +232,8 @@ impl From<wasi::ExponentialHistogram> for ExponentialHistogram {
                 .into_iter()
                 .map(|dp| ExponentialHistogramDataPoint {
                     attributes: dp.attributes.into_iter().map(Into::into).collect(),
-                    start_time_unix_nano: datetime_nanos(hist.start_time),
-                    time_unix_nano: datetime_nanos(hist.time),
+                    start_time_unix_nano: instant_nanos(hist.start_time),
+                    time_unix_nano: instant_nanos(hist.time),
                     count: dp.count,
                     sum: Some(dp.sum.into()),
                     scale: dp.scale.into(),
@@ -262,7 +262,7 @@ impl From<wasi::Exemplar> for Exemplar {
     fn from(ex: wasi::Exemplar) -> Self {
         Self {
             filtered_attributes: ex.filtered_attributes.into_iter().map(Into::into).collect(),
-            time_unix_nano: datetime_nanos(ex.time),
+            time_unix_nano: instant_nanos(ex.time),
             span_id: decode_id(&ex.span_id),
             trace_id: decode_id(&ex.trace_id),
             value: Some(ex.value.into()),

@@ -14,9 +14,10 @@ omnia_wasi_messaging::export!(Messaging with_types_in omnia_wasi_messaging);
 
 impl Guest for Messaging {
     async fn handle(_message: Message) -> Result<(), Error> {
-        // `thread::sleep` is an async host call on wasip2, so the fiber
-        // suspends and the host's timeout lands; a busy loop would not be
-        // cancellable without the epoch
+        // `thread::sleep` waits on WASI 0.3's async `wait-for`, which the
+        // async-typed `handle` may block on, so the fiber suspends and the
+        // host's timeout lands; a busy loop would not be cancellable without
+        // the epoch
         std::thread::sleep(Duration::from_secs(2));
         Ok(())
     }

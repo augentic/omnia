@@ -133,7 +133,7 @@ where
     }
 }
 
-/// In-process `wasi:http/incoming-handler` dispatcher: routes a request to a
+/// In-process `wasi:http/handler` dispatcher: routes a request to a
 /// guest, instantiates it, and invokes the export.
 ///
 /// The server loop drives one over accepted connections; tests drive it
@@ -220,11 +220,10 @@ where
         };
 
         // a declared guest's export is checked here, at first use
-        let indices = ServiceIndices::new(guest.instance_pre())
-            .map_err(anyhow::Error::from)
-            .with_context(|| {
-                format!("routed guest `{guest_id}` does not export `wasi:http/incoming-handler`")
-            })?;
+        let indices =
+            ServiceIndices::new(guest.instance_pre()).map_err(anyhow::Error::from).with_context(
+                || format!("routed guest `{guest_id}` does not export `wasi:http/handler`"),
+            )?;
 
         // instantiate the selected guest fresh (instance-per-call)
         let store_data = self.state.store();

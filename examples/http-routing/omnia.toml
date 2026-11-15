@@ -11,10 +11,10 @@
 
 [[guest]]
 name = "a"
-source.path = "../../target/wasm32-wasip2/debug/examples/http_routing_a_wasm.wasm"
+source.path = "../../target/wasm32-wasip3/debug/examples/http_routing_a_wasm.wasm"
 routes.http = ["/a"]
 
 [[guest]]
 name = "b"
-source.path = "../../target/wasm32-wasip2/debug/examples/http_routing_b_wasm.wasm"
+source.path = "../../target/wasm32-wasip3/debug/examples/http_routing_b_wasm.wasm"
 routes.http = ["/b"]

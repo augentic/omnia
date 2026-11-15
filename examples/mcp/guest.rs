@@ -103,7 +103,7 @@ impl McpServer for Docs {
     }
 
     fn read_resource(&self, uri: &str) -> Result<ResourceContents, McpError> {
-        let name = uri.strip_prefix("doc://").unwrap_or(uri);
+        let name = uri.trim_prefix("doc://");
         Docs::find_doc(name).map_or_else(
             || Err(McpError::resource_not_found(uri)),
             |(.., body)| Ok(ResourceContents::text(uri, "text/markdown", *body)),

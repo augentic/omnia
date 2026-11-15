@@ -41,9 +41,8 @@ Unreleased
   beside the `wasi:sql` draft over one `Connection`. Each call names its
   database, and `batch` runs its statements in one transaction.
 - `omnia:blobstore`, the Omnia-owned interface `BlobStore` calls.
-  `WasiBlobStore` serves it beside the `wasi:blobstore` draft over one
-  `BlobStoreClient`. Each call names its container, and `get-range` takes
-  a half-open range.
+  `WasiBlobStore` serves it over one `BlobStoreClient`. Each call names its
+  container, and `get-range` takes a half-open range.
 - The codes of a failed capability call. Its `omnia_sdk::Error` names the
   class of failure in its code:
   - `not-found`, `denied`, `invalid`, `unsupported`, or `other` on a
@@ -127,6 +126,20 @@ Unreleased
 
 ### Changed
 
+- omnia runs WASI 0.3 guests alone. Guests build for `wasm32-wasip3`, and
+  the MSRV is Rust 1.100. The linker no longer serves WASI 0.2, so a guest
+  that imports a WASI 0.2 `wasi:cli`, `wasi:clocks`, `wasi:filesystem`,
+  `wasi:http`, `wasi:io`, `wasi:random`, or `wasi:sockets` interface is
+  refused by name, with the rebuild it needs, at startup or at its first
+  use. The `wasi:config`, `wasi:keyvalue`, `wasi:messaging`, and
+  `wasi:sql` drafts are served as before.
+- `omnia_test::build` compiles a fixture crate's programs for
+  `wasm32-wasip3`.
+- A raw export that may wait is an `async func`. On `wasm32-wasip3`,
+  `std::thread::sleep` and every async-typed import suspend the task, and
+  a sync-typed export that suspends traps with `cannot block a synchronous
+  task before returning`. The exports behind the `export!` macros are
+  already async-typed.
 - A handler takes its `Context<P>` first and its input second. An HTTP
   handler is a plain axum handler that takes `Context<P>` as an extractor
   over the `Arc<P>` in the router state. A handler that takes `Json<T>`
@@ -396,6 +409,10 @@ Unreleased
   it appears, so `SET name = $2 WHERE id = $1` no longer binds its values
   swapped. A `?` or `?n` placeholder binds as before, and any other named
   placeholder fails.
+- `omnia:otel` is `0.2.0`. Its timestamps are the WASI 0.3
+  `wasi:clocks/system-clock@0.3.2` `instant`, where `0.1.0` carried the
+  WASI 0.2 `wall-clock` `datetime`. The host reads an instant before the
+  epoch as the epoch.
 
 ### Removed
 
@@ -438,6 +455,13 @@ Unreleased
 - The host's `omnia_wasi_sql::DataType`, which is `omnia_wasi_sql::Value`,
   and `omnia_wasi_sql::Error::trace`. The draft's `trace` is the message
   of the `Error` case a backend returns.
+- The `wasi:blobstore@0.2.0-draft` imports, whose values are `wasi:io@0.2`
+  streams a WASI 0.3 runtime does not serve. With them go
+  `omnia_wasi_blobstore::{blobstore, container, types}` on `wasm32`, and
+  the host's `ContainerProxy`, `IncomingValue`, `OutgoingValue`, and
+  `StreamObjectNames`. A guest reaches a blob store through
+  `omnia_sdk::BlobStore`, and `omnia_wasi_blobstore::omnia::store` is the
+  raw `omnia:blobstore` binding.
 
 ---
 

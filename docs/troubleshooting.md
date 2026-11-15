@@ -6,17 +6,17 @@ Common failures and their fixes, grouped by when they bite. If your problem isn'
 
 ### `can't find the wasm file` / the guest built with the wrong name
 
-Guest binaries use **underscores**, even when the cargo target uses hyphens: `cargo build --example http-wasm` produces `http_wasm.wasm`, not `http-wasm.wasm`. Check `target/wasm32-wasip2/debug/examples/` for the actual name.
+Guest binaries use **underscores**, even when the cargo target uses hyphens: `cargo build --example http-wasm` produces `http_wasm.wasm`, not `http-wasm.wasm`. Check `target/wasm32-wasip3/debug/examples/` for the actual name.
 
-### Building the whole workspace for `wasm32-wasip2` fails
+### Building the whole workspace for `wasm32-wasip3` fails
 
 Expected. Native host crates (wasmtime, tokio, backends) don't compile for the wasm target. Build guest targets explicitly:
 
 ```bash
-cargo build --example <name>-wasm --target wasm32-wasip2
+cargo build --example <name>-wasm --target wasm32-wasip3
 ```
 
-never `cargo build --workspace --target wasm32-wasip2`.
+never `cargo build --workspace --target wasm32-wasip3`.
 
 ### `error[E0463]: can't find crate for 'wasip3'` on a native build
 
@@ -27,14 +27,6 @@ The `wasip3` crate exists only for the wasm target. Guest modules must be gated:
 ```
 
 and shared crates put wasm-only dependencies under `[target.'cfg(target_arch = "wasm32")'.dependencies]`.
-
-### `cargo nextest` fails to build or behaves oddly
-
-Install it with `--locked`:
-
-```bash
-cargo install --locked cargo-nextest
-```
 
 ### `cargo fmt` produces unexpected diffs or errors
 
@@ -96,6 +88,10 @@ Only `in-process` is a valid `[transport] default`. Remove `unix`/`nats`/`quic` 
 
 A manifest declares a `source.package` guest, but the runtime has no registry client to fetch it with. Packages are fetched through omnia's `loader` feature; enable it on the `omnia` dependency (`features = ["loader"]`), or give the guest a `source.path`. The run-time twin, `... has no registry to fetch it from`, is the same gap reached through an embedder's own `RuntimeParts` with `packages: None`.
 
+### `guest ... targets WASI 0.2 (wasm32-wasip2), importing ...; rebuild it for wasm32-wasip3`
+
+The guest was built for WASI 0.2, and the runtime serves WASI 0.3 alone. Rebuild it with `--target wasm32-wasip3` against an `omnia-sdk` of the runtime's release. A compiled-in guest is refused at startup, and a declared or dynamically registered one at its first use. The `wasi:config`, `wasi:keyvalue`, `wasi:messaging`, and `wasi:sql` drafts are versioned `0.2` too, but omnia serves them itself, so they never trigger this refusal.
+
 ### The deployment starts but a guest never runs
 
 A guest declared in a manifest file loads at its first use, and only something naming it is a use: a `routes.*` entry matching an event, the `command = true` mark, a link call from another guest, a host dispatch, or a `loader.load(declared(..))`. An entry with none of those is never reached — it is not the catch-all, which is drawn from the guests loaded at boot alone (embedded `path:` bytes, `run <component>`). Give it routes or the `command` mark. Startup validates the manifest but does not read the file, so a wrong `source.path` also surfaces only here.
@@ -113,6 +109,10 @@ Manifest-relative resolution: `source.path` and `[[mount]] path` in a manifest *
 ### The guest times out (`epoch deadline` / invocation aborted around 30s)
 
 `GUEST_TIMEOUT_MS` (default 30000) caps each **server** invocation and each link-dispatch hop on a server-rooted chain. Raise it for legitimately long request work. A command-mode (`wasi:cli/run`) chain has no wall-clock cap — neither the run itself nor the link dispatches it makes — so if a CLI guest appears to time out, check a backend timeout (for example `CURSOR_TIMEOUT_SECS`) or an external process deadline.
+
+### `cannot block a synchronous task before returning`
+
+A guest export typed `func` in its WIT suspended before it returned. On `wasm32-wasip3`, `std::thread::sleep` and every async-typed import suspend the task, and a sync-typed export may not. Declare the export `async func` and implement it as an `async fn`. The exports behind the `export!` macros are already async-typed; the trap comes from a raw export, such as an interface one guest serves to another.
 
 ### The guest traps growing memory
 

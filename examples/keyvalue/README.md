@@ -16,10 +16,10 @@ Or, more manually, for debugging:
 
 ```bash
 # build the guest
-cargo build --example keyvalue-wasm --target wasm32-wasip2
+cargo build --example keyvalue-wasm --target wasm32-wasip3
 
 # run the host
-KEYVALUE_BUCKETS=omnia_bucket cargo run --example keyvalue -- -v run ./target/wasm32-wasip2/debug/examples/keyvalue_wasm.wasm
+KEYVALUE_BUCKETS=omnia_bucket cargo run --example keyvalue -- -v run ./target/wasm32-wasip3/debug/examples/keyvalue_wasm.wasm
 ```
 
 ## Test

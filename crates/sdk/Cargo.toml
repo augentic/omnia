@@ -21,7 +21,7 @@ default = ["http"]
 
 # Enables the axum-backed `api::http` handler support and the `mcp` server.
 # The outbound `HttpClient` capability and `Error::status()` need no feature.
-http = ["dep:axum", "dep:tower"]
+http = ["dep:axum", "dep:http-body", "dep:tower"]
 
 # Enables the clap-backed `api::command` façade (argv parsing, `--format`,
 # shell completions).
@@ -36,7 +36,7 @@ clap = { workspace = true, features = ["string"], optional = true }
 clap_complete = { workspace = true, optional = true }
 getrandom.workspace = true
 http.workspace = true
-http-body.workspace = true
+http-body = { workspace = true, optional = true }
 omnia-guest-macros.workspace = true
 schemars.workspace = true
 serde.workspace = true

@@ -2,7 +2,7 @@
 
 Demonstrates a compiled-in command deployment: a guest embedded from the
 `runtime!` invocation's inline `guests:` list. The examples package's
-`build.rs` compiles the guest for `wasm32-wasip2` and names the artifact in
+`build.rs` compiles the guest for `wasm32-wasip3` and names the artifact in
 `CLI_WASM`; the macro embeds those bytes with `include_bytes!` and names the
 guest by the file's stem, `cli_wasm`. The guest is the sole `wasi:cli/run`
 exporter, so command mode routes to it with no configuration.

@@ -4,7 +4,7 @@
 //! under the parent without owning the telemetry lifecycle, a span opened
 //! through the OpenTelemetry API inside the parent joins the same tree in its
 //! own instrumentation scope with its schema URL and linked `tracestate`, and
-//! a raw `omnia:otel` export with malformed ids and overflowing timestamps
+//! a raw `omnia:otel` export with malformed ids and out-of-range timestamps
 //! clamps cleanly on the host.
 
 #![cfg(target_arch = "wasm32")]
@@ -14,7 +14,7 @@ mod raw {
         inline: "
             package omnia-test:otel;
             world raw-otel {
-                import omnia:otel/tracing@0.1.0;
+                import omnia:otel/tracing@0.2.0;
             }
         ",
         path: "../wasi-otel/wit",
@@ -75,10 +75,14 @@ async fn export_malformed() {
         Link, SpanContext, SpanData, SpanKind, Status, TraceFlags, export,
     };
     use raw::omnia::otel::types::InstrumentationScope;
-    use raw::wasi::clocks::wall_clock::Datetime;
+    use raw::wasi::clocks::system_clock::Instant;
 
-    let max_time = Datetime {
-        seconds: u64::MAX,
+    let before_epoch = Instant {
+        seconds: -1,
+        nanoseconds: 999_999_999,
+    };
+    let max_time = Instant {
+        seconds: i64::MAX,
         nanoseconds: 999_999_999,
     };
     export(vec![SpanData {
@@ -95,7 +99,7 @@ async fn export_malformed() {
         parent_span_id: "abc".to_owned(),
         span_kind: SpanKind::Internal,
         name: "malformed".to_owned(),
-        start_time: max_time,
+        start_time: before_epoch,
         end_time: max_time,
         attributes: Vec::new(),
         events: Vec::new(),

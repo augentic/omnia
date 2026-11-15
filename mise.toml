@@ -1,5 +1,5 @@
 [task_config]
-includes = ["git::https://github.com/augentic/toolkit.git//mise/rust.toml?ref=v0.6.0"]
+includes = ["git::https://github.com/augentic/toolkit.git//mise/rust.toml?ref=v0.7.0"]
 
 # Knobs read by the included tasks. Keep `OUTDATED_IGNORE` in step with the
 # `outdated` input in `.github/workflows/audit.yaml`.
@@ -25,7 +25,7 @@ ws="${ws%/Cargo.toml}"
 shift
 
 # incremental, so a current guest costs a fingerprint check
-cargo build -p examples --example "${name}-wasm" --target wasm32-wasip2
+cargo build -p examples --example "${name}-wasm" --target wasm32-wasip3
 
 # `-v` shows startup logs; a set `RUST_LOG` takes over, as `-v` would
 # displace its level.
@@ -33,5 +33,5 @@ flags=""
 [ -n "${RUST_LOG:-}" ] || flags="-v"
 
 cargo run -p examples --example "$name" -- $flags \
-  run "${CARGO_TARGET_DIR:-$ws/target}/wasm32-wasip2/debug/examples/${module}_wasm.wasm" -- "$@"
+  run "${CARGO_TARGET_DIR:-$ws/target}/wasm32-wasip3/debug/examples/${module}_wasm.wasm" -- "$@"
 '''

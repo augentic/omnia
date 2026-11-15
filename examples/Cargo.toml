@@ -45,6 +45,8 @@ tracing.workspace = true
 wasip3.workspace = true
 wit-bindgen.workspace = true
 
+[lints]
+
 [[example]]
 name = "blobstore-wasm"
 path = "blobstore/guest.rs"

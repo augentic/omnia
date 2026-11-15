@@ -1,5 +1,5 @@
 //! Compiles every guest program under `programs/<capability>/` to a
-//! `wasm32-wasip2` component and generates `gen.rs`: one path constant per
+//! `wasm32-wasip3` component and generates `gen.rs`: one path constant per
 //! program plus a `foreach_<capability>!` completeness macro per capability
 //! directory, for the native side of this crate to `include!`.
 //!

@@ -22,7 +22,7 @@ cfg_select! {
         #[tokio::main]
         async fn main() -> Result<()> {
             let artifacts = Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../target/wasm32-wasip2/debug/examples");
+                .join("../target/wasm32-wasip3/debug/examples");
 
             let manifest = Manifest::new()
                 .guest(GuestEntry::new(
@@ -43,7 +43,7 @@ cfg_select! {
             // bytes first, here the "install" is a file read
             let wasm = std::fs::read(artifacts.join("guest_link_extra_wasm.wasm")).context(
                 "extra guest not built: cargo build -p examples --example \
-                 guest-link-extra-wasm --target wasm32-wasip2",
+                 guest-link-extra-wasm --target wasm32-wasip3",
             )?;
             runtime.register("extra", wasm).await?;
 

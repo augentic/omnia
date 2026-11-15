@@ -1,6 +1,7 @@
 //! The `omnia_test::contract::blob` rows over `WasiProvider`, all at once,
 //! so the host's `omnia:blobstore` meets the contract the native double does.
-//! One object of the program's own is left for the host to read back.
+//! The program reads an object the host seeded before the run, and leaves one
+//! of its own for the host to read back.
 
 #![cfg(target_arch = "wasm32")]
 
@@ -11,10 +12,13 @@ omnia_sdk::api::command::export!(scenario);
 
 const SCOPE: &str = "contract";
 const HOST: &str = "contract-host";
+const SEEDED: &str = "seeded";
 
 async fn scenario() {
     let store = WasiProvider;
 
+    let seeded = store.get(SEEDED, "from-host").await.expect("read the host's object");
+    assert_eq!(seeded.as_deref(), Some(&b"hello"[..]), "the host's object reads other bytes");
     store.create_container(HOST).await.expect("create the host's container");
     store.put(HOST, "raw", b"raw").await.expect("put the host's object");
 

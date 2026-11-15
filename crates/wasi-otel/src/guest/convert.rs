@@ -7,7 +7,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use opentelemetry::{Array, InstrumentationScope, KeyValue, Value};
 
 use crate::guest::generated::omnia::otel::types as wasi;
-use crate::guest::generated::wasi::clocks::wall_clock::Datetime;
+use crate::guest::generated::wasi::clocks::system_clock::Instant;
 
 impl From<Value> for wasi::Value {
     fn from(value: Value) -> Self {
@@ -59,11 +59,11 @@ impl From<&InstrumentationScope> for wasi::InstrumentationScope {
     }
 }
 
-impl From<SystemTime> for Datetime {
+impl From<SystemTime> for Instant {
     fn from(st: SystemTime) -> Self {
         let since_epoch = st.duration_since(UNIX_EPOCH).unwrap_or_default();
         Self {
-            seconds: since_epoch.as_secs(),
+            seconds: i64::try_from(since_epoch.as_secs()).unwrap_or(i64::MAX),
             nanoseconds: since_epoch.subsec_nanos(),
         }
     }

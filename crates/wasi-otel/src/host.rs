@@ -15,7 +15,7 @@ mod generated {
             default: tracing | trappable,
         },
         with: {
-            "wasi:clocks": wasmtime_wasi::p2::bindings::clocks,
+            "wasi:clocks": wasmtime_wasi::p3::bindings::clocks,
         },
         trappable_error_type: {
             "omnia:otel/types.error" => Error,

@@ -29,7 +29,7 @@ pub struct Program {
     pub example: bool,
 }
 
-/// A nested `wasm32-wasip2` build of guest programs, configured from a
+/// A nested `wasm32-wasip3` build of guest programs, configured from a
 /// consumer's `build.rs`.
 #[derive(Clone, Debug)]
 pub struct Components {

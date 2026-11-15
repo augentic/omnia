@@ -12,10 +12,10 @@ Or, more manually, for debugging:
 
 ```bash
 # build the guest
-cargo build --example vault-wasm --target wasm32-wasip2
+cargo build --example vault-wasm --target wasm32-wasip3
 
 # run the host
-cargo run --example vault -- -v run ./target/wasm32-wasip2/debug/examples/vault_wasm.wasm
+cargo run --example vault -- -v run ./target/wasm32-wasip3/debug/examples/vault_wasm.wasm
 ```
 
 ## Test

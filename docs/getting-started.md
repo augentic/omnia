@@ -6,7 +6,7 @@ Everything here uses in-memory defaults — no databases, brokers, or credential
 
 ## Prerequisites
 
-- **Rust 1.99 or later.** The repository's `rust-toolchain.toml` pins the toolchain and automatically installs the `wasm32-wasip2` compilation target the first time you build.
+- **Rust 1.100 or later.** The repository's `rust-toolchain.toml` pins the toolchain and automatically installs the `wasm32-wasip3` compilation target the first time you build.
 - A checkout of this repository.
 
 ## Step 1: Build a guest
@@ -14,10 +14,10 @@ Everything here uses in-memory defaults — no databases, brokers, or credential
 A **guest** is your application logic, compiled to a WebAssembly component (a `.wasm` file). Build the HTTP example guest:
 
 ```bash
-cargo build --example http-wasm --target wasm32-wasip2
+cargo build --example http-wasm --target wasm32-wasip3
 ```
 
-This produces `target/wasm32-wasip2/debug/examples/http_wasm.wasm` (note: the file name uses underscores).
+This produces `target/wasm32-wasip3/debug/examples/http_wasm.wasm` (note: the file name uses underscores).
 
 The guest itself is ordinary Rust. In an Omnia service, you write plain [Axum](https://github.com/tokio-rs/axum) handlers on a `Router` whose state is the capability-serving provider, shared as an `Arc<P>`, and export the WASI HTTP interface with `omnia_sdk::api::http::export!`:
 
@@ -38,7 +38,7 @@ A handler reaches its capabilities through the `omnia_sdk::api::Context<P>` extr
 A **host** is a native binary that loads the guest and provides its capabilities. Run the example host, passing it the `.wasm` file (`-v` shows startup logs):
 
 ```bash
-cargo run --example http -- -v run ./target/wasm32-wasip2/debug/examples/http_wasm.wasm
+cargo run --example http -- -v run ./target/wasm32-wasip3/debug/examples/http_wasm.wasm
 ```
 
 When the log line `omnia ready` appears, the runtime is serving on `localhost:8080`. Try it from another terminal:
@@ -98,8 +98,8 @@ async fn handler(body: Bytes) -> omnia_sdk::Result<Json<Value>> {
 The in-memory backend serves only the buckets `KEYVALUE_BUCKETS` declares, `default` when it is unset. The example opens `omnia_bucket`, so build and run it the same way with that bucket declared:
 
 ```bash
-cargo build --example keyvalue-wasm --target wasm32-wasip2
-KEYVALUE_BUCKETS=omnia_bucket cargo run --example keyvalue -- run ./target/wasm32-wasip2/debug/examples/keyvalue_wasm.wasm
+cargo build --example keyvalue-wasm --target wasm32-wasip3
+KEYVALUE_BUCKETS=omnia_bucket cargo run --example keyvalue -- run ./target/wasm32-wasip3/debug/examples/keyvalue_wasm.wasm
 curl -X POST http://localhost:8080 -d '"some data"'
 ```
 

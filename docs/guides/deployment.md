@@ -16,7 +16,7 @@ The two are versioned independently: a guest update ships a new `.wasm` without 
 Build guests and the host in release mode:
 
 ```bash
-cargo build --release --target wasm32-wasip2 -p <guest-crate>
+cargo build --release --target wasm32-wasip3 -p <guest-crate>
 cargo build --release -p <host-crate>
 ```
 

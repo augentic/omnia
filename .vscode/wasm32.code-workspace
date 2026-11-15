@@ -9,6 +9,6 @@
             "Cargo.toml"
         ],
         "rust-analyzer.check.command": "clippy",
-        "rust-analyzer.cargo.target": "wasm32-wasip2",
+        "rust-analyzer.cargo.target": "wasm32-wasip3",
     },
 }

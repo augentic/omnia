@@ -25,22 +25,22 @@ jobs:
     if: ${{ startsWith(github.ref_name, 'release-') }}
     permissions:
       contents: read
-    uses: augentic/toolkit/.github/workflows/ci.yaml@v0.6.0
+    uses: augentic/toolkit/.github/workflows/ci.yaml@v0.7.0
     secrets: inherit
     with:
-      targets: wasm32-wasip2
+      targets: wasm32-wasip3
 
   publish:
     name: Publish
     needs: ci
     permissions:
       contents: write
-    uses: augentic/toolkit/.github/workflows/publish.yaml@v0.6.0
+    uses: augentic/toolkit/.github/workflows/publish.yaml@v0.7.0
 
   crates:
     name: Publish crates
     needs: publish
     permissions:
       contents: read
-    uses: augentic/toolkit/.github/workflows/crates.yaml@v0.6.0
+    uses: augentic/toolkit/.github/workflows/crates.yaml@v0.7.0
     secrets: inherit

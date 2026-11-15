@@ -2,8 +2,7 @@
 
 //! # WASI Blobstore Service
 //!
-//! This module implements a runtime service for `omnia:blobstore` and the
-//! `wasi:blobstore` draft (<https://github.com/WebAssembly/wasi-blobstore>).
+//! This module implements a runtime service for `omnia:blobstore`.
 
 cfg_select! {
     target_arch = "wasm32" => {

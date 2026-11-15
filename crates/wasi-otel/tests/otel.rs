@@ -259,11 +259,12 @@ async fn otel_span_tree() {
     };
     assert_eq!(api_link.trace_state, "vendor=opaque,other=a:b");
 
-    // malformed hex ids decode to empty and overflowing timestamps clamp
+    // malformed hex ids decode to empty, a pre-epoch timestamp clamps to the
+    // epoch, and an overflowing one saturates
     assert_eq!(malformed.span_id, b"");
     assert_eq!(malformed.parent_span_id, b"");
     assert_eq!(malformed.trace_state, "vendor=opaque,other=a:b=c");
-    assert_eq!(malformed.start_time_unix_nano, u64::MAX);
+    assert_eq!(malformed.start_time_unix_nano, 0);
     assert_eq!(malformed.end_time_unix_nano, u64::MAX);
     let [malformed_link] = malformed.links.as_slice() else {
         panic!("one link on `malformed`, got {:?}", malformed.links);

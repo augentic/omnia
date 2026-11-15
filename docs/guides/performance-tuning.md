@@ -11,8 +11,8 @@ Guests are compiled and pre-instantiated **once** at startup. Per request, the r
 Drive concurrent keep-alive HTTP load at a running host with any load-testing tool (for example [`wrk`](https://github.com/wg/wrk) or [`hey`](https://github.com/rakyll/hey)) and record throughput plus tail latency (p99 and up) before and after each change. The [`http`](../../examples/http/) example makes a convenient target:
 
 ```bash
-cargo build --example http-wasm --target wasm32-wasip2
-cargo run --example http -- run ./target/wasm32-wasip2/debug/examples/http_wasm.wasm
+cargo build --example http-wasm --target wasm32-wasip3
+cargo run --example http -- run ./target/wasm32-wasip3/debug/examples/http_wasm.wasm
 # second terminal:
 hey -z 30s -c 64 http://127.0.0.1:8080/
 ```

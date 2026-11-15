@@ -10,7 +10,7 @@ homepage = "https://augentic.io"
 keywords = ["runtime", "wasi", "wasm", "wasmtime", "component-model"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/augentic/omnia"
-rust-version = "1.99"
+rust-version = "1.100"
 version = "0.38.0"
 
 [workspace.lints.rust]
@@ -69,9 +69,7 @@ opentelemetry_sdk = { version = "0.33.1", default-features = false }
 parking_lot = "0.13.0"
 proc-macro2 = "1.0.107"
 quote = "1.0.47"
-rand = "0.10.3"
 rcgen = "0.14.10"
-regex = "1.13.1"
 reqwest = { version = "0.13.5", default-features = false }
 rustls = { version = "0.23.46", default-features = false, features = ["ring", "std"] }
 schemars = "1.2.3"
@@ -84,7 +82,6 @@ thiserror = "2.0.21"
 tokio = { version = "1.54.1", default-features = false }
 tokio-stream = { version = "0.1.19", features = ["sync"] }
 tokio-tungstenite = "0.30.0"
-tokio-util = { version = "0.7.20", features = ["codec"] }
 toml = { version = "1.2.1", default-features = false, features = ["parse", "serde", "std"] }
 tower = "0.5.3"
 tracing = "0.1.44"
@@ -94,7 +91,7 @@ trybuild = "1"
 wasip3 = { version = "0.10.0", features = ["http-compat"] }
 wasm-pkg-client = "0.16.2"
 wasmtime = { version = "50.0.1", default-features = false, features = ["anyhow", "component-model-bytes", "parallel-compilation"] }
-wasmtime-wasi = { version = "50.0.1", default-features = false, features = ["p2", "p3"] }
+wasmtime-wasi = { version = "50.0.1", default-features = false, features = ["p3"] }
 wasmtime-wasi-config = "50.0.1"
 wasmtime-wasi-http = { version = "50.0.1", default-features = false, features = ["p3"] }
 wit-bindgen = { version = "0.63.0", features = ["async-spawn"] }

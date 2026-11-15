@@ -8,7 +8,7 @@ How the Omnia repository tests *itself*. The binding rules are also in the repos
 - **Unit tests** cover deterministic logic wherever it lives: parsers, codecs, filter/type translation, route matching, macro token expansion, guest-side library code. If a behavior is a pure function no guest boundary reaches (e.g. `Format::candidate` extraction, which backends drive directly), it is a unit test next to that logic.
 - **Live tests** (in the `omnia-backends` repo) are the acceptance tier for production backends: `#[ignore]`-gated, credential-gated, driving the backend's `XxxClient` against the real service.
 
-Guest-instantiating tests exist **only** through the shared pipeline below. Do not compile, deserialize, or instantiate a WASM guest ad hoc inside an individual test, and do not build or run an example to check that something works from a guest. Examples are not a tier. They are demos a human runs by hand (`mise run example <name>`); CI compiles them under clippy, natively and for `wasm32-wasip2`, and nothing runs them, so a passing example confirms neither a behaviour nor a trait bound. That question is always answered by [adding a guest program](#adding-a-guest-program).
+Guest-instantiating tests exist **only** through the shared pipeline below. Do not compile, deserialize, or instantiate a WASM guest ad hoc inside an individual test, and do not build or run an example to check that something works from a guest. Examples are not a tier. They are demos a human runs by hand (`mise run example <name>`); CI compiles them under clippy, natively and for `wasm32-wasip3`, and nothing runs them, so a passing example confirms neither a behaviour nor a trait bound. That question is always answered by [adding a guest program](#adding-a-guest-program).
 
 ## Principles
 
@@ -24,7 +24,7 @@ Guest-instantiating tests exist **only** through the shared pipeline below. Do n
 One unpublished crate, patterned on wasmtime's `test-programs`, over the published `omnia-test`. **`crates/test-programs`** is both sides of the boundary:
 
 - On `wasm32` it is the guest scenario programs, one `[[example]]` cdylib per scenario (`programs/<capability>/<scenario>.rs`), plus their shared helpers in `src/helpers.rs`. The example, path constant, and host test identity is `<capability>_<scenario>` (`model_echo_text`). Each program asserts what the guest observes across the boundary and traps on failure, and enters through `omnia_sdk::api::command::export!(scenario)`.
-- Natively it is the compiled artifacts. Its `build.rs` compiles every program to a `wasm32-wasip2` component through `omnia_test::build::Components` (into `target/wasm32-fixtures`, one directory shared by every outer configuration, so plain `mise run test` is self-contained), regenerates the `[[example]]` stanzas from the `programs/` tree, and writes `gen.rs`: one `pub const <NAME>: &str` artifact path per program plus a `foreach_<capability>!` macro, which `src/lib.rs` includes. The native side has no dependencies. The nested build compiles this same package for `wasm32` and so runs the script again; `Components` is a no-op under a `wasm32` target, which is what lets the guest package own its own fixture build.
+- Natively it is the compiled artifacts. Its `build.rs` compiles every program to a `wasm32-wasip3` component through `omnia_test::build::Components` (into `target/wasm32-fixtures`, one directory shared by every outer configuration, so plain `mise run test` is self-contained), regenerates the `[[example]]` stanzas from the `programs/` tree, and writes `gen.rs`: one `pub const <NAME>: &str` artifact path per program plus a `foreach_<capability>!` macro, which `src/lib.rs` includes. The native side has no dependencies. The nested build compiles this same package for `wasm32` and so runs the script again; `Components` is a no-op under a `wasm32` target, which is what lets the guest package own its own fixture build.
 
 The harness a suite drives the artifacts through is `omnia_test::host`, the same one a downstream consumer uses: `Deployment::new().guest(id, wasm).mounts(..).run_host::<H, _>(backends)` builds a one-shot `wasi:cli` command deployment and links the host under test beside `WasiOtel` (which the command export imports; `run(backends, link)` takes a `link` closure for suites that link by hand), and `scratch()` mints a per-test workspace directory removed on drop.
 
@@ -44,7 +44,7 @@ The pipeline is also how a change is *verified* when the question is "does this 
 
 1. **Write the program**: `crates/test-programs/programs/<capability>/<scenario>.rs`, starting with `#![cfg(target_arch = "wasm32")]` and entering through `omnia_sdk::api::command::export!(scenario)`. It asserts what the guest observes across the boundary and panics (traps) on failure. On `wasm32` the crate already depends on what a guest needs (`axum`, `futures`, `omnia-wasi-*`, `tracing`, `wit-bindgen`, ...); add a workspace dependency only if a scenario genuinely needs one. The `[[example]]` stanza is generated: the build script regenerates the list from the `programs/` tree, so the file is the only thing to add.
 2. **Write the test**: `async fn <capability>_<scenario>()` in the suite that invokes `test_programs::foreach_<capability>!()` (`crates/wasi-<capability>/tests/<capability>.rs` for a `wasi-*` host; `command`, `plugins`, and `link` live in `crates/test`, `crates/plugin`, and `crates/omnia` respectively). It runs `test_programs::<CAPABILITY>_<SCENARIO>` through the suite's `run_guest` and asserts the host-side effects. Until the program and the test pair up, the macro fails to compile.
-3. **Run the suite**: `cargo nextest run -p <host crate> --all-features`. The build script compiles the guest for `wasm32-wasip2` as part of that command — no separate build, no `--target` flag, no example.
+3. **Run the suite**: `cargo nextest run -p <host crate> --all-features`. The build script compiles the guest for `wasm32-wasip3` as part of that command — no separate build, no `--target` flag, no example.
 
 ## Scenario backends
 
@@ -71,7 +71,7 @@ cargo test --doc --all-features --workspace       # doc tests
 
 Verify locally per crate; the full workspace run is CI's.
 
-`cargo-nextest` must be installed with `--locked` (`cargo install --locked cargo-nextest`). The `wasm32-wasip2` target must be installed (`rust-toolchain.toml` pins it); `test-programs`'s build script needs it to compile the guest programs.
+The `wasm32-wasip3` target must be installed (`rust-toolchain.toml` pins it); `test-programs`'s build script needs it to compile the guest programs.
 
 ## Naming
 

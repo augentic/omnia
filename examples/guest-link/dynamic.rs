@@ -27,10 +27,10 @@ cfg_select! {
 
         fn main() -> anyhow::Result<()> {
             let artifacts = Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../target/wasm32-wasip2/debug/examples");
+                .join("../target/wasm32-wasip3/debug/examples");
             let read = |file: &str| {
                 std::fs::read(artifacts.join(file)).with_context(|| {
-                    format!("{file} not built: cargo build -p examples --examples --target wasm32-wasip2")
+                    format!("{file} not built: cargo build -p examples --examples --target wasm32-wasip3")
                 })
             };
             let manifest = Manifest::new()

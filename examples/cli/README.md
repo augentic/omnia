@@ -26,13 +26,13 @@ Or, more manually, for debugging:
 
 ```bash
 # build the guest
-cargo build --example cli-wasm --target wasm32-wasip2
+cargo build --example cli-wasm --target wasm32-wasip3
 
 # run the host (everything after `--` is the guest argv)
-cargo run --example cli -- run ./target/wasm32-wasip2/debug/examples/cli_wasm.wasm -- greet Ada
+cargo run --example cli -- run ./target/wasm32-wasip3/debug/examples/cli_wasm.wasm -- greet Ada
 
 # test
-cargo run --example cli -- run ./target/wasm32-wasip2/debug/examples/cli_wasm.wasm -- greet Ada
+cargo run --example cli -- run ./target/wasm32-wasip3/debug/examples/cli_wasm.wasm -- greet Ada
 ...
 ```
 

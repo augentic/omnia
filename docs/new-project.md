@@ -4,12 +4,12 @@
 
 ## Prerequisites
 
-- **Rust 1.99 or later** with the `wasm32-wasip2` target. Pin both in a `rust-toolchain.toml` at your workspace root so every checkout gets them automatically:
+- **Rust 1.100 or later** with the `wasm32-wasip3` target. Pin both in a `rust-toolchain.toml` at your workspace root so every checkout gets them automatically:
 
 ```toml
 [toolchain]
 channel = "stable"
-targets = ["wasm32-wasip2"]
+targets = ["wasm32-wasip3"]
 ```
 
 ## Workspace layout
@@ -37,7 +37,7 @@ members = ["guest", "host"]
 
 ## The guest crate
 
-A guest is a library crate with `crate-type = ["cdylib", "rlib"]` — `cdylib` produces the `.wasm` component when compiled for `wasm32-wasip2`, and `rlib` lets native integration tests link your router and handlers directly:
+A guest is a library crate with `crate-type = ["cdylib", "rlib"]` — `cdylib` produces the `.wasm` component when compiled for `wasm32-wasip3`, and `rlib` lets native integration tests link your router and handlers directly:
 
 ```toml
 # guest/Cargo.toml
@@ -102,7 +102,7 @@ async fn echo(Json(body): Json<Value>) -> Result<Json<Value>, Error> {
 
 The handlers are plain axum handlers. `Context<P>` is an extractor over the provider in the router state, an `Arc<P>`: it carries the provider the handler's capability bounds name and the request's metadata (`x-request-id`, `x-tenant`, and friends). A handler that needs none of that, like `echo`, takes only axum's own extractors. An `omnia_sdk::Error` answers the JSON `{"error","message"}` envelope at its status.
 
-`http::export!(http_router)` expands to the `wasi:http/incoming-handler` export (instrumented with an OpenTelemetry span) on `wasm32-wasip2` and to nothing on native targets; a guest that also consumes messages or runs as a command adds `messaging::export!(..)` or `command::export!(..)` beside it. Because `omnia-sdk` re-exports `wasip3`, `wit-bindgen`, `omnia-wasi-http`, and `omnia-wasi-otel` internally for the macro expansion, your guest `Cargo.toml` does not need to pin `wasip3` or `wit-bindgen` directly (avoiding version-mismatch deadlocks — see [Troubleshooting](troubleshooting.md#outbound-http-or-spawned-work-inside-a-handler-deadlocks)).
+`http::export!(http_router)` expands to the `wasi:http/handler` export (instrumented with an OpenTelemetry span) on `wasm32-wasip3` and to nothing on native targets; a guest that also consumes messages or runs as a command adds `messaging::export!(..)` or `command::export!(..)` beside it. Because `omnia-sdk` re-exports `wasip3`, `wit-bindgen`, `omnia-wasi-http`, and `omnia-wasi-otel` internally for the macro expansion, your guest `Cargo.toml` does not need to pin `wasip3` or `wit-bindgen` directly (avoiding version-mismatch deadlocks — see [Troubleshooting](troubleshooting.md#outbound-http-or-spawned-work-inside-a-handler-deadlocks)).
 
 ## The host crate
 
@@ -143,8 +143,8 @@ That dependency list is complete. `omnia` is the facade over the runtime — the
 Two steps, always in this order — guest first, then host:
 
 ```bash
-cargo build -p my-guest --target wasm32-wasip2
-cargo run -p my-host -- -v run ./target/wasm32-wasip2/debug/my_guest.wasm
+cargo build -p my-guest --target wasm32-wasip3
+cargo run -p my-host -- -v run ./target/wasm32-wasip3/debug/my_guest.wasm
 ```
 
 (The artifact name uses underscores: `my_guest.wasm`; `-v` shows startup logs.) When `omnia ready` appears, the server is on `localhost:8080`:

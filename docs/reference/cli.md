@@ -32,7 +32,7 @@ path=<host-path>[,name=<guest-name>][,writable]
 
 ```bash
 # Single guest, zero config
-<runtime> run ./target/wasm32-wasip2/debug/examples/http_wasm.wasm
+<runtime> run ./target/wasm32-wasip3/debug/examples/http_wasm.wasm
 
 # Manifest-driven deployment
 <runtime> run --manifest deploy/omnia.toml
@@ -49,7 +49,7 @@ path=<host-path>[,name=<guest-name>][,writable]
 
 ## `compile` (jit feature)
 
-Ahead-of-time compile a `wasm32-wasip2` component to a serialized wasmtime component (`.bin`) for faster startup:
+Ahead-of-time compile a `wasm32-wasip3` component to a serialized wasmtime component (`.bin`) for faster startup:
 
 ```bash
 <runtime> compile <wasm> [-o <output>] [-t <triple>]
