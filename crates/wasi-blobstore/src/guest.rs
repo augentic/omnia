@@ -10,7 +10,9 @@ mod generated {
     });
 }
 
-/// `omnia:blobstore`, the interface the SDK's `BlobStore` calls.
+/// `omnia:blobstore`, the interfaces behind the SDK's `BlobStore`.
 pub mod omnia {
-    pub use crate::guest::generated::omnia::blobstore::store;
+    pub use crate::guest::generated::omnia::blobstore::*;
 }
+
+pub use self::generated::{wit_future, wit_stream};

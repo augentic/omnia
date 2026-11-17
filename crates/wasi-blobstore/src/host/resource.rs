@@ -4,8 +4,6 @@ use std::ops::Range;
 use bytes::Bytes;
 pub use omnia_core::FutureResult;
 
-use crate::host::{ContainerMetadata, ObjectMetadata, Page};
-
 /// Providers implement the [`Container`] trait to allow the host to
 /// interact with different backend containers.
 pub trait Container: Debug + Send + Sync + 'static {
@@ -63,4 +61,37 @@ impl dyn Container {
             }
         }
     }
+}
+
+/// A container's metadata, as [`Container::info`] reports it.
+#[derive(Clone, Debug)]
+pub struct ContainerMetadata {
+    /// The container's name.
+    pub name: String,
+    /// When the container was created, in seconds since the Unix epoch, or
+    /// zero where the store records no time.
+    pub created_at: u64,
+}
+
+/// An object's metadata, as [`Container::object_info`] reports it.
+#[derive(Clone, Debug)]
+pub struct ObjectMetadata {
+    /// The object's name.
+    pub name: String,
+    /// The container holding the object.
+    pub container: String,
+    /// When the object was written, in seconds since the Unix epoch.
+    pub created_at: u64,
+    /// The object's size in bytes.
+    pub size: u64,
+}
+
+/// One page of the objects [`Container::list_objects`] lists.
+#[derive(Clone, Debug)]
+pub struct Page {
+    /// The objects on this page, in name order.
+    pub objects: Vec<ObjectMetadata>,
+    /// The cursor that resumes the listing after this page, `None` on the
+    /// last page.
+    pub next: Option<String>,
 }

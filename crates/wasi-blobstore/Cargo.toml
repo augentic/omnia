@@ -23,7 +23,7 @@ futures.workspace = true
 omnia-core.workspace = true
 parking_lot.workspace = true
 tracing.workspace = true
-wasmtime.workspace = true
+wasmtime = { workspace = true, features = ["component-model-async"] }
 
 # guest dependencies
 [target.'cfg(target_arch = "wasm32")'.dependencies]
