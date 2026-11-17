@@ -105,12 +105,18 @@ fn cas_race() {
 #[test]
 fn increment_text() {
     let memory = Memory::default();
-    memory.insert_state("text", b"nope");
+    memory.insert_state("visits", b"41");
 
-    let error = now(memory.increment("text", 1, None)).expect_err("non-integer bytes fail");
-
-    assert!(matches!(&error, Error::ServerError { code, .. } if code == "invalid"), "{error}");
-    assert!(error.description().contains("8-byte"), "{error}");
+    assert_eq!(now(memory.increment("visits", 1, None)).expect("increment"), 42);
+    assert_eq!(memory.state("visits"), Some(b"42".to_vec()));
+    for text in ["007", "-0", "+7", "nope"] {
+        memory.insert_state("text", text.as_bytes());
+        let Err(error) = now(memory.increment("text", 1, None)) else {
+            panic!("`{text}` counted");
+        };
+        assert!(matches!(&error, Error::ServerError { code, .. } if code == "invalid"), "{error}");
+        assert_eq!(memory.state("text"), Some(text.as_bytes().to_vec()), "`{text}` changed");
+    }
 }
 
 // -- Memory: blobs -----------------------------------------------------------

@@ -51,8 +51,17 @@ Unreleased
   beside the `wasi:sql` draft over one `Connection`. Each call names its
   database, and `batch` runs its statements in one transaction.
 - `omnia:blobstore`, the Omnia-owned interface `BlobStore` calls.
-  `WasiBlobStore` serves it over one `BlobStoreClient`. Each call names its
-  container, and `get-range` takes a half-open range.
+  `WasiBlobStore` serves it over one `BlobStoreClient`:
+  - `store.open` answers a `container` handle, and every object call goes
+    through it.
+  - `get` streams an object, or a `byte-range` of it: a half-open span, an
+    offset to the end, or a suffix.
+  - `put` streams an object in, and stores it once the writer commits.
+  - `list` pages the names under a prefix, flat or folded at the next `/`.
+  - The optional `admin`, `uploads`, and `presign` interfaces manage
+    containers, assemble an object from parts, and presign requests.
+  - `WasiBlobStore` answers `unsupported` for a precondition, for object
+    attributes, and for `list-containers`, `uploads`, and `presign`.
 - The codes of a failed capability call. Its `omnia_sdk::Error` names the
   class of failure in its code:
   - `not-found`, `denied`, `invalid`, `unsupported`, or `other` on a
@@ -219,9 +228,9 @@ Unreleased
 - `SqlDb` calls `omnia:sql`, one host call per method, and `batch` runs its
   statements in one transaction. A failing statement rolls back the whole
   batch.
-- `BlobStore` calls `omnia:blobstore`, one host call per method. Its codes
-  come from the error's case, where the SDK read a missing container or
-  object from the message.
+- `BlobStore` calls `omnia:blobstore`, opening a `container` handle for
+  each object call. Its codes come from the error's case, where the SDK
+  read a missing container or object from the message.
 - `SqlDefault` opens only the names it declares, and refuses any other.
   A guest that opened a connection by another name, such as `db`, opens
   `default` or lists the name in `SQL_DATABASES`.
@@ -266,16 +275,17 @@ Unreleased
   A backend picks a failure's code by returning an
   `omnia_wasi_blobstore::Error`, whose six cases are the six capability
   error codes.
-- `omnia_wasi_blobstore::Container` takes the `omnia:blobstore` shapes:
+- `omnia_wasi_blobstore::Container` changes shape:
   - `get_data` takes a half-open `Range<u64>`, clamped to the object. An
     inverted range, which a backend refused, reads as empty.
   - `object_info` answers `None` for an absent object.
   - `list_objects(prefix, after)` answers one name-ordered `Page` of
     `ObjectMetadata`.
 
-  `ContainerMetadata`, `ObjectMetadata`, and `Page` are the
-  `omnia:blobstore` records. The host translates the draft's inclusive
-  range and its name stream itself.
+  `ContainerMetadata`, `ObjectMetadata`, and `Page` are the crate's own
+  structs, which the host maps onto the `omnia:blobstore` records. The
+  host resolves a `byte-range` to a `Range<u64>`, and folds and limits a
+  listing itself.
 - `StateStore` calls `omnia:keyvalue`, opening a `bucket` handle for each
   call:
   - `get` answers `Option<Bytes>`.
@@ -302,9 +312,10 @@ Unreleased
 - `Bucket::{set, increment}` take a TTL, and `Bucket::compare_and_swap`
   replaces `swap`. A backend picks a failure's code by returning an
   `omnia_wasi_keyvalue::Error`.
-- `KeyValueDefault` stores a counter as decimal text, as `omnia:keyvalue`
-  specifies, rather than as eight big-endian bytes. `increment` fails any
-  other value with the code `invalid`.
+- `KeyValueDefault` and `omnia_test::guest::Memory` store a counter as
+  decimal text, as `omnia:keyvalue` specifies, rather than as eight
+  big-endian bytes. `increment` fails any other value with the code
+  `invalid`.
 - Each `Has<Trait>` names the type it delegates to as `Inner`, and its
   accessor returns `&Self::Inner`, so a capability's associated types
   forward to the field's. A `pub` provider that derives `Provider` needs
@@ -474,8 +485,8 @@ Unreleased
   `omnia_wasi_blobstore::{blobstore, container, types}` on `wasm32`, and
   the host's `ContainerProxy`, `IncomingValue`, `OutgoingValue`, and
   `StreamObjectNames`. A guest reaches a blob store through
-  `omnia_sdk::BlobStore`, and `omnia_wasi_blobstore::omnia::store` is the
-  raw `omnia:blobstore` binding.
+  `omnia_sdk::BlobStore`, and `omnia_wasi_blobstore::omnia` holds the raw
+  `omnia:blobstore` bindings.
 - The `wasi:keyvalue@0.2.0-draft2` imports. With them go
   `omnia_wasi_keyvalue::{store, atomics, batch}` on `wasm32`, and the
   host's `BucketProxy` and `Cas`. A guest reaches a key-value store

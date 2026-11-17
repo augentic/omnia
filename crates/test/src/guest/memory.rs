@@ -35,6 +35,10 @@ pub type BlobSnapshot = BTreeMap<String, BTreeMap<String, Vec<u8>>>;
 /// - [`bucket`](Self::bucket) declares a bucket, and a call on an undeclared
 ///   one fails with the code `not-found`.
 /// - A zero TTL fails with the code `invalid` and writes nothing.
+/// - A counter is stored as the decimal text `omnia:keyvalue` specifies, so a
+///   test seeds one with [`insert_state`](Self::insert_state).
+///   [`increment`](StateStore::increment) fails any other value with the code
+///   `invalid`.
 ///
 /// Blobs follow the [`BlobStore`] contract, so a call on an object in a
 /// container that was never created fails with the code `not-found`.
@@ -257,7 +261,7 @@ impl Memory {
             let incremented = add_i64(existing.as_ref().map(|entry| entry.bytes.as_slice()), delta)
                 .with_context(|| format!("incrementing `{key}` by {delta}"))
                 .map_err(|err| Error::server_error("invalid", format!("{err:#}")))?;
-            let entry = StateEntry::atomic(existing, incremented.to_be_bytes().to_vec(), ttl);
+            let entry = StateEntry::atomic(existing, incremented.to_string().into_bytes(), ttl);
             drop(bucket.insert(key.to_owned(), entry));
             Ok(incremented)
         })?
@@ -548,11 +552,20 @@ fn add_i64(current: Option<&[u8]>, delta: i64) -> anyhow::Result<i64> {
     let base = match current {
         None => 0,
         Some(value) => {
-            let bytes: [u8; 8] = value.try_into().map_err(|_len| {
-                anyhow!("value is {} bytes, not an 8-byte big-endian integer", value.len())
-            })?;
-            i64::from_be_bytes(bytes)
+            decode_i64(value).ok_or_else(|| anyhow!("value is not a decimal counter"))?
         }
     };
     base.checked_add(delta).context("adding delta overflows i64")
+}
+
+// `omnia:keyvalue` admits only the canonical text: `0`, or an optional `-` and
+// digits that do not start with `0`
+fn decode_i64(value: &[u8]) -> Option<i64> {
+    let digits = value.strip_prefix(b"-").unwrap_or(value);
+    let canonical = value == b"0"
+        || (matches!(digits.first(), Some(b'1'..=b'9')) && digits.iter().all(u8::is_ascii_digit));
+    if !canonical {
+        return None;
+    }
+    std::str::from_utf8(value).ok()?.parse().ok()
 }

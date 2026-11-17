@@ -10,8 +10,14 @@ one `Bucket` per backend.
 - A guest opens a bucket by name and calls it through the handle `open`
   returns. A name the deployment does not declare fails with `not-found`.
   An absent key is `none`, not an error.
-- Every backend stores the portable keys the SDK's `StateStore` defines. A
-  backend may reject any other key with `invalid`.
+- Every backend stores a portable bucket name, key, and value, and may
+  reject any other with `invalid`:
+  - a bucket name is not empty and holds only ASCII letters, digits, `_`,
+    and `-`;
+  - a key is one or more segments joined by `.`, at most 255 bytes in all,
+    and each segment is not empty and holds only ASCII letters, digits,
+    `_`, and `-`;
+  - a value is at most 512 kibibytes.
 - A write names its lifetime. `forever` and `ttl-ms` replace an entry's
   lifetime. `keep` and `keep-or-ttl-ms` leave an existing entry the time it
   has left. A zero TTL is rejected before the backend sees it.
