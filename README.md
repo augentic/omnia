@@ -66,7 +66,7 @@ The [`examples/`](examples/README.md) directory contains a complete working gues
 | [`omnia-wasi-docstore`](crates/wasi-docstore)   | Document-store host and guest bindings                                                     |
 | [`omnia-wasi-http`](crates/wasi-http)           | wasi:http host and guest bindings                                                          |
 | [`omnia-wasi-identity`](crates/wasi-identity)   | Identity/OAuth host and guest bindings                                                     |
-| [`omnia-wasi-keyvalue`](crates/wasi-keyvalue)   | wasi:keyvalue host and guest bindings                                                      |
+| [`omnia-wasi-keyvalue`](crates/wasi-keyvalue)   | omnia:keyvalue host and guest bindings                                                     |
 | [`omnia-wasi-messaging`](crates/wasi-messaging) | Messaging host and guest bindings                                                          |
 | [`omnia-wasi-model`](crates/wasi-model)         | omnia:model completion host and guest bindings                                             |
 | [`omnia-wasi-otel`](crates/wasi-otel)           | OpenTelemetry host and guest bindings                                                      |

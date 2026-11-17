@@ -83,16 +83,20 @@ async fn store_item<P: StateStore>(
 }
 ```
 
-Under the hood, `WasiProvider` calls Omnia's `omnia:keyvalue` interface. The same host also serves the standard `wasi:keyvalue` draft, which the standalone `keyvalue` example (`examples/keyvalue/guest.rs`) calls directly to demonstrate the raw WIT binding:
+Under the hood, `WasiProvider` calls Omnia's `omnia:keyvalue` interface. The standalone `keyvalue` example (`examples/keyvalue/guest.rs`) calls it directly to demonstrate the raw WIT binding, opening a bucket handle and calling it:
 
 ```rust,noplayground
 async fn handler(body: Bytes) -> omnia_sdk::Result<Json<Value>> {
     let bucket = store::open("omnia_bucket".to_string()).await.context("opening bucket")?;
 
-    bucket.set("my_key".to_string(), body.to_vec()).await.context("storing data")?;
+    let stored = bucket
+        .set("my_key".to_string(), body.to_vec(), Lifetime::Forever, None)
+        .await
+        .context("storing data")?;
+    tracing::debug!("stored at revision: {stored:?}");
 
     let res = bucket.get("my_key".to_string()).await.context("reading data")?;
-    tracing::debug!("found val: {res:?}");
+    tracing::debug!("found entry: {res:?}");
 ```
 
 The in-memory backend serves only the buckets `KEYVALUE_BUCKETS` declares, `default` when it is unset. The example opens `omnia_bucket`, so build and run it the same way with that bucket declared:
@@ -103,7 +107,7 @@ KEYVALUE_BUCKETS=omnia_bucket cargo run --example keyvalue -- run ./target/wasm3
 curl -X POST http://localhost:8080 -d '"some data"'
 ```
 
-The key point: the guest never mentions an implementation. It talks to `wasi:keyvalue`; the host decides whether that means an in-memory cache (here), Redis, or NATS. Swapping the backend is a one-line change in the host — the `.wasm` file does not change. That swap is exactly what [Production Backends](guides/production-backends.md) covers.
+The key point: the guest never mentions an implementation. It talks to `omnia:keyvalue`; the host decides whether that means an in-memory cache (here), Redis, or NATS. Swapping the backend is a one-line change in the host — the `.wasm` file does not change. That swap is exactly what [Production Backends](guides/production-backends.md) covers.
 
 ## Where to go next
 

@@ -1,5 +1,4 @@
 use std::fmt::Debug;
-use std::sync::Arc;
 use std::time::Duration;
 
 pub use omnia_core::FutureResult;
@@ -54,17 +53,4 @@ pub trait Bucket: Debug + Send + Sync + 'static {
     fn compare_and_swap(
         &self, key: String, current: Option<Vec<u8>>, new: Vec<u8>, ttl: Option<Duration>,
     ) -> FutureResult<Result<(), Option<Vec<u8>>>>;
-}
-
-/// Proxy for a Key-Value bucket.
-pub type BucketProxy = omnia_core::Proxy<dyn Bucket>;
-
-/// CAS (Compare-And-Swap) operation handle.
-///
-/// The snapshot a `wasi:keyvalue/atomics` swap compares against.
-#[derive(Clone, Debug)]
-pub struct Cas {
-    pub(crate) bucket: Arc<dyn Bucket>,
-    pub(crate) key: String,
-    pub(crate) current: Option<Vec<u8>>,
 }

@@ -1,17 +1,14 @@
 //! # WASI Key-Value Service
 
-mod atomics_impl;
-mod batch_impl;
+mod bucket_impl;
 mod default_impl;
-mod omnia_impl;
+mod keys_impl;
 mod resource;
 mod store_impl;
 
 mod generated {
-    pub use self::omnia::keyvalue::store::Error;
-    pub use self::wasi::keyvalue::atomics::CasError;
-    pub use self::wasi::keyvalue::store::Error as WasiError;
-    pub use super::{BucketProxy, Cas};
+    pub use self::omnia::keyvalue::types::Error;
+    pub use super::bucket_impl::BucketHandle;
 
     wasmtime::component::bindgen!({
         world: "imports",
@@ -20,15 +17,11 @@ mod generated {
             default: store | tracing | trappable,
         },
         with: {
-            "wasi:keyvalue/store.bucket": BucketProxy,
-            "wasi:keyvalue/atomics.cas": Cas,
+            "omnia:keyvalue/bucket.bucket": BucketHandle,
         },
         trappable_error_type: {
-            "omnia:keyvalue/store.error" => Error,
-            "wasi:keyvalue/store.error" => WasiError,
-            "wasi:keyvalue/atomics.cas-error" => CasError,
+            "omnia:keyvalue/types.error" => Error,
         },
-
     });
 }
 
@@ -36,30 +29,28 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 pub use omnia_core::FutureResult;
-use omnia_core::{Host, HostCtx, Provides, StoreCtx};
+use omnia_core::{Host, HostCtx, HostView, Provides, StoreCtx};
 use wasmtime::component::{Linker, ResourceTableError};
 
 pub use self::default_impl::{ConnectOptions, KeyValueDefault};
 pub use self::generated::Error;
-use self::generated::WasiError;
-use self::generated::omnia::keyvalue::store as omnia_store;
-use self::generated::wasi::keyvalue::{atomics, batch, store};
+use self::generated::omnia::keyvalue::types::Host as TypesHost;
+use self::generated::omnia::keyvalue::{bucket, keys, store, types};
 pub use self::resource::*;
 
 type Result<T> = std::result::Result<T, Error>;
-type WasiResult<T> = std::result::Result<T, WasiError>;
 
-/// Host-side service for `omnia:keyvalue` and the `wasi:keyvalue` draft.
+/// Host-side service for `omnia:keyvalue`.
 #[derive(Debug, HostCtx)]
 #[host_ctx(client = KeyValueClient)]
 pub struct WasiKeyValue;
 
 impl<B: Provides<Self>> Host<B> for WasiKeyValue {
     fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
-        omnia_store::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
+        types::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
+        bucket::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
         store::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
-        atomics::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
-        Ok(batch::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?)
+        Ok(keys::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?)
     }
 }
 
@@ -83,19 +74,20 @@ impl From<anyhow::Error> for Error {
     }
 }
 
-// the draft names only these two kinds; the rest collapse into `other`
-impl From<anyhow::Error> for WasiError {
-    fn from(err: anyhow::Error) -> Self {
-        match err.downcast_ref::<Error>() {
-            Some(Error::NotFound(_)) => Self::NoSuchStore,
-            Some(Error::Denied(_)) => Self::AccessDenied,
-            _ => Self::Other(format!("{err:#}")),
-        }
+impl From<wasmtime::Error> for Error {
+    fn from(err: wasmtime::Error) -> Self {
+        Self::Other(format!("{err:#}"))
     }
 }
 
-impl From<ResourceTableError> for WasiError {
+impl From<ResourceTableError> for Error {
     fn from(err: ResourceTableError) -> Self {
         Self::Other(err.to_string())
+    }
+}
+
+impl TypesHost for HostView<'_, dyn KeyValueClient> {
+    fn convert_error(&mut self, err: Error) -> wasmtime::Result<Error> {
+        Ok(err)
     }
 }

@@ -1,83 +1,16 @@
-use anyhow::Context;
 use omnia_core::HostView;
-use wasmtime::component::{Access, Accessor, Resource};
+use wasmtime::component::{Accessor, Resource};
 
-use crate::host::generated::WasiError;
-use crate::host::generated::wasi::keyvalue::store::{
-    HostBucketWithStore, HostWithStore, KeyResponse,
-};
-use crate::host::resource::BucketProxy;
-use crate::host::store::{Host, HostBucket};
-use crate::host::{KeyValueClient, WasiKeyValue, WasiResult};
-
-pub fn get_bucket<T>(
-    accessor: &Accessor<T, WasiKeyValue>, self_: &Resource<BucketProxy>,
-) -> WasiResult<BucketProxy> {
-    omnia_core::get_cloned(accessor, self_).map_err(|_stale| WasiError::NoSuchStore)
-}
+use crate::host::bucket_impl::BucketHandle;
+use crate::host::generated::omnia::keyvalue::store::{Host, HostWithStore};
+use crate::host::{KeyValueClient, Result, WasiKeyValue};
 
 impl<T> HostWithStore<T> for WasiKeyValue {
-    async fn open(
-        accessor: &Accessor<T, Self>, identifier: String,
-    ) -> WasiResult<Resource<BucketProxy>> {
-        let bucket = accessor.with(|mut store| store.get().client.open_bucket(identifier)).await?;
-        let proxy = omnia_core::Proxy(bucket);
-        Ok(accessor.with(|mut store| store.get().table.push(proxy))?)
+    async fn open(accessor: &Accessor<T, Self>, name: String) -> Result<Resource<BucketHandle>> {
+        let bucket =
+            accessor.with(|mut store| store.get().client.open_bucket(name.clone())).await?;
+        BucketHandle::push(accessor, name, bucket)
     }
 }
 
-impl<T> HostBucketWithStore<T> for WasiKeyValue {
-    async fn get(
-        accessor: &Accessor<T, Self>, self_: Resource<BucketProxy>, key: String,
-    ) -> WasiResult<Option<Vec<u8>>> {
-        let bucket = get_bucket(accessor, &self_)?;
-        let value = bucket.get(key).await.context("issue getting value")?;
-        Ok(value)
-    }
-
-    async fn set(
-        accessor: &Accessor<T, Self>, self_: Resource<BucketProxy>, key: String, value: Vec<u8>,
-    ) -> WasiResult<()> {
-        let bucket = get_bucket(accessor, &self_)?;
-        bucket.set(key, value, None).await.context("issue setting value")?;
-        Ok(())
-    }
-
-    async fn delete(
-        accessor: &Accessor<T, Self>, self_: Resource<BucketProxy>, key: String,
-    ) -> WasiResult<()> {
-        let bucket = get_bucket(accessor, &self_)?;
-        bucket.delete(key).await.context("issue deleting value")?;
-        Ok(())
-    }
-
-    async fn exists(
-        accessor: &Accessor<T, Self>, self_: Resource<BucketProxy>, key: String,
-    ) -> WasiResult<bool> {
-        let bucket = get_bucket(accessor, &self_)?;
-        let exists = bucket.exists(key).await.context("issue checking existence")?;
-        Ok(exists)
-    }
-
-    async fn list_keys(
-        accessor: &Accessor<T, Self>, self_: Resource<BucketProxy>, cursor: Option<String>,
-    ) -> WasiResult<KeyResponse> {
-        tracing::trace!("store::HostBucket::list_keys {cursor:?}");
-        let bucket = get_bucket(accessor, &self_)?;
-        let keys = bucket.keys().await.context("issue listing keys")?;
-        // one page: echoing the cursor back would loop pagination-aware guests forever
-        Ok(KeyResponse { keys, cursor: None })
-    }
-
-    fn drop(mut accessor: Access<'_, T, Self>, rep: Resource<BucketProxy>) -> wasmtime::Result<()> {
-        Ok(accessor.get().table.delete(rep).map(|_| ())?)
-    }
-}
-
-impl Host for HostView<'_, dyn KeyValueClient> {
-    fn convert_error(&mut self, err: WasiError) -> wasmtime::Result<WasiError> {
-        Ok(err)
-    }
-}
-
-impl HostBucket for HostView<'_, dyn KeyValueClient> {}
+impl Host for HostView<'_, dyn KeyValueClient> {}

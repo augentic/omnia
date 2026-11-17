@@ -192,7 +192,7 @@ When writing `wasm32`-only code (as in `examples/`), you can also call the `omni
 
 | Capability | `WasiProvider` trait (`omnia_sdk`) | Raw guest module | Example | Deep dive |
 | ---------- | ---------------------------------- | ---------------- | ------- | --------- |
-| Key-value | `StateStore` | `omnia_wasi_keyvalue::omnia::store`, or the `wasi:keyvalue` draft's `omnia_wasi_keyvalue::store` | `examples/keyvalue` | — |
+| Key-value | `StateStore` | `omnia_wasi_keyvalue::omnia::{store, bucket, keys}` | `examples/keyvalue` | — |
 | Messaging | `Publisher` | `omnia_wasi_messaging::{producer, request_reply}` | `examples/messaging` | [Messaging](messaging.md) |
 | SQL | `SqlDb` | `omnia_wasi_sql` | `examples/sql` | [SQL](sql.md) |
 | Document store | `DocumentDb` | `omnia_wasi_docstore` | `examples/docstore` | [Document Store](document-store.md) |

@@ -186,7 +186,7 @@ impl FromEnv for NoOptions {
 /// Resource-table proxy over a shared backend handle.
 ///
 /// WASI host crates alias this per resource (e.g.
-/// `type BucketProxy = Proxy<dyn Bucket>`) to bridge WIT resources to their
+/// `type LockerProxy = Proxy<dyn Locker>`) to bridge WIT resources to their
 /// backend trait objects.
 pub struct Proxy<T: ?Sized>(pub Arc<T>);
 

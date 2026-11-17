@@ -73,7 +73,7 @@ Guests normally call these through the `omnia_sdk::DocumentDb` trait, which `omn
 Every backend stores a portable collection name, id, and body:
 
 - A collection name is 3 to 63 ASCII letters and digits, starting with a letter.
-- An id follows the portable-key rule of `omnia:keyvalue`. It is not empty, holds only ASCII letters, digits, `.`, `_`, and `-`, and neither starts nor ends with `.`.
+- An id is not empty, holds only ASCII letters, digits, `.`, `_`, and `-`, and neither starts nor ends with `.`.
 - A body is a JSON object.
 
 A filter or sort field is portable when it is a top-level name matching `[A-Za-z_][A-Za-z0-9_]*`. A backend may reject any other name, id, or body as `invalid`.

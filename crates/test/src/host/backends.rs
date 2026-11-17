@@ -81,7 +81,7 @@ pub struct Backends<
     pub http: HttpDefault,
     /// The `wasi:identity` backend.
     pub identity: I,
-    /// The `wasi:keyvalue` backend.
+    /// The `omnia:keyvalue` backend.
     pub keyvalue: K,
     /// The `wasi:messaging` backend.
     pub messaging: G,
@@ -172,7 +172,7 @@ impl<M, K, B, D, S, V, G, I, O, C> Backends<M, K, B, D, S, V, G, I, O, C> {
         }
     }
 
-    /// The same bundle serving `wasi:keyvalue` from `keyvalue`.
+    /// The same bundle serving `omnia:keyvalue` from `keyvalue`.
     #[must_use]
     pub fn keyvalue<N: KeyValueClient + Clone>(
         self, keyvalue: N,

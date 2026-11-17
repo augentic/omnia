@@ -34,9 +34,19 @@ Unreleased
   `vcs`, and `websockets`. Each borrows the provider as that one trait, so
   a handler bounded on `Config + StateStore` calls `get` without UFCS.
 - `omnia:keyvalue`, the Omnia-owned interface `StateStore` calls.
-  `WasiKeyValue` serves it beside the `wasi:keyvalue` draft over one
-  `Bucket`. Each call names its bucket, and `set`, `compare-and-swap`, and
-  `increment` take a TTL in milliseconds.
+  `WasiKeyValue` serves it over one `Bucket`:
+  - `store.open` answers a `bucket` handle, and every call goes through
+    it.
+  - A write names its `lifetime`: `forever`, a TTL in milliseconds, or one
+    of two that leave an existing entry the time it has left.
+  - A write returns the entry's `revision`. `set` takes an `absent` or
+    `matches` precondition, and one that fails answers a `conflict`
+    carrying the entry it found.
+  - `get-many`, `set-many`, and `delete-many` take several keys at once.
+  - The optional `keys` interface pages the keys under a prefix.
+  - `WasiKeyValue` answers `unsupported` for a `delete` with a revision,
+    and for a `matches` write or an `increment` that replaces the
+    lifetime.
 - `omnia:sql`, the Omnia-owned interface `SqlDb` calls. `WasiSql` serves it
   beside the `wasi:sql` draft over one `Connection`. Each call names its
   database, and `batch` runs its statements in one transaction.
@@ -131,8 +141,8 @@ Unreleased
   that imports a WASI 0.2 `wasi:cli`, `wasi:clocks`, `wasi:filesystem`,
   `wasi:http`, `wasi:io`, `wasi:random`, or `wasi:sockets` interface is
   refused by name, with the rebuild it needs, at startup or at its first
-  use. The `wasi:config`, `wasi:keyvalue`, `wasi:messaging`, and
-  `wasi:sql` drafts are served as before.
+  use. The `wasi:config`, `wasi:messaging`, and `wasi:sql` drafts are
+  served as before.
 - `omnia_test::build` compiles a fixture crate's programs for
   `wasm32-wasip3`.
 - A raw export that may wait is an `async func`. On `wasm32-wasip3`,
@@ -266,12 +276,14 @@ Unreleased
   `ContainerMetadata`, `ObjectMetadata`, and `Page` are the
   `omnia:blobstore` records. The host translates the draft's inclusive
   range and its name stream itself.
-- `StateStore` calls `omnia:keyvalue`, one host call per method:
+- `StateStore` calls `omnia:keyvalue`, opening a `bucket` handle for each
+  call:
   - `get` answers `Option<Bytes>`.
   - `set` answers `()`, and a TTL is an `Option<Duration>`. A zero TTL
     fails with the code `invalid` and writes nothing.
-  - `cas` is `compare_and_swap`. A mismatch answers `Ok(Err(Conflict))`
-    with the value it found.
+  - `cas` is `compare_and_swap`. It writes under the `absent`
+    precondition, or under the `revision` it read the expected value at.
+    A mismatch answers `Ok(Err(Conflict))` with the value it found.
   - `increment` takes a TTL. Like `compare_and_swap`, it applies the TTL
     only to an entry it creates.
   - `named(name)` selects another bucket the deployment declares.
@@ -285,12 +297,14 @@ Unreleased
   0.37 guest set with a TTL reads back as its JSON `Cacheable` envelope.
   `omnia_test::host::Backends::state` reads the raw bytes.
 - Bucket names are strict. `KeyValueDefault` opens only the buckets it
-  declares, and any other fails with `not-found` on `omnia:keyvalue` and
-  `no-such-store` on the draft. A deployment whose guests open a bucket
-  other than `default` lists it in `KEYVALUE_BUCKETS`.
+  declares, and any other fails with `not-found`. A deployment whose guests
+  open a bucket other than `default` lists it in `KEYVALUE_BUCKETS`.
 - `Bucket::{set, increment}` take a TTL, and `Bucket::compare_and_swap`
   replaces `swap`. A backend picks a failure's code by returning an
   `omnia_wasi_keyvalue::Error`.
+- `KeyValueDefault` stores a counter as decimal text, as `omnia:keyvalue`
+  specifies, rather than as eight big-endian bytes. `increment` fails any
+  other value with the code `invalid`.
 - Each `Has<Trait>` names the type it delegates to as `Inner`, and its
   accessor returns `&Self::Inner`, so a capability's associated types
   forward to the field's. A `pub` provider that derives `Provider` needs
@@ -462,6 +476,11 @@ Unreleased
   `StreamObjectNames`. A guest reaches a blob store through
   `omnia_sdk::BlobStore`, and `omnia_wasi_blobstore::omnia::store` is the
   raw `omnia:blobstore` binding.
+- The `wasi:keyvalue@0.2.0-draft2` imports. With them go
+  `omnia_wasi_keyvalue::{store, atomics, batch}` on `wasm32`, and the
+  host's `BucketProxy` and `Cas`. A guest reaches a key-value store
+  through `omnia_sdk::StateStore`, and `omnia_wasi_keyvalue::omnia` holds
+  the raw `omnia:keyvalue` bindings.
 
 ---
 

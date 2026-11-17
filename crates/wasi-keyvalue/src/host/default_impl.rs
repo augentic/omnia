@@ -1,4 +1,4 @@
-//! Default in-memory implementation for wasi-keyvalue
+//! Default in-memory implementation for `omnia:keyvalue`
 //!
 //! This is a lightweight implementation for development use only.
 
@@ -57,7 +57,7 @@ impl omnia_core::FromEnv for ConnectOptions {
     }
 }
 
-/// Default implementation for `wasi:keyvalue`.
+/// Default implementation for `omnia:keyvalue`.
 #[derive(Clone)]
 pub struct KeyValueDefault {
     buckets: Arc<HashMap<String, InMemBucket>>,
@@ -255,15 +255,24 @@ fn add_i64(current: Option<&[u8]>, delta: i64) -> anyhow::Result<i64> {
     let base = match current {
         None => 0,
         Some(value) => {
-            let bytes: [u8; 8] = value.try_into().map_err(|_len| {
-                anyhow!("value is {} bytes, not an 8-byte big-endian integer", value.len())
-            })?;
-            i64::from_be_bytes(bytes)
+            decode_i64(value).ok_or_else(|| anyhow!("value is not a decimal counter"))?
         }
     };
     base.checked_add(delta).context("adding delta overflows i64")
 }
 
+// `omnia:keyvalue` admits only the canonical text: `0`, or an optional `-` and
+// digits that do not start with `0`
+fn decode_i64(value: &[u8]) -> Option<i64> {
+    let digits = value.strip_prefix(b"-").unwrap_or(value);
+    let canonical = value == b"0"
+        || (matches!(digits.first(), Some(b'1'..=b'9')) && digits.iter().all(u8::is_ascii_digit));
+    if !canonical {
+        return None;
+    }
+    std::str::from_utf8(value).ok()?.parse().ok()
+}
+
 fn encode_i64(value: i64) -> Vec<u8> {
-    value.to_be_bytes().to_vec()
+    value.to_string().into_bytes()
 }

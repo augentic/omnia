@@ -1,8 +1,8 @@
-//! End-to-end tests for `omnia:keyvalue` and the `wasi:keyvalue` draft:
-//! every scenario runs a real guest component from `crates/test-programs`
-//! through the omnia runtime against the in-memory default. The guest
-//! asserts what it observes across the boundary (and traps on failure); the
-//! host side seeds the bucket and asserts what persisted after the run.
+//! End-to-end tests for `omnia:keyvalue`: every scenario runs a real guest
+//! component from `crates/test-programs` through the omnia runtime against
+//! the in-memory default. The guest asserts what it observes across the
+//! boundary (and traps on failure); the host side seeds the bucket and
+//! asserts what persisted after the run.
 
 #![cfg(not(target_arch = "wasm32"))]
 
@@ -38,26 +38,22 @@ async fn declaring(buckets: &[&str]) -> KeyValueDefault {
 async fn keyvalue_bucket() {
     let backends = Backends::defaults().await.keyvalue(declaring(&["bucket"]).await);
     let bucket = backends.keyvalue.open_bucket("bucket".to_owned()).await.expect("bucket");
-    bucket.set("counter".to_owned(), 37_i64.to_be_bytes().to_vec(), None).await.expect("seed");
+    bucket.set("counter".to_owned(), b"37".to_vec(), None).await.expect("seed");
 
     run_guest(test_programs::KEYVALUE_BUCKET, backends.clone()).await;
 
-    // Persisted state: the increments landed, the deletes took, and the CAS
-    // retry's value is what survived.
+    // Persisted state: the deletes took, the refused calls wrote nothing,
+    // and the counters are decimal text.
     let bucket = backends.keyvalue.open_bucket("bucket".to_owned()).await.expect("bucket");
     let mut keys = bucket.keys().await.expect("keys");
     keys.sort();
-    assert_eq!(keys, ["b", "cas", "counter", "fresh"]);
     assert_eq!(
-        bucket.get("counter".to_owned()).await.expect("get"),
-        Some(42_i64.to_be_bytes().to_vec())
+        keys,
+        ["b", "counter", "fresh", "kept", "lock", "padded", "page.1", "page.2", "page.3"]
     );
-    assert_eq!(
-        bucket.get("fresh".to_owned()).await.expect("get"),
-        Some(3_i64.to_be_bytes().to_vec())
-    );
+    assert_eq!(bucket.get("counter".to_owned()).await.expect("get"), Some(b"42".to_vec()));
+    assert_eq!(bucket.get("fresh".to_owned()).await.expect("get"), Some(b"3".to_vec()));
     assert_eq!(bucket.get("b".to_owned()).await.expect("get"), Some(b"2".to_vec()));
-    assert_eq!(bucket.get("cas".to_owned()).await.expect("get"), Some(b"retried".to_vec()));
 }
 
 #[tokio::test]
@@ -110,10 +106,7 @@ async fn keyvalue_error_codes() {
         .expect("guest runs");
     assert_eq!(status, ExitStatus::SUCCESS, "guest failed");
 
-    // the zero TTL is rejected before any bucket opens
+    // the SDK opens a call's bucket before the host checks its TTL
     let opened = backends.keyvalue.opened.lock().expect("opened buckets").clone();
-    assert_eq!(
-        opened,
-        ["undeclared", "denied", "unsupported", "unavailable", "other", "undeclared", "denied"]
-    );
+    assert_eq!(opened, ["default", "undeclared", "denied", "unsupported", "unavailable", "other"]);
 }

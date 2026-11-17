@@ -124,7 +124,7 @@ Each interface crate provides guest bindings, a host implementation, and, with o
 | Crate            | Interface         | Purpose                          | Default backend                           |
 | ---------------- | ----------------- | -------------------------------- | ----------------------------------------- |
 | `wasi-http`      | `wasi:http`       | HTTP client/server (trigger)     | `HttpDefault` — hyper client, axum server |
-| `wasi-keyvalue`  | `omnia:keyvalue`  | Key-value storage (+ wasi draft) | `KeyValueDefault` — in-memory             |
+| `wasi-keyvalue`  | `omnia:keyvalue`  | Key-value storage                | `KeyValueDefault` — in-memory             |
 | `wasi-messaging` | `wasi:messaging`  | Pub/sub messaging (trigger)      | `MessagingDefault` — in-process broadcast |
 | `wasi-blobstore` | `omnia:blobstore` | Blob storage                     | `BlobStoreDefault` — in-memory            |
 | `wasi-sql`       | `omnia:sql`       | Parameterized SQL (+ wasi draft) | `SqlDefault` — SQLite                     |
@@ -262,7 +262,7 @@ StoreCtx<Backends>                       one per guest store
 HostView<'_, dyn KeyValueClient>         #[host_ctx(client = KeyValueClient)]: the host's HasData::Data
    |  bindgen Host* impls on the view; Host::add_to_linker(linker, StoreCtx::view::<Self>)
    v
-wasmtime Linker                          wasi:keyvalue/* resolved for the guest
+wasmtime Linker                          omnia:keyvalue/* resolved for the guest
 ```
 
 A backend implements the `<Name>Client` contract and never sees the view; a host implements the WIT functions on the view and never sees the bundle. `runtime!` supplies the bundle's `Provides` impl per row, `#[derive(HostCtx)]` supplies the host's borrow and view, and `StoreCtx::view` joins them.

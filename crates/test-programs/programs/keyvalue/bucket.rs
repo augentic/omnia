@@ -1,76 +1,142 @@
-//! One bucket walked end to end over the raw `wasi:keyvalue` bindings: an
-//! atomic increment lands on the host-seeded counter, the store methods
-//! round-trip one key, the batch functions align positionally with a missing
-//! key, `list-keys` is a single page, and a compare-and-swap succeeds on a
-//! fresh snapshot then fails on a stale one with a live refreshed handle.
+//! One bucket walked end to end over the raw `omnia:keyvalue` bindings, on
+//! the one handle `store::open` returns.
+//!
+//! - Increments land on the host-seeded `counter`, and `get` reads it back
+//!   as decimal text.
+//! - A write returns the revision a read reports. An `absent` or `matches`
+//!   write that fails conflicts with the entry it found.
+//! - The batch verbs answer in request order, and a key given twice is
+//!   `invalid`.
+//! - `keys::list` pages the keys under a prefix.
+//! - A zero TTL, a non-canonical counter, and a zero `limit` are `invalid`.
+//! - The calls the backend trait cannot express yet are `unsupported`.
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_wasi_keyvalue::atomics::{self, Cas, CasError};
-use omnia_wasi_keyvalue::{batch, store};
+use omnia_wasi_keyvalue::omnia::bucket::Bucket;
+use omnia_wasi_keyvalue::omnia::types::{Conflict, Error, Lifetime, Precondition, Revision};
+use omnia_wasi_keyvalue::omnia::{keys, store};
 
 omnia_sdk::api::command::export!(scenario);
+
+const HOUR_MS: u64 = 3_600_000;
 
 async fn scenario() {
     let bucket = store::open("bucket".to_owned()).await.expect("open");
 
-    // Atomics: the host seeded `counter` as big-endian 37; an absent key
-    // starts from zero.
-    assert_eq!(atomics::increment(&bucket, "counter".to_owned(), 5).await.expect("increment"), 42);
-    assert_eq!(atomics::increment(&bucket, "fresh".to_owned(), 3).await.expect("increment"), 3);
+    // the host seeded `counter` as `37`, and an absent counter starts at zero
+    let counted = bucket.increment("counter".to_owned(), 5, Lifetime::Keep).await;
+    assert_eq!(counted.expect("increment"), 42);
+    let counted = bucket.increment("fresh".to_owned(), 3, Lifetime::Keep).await;
+    assert_eq!(counted.expect("increment"), 3);
+    assert_eq!(value(&bucket, "counter").await.as_deref(), Some(&b"42"[..]));
 
-    // Store: set, read back, probe, delete.
-    bucket.set("k".to_owned(), b"v".to_vec()).await.expect("set");
-    assert_eq!(bucket.get("k".to_owned()).await.expect("get"), Some(b"v".to_vec()));
+    // a write returns the revision a read reports
+    let first = write(&bucket, "k", b"v1", Lifetime::Forever, None).await.expect("unconditional");
+    let entry = bucket.get("k".to_owned()).await.expect("get").expect("an entry");
+    assert_eq!((entry.value, entry.revision), (b"v1".to_vec(), first.clone()));
     assert!(bucket.exists("k".to_owned()).await.expect("exists"));
     assert!(!bucket.exists("missing".to_owned()).await.expect("exists"));
-    bucket.delete("k".to_owned()).await.expect("delete");
-    assert_eq!(bucket.get("k".to_owned()).await.expect("get"), None);
-    assert!(!bucket.exists("k".to_owned()).await.expect("exists"));
 
-    // Batch: one entry per requested key, `None` where the key is absent.
+    // `matches` writes over the revision it names, and conflicts on any other
+    let matching = Some(Precondition::Matches(first.clone()));
+    let second = write(&bucket, "k", b"v2", Lifetime::Keep, matching).await.expect("a match");
+    assert_ne!(second, first);
+    let stale = Some(Precondition::Matches(first));
+    let found = write(&bucket, "k", b"v3", Lifetime::Keep, stale).await.expect_err("stale");
+    assert_eq!(current(found), Some((b"v2".to_vec(), second.clone())));
+    let unmatched = Some(Precondition::Matches(second));
+    let found = write(&bucket, "nothing", b"v", Lifetime::Keep, unmatched).await;
+    assert_eq!(current(found.expect_err("an absent key matched")), None);
+
+    // `absent` creates an entry once
+    let created = Some(Precondition::Absent);
+    let lock = Lifetime::KeepOrTtlMs(HOUR_MS);
+    let held = write(&bucket, "lock", b"held", lock, created.clone()).await.expect("a create");
+    let found = write(&bucket, "lock", b"mine", lock, created).await.expect_err("a second create");
+    assert_eq!(current(found), Some((b"held".to_vec(), held)));
+
+    // a write that keeps the lifetime lands on an absent key and over an entry
+    write(&bucket, "kept", b"one", Lifetime::Keep, None).await.expect("unconditional");
+    write(&bucket, "kept", b"two", lock, None).await.expect("unconditional");
+    assert_eq!(value(&bucket, "kept").await.as_deref(), Some(&b"two"[..]));
+
+    // deleting an absent key succeeds
+    bucket.delete("k".to_owned(), None).await.expect("delete").expect("unconditional");
+    bucket.delete("k".to_owned(), None).await.expect("delete absent").expect("unconditional");
+    assert_eq!(value(&bucket, "k").await, None);
+
+    // the batch verbs answer in request order
     let pairs = vec![("a".to_owned(), b"1".to_vec()), ("b".to_owned(), b"2".to_vec())];
-    batch::set_many(&bucket, pairs).await.expect("set-many");
-    let many = batch::get_many(&bucket, vec!["a".to_owned(), "missing".to_owned(), "b".to_owned()])
-        .await
-        .expect("get-many");
-    assert_eq!(
-        many,
-        [Some(("a".to_owned(), b"1".to_vec())), None, Some(("b".to_owned(), b"2".to_vec()))]
-    );
+    bucket.set_many(pairs, Lifetime::Forever).await.expect("set-many");
+    let many = values(&bucket, &["a", "missing", "b"]).await;
+    assert_eq!(many, [Some(b"1".to_vec()), None, Some(b"2".to_vec())]);
+    let deleted = vec!["a".to_owned(), "missing".to_owned()];
+    bucket.delete_many(deleted).await.expect("delete-many");
+    assert_eq!(values(&bucket, &["a", "b"]).await, [None, Some(b"2".to_vec())]);
 
-    // The default returns every key in one page; the deleted `k` is gone.
-    let page = bucket.list_keys(None).await.expect("list-keys");
-    let mut keys = page.keys;
-    keys.sort();
-    assert_eq!(keys, ["a", "b", "counter", "fresh"]);
-    assert_eq!(page.cursor, None);
+    // a key given twice writes nothing
+    let twice = vec![("c".to_owned(), b"1".to_vec()), ("c".to_owned(), b"2".to_vec())];
+    let repeated = bucket.set_many(twice, Lifetime::Forever).await;
+    assert!(matches!(repeated, Err(Error::Invalid(_))), "{repeated:?}");
+    assert_eq!(value(&bucket, "c").await, None);
 
-    batch::delete_many(&bucket, vec!["a".to_owned(), "missing".to_owned()])
-        .await
-        .expect("delete-many");
-    let many =
-        batch::get_many(&bucket, vec!["a".to_owned(), "b".to_owned()]).await.expect("get-many");
-    assert_eq!(many, [None, Some(("b".to_owned(), b"2".to_vec()))]);
+    // a listing pages the keys under its prefix
+    for key in ["page.1", "page.2", "page.3"] {
+        write(&bucket, key, b"p", Lifetime::Forever, None).await.expect("unconditional");
+    }
+    let page = keys::list(&bucket, "page.".to_owned(), None, Some(2)).await.expect("list");
+    assert_eq!(page.keys.len(), 2, "{:?}", page.keys);
+    let after = page.next.expect("a second page");
+    let rest = keys::list(&bucket, "page.".to_owned(), Some(after), Some(2)).await.expect("list");
+    assert_eq!(rest.next, None);
+    let mut listed = [page.keys, rest.keys].concat();
+    listed.sort();
+    assert_eq!(listed, ["page.1", "page.2", "page.3"]);
 
-    // CAS: a swap against an unchanged snapshot succeeds.
-    bucket.set("cas".to_owned(), b"v1".to_vec()).await.expect("set");
-    let cas = Cas::new(&bucket, "cas".to_owned()).await.expect("cas");
-    assert_eq!(cas.current().await.expect("current"), Some(b"v1".to_vec()));
-    atomics::swap(cas, b"v2".to_vec()).await.expect("swap on a fresh snapshot");
-    assert_eq!(bucket.get("cas".to_owned()).await.expect("get"), Some(b"v2".to_vec()));
+    // refused as `invalid`
+    let zero_ttl = bucket.set("zero".to_owned(), b"v".to_vec(), Lifetime::TtlMs(0), None).await;
+    assert!(matches!(zero_ttl, Err(Error::Invalid(_))), "{zero_ttl:?}");
+    assert_eq!(value(&bucket, "zero").await, None);
+    let zero_limit = keys::list(&bucket, String::new(), None, Some(0)).await;
+    assert!(matches!(zero_limit, Err(Error::Invalid(_))), "{zero_limit:?}");
+    for text in ["007", "-0", "+7"] {
+        write(&bucket, "padded", text.as_bytes(), Lifetime::Forever, None)
+            .await
+            .expect("unconditional");
+        let counted = bucket.increment("padded".to_owned(), 1, Lifetime::Keep).await;
+        assert!(matches!(counted, Err(Error::Invalid(_))), "`{text}` counted: {counted:?}");
+    }
 
-    // A write slipping in between `new` and `swap` fails the swap and hands
-    // back a handle refreshed at the observed value, which then swaps.
-    let cas = Cas::new(&bucket, "cas".to_owned()).await.expect("cas");
-    assert_eq!(cas.current().await.expect("current"), Some(b"v2".to_vec()));
-    bucket.set("cas".to_owned(), b"interfering".to_vec()).await.expect("set");
-    let fresh = match atomics::swap(cas, b"lost-race".to_vec()).await {
-        Err(CasError::CasFailed(fresh)) => fresh,
-        Ok(()) => panic!("stale swap succeeded"),
-        Err(CasError::StoreError(error)) => panic!("stale swap failed with {error:?}"),
-    };
-    assert_eq!(fresh.current().await.expect("current"), Some(b"interfering".to_vec()));
-    atomics::swap(fresh, b"retried".to_vec()).await.expect("swap with the refreshed handle");
-    assert_eq!(bucket.get("cas".to_owned()).await.expect("get"), Some(b"retried".to_vec()));
+    // refused as `unsupported` until backends carry revisions and lifetimes
+    let revision = bucket.get("b".to_owned()).await.expect("get").expect("an entry").revision;
+    let delete = bucket.delete("b".to_owned(), Some(revision.clone())).await;
+    assert!(matches!(delete, Err(Error::Unsupported(_))), "{delete:?}");
+    let matching = Some(Precondition::Matches(revision));
+    let replace = bucket.set("b".to_owned(), b"3".to_vec(), Lifetime::Forever, matching).await;
+    assert!(matches!(replace, Err(Error::Unsupported(_))), "{replace:?}");
+    let counted = bucket.increment("counter".to_owned(), 1, Lifetime::Forever).await;
+    assert!(matches!(counted, Err(Error::Unsupported(_))), "{counted:?}");
+}
+
+async fn write(
+    bucket: &Bucket, key: &str, value: &[u8], lifetime: Lifetime, when: Option<Precondition>,
+) -> Result<Revision, Conflict> {
+    let written = bucket.set(key.to_owned(), value.to_vec(), lifetime, when).await;
+    written.unwrap_or_else(|err| panic!("set `{key}`: {err:?}"))
+}
+
+async fn value(bucket: &Bucket, key: &str) -> Option<Vec<u8>> {
+    let entry = bucket.get(key.to_owned()).await;
+    entry.unwrap_or_else(|err| panic!("get `{key}`: {err:?}")).map(|entry| entry.value)
+}
+
+async fn values(bucket: &Bucket, keys: &[&str]) -> Vec<Option<Vec<u8>>> {
+    let keys = keys.iter().map(|&key| key.to_owned()).collect();
+    let entries = bucket.get_many(keys).await.expect("get-many");
+    entries.into_iter().map(|entry| entry.map(|entry| entry.value)).collect()
+}
+
+fn current(conflict: Conflict) -> Option<(Vec<u8>, Revision)> {
+    conflict.current.map(|entry| (entry.value, entry.revision))
 }

@@ -1,29 +1,23 @@
 package omnia:keyvalue@0.1.0;
 
-/// Key-value state, one function per `StateStore` method.
+/// The types the key-value interfaces share.
 ///
-/// `bucket` names a binding the deployment declares. An unnamed SDK handle
-/// passes `default`.
+/// Every backend stores a portable name and a portable value, and may
+/// reject any other as `invalid`.
 ///
-/// Every backend stores a portable key, and may reject any other as
-/// `invalid`. A portable key:
-///
-/// - is not empty;
-/// - holds only ASCII letters, digits, `.`, `_`, and `-`;
-/// - neither starts nor ends with `.`.
-///
-/// A TTL is a lifetime the host enforces, in milliseconds:
-///
-/// - An entry written without one never expires.
-/// - A TTL is rounded up to the store's resolution, so an entry never
-///   expires early.
-/// - A zero TTL is `invalid` and writes nothing.
-interface store {
+/// - A portable bucket name is not empty and holds only ASCII letters,
+///   digits, `_`, and `-`.
+/// - A portable key is one or more segments joined by `.`, at most 255
+///   bytes long. Each segment is not empty and holds only ASCII letters,
+///   digits, `_`, and `-`.
+/// - A portable value is at most 512 KiB.
+interface types {
   /// Why a call failed.
   variant error {
-    /// The bucket is not declared by the deployment.
+    /// The bucket is not declared by the deployment. An absent key is not
+    /// an error.
     not-found(string),
-    /// The caller may not use the bucket.
+    /// The caller may not make the call.
     denied(string),
     /// The request was rejected, such as a zero TTL or a key the backend
     /// cannot store.
@@ -36,43 +30,152 @@ interface store {
     other(string),
   }
 
-  /// A compare-and-swap whose expected value no longer matched.
-  record conflict {
-    /// The value stored when the swap was attempted, `none` when absent.
-    current: option<list<u8>>,
+  /// A token for one stored state of an entry, compared only for equality.
+  ///
+  /// It changes whenever the entry's bytes change. Two states that hold the
+  /// same bytes may share one, so an entry that changed and changed back
+  /// may still match.
+  type revision = string;
+
+  /// A stored value.
+  record entry {
+    value: list<u8>,
+    revision: revision,
   }
 
-  /// Get the value at `key`, `none` when absent.
-  get: async func(bucket: string, key: string) -> result<option<list<u8>>, error>;
-
-  /// Replace the value at `key` and its lifetime.
-  set: async func(bucket: string, key: string, value: list<u8>, ttl-ms: option<u64>)
-    -> result<_, error>;
-
-  /// Delete the value at `key`. Deleting an absent key succeeds.
-  delete: async func(bucket: string, key: string) -> result<_, error>;
-
-  /// Replace the value at `key` with `new` while it still equals `current`
-  /// (`none` means absent).
+  /// What a write does to an entry's lifetime.
   ///
-  /// `ttl-ms` applies only when the swap creates the entry. An existing
-  /// entry keeps the time it has left.
-  compare-and-swap: async func(
-    bucket: string, key: string, current: option<list<u8>>, new: list<u8>,
-    ttl-ms: option<u64>,
-  ) -> result<result<_, conflict>, error>;
+  /// A TTL is in milliseconds and counts from the write. It is rounded up
+  /// to the store's resolution, so an entry never expires early. A zero TTL
+  /// is `invalid` and writes nothing. A backend that cannot honour a case
+  /// fails with `unsupported`.
+  variant lifetime {
+    /// The entry never expires.
+    forever,
+    /// The entry expires after this TTL.
+    ttl-ms(u64),
+    /// An existing entry keeps the time it has left. A new entry never
+    /// expires.
+    keep,
+    /// An existing entry keeps the time it has left. A new entry expires
+    /// after this TTL.
+    keep-or-ttl-ms(u64),
+  }
 
-  /// Add `delta` to the counter at `key`, starting from zero, and return
-  /// the new value.
+  /// What must hold for a write to take effect.
   ///
-  /// `ttl-ms` applies only when the call creates the counter. An existing
-  /// counter keeps the time it has left.
-  increment: async func(bucket: string, key: string, delta: s64, ttl-ms: option<u64>)
-    -> result<s64, error>;
+  /// A backend that cannot check it atomically fails with `unsupported`.
+  variant precondition {
+    /// No entry is stored under the key.
+    absent,
+    /// The entry stored under the key has this revision.
+    matches(revision),
+  }
+
+  /// A write whose precondition did not hold.
+  record conflict {
+    /// The entry found in its place, `none` when the key is absent.
+    current: option<entry>,
+  }
 }
 
-/// `omnia:keyvalue/store` beside the `wasi:keyvalue` draft.
-world imports {
+/// Entries in one bucket. Every backend serves this interface.
+///
+/// An absent key is `none`. A write is atomic, so a reader sees the entry
+/// as it was or as it became. A read may trail a write on a replicated
+/// store. A precondition is checked against the latest write.
+interface bucket {
+  use types.{conflict, entry, error, lifetime, precondition, revision};
+
+  /// An open bucket.
+  resource bucket {
+    /// The entry at `key`, `none` when absent.
+    get: async func(key: string) -> result<option<entry>, error>;
+
+    /// The entry at each of `keys`, in the order given.
+    get-many: async func(keys: list<string>) -> result<list<option<entry>>, error>;
+
+    /// Whether an entry is stored at `key`.
+    exists: async func(key: string) -> result<bool, error>;
+
+    /// Store `value` at `key` and return its revision. With `when`, only
+    /// while the precondition holds.
+    set: async func(
+      key: string, value: list<u8>, lifetime: lifetime, when: option<precondition>,
+    ) -> result<result<revision, conflict>, error>;
+
+    /// Store each value at its key, all with `lifetime`. A key given twice
+    /// is `invalid` and writes nothing.
+    ///
+    /// Each write is atomic and the batch is not, so a failure may leave
+    /// part of it stored.
+    set-many: async func(entries: list<tuple<string, list<u8>>>, lifetime: lifetime)
+      -> result<_, error>;
+
+    /// Delete the entry at `key`, and with `when` only while it has that
+    /// revision. Deleting an absent key succeeds.
+    delete: async func(key: string, when: option<revision>)
+      -> result<result<_, conflict>, error>;
+
+    /// Delete the entry at each of `keys`. A key already absent is skipped.
+    delete-many: async func(keys: list<string>) -> result<_, error>;
+
+    /// Add `delta` to the counter at `key` and return the new value. An
+    /// absent counter starts at zero.
+    ///
+    /// A counter is stored as decimal text, so `get` reads one and `set`
+    /// writes one. The text is `0`, or an optional `-` and digits that do
+    /// not start with `0`. Any other value, or a sum outside a signed
+    /// 64-bit integer, is `invalid` and changes nothing.
+    increment: async func(key: string, delta: s64, lifetime: lifetime)
+      -> result<s64, error>;
+  }
+}
+
+/// The buckets a guest may open. Every backend serves this interface.
+interface store {
+  use types.{error};
+  use bucket.{bucket};
+
+  /// Open the bucket `name`, a binding the deployment declares. An unnamed
+  /// SDK handle opens `default`.
+  open: async func(name: string) -> result<bucket, error>;
+}
+
+/// Optional: enumerating the keys a bucket holds.
+interface keys {
+  use types.{error};
+  use bucket.{bucket};
+
+  /// One page of a listing.
+  record page {
+    /// The keys on this page, in no particular order.
+    keys: list<string>,
+    /// The cursor that resumes the listing. Only `none` marks the last page.
+    next: option<string>,
+  }
+
+  /// One page of the keys that start with `prefix`.
+  ///
+  /// A page holds at most `limit` keys and never more than 1,000. A zero
+  /// `limit` is `invalid`. `after` is the `next` of the previous page of the
+  /// same listing. A key stored for the whole listing is returned at least
+  /// once. One written or deleted during it may or may not be.
+  %list: async func(
+    bucket: borrow<bucket>, prefix: string, after: option<string>, limit: option<u32>,
+  ) -> result<page, error>;
+}
+
+/// What every backend serves.
+world core {
+  import types;
   import store;
-  include wasi:keyvalue/imports@0.2.0-draft2;
+  import bucket;
+}
+
+/// Every interface. A backend answers `unsupported` for what it does not
+/// serve.
+world imports {
+  include core;
+  import keys;
 }

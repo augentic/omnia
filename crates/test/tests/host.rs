@@ -287,9 +287,9 @@ async fn swapped_keyvalue() {
         inner: KeyValueDefault::connect_with(options).await.expect("in-memory keyvalue"),
         opened: Arc::default(),
     };
-    // The guest's atomics start from a host-seeded counter.
+    // The guest's increments start from a host-seeded counter.
     let bucket = recording.inner.open_bucket("bucket".to_owned()).await.expect("bucket");
-    bucket.set("counter".to_owned(), 37_i64.to_be_bytes().to_vec(), None).await.expect("seed");
+    bucket.set("counter".to_owned(), b"37".to_vec(), None).await.expect("seed");
 
     let backends = Backends::defaults().await.keyvalue(recording);
     let status = Deployment::new()
@@ -304,10 +304,7 @@ async fn swapped_keyvalue() {
     let opened = backends.keyvalue.opened.lock().expect("opened buckets").clone();
     assert_eq!(opened, ["bucket"]);
     let bucket = backends.keyvalue.inner.open_bucket("bucket".to_owned()).await.expect("bucket");
-    assert_eq!(
-        bucket.get("counter".to_owned()).await.expect("get"),
-        Some(42_i64.to_be_bytes().to_vec())
-    );
+    assert_eq!(bucket.get("counter".to_owned()).await.expect("get"), Some(b"42".to_vec()));
 }
 
 #[tokio::test]

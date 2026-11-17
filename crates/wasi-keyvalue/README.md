@@ -4,19 +4,26 @@ This crate provides the Key-Value interface for the Omnia runtime.
 
 ## Interface
 
-Implements `omnia:keyvalue`, the interface the SDK's `StateStore` calls, and
-the `wasi:keyvalue` draft for raw-binding guests. Both are served from one
-`Bucket` per backend.
+Implements `omnia:keyvalue`, the interface the SDK's `StateStore` calls, over
+one `Bucket` per backend.
 
-- A guest opens a bucket by name. A name the deployment does not declare
-  fails with `not-found`.
-- Every backend stores a portable key: one that is not empty, holds only
-  ASCII letters, digits, `.`, `_`, and `-`, and neither starts nor ends with
-  `.`. A backend may reject any other key with `invalid`.
-- The backend enforces a TTL. An entry written without one never expires, and
-  a zero TTL is rejected before the backend sees it.
-- `compare-and-swap` and `increment` apply a TTL only when they create the
-  entry. An existing entry keeps the time it has left.
+- A guest opens a bucket by name and calls it through the handle `open`
+  returns. A name the deployment does not declare fails with `not-found`.
+  An absent key is `none`, not an error.
+- Every backend stores the portable keys the SDK's `StateStore` defines. A
+  backend may reject any other key with `invalid`.
+- A write names its lifetime. `forever` and `ttl-ms` replace an entry's
+  lifetime. `keep` and `keep-or-ttl-ms` leave an existing entry the time it
+  has left. A zero TTL is rejected before the backend sees it.
+- A write returns the entry's revision. A `set` with a precondition writes
+  only while it holds, and otherwise returns a `conflict` carrying the entry
+  it found.
+- `increment` stores a counter as decimal text, which `get` reads back.
+- `keys` is optional, and pages the keys under a prefix.
+- The host answers `unsupported` for what `Bucket` cannot express yet:
+  - a `delete` with a revision;
+  - a `set` with `matches` and `forever` or `ttl-ms`;
+  - an `increment` with `forever` or `ttl-ms`.
 
 ## Backend
 

@@ -30,7 +30,7 @@ Each example directory has a `README.md` with test commands and example-specific
 | Example | Demonstrates |
 | ------- | ------------ |
 | [`http`](http) | Basic HTTP server: WASI HTTP handler + Axum routing |
-| [`keyvalue`](keyvalue) | Storing and retrieving state through `wasi:keyvalue` |
+| [`keyvalue`](keyvalue) | Storing and retrieving state through `omnia:keyvalue` |
 | [`cli`](cli) | A `wasi:cli/run` command-mode guest driven as a one-shot trigger |
 
 ### One per capability
