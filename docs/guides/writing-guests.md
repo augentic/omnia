@@ -195,7 +195,7 @@ When writing `wasm32`-only code (as in `examples/`), you can also call the `omni
 | Key-value | `StateStore` | `omnia_wasi_keyvalue::omnia::{store, bucket, keys}` | `examples/keyvalue` | — |
 | Messaging | `Publisher` | `omnia_wasi_messaging::{producer, request_reply}` | `examples/messaging` | [Messaging](messaging.md) |
 | SQL | `SqlDb` | `omnia_wasi_sql` | `examples/sql` | [SQL](sql.md) |
-| Document store | `DocumentDb` | `omnia_wasi_docstore` | `examples/docstore` | [Document Store](document-store.md) |
+| Document store | `DocumentDb` | `omnia_wasi_docstore::omnia::{store, collection}` | `examples/docstore` | [Document Store](document-store.md) |
 | Blob store | `BlobStore` | `omnia_wasi_blobstore` | `examples/blobstore` | — |
 | Secrets | `SecretStore` | `omnia_wasi_vault::omnia::{store, locker}` | `examples/vault` | — |
 | Config | `Config` | `omnia_wasi_config` | `examples/config` | — |

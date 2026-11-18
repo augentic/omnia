@@ -4,10 +4,13 @@ Demonstrates `omnia:docstore` through the `DocumentDb` capability, using the
 default in-memory backend: CRUD on a single `stops` collection plus one query
 endpoint with filters, sorting, limits, and cursor pagination.
 
+The in-memory backend serves only the collections `DOCSTORE_COLLECTIONS`
+declares (`default` when unset), so the host runs with `stops` declared.
+
 ## Quick Start
 
 ```bash
-make example docstore
+DOCSTORE_COLLECTIONS=stops make example docstore
 ```
 
 Or, more manually, for debugging:
@@ -17,7 +20,7 @@ Or, more manually, for debugging:
 cargo build --example docstore-wasm --target wasm32-wasip3
 
 # run the host
-cargo run --example docstore -- -v run ./target/wasm32-wasip3/debug/examples/docstore_wasm.wasm
+DOCSTORE_COLLECTIONS=stops cargo run --example docstore -- -v run ./target/wasm32-wasip3/debug/examples/docstore_wasm.wasm
 ```
 
 ## Test

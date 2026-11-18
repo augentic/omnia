@@ -127,6 +127,29 @@ Unreleased
   - `WasiVault` answers `unsupported` for nothing.
   - On `wasm32`, `omnia_wasi_vault::omnia` holds the raw bindings, which
     `omnia_wasi_vault::vault` held.
+- `omnia:docstore`, rewritten in place as the interface `DocumentDb`
+  calls. `WasiDocStore` serves it over one `DocStoreClient`:
+  - `store.open` answers a `collection` handle, and every call goes
+    through it. A name the deployment does not declare fails with
+    `not-found`.
+  - A body is a JSON object. A write whose body is not one fails with
+    `invalid`.
+  - A write returns the document's `revision`, and a read reports it.
+    `put` takes an `absent` or `matches` precondition, and one that fails
+    answers a `conflict` carrying the document it found.
+  - `exists` asks after one id, and `get-many`, `put-many`, and
+    `delete-many` take several at once.
+  - A `filter` is a list of groups, and holds when each group has a
+    condition that holds. A condition tests one field with `eq`, an
+    ordering, `in`, a text test, `array-contains`, or `null`, and may be
+    negated.
+  - `query` answers one `page` of at most 1,000 documents, and the cursor
+    that resumes it.
+  - The `error` has one case per capability error code.
+  - `WasiDocStore` answers `unsupported` for a `matches` write, a `delete`
+    with a revision, and an `array-contains` test.
+  - On `wasm32`, `omnia_wasi_docstore::omnia` holds the raw bindings,
+    which the crate root held.
 - The codes of a failed capability call. Its `omnia_sdk::Error` names the
   class of failure in its code:
   - `not-found`, `denied`, `invalid`, `unsupported`, or `other` on a
@@ -163,6 +186,9 @@ Unreleased
   Each identity's token is distinct.
 - `omnia_wasi_vault::ConnectOptions`. `VaultDefault` serves the lockers
   `VAULT_LOCKERS` lists, comma-separated, and `default` when it is unset.
+- `omnia_wasi_docstore::ConnectOptions`. `DocStoreDefault` serves the
+  collections `DOCSTORE_COLLECTIONS` lists, comma-separated, and `default`
+  when it is unset.
 - Extension traits, blanket-implemented over each capability:
   `ConfigExt::{require, parse}`, `DocumentDbExt::get_as`,
   `HttpClientExt::fetch_json`, `IdentityExt::access_token`,
@@ -173,8 +199,8 @@ Unreleased
   `SortField::compare` in `omnia_sdk::docstore`. `Filter::matches` and
   `SortField::compare` are the reference query semantics, and
   `omnia_test::guest::MemoryDocs` evaluates its queries with them.
-  `Filter::check` holds a filter to `Filter::MAX_DEPTH` and
-  `Filter::MAX_LIST_LEN`.
+  `Filter::check` holds a filter to `Filter::MAX_DEPTH`,
+  `Filter::MAX_LIST_LEN`, and `Filter::MAX_CONDITIONS`.
 - `omnia_sdk::messaging::Message::with_key` and
   `omnia_sdk::api::messaging::Delivery::key`. A message's key crosses the
   wire as its `key` metadata entry.
@@ -277,8 +303,10 @@ Unreleased
     `execute` answers a `u64`, and `batch` runs `Statement`s.
   - `DocumentStore` is `DocumentDb`. `query` takes `&Query`, which was
     `QueryOptions` with `after` for `continuation`, and answers a
-    `Page<Document>`. `insert` answers `Ok(Err(Exists))` for an id already
-    stored, and a `Document` payload is `Bytes`.
+    `Page<Document>`. A query that sets `offset` fails with the code
+    `unsupported`, so a guest pages with `after` and `Page::next`.
+    `insert` answers `Ok(Err(Exists))` for an id already stored, and a
+    `Document` payload is `Bytes`.
   - `BlobStore` answers `None` for a missing object. A call on an object
     in a container that does not exist fails with the code `not-found`,
     and `delete_container` succeeds when the container is absent.
@@ -315,18 +343,37 @@ Unreleased
   one as `NULL` before.
 - `Row::get` reads a `bool` from an integer `0` or `1` too, which is how
   SQLite returns a `BOOLEAN`.
-- The `omnia:docstore` `error` has one case per capability error code, and
-  `insert` answers `already-exists` for an id already stored. The SDK
-  reads both without matching message text.
+- Collection names are strict. `DocStoreDefault` opens only the
+  collections it declares, any other fails with `not-found`, and a write
+  no longer creates one. A deployment whose guests use a collection other
+  than `default` lists it in `DOCSTORE_COLLECTIONS`.
 - `DocStoreClient::insert` answers `false` for an id already stored, and a
   backend picks a failure's code by returning an
   `omnia_wasi_docstore::Error`.
+- `omnia_wasi_docstore::{Document, ScalarValue, ComparisonOp, SortField,
+  QueryResult}` are the crate's own types, where the WIT generated them.
+  Their names and shapes are unchanged, so a backend builds as before.
+- A `Timestamp` filter value reaches a backend as `ScalarValue::Str`, since
+  `omnia:docstore` carries it as text. `omnia-azure-table` therefore
+  compares it as a string, not as an `Edm.DateTime`.
+- `DocumentDb::query` sends a filter as an `and` of `or`s. It pushes each
+  `not` down to the fields and distributes each `or` over the `and`s inside
+  it.
 - `DocumentDb::query` fails a filter past its limits with the code
-  `invalid` before the query reaches the host, where the guest
-  trapped before. A filter nests at most 5 deep, a list holds 1 to 100
-  values, and an `and` or `or` holds a child. `MemoryDocs` refuses the
-  same filters, and the host's `in-list` and `not-in-list` constructors
-  refuse an empty list.
+  `invalid` before the query reaches the host, where the guest trapped
+  before:
+  - A filter nests at most 5 deep, a list holds 1 to 100 values, and an
+    `and` or `or` holds a child.
+  - A filter holds at most 100 conditions once written as an `and` of
+    `or`s.
+  - A `Binary` value, a `Float64` that is not finite, and an ordering
+    comparison with `null` or a boolean are refused.
+
+  `MemoryDocs` refuses the same filters, and the host refuses a filter past
+  its own limits with `invalid` too.
+- `MemoryDocs` fails a query that sets `offset` with the code
+  `unsupported`, and a write whose body is not a JSON object with
+  `invalid`, as the runtime does.
 - `IdentityStub` refuses an identity `IDENTITY_NAMES` does not list, and
   `IdentityDefault` serves the identity `default` alone. A refused name is
   `not-found`. A backend picks a failure's code by returning an
@@ -541,8 +588,14 @@ Unreleased
 - `omnia_wasi_docstore::document_store` and the SDK-typed
   `omnia_wasi_docstore::store` functions. The value types are
   `omnia_sdk::docstore`, a guest reaches the store through
-  `omnia_sdk::DocumentDb`, and `omnia_wasi_docstore::{store, types}` are
-  the raw `omnia:docstore` bindings.
+  `omnia_sdk::DocumentDb`, and `omnia_wasi_docstore::omnia` holds the raw
+  `omnia:docstore` bindings.
+- The `omnia:docstore` `filter` resource, `query-options` record, and
+  `insert` function, and with them the host's `FilterProxy`. A filter is a
+  list of groups, `query` takes its options as arguments, and `put` with
+  `absent` inserts.
+- The `Default` impl of `DocStoreDefault`. `DocStoreDefault::connect_with`
+  takes the `ConnectOptions` that declare its collections.
 - The `sql` and `docstore` features of `omnia-sdk`. `SqlDb` and
   `DocumentDb` are always built.
 - `omnia_test::guest::Namespaced`. A test addresses another bucket or

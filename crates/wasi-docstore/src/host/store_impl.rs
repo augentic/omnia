@@ -1,67 +1,18 @@
-//! `omnia:docstore` `store` interface.
-
 use omnia_core::HostView;
-use wasmtime::component::Accessor;
+use wasmtime::component::{Accessor, Resource};
 
-use crate::host::generated::omnia::docstore::store::{
-    AlreadyExists, Document, Host as StoreHost, HostWithStore, QueryOptions, QueryResult,
-};
-use crate::host::{DocStoreClient, QueryOpts, Result, WasiDocStore};
+use crate::host::collection_impl::CollectionHandle;
+use crate::host::generated::omnia::docstore::store::{Host, HostWithStore};
+use crate::host::{DocStoreClient, Result, WasiDocStore};
 
 impl<T> HostWithStore<T> for WasiDocStore {
-    async fn get(
-        accessor: &Accessor<T, Self>, collection: String, id: String,
-    ) -> Result<Option<Document>> {
-        let fut = accessor.with(|mut store| store.get().client.get(collection, id));
-        Ok(fut.await?)
-    }
-
-    async fn insert(
-        accessor: &Accessor<T, Self>, collection: String, doc: Document,
-    ) -> Result<std::result::Result<(), AlreadyExists>> {
-        let id = doc.id.clone();
-        let fut = accessor.with(|mut store| store.get().client.insert(collection, doc));
-        let inserted = fut.await?;
-        Ok(if inserted { Ok(()) } else { Err(AlreadyExists { id }) })
-    }
-
-    async fn put(accessor: &Accessor<T, Self>, collection: String, doc: Document) -> Result<()> {
-        let fut = accessor.with(|mut store| store.get().client.put(collection, doc));
-        Ok(fut.await?)
-    }
-
-    async fn delete(accessor: &Accessor<T, Self>, collection: String, id: String) -> Result<bool> {
-        let fut = accessor.with(|mut store| store.get().client.delete(collection, id));
-        Ok(fut.await?)
-    }
-
-    async fn query(
-        accessor: &Accessor<T, Self>, collection: String, options: QueryOptions,
-    ) -> Result<QueryResult> {
-        let QueryOptions {
-            filter,
-            order_by,
-            limit,
-            offset,
-            continuation,
-        } = options;
-
-        let filter_tree = filter
-            .map(|res| accessor.with(|mut store| store.get().table.delete(res)))
-            .transpose()?
-            .map(|fp| fp.0);
-
-        let opts = QueryOpts {
-            order_by,
-            limit,
-            offset,
-            continuation,
-        };
-
-        let fut =
-            accessor.with(|mut store| store.get().client.query(collection, filter_tree, opts));
-        Ok(fut.await?)
+    // `DocStoreClient` has no call that opens a collection, so a name the
+    // deployment does not declare fails at the handle's first call
+    fn open(
+        accessor: &Accessor<T, Self>, name: String,
+    ) -> impl Future<Output = Result<Resource<CollectionHandle>>> + Send {
+        std::future::ready(CollectionHandle::push(accessor, name))
     }
 }
 
-impl StoreHost for HostView<'_, dyn DocStoreClient> {}
+impl Host for HostView<'_, dyn DocStoreClient> {}

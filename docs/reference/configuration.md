@@ -70,6 +70,7 @@ Two further compile-affecting options trade artifact size against introspection:
 | `HTTP_CONNECT_TIMEOUT`                                               | `10` (seconds)           | `HttpDefault` outbound client                               |
 | `WEBSOCKET_ADDR`                                                     | `0.0.0.0:80`             | `WebSocketDefault` server                                   |
 | `KEYVALUE_BUCKETS`                                                   | `default`                | `KeyValueDefault`: the buckets served, comma-separated      |
+| `DOCSTORE_COLLECTIONS`                                               | `default`                | `DocStoreDefault`: the collections served, comma-separated  |
 | `SQL_DATABASE`                                                       | shared in-memory SQLite  | `SqlDefault`: the database `default`                        |
 | `SQL_DATABASES`                                                      | unset                    | `SqlDefault`: the further databases served, comma-separated |
 | `SQL_DATABASE__<NAME>`                                               | private in-memory SQLite | `SqlDefault`: the listed database `<name>`                  |
@@ -77,7 +78,7 @@ Two further compile-affecting options trade artifact size against introspection:
 | `IDENTITY_NAMES`                                                     | `default`                | `IdentityStub`: the identities served, comma-separated      |
 | `VAULT_LOCKERS`                                                      | `default`                | `VaultDefault`: the lockers served, comma-separated         |
 
-A guest names a bucket, database, identity, or locker other than `default` only when the deployment declares it, and the default backends refuse any other name.
+A guest names a bucket, collection, database, identity, or locker other than `default` only when the deployment declares it, and the default backends refuse any other name.
 
 Production backend variables (Redis, Kafka, Azure, ...) are listed in [Production Backends](../guides/production-backends.md#configuration) and each backend crate's README.
 

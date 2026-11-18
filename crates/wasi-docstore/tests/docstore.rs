@@ -8,11 +8,11 @@
 
 use std::sync::{Arc, Mutex};
 
-use omnia::ExitStatus;
+use omnia::{Connect as _, ExitStatus};
 use omnia_test::host::{Backends, Deployment};
 use omnia_wasi_docstore::{
-    DocStoreClient, DocStoreDefault, Document, Error, FilterTree, FutureResult, QueryOpts,
-    QueryResult, WasiDocStore,
+    ConnectOptions, DocStoreClient, DocStoreDefault, Document, Error, FilterTree, FutureResult,
+    QueryOpts, QueryResult, WasiDocStore,
 };
 use serde_json::{Value, json};
 
@@ -29,41 +29,75 @@ async fn run_guest(wasm: &str, backends: Backends) {
     assert_eq!(status, ExitStatus::SUCCESS, "guest `{wasm}` failed");
 }
 
-async fn body(backends: &Backends, collection: &str, id: &str) -> Option<Value> {
-    let doc = backends.docstore.get(collection.to_owned(), id.to_owned()).await.expect("get")?;
+async fn declaring(collections: &[&str]) -> DocStoreDefault {
+    let options = ConnectOptions {
+        collections: collections.iter().map(|&collection| collection.to_owned()).collect(),
+    };
+    DocStoreDefault::connect_with(options).await.expect("in-memory docstore")
+}
+
+async fn body(docstore: &DocStoreDefault, collection: &str, id: &str) -> Option<Value> {
+    let doc = docstore.get(collection.to_owned(), id.to_owned()).await.expect("get")?;
     assert_eq!(doc.id, id);
     Some(serde_json::from_slice(&doc.data).expect("JSON body"))
 }
 
 #[tokio::test]
-async fn docstore_crud_query() {
-    let backends = Backends::defaults().await;
+async fn docstore_collection() {
+    let docstore = declaring(&["docs", "query"]).await;
+    let backends = Backends::defaults().await.docstore(docstore.clone());
 
-    run_guest(test_programs::DOCSTORE_CRUD_QUERY, backends.clone()).await;
+    run_guest(test_programs::DOCSTORE_COLLECTION, backends).await;
+
+    // Persisted state: the refused writes stored nothing and left the
+    // documents they named unchanged.
+    assert_eq!(body(&docstore, "docs", "a").await, Some(json!({"kind": "fruit", "rank": 4})));
+    assert_eq!(body(&docstore, "docs", "lock").await, Some(json!({"held": true})));
+    assert_eq!(body(&docstore, "docs", "b").await, None);
+    assert_eq!(body(&docstore, "docs", "c").await, Some(json!({"n": 2})));
+    for refused in ["raw", "array", "twice"] {
+        assert_eq!(body(&docstore, "docs", refused).await, None, "`{refused}` was stored");
+    }
+    assert_eq!(body(&docstore, "query", "q1").await, None);
+    assert_eq!(body(&docstore, "query", "n1000").await, Some(json!({"n": 1000})));
+}
+
+#[tokio::test]
+async fn docstore_crud_query() {
+    let docstore = declaring(&["items", "edges"]).await;
+    let backends = Backends::defaults().await.docstore(docstore.clone());
+
+    run_guest(test_programs::DOCSTORE_CRUD_QUERY, backends).await;
 
     // Persisted state: the inserts landed, the overwrite and the upsert took,
     // and the deleted document is gone.
     assert_eq!(
-        body(&backends, "items", "a").await,
+        body(&docstore, "items", "a").await,
         Some(json!({"kind": "fruit", "rank": 3, "zone": "z1"}))
     );
-    assert_eq!(body(&backends, "items", "b").await, None);
+    assert_eq!(body(&docstore, "items", "b").await, None);
     assert_eq!(
-        body(&backends, "items", "c").await,
+        body(&docstore, "items", "c").await,
         Some(json!({"kind": "veg", "rank": 9, "zone": "z2", "fresh": true}))
     );
-    assert_eq!(body(&backends, "items", "f").await, Some(json!({"kind": "veg", "rank": 0})));
+    assert_eq!(body(&docstore, "items", "f").await, Some(json!({"kind": "veg", "rank": 0})));
 }
 
 #[tokio::test]
 async fn docstore_document_db() {
-    run_guest(test_programs::DOCSTORE_DOCUMENT_DB, Backends::defaults().await).await;
+    // the four `omnia_test::contract::document` collections, and the guest's own
+    let docstore =
+        declaring(&["insertexists", "portablequery", "filterlimits", "optionalquery", "atlimits"])
+            .await;
+
+    run_guest(test_programs::DOCSTORE_DOCUMENT_DB, Backends::defaults().await.docstore(docstore))
+        .await;
 }
 
 // fails every call on a collection named for a kind with that kind,
 // delegating any other collection, and records each collection a call
 // reaches so the run's exchanges are pinned
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 struct Faulting {
     inner: DocStoreDefault,
     collections: Arc<Mutex<Vec<String>>>,
@@ -73,7 +107,6 @@ impl Faulting {
     fn fault(&self, collection: &str) -> Option<anyhow::Error> {
         self.collections.lock().expect("called collections").push(collection.to_owned());
         let fault = match collection {
-            "missing" => Error::NotFound("missing in the suite".to_owned()).into(),
             "denied" => Error::Denied("denied by the suite".to_owned()).into(),
             "unsupported" => Error::Unsupported("unsupported by the suite".to_owned()).into(),
             "unavailable" => Error::Unavailable("unavailable in the suite".to_owned()).into(),
@@ -115,7 +148,11 @@ fn failed<T: 'static>(fault: anyhow::Error) -> FutureResult<T> {
 
 #[tokio::test]
 async fn docstore_error_codes() {
-    let backends = Backends::defaults().await.docstore(Faulting::default());
+    let faulting = Faulting {
+        inner: declaring(&["default"]).await,
+        collections: Arc::default(),
+    };
+    let backends = Backends::defaults().await.docstore(faulting);
 
     let status = Deployment::new()
         .guest("guest", test_programs::DOCSTORE_ERROR_CODES)
@@ -124,10 +161,8 @@ async fn docstore_error_codes() {
         .expect("guest runs");
     assert_eq!(status, ExitStatus::SUCCESS, "guest failed");
 
+    // the host refuses the body before the backend sees it
     let collections = backends.docstore.collections.lock().expect("called collections").clone();
-    assert_eq!(collections, ["bodies", "missing", "denied", "unsupported", "unavailable", "other"]);
-
-    // the body the default refused was not stored
-    let refused = backends.docstore.inner.get("bodies".to_owned(), "raw".to_owned()).await;
-    assert!(refused.expect("get").is_none());
+    assert_eq!(collections, ["undeclared", "denied", "unsupported", "unavailable", "other"]);
+    assert_eq!(body(&backends.docstore.inner, "default", "raw").await, None);
 }

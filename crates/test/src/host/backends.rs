@@ -8,7 +8,9 @@ use omnia::{Connect as _, HostCtx, NoOptions, Provides};
 use omnia_wasi_blobstore::{BlobStoreClient, BlobStoreDefault, WasiBlobStore};
 use omnia_wasi_config::wasmtime_wasi_config::WasiConfigVariables;
 use omnia_wasi_config::{ConfigDefault, WasiConfig};
-use omnia_wasi_docstore::{DocStoreClient, DocStoreDefault, WasiDocStore};
+use omnia_wasi_docstore::{
+    ConnectOptions as DocStoreOptions, DocStoreClient, DocStoreDefault, WasiDocStore,
+};
 use omnia_wasi_http::{ConnectOptions as HttpOptions, HttpDefault, WasiHttp};
 use omnia_wasi_identity::{IdentityClient, IdentityStub, WasiIdentity};
 use omnia_wasi_keyvalue::{
@@ -42,14 +44,16 @@ pub const STATE_BUCKET: &str = "default";
 /// The bundle is deterministic: [`defaults`](Self::defaults) reads no
 /// environment variable and opens no socket. Config answers from the map
 /// seeded by [`config`](Self::config) alone, the websocket backend serves no
-/// listener, and the HTTP client, keyvalue buckets, `SQLite` databases,
-/// identities, and vault lockers are built from fixed options rather than
-/// `HTTP_CONNECT_TIMEOUT` / `KEYVALUE_BUCKETS` / `SQL_DATABASES` /
-/// `IDENTITY_NAMES` / `VAULT_LOCKERS`. The keyvalue backend declares
-/// [`STATE_BUCKET`] alone, the `SQLite` backend a private `default` database
-/// alone, the identity stub the `default` identity alone, and the vault
-/// backend the `default` locker alone. A scenario that opens another name
-/// sets its own backend with [`keyvalue`](Self::keyvalue),
+/// listener, and the HTTP client, keyvalue buckets, docstore collections,
+/// `SQLite` databases, identities, and vault lockers are built from fixed
+/// options rather than `HTTP_CONNECT_TIMEOUT` / `KEYVALUE_BUCKETS` /
+/// `DOCSTORE_COLLECTIONS` / `SQL_DATABASES` / `IDENTITY_NAMES` /
+/// `VAULT_LOCKERS`. The keyvalue backend declares [`STATE_BUCKET`] alone,
+/// the docstore backend the `default` collection alone, the `SQLite` backend
+/// a private `default` database alone, the identity stub the `default`
+/// identity alone, and the vault backend the `default` locker alone. A
+/// scenario that opens another name sets its own backend with
+/// [`keyvalue`](Self::keyvalue), [`docstore`](Self::docstore),
 /// [`sql`](Self::sql), [`identity`](Self::identity), or
 /// [`vault`](Self::vault).
 ///
@@ -113,7 +117,9 @@ impl Backends {
                 .await
                 .expect("in-memory blobstore"),
             config: config_from(WasiConfigVariables::new()),
-            docstore: DocStoreDefault::connect_with(NoOptions).await.expect("in-memory docstore"),
+            docstore: DocStoreDefault::connect_with(DocStoreOptions::default())
+                .await
+                .expect("in-memory docstore"),
             http: HttpDefault::connect_with(HttpOptions { connect_timeout: 10 })
                 .await
                 .expect("outbound http client"),

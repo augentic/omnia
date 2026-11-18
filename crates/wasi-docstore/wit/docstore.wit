@@ -1,158 +1,252 @@
 package omnia:docstore@0.1.0;
 
+/// The types the document store interfaces share.
+///
+/// Every backend stores a portable name, id, and body, and may reject any
+/// other as `invalid`.
+///
+/// - A portable collection name is not empty and holds only ASCII letters,
+///   digits, `_`, and `-`.
+/// - A portable id is one or more segments joined by `.`, at most 255 bytes
+///   long. Each segment is not empty and holds only ASCII letters, digits,
+///   `_`, and `-`.
+/// - A portable body is a JSON object of at most 256 KiB that keeps to
+///   I-JSON (RFC 7493). Each of its top-level names starts with an ASCII
+///   letter and holds only ASCII letters, digits, and `_`.
 interface types {
-    /// Why a call failed.
-    variant error {
-        /// The collection does not exist. An absent document is not an
-        /// error.
-        not-found(string),
-        /// The caller may not use the collection.
-        denied(string),
-        /// The request was rejected, such as a body that is not JSON, a zero
-        /// `limit`, or a malformed continuation.
-        invalid(string),
-        /// A valid request this backend cannot serve, such as an optional
-        /// query feature.
-        unsupported(string),
-        /// The backing store did not answer, or the call exceeded its bound.
-        unavailable(string),
-        /// Any other failure.
-        other(string),
-    }
+  /// Why a call failed.
+  variant error {
+    /// The collection is not declared by the deployment. An absent document
+    /// is not an error.
+    not-found(string),
+    /// The caller may not make the call.
+    denied(string),
+    /// The request was rejected, such as a body that is not a JSON object,
+    /// a zero `limit`, or a cursor the backend did not issue.
+    invalid(string),
+    /// A valid request this backend cannot serve, such as an order it
+    /// cannot keep.
+    unsupported(string),
+    /// The backing store did not answer, or the call exceeded its bound.
+    unavailable(string),
+    /// Any other failure.
+    other(string),
+  }
 
-    variant scalar-value {
-        null,
-        boolean(bool),
-        int32(s32),
-        int64(s64),
-        float64(f64),
-        str(string),
-        binary(list<u8>),
-        timestamp(string),
-    }
+  /// A token for one stored state of a document, compared only for equality.
+  ///
+  /// It changes whenever the document's body changes. Two states that hold
+  /// the same body may share one, so a document that changed and changed
+  /// back may still match.
+  type revision = string;
 
-    enum comparison-op {
-        eq,
-        ne,
-        gt,
-        gte,
-        lt,
-        lte,
-    }
+  /// A stored document.
+  record document {
+    id: string,
+    /// The body, a JSON object encoded as UTF-8.
+    data: list<u8>,
+    revision: revision,
+  }
 
-    /// Host-managed filter tree. The guest builds filters by calling
-    /// static constructors; the host assembles a native recursive
-    /// tree internally.
+  /// What must hold for a write to take effect.
+  ///
+  /// A backend that cannot check it atomically fails with `unsupported`.
+  variant precondition {
+    /// No document is stored under the id.
+    absent,
+    /// The document stored under the id has this revision.
+    matches(revision),
+  }
+
+  /// A write whose precondition did not hold.
+  record conflict {
+    /// The document found in its place, `none` when the id is absent.
+    current: option<document>,
+  }
+}
+
+/// Documents in one collection. Every backend serves this interface.
+///
+/// An absent document is `none`. A write is atomic, so a reader sees the
+/// document as it was or as it became. A read or a query may trail a write
+/// on a replicated store. A precondition is checked against the latest
+/// write.
+///
+/// A body reads back as the JSON value that was stored, except that:
+///
+/// - an object's names may come in another order;
+/// - a field that holds `null` may be absent;
+/// - a number may be written another way, so `1.0` may read back as `1`,
+///   though never `1` as `1.0`.
+interface collection {
+  use types.{conflict, document, error, precondition, revision};
+
+  /// A value a test compares a field with.
+  variant value {
+    boolean(bool),
+    /// A whole number.
+    integer(s64),
+    /// Any finite number. One that is not finite is `invalid`.
+    number(f64),
+    text(string),
+  }
+
+  /// What a condition asks of a field.
+  ///
+  /// - Numbers compare by value, whichever case carries them.
+  /// - Text compares by Unicode code point, so `a` and `A` differ.
+  /// - A boolean has no order, so `lt`, `lte`, `gt`, and `gte` given one
+  ///   are `invalid`.
+  /// - A field that is absent or holds `null` passes `null` and fails every
+  ///   other test.
+  /// - A field that holds a boolean, a number, or text fails a test given a
+  ///   value of another type.
+  /// - What a test other than `array-contains` makes of a field that holds
+  ///   an array or an object is the backend's to decide.
+  variant test {
+    /// The field equals this value.
+    eq(value),
+    /// The field is less than this value.
+    lt(value),
+    /// The field is less than or equal to this value.
+    lte(value),
+    /// The field is greater than this value.
+    gt(value),
+    /// The field is greater than or equal to this value.
+    gte(value),
+    /// The field equals one of these values, of which there are 1 to 100.
+    in(list<value>),
+    /// The field is text that starts with this text.
+    starts-with(string),
+    /// The field is text that ends with this text.
+    ends-with(string),
+    /// The field is text that holds this text.
+    contains(string),
+    /// The field is an array, and one of its elements equals this value.
+    array-contains(value),
+    /// The field is absent, or holds `null`.
+    null,
+  }
+
+  /// One test of one field.
+  record condition {
+    /// The field: a top-level name, or names joined by `.` that reach into
+    /// nested objects.
+    field: string,
+    test: test,
+    /// When set, the condition holds for the documents that fail the test.
+    negated: bool,
+  }
+
+  /// Which documents a query selects.
+  ///
+  /// A filter is a list of groups. A document matches when every group
+  /// holds, and a group holds when at least one of its conditions does. So
+  /// `[[a], [b, c]]` reads `a and (b or c)`.
+  ///
+  /// - An empty filter matches every document.
+  /// - An empty group is `invalid`.
+  /// - A filter holds at most 100 conditions.
+  type filter = list<list<condition>>;
+
+  /// A field a query orders by.
+  record sort-field {
+    /// The field, named as a condition names one.
+    field: string,
+    descending: bool,
+  }
+
+  /// One page of a query.
+  record page {
+    /// The documents on this page, in the order the query asked for.
+    documents: list<document>,
+    /// The cursor that resumes the query. Only `none` marks the last page.
+    next: option<string>,
+  }
+
+  /// An open collection.
+  resource collection {
+    /// The document `id`, `none` when absent.
+    get: async func(id: string) -> result<option<document>, error>;
+
+    /// The document at each of `ids`, in the order given.
+    get-many: async func(ids: list<string>) -> result<list<option<document>>, error>;
+
+    /// Whether a document is stored under `id`.
+    exists: async func(id: string) -> result<bool, error>;
+
+    /// Store `data` as the body of the document `id`, replacing any body
+    /// there, and return its revision. With `when`, only while the
+    /// precondition holds.
+    put: async func(id: string, data: list<u8>, when: option<precondition>)
+      -> result<result<revision, conflict>, error>;
+
+    /// Store each body under its id. An id given twice is `invalid` and
+    /// writes nothing.
     ///
-    /// A tree nests at most 5 deep, a list holds 1 to 100 values, and an
-    /// `and` or `or` holds at least one child. The constructors return no
-    /// error, so a call past a limit traps. The guest SDK checks a filter
-    /// against the same limits first, and fails the query with `invalid`.
-    resource filter {
-        compare: static func(field: string, op: comparison-op, value: scalar-value) -> filter;
-        in-list: static func(field: string, values: list<scalar-value>) -> filter;
-        not-in-list: static func(field: string, values: list<scalar-value>) -> filter;
-        is-null: static func(field: string) -> filter;
-        is-not-null: static func(field: string) -> filter;
-        contains: static func(field: string, pattern: string) -> filter;
-        starts-with: static func(field: string, pattern: string) -> filter;
-        ends-with: static func(field: string, pattern: string) -> filter;
-        and: static func(filters: list<filter>) -> filter;
-        or: static func(filters: list<filter>) -> filter;
-        not: static func(inner: filter) -> filter;
-    }
+    /// Each write is atomic and the batch is not, so a failure may leave
+    /// part of it stored.
+    put-many: async func(documents: list<tuple<string, list<u8>>>) -> result<_, error>;
 
-    record sort-field {
-        field: string,
-        descending: bool,
-    }
+    /// Delete the document `id`, and with `when` only while it has that
+    /// revision. Deleting an absent document succeeds.
+    delete: async func(id: string, when: option<revision>)
+      -> result<result<_, conflict>, error>;
 
-    record query-options {
-        filter: option<filter>,
-        order-by: list<sort-field>,
-        /// The most documents to return. Zero is `invalid`.
-        limit: option<u32>,
-        offset: option<u32>,
-        /// Opaque pagination token. None = start from beginning.
-        /// Returned by a previous query-result; pass it back to
-        /// fetch the next page. Semantics are backend-dependent.
-        continuation: option<string>,
-    }
+    /// Delete the document at each of `ids`. An id already absent is
+    /// skipped.
+    delete-many: async func(ids: list<string>) -> result<_, error>;
 
-    record document {
-        id: string,
-        /// JSON-serialized document body.
-        data: list<u8>,
-    }
-
-    /// An insert whose id was already stored.
-    record already-exists {
-        /// The id of the document left in place.
-        id: string,
-    }
-
-    record query-result {
-        documents: list<document>,
-        continuation: option<string>,
-    }
+    /// One page of the documents `filter` selects, ordered by `order-by`.
+    ///
+    /// - A page holds at most `limit` documents and never more than 1,000.
+    ///   A zero `limit` is `invalid`.
+    /// - `after` is the `next` of the previous page of the same query.
+    /// - A document unchanged for the whole query is returned once. One
+    ///   written or deleted during it may or may not be.
+    /// - Documents order by the first field of `order-by` as `lt` orders
+    ///   its values, then by each next field. `false` comes before `true`.
+    /// - Documents the fields do not tell apart come in no particular
+    ///   order, as all do when `order-by` is empty.
+    /// - Where a document lacks an `order-by` field, the backend decides
+    ///   its place and may leave it out. Where the field's values differ in
+    ///   type, the backend decides the order between the types.
+    ///
+    /// Every backend serves a portable query, and serves any other as
+    /// written or fails it with `unsupported`. A portable query:
+    ///
+    /// - names only top-level fields, each of which every document stores
+    ///   with one type of value;
+    /// - uses only `eq`, `lt`, `lte`, `gt`, `gte`, and `in`, negated or not;
+    /// - makes at most 15 comparisons, counting each value of an `in`;
+    /// - has an empty `order-by`.
+    query: async func(
+      filter: filter, order-by: list<sort-field>, after: option<string>, limit: option<u32>,
+    ) -> result<page, error>;
+  }
 }
 
-/// JSON documents in named collections, one function per `DocumentDb`
-/// method.
-///
-/// A collection is created by its first write. Every backend stores a
-/// portable collection name, id, and body:
-///
-/// - A collection name is 3 to 63 ASCII letters and digits, starting with a
-///   letter.
-/// - An id is not empty, holds only ASCII letters, digits, `.`, `_`, and
-///   `-`, and neither starts nor ends with `.`.
-/// - A body is a JSON object.
-///
-/// `query` selects and orders documents as the SDK's `Filter::matches` and
-/// `SortField::compare` define. Every backend serves:
-///
-/// - `compare` with a value other than `null`, `in-list`, and
-///   `not-in-list`, on a top-level field named `[A-Za-z_][A-Za-z0-9_]*`;
-/// - `and`, `or`, and `not`;
-/// - `limit`, with each `continuation` leading to the next page until every
-///   match is returned once.
-///
-/// A missing field reads as `null`, so a portable query names fields every
-/// document stores.
-///
-/// The rest is optional. A backend serves each as `Filter::matches` and
-/// `SortField::compare` define, or fails the query with `unsupported`, and
-/// never ignores it:
-///
-/// - `contains`, `starts-with`, and `ends-with`;
-/// - `is-null`, `is-not-null`, and a `compare` with `null`;
-/// - a dotted field path;
-/// - `order-by`;
-/// - `offset`.
+/// The collections a guest may open. Every backend serves this interface.
 interface store {
-    use types.{already-exists, document, query-options, query-result, error};
+  use types.{error};
+  use collection.{collection};
 
-    /// Get the document `id`, `none` when absent.
-    get: async func(collection: string, id: string) -> result<option<document>, error>;
-
-    /// Store `doc` unless its id is already stored, which returns
-    /// `already-exists` and leaves the stored document untouched.
-    insert: async func(collection: string, doc: document)
-        -> result<result<_, already-exists>, error>;
-
-    /// Store `doc`, replacing any document with its id.
-    put: async func(collection: string, doc: document) -> result<_, error>;
-
-    /// Delete the document `id`, returning whether one was removed.
-    delete: async func(collection: string, id: string) -> result<bool, error>;
-
-    /// One page of the documents `options` selects, with the continuation of
-    /// the next page when more remain.
-    query: async func(collection: string, options: query-options) -> result<query-result, error>;
+  /// Open the collection `name`, a binding the deployment declares.
+  ///
+  /// A name the deployment does not declare fails with `not-found`, here or
+  /// at the first call on the handle.
+  open: async func(name: string) -> result<collection, error>;
 }
 
+/// What every backend serves.
+world core {
+  import types;
+  import store;
+  import collection;
+}
+
+/// Every interface. A backend answers `unsupported` for what it does not
+/// serve.
 world imports {
-    import types;
-    import store;
+  include core;
 }

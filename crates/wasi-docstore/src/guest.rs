@@ -1,6 +1,6 @@
 //! # WASI `DocStore` Guest
 
-// Bindings for the `omnia:docstore` world.
+// Bindings for `omnia:docstore`.
 mod generated {
     #![allow(missing_docs, clippy::same_length_and_capacity, reason = "wit-bindgen output")]
 
@@ -11,4 +11,7 @@ mod generated {
     });
 }
 
-pub use self::generated::omnia::docstore::*;
+/// `omnia:docstore`, the interfaces behind the SDK's `DocumentDb`.
+pub mod omnia {
+    pub use crate::guest::generated::omnia::docstore::*;
+}

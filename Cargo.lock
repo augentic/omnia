@@ -2493,6 +2493,7 @@ name = "omnia-wasi-docstore"
 version = "0.38.0"
 dependencies = [
  "anyhow",
+ "fromenv",
  "futures",
  "omnia",
  "omnia-core",
@@ -4061,6 +4062,7 @@ dependencies = [
  "omnia-test",
  "omnia-wasi-blobstore",
  "omnia-wasi-config",
+ "omnia-wasi-docstore",
  "omnia-wasi-http",
  "omnia-wasi-identity",
  "omnia-wasi-keyvalue",

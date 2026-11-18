@@ -1,10 +1,10 @@
 # Document Store
 
-The `omnia:docstore` interface is a JSON document store: named collections of `{ id, data }` documents with a rich filter language and cursor-based pagination. The default backend is in-memory; production deployments swap in Azure Table Storage (`omnia-azure-table`) without guest changes, for a guest whose queries keep to the [portable subset](#filters).
+The `omnia:docstore` interface is a JSON document store: named collections of `{ id, data }` documents with a rich filter language and cursor-based pagination. The default backend is in-memory; production deployments swap in Azure Table Storage (`omnia-azure-table`) without guest changes, for a guest whose queries keep to the [portable query](#filters).
 
 The [`docstore`](../../examples/docstore/) example is a minimal GTFS-flavoured service (a `stops` collection) showing CRUD and a combined query endpoint; the snippets below extend its patterns to the full filter vocabulary.
 
-> **Host prerequisite.** The runtime serving your guest must link this interface: add `WasiDocStore: DocStoreDefault` (from `omnia_wasi_docstore`) to the `runtime!` `hosts:` map — see [Composing a Runtime](composing-a-runtime.md). Everything below is guest code.
+> **Host prerequisite.** The runtime serving your guest must link this interface: add `WasiDocStore: DocStoreDefault` (from `omnia_wasi_docstore`) to the `runtime!` `hosts:` map — see [Composing a Runtime](composing-a-runtime.md) — and declare the collections the guest uses in `DOCSTORE_COLLECTIONS`. Everything below is guest code.
 
 ## The provider
 
@@ -47,7 +47,9 @@ The four operations:
 | `put(collection, &doc)` | Upsert (create or replace) |
 | `delete(collection, id)` | Remove → `bool` (whether anything was deleted) |
 
-`get_as::<T>(collection, id)` is `get` with the body decoded into `T`. Collections are created implicitly on first write. Every method fails with an `omnia_sdk::Error`, coded as the [reference](../reference/docstore.md#errors) lists.
+`get_as::<T>(collection, id)` is `get` with the body decoded into `T`. A body is a JSON object, and any other body fails with the code `invalid`. Every method fails with an `omnia_sdk::Error`, coded as the [reference](../reference/docstore.md#errors) lists.
+
+The deployment declares its collections, and a write never creates one. The default backend serves the names `DOCSTORE_COLLECTIONS` lists (comma-separated, default `default`), and a call on any other name fails with the code `not-found`. The example runs as `DOCSTORE_COLLECTIONS=stops make example docstore`.
 
 ## Filters
 
@@ -63,6 +65,8 @@ Filters reference fields *inside* the document JSON and compose into trees. Avai
 | `Filter::on_date(field, "YYYY-MM-DD")` | Date-day match on a timestamp field (fallible — validates the date) |
 | `Filter::and(filters)` / `Filter::or(filters)` | Boolean composition |
 | `Filter::negate(filter)` | Logical NOT of any sub-tree |
+
+A `Timestamp` value, such as the bounds `on_date` builds, compares as text. ISO-8601 instants written in one zone and format therefore order correctly.
 
 Building a filter from optional query parameters is the common pattern — collect predicates, then `and` them:
 
@@ -137,14 +141,18 @@ if let (Some(agency), Some(rtype)) = (&p.not_agency, p.not_type) {
 }
 ```
 
-The backend translates the tree to its native query language (direct JSON evaluation in the default, OData `$filter` for Azure Table). Only the [portable subset](../reference/docstore.md#query-contract) runs on every backend:
+Before a query leaves the guest, the SDK writes the tree as an `and` of `or`s. It pushes each `negate` down to the fields and distributes each `or` over the `and`s inside it, so any nesting reaches every backend in the same form. A filter that holds more than `Filter::MAX_CONDITIONS` (100) conditions once written that way fails with the code `invalid`.
+
+The backend translates the filter to its native query language (direct JSON evaluation in the default, OData `$filter` for Azure Table). Only the [portable query](../reference/docstore.md#query-contract) runs on every backend:
 
 - `eq`, `ne`, `gt`, `gte`, `lt`, and `lte` with a non-null value, on a top-level field;
 - `in_list` and `not_in_list` on a top-level field;
-- `and`, `or`, and `negate`;
+- `and`, `or`, and `negate`, nested in any way;
+- at most 15 comparisons, counting each value of a list;
+- no `order_by`;
 - `limit`, with the `next` cursor.
 
-The rest is optional: the string predicates, the null predicates, a comparison with `null`, a dotted field path, `order_by`, and `offset`. A backend serves each optional feature or fails it with the code `unsupported`, and never ignores one. A query that keeps to the portable subset runs alike locally and in production.
+The rest is optional: the string predicates, the null predicates, a comparison with `null`, a list that holds `null`, a dotted field path, and `order_by`. A backend serves each optional feature or fails it with the code `unsupported`, and never ignores one. A query that keeps to the portable query runs alike locally and in production.
 
 ## Queries, sorting, and pagination
 
@@ -167,13 +175,13 @@ let stops: Vec<Stop> = page.items.iter().map(Document::decode).collect::<Result<
 Ok(Json(json!({ "stops": stops, "next": page.next })))
 ```
 
-The result is a `Page<Document>`: the page's `items`, plus an opaque `next` cursor when more pages exist. Hand the cursor back as the next query's `after` to resume. Treat it as opaque — its format is backend-specific.
+The result is a `Page<Document>`: the page's `items`, plus an opaque `next` cursor when more pages exist. Hand the cursor back as the next query's `after` to resume. Treat it as opaque — its format is backend-specific. A page holds at most 1,000 documents. The cursor is the only way to page, and a query that sets `offset` fails with the code `unsupported`.
 
 ## Backends
 
 | Backend | Notes |
 | ------- | ----- |
-| `DocStoreDefault` (in-tree) | In-memory; state is process-local and lost on exit |
+| `DocStoreDefault` (in-tree) | In-memory; serves the collections `DOCSTORE_COLLECTIONS` declares; state is process-local and lost on exit |
 | `omnia-azure-table` | Azure Table Storage over REST; `AZURE_STORAGE_ACCOUNT`, `AZURE_STORAGE_KEY`, optional `AZURE_TABLE_ENDPOINT` (points at Azurite for local emulation) |
 
 ## Choosing docstore vs SQL vs keyvalue

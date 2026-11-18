@@ -1,15 +1,13 @@
 //! # WASI `DocStore` Service
 
+mod collection_impl;
 mod default_impl;
 mod resource;
 mod store_impl;
-mod types_impl;
 
 mod generated {
-    #![allow(missing_docs, reason = "wasmtime bindgen output")]
-
     pub use self::omnia::docstore::types::Error;
-    pub use super::FilterProxy;
+    pub use super::collection_impl::CollectionHandle;
 
     wasmtime::component::bindgen!({
         world: "imports",
@@ -18,7 +16,7 @@ mod generated {
             default: store | tracing | trappable,
         },
         with: {
-            "omnia:docstore/types.filter": FilterProxy,
+            "omnia:docstore/collection.collection": CollectionHandle,
         },
         trappable_error_type: {
             "omnia:docstore/types.error" => Error,
@@ -29,14 +27,13 @@ mod generated {
 use std::fmt::Debug;
 
 pub use omnia_core::FutureResult;
-use omnia_core::{Host, HostCtx, Provides, StoreCtx};
+use omnia_core::{Host, HostCtx, HostView, Provides, StoreCtx};
 use wasmtime::component::{Linker, ResourceTableError};
 
-pub use self::default_impl::DocStoreDefault;
-pub use self::generated::omnia::docstore::types::{
-    ComparisonOp, Document, Error, QueryResult, ScalarValue, SortField,
-};
-use self::generated::omnia::docstore::{store, types};
+pub use self::default_impl::{ConnectOptions, DocStoreDefault};
+pub use self::generated::Error;
+use self::generated::omnia::docstore::types::Host as TypesHost;
+use self::generated::omnia::docstore::{collection, store, types};
 pub use self::resource::*;
 
 /// Result type for docstore operations.
@@ -50,6 +47,7 @@ pub struct WasiDocStore;
 impl<B: Provides<Self>> Host<B> for WasiDocStore {
     fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
         types::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
+        collection::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
         Ok(store::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?)
     }
 }
@@ -80,25 +78,25 @@ pub trait DocStoreClient: Debug + Send + Sync + 'static {
 
     /// One page of the documents in `collection` that `filter` and `options` select.
     ///
-    /// A backend serves the portable subset the
+    /// A backend serves the portable query the
     /// [document store reference](https://github.com/augentic/omnia/blob/main/docs/reference/docstore.md#query-contract)
-    /// lists. It fails any other feature it cannot serve with
+    /// defines. It fails any other feature it cannot serve with
     /// [`Error::Unsupported`], and never ignores one.
     fn query(
         &self, collection: String, filter: Option<FilterTree>, options: QueryOpts,
     ) -> FutureResult<QueryResult>;
 }
 
-/// Host-side query options (WIT `query-options` without the filter resource).
+/// The ordering and paging of one query, as the host hands them to a backend.
 #[derive(Debug, Clone, Default)]
 pub struct QueryOpts {
     /// Sort fields.
     pub order_by: Vec<SortField>,
-    /// Max documents.
+    /// The most documents the page holds.
     pub limit: Option<u32>,
-    /// Skip count (when no continuation token).
+    /// Documents to skip before the page. The host always sends `None`.
     pub offset: Option<u32>,
-    /// Opaque continuation.
+    /// The cursor a previous page returned, `None` for the first page.
     pub continuation: Option<String>,
 }
 
@@ -110,8 +108,20 @@ impl From<anyhow::Error> for Error {
     }
 }
 
+impl From<wasmtime::Error> for Error {
+    fn from(err: wasmtime::Error) -> Self {
+        Self::Other(format!("{err:#}"))
+    }
+}
+
 impl From<ResourceTableError> for Error {
     fn from(err: ResourceTableError) -> Self {
         Self::Other(err.to_string())
+    }
+}
+
+impl TypesHost for HostView<'_, dyn DocStoreClient> {
+    fn convert_error(&mut self, err: Error) -> wasmtime::Result<Error> {
+        Ok(err)
     }
 }

@@ -4,6 +4,8 @@
 //! and orders JSON documents. A provider that evaluates queries itself calls
 //! them rather than writing its own evaluator.
 
+pub(crate) mod groups;
+
 use std::cmp::Ordering;
 use std::future::Future;
 use std::ops::Not;
@@ -21,16 +23,19 @@ use crate::{Error, Page, Result};
 /// [`SortField::compare`]. Typed reads of a document body are
 /// [`DocumentDbExt`].
 ///
-/// Every provider serves the portable subset of a query:
+/// Every provider serves a portable query:
 ///
 /// - [`Filter::Compare`] with a value other than `null`, [`Filter::InList`],
-///   and [`Filter::NotInList`], on a top-level field;
-/// - [`Filter::And`], [`Filter::Or`], and [`Filter::Not`];
+///   and [`Filter::NotInList`], on top-level fields;
+/// - combined with [`Filter::And`], [`Filter::Or`], and [`Filter::Not`];
+/// - at most 15 comparisons, counting each value of a list;
+/// - an empty `order_by`;
 /// - a `limit`, with the [`Page::next`] cursor.
 ///
 /// A zero `limit`, or a filter [`Filter::check`] refuses, fails with the
-/// code `invalid`. A provider serves every other feature as defined, or
-/// fails the query with the code `unsupported`, and never ignores one. The
+/// code `invalid`. An `offset` fails with the code `unsupported`. A provider
+/// serves every other feature as defined, or fails the query with the code
+/// `unsupported`, and never ignores one. The
 /// [document store reference](https://github.com/augentic/omnia/blob/main/docs/reference/docstore.md#query-contract)
 /// lists the portable names and the optional features.
 #[omnia_guest_macros::capability]
@@ -92,9 +97,9 @@ pub enum ScalarValue {
     Float64(f64),
     /// UTF-8 string.
     Str(String),
-    /// Opaque bytes.
+    /// Opaque bytes, which [`Filter::check`] refuses.
     Binary(Vec<u8>),
-    /// ISO-8601 timestamp string for comparisons.
+    /// ISO-8601 timestamp string, compared as text.
     Timestamp(String),
 }
 
@@ -217,6 +222,13 @@ pub enum Filter {
 }
 
 impl Filter {
+    /// The most conditions a filter may hold once written as an `and` of `or`s.
+    ///
+    /// [`Filter::check`] writes it so by pushing each [`Not`](Self::Not) down
+    /// to the fields and distributing each [`Or`](Self::Or) over the
+    /// [`And`](Self::And)s inside it. A list then counts once, or twice when
+    /// it holds [`Null`](ScalarValue::Null). Every other leaf counts once.
+    pub const MAX_CONDITIONS: usize = 100;
     /// The deepest a filter tree may nest, as [`Filter::depth`] counts it.
     pub const MAX_DEPTH: usize = 5;
     /// The most values an [`InList`](Self::InList) or [`NotInList`](Self::NotInList) may hold.
@@ -378,42 +390,19 @@ impl Filter {
     ///
     /// # Errors
     ///
-    /// A [`ServerError`](Error::ServerError) with the code `invalid` when the
-    /// tree nests deeper than [`MAX_DEPTH`](Self::MAX_DEPTH), a list is empty
-    /// or holds more than [`MAX_LIST_LEN`](Self::MAX_LIST_LEN) values, or an
-    /// [`And`](Self::And) or [`Or`](Self::Or) has no children.
+    /// A [`ServerError`](Error::ServerError) with the code `invalid` when:
+    ///
+    /// - the tree nests deeper than [`MAX_DEPTH`](Self::MAX_DEPTH);
+    /// - a list is empty or holds more than [`MAX_LIST_LEN`](Self::MAX_LIST_LEN) values;
+    /// - an [`And`](Self::And) or [`Or`](Self::Or) has no children;
+    /// - the filter holds more than [`MAX_CONDITIONS`](Self::MAX_CONDITIONS) conditions;
+    /// - a value is [`Binary`](ScalarValue::Binary), or a
+    ///   [`Float64`](ScalarValue::Float64) that is not finite;
+    /// - an ordering comparison is given [`Null`](ScalarValue::Null) or a
+    ///   [`Bool`](ScalarValue::Bool).
     pub fn check(&self) -> Result<()> {
-        let depth = self.depth();
-        if depth > Self::MAX_DEPTH {
-            let message =
-                format!("the filter nests {depth} deep, past the limit of {}", Self::MAX_DEPTH);
-            return Err(Error::server_error("invalid", message));
-        }
-        self.check_node()
-    }
-
-    fn check_node(&self) -> Result<()> {
-        match self {
-            Self::InList { field, values } | Self::NotInList { field, values } => {
-                if (1..=Self::MAX_LIST_LEN).contains(&values.len()) {
-                    return Ok(());
-                }
-                let message = format!(
-                    "the list filter on `{field}` holds {} values, not 1 to {}",
-                    values.len(),
-                    Self::MAX_LIST_LEN
-                );
-                Err(Error::server_error("invalid", message))
-            }
-            Self::And(children) | Self::Or(children) => {
-                if children.is_empty() {
-                    return Err(Error::server_error("invalid", "an `and` or `or` has no children"));
-                }
-                children.iter().try_for_each(Self::check_node)
-            }
-            Self::Not(inner) => inner.check_node(),
-            _ => Ok(()),
-        }
+        self.groups()?;
+        Ok(())
     }
 
     /// Whether the JSON document body `doc` satisfies this filter.
@@ -619,7 +608,9 @@ pub struct Query {
     /// Maximum documents to return.
     pub limit: Option<u32>,
 
-    /// Skip this many documents after filter/sort (offset pagination).
+    /// Skip this many documents after filtering and sorting.
+    ///
+    /// A query that sets it fails with the code `unsupported`.
     pub offset: Option<u32>,
 
     /// The [`next`](Page::next) cursor of the previous page, or `None` for the

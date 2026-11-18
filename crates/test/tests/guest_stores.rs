@@ -239,6 +239,9 @@ fn documents() {
 
     let error = now(docs.put("people", &doc("2", "not json"))).expect_err("not JSON");
     assert!(matches!(&error, Error::ServerError { code, .. } if code == "invalid"), "{error}");
+    let error = now(docs.insert("people", &doc("3", "[1]"))).expect_err("not an object");
+    assert!(matches!(&error, Error::ServerError { code, .. } if code == "invalid"), "{error}");
+    assert_eq!(now(docs.documents("people")).expect("all"), Vec::<Document>::new());
 }
 
 #[test]
@@ -275,6 +278,13 @@ fn queries() {
     };
     let error = now(docs.query("people", &malformed)).expect_err("malformed cursor");
     assert!(matches!(&error, Error::ServerError { code, .. } if code == "invalid"), "{error}");
+
+    let offset = Query {
+        offset: Some(1),
+        ..Query::default()
+    };
+    let error = now(docs.query("people", &offset)).expect_err("an offset");
+    assert!(matches!(&error, Error::ServerError { code, .. } if code == "unsupported"), "{error}");
 }
 
 #[test]

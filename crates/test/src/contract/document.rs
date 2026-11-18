@@ -4,7 +4,9 @@
 //! all at once, over one store. Every collection name, id, body, and field
 //! the rows use is portable, as the
 //! [document store reference](https://github.com/augentic/omnia/blob/main/docs/reference/docstore.md#portable-names-and-bodies)
-//! defines it. The store must start with the rows' collections empty.
+//! defines it. The store must declare the rows' collections, `insertexists`,
+//! `portablequery`, `filterlimits`, and `optionalquery`, and start with them
+//! empty.
 
 use std::iter;
 
@@ -72,6 +74,12 @@ pub async fn portable_query(db: &impl DocumentDb) {
         Filter::and([Filter::eq("fresh", true), Filter::gt("rank", 3)]),
         Filter::or([Filter::eq("kind", "grain"), Filter::lt("weight", 1.0)]),
         !Filter::eq("kind", "veg"),
+        Filter::or([
+            Filter::and([Filter::eq("kind", "fruit"), Filter::gt("rank", 2)]),
+            Filter::and([Filter::eq("kind", "veg"), Filter::lt("weight", 2.0)]),
+        ]),
+        !Filter::or([Filter::eq("kind", "veg"), Filter::gt("rank", 4)]),
+        !Filter::and([Filter::eq("fresh", true), Filter::lt("rank", 4)]),
     ] {
         let selected = walk(db, PORTABLE, &filtered(&filter)).await;
         let selected = selected.unwrap_or_else(|err| panic!("{filter:?} failed with `{err}`"));
@@ -101,7 +109,10 @@ pub async fn portable_query(db: &impl DocumentDb) {
 /// - one nested a level deeper than [`Filter::MAX_DEPTH`];
 /// - a list one value longer than [`Filter::MAX_LIST_LEN`];
 /// - an empty list;
-/// - an empty `and`, and an empty `or`.
+/// - an empty `and`, and an empty `or`;
+/// - one condition more than [`Filter::MAX_CONDITIONS`];
+/// - a [`Binary`](ScalarValue::Binary) value, and a number that is not finite;
+/// - an ordering comparison with `null`, and one with a boolean.
 ///
 /// # Panics
 ///
@@ -110,6 +121,7 @@ pub async fn portable_query(db: &impl DocumentDb) {
 pub async fn filter_limits(db: &impl DocumentDb) {
     let deep = (0..Filter::MAX_DEPTH).fold(Filter::eq("rank", 1), |inner, _| !inner);
     let long = Filter::in_list("rank", iter::repeat_n(1, Filter::MAX_LIST_LEN + 1));
+    let many = Filter::and(iter::repeat_n(Filter::eq("rank", 1), Filter::MAX_CONDITIONS + 1));
 
     for (filter, refused) in [
         (deep, "a filter nested past the depth limit"),
@@ -117,6 +129,11 @@ pub async fn filter_limits(db: &impl DocumentDb) {
         (Filter::not_in_list("rank", Vec::<i32>::new()), "an empty list"),
         (Filter::and([]), "an empty `and`"),
         (Filter::or([]), "an empty `or`"),
+        (many, "a filter past the condition limit"),
+        (Filter::eq("rank", ScalarValue::Binary(vec![1])), "a binary value"),
+        (Filter::gt("rank", f64::NAN), "a number that is not finite"),
+        (Filter::gt("rank", ScalarValue::Null), "an ordering comparison with `null`"),
+        (Filter::lt("rank", true), "an ordering comparison with a boolean"),
     ] {
         expect_code(db.query(LIMITS, &filtered(&filter)).await, "invalid", refused);
     }
@@ -128,7 +145,8 @@ pub async fn filter_limits(db: &impl DocumentDb) {
 /// The optional features are:
 ///
 /// - the string predicates;
-/// - the null predicates, and a comparison with `null`;
+/// - the null predicates, a comparison with `null`, and a list that holds
+///   `null`;
 /// - a dotted field path;
 /// - `order_by`;
 /// - `offset`.
@@ -154,6 +172,7 @@ pub async fn optional_query(db: &impl DocumentDb) {
         Filter::is_not_null("tag"),
         Filter::eq("tag", ScalarValue::Null),
         Filter::ne("tag", ScalarValue::Null),
+        Filter::in_list("tag", [ScalarValue::Null, ScalarValue::from("x")]),
         Filter::eq("meta.level", 1),
     ] {
         let selected = walk(db, OPTIONAL, &filtered(&filter)).await.map(sorted);
