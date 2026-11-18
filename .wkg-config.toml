@@ -3,6 +3,3 @@ default_registry = "omnia.host"
 [namespace_registries]
 omnia = "omnia.host"
 wasi = "wasi.dev"
-
-[package_registry_overrides]
-"wasi:sql" = "omnia.host"

@@ -6,7 +6,7 @@ use bytes::Bytes;
 use http::{Method, Request, Response, StatusCode};
 use omnia_sdk::docstore::Document;
 use omnia_sdk::messaging::Message;
-use omnia_sdk::sql::{Field, FromRow, Row, Value};
+use omnia_sdk::sql::{Field, FromRow, Row, Transaction as _, Value};
 use omnia_sdk::{
     ConfigExt as _, DocumentDb as _, DocumentDbExt as _, Error, HttpClientExt as _, Identity as _,
     IdentityExt as _, Publisher as _, Settings, SqlDb as _, SqlDbExt as _, StateStoreExt as _,
@@ -212,27 +212,27 @@ async fn query_as() {
         vec![row(1, "alpha", None), row(2, "beta", Some("second"))],
     );
 
-    let items: Vec<Item> = tables
-        .named("orders")
-        .query_as("SELECT id, label, note FROM items WHERE id > $1", &[Value::from(0_i64)])
-        .await
-        .expect("query");
+    let select = "SELECT id, label, note FROM items WHERE id > $1";
+    let items: Vec<Item> =
+        tables.named("orders").query_as(select, &[Value::from(0_i64)]).await.expect("query");
+    let transaction = tables.begin().await.expect("begin");
+    let staged: Vec<Item> =
+        transaction.query_as(select, &[Value::from(0_i64)]).await.expect("query");
 
-    assert_eq!(
-        items,
-        [
-            Item {
-                id: 1,
-                label: "alpha".into(),
-                note: None,
-            },
-            Item {
-                id: 2,
-                label: "beta".into(),
-                note: Some("second".into()),
-            },
-        ]
-    );
+    let expected = [
+        Item {
+            id: 1,
+            label: "alpha".into(),
+            note: None,
+        },
+        Item {
+            id: 2,
+            label: "beta".into(),
+            note: Some("second".into()),
+        },
+    ];
+    assert_eq!(items, expected);
+    assert_eq!(staged, expected);
     assert_eq!(tables.statements()[0].binding, "orders");
 }
 

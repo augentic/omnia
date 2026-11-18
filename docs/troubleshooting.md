@@ -90,7 +90,7 @@ A manifest declares a `source.package` guest, but the runtime has no registry cl
 
 ### `guest ... targets WASI 0.2 (wasm32-wasip2), importing ...; rebuild it for wasm32-wasip3`
 
-The guest was built for WASI 0.2, and the runtime serves WASI 0.3 alone. Rebuild it with `--target wasm32-wasip3` against an `omnia-sdk` of the runtime's release. A compiled-in guest is refused at startup, and a declared or dynamically registered one at its first use. The `wasi:config` and `wasi:sql` drafts are versioned `0.2` too, but omnia serves them itself, so they never trigger this refusal.
+The guest was built for WASI 0.2, and the runtime serves WASI 0.3 alone. Rebuild it with `--target wasm32-wasip3` against an `omnia-sdk` of the runtime's release. A compiled-in guest is refused at startup, and a declared or dynamically registered one at its first use. The `wasi:config` draft is versioned `0.2` too, but omnia serves it itself, so it never triggers this refusal.
 
 ### The deployment starts but a guest never runs
 

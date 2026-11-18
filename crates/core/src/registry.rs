@@ -467,7 +467,7 @@ fn ensure_wasi_03(id: &GuestId, component: &Component, engine: &Engine) -> Resul
 }
 
 // the packages wasmtime-wasi served at 0.2; the 0.2 drafts omnia's own hosts
-// serve, such as `wasi:sql`, stay importable
+// serve, such as `wasi:config`, stay importable
 const WASI_02_PACKAGES: [&str; 7] = [
     "wasi:cli/",
     "wasi:clocks/",
@@ -518,7 +518,7 @@ mod tests {
             "wasi:config/store@0.2.0-rc.1",
             "omnia:keyvalue/store@0.1.0",
             "omnia:messaging/producer@0.1.0",
-            "wasi:sql/readwrite@0.2.0-draft",
+            "omnia:sql/database@0.1.0",
             "omnia:otel/tracing@0.2.0",
         ];
         assert_eq!(wasi_02_import(imports), None);

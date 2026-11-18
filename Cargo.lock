@@ -2652,6 +2652,7 @@ name = "omnia-wasi-sql"
 version = "0.38.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "futures",
  "omnia",
  "omnia-core",

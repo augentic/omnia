@@ -1,15 +1,22 @@
 //! Every `omnia:sql` error case reaches the guest as its own code: a
-//! `BadGateway` for `unavailable`, and a `ServerError` for the rest. The
-//! default backend fails an undeclared database and a malformed statement
-//! itself. The suite's faulting backend fails the rest by database name. The
-//! `wasi:sql` draft's error carries only the message.
+//! `BadGateway` for `unavailable`, and a `ServerError` for the rest.
+//!
+//! - The default backend fails an undeclared database and a malformed
+//!   statement itself.
+//! - The host refuses a statement that starts a transaction, a temporal value
+//!   outside its format, and a call on an ended transaction, each as
+//!   `invalid`.
+//! - The SDK refuses a `u64` above `i64::MAX` as `invalid` before it reaches
+//!   the host.
+//! - The suite's faulting backend fails the rest by database name, and serves
+//!   `untransacted` with no transactions.
 
 #![cfg(target_arch = "wasm32")]
 
 use std::fmt::Debug;
 
+use omnia_sdk::sql::{Transaction as _, Value};
 use omnia_sdk::{Result, SqlDb as _, WasiProvider};
-use omnia_wasi_sql::types::Connection;
 
 omnia_sdk::api::command::export!(scenario);
 
@@ -20,6 +27,19 @@ async fn scenario() {
     expect_code(provider.named("undeclared").query("SELECT 1", &[]).await, 500, "not-found");
     expect_code(provider.execute("SELEKT nonsense", &[]).await, 500, "invalid");
 
+    // the host's refusals
+    expect_code(provider.execute("BEGIN", &[]).await, 500, "invalid");
+    let date = [Value::Date(Some("29/02/2024".to_owned()))];
+    expect_code(provider.query("SELECT $1", &date).await, 500, "invalid");
+    let transaction = provider.begin().await.expect("begin");
+    expect_code(transaction.execute("SELEKT nonsense", &[]).await, 500, "invalid");
+    expect_code(transaction.execute("SELECT 1", &[]).await, 500, "invalid");
+    drop(transaction);
+
+    // the SDK's refusal
+    let past = [Value::from(u64::MAX)];
+    expect_code(provider.query("SELECT $1", &past).await, 500, "invalid");
+
     // the backend's chosen cases
     for (database, status, code) in [
         ("denied", 500, "denied"),
@@ -29,12 +49,7 @@ async fn scenario() {
     ] {
         expect_code(provider.named(database).query("SELECT 1", &[]).await, status, code);
     }
-
-    // the draft's error has no case
-    let Err(error) = Connection::open("denied".to_owned()).await else {
-        panic!("the draft opened a denied database");
-    };
-    assert_eq!(error.trace(), "denied by the suite");
+    expect_code(provider.named("untransacted").begin().await, 500, "unsupported");
 }
 
 fn expect_code<T: Debug>(result: Result<T>, status: u16, code: &str) {

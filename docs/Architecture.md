@@ -121,21 +121,21 @@ pub trait Connect: Sized + Sync + Send {
 
 Each interface crate provides guest bindings, a host implementation, and, with one exception, a default backend:
 
-| Crate            | Interface         | Purpose                          | Default backend                           |
-| ---------------- | ----------------- | -------------------------------- | ----------------------------------------- |
-| `wasi-http`      | `wasi:http`       | HTTP client/server (trigger)     | `HttpDefault` — hyper client, axum server |
-| `wasi-keyvalue`  | `omnia:keyvalue`  | Key-value storage                | `KeyValueDefault` — in-memory             |
-| `wasi-messaging` | `omnia:messaging` | Pub/sub messaging (trigger)      | `MessagingDefault` — in-process broadcast |
-| `wasi-blobstore` | `omnia:blobstore` | Blob storage                     | `BlobStoreDefault` — in-memory            |
-| `wasi-sql`       | `omnia:sql`       | Parameterized SQL (+ wasi draft) | `SqlDefault` — SQLite                     |
-| `wasi-docstore`  | `omnia:docstore`  | JSON document store with filters | `DocStoreDefault` — in-memory             |
-| `wasi-config`    | `wasi:config`     | Runtime configuration            | `ConfigDefault` — process environment     |
-| `wasi-vault`     | `omnia:vault`     | Secrets management               | `VaultDefault` — in-memory                |
-| `wasi-identity`  | `omnia:identity`  | Identity/OAuth tokens            | `IdentityDefault` — OAuth2 client flow    |
-| `wasi-otel`      | Custom            | Guest OpenTelemetry export       | `OtelDefault` — log-only                  |
-| `wasi-websocket` | `omnia:websocket` | WebSocket connections (trigger)  | `WebSocketDefault` — tungstenite server   |
-| `wasi-model`     | `omnia:model`     | Model completions with grants    | `ModelDefault` — deterministic echo       |
-| `wasi-vcs`       | `omnia:vcs`       | Version control over lent mounts | none — `omnia-git` in `omnia-backends`    |
+| Crate            | Interface         | Purpose                            | Default backend                           |
+| ---------------- | ----------------- | ---------------------------------- | ----------------------------------------- |
+| `wasi-http`      | `wasi:http`       | HTTP client/server (trigger)       | `HttpDefault` — hyper client, axum server |
+| `wasi-keyvalue`  | `omnia:keyvalue`  | Key-value storage                  | `KeyValueDefault` — in-memory             |
+| `wasi-messaging` | `omnia:messaging` | Pub/sub messaging (trigger)        | `MessagingDefault` — in-process broadcast |
+| `wasi-blobstore` | `omnia:blobstore` | Blob storage                       | `BlobStoreDefault` — in-memory            |
+| `wasi-sql`       | `omnia:sql`       | Parameterized SQL and transactions | `SqlDefault` — SQLite                     |
+| `wasi-docstore`  | `omnia:docstore`  | JSON document store with filters   | `DocStoreDefault` — in-memory             |
+| `wasi-config`    | `wasi:config`     | Runtime configuration              | `ConfigDefault` — process environment     |
+| `wasi-vault`     | `omnia:vault`     | Secrets management                 | `VaultDefault` — in-memory                |
+| `wasi-identity`  | `omnia:identity`  | Identity/OAuth tokens              | `IdentityDefault` — OAuth2 client flow    |
+| `wasi-otel`      | Custom            | Guest OpenTelemetry export         | `OtelDefault` — log-only                  |
+| `wasi-websocket` | `omnia:websocket` | WebSocket connections (trigger)    | `WebSocketDefault` — tungstenite server   |
+| `wasi-model`     | `omnia:model`     | Model completions with grants      | `ModelDefault` — deterministic echo       |
+| `wasi-vcs`       | `omnia:vcs`       | Version control over lent mounts   | none — `omnia-git` in `omnia-backends`    |
 
 Conditional compilation lets one crate serve both sides — guests get bindings on `wasm32`, hosts get the implementation on native:
 

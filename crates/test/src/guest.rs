@@ -24,5 +24,5 @@ pub use provider::Provider;
 pub use router::{deliver, send};
 pub use scripted::{ScriptedLoader, ScriptedModel, Turn, function_tools};
 pub use sink::{Broadcasted, FixedIdentity, MapConfig, Sink};
-pub use tables::{Executed, Predicate, ScriptedTables};
+pub use tables::{Ended, Executed, Predicate, ScriptedTables, ScriptedTransaction, Transacted};
 pub use vcs::{ScriptedVcs, SeenVcs, VcsTurn};

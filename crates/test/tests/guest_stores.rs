@@ -14,13 +14,13 @@ use bytes::Bytes;
 use http::{Method, Request, Response};
 use omnia_sdk::docstore::{Document, Filter, Query, SortField};
 use omnia_sdk::messaging::Message;
-use omnia_sdk::sql::{Field, Row, Statement, Value};
+use omnia_sdk::sql::{Field, Row, Statement, Transaction as _, Value};
 use omnia_sdk::{
     BlobStore, DocumentDb, Error, HttpClient, Identity, Publisher, SecretStore, SqlDb, StateStore,
     WebSockets,
 };
 use omnia_test::guest::{
-    Broadcasted, FixedIdentity, MatchedHttp, Memory, MemoryDocs, ScriptedTables, Sink,
+    Broadcasted, Ended, FixedIdentity, MatchedHttp, Memory, MemoryDocs, ScriptedTables, Sink,
 };
 
 // every store double answers without yielding
@@ -388,6 +388,35 @@ fn tables() {
     );
     assert_eq!((statements[1].binding.as_str(), statements[1].sql.as_str()), ("orders", "INSERT"));
     assert_eq!(statements[3].params, [Value::from("z")]);
+
+    let committed = now(tables.named("orders").begin()).expect("begin");
+    assert_eq!(now(committed.query("SELECT 2", &[])).expect("query").len(), 1);
+    assert_eq!(now(committed.execute("INSERT", &[Value::from("a")])).expect("exec"), 1);
+    now(committed.commit()).expect("commit");
+    let rolled_back = now(tables.begin()).expect("begin");
+    now(rolled_back.rollback()).expect("rollback");
+    let dropped = now(tables.begin()).expect("begin");
+    assert_eq!(now(dropped.execute("INSERT", &[Value::from("b")])).expect("exec"), 1);
+    assert_eq!(tables.transactions()[2].ended, None);
+    drop(dropped);
+
+    let transactions = tables.transactions();
+    let ends: Vec<_> = transactions
+        .iter()
+        .map(|transaction| {
+            (transaction.binding.as_str(), transaction.statements.len(), transaction.ended)
+        })
+        .collect();
+    assert_eq!(
+        ends,
+        [
+            ("orders", 2, Some(Ended::Committed)),
+            ("default", 0, Some(Ended::RolledBack)),
+            ("default", 1, Some(Ended::RolledBack)),
+        ]
+    );
+    assert_eq!(transactions[0].statements[1].params, [Value::from("a")]);
+    assert_eq!(tables.statements().len(), 7);
 }
 
 #[test]

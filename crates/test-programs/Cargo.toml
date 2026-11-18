@@ -432,8 +432,18 @@ path = "programs/plugins/unlinked.rs"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "sql_backend_defaults"
+path = "programs/sql/backend_defaults.rs"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "sql_bindings"
 path = "programs/sql/bindings.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "sql_database"
+path = "programs/sql/database.rs"
 crate-type = ["cdylib"]
 
 [[example]]
@@ -442,13 +452,13 @@ path = "programs/sql/error_codes.rs"
 crate-type = ["cdylib"]
 
 [[example]]
-name = "sql_query_exec"
-path = "programs/sql/query_exec.rs"
+name = "sql_sql_db"
+path = "programs/sql/sql_db.rs"
 crate-type = ["cdylib"]
 
 [[example]]
-name = "sql_sql_db"
-path = "programs/sql/sql_db.rs"
+name = "sql_transactions"
+path = "programs/sql/transactions.rs"
 crate-type = ["cdylib"]
 
 [[example]]

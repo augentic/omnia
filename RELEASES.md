@@ -48,8 +48,23 @@ Unreleased
     and for a `matches` write or an `increment` that replaces the
     lifetime.
 - `omnia:sql`, the Omnia-owned interface `SqlDb` calls. `WasiSql` serves it
-  beside the `wasi:sql` draft over one `Connection`. Each call names its
-  database, and `batch` runs its statements in one transaction.
+  over one `Connection`:
+  - `store.open` answers a `database` handle, and every statement goes
+    through it.
+  - `query` answers a `result-set`: the `columns` it selects, a `rows`
+    stream, and a `finished` future.
+  - `execute` answers the rows a statement changed, and `batch` runs its
+    statements in one transaction.
+  - A temporal value is text in one ISO 8601 shape per case, and the host
+    fails any other with `invalid`.
+  - The optional `transactions` interface begins a `transaction` on a
+    database. Its statements commit or roll back together, and a failure
+    or a drop rolls it back.
+- `SqlDb::begin`, which starts an `omnia_sdk::sql::Transaction`. Its
+  `query`, `execute`, and `query_as` run in the transaction until `commit`
+  or `rollback` ends it. Dropping it rolls it back, and so does a statement
+  that fails. `omnia_sdk::wasi::sql::Transaction` is the one `WasiProvider`
+  begins.
 - `omnia:blobstore`, the Omnia-owned interface `BlobStore` calls.
   `WasiBlobStore` serves it over one `BlobStoreClient`:
   - `store.open` answers a `container` handle, and every object call goes
@@ -243,7 +258,7 @@ Unreleased
   that imports a WASI 0.2 `wasi:cli`, `wasi:clocks`, `wasi:filesystem`,
   `wasi:http`, `wasi:io`, `wasi:random`, or `wasi:sockets` interface is
   refused by name, with the rebuild it needs, at startup or at its first
-  use. The `wasi:config` and `wasi:sql` drafts are served as before.
+  use. The `wasi:config` draft is served as before.
 - `omnia_test::build` compiles a fixture crate's programs for
   `wasm32-wasip3`.
 - A raw export that may wait is an `async func`. On `wasm32-wasip3`,
@@ -319,9 +334,14 @@ Unreleased
     `Message`, `Delivery`, and `Statement` are `#[non_exhaustive]`, so
     code outside the SDK builds them with `new`. A metadata `created_at`
     is a `SystemTime`.
-- `SqlDb` calls `omnia:sql`, one host call per method, and `batch` runs its
-  statements in one transaction. A failing statement rolls back the whole
-  batch.
+- `SqlDb` calls `omnia:sql`, opening a `database` handle for each call, and
+  `batch` runs its statements in one transaction. A failing statement rolls
+  back the whole batch.
+- Every `SqlDb` implementor provides `begin` and its `Transaction` type.
+- `SqlDb` sends a `Uint32` or a `Uint64` as an `int64`, and fails a `Uint64`
+  above `i64::MAX` with the code `invalid`. A `Timestamp` with a `Z` or an
+  offset travels as a `timestamp-tz`, and a `NULL` reads back as
+  `Str(None)`.
 - `BlobStore` calls `omnia:blobstore`, opening a `container` handle for
   each object call. Its codes come from the error's case, where the SDK
   read a missing container or object from the message.
@@ -330,7 +350,7 @@ Unreleased
   `default` or lists the name in `SQL_DATABASES`.
 - `SqlClient::open` fails a name the deployment does not declare with
   `omnia_wasi_sql::Error::NotFound`.
-- `omnia_wasi_sql::Connection` serves `omnia:sql` and the draft alike:
+- `omnia_wasi_sql::Connection` serves `omnia:sql` alone:
   - `query` and `execute`, which was `exec`, take a `Vec<Value>`, and
     `execute` answers a `u64`.
   - `batch` runs a `Vec<Statement>` in one transaction. A `Statement` is
@@ -339,6 +359,19 @@ Unreleased
   - A backend picks a failure's code by returning an
     `omnia_wasi_sql::Error`, whose six cases are the six capability error
     codes.
+  - `select` answers a `ResultSet`, the selected columns beside the rows.
+    Its default body runs `query` and names the first row's columns.
+  - `begin`, `commit`, and `rollback` bound the transaction the host runs
+    on the connection. Their default bodies send `BEGIN`, `COMMIT`, and
+    `ROLLBACK` through `execute`.
+- `WasiSql` fails a statement that starts or ends a transaction or a
+  savepoint, such as `BEGIN`, `COMMIT`, or `SAVEPOINT`, with the code
+  `invalid`. A guest ends a transaction through its handle, and
+  `SET TRANSACTION` still reaches the backend.
+- `SqlDefault` serves transactions. Every handle on a database shares its
+  one `SQLite` connection, so a call made while a transaction is open waits
+  up to 5 s for it and then fails with the code `unavailable`, as a busy or
+  locked database does. A DDL statement answers `0` rows changed.
 - `SqlDefault` stores a `date` or `time` as the text it is given. It stored
   one as `NULL` before.
 - `Row::get` reads a `bool` from an integer `0` or `1` too, which is how
@@ -459,6 +492,9 @@ Unreleased
   - `ScriptedTables::statements` answers `Executed`, which was
     `Statement`, and its `binding` was `connection`. `on_exec` takes a
     `u64`.
+  - `ScriptedTables::begin` answers a `ScriptedTransaction`, whose
+    statements the same rules answer. `ScriptedTables::transactions` lists
+    each one begun, with its statements and how it `Ended`.
   - `Broadcasted` has no channel `name`.
   - `MapConfig` answers an unknown key as unset.
   - `FixedIdentity` answers a named identity's token as `<token>:<name>`.
@@ -608,8 +644,7 @@ Unreleased
   `topic_with` or `command_with` decoder answers `omnia_sdk::Result<I>`, so
   `DecodeError::new(message)` becomes `bad_request!("{message}")`.
 - The host's `omnia_wasi_sql::DataType`, which is `omnia_wasi_sql::Value`,
-  and `omnia_wasi_sql::Error::trace`. The draft's `trace` is the message
-  of the `Error` case a backend returns.
+  and `omnia_wasi_sql::Error::trace`.
 - The `wasi:blobstore@0.2.0-draft` imports, whose values are `wasi:io@0.2`
   streams a WASI 0.3 runtime does not serve. With them go
   `omnia_wasi_blobstore::{blobstore, container, types}` on `wasm32`, and
@@ -622,6 +657,11 @@ Unreleased
   host's `BucketProxy` and `Cas`. A guest reaches a key-value store
   through `omnia_sdk::StateStore`, and `omnia_wasi_keyvalue::omnia` holds
   the raw `omnia:keyvalue` bindings.
+- The `wasi:sql@0.2.0-draft` imports. With them go
+  `omnia_wasi_sql::{readwrite, types, DataType, Field, Row}` on `wasm32`,
+  and the host's `ConnectionProxy`, `Prepared`, and `Trace`. A guest
+  reaches a database through `omnia_sdk::SqlDb`, and
+  `omnia_wasi_sql::omnia` holds the raw `omnia:sql` bindings.
 
 ---
 

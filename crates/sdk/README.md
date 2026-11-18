@@ -195,7 +195,7 @@ A capability is a trait over one host service. `WasiProvider` implements every o
 | `Plugins` | `plugins()` | Loads of other guests by declared name, mounted path, or registry package. |
 | `Publisher` | `publisher()` | Messages published to a topic, with an optional key that orders them. |
 | `SecretStore` | `secrets()` | Secrets in one locker, to read, write, delete, check, and list. |
-| `SqlDb` | `sql()` | Parameterized SQL, with rows decoded through `SqlDbExt::query_as`. |
+| `SqlDb` | `sql()` | Parameterized SQL and transactions, with rows decoded through `SqlDbExt::query_as`. |
 | `StateStore` | `state()` | Key-value state with TTLs, compare-and-swap, and atomic increments. |
 | `Vcs` | `vcs()` | Version-control operations over lent repository and working-copy mounts. |
 | `WebSockets` | `websockets()` | Data sent to every connected WebSocket, or to the sockets named. |
