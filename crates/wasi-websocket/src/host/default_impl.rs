@@ -1,9 +1,10 @@
-//! Default implementation for wasi-websocket
+//! Default implementation for `omnia:websocket`.
 //!
 //! This implementation runs a real tungstenite WebSocket server that external
-//! clients can connect to. Incoming messages from WS clients are broadcast as
-//! events to the guest handler. Outbound events from the guest are sent to
-//! connected WS clients, optionally filtered by group.
+//! clients can connect to. Each connection gets a random id, and each message
+//! a client sends reaches the guest handler as an event in its frame type. The
+//! guest sends to one connection or to every open one, closes a connection,
+//! and checks whether one is open.
 //!
 //! For production use, use a backend with proper WebSocket connection
 //! management and authentication.
@@ -20,12 +21,14 @@ use omnia_core::{Connect, FutureResult};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::broadcast::{self, Sender};
 use tokio_stream::wrappers::BroadcastStream;
+use tokio_tungstenite::tungstenite::protocol::CloseFrame as WsCloseFrame;
+use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 use tokio_tungstenite::{WebSocketStream, accept_async};
 use tracing::instrument;
 
-use crate::host::WebSocketClient;
-use crate::host::resource::{Endpoint, Event, Events};
+use crate::host::resource::{CloseFrame, Endpoint, Event, Events, Frame};
+use crate::host::{Error, WebSocketClient};
 
 /// Options used to connect to the WebSocket service.
 #[derive(Debug, Clone)]
@@ -46,7 +49,7 @@ const MAX_CONNECTIONS: usize = 1024;
 const BROADCAST_CAPACITY: usize = 256;
 const CLIENT_CAPACITY: usize = 256;
 
-/// Default implementation for `wasi:websocket`.
+/// Default implementation for `omnia:websocket`.
 #[derive(Clone, Debug)]
 pub struct WebSocketDefault {
     event_tx: Sender<Event>,
@@ -108,10 +111,18 @@ impl WebSocketDefault {
         }
     }
 
-    async fn handle_socket(&self, ws_stream: WebSocketStream<TcpStream>, socket_addr: String) {
-        let (tx, rx) = mpsc::channel(CLIENT_CAPACITY);
+    async fn handle_socket(&self, ws_stream: WebSocketStream<TcpStream>, peer: String) {
+        let connection = match connection_id() {
+            Ok(connection) => connection,
+            Err(e) => {
+                tracing::error!("issue identifying the connection from {peer}: {e:#}");
+                return;
+            }
+        };
+        tracing::info!("connection {connection} opened from {peer}");
 
-        if let Err(e) = self.add_socket(socket_addr.clone(), tx) {
+        let (tx, rx) = mpsc::channel(CLIENT_CAPACITY);
+        if let Err(e) = self.add_socket(connection.clone(), tx) {
             tracing::error!("issue adding peer connection: {e}");
             return;
         }
@@ -121,11 +132,13 @@ impl WebSocketDefault {
         let inbound = incoming.try_for_each(|msg| {
             match msg {
                 Message::Text(text) => {
-                    self.send_to_guest(socket_addr.clone(), text.as_bytes().to_vec());
+                    self.send_to_guest(&connection, Frame::Text, text.as_bytes().to_vec());
                 }
-                Message::Binary(data) => self.send_to_guest(socket_addr.clone(), data.to_vec()),
+                Message::Binary(data) => {
+                    self.send_to_guest(&connection, Frame::Binary, data.to_vec());
+                }
                 Message::Close(_) => {
-                    tracing::info!("peer {socket_addr} sent close frame");
+                    tracing::info!("connection {connection} sent a close frame");
                     return future::err(WsError::ConnectionClosed);
                 }
                 _ => {}
@@ -137,27 +150,42 @@ impl WebSocketDefault {
 
         pin_mut!(inbound, outbound);
         future::select(inbound, outbound).await;
-        tracing::info!("{socket_addr} disconnected");
+        tracing::info!("connection {connection} closed");
 
-        self.connections.remove(&socket_addr);
+        self.connections.remove(&connection);
     }
 
-    fn add_socket(&self, socket_addr: String, tx: mpsc::Sender<Message>) -> Result<()> {
+    fn add_socket(&self, connection: String, tx: mpsc::Sender<Message>) -> Result<()> {
         if self.connections.len() >= MAX_CONNECTIONS {
             return Err(anyhow!("max connections reached"));
         }
-        self.connections.insert(socket_addr, tx);
+        self.connections.insert(connection, tx);
         Ok(())
     }
 
-    fn send_to_guest(&self, socket_addr: String, data: Vec<u8>) {
+    fn send_to_guest(&self, connection: &str, frame: Frame, data: Vec<u8>) {
         let event = Event {
-            socket_addr: Some(socket_addr),
+            socket_addr: Some(connection.to_owned()),
             data,
+            frame,
             route: None,
         };
         if let Err(e) = self.event_tx.send(event) {
             tracing::warn!("issue sending WebSocket event: {e}");
+        }
+    }
+
+    // queues `message` for each open connection `to` admits, pruning the closed
+    fn fan_out(&self, message: &Message, to: impl Fn(&str) -> bool) {
+        self.connections.retain(|_, sender| !sender.is_closed());
+
+        for mut entry in self.connections.iter_mut() {
+            if !to(entry.key()) {
+                continue;
+            }
+            if let Err(e) = entry.value_mut().try_send(message.clone()) {
+                tracing::warn!("failed to send to peer, channel full or disconnected: {e}");
+            }
         }
     }
 }
@@ -219,22 +247,69 @@ impl Endpoint for WebSocketDefault {
     }
 
     fn send(&self, event: Event, sockets: Option<Vec<String>>) -> FutureResult<()> {
-        tracing::debug!("sending event to WebSocket clients, sockets: {:?}", sockets);
+        tracing::debug!("sending event to WebSocket clients, sockets: {sockets:?}");
 
-        self.connections.retain(|_, sender| !sender.is_closed());
+        let sent = ws_message(event).map(|message| {
+            self.fan_out(&message, |connection| {
+                sockets.as_ref().is_none_or(|sockets| sockets.iter().any(|id| id == connection))
+            });
+        });
+        future::ready(sent).boxed()
+    }
 
-        let msg = Message::Binary(event.data.into());
-        for mut entry in self.connections.iter_mut() {
-            if sockets.as_ref().is_some_and(|s| !s.contains(entry.key())) {
-                continue;
-            }
-            if let Err(e) = entry.value_mut().try_send(msg.clone()) {
-                tracing::warn!("failed to send to peer, channel full or disconnected: {e}");
-            }
+    fn broadcast(&self, event: Event, except: Vec<String>) -> FutureResult<()> {
+        tracing::debug!("broadcasting event to WebSocket clients, except: {except:?}");
+
+        let sent = ws_message(event).map(|message| {
+            self.fan_out(&message, |connection| !except.iter().any(|id| id == connection));
+        });
+        future::ready(sent).boxed()
+    }
+
+    fn close(&self, connection: String, frame: Option<CloseFrame>) -> FutureResult<()> {
+        if let Some(frame) = &frame
+            && !CloseCode::from(frame.code).is_allowed()
+        {
+            let error =
+                Error::Invalid(format!("close code {} is not one this server sends", frame.code));
+            return future::ready(Err(error.into())).boxed();
         }
 
-        async move { Ok(()) }.boxed()
+        let frame = frame.map(|frame| WsCloseFrame {
+            code: frame.code.into(),
+            reason: frame.reason.into(),
+        });
+        if let Some((_, mut sender)) = self.connections.remove(&connection)
+            && let Err(e) = sender.try_send(Message::Close(frame))
+        {
+            tracing::warn!("failed to queue a close frame for connection {connection}: {e}");
+        }
+        future::ready(Ok(())).boxed()
     }
+
+    fn exists(&self, connection: String) -> FutureResult<bool> {
+        let open = self.connections.get(&connection).is_some_and(|sender| !sender.is_closed());
+        future::ready(Ok(open)).boxed()
+    }
+}
+
+// a text event travels in a text frame, so its data must be UTF-8
+fn ws_message(event: Event) -> Result<Message> {
+    match event.frame {
+        Frame::Binary => Ok(Message::binary(event.data)),
+        Frame::Text => {
+            let text = String::from_utf8(event.data)
+                .map_err(|e| Error::Invalid(format!("a text event is not UTF-8: {e}")))?;
+            Ok(Message::text(text))
+        }
+    }
+}
+
+// 128 random bits, so no two connections share an id, even across restarts
+fn connection_id() -> Result<String> {
+    let mut bytes = [0_u8; 16];
+    getrandom::fill(&mut bytes).context("drawing a connection id")?;
+    Ok(format!("{:032x}", u128::from_be_bytes(bytes)))
 }
 
 type ConnectionMap = Arc<DashMap<String, mpsc::Sender<Message>>>;

@@ -461,6 +461,16 @@ path = "programs/vcs/locations.rs"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "websocket_close"
+path = "programs/websocket/close.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "websocket_error_codes"
+path = "programs/websocket/error_codes.rs"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "websocket_handler_echo"
 path = "programs/websocket/handler_echo.rs"
 crate-type = ["cdylib"]

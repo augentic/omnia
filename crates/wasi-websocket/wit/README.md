@@ -1,11 +1,7 @@
-# WebAssembly Interface Types (WIT) Deps
+# WebAssembly Interface Types (WIT)
 
-## Prerequisites
-
-Install [wkg](https://github.com/bytecodealliance/wasm-pkg-tools).
-
-## Usage
-
-```bash
-wkg get omnia:websocket@0.1.0 --config .wkg-config.toml --output ./crates/wasi-websocket/wit/websocket.wit
-```
+`websocket.wit` is `omnia:websocket`, owned by this crate and edited here.
+Every backend serves `types` and `connections`, the `core` world.
+`broadcast` is optional, and `imports` adds it. A guest that receives
+messages exports `incoming-handler`: `websocket-core` adds it to `core`, and
+`websocket` adds it to `imports`.

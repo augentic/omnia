@@ -1,12 +1,11 @@
-//! # WASI WebSocket WIT implementation
+//! # WASI WebSocket Guest
 
-// Bindings for the `wasi:websocket` world.
-// See (<https://github.com/augentic/wasi-websocket/>)
+// Bindings for `omnia:websocket`.
 mod generated {
     #![allow(missing_docs, clippy::same_length_and_capacity, reason = "wit-bindgen output")]
 
     wit_bindgen::generate!({
-        world: "duplex",
+        world: "websocket",
         path: "wit",
         additional_derives: [Clone],
         generate_all,

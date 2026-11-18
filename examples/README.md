@@ -46,7 +46,7 @@ Each example directory has a `README.md` with test commands and example-specific
 | [`otel`](otel) | Guest OpenTelemetry instrumentation (`wasi:otel`) |
 | [`sql`](sql) | CRUD over `omnia:sql` through the `SqlDb` capability, with schema setup over the `wasi:sql` draft |
 | [`vault`](vault) | Secret storage (`wasi:vault`) |
-| [`websocket`](websocket) | Real-time bidirectional messaging (`wasi:websocket`) |
+| [`websocket`](websocket) | Real-time bidirectional messaging (`omnia:websocket`) |
 
 ### Composition and deployment patterns
 

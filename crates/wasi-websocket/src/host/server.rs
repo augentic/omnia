@@ -1,4 +1,8 @@
+//! The websocket trigger, whose [`WebSocketHandler`] routes each event to a
+//! guest.
+
 use std::sync::Arc;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow};
 use futures::StreamExt;
@@ -6,8 +10,12 @@ use omnia_core::{PatternRoutes, Provides, Runtime, TriggerRouter};
 use tracing::{Instrument, info_span, instrument};
 
 use crate::host::WasiWebSocket;
-use crate::host::generated::DuplexIndices;
+use crate::host::generated::WebsocketIndices;
+use crate::host::generated::omnia::websocket::types;
 use crate::host::resource::{Event, Events};
+
+// the metadata entry omnia-sdk's `Metadata` reads a guest's deadline from
+const DEADLINE: &str = "deadline";
 
 #[instrument("websocket-server", skip(state))]
 pub async fn run<B>(state: &Runtime<B>) -> Result<()>
@@ -43,8 +51,8 @@ where
     Ok(())
 }
 
-/// In-process `omnia:websocket/handler` dispatcher: routes an event to a
-/// guest, instantiates it, and invokes the export.
+/// In-process `omnia:websocket/incoming-handler` dispatcher: routes an event
+/// to a guest, instantiates it, and invokes the export.
 ///
 /// The server loop drives one over the backend event stream; tests drive it
 /// directly with a constructed [`Event`], bypassing the socket.
@@ -70,13 +78,13 @@ where
     /// Returns an error if the deployment's websocket routes are inconsistent
     /// with the guests' exports.
     pub fn new(runtime: &Runtime<B>) -> Result<Option<Self>> {
-        // a guest is capable exactly when its `DuplexIndices` resolve; a
+        // a guest is capable exactly when its `WebsocketIndices` resolve; a
         // declared guest is probed when its first event loads it
         let routing = TriggerRouter::build(
             runtime.registry(),
             "websocket",
             runtime.registry().routes().websocket().clone(),
-            DuplexIndices::new,
+            WebsocketIndices::new,
         )?;
         if routing.is_inert() {
             return Ok(None);
@@ -91,13 +99,21 @@ where
     /// Forward an event to the guest routed by its route key (or the
     /// catch-all guest when it carries none).
     ///
-    /// An event with no matching route is dropped silently.
+    /// An event with no matching route is dropped silently. The guest
+    /// receives the event with its `deadline` metadata entry set to the
+    /// instant the guest timeout expires, in milliseconds since the Unix
+    /// epoch. A guest's error leaves the connection open.
     ///
     /// # Errors
     ///
-    /// Returns an error if the guest cannot be loaded at its first use or
-    /// instantiated, traps, or times out.
+    /// Returns an error if the event names no connection or carries text that
+    /// is not UTF-8, if the guest cannot be loaded at its first use or
+    /// instantiated, traps, or times out, or if the guest returns an error.
     pub async fn handle(&self, event: Event) -> Result<()> {
+        // an event the guest could not answer is refused before routing
+        let mut event = types::Event::try_from(event)
+            .map_err(|error| anyhow!("refusing a websocket event: {error}"))?;
+
         // resolve the guest by route, or the catch-all; unmatched is dropped, not an error
         let routed = event
             .route
@@ -117,39 +133,38 @@ where
 
         // a declared guest's export is checked here, at first use
         let indices =
-            DuplexIndices::new(guest.instance_pre()).map_err(anyhow::Error::from).with_context(
+            WebsocketIndices::new(guest.instance_pre()).map_err(anyhow::Error::from).with_context(
                 || format!("routed guest `{guest_id}` does not export the websocket handler"),
             )?;
 
-        let mut store_data = self.state.store();
-        let event_res = store_data
-            .view::<WasiWebSocket>()
-            .table
-            .push(event)
-            .map_err(|e| anyhow!("failed to push event: {e}"))?;
+        let deadline = deadline_millis(self.state.options().guest_timeout);
+        event.metadata.push((DEADLINE.to_owned(), deadline.to_string()));
 
-        let mut store = self.state.build_store(store_data);
+        let mut store = self.state.build_store(self.state.store());
         let instance = self.state.instantiate(guest.instance_pre(), &mut store).await?;
         let websocket = indices.load(&mut store, &instance)?;
 
         let run = store
             .run_concurrent(async |store| {
-                let guest = websocket.omnia_websocket_handler();
-                guest
-                    .call_handle(store, event_res)
-                    .await
-                    .map(|_| ())
-                    .map_err(anyhow::Error::from)
-                    .context("issue handling event")
+                websocket.omnia_websocket_incoming_handler().call_handle(store, event).await
             })
             .instrument(info_span!("websocket-handle"));
 
-        tokio::time::timeout(self.state.options().guest_timeout, run)
+        let called = tokio::time::timeout(self.state.options().guest_timeout, run)
             .await
-            .context("websocket handler timed out")??
+            .context("websocket handler timed out")?;
+        let returned =
+            called.flatten().map_err(anyhow::Error::from).context("issue handling event")?;
+        returned.map_err(|error| anyhow!("the guest returned an error: {error}"))
     }
 
     async fn events(&self) -> Result<Events> {
         self.state.store().view::<WasiWebSocket>().client.endpoint().await?.events().await
     }
+}
+
+// saturates rather than panics, so no configured timeout can fail an event
+fn deadline_millis(timeout: Duration) -> u64 {
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
+    u64::try_from(now.saturating_add(timeout).as_millis()).unwrap_or(u64::MAX)
 }

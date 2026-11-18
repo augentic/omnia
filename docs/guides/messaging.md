@@ -122,28 +122,29 @@ Semantics to keep in mind when moving from the default to a broker: the in-memor
 
 ## WebSockets
 
-The `wasi:websocket` interface is the same trigger shape pointed at WebSocket connections: the host (`WasiWebSocket`, default backend `WebSocketDefault`, a tungstenite server on `WEBSOCKET_ADDR`) accepts connections and delivers inbound frames to the guest's exported handler, and guests push events out through a client:
+The `omnia:websocket` interface is the same trigger shape pointed at WebSocket connections. The host (`WasiWebSocket`, default backend `WebSocketDefault`, a tungstenite server on `WEBSOCKET_ADDR`) accepts connections, names each with an opaque id, and delivers every message a peer sends to the guest's exported `incoming-handler`. A message is text or binary, and travels in a frame of that type. Guests answer one connection through `connections`, and reach every open one through `broadcast`:
 
 ```rust
-use omnia_wasi_websocket::types::{Client, Event};
-use omnia_wasi_websocket::client;
+use omnia_wasi_websocket::types::{Client, Error, Event, Message};
+use omnia_wasi_websocket::{broadcast, connections};
 
-// Push to connected clients (None = broadcast; Some(group) targets a group)
+// Push text to every connected client
 let ws = Client::connect("default".to_string()).await?;
-client::send(&ws, Event::new(&payload), None).await?;
+broadcast::send(&ws, Message::Text(payload), Vec::new()).await?;
 
-// Receive inbound frames
+// Receive inbound messages
 struct WebSocket;
 omnia_wasi_websocket::export!(WebSocket);
 
-impl omnia_wasi_websocket::handler::Guest for WebSocket {
+impl omnia_wasi_websocket::incoming_handler::Guest for WebSocket {
     async fn handle(event: Event) -> Result<(), Error> {
-        // react, or echo back with client::send
-        Ok(())
+        // react, or echo back to the sender
+        let ws = Client::connect("default".to_string()).await?;
+        connections::send(&ws, event.connection, event.message).await
     }
 }
 ```
 
-A handler sends through the `WebSockets` capability instead: `broadcast(data)` reaches every connected socket, and `send_to(sockets, data)` the sockets named.
+A handler sends through the `WebSockets` capability instead: `broadcast(data)` reaches every open connection, and `send_to(sockets, data)` the connections named, each in a binary frame.
 
 The [`websocket`](../../examples/websocket/) example pairs an HTTP control endpoint (POST a message) with a WebSocket broadcast to all connected clients. In manifests, `routes.websocket` entries use the same pattern syntax as messaging routes.

@@ -22,6 +22,7 @@ dashmap.workspace = true
 futures.workspace = true
 futures-channel.workspace = true
 futures-util.workspace = true
+getrandom.workspace = true
 omnia-core.workspace = true
 tokio = { workspace = true, features = ["sync", "time"] }
 tokio-stream.workspace = true

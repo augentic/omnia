@@ -81,6 +81,24 @@ Unreleased
     `default` is declared.
   - `WasiMessaging` answers `unsupported` for a message `id`, and for
     `consumer`, `log`, and `admin`.
+- `omnia:websocket`, rewritten in place as the interface `WebSockets`
+  calls. `WasiWebSocket` serves it over one `Endpoint`:
+  - The `incoming-handler` export takes an `event` record: the id of the
+    connection that sent it, its route, the message, and metadata that
+    carries the host's `deadline`.
+  - A `message` is text or binary, and travels in a frame of that type.
+  - `connections` sends to one connection, closes one with an optional
+    status, and asks whether one is open. A connection that is not open is
+    no error.
+  - The optional `broadcast` sends to every open connection except those
+    the guest names.
+  - `client.connect` names a service the deployment declares, and only
+    `default` is declared.
+  - `Endpoint` gains `broadcast`, `close`, and `exists`, which answer
+    `unsupported` until a backend serves them, and `Event` gains `frame`.
+    `WebSocketDefault` serves every call, and mints each connection a
+    random id.
+  - `WebSocketHandler::handle` returns the guest's own error.
 - The codes of a failed capability call. Its `omnia_sdk::Error` names the
   class of failure in its code:
   - `not-found`, `denied`, `invalid`, `unsupported`, or `other` on a
