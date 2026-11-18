@@ -41,7 +41,7 @@ Each example directory has a `README.md` with test commands and example-specific
 | [`config`](config) | Reading runtime configuration (`wasi:config`) |
 | [`docstore`](docstore) | JSON documents with filters, sorting, and pagination (`omnia:docstore`) |
 | [`identity`](identity) | OAuth token acquisition (`wasi:identity`) |
-| [`messaging`](messaging) | Pub-sub, request-reply, and fan-out (`wasi:messaging`) |
+| [`messaging`](messaging) | Pub-sub, request-reply, and fan-out (`omnia:messaging`) |
 | [`model`](model) | Model completion across the `omnia:model` boundary with the scripted test double |
 | [`otel`](otel) | Guest OpenTelemetry instrumentation (`wasi:otel`) |
 | [`sql`](sql) | CRUD over `omnia:sql` through the `SqlDb` capability, with schema setup over the `wasi:sql` draft |

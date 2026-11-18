@@ -171,6 +171,11 @@ path = "programs/link/sleeper.rs"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "messaging_error_codes"
+path = "programs/messaging/error_codes.rs"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "messaging_handle_err"
 path = "programs/messaging/handle_err.rs"
 crate-type = ["cdylib"]
@@ -183,6 +188,11 @@ crate-type = ["cdylib"]
 [[example]]
 name = "messaging_keyed"
 path = "programs/messaging/keyed.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "messaging_outcomes"
+path = "programs/messaging/outcomes.rs"
 crate-type = ["cdylib"]
 
 [[example]]

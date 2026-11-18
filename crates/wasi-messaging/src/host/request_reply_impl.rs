@@ -1,77 +1,46 @@
 use std::time::Duration;
 
 use omnia_core::HostView;
-use wasmtime::component::{Access, Accessor, Resource};
+use wasmtime::component::{Accessor, Resource};
 
-use crate::host::generated::wasi::messaging::request_reply::{
-    Host, HostRequestOptions, HostRequestOptionsWithStore, HostWithStore,
-};
-use crate::host::generated::wasi::messaging::types::Topic;
+use crate::host::generated::omnia::messaging::request_reply::{Host, HostWithStore};
+use crate::host::generated::omnia::messaging::types::{self, Topic};
 use crate::host::resource::{ClientProxy, Message, RequestOptions};
-use crate::host::types_impl::{get_client, get_message};
-use crate::host::{MessagingClient, Result, WasiMessaging};
+use crate::host::types_impl::get_client;
+use crate::host::{Error, MessagingClient, Result, WasiMessaging};
 
 impl<T> HostWithStore<T> for WasiMessaging {
     async fn request(
         accessor: &Accessor<T, Self>, c: Resource<ClientProxy>, topic: Topic,
-        message: Resource<Message>, options: Option<Resource<RequestOptions>>,
-    ) -> Result<Vec<Resource<Message>>> {
+        message: types::Message, timeout_ms: Option<u32>,
+    ) -> Result<types::Message> {
+        if timeout_ms == Some(0) {
+            return Err(Error::Invalid("a request waits at least 1 ms".to_owned()));
+        }
         let client = get_client(accessor, &c)?;
-        let request = get_message(accessor, &message)?;
-        let options = accessor.with(|mut access| {
-            options.map(|options| access.get().table.get(&options).cloned()).transpose()
-        })?;
+        let request = Message::try_from(message)?;
+        let options = timeout_ms.map(|timeout_ms| RequestOptions {
+            timeout: Some(Duration::from_millis(u64::from(timeout_ms))),
+            ..RequestOptions::default()
+        });
 
         let reply = client.request(topic, request, options).await?;
-        let reply_res = accessor.with(|mut access| access.get().table.push(reply))?;
-
-        Ok(vec![reply_res])
+        Ok(reply.into())
     }
 
     async fn reply(
-        accessor: &Accessor<T, Self>, reply_to: Resource<Message>, message: Resource<Message>,
+        accessor: &Accessor<T, Self>, reply_to: String, message: types::Message,
     ) -> Result<()> {
-        let reply_to = get_message(accessor, &reply_to)?;
-        let Some(reply) = &reply_to.reply else { return Ok(()) };
+        if reply_to.is_empty() {
+            return Err(Error::Invalid("a reply needs the address a delivery carried".to_owned()));
+        }
+        let message = Message::try_from(message)?;
 
         let client = accessor.with(|mut store| store.get().client.endpoint()).await?;
-        let message = get_message(accessor, &message)?;
-
-        client.send(reply.topic.clone(), message).await?;
+        client.send(reply_to, message).await?;
 
         Ok(())
-    }
-}
-
-impl<T> HostRequestOptionsWithStore<T> for WasiMessaging {
-    fn new(mut host: Access<'_, T, Self>) -> wasmtime::Result<Resource<RequestOptions>> {
-        let options = RequestOptions::default();
-        Ok(host.get().table.push(options)?)
-    }
-
-    fn set_timeout_ms(
-        mut host: Access<'_, T, Self>, self_: Resource<RequestOptions>, timeout_ms: u32,
-    ) -> wasmtime::Result<()> {
-        let options = host.get().table.get_mut(&self_)?;
-        options.timeout = Some(Duration::from_millis(u64::from(timeout_ms)));
-        Ok(())
-    }
-
-    // recorded but not configurable on NATS
-    fn set_expected_replies(
-        mut host: Access<'_, T, Self>, self_: Resource<RequestOptions>, expected_replies: u32,
-    ) -> wasmtime::Result<()> {
-        let options = host.get().table.get_mut(&self_)?;
-        options.expected_replies = Some(expected_replies);
-        Ok(())
-    }
-
-    fn drop(
-        mut accessor: Access<'_, T, Self>, rep: Resource<RequestOptions>,
-    ) -> wasmtime::Result<()> {
-        Ok(accessor.get().table.delete(rep).map(|_| ())?)
     }
 }
 
 impl Host for HostView<'_, dyn MessagingClient> {}
-impl HostRequestOptions for HostView<'_, dyn MessagingClient> {}

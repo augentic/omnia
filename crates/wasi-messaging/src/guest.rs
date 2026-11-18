@@ -1,12 +1,11 @@
-//! # WASI Messaging WIT implementation
+//! # WASI Messaging Guest
 
-// Bindings for the `wasi:messaging` world.
-// See (<https://github.com/WebAssembly/wasi-messaging/>)
+// Bindings for `omnia:messaging`.
 mod generated {
     #![allow(missing_docs, clippy::same_length_and_capacity, reason = "wit-bindgen output")]
 
     wit_bindgen::generate!({
-        world: "messaging-request-reply",
+        world: "messaging",
         path: "wit",
         additional_derives: [Clone],
         generate_all,
@@ -14,6 +13,6 @@ mod generated {
     });
 }
 
-pub use self::generated::exports::wasi::messaging::*;
-pub use self::generated::wasi::messaging::*;
+pub use self::generated::exports::omnia::messaging::*;
+pub use self::generated::omnia::messaging::*;
 pub use self::generated::*;

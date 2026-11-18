@@ -13,7 +13,7 @@
 //! hand-written export calls too:
 //!
 //! - `http::serve` for `wasi:http`, behind the `http` feature
-//! - `messaging::handle` for `wasi:messaging`
+//! - `messaging::handle` for `omnia:messaging`
 //! - `command::execute` for `wasi:cli/run`
 
 mod blobstore;

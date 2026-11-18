@@ -9,7 +9,8 @@ use tokio::sync::Semaphore;
 use tracing::{Instrument, info_span, instrument};
 
 use crate::host::WasiMessaging;
-use crate::host::generated::MessagingRequestReplyIndices;
+use crate::host::generated::MessagingIndices;
+use crate::host::generated::omnia::messaging::types::Delivery;
 use crate::host::resource::{Endpoint, HandleError, Handler, Message};
 
 // the metadata entry omnia-sdk's `Metadata` reads a guest's deadline from
@@ -35,7 +36,7 @@ where
     Err(anyhow!("messaging consumer ended for: {}", state.name()))
 }
 
-/// In-process `wasi:messaging/incoming-handler` dispatcher: routes a message
+/// In-process `omnia:messaging/incoming-handler` dispatcher: routes a message
 /// to a guest by topic, instantiates it, and invokes the export.
 ///
 /// The server hands one to the backend's [`Endpoint::consume`] as the
@@ -72,7 +73,7 @@ where
             runtime.registry(),
             "messaging",
             runtime.registry().routes().messaging().clone(),
-            MessagingRequestReplyIndices::new,
+            MessagingIndices::new,
         )?;
         if routing.is_inert() {
             return Ok(None);
@@ -132,7 +133,7 @@ where
         })?;
 
         // a declared guest's export is checked here, at first use
-        let indices = MessagingRequestReplyIndices::new(guest.instance_pre()).map_err(|error| {
+        let indices = MessagingIndices::new(guest.instance_pre()).map_err(|error| {
             HandleError::Unavailable(format!(
                 "routed guest `{guest_id}` does not export the messaging handler: {error:#}"
             ))
@@ -143,13 +144,9 @@ where
         let metadata = message.metadata.get_or_insert_default();
         metadata.retain(|name, _| !name.eq_ignore_ascii_case(DEADLINE));
         metadata.insert(DEADLINE.to_owned(), deadline.to_string());
+        let delivery = Delivery::from(message);
 
-        let mut store_data = self.state.store();
-        let msg_res =
-            store_data.view::<WasiMessaging>().table.push(message).map_err(|error| {
-                HandleError::Unavailable(format!("pushing the message: {error}"))
-            })?;
-        let mut store = self.state.build_store(store_data);
+        let mut store = self.state.build_store(self.state.store());
         let instance =
             self.state.instantiate(guest.instance_pre(), &mut store).await.map_err(|error| {
                 HandleError::Unavailable(format!("instantiating `{guest_id}`: {error:#}"))
@@ -160,7 +157,7 @@ where
 
         let run = store
             .run_concurrent(async |store| {
-                messaging.wasi_messaging_incoming_handler().call_handle(store, msg_res).await
+                messaging.omnia_messaging_incoming_handler().call_handle(store, delivery).await
             })
             .instrument(info_span!("messaging-handle"));
 

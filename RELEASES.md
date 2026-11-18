@@ -62,6 +62,25 @@ Unreleased
     containers, assemble an object from parts, and presign requests.
   - `WasiBlobStore` answers `unsupported` for a precondition, for object
     attributes, and for `list-containers`, `uploads`, and `presign`.
+- `omnia:messaging`, the Omnia-owned interface `Publisher` and
+  `messaging::export!` call, in place of the `wasi:messaging` draft.
+  `WasiMessaging` serves it over one `Endpoint`:
+  - A `message` is a record of its payload, `content-type`, `id`, ordering
+    `key`, and the caller's own metadata.
+  - The `incoming-handler` export takes a `delivery`: the message, its
+    topic, the `reply-to` address a reply answers, and the broker's
+    `position`, `attempt` count, and `published-at` time where it keeps
+    them.
+  - What `handle` returns settles the delivery. `ok` accepts it, `invalid`
+    rejects it, and `unavailable` releases it for another delivery.
+  - The optional `request-reply` awaits one reply within an optional
+    timeout. The optional `consumer`, `log`, and `admin` interfaces take
+    messages in batches, read topics as an ordered log, and list and purge
+    topics.
+  - `client.connect` names a broker the deployment declares, and only
+    `default` is declared.
+  - `WasiMessaging` answers `unsupported` for a message `id`, and for
+    `consumer`, `log`, and `admin`.
 - The codes of a failed capability call. Its `omnia_sdk::Error` names the
   class of failure in its code:
   - `not-found`, `denied`, `invalid`, `unsupported`, or `other` on a
@@ -150,8 +169,7 @@ Unreleased
   that imports a WASI 0.2 `wasi:cli`, `wasi:clocks`, `wasi:filesystem`,
   `wasi:http`, `wasi:io`, `wasi:random`, or `wasi:sockets` interface is
   refused by name, with the rebuild it needs, at startup or at its first
-  use. The `wasi:config`, `wasi:messaging`, and `wasi:sql` drafts are
-  served as before.
+  use. The `wasi:config` and `wasi:sql` drafts are served as before.
 - `omnia_test::build` compiles a fixture crate's programs for
   `wasm32-wasip3`.
 - A raw export that may wait is an `async func`. On `wasm32-wasip3`,
@@ -418,9 +436,10 @@ Unreleased
     in its source chain, and is otherwise a `ServerError`. Its description
     is the whole chain. A broker redelivers it when it is a `BadGateway`.
 
-  Over the draft `wasi:messaging`, every failure still crosses as
-  `error.other` carrying the error's display. A match on a `DeliveryError`
-  variant becomes a match on the code.
+  Over `omnia:messaging`, a failure crosses carrying the error's display,
+  as `invalid` for a `BadRequest`, `unavailable` for a `BadGateway`, and
+  `other` for the rest. A match on a `DeliveryError` variant becomes a
+  match on the code.
 - A subcommand reads its handler's error by the messaging rule above, so
   `Command::call` takes any handler, where it took one whose error
   converted into `Failure`. `Command::hints` and `Router::hints` consult

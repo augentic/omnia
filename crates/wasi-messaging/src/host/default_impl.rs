@@ -1,4 +1,4 @@
-//! Default in-memory implementation for wasi-messaging
+//! Default in-memory implementation for `omnia:messaging`
 //!
 //! This is a lightweight implementation for development use only. Messages
 //! fan out over a 32-slot [`tokio::sync::broadcast`] channel: a subscriber
@@ -20,7 +20,7 @@ use crate::host::resource::{
     Endpoint, FutureResult, Handler, Message, RequestOptions, Subscriptions, dispatch,
 };
 
-/// Default implementation for `wasi:messaging`.
+/// Default implementation for `omnia:messaging`.
 #[derive(Clone, Debug)]
 pub struct MessagingDefault {
     sender: Sender<Message>,

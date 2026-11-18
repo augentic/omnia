@@ -83,7 +83,7 @@ pub struct Backends<
     pub identity: I,
     /// The `omnia:keyvalue` backend.
     pub keyvalue: K,
-    /// The `wasi:messaging` backend.
+    /// The `omnia:messaging` backend.
     pub messaging: G,
     /// The `omnia:model` backend.
     pub model: M,
@@ -278,7 +278,7 @@ impl<M, K, B, D, S, V, G, I, O, C> Backends<M, K, B, D, S, V, G, I, O, C> {
         }
     }
 
-    /// The same bundle serving `wasi:messaging` from `messaging`.
+    /// The same bundle serving `omnia:messaging` from `messaging`.
     #[must_use]
     pub fn messaging<N: MessagingClient + Clone>(
         self, messaging: N,

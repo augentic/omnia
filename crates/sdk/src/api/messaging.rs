@@ -6,7 +6,7 @@
 //! [`Handlers::with_state`](crate::api::Handlers::with_state) into its one
 //! [`Router`](crate::api::Router). A topic decodes JSON unless registered
 //! with [`Handlers::topic_with`](crate::api::Handlers::topic_with).
-//! [`export!`] binds the router fn as the guest's `wasi:messaging` handler.
+//! [`export!`] binds the router fn as the guest's `omnia:messaging` handler.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -38,17 +38,17 @@ macro_rules! __export_messaging {
 
             impl $crate::omnia_wasi_messaging::incoming_handler::Guest for MessagingGuest {
                 async fn handle(
-                    message: $crate::omnia_wasi_messaging::types::Message,
+                    delivery: $crate::omnia_wasi_messaging::types::Delivery,
                 ) -> ::core::result::Result<(), $crate::omnia_wasi_messaging::types::Error>
                 {
-                    $crate::wasi::messaging::handle(&$router($provider), message).await
+                    $crate::wasi::messaging::handle(&$router($provider), delivery).await
                 }
             }
         };
     };
 }
 
-/// Bind a router fn as the guest's `wasi:messaging` export.
+/// Bind a router fn as the guest's `omnia:messaging` export.
 ///
 /// Calls the router fn on each delivery with `WasiProvider`, or with the
 /// provider expression passed as a second argument, and dispatches the

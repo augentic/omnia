@@ -85,7 +85,7 @@ A messaging handler is any `async fn(Context<P>, I) -> Result<O, E>`, the contex
 - `Handlers::topic(topic, handler)` decodes the payload as JSON.
 - `Handlers::topic_with(topic, handler, decode)` takes a decoder over the whole `Delivery`, for any other wire format.
 - A topic matches exactly, with no wildcards.
-- `messaging::export!` binds the `wasi:messaging` handler.
+- `messaging::export!` binds the `omnia:messaging` handler.
 
 ```rust,ignore
 use omnia_sdk::api::{Context, Handlers, Router, messaging};

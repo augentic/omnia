@@ -181,7 +181,7 @@ A provider's own handle uses the `default` bucket, and `named(name)` selects ano
 - `compare_and_swap` and `increment` apply their TTL only to an entry they create.
 - A zero TTL fails with the code `invalid`.
 
-Publishing a message (`Publisher` over `wasi:messaging`), with a key that orders and partitions it:
+Publishing a message (`Publisher` over `omnia:messaging`), with a key that orders and partitions it:
 
 ```rust,noplayground
 let message = Message::new(&payload).with_key("customer-7");
@@ -220,15 +220,17 @@ pub fn messaging_router<P: StateStore + 'static>(provider: P) -> Router<P> {
 messaging::export!(messaging_router);
 ```
 
-For guests that need direct control over the raw `wasi:messaging/incoming-handler` export (for example, `examples/messaging` demonstrating request-reply and fan-out), implement `omnia_wasi_messaging::incoming_handler::Guest` and dispatch via `omnia_sdk::wasi::messaging::handle`, which opens the guest telemetry scope around the delivery:
+For guests that need direct control over the raw `omnia:messaging/incoming-handler` export (for example, `examples/messaging` demonstrating request-reply and fan-out), implement `omnia_wasi_messaging::incoming_handler::Guest` and dispatch via `omnia_sdk::wasi::messaging::handle`, which opens the guest telemetry scope around the delivery:
 
 ```rust,noplayground
+use omnia_wasi_messaging::types::{Delivery, Error};
+
 pub struct Messaging;
 omnia_wasi_messaging::export!(Messaging with_types_in omnia_wasi_messaging);
 
 impl omnia_wasi_messaging::incoming_handler::Guest for Messaging {
-    async fn handle(message: Message) -> anyhow::Result<(), Error> {
-        omnia_sdk::wasi::messaging::handle(&router(), message).await
+    async fn handle(delivery: Delivery) -> Result<(), Error> {
+        omnia_sdk::wasi::messaging::handle(&router(), delivery).await
     }
 }
 ```

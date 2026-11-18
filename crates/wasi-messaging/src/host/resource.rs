@@ -11,7 +11,7 @@ use futures::{Stream, StreamExt as _};
 pub use omnia_core::FutureResult;
 use tokio::task::{JoinError, JoinSet};
 
-use crate::host::generated::wasi::messaging::types;
+use crate::host::generated::omnia::messaging::types;
 
 /// Stream of messages.
 pub type Subscriptions = Pin<Box<dyn Stream<Item = Message> + Send>>;
