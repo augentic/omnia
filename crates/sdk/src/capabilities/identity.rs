@@ -20,7 +20,9 @@ pub trait Identity: Send + Sync {
 
     /// An access token for this identity, scoped to `scopes`.
     ///
-    /// An empty `scopes` asks for the identity's default scopes.
+    /// An empty `scopes` asks for the identity's default scopes. A portable
+    /// request names one scope, and a provider may fail any other number with
+    /// the code `unsupported`.
     fn token(&self, scopes: &[&str]) -> impl Future<Output = Result<AccessToken>> + Send;
 
     /// A handle to the identity `name` on the same provider.
@@ -32,6 +34,9 @@ pub trait Identity: Send + Sync {
 /// Blanket-implemented for every [`Identity`]; never implemented by hand.
 pub trait IdentityExt: Identity {
     /// The token string for this identity's default scopes.
+    ///
+    /// Not every identity has default scopes, and a provider may fail this
+    /// with the code `unsupported`.
     fn access_token(&self) -> impl Future<Output = Result<String>> + Send {
         async move { Ok(self.token(&[]).await?.token) }
     }
@@ -51,7 +56,8 @@ pub struct AccessToken {
     /// The `OAuth` 2.0 access token.
     pub token: String,
 
-    /// How long the token stays valid from when it was issued.
+    /// How long the token stays valid, counted from when [`Identity::token`]
+    /// returned it.
     pub expires_in: Duration,
 }
 

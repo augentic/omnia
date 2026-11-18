@@ -2,7 +2,8 @@
 //! component from `crates/test-programs` through the omnia runtime. The guest
 //! asserts what it observes across the boundary (and traps on failure).
 //! `IdentityStub` records nothing, so a scenario whose host side asserts
-//! what the backend was asked for runs against an inline recording backend.
+//! what the backend was asked for runs against an inline backend that
+//! records it.
 
 #![cfg(not(target_arch = "wasm32"))]
 
@@ -12,7 +13,7 @@ use futures::FutureExt as _;
 use omnia::{Connect as _, ExitStatus, FutureResult, Provides};
 use omnia_test::host::Deployment;
 use omnia_wasi_identity::{
-    AccessToken, Identity, IdentityClient, IdentityStub, StubOptions, WasiIdentity,
+    AccessToken, Error, Identity, IdentityClient, IdentityStub, StubOptions, WasiIdentity,
 };
 use omnia_wasi_otel::{OtelClient, OtelDefault, WasiOtel};
 
@@ -104,13 +105,13 @@ async fn run_guest<B: Provides<WasiIdentity> + Provides<WasiOtel>>(wasm: &str, b
 }
 
 #[tokio::test]
-async fn identity_stub_token() {
+async fn identity_credentials() {
     let backends = Backends::new();
 
-    run_guest(test_programs::IDENTITY_STUB_TOKEN, backends.clone()).await;
+    run_guest(test_programs::IDENTITY_CREDENTIALS, backends.clone()).await;
 
     // Wire fidelity: the scopes reached the backend in order, under the
-    // resolved name, and the refused name never issued a token.
+    // opened name, and the refused name never issued a token.
     assert_eq!(
         backends.identity.requests(),
         [("default".to_owned(), vec!["read".to_owned(), "write".to_owned()])]
@@ -126,4 +127,51 @@ async fn identity_named() {
     let backends = omnia_test::host::Backends::defaults().await.identity(stub);
 
     run_guest(test_programs::IDENTITY_NAMED, backends).await;
+}
+
+// fails `get_token` with the kind an identity is named for, delegating any
+// other name, and records each name so the run's exchanges are pinned
+#[derive(Clone, Debug)]
+struct Faulting {
+    inner: IdentityStub,
+    opened: Arc<Mutex<Vec<String>>>,
+}
+
+impl IdentityClient for Faulting {
+    fn get_identity(&self, name: String) -> FutureResult<Arc<dyn Identity>> {
+        self.opened.lock().expect("opened identities").push(name.clone());
+        let fault: fn() -> anyhow::Error = match name.as_str() {
+            "denied" => || Error::Denied("denied by the suite".to_owned()).into(),
+            "invalid" => || Error::Invalid("invalid in the suite".to_owned()).into(),
+            "unsupported" => || Error::Unsupported("unsupported by the suite".to_owned()).into(),
+            "unavailable" => || Error::Unavailable("unavailable in the suite".to_owned()).into(),
+            "other" => || anyhow::anyhow!("an untyped backend failure"),
+            _ => return self.inner.get_identity(name),
+        };
+        async move { Ok(Arc::new(Faulty(fault)) as Arc<dyn Identity>) }.boxed()
+    }
+}
+
+#[derive(Debug)]
+struct Faulty(fn() -> anyhow::Error);
+
+impl Identity for Faulty {
+    fn get_token(&self, _scopes: Vec<String>) -> FutureResult<AccessToken> {
+        let fault = (self.0)();
+        async move { Err(fault) }.boxed()
+    }
+}
+
+#[tokio::test]
+async fn identity_error_codes() {
+    let faulting = Faulting {
+        inner: IdentityStub::default(),
+        opened: Arc::default(),
+    };
+    let backends = omnia_test::host::Backends::defaults().await.identity(faulting);
+
+    run_guest(test_programs::IDENTITY_ERROR_CODES, backends.clone()).await;
+
+    let opened = backends.identity.opened.lock().expect("opened identities").clone();
+    assert_eq!(opened, ["undeclared", "denied", "invalid", "unsupported", "unavailable", "other"]);
 }

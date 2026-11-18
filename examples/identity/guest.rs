@@ -1,8 +1,8 @@
 //! # Identity Wasm Guest
 //!
-//! This module demonstrates the WASI Identity interface for obtaining
-//! authentication credentials. It shows how to:
-//! - Retrieve an identity provider from the host
+//! This module demonstrates `omnia:identity` for obtaining authentication
+//! credentials. It shows how to:
+//! - Open the identity `default` the host declares
 //! - Request access tokens with specific scopes
 //!
 //! ## Use Cases
@@ -16,7 +16,7 @@
 use anyhow::Context;
 use axum::routing::get;
 use axum::{Json, Router};
-use omnia_wasi_identity::credentials::get_identity;
+use omnia_wasi_identity::omnia::credentials;
 use serde_json::{Value, json};
 use tracing::Level;
 use wasip3::exports::http::handler::Guest;
@@ -37,7 +37,7 @@ impl Guest for Http {
 
 #[omnia_wasi_otel::instrument]
 async fn handler() -> omnia_sdk::Result<Json<Value>> {
-    let identity = get_identity("identity".to_string()).await.context("getting identity")?;
+    let identity = credentials::open("default".to_string()).await.context("opening identity")?;
 
     let scopes = vec![SCOPE.to_string()];
     let access_token = identity.get_token(scopes).await.context("getting access token")?;

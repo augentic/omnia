@@ -111,13 +111,18 @@ path = "programs/http/outgoing_tls.rs"
 crate-type = ["cdylib"]
 
 [[example]]
-name = "identity_named"
-path = "programs/identity/named.rs"
+name = "identity_credentials"
+path = "programs/identity/credentials.rs"
 crate-type = ["cdylib"]
 
 [[example]]
-name = "identity_stub_token"
-path = "programs/identity/stub_token.rs"
+name = "identity_error_codes"
+path = "programs/identity/error_codes.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "identity_named"
+path = "programs/identity/named.rs"
 crate-type = ["cdylib"]
 
 [[example]]

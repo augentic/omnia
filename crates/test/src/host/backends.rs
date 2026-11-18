@@ -79,7 +79,7 @@ pub struct Backends<
     pub docstore: D,
     /// Outbound `wasi:http`.
     pub http: HttpDefault,
-    /// The `wasi:identity` backend.
+    /// The `omnia:identity` backend.
     pub identity: I,
     /// The `omnia:keyvalue` backend.
     pub keyvalue: K,
@@ -300,7 +300,7 @@ impl<M, K, B, D, S, V, G, I, O, C> Backends<M, K, B, D, S, V, G, I, O, C> {
         }
     }
 
-    /// The same bundle serving `wasi:identity` from `identity`.
+    /// The same bundle serving `omnia:identity` from `identity`.
     #[must_use]
     pub fn identity<N: IdentityClient + Clone>(
         self, identity: N,

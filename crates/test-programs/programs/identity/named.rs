@@ -1,7 +1,7 @@
 //! Named identities through the `omnia_sdk` `Identity`: the unnamed handle is
 //! `default`, two declared names issue distinct tokens, a token's lifetime
-//! arrives as a `Duration`, and an undeclared name fails with the code
-//! `not-found`.
+//! arrives as the `Duration` it has left, and an undeclared name fails with
+//! the code `not-found`.
 
 #![cfg(target_arch = "wasm32")]
 
@@ -16,9 +16,11 @@ async fn scenario() {
     let default = WasiProvider.named("default").token(&["read"]).await.expect("default token");
     let reports = WasiProvider.named("reports").token(&["read"]).await.expect("reports token");
 
-    assert_eq!(unnamed, default, "the unnamed handle is `default`");
+    assert_eq!(unnamed.token, default.token, "the unnamed handle is `default`");
     assert_ne!(default.token, reports.token, "each identity has its own token");
-    assert_eq!(reports.expires_in, Duration::from_secs(3600));
+    // the stub's hour, less what passed before the guest read the clock
+    let lifetime = Duration::from_secs(59 * 60)..=Duration::from_secs(3600);
+    assert!(lifetime.contains(&reports.expires_in), "lifetime {:?}", reports.expires_in);
 
     let error = WasiProvider.named("undeclared").token(&[]).await.expect_err("undeclared");
     assert!(

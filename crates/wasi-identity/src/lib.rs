@@ -2,8 +2,7 @@
 
 //! # WASI Identity Service
 //!
-//! This module implements a runtime service for `wasi:identity`
-//! (<https://github.com/augentic/wasi-identity>).
+//! This module implements a runtime service for `omnia:identity`.
 
 cfg_select! {
     target_arch = "wasm32" => {

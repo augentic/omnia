@@ -199,7 +199,7 @@ When writing `wasm32`-only code (as in `examples/`), you can also call the `omni
 | Blob store | `BlobStore` | `omnia_wasi_blobstore` | `examples/blobstore` | — |
 | Secrets | `SecretStore` | `omnia_wasi_vault` | `examples/vault` | — |
 | Config | `Config` | `omnia_wasi_config` | `examples/config` | — |
-| Identity/OAuth | `Identity` | `omnia_wasi_identity` | `examples/identity` | — |
+| Identity/OAuth | `Identity` | `omnia_wasi_identity::omnia::credentials` | `examples/identity` | — |
 | Outbound HTTP | `HttpClient` | `omnia_wasi_http` | `examples/http-proxy` | — |
 | Model completions | `Model` | `omnia_wasi_model::completion` | `examples/model` | [Model Completions](model-completions.md) |
 | Version control | `Vcs` | `omnia_wasi_vcs` | — | — |

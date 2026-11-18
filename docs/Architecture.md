@@ -131,7 +131,7 @@ Each interface crate provides guest bindings, a host implementation, and, with o
 | `wasi-docstore`  | `omnia:docstore`  | JSON document store with filters | `DocStoreDefault` — in-memory             |
 | `wasi-config`    | `wasi:config`     | Runtime configuration            | `ConfigDefault` — process environment     |
 | `wasi-vault`     | Custom            | Secrets management               | `VaultDefault` — in-memory                |
-| `wasi-identity`  | Custom            | Identity/OAuth tokens            | `IdentityDefault` — OAuth2 client flow    |
+| `wasi-identity`  | `omnia:identity`  | Identity/OAuth tokens            | `IdentityDefault` — OAuth2 client flow    |
 | `wasi-otel`      | Custom            | Guest OpenTelemetry export       | `OtelDefault` — log-only                  |
 | `wasi-websocket` | `omnia:websocket` | WebSocket connections (trigger)  | `WebSocketDefault` — tungstenite server   |
 | `wasi-model`     | `omnia:model`     | Model completions with grants    | `ModelDefault` — deterministic echo       |

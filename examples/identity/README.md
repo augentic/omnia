@@ -1,6 +1,6 @@
 # Identity Example
 
-Demonstrates `wasi-identity` using the default implementation.
+Demonstrates `omnia:identity` using the default implementation.
 
 ## Quick Start
 

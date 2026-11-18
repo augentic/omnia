@@ -99,6 +99,20 @@ Unreleased
     `WebSocketDefault` serves every call, and mints each connection a
     random id.
   - `WebSocketHandler::handle` returns the guest's own error.
+- `omnia:identity`, rewritten in place as the interface `Identity` calls.
+  `WasiIdentity` serves it over one `IdentityClient`:
+  - `credentials.open` answers an `identity` handle, and `get-token` goes
+    through it. A name the deployment does not declare fails at `open`
+    with `not-found`.
+  - An `access-token` is an OAuth 2.0 bearer token and its `expires-at`,
+    in milliseconds since the Unix epoch.
+  - The `error` has one case per capability error code.
+  - An empty `scopes` asks for the identity's default scopes. A portable
+    request names one scope, and a backend may fail any other number with
+    `unsupported`.
+  - `WasiIdentity` answers `unsupported` for nothing.
+  - On `wasm32`, `omnia_wasi_identity::omnia` holds the raw bindings, which
+    the crate root held.
 - The codes of a failed capability call. Its `omnia_sdk::Error` names the
   class of failure in its code:
   - `not-found`, `denied`, `invalid`, `unsupported`, or `other` on a
@@ -299,9 +313,14 @@ Unreleased
   refuse an empty list.
 - `IdentityStub` refuses an identity `IDENTITY_NAMES` does not list, and
   `IdentityDefault` serves the identity `default` alone. A refused name is
-  `no-such-identity`, which `Identity` reports with the code `not-found`.
-  A backend picks a failure's code by returning an
-  `omnia_wasi_identity::Error`.
+  `not-found`. A backend picks a failure's code by returning an
+  `omnia_wasi_identity::Error`, whose six cases are the six capability
+  error codes.
+- `omnia_wasi_identity::AccessToken` is the crate's own struct, which the
+  host maps onto the `omnia:identity` record. Its `expires_in` is the whole
+  seconds the token has left when the backend answers, and its `Debug`
+  redacts the token. `IdentityDefault` answers a cached token with the time
+  it has left, where it answered the lifetime the token was issued with.
 - `BlobStoreClient` states the container rules every backend keeps:
   - `get_container` fails a container that does not exist with
     `omnia_wasi_blobstore::Error::missing_container`.
