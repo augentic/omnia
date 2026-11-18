@@ -18,7 +18,7 @@ use omnia_wasi_messaging::{MessagingClient, MessagingDefault, WasiMessaging};
 use omnia_wasi_model::{ModelClient, ModelDefault, WasiModel};
 use omnia_wasi_otel::{OtelClient, OtelDefault, WasiOtel};
 use omnia_wasi_sql::{ConnectOptions as SqlOptions, SqlClient, SqlDefault, WasiSql};
-use omnia_wasi_vault::{VaultClient, VaultDefault, WasiVault};
+use omnia_wasi_vault::{ConnectOptions as VaultOptions, VaultClient, VaultDefault, WasiVault};
 use omnia_wasi_vcs::{VcsClient, WasiVcs};
 use omnia_wasi_websocket::{WasiWebSocket, WebSocketDefault};
 
@@ -42,14 +42,16 @@ pub const STATE_BUCKET: &str = "default";
 /// The bundle is deterministic: [`defaults`](Self::defaults) reads no
 /// environment variable and opens no socket. Config answers from the map
 /// seeded by [`config`](Self::config) alone, the websocket backend serves no
-/// listener, and the HTTP client, keyvalue buckets, `SQLite` databases, and
-/// identities are built from fixed options rather than
+/// listener, and the HTTP client, keyvalue buckets, `SQLite` databases,
+/// identities, and vault lockers are built from fixed options rather than
 /// `HTTP_CONNECT_TIMEOUT` / `KEYVALUE_BUCKETS` / `SQL_DATABASES` /
-/// `IDENTITY_NAMES`. The keyvalue backend declares [`STATE_BUCKET`] alone,
-/// the `SQLite` backend a private `default` database alone, and the identity
-/// stub the `default` identity alone. A scenario that opens another name
+/// `IDENTITY_NAMES` / `VAULT_LOCKERS`. The keyvalue backend declares
+/// [`STATE_BUCKET`] alone, the `SQLite` backend a private `default` database
+/// alone, the identity stub the `default` identity alone, and the vault
+/// backend the `default` locker alone. A scenario that opens another name
 /// sets its own backend with [`keyvalue`](Self::keyvalue),
-/// [`sql`](Self::sql), or [`identity`](Self::identity).
+/// [`sql`](Self::sql), [`identity`](Self::identity), or
+/// [`vault`](Self::vault).
 ///
 /// One type parameter per swappable host, each defaulting to the in-memory
 /// backend, so `Backends` with no arguments is the all-default bundle and a
@@ -91,7 +93,7 @@ pub struct Backends<
     pub otel: O,
     /// The `omnia:sql` and `wasi:sql` backend.
     pub sql: S,
-    /// The `wasi:vault` backend.
+    /// The `omnia:vault` backend.
     pub vault: V,
     /// The `omnia:vcs` backend, [`NoVcs`] until one is set.
     pub vcs: C,
@@ -131,7 +133,9 @@ impl Backends {
             })
             .await
             .expect("in-memory sqlite"),
-            vault: VaultDefault::connect_with(NoOptions).await.expect("in-memory vault"),
+            vault: VaultDefault::connect_with(VaultOptions::default())
+                .await
+                .expect("in-memory vault"),
             vcs: NoVcs,
             websocket: WebSocketDefault::new(),
         }
@@ -258,7 +262,7 @@ impl<M, K, B, D, S, V, G, I, O, C> Backends<M, K, B, D, S, V, G, I, O, C> {
         }
     }
 
-    /// The same bundle serving `wasi:vault` from `vault`.
+    /// The same bundle serving `omnia:vault` from `vault`.
     #[must_use]
     pub fn vault<N: VaultClient + Clone>(self, vault: N) -> Backends<M, K, B, D, S, N, G, I, O, C> {
         Backends {

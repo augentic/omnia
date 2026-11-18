@@ -1,11 +1,5 @@
-# WebAssembly Interface Types (WIT) Deps
+# WebAssembly Interface Types (WIT)
 
-## Prerequisites
-
-Install [wkg](https://github.com/bytecodealliance/wasm-pkg-tools).
-
-## Usage
-
-```bash
-wkg get omnia:vault@0.1.0 --config .wkg-config.toml --output ./crates/wasi-vault/wit/vault.wit
-```
+`vault.wit` is `omnia:vault`, owned by this crate and edited here.
+Every backend serves `types`, `store`, and `locker`, the `core` world.
+`imports` includes `core`, and an optional interface joins it there.

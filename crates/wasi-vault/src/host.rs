@@ -1,15 +1,14 @@
-//! # Host implementation for WASI Vault Service
-//!
-//! This module implements the host-side logic for the WASI Vault service.
+//! # WASI Vault Service
 
 mod default_impl;
+mod locker_impl;
 mod resource;
-mod vault_impl;
+mod store_impl;
+mod types_impl;
 
 mod generated {
-
-    pub use self::omnia::vault::vault::Error;
-    pub use super::LockerProxy;
+    pub use self::omnia::vault::types::Error;
+    pub use crate::host::resource::LockerProxy;
 
     wasmtime::component::bindgen!({
         world: "imports",
@@ -18,10 +17,10 @@ mod generated {
             default: store | tracing | trappable,
         },
         with: {
-            "omnia:vault/vault.locker": LockerProxy,
+            "omnia:vault/locker.locker": LockerProxy,
         },
         trappable_error_type: {
-            "omnia:vault/vault.error" => Error,
+            "omnia:vault/types.error" => Error,
         },
     });
 }
@@ -31,24 +30,26 @@ use std::sync::Arc;
 
 pub use omnia_core::FutureResult;
 use omnia_core::{Host, HostCtx, Provides, StoreCtx};
-use wasmtime::component::Linker;
+use wasmtime::component::{Linker, ResourceTableError};
 
-use self::generated::omnia::vault::vault;
-pub use crate::host::default_impl::VaultDefault;
-use crate::host::generated::Error;
-pub use crate::host::resource::*;
+pub use self::default_impl::{ConnectOptions, VaultDefault};
+pub use self::generated::Error;
+use self::generated::omnia::vault::{locker, store, types};
+pub use self::resource::*;
 
-/// Result type for  vault operations.
+/// Result type for vault operations.
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// Host-side service for `wasi:vault`.
+/// Host-side service for `omnia:vault`.
 #[derive(Debug, HostCtx)]
 #[host_ctx(client = VaultClient)]
 pub struct WasiVault;
 
 impl<B: Provides<Self>> Host<B> for WasiVault {
     fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
-        Ok(vault::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?)
+        types::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
+        locker::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
+        Ok(store::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?)
     }
 }
 
@@ -57,8 +58,23 @@ impl<B: Provides<Self>> Host<B> for WasiVault {
 /// This is implemented by the resource-specific provider of Vault
 /// functionality.
 pub trait VaultClient: Debug + Send + Sync + 'static {
-    /// Open a locker.
+    /// Open the locker the deployment declares under `identifier`.
+    ///
+    /// An identifier the deployment does not declare fails with
+    /// [`Error::NotFound`].
     fn open_locker(&self, identifier: String) -> FutureResult<Arc<dyn Locker>>;
 }
 
-omnia_core::host_error!(Error, Other);
+// a backend picks the kind by returning an `Error`; any other failure is
+// `other`, with its full context chain
+impl From<anyhow::Error> for Error {
+    fn from(err: anyhow::Error) -> Self {
+        err.downcast::<Self>().unwrap_or_else(|err| Self::Other(format!("{err:#}")))
+    }
+}
+
+impl From<ResourceTableError> for Error {
+    fn from(err: ResourceTableError) -> Self {
+        Self::Other(err.to_string())
+    }
+}

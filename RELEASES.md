@@ -28,7 +28,7 @@ Unreleased
   guest crate's version and description as `--version` and `--help`.
 - `SecretStore`, the secrets capability over `omnia:vault`. A handle
   addresses one locker, `default` until `named(name)` selects another, and
-  `keys(after)` lists it in key order.
+  `keys(after)` lists it a page at a time, in no particular order.
 - One `Context` accessor per capability: `blobs`, `config`, `docs`, `http`,
   `identity`, `model`, `plugins`, `publisher`, `secrets`, `sql`, `state`,
   `vcs`, and `websockets`. Each borrows the provider as that one trait, so
@@ -113,6 +113,20 @@ Unreleased
   - `WasiIdentity` answers `unsupported` for nothing.
   - On `wasm32`, `omnia_wasi_identity::omnia` holds the raw bindings, which
     the crate root held.
+- `omnia:vault`, rewritten in place as the interface `SecretStore` calls.
+  `WasiVault` serves it over one `VaultClient`:
+  - `store.open` answers a `locker` handle, and every call goes through
+    it. A name the deployment does not declare fails at `open` with
+    `not-found`.
+  - `list-secrets` pages the secret names under a prefix, in no particular
+    order.
+  - The `error` has one case per capability error code.
+  - A portable secret name is 1 to 63 lowercase ASCII letters, digits, and
+    `-`. A portable value is not empty and at most 16 kibibytes.
+  - A deleted name may be set again at once.
+  - `WasiVault` answers `unsupported` for nothing.
+  - On `wasm32`, `omnia_wasi_vault::omnia` holds the raw bindings, which
+    `omnia_wasi_vault::vault` held.
 - The codes of a failed capability call. Its `omnia_sdk::Error` names the
   class of failure in its code:
   - `not-found`, `denied`, `invalid`, `unsupported`, or `other` on a
@@ -147,6 +161,8 @@ Unreleased
 - `omnia_wasi_identity::StubOptions`. `IdentityStub` serves the identities
   `IDENTITY_NAMES` lists, comma-separated, and `default` when it is unset.
   Each identity's token is distinct.
+- `omnia_wasi_vault::ConnectOptions`. `VaultDefault` serves the lockers
+  `VAULT_LOCKERS` lists, comma-separated, and `default` when it is unset.
 - Extension traits, blanket-implemented over each capability:
   `ConfigExt::{require, parse}`, `DocumentDbExt::get_as`,
   `HttpClientExt::fetch_json`, `IdentityExt::access_token`,
@@ -364,6 +380,11 @@ Unreleased
 - Bucket names are strict. `KeyValueDefault` opens only the buckets it
   declares, and any other fails with `not-found`. A deployment whose guests
   open a bucket other than `default` lists it in `KEYVALUE_BUCKETS`.
+- Locker names are strict. `VaultDefault` opens only the lockers it
+  declares, and any other fails with `not-found`. A deployment whose guests
+  open a locker other than `default` lists it in `VAULT_LOCKERS`. A backend
+  picks a failure's code by returning an `omnia_wasi_vault::Error`, whose
+  six cases are the six capability error codes.
 - `Bucket::{set, increment}` take a TTL, and `Bucket::compare_and_swap`
   replaces `swap`. A backend picks a failure's code by returning an
   `omnia_wasi_keyvalue::Error`.
@@ -378,9 +399,9 @@ Unreleased
 - `omnia_test::guest::Scripted` is `ScriptedModel`, and
   `omnia_test::guest::Memory` implements `SecretStore`.
 - `omnia_test::guest::Memory` keeps state per bucket and secrets per
-  locker. `Memory::bucket` declares a bucket beside `default`,
-  `Memory::named` addresses another bucket and locker of the same store,
-  and `Memory::snapshot` answers state by bucket.
+  locker. `Memory::bucket` and `Memory::locker` declare a bucket and a
+  locker beside `default`, `Memory::named` addresses another bucket and
+  locker of the same store, and `Memory::snapshot` answers state by bucket.
 - `omnia_test::guest::Memory` fails a call on an object in a container
   nothing created with the code `not-found`, as the runtime does. A test
   creates the container first, or seeds it with `insert_container` or

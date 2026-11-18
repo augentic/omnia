@@ -2670,6 +2670,7 @@ name = "omnia-wasi-vault"
 version = "0.38.0"
 dependencies = [
  "anyhow",
+ "fromenv",
  "futures",
  "omnia",
  "omnia-core",

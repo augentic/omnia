@@ -87,7 +87,7 @@ Each behavioural invariant of a capability trait is one generic `async fn` in `o
 The same arguments fail the same way on every provider. Each failure is an `omnia_sdk::Error` whose code names its class, a `ServerError` for every code but `unavailable`, which is a `BadGateway`:
 
 - A zero TTL fails with the code `invalid`, and a TTL rounds up to the store's resolution.
-- A handle that names no binding addresses `default`, and a name the deployment does not declare fails with the code `not-found`. A secret locker is the exception, and opens under any name.
+- A handle that names no binding addresses `default`, and a name the deployment does not declare fails with the code `not-found`.
 - A document query whose filter `Filter::check` refuses fails with the code `invalid`.
 - A call on an object in a blob container that was never created fails with the code `not-found`.
 - A request the provider does not serve fails with the code `unsupported`, and is never partly served. The [portable SQL dialect](sql.md#the-portable-dialect) and the [document query contract](docstore.md#query-contract) list what every provider serves.
@@ -99,12 +99,12 @@ Omnia enforces each rule in the layer this table names, so a backend owes only t
 | A zero TTL is `invalid` | The `omnia:keyvalue` host, for every backend. |
 | A TTL rounds up | The SDK, to milliseconds, then each backend, to its store's resolution. |
 | A handle that names no binding is `default` | The SDK. |
-| An undeclared name is `not-found` | Each backend, when it opens a bucket, a database, or an identity. |
+| An undeclared name is `not-found` | Each backend, when it opens a bucket, a database, an identity, or a locker. |
 | A filter past its limits is `invalid` | The SDK, before the query reaches the host. The host traps a guest that passes the raw `filter` constructors past the same limits. |
 | An uncreated container is `not-found` | Each blob backend. |
 | An unserved request is `unsupported` | Each backend. |
 
-The code a backend picks reaches the guest exactly over `omnia:keyvalue`, `omnia:blobstore`, `omnia:sql`, `omnia:docstore`, and `omnia:identity`, which carry one error case per code. Elsewhere a code is best effort: the other `wasi:*` interfaces have fewer error cases than there are codes, and the SDK maps each case to one code.
+The code a backend picks reaches the guest exactly over `omnia:keyvalue`, `omnia:blobstore`, `omnia:sql`, `omnia:docstore`, `omnia:identity`, and `omnia:vault`, which carry one error case per code. Elsewhere a code is best effort: the other `wasi:*` interfaces have fewer error cases than there are codes, and the SDK maps each case to one code.
 
 ### Bound every call
 

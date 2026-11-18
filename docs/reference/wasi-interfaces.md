@@ -13,7 +13,7 @@ Every capability Omnia exposes to guests, its interface crate, the zero-config d
 | SQL | `wasi-sql` | `WasiSql` | `SqlDefault` — SQLite, serving `default` (`SQL_DATABASE`, default shared in-memory) and the databases `SQL_DATABASES` declares | `omnia-postgres` |
 | Document store | `wasi-docstore` | `WasiDocStore` | `DocStoreDefault` — in-memory | `omnia-azure-table` |
 | Configuration | `wasi-config` | `WasiConfig` | `ConfigDefault` — host process environment snapshot | — |
-| Secrets vault | `wasi-vault` | `WasiVault` | `VaultDefault` — in-memory lockers | `omnia-azure-vault` |
+| Secrets vault | `wasi-vault` | `WasiVault` | `VaultDefault` — in-memory, serving the lockers `VAULT_LOCKERS` declares (default `default`) | `omnia-azure-vault` |
 | Identity/OAuth | `wasi-identity` | `WasiIdentity` | `IdentityDefault` — OAuth2 client flow for the identity `default` (`IDENTITY_CLIENT_ID`, `IDENTITY_CLIENT_SECRET`, `IDENTITY_TOKEN_URL`) | `omnia-azure-id` |
 | Observability | `wasi-otel` | `WasiOtel` | `OtelDefault` — log-only, no export | `omnia-opentelemetry` |
 | WebSockets | `wasi-websocket` | `WasiWebSocket` † | `WebSocketDefault` — tungstenite server (`WEBSOCKET_ADDR`, default `0.0.0.0:80`) | — |
@@ -25,7 +25,7 @@ Every capability Omnia exposes to guests, its interface crate, the zero-config d
 Notes:
 
 - Package names on crates.io carry the `omnia-` prefix (`omnia-wasi-keyvalue`, and so on); directory names in `crates/` drop it.
-- `wasi-sql` serves the Omnia-owned interface the SDK calls (`omnia:sql`) beside the WASI draft for guests that bind it directly. A backend implements one client trait and serves both. `wasi-keyvalue`, `wasi-blobstore`, `wasi-messaging`, `wasi-websocket`, and `wasi-identity` serve `omnia:keyvalue`, `omnia:blobstore`, `omnia:messaging`, `omnia:websocket`, and `omnia:identity` alone.
+- `wasi-sql` serves the Omnia-owned interface the SDK calls (`omnia:sql`) beside the WASI draft for guests that bind it directly. A backend implements one client trait and serves both. `wasi-keyvalue`, `wasi-blobstore`, `wasi-messaging`, `wasi-websocket`, `wasi-identity`, and `wasi-vault` serve `omnia:keyvalue`, `omnia:blobstore`, `omnia:messaging`, `omnia:websocket`, `omnia:identity`, and `omnia:vault` alone.
 - Most defaults are genuinely zero-config and in-memory. The exceptions: `HttpDefault` and `WebSocketDefault` bind real TCP ports, and `IdentityDefault` needs OAuth credentials. `ModelDefault` is a zero-config echo — it answers text/json completions with the prompt itself but rejects `format::schema`, so deployments bind a real backend and tests define inline canned backends. `wasi-vcs` ships no default at all: a repository is a tree on disk, so a deployment that links `WasiVcs` names a production backend, and a test scripts a `VcsClient` of its own.
 - `omnia:vcs` operations name a repository or working copy as a `location` — a lent mount-root descriptor plus a relative subpath — and the host resolves it beneath the authorized mount before the backend runs: a descriptor that is not a mount root, a subpath that leaves the mount or starts at `/`, and a mutation beneath a read-only mount are refused with no backend call. The backend works through a `Place`, an open directory handle the host holds for the whole operation, never a path it would walk again.
 - Each interface crate compiles to guest bindings on `wasm32` and the host implementation on native targets, so guests and hosts depend on the same crate name.

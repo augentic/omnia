@@ -29,8 +29,8 @@ pub type BlobSnapshot = BTreeMap<String, BTreeMap<String, Vec<u8>>>;
 ///
 /// A handle addresses one state bucket and one secret locker, both named
 /// [`DEFAULT`] until [`named`](Self::named) returns a handle on another name
-/// of the same store. Lockers open on first use. State follows the
-/// [`StateStore`] contract against the real clock:
+/// of the same store. State follows the [`StateStore`] contract against the
+/// real clock:
 ///
 /// - [`bucket`](Self::bucket) declares a bucket, and a call on an undeclared
 ///   one fails with the code `not-found`.
@@ -39,6 +39,10 @@ pub type BlobSnapshot = BTreeMap<String, BTreeMap<String, Vec<u8>>>;
 ///   test seeds one with [`insert_state`](Self::insert_state).
 ///   [`increment`](StateStore::increment) fails any other value with the code
 ///   `invalid`.
+///
+/// Secrets follow the [`SecretStore`] contract, so a call on a locker that
+/// was never declared fails with the code `not-found`.
+/// [`locker`](Self::locker) declares one beside [`DEFAULT`].
 ///
 /// Blobs follow the [`BlobStore`] contract, so a call on an object in a
 /// container that was never created fails with the code `not-found`.
@@ -91,6 +95,13 @@ impl Memory {
     #[must_use]
     pub fn bucket(self, name: &str) -> Self {
         self.lock_state().entry(name.to_owned()).or_default();
+        self
+    }
+
+    /// Declares the locker `name`, which every clone and named handle shares.
+    #[must_use]
+    pub fn locker(self, name: &str) -> Self {
+        self.lock_secrets().entry(name.to_owned()).or_default();
         self
     }
 
@@ -153,12 +164,14 @@ impl Memory {
     }
 
     /// Seeds a secret entry in this handle's locker.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the locker is not declared.
     pub fn insert_secret(&self, key: &str, bytes: &[u8]) {
-        let mut secrets = self.lock_secrets();
-        let locker = secrets.entry(self.name.to_string()).or_default();
-        let replaced = locker.insert(key.to_owned(), bytes.to_vec());
-        drop(secrets);
-        drop(replaced);
+        if let Err(err) = self.set_secret(key, bytes) {
+            panic!("seeding `{key}`: {err}");
+        }
     }
 
     /// Seeds an object, creating its container.
@@ -287,14 +300,27 @@ impl Memory {
 
     // -- secrets ----------------------------------------------------------
 
-    fn delete_secret(&self, key: &str) {
-        if let Some(locker) = self.lock_secrets().get_mut(&*self.name) {
-            drop(locker.remove(key));
-        }
+    fn in_locker<T>(&self, f: impl FnOnce(&mut Locker) -> T) -> Result<T> {
+        self.lock_secrets().get_mut(&*self.name).map(f).ok_or_else(|| {
+            let message = format!("locker `{}` is not declared", self.name);
+            Error::server_error("not-found", message)
+        })
     }
 
-    fn secret_keys(&self, after: Option<&str>) -> Vec<String> {
-        self.lock_secrets().get(&*self.name).map_or_default(|locker| {
+    fn get_secret(&self, key: &str) -> Result<Option<Bytes>> {
+        self.in_locker(|locker| locker.get(key).map(|bytes| Bytes::from(bytes.clone())))
+    }
+
+    fn set_secret(&self, key: &str, value: &[u8]) -> Result<()> {
+        self.in_locker(|locker| drop(locker.insert(key.to_owned(), value.to_vec())))
+    }
+
+    fn delete_secret(&self, key: &str) -> Result<()> {
+        self.in_locker(|locker| drop(locker.remove(key)))
+    }
+
+    fn secret_keys(&self, after: Option<&str>) -> Result<Vec<String>> {
+        self.in_locker(|locker| {
             locker
                 .keys()
                 .filter(|key| after.is_none_or(|after| key.as_str() > after))
@@ -414,21 +440,19 @@ impl SecretStore for Memory {
     type Named = Self;
 
     fn get(&self, key: &str) -> impl Future<Output = Result<Option<Bytes>>> + Send {
-        ready(Ok(self.secret(key).map(Bytes::from)))
+        ready(self.get_secret(key))
     }
 
     fn set(&self, key: &str, value: &[u8]) -> impl Future<Output = Result<()>> + Send {
-        self.insert_secret(key, value);
-        ready(Ok(()))
+        ready(self.set_secret(key, value))
     }
 
     fn delete(&self, key: &str) -> impl Future<Output = Result<()>> + Send {
-        self.delete_secret(key);
-        ready(Ok(()))
+        ready(self.delete_secret(key))
     }
 
     fn keys(&self, after: Option<&str>) -> impl Future<Output = Result<Page<String>>> + Send {
-        ready(Ok(Page::new(self.secret_keys(after), None)))
+        ready(self.secret_keys(after).map(|keys| Page::new(keys, None)))
     }
 
     fn named(&self, name: &str) -> Self {
@@ -438,7 +462,7 @@ impl SecretStore for Memory {
 
 #[derive(Debug)]
 struct Inner {
-    // a bucket is declared once it has a map, even an empty one
+    // a bucket or a locker is declared once it has a map, even an empty one
     state: Mutex<BTreeMap<String, Bucket>>,
     blobs: Mutex<BTreeMap<String, Container>>,
     secrets: Mutex<BTreeMap<String, Locker>>,
@@ -450,7 +474,7 @@ impl Default for Inner {
         Self {
             state: Mutex::new(BTreeMap::from([(DEFAULT.to_owned(), Bucket::new())])),
             blobs: Mutex::default(),
-            secrets: Mutex::default(),
+            secrets: Mutex::new(BTreeMap::from([(DEFAULT.to_owned(), Locker::new())])),
             clock: AtomicU64::default(),
         }
     }

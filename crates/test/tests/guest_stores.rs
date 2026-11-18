@@ -190,7 +190,7 @@ fn secrets() {
 
 #[test]
 fn lockers() {
-    let memory = Memory::default();
+    let memory = Memory::default().locker("other").locker("empty");
     let other = SecretStore::named(&memory, "other");
     now(SecretStore::set(&memory, "k", b"default")).expect("set");
     now(SecretStore::set(&other, "k", b"other")).expect("set");
@@ -199,6 +199,10 @@ fn lockers() {
     assert_eq!(other.secret("k"), Some(b"other".to_vec()));
     let empty = now(SecretStore::named(&memory, "empty").keys(None)).expect("keys");
     assert_eq!(empty.items, Vec::<String>::new());
+
+    let undeclared = SecretStore::named(&memory, "undeclared");
+    let error = now(SecretStore::set(&undeclared, "k", b"v")).expect_err("undeclared locker");
+    assert!(matches!(&error, Error::ServerError { code, .. } if code == "not-found"), "{error}");
 }
 
 // -- Pointer impls -----------------------------------------------------------
