@@ -1,3 +1,5 @@
+//! The `omnia:messaging/producer` host bindings.
+
 use omnia_core::HostView;
 use wasmtime::component::{Accessor, Resource};
 

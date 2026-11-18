@@ -1,3 +1,6 @@
+//! The `omnia:messaging/types` host bindings, and the conversions between its
+//! records and the seam's [`Message`].
+
 use omnia_core::HostView;
 use wasmtime::component::{Access, Accessor, Resource};
 

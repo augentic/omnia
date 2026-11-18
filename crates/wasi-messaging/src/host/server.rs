@@ -1,3 +1,6 @@
+//! The messaging trigger, whose [`MessagingHandler`] routes each delivery to a
+//! guest by topic.
+
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 

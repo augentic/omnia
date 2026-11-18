@@ -1,3 +1,6 @@
+//! The [`Endpoint`] seam a backend implements, and the [`Message`] that
+//! crosses it.
+
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::ops::{Deref, DerefMut};

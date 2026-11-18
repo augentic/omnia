@@ -1,3 +1,8 @@
+//! # WASI Messaging Service
+//!
+//! Serves `omnia:messaging` to guests over a [`MessagingClient`], and runs its
+//! delivery trigger.
+
 mod admin_impl;
 mod consumer_impl;
 mod default_impl;

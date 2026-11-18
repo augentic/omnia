@@ -1,3 +1,5 @@
+//! The `omnia:messaging/request-reply` host bindings.
+
 use std::time::Duration;
 
 use omnia_core::HostView;

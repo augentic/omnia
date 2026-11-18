@@ -1,3 +1,6 @@
+//! The `omnia:messaging/admin` host bindings, which answer every call with
+//! `unsupported`.
+
 use omnia_core::HostView;
 use wasmtime::component::{Accessor, Resource};
 
