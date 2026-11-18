@@ -1,476 +1,402 @@
 package omnia:otel@0.2.0;
 
+/// The types the telemetry interfaces share.
+///
+/// Records and fields carry the names of the OpenTelemetry Protocol, OTLP,
+/// and mean what OTLP means by them. A field OTLP leaves unset is `none`.
+/// A field whose name ends in `-unix-nano` is an instant in nanoseconds
+/// since the Unix epoch. One whose name starts with `dropped-` counts the
+/// items the guest discarded to keep within its own limits.
+///
+/// The telemetry is the guest's own. The host adds the resource that
+/// identifies the deployment, and sends the telemetry to the collector the
+/// deployment configures.
+///
+/// Every backend carries portable telemetry, and may reject any other as
+/// `invalid`:
+///
+/// - A trace id is 32 lowercase hexadecimal digits and a span id is 16.
+///   Neither is all zeros.
+/// - An attribute key is not empty, and a list of attributes holds each
+///   key once.
+/// - The telemetry of one call is at most 4 MiB as an OTLP request.
 interface types {
-  use wasi:clocks/system-clock@0.3.2.{instant};
-
-  /// The key part of attribute `key-value` pairs.
-  type key = string;
-
-  /// The value part of attribute `key-value` pairs.
-  variant value {
-    /// A string value.
-    %string(string),
-    /// A boolean value.
-    %bool(bool),
-    /// A double precision floating point value.
-    %f64(f64),
-    /// A signed 64 bit integer value.
-    %s64(s64),
-    /// A homogeneous array of string values.
-    string-array(list<string>),
-    /// A homogeneous array of boolean values.
-    bool-array(list<bool>),
-    /// A homogeneous array of double precision floating point values.
-    f64-array(list<f64>),
-    /// A homogeneous array of 64 bit integer values.
-    s64-array(list<s64>),
-  }
-
-  /// A key-value pair describing an attribute.
-  record key-value {
-    /// The attribute name.
-    key: key,
-    /// The attribute value.
-    value: value,
-  }
-
-  /// The host resource describing the entity producing telemetry.
-  record %resource {
-    /// Specifies the resource attributes to associate with emitted telemetry.
-    attributes: list<key-value>,
-    /// Schema URL used by this library.
-    /// https://github.com/open-telemetry/opentelemetry-specification/blob/v1.9.0/specification/schemas/overview.md#schema-url
-    schema-url: option<string>,
-  }
-
-  /// Describes the instrumentation scope that produced a span.
-  record instrumentation-scope {
-    /// Name of the instrumentation scope.
-    name: string,
-    /// The library version.
-    version: option<string>,
-    /// Schema URL used by this library.
-    /// https://github.com/open-telemetry/opentelemetry-specification/blob/v1.9.0/specification/schemas/overview.md#schema-url
-    schema-url: option<string>,
-    /// Specifies the instrumentation scope attributes to associate with emitted telemetry.
-    attributes: list<key-value>,
-  }
-
-  /// The set of errors which may be raised by functions in this package
+  /// Why a call failed.
   variant error {
-    /// Shutdown has already been invoked.
-    already-shutdown,
-    /// Operation timed out before completing.
-    timeout(u64),
-    /// Operation failed due to an internal error.
-    internal-failure(string),
+    /// The collector has no endpoint for the signal.
+    not-found(string),
+    /// The collector refused the deployment's credentials.
+    denied(string),
+    /// The telemetry was rejected, such as an id that is not hexadecimal.
+    /// Sending it again fails again.
+    invalid(string),
+    /// A valid export this backend cannot serve.
+    unsupported(string),
+    /// The collector did not answer, or the export exceeded its bound.
+    unavailable(string),
+    /// Any other failure.
+    other(string),
+  }
+
+  /// The id of a trace, as W3C Trace Context writes it.
+  type trace-id = string;
+
+  /// The id of a span, as W3C Trace Context writes it.
+  type span-id = string;
+
+  /// The W3C trace flags, as the octet a `traceparent` header carries. Bit
+  /// 0 is `sampled` and bit 1 is `random`.
+  type trace-flags = u8;
+
+  /// A value, which OTLP calls an `AnyValue`.
+  variant any-value {
+    string-value(string),
+    bool-value(bool),
+    int-value(s64),
+    double-value(f64),
+    bytes-value(list<u8>),
+    /// An array whose values are all strings. The next three cases hold
+    /// booleans, integers, and doubles.
+    string-array(list<string>),
+    bool-array(list<bool>),
+    int-array(list<s64>),
+    double-array(list<f64>),
+    /// A map, or an array that is nested or holds more than one type, as
+    /// JSON text. An object is a map, and `null` is the empty value. A
+    /// number with no fraction or exponent that fits a signed 64-bit
+    /// integer is an integer, and any other number is a double. Nothing
+    /// inside it is read as bytes. Text that is not JSON is `invalid`.
+    json-value(string),
+    /// The empty value, which some languages write as `null`.
+    empty,
+  }
+
+  /// An attribute.
+  record key-value {
+    key: string,
+    value: any-value,
+  }
+
+  /// The library or module that produced a batch of telemetry.
+  record instrumentation-scope {
+    name: string,
+    version: option<string>,
+    attributes: list<key-value>,
+    dropped-attributes-count: u32,
   }
 }
 
+/// Spans, and the trace the host is in. Every backend serves this
+/// interface.
+interface traces {
+  use types.{error, instrumentation-scope, key-value, span-id, trace-flags, trace-id};
+
+  /// The `tracestate` header of W3C Trace Context, as it is written.
+  type trace-state = string;
+
+  /// Where a span sits in a trace, as W3C Trace Context propagates it.
+  record span-context {
+    trace-id: trace-id,
+    span-id: span-id,
+    trace-flags: trace-flags,
+    trace-state: option<trace-state>,
+  }
+
+  /// The part a span plays in a call between two parties.
+  enum span-kind {
+    /// Work with no remote party.
+    internal,
+    /// Handling a request another party sent.
+    server,
+    /// A request to another party.
+    client,
+    /// Handing a message to a broker.
+    producer,
+    /// Handling a message a broker delivered.
+    consumer,
+  }
+
+  /// How the operation a span covers ended.
+  variant status {
+    /// The instrumentation set no status.
+    unset,
+    /// The application marked the operation as successful.
+    ok,
+    /// The operation failed, with a description where one is given.
+    error(option<string>),
+  }
+
+  /// A moment within a span.
+  record event {
+    time-unix-nano: u64,
+    name: string,
+    attributes: list<key-value>,
+    dropped-attributes-count: u32,
+  }
+
+  /// A pointer from a span to another span, in any trace.
+  record link {
+    span-context: span-context,
+    /// Whether the linked context arrived from another process. `none`
+    /// when unknown.
+    is-remote: option<bool>,
+    attributes: list<key-value>,
+    dropped-attributes-count: u32,
+  }
+
+  /// A span that has ended.
+  record span {
+    span-context: span-context,
+    /// `none` for a root span.
+    parent-span-id: option<span-id>,
+    /// Whether the parent's context arrived from another process. `none`
+    /// when unknown, and for a root span.
+    parent-is-remote: option<bool>,
+    name: string,
+    kind: span-kind,
+    start-time-unix-nano: u64,
+    end-time-unix-nano: u64,
+    attributes: list<key-value>,
+    dropped-attributes-count: u32,
+    events: list<event>,
+    dropped-events-count: u32,
+    links: list<link>,
+    dropped-links-count: u32,
+    status: status,
+  }
+
+  /// The spans one instrumentation scope produced.
+  record scope-spans {
+    /// `none` when the scope is unknown.
+    scope: option<instrumentation-scope>,
+    spans: list<span>,
+    /// The schema the spans' names and attributes follow.
+    schema-url: option<string>,
+  }
+
+  /// The context of the host's span for the call the guest is serving,
+  /// `none` when the host has none.
+  ///
+  /// A root span that takes this context as its parent joins the host's
+  /// trace.
+  current-span-context: func() -> option<span-context>;
+
+  /// Export spans that have ended.
+  ///
+  /// The host exports each span as given. `ok` means the host took the
+  /// spans for delivery, not that a collector stored them, and a
+  /// deployment with no collector drops them. When the host rejects a span
+  /// as `invalid` it exports none of the call's spans. An empty list
+  /// succeeds.
+  %export: async func(scope-spans: list<scope-spans>) -> result<_, error>;
+}
+
+/// Metric points. Every backend serves this interface.
 interface metrics {
-  use wasi:clocks/system-clock@0.3.2.{instant};
-  use types.{key, value, key-value, instrumentation-scope, %resource, error};
+  use types.{error, instrumentation-scope, key-value, span-id, trace-id};
 
-  /// A set of bucket counts, encoded in a contiguous array of counts.
-  record exponential-bucket {
-    /// The bucket index of the first entry in the `counts` vec.
-    offset: s32,
-    /// A vec where `counts[i]` carries the count of the bucket at index `offset + i`.
-    ///
-    /// `counts[i]` is the count of values greater than base^(offset+i) and less than
-    /// or equal to base^(offset+i+1).
-    counts: list<u64>,
+  /// A measured number.
+  variant number {
+    as-double(f64),
+    as-int(s64),
   }
 
-  /// Defines the window that an aggregation was calculated over.
-  enum temporality {
-    /// A measurement interval that continues to expand forward in time from a
-    /// starting point.
-    ///
-    /// New measurements are added to all previous measurements since a start time.
-    cumulative,
-    /// A measurement interval that resets each cycle.
-    ///
-    /// Measurements from one cycle are recorded independently, measurements from
-    /// other cycles do not affect them.
+  /// The time each point of a metric covers.
+  enum aggregation-temporality {
+    /// The time since the previous point.
     delta,
-    /// Configures Synchronous Counter and Histogram instruments to use
-    /// Delta aggregation temporality, which allows them to shed memory
-    /// following a cardinality explosion, thus use less memory.
-    low-memory,
+    /// The time since the series started.
+    cumulative,
   }
 
-  variant data-value {
-    /// All metric data with `f64` value type
-    %f64(f64),
-    /// All metric data with `u64` value type
-    %u64(u64),
-    /// All metric data with `s64` value type
-    %s64(s64),
-  }
-
-  /// A measurement sampled from a time series providing a typical example.
+  /// One measurement kept as an example of those a point aggregates.
   record exemplar {
-    /// The attributes recorded with the measurement but filtered out of the
-    /// time series' aggregated data.
+    /// The measurement's attributes that the point's series leaves out.
     filtered-attributes: list<key-value>,
-    /// The time when the measurement was recorded.
-    time: instant,
-    /// The measured value.
-    value: data-value,
-    /// The ID of the span that was active during the measurement.
-    ///
-    /// If no span was active or the span was not sampled this will be empty.
-    span-id: string,
-    /// The ID of the trace the active span belonged to during the measurement.
-    ///
-    /// If no span was active or the span was not sampled this will be empty.
-    trace-id: string,
+    time-unix-nano: u64,
+    value: number,
+    /// The span that was current at the measurement. `none` when no
+    /// sampled span was.
+    span-id: option<span-id>,
+    trace-id: option<trace-id>,
   }
 
-  /// DataPoint is a single data point in a time series.
-  record gauge-data-point {
-    /// Attributes is the set of key value pairs that uniquely identify the
-    /// time series.
+  /// One point of a gauge or a sum.
+  record number-data-point {
+    /// The attributes that identify the point's series.
     attributes: list<key-value>,
-    /// The value of this data point.
-    value: data-value,
-    /// The sampled exemplars collected during the time series.
+    /// When the series started. `none` when unknown.
+    start-time-unix-nano: option<u64>,
+    time-unix-nano: u64,
+    value: number,
     exemplars: list<exemplar>,
   }
 
-  /// A measurement of the current value of an instrument.
+  /// The latest value of each series.
   record gauge {
-    /// Represents individual aggregated measurements with unique attributes.
-    data-points: list<gauge-data-point>,
-    /// The time when the time series was started.
-    start-time: option<instant>,
-    /// The time when the time series was recorded.
-    time: instant,
+    data-points: list<number-data-point>,
   }
 
-  /// DataPoint is a single data point in a time series.
-  record sum-data-point {
-    /// Attributes is the set of key value pairs that uniquely identify the
-    /// time series.
-    attributes: list<key-value>,
-    /// The value of this data point.
-    value: data-value,
-    /// The sampled exemplars collected during the time series.
-    exemplars: list<exemplar>,
-  }
-
-  /// Represents the sum of all measurements of values from an instrument.
+  /// The total of each series.
   record sum {
-    /// Represents individual aggregated measurements with unique attributes.
-    data-points: list<sum-data-point>,
-    /// The time when the time series was started.
-    start-time: instant,
-    /// The time when the time series was recorded.
-    time: instant,
-    /// Describes if the aggregation is reported as the change from the last report
-    /// time, or the cumulative changes since a fixed start time.
-    temporality: temporality,
-    /// Whether this aggregation only increases or decreases.
+    data-points: list<number-data-point>,
+    aggregation-temporality: aggregation-temporality,
+    /// Whether the total only rises.
     is-monotonic: bool,
   }
 
-  /// A single histogram data point in a time series.
+  /// One point of a histogram with stated bucket bounds.
   record histogram-data-point {
-    /// The set of key value pairs that uniquely identify the time series.
     attributes: list<key-value>,
-    /// The number of updates this histogram has been calculated with.
+    start-time-unix-nano: option<u64>,
+    time-unix-nano: u64,
+    /// How many measurements the point holds.
     count: u64,
-    /// The upper bounds of the buckets of the histogram.
-    ///
-    /// Because the last boundary is +infinity this one is implied.
-    bounds: list<f64>,
-    /// The count of each of the buckets.
+    /// `none` where a measurement may be negative.
+    sum: option<f64>,
+    /// One count for each bucket, which is one more than `explicit-bounds`
+    /// holds. Empty when the point keeps no buckets.
     bucket-counts: list<u64>,
-    /// The minimum value recorded.
-    min: option<data-value>,
-    /// The maximum value recorded.
-    max: option<data-value>,
-    /// The sum of the values recorded.
-    sum: data-value,
-    /// The sampled exemplars collected during the time series.
+    /// The upper bound of every bucket but the last, in rising order.
+    explicit-bounds: list<f64>,
     exemplars: list<exemplar>,
+    min: option<f64>,
+    max: option<f64>,
   }
 
-  /// Represents the histogram of all measurements of values from an instrument.
+  /// The distribution of each series, in buckets with stated bounds.
   record histogram {
-    /// Individual aggregated measurements with unique attributes.
     data-points: list<histogram-data-point>,
-    /// The time when the time series was started.
-    start-time: instant,
-    /// The time when the time series was recorded.
-    time: instant,
-    /// Describes if the aggregation is reported as the change from the last report
-    /// time, or the cumulative changes since a fixed start time.
-    temporality: temporality,
+    aggregation-temporality: aggregation-temporality,
   }
 
-  /// A single exponential histogram data point in a time series.
+  /// A run of bucket counts in an exponential histogram.
+  record buckets {
+    /// The index of the first bucket.
+    offset: s32,
+    bucket-counts: list<u64>,
+  }
+
+  /// One point of an exponential histogram.
   record exponential-histogram-data-point {
-    /// The set of key value pairs that uniquely identify the time series.
     attributes: list<key-value>,
-    /// The number of updates this histogram has been calculated with.
+    start-time-unix-nano: option<u64>,
+    time-unix-nano: u64,
     count: u64,
-    /// The minimum value recorded.
-    min: option<data-value>,
-    /// The maximum value recorded.
-    max: option<data-value>,
-    /// The sum of the values recorded.
-    sum: data-value,
-    /// Describes the resolution of the histogram.
-    ///
-    /// Boundaries are located at powers of the base, where:
-    ///
-    ///   base = 2 ^ (2 ^ -scale)
-    scale: s8,
-    /// The number of values whose absolute value is less than or equal to
-    /// `zero_threshold`.
-    ///
-    /// When `zero_threshold` is `0`, this is the number of values that cannot be
-    /// expressed using the standard exponential formula as well as values that have
-    /// been rounded to zero.
+    sum: option<f64>,
+    /// The resolution. Each bucket bound is a power of `2^(2^-scale)`.
+    scale: s32,
+    /// How many measurements lie within `zero-threshold` of zero.
     zero-count: u64,
-    /// The range of positive value bucket counts.
-    positive-bucket: exponential-bucket,
-    /// The range of negative value bucket counts.
-    negative-bucket: exponential-bucket,
-    /// The width of the zero region.
-    ///
-    /// Where the zero region is defined as the closed interval
-    /// [-zero_threshold, zero_threshold].
-    zero-threshold: f64,
-    /// The sampled exemplars collected during the time series.
+    positive: buckets,
+    negative: buckets,
     exemplars: list<exemplar>,
+    min: option<f64>,
+    max: option<f64>,
+    zero-threshold: f64,
   }
 
-  /// The histogram of all measurements of values from an instrument.
+  /// The distribution of each series, in buckets whose bounds grow by a
+  /// fixed ratio.
   record exponential-histogram {
-    /// The individual aggregated measurements with unique attributes.
     data-points: list<exponential-histogram-data-point>,
-    /// When the time series was started.
-    start-time: instant,
-    /// The time when the time series was recorded.
-    time: instant,
-    /// Describes if the aggregation is reported as the change from the last report
-    /// time, or the cumulative changes since a fixed start time.
-    temporality: temporality,
+    aggregation-temporality: aggregation-temporality,
   }
 
-  /// Metric data for all types
+  /// The points of a metric, by how they were aggregated.
   variant metric-data {
-    /// Metric data for Gauge
     gauge(gauge),
-    /// Metric data for Sum
     sum(sum),
-    /// Metric data for Histogram
     histogram(histogram),
-    /// Metric data for ExponentialHistogram
     exponential-histogram(exponential-histogram),
   }
 
-  /// Aggregated metrics data from an instrument
-  variant aggregated-metrics {
-    /// All metric data with `f64` value type
-    %f64(metric-data),
-    /// All metric data with `u64` value type
-    %u64(metric-data),
-    /// All metric data with `i64` value type
-    %s64(metric-data),
-  }
-
-  /// A collection of one or more aggregated time series from an [Instrument].
-  ///
-  /// [Instrument]: crate::metrics::Instrument
+  /// The points one instrument produced.
   record metric {
-    /// The name of the instrument that created this data.
     name: string,
-    /// The description of the instrument, which can be used in documentation.
-    description: string,
-    /// The unit in which the instrument reports.
-    unit: string,
-    /// The aggregated data from an instrument.
-    data: aggregated-metrics,
+    description: option<string>,
+    /// The unit of the values, as a UCUM code.
+    unit: option<string>,
+    data: metric-data,
   }
 
+  /// The metrics one instrumentation scope produced.
   record scope-metrics {
-    /// The instrumentation scope that the meter was created with.
-    scope: instrumentation-scope,
-    /// The list of aggregations created by the meter.
+    /// `none` when the scope is unknown.
+    scope: option<instrumentation-scope>,
     metrics: list<metric>,
+    /// The schema the metrics' names and attributes follow.
+    schema-url: option<string>,
   }
 
-  /// A collection of scope metrics and the associated resource that created them.
-  record resource-metrics {
-    /// The entity that collected the metrics.
-    %resource: %resource,
-    /// The collection of metrics with unique [InstrumentationScope]s.
-    scope-metrics: list<scope-metrics>,
-  }
-
-  /// The identifier of a group of instruments that all perform the same function.
-  enum instrument-kind {
-    /// Identifies a group of instruments that record increasing values synchronously
-    /// with the code path they are measuring.
-    counter,
-    /// A group of instruments that record increasing and decreasing values
-    /// synchronously with the code path they are measuring.
-    up-down-counter,
-    /// A group of instruments that record a distribution of values synchronously with
-    /// the code path they are measuring.
-    histogram,
-    /// A group of instruments that record increasing values in an asynchronous
-    /// callback.
-    observable-counter,
-    /// A group of instruments that record increasing and decreasing values in an
-    /// asynchronous callback.
-    observable-up-down-counter,
-    /// a group of instruments that record current value synchronously with
-    /// the code path they are measuring.
-    gauge,
-    /// a group of instruments that record current values in an asynchronous callback.
-    observable-gauge,
-  }
-
-  /// Gathers and returns all metric data related to the [MetricReader] from the
-  /// SDK and stores it in the provided [ResourceMetrics] reference.
+  /// Export metric points.
   ///
-  /// An error is returned if this is called after shutdown.
-  %export: async func(rm: resource-metrics) -> result<_, error>;
+  /// `ok` means the host took the points for delivery, not that a
+  /// collector stored them, and a deployment with no collector drops them.
+  /// When the host rejects a point as `invalid` it exports none of the
+  /// call's points. An empty list succeeds.
+  %export: async func(scope-metrics: list<scope-metrics>) -> result<_, error>;
 }
 
-interface %resource {
-  use types.{key, value, key-value, %resource as telemetry-resource};
+/// Optional: log records.
+interface logs {
+  use types.{
+    any-value, error, instrumentation-scope, key-value, span-id, trace-flags, trace-id,
+  };
 
-  /// Returns the telemetry resource used by the host.
-  %resource: func() -> telemetry-resource;
+  /// One log record.
+  record log-record {
+    /// When the event happened. `none` when unknown.
+    time-unix-nano: option<u64>,
+    /// When the guest observed the event. `none` leaves the host to stamp
+    /// the time it took the record.
+    observed-time-unix-nano: option<u64>,
+    /// OTLP's severity number: 1 to 4 are trace, 5 to 8 debug, 9 to 12
+    /// info, 13 to 16 warn, 17 to 20 error, and 21 to 24 fatal. Any other
+    /// number is `invalid`.
+    severity-number: option<u8>,
+    /// The level as the source wrote it.
+    severity-text: option<string>,
+    body: option<any-value>,
+    attributes: list<key-value>,
+    dropped-attributes-count: u32,
+    /// The span that was current when the record was made. `none` when
+    /// none was.
+    trace-id: option<trace-id>,
+    span-id: option<span-id>,
+    trace-flags: option<trace-flags>,
+    /// The name of the kind of event the record reports.
+    event-name: option<string>,
+  }
+
+  /// The log records one instrumentation scope produced.
+  record scope-logs {
+    /// `none` when the scope is unknown.
+    scope: option<instrumentation-scope>,
+    log-records: list<log-record>,
+    /// The schema the records' names and attributes follow.
+    schema-url: option<string>,
+  }
+
+  /// Export log records.
+  ///
+  /// `ok` means the host took the records for delivery, not that a
+  /// collector stored them, and a deployment with no collector drops them.
+  /// When the host rejects a record as `invalid` it exports none of the
+  /// call's records. An empty list succeeds.
+  %export: async func(scope-logs: list<scope-logs>) -> result<_, error>;
 }
 
-interface tracing {
-  use wasi:clocks/system-clock@0.3.2.{instant};
-  use types.{key, value, key-value, instrumentation-scope, error};
-
-  /// The trace that this `span-context` belongs to.
-  ///
-  /// 16 bytes encoded as a hexadecimal string.
-  type trace-id = string;
-
-  /// The id of this `span-context`.
-  ///
-  /// 8 bytes encoded as a hexadecimal string.
-  type span-id = string;
-
-  /// Flags that can be set on a `span-context`.
-  flags trace-flags {
-    /// Whether the `span` should be sampled or not.
-    sampled,
-  }
-
-  /// Carries system-specific configuration data, represented as a list of key-value pairs. `trace-state` allows multiple tracing systems to participate in the same trace.
-  ///
-  /// If any invalid keys or values are provided then the `trace-state` will be treated as an empty list.
-  type trace-state = list<tuple<string, string>>;
-
-  /// Identifying trace information about a span that can be serialized and propagated.
-  record span-context {
-    /// The `trace-id` for this `span-context`.
-    trace-id: trace-id,
-    /// The `span-id` for this `span-context`.
-    span-id: span-id,
-    /// The `trace-flags` for this `span-context`.
-    trace-flags: trace-flags,
-    /// Whether this `span-context` was propagated from a remote parent.
-    is-remote: bool,
-    /// The `trace-state` for this `span-context`.
-    trace-state: trace-state,
-  }
-
-  /// Describes the relationship between the Span, its parents, and its children in a trace.
-  enum span-kind {
-    /// Indicates that the span describes a request to some remote service. This span is usually the parent of a remote server span and does not end until the response is received.
-    client,
-    /// Indicates that the span covers server-side handling of a synchronous RPC or other remote request. This span is often the child of a remote client span that was expected to wait for a response.
-    server,
-    /// Indicates that the span describes the initiators of an asynchronous request. This parent span will often end before the corresponding child consumer span, possibly even before the child span starts. In messaging scenarios with batching, tracing individual messages requires a new producer span per message to be created.
-    producer,
-    /// Indicates that the span describes a child of an asynchronous consumer request.
-    consumer,
-    /// Default value. Indicates that the span represents an internal operation within an application, as opposed to an operations with remote parents or children.
-    internal,
-  }
-
-  /// An event describing a specific moment in time on a span and associated attributes.
-  record event {
-    /// Event name.
-    name: string,
-    /// Event time.
-    time: instant,
-    /// Event attributes.
-    attributes: list<key-value>,
-  }
-
-  /// Describes a relationship to another `span`.
-  record link {
-    /// Denotes which `span` to link to.
-    span-context: span-context,
-    /// Attributes describing the link.
-    attributes: list<key-value>,
-  }
-
-  /// The `status` of a `span`.
-  variant status {
-    /// The default status.
-    unset,
-    /// The operation has been validated by an Application developer or Operator to have completed successfully.
-    ok,
-    /// The operation contains an error with a description.
-    error(string),
-  }
-
-  /// The data associated with a span.
-  record span-data {
-    /// Span context.
-    span-context: span-context,
-    /// Span parent id.
-    parent-span-id: string,
-    /// Span kind.
-    span-kind: span-kind,
-    /// Span name.
-    name: string,
-    /// Span start time.
-    start-time: instant,
-    /// Span end time.
-    end-time: instant,
-    /// Span attributes.
-    attributes: list<key-value>,
-    /// Span events.
-    events: list<event>,
-    /// Span Links.
-    links: list<link>,
-    /// Span status.
-    status: status,
-    /// Instrumentation scope that produced this span.
-    instrumentation-scope: instrumentation-scope,
-    /// Number of attributes dropped by the span due to limits being reached.
-    dropped-attributes: u32,
-    /// Number of events dropped by the span due to limits being reached.
-    dropped-events: u32,
-    /// Number of links dropped by the span due to limits being reached.
-    dropped-links: u32,
-  }
-
-  /// Called by the guest to export spans.
-  %export: async func(span-data: list<span-data>) -> result<_, error>;
-}
-
-world imports {
-  import wasi:clocks/system-clock@0.3.2;
+/// What every backend serves.
+world core {
   import types;
-  import tracing;
+  import traces;
   import metrics;
-  import %resource;
+}
+
+/// Every interface. A backend answers `unsupported` for what it does not
+/// serve.
+world imports {
+  include core;
+  import logs;
 }

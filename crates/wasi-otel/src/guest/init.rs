@@ -11,7 +11,6 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Layer as _, Registry};
 
-use crate::guest::generated::omnia::otel::{resource, types};
 use crate::guest::{metrics, tracing};
 
 static TELEMETRY: OnceLock<Option<Telemetry>> = OnceLock::new();
@@ -44,18 +43,15 @@ pub async fn scope<F: Future>(inner: impl FnOnce() -> F) -> F::Output {
 pub async fn flush() {
     let Some(telemetry) = telemetry() else { return };
     tracing::export(&telemetry.spans).await;
-    metrics::export(&telemetry.meters, &telemetry.resource).await;
+    metrics::export(&telemetry.meters).await;
 }
 
 struct Telemetry {
     spans: tracing::SpanBuffer,
     meters: metrics::MeterProvider,
-    resource: types::Resource,
 }
 
 fn init() -> Result<Telemetry> {
-    let resource = resource::resource();
-
     let filter_layer = mute(EnvFilter::from_default_env());
     let fmt_layer = tracing_subscriber::fmt::layer()
         .with_writer(std::io::stderr)
@@ -82,7 +78,6 @@ fn init() -> Result<Telemetry> {
     Ok(Telemetry {
         spans,
         meters: meter_provider,
-        resource,
     })
 }
 

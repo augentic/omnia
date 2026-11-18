@@ -1,31 +1,22 @@
-//! A span tree reaches the host intact: a `tracing` child under an
-//! instrumented parent carries its field, its error event, and the error
-//! status the event implies, an instrumented sync function opens its span
-//! under the parent without owning the telemetry lifecycle, a span opened
-//! through the OpenTelemetry API inside the parent joins the same tree in its
-//! own instrumentation scope with its schema URL and linked `tracestate`, and
-//! a raw `omnia:otel` export with malformed ids and out-of-range timestamps
-//! clamps cleanly on the host.
+//! A span tree reaches the host intact, in the host's trace:
+//!
+//! - The instrumented root takes the host's span as its parent, so the trace
+//!   id the guest sees is the host's.
+//! - A `tracing` child carries its field, its error event, and the error
+//!   status the event implies.
+//! - An instrumented sync function opens its span under the root without
+//!   owning the telemetry lifecycle.
+//! - A span opened through the OpenTelemetry API inside the root joins the
+//!   same tree in its own instrumentation scope, with its schema URL and a
+//!   link to a remote context with its `tracestate`.
 
 #![cfg(target_arch = "wasm32")]
 
-mod raw {
-    wit_bindgen::generate!({
-        inline: "
-            package omnia-test:otel;
-            world raw-otel {
-                import omnia:otel/tracing@0.2.0;
-            }
-        ",
-        path: "../wasi-otel/wit",
-        generate_all,
-    });
-}
-
+use omnia_wasi_otel::omnia::traces;
 use opentelemetry::trace::{
     SpanContext, SpanId, TraceContextExt as _, TraceFlags, TraceId, TraceState, Tracer as _,
 };
-use opentelemetry::{InstrumentationScope, KeyValue};
+use opentelemetry::{Context, InstrumentationScope, KeyValue};
 use tracing::{Instrument as _, Level};
 
 omnia_sdk::api::command::export!(scenario);
@@ -38,6 +29,10 @@ async fn scenario() {
 // `EnvFilter` (the test environment sets no `RUST_LOG`).
 #[omnia_wasi_otel::instrument(level = Level::ERROR)]
 async fn parent() {
+    let host = traces::current_span_context().expect("the host has a span for the run");
+    let current = Context::current().span().span_context().trace_id();
+    assert_eq!(current.to_string(), host.trace_id, "the root joins the host's trace");
+
     async {
         tracing::error!("child failed");
     }
@@ -63,67 +58,7 @@ async fn parent() {
             Vec::new(),
         );
     });
-
-    export_malformed().await;
 }
 
 #[omnia_wasi_otel::instrument(level = Level::ERROR)]
 fn sibling() {}
-
-async fn export_malformed() {
-    use raw::omnia::otel::tracing::{
-        Link, SpanContext, SpanData, SpanKind, Status, TraceFlags, export,
-    };
-    use raw::omnia::otel::types::InstrumentationScope;
-    use raw::wasi::clocks::system_clock::Instant;
-
-    let before_epoch = Instant {
-        seconds: -1,
-        nanoseconds: 999_999_999,
-    };
-    let max_time = Instant {
-        seconds: i64::MAX,
-        nanoseconds: 999_999_999,
-    };
-    export(vec![SpanData {
-        span_context: SpanContext {
-            trace_id: String::new(),
-            span_id: "not-hex".to_owned(),
-            trace_flags: TraceFlags::SAMPLED,
-            is_remote: false,
-            trace_state: vec![
-                ("vendor".to_owned(), "opaque".to_owned()),
-                ("other".to_owned(), "a:b=c".to_owned()),
-            ],
-        },
-        parent_span_id: "abc".to_owned(),
-        span_kind: SpanKind::Internal,
-        name: "malformed".to_owned(),
-        start_time: before_epoch,
-        end_time: max_time,
-        attributes: Vec::new(),
-        events: Vec::new(),
-        links: vec![Link {
-            span_context: SpanContext {
-                trace_id: "not-hex".to_owned(),
-                span_id: "abc".to_owned(),
-                trace_flags: TraceFlags::empty(),
-                is_remote: true,
-                trace_state: Vec::new(),
-            },
-            attributes: Vec::new(),
-        }],
-        status: Status::Unset,
-        instrumentation_scope: InstrumentationScope {
-            name: "raw".to_owned(),
-            version: None,
-            schema_url: None,
-            attributes: Vec::new(),
-        },
-        dropped_attributes: 0,
-        dropped_events: 0,
-        dropped_links: 0,
-    }])
-    .await
-    .expect("raw export");
-}

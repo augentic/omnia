@@ -2637,13 +2637,13 @@ dependencies = [
  "opentelemetry",
  "opentelemetry-proto",
  "opentelemetry_sdk",
+ "serde_json",
  "test-programs",
  "tokio",
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",
  "wasmtime",
- "wasmtime-wasi",
  "wit-bindgen 0.63.0",
 ]
 

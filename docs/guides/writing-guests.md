@@ -312,7 +312,7 @@ As text the envelope is `error[<code>]: <message>` followed by `hint: <hint>` wh
 
 ## Tracing
 
-`tracing::debug!` and friends work inside guests, and spans flow to whatever OTel backend the host configures. Each transport's `export!` runs the export inside `omnia_wasi_otel::scope`: it initializes the guest's telemetry on entry and exports every span and metric as it returns. A span opened anywhere beneath it reaches the host.
+`tracing::debug!` and friends work inside guests, and spans flow to whatever OTel backend the host configures. Each transport's `export!` runs the export inside `omnia_wasi_otel::scope`: it initializes the guest's telemetry on entry and exports every span and metric as it returns. A span opened anywhere beneath it reaches the host. A root span takes the host's span for the call as its parent, so the guest's spans join the host's trace.
 
 Annotate stem handlers with `#[tracing::instrument]`. A stem compiles natively, for its handler tests or a native host, and depends on no `omnia-wasi-*` crate. The export's scope already owns the telemetry lifecycle:
 

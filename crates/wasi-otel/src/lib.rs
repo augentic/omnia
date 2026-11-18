@@ -2,10 +2,8 @@
 
 //! # WASI OpenTelemetry
 //!
-//! Bindings for the OpenTelemetry specification (wasi:otel) for guest and host
+//! Bindings for `omnia:otel`, the OpenTelemetry interface, for guest and host
 //! components.
-
-mod trace_state;
 
 cfg_select! {
     target_arch = "wasm32" => {

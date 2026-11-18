@@ -506,7 +506,7 @@ mod tests {
     #[test]
     fn wasip2_guest() {
         let imports =
-            ["omnia:otel/tracing@0.2.0", "wasi:cli/environment@0.2.6", "wasi:io/streams@0.2.6"];
+            ["omnia:otel/traces@0.2.0", "wasi:cli/environment@0.2.6", "wasi:io/streams@0.2.6"];
         assert_eq!(wasi_02_import(imports), Some("wasi:cli/environment@0.2.6"));
     }
 
@@ -519,7 +519,7 @@ mod tests {
             "omnia:keyvalue/store@0.1.0",
             "omnia:messaging/producer@0.1.0",
             "omnia:sql/database@0.1.0",
-            "omnia:otel/tracing@0.2.0",
+            "omnia:otel/traces@0.2.0",
         ];
         assert_eq!(wasi_02_import(imports), None);
     }

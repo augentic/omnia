@@ -165,6 +165,29 @@ Unreleased
     with a revision, and an `array-contains` test.
   - On `wasm32`, `omnia_wasi_docstore::omnia` holds the raw bindings,
     which the crate root held.
+- `omnia:otel`, rewritten in place over OTLP's own records. `WasiOtel`
+  serves it over one `OtelClient`:
+  - `traces.export` and `metrics.export` take the guest's telemetry grouped
+    by instrumentation scope, with OTLP's names and meanings. A time is
+    nanoseconds since the Unix epoch.
+  - The host adds the deployment's resource to each export, and exports
+    spans as the guest gives them.
+  - A value is any of OTLP's: a scalar, bytes, an array of one type, or a
+    map or nested array as JSON text.
+  - `traces.current-span-context` answers the host's span for the call. A
+    guest's root span takes it as its parent, so the guest's spans join the
+    host's trace. With no host span, they form a trace of their own, where
+    the host dropped them.
+  - The `error` has one case per capability error code. The host refuses
+    an id that is not portable and a `json-value` that is not JSON with
+    `invalid`.
+  - The optional `logs` interface exports log records. `WasiOtel` answers
+    `unsupported` for it.
+  - A `u64` measurement past `i64::MAX` exports as `i64::MAX`, where it
+    exported as a negative number.
+  - A span exports the kind the guest gave it, where the host cast the kind
+    by position and exported each as another.
+  - On `wasm32`, `omnia_wasi_otel::omnia` holds the raw bindings.
 - The codes of a failed capability call. Its `omnia_sdk::Error` names the
   class of failure in its code:
   - `not-found`, `denied`, `invalid`, `unsupported`, or `other` on a
@@ -594,10 +617,6 @@ Unreleased
   it appears, so `SET name = $2 WHERE id = $1` no longer binds its values
   swapped. A `?` or `?n` placeholder binds as before, and any other named
   placeholder fails.
-- `omnia:otel` is `0.2.0`. Its timestamps are the WASI 0.3
-  `wasi:clocks/system-clock@0.3.2` `instant`, where `0.1.0` carried the
-  WASI 0.2 `wall-clock` `datetime`. The host reads an instant before the
-  epoch as the epoch.
 
 ### Removed
 

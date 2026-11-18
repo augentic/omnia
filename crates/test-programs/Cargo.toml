@@ -372,6 +372,11 @@ path = "programs/otel/axum_handler.rs"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "otel_error_codes"
+path = "programs/otel/error_codes.rs"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "otel_instrumented_handler"
 path = "programs/otel/instrumented_handler.rs"
 crate-type = ["cdylib"]
@@ -384,6 +389,11 @@ crate-type = ["cdylib"]
 [[example]]
 name = "otel_metrics_instruments"
 path = "programs/otel/metrics_instruments.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "otel_raw_export"
+path = "programs/otel/raw_export.rs"
 crate-type = ["cdylib"]
 
 [[example]]

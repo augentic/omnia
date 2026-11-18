@@ -93,7 +93,7 @@ pub struct Backends<
     pub messaging: G,
     /// The `omnia:model` backend.
     pub model: M,
-    /// The `wasi:otel` backend.
+    /// The `omnia:otel` backend.
     pub otel: O,
     /// The `omnia:sql` backend.
     pub sql: S,
@@ -332,7 +332,7 @@ impl<M, K, B, D, S, V, G, I, O, C> Backends<M, K, B, D, S, V, G, I, O, C> {
         }
     }
 
-    /// The same bundle serving `wasi:otel` from `otel`.
+    /// The same bundle serving `omnia:otel` from `otel`.
     #[must_use]
     pub fn otel<N: OtelClient + Clone>(self, otel: N) -> Backends<M, K, B, D, S, V, G, I, N, C> {
         Backends {

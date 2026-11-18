@@ -1,7 +1,7 @@
 //! # Guest
 //!
 //! The guest half of `omnia:otel`: a `tracing` subscriber whose spans and
-//! metrics reach the host through the crate's private `wasi:otel` bindings.
+//! metrics reach the host through the [`omnia`] bindings.
 
 mod aggregate;
 mod convert;
@@ -9,9 +9,9 @@ mod init;
 mod metrics;
 mod tracing;
 
-// Bindings for the `wasi:otel` world.
 mod generated {
     #![allow(
+        missing_docs,
         clippy::future_not_send,
         clippy::collection_is_never_read,
         clippy::same_length_and_capacity,
@@ -23,6 +23,11 @@ mod generated {
         path: "wit",
         generate_all,
     });
+}
+
+/// `omnia:otel`, the interfaces behind the guest telemetry library.
+pub mod omnia {
+    pub use crate::guest::generated::omnia::otel::*;
 }
 
 /// Re-exported `instrument` macro for use in guest code.

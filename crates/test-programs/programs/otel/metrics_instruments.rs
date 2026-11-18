@@ -4,9 +4,10 @@
 //! only what was recorded after it — a delta counter and a cumulative
 //! up-down counter, while the histograms and the gauge, which saw nothing
 //! new, stay out. Along the way: attribute sets match whatever order their
-//! keys arrive in, a counter drops a negative increment, values land in
-//! their explicit buckets (default and custom), and an instrument built with
-//! invalid boundaries records nothing.
+//! keys arrive in, a counter drops a negative increment, a `u64` past the
+//! signed range saturates, values land in their explicit buckets (default
+//! and custom), and an instrument built with invalid boundaries records
+//! nothing.
 
 #![cfg(target_arch = "wasm32")]
 
@@ -18,6 +19,7 @@ async fn scenario() {
     let meter = global::meter("guest");
     let requests = meter.u64_counter("requests").with_unit("{request}").build();
     let bytes = meter.f64_counter("bytes").build();
+    let big = meter.u64_counter("big").build();
     let latency = meter.f64_histogram("latency").build();
     let sizes = meter.u64_histogram("sizes").with_boundaries(vec![10.0, 100.0]).build();
     let broken = meter.f64_histogram("broken").with_boundaries(vec![100.0, 10.0]).build();
@@ -31,6 +33,8 @@ async fn scenario() {
     // A counter only increases: the negative increment is dropped.
     bytes.add(1.5, &[]);
     bytes.add(-4.0, &[]);
+    // Past `i64::MAX`, the largest integer OTLP carries.
+    big.add(u64::MAX, &[]);
     // Default bounds: on the first bound, on an inner bound, inside a bucket,
     // past the last bound.
     latency.record(0.0, &[]);
