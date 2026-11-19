@@ -148,19 +148,15 @@ One filter governs the host console and every guest: its bare level is a `-v`/`-
 
 ### `unsupported: the default echo backend …`
 
-The runtime is serving `wasi-model` with the echo `ModelDefault`, which answers text/json completions with the prompt itself and answers `unsupported` for what an echo cannot honour: a `format::schema` (it cannot fabricate a value conforming to a guest-supplied JSON Schema), a set `generation` field, or an MCP server. Bind a real backend (`omnia-genai`, `omnia-cursor`) in `runtime!`, or define an inline canned `ModelClient` in tests (see [Testing Policy](guides/testing-policy.md#scenario-backends)).
+The runtime is serving `wasi-model` with the echo `ModelDefault`, which answers text/json completions with the prompt itself and answers `unsupported` for what an echo cannot honour: a `format::schema` (it cannot fabricate a value conforming to a guest-supplied JSON Schema) or a set `generation` field. Bind a real backend (`omnia-genai`, `omnia-cursor`) in `runtime!`, or define an inline canned `ModelClient` in tests (see [Testing Policy](guides/testing-policy.md#scenario-backends)).
 
 ### `invalid-request` errors
 
-The host rejected the request, or the guest's side of its session: messages with no text, a guest tool named after a reserved name (`read`, `list`, `write`, or the SDK's `check`), function-tool `parameters` that are not valid JSON, a `format` schema that is not JSON, or a tool result or check correction over the host's per-result size cap. The message names the violation. A `Question<T>` also reports `InvalidRequest` when a candidate never deserialized as `T` and nothing was accepted — the steering schema and the type disagree.
+The host rejected the request, or the guest's side of its session: messages with no text, a guest tool named after a reserved name (`read`, `list`, `write`, or the SDK's `check`), a tool name given twice, function-tool `parameters` that are not valid JSON, a `format` schema that is not JSON, or a tool result or check correction over the host's per-result size cap. The message names the violation. A `Question<T>` also reports `InvalidRequest` when a candidate never deserialized as `T` and nothing was accepted — the steering schema and the type disagree.
 
 ### `no local tree on this node` (cursor backend)
 
 The cursor backend requires a workspace: the host must mount a directory (`[[mount]]`/`--mount`) *and* the guest must lend it via `grants.workspace`. Absent either half, the spawn is refused.
-
-### MCP tools rejected (`genai` backend)
-
-`Tool::Mcp` grants are only supported by the cursor backend. Use `omnia-cursor`, or restrict the request to `Tool::Function` declarations.
 
 ## Compile / AOT
 

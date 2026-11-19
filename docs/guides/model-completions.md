@@ -41,7 +41,7 @@ The pieces:
 - **`Sections`** — a guest-side builder that assembles the `system` and `messages` channels from structured fields (role, task, context, ...), so prompts stay consistent across guests.
 - **`model`** — unset here, so the completion opens the model `default`. A model is a binding the deployment declares, and a name it does not declare fails with `not-found`.
 - **`format`** — `Text`, `Json`, or `Schema` with a JSON Schema. A steering hint for the provider (`response_format` where it constrains decoding, instruction prose where it does not); nothing validates the answer against it. To judge answers, ask for a check (below).
-- **`tools`** — functions the guest itself declares for the model to call, or MCP servers to attach (backend-dependent; see below).
+- **`tools`** — functions the guest itself declares for the model to call, each name given once.
 - **`grants`** — capabilities the guest lends to the completion.
 
 ### Answering tool calls
@@ -106,7 +106,7 @@ This grant is what drives the host-injected tools. The names `read`, `list`, and
 
 ### `ModelDefault` — deterministic echo (in-tree)
 
-The default backend answers every completion with its own prompt: the last message echoed as a string for `format::text`, wrapped as `{"echo": ...}` for `format::json`. That makes guest wiring and prompt assembly smoke-testable with no live model. It serves the models `MODEL_NAMES` lists, comma-separated, and `default` alone when it is unset; any other name is `not-found`. What an echo cannot honour is `unsupported`: a `format::schema` (no echo can conform to an arbitrary guest schema), a set `generation` field, and an MCP server. So bind a real backend for typed answers. A `check` request gets its one candidate offered once, and a rejection is `exhausted`, which the SDK reports as `Error::BudgetExhausted`.
+The default backend answers every completion with its own prompt: the last message echoed as a string for `format::text`, wrapped as `{"echo": ...}` for `format::json`. That makes guest wiring and prompt assembly smoke-testable with no live model. It serves the models `MODEL_NAMES` lists, comma-separated, and `default` alone when it is unset; any other name is `not-found`. What an echo cannot honour is `unsupported`: a `format::schema` (no echo can conform to an arbitrary guest schema) and a set `generation` field. So bind a real backend for typed answers. A `check` request gets its one candidate offered once, and a rejection is `exhausted`, which the SDK reports as `Error::BudgetExhausted`.
 
 For tests, CI, and local development of model guests, define an inline `ModelClient` impl that returns a fixed answer — no network, no credentials, fully deterministic, and (unlike an echo) able to satisfy `format::schema` (see the recipe in [Testing Policy](testing-policy.md#scenario-backends)). The [`model` example](../../examples/model/) serves its fixed schema answer that way:
 
@@ -117,7 +117,7 @@ cargo run --example model
 
 ### `omnia-genai` — provider APIs (omnia-backends repo)
 
-Calls LLM provider APIs in-process via the [`genai`](https://crates.io/crates/genai) SDK (OpenAI, Anthropic, Gemini, Groq, Ollama, and others). Provider API keys are read from the environment at call time (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, ...). It advertises the request's declared function tools — plus the host-injected `read`/`list` workspace tools when the guest lent a workspace — and drives the bounded session tool loop: `read`/`list` execute host-side against the lent tree, while every other model tool call is forwarded back through the host to the guest's handler. When the request asks for a `check`, each final text is offered to the guest and a rejection is appended to the provider conversation as the next user turn. MCP tools are not supported by this backend — use `omnia-cursor` for that.
+Calls LLM provider APIs in-process via the [`genai`](https://crates.io/crates/genai) SDK (OpenAI, Anthropic, Gemini, Groq, Ollama, and others). Provider API keys are read from the environment at call time (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, ...). It advertises the request's declared function tools — plus the host-injected `read`/`list` workspace tools when the guest lent a workspace — and drives the bounded session tool loop: `read`/`list` execute host-side against the lent tree, while every other model tool call is forwarded back through the host to the guest's handler. When the request asks for a `check`, each final text is offered to the guest and a rejection is appended to the provider conversation as the next user turn.
 
 ### `omnia-cursor` — Cursor SDK bridge (omnia-backends repo)
 
@@ -127,7 +127,6 @@ Drives one bridge-managed Cursor agent per completion through [`cursor-sdk-bridg
 - The agent runs in the directory behind the guest's `grants.workspace` mount; without one, the completion still runs tools-only in a private empty directory with every built-in tool disabled.
 - The agent's bridge, and every command it runs, sits inside a kernel boundary around the lend; what it may reach beyond — the hosts, the `~/` toolchain roots, the variables — is the request's `grants.worker`, which requires a lend.
 - `Tool::Function` declarations become SDK custom tools: the agent's calls route back through the backend's loopback callback into the session (`ToolHost::call_tool`), so the guest's handler answers under the host's session limits.
-- `Tool::Mcp` grants pass inline as the agent's `mcp_servers`; nothing is written into the workspace.
 - A `check` request offers each agent answer to the guest and sends a rejection back into the same agent session as the next prompt.
 
 Wire it like any other backend:
@@ -164,4 +163,4 @@ impl Guest for HttpGuest {
 
 The `McpServer` trait has five methods: `info` (server identity), `tools` (tool declarations with JSON Schema inputs), `call_tool`, and optionally `resources`/`read_resource`. The router handles the JSON-RPC and Streamable HTTP transport details.
 
-The [`mcp`](../../examples/mcp/) example serves a small document set; combined with the cursor backend and an MCP grant, a completion can call back into guest-served tools — a guest-to-model-to-guest loop entirely under host mediation.
+The [`mcp`](../../examples/mcp/) example serves a small document set. A completion reaches the tools a guest runs through the request's function tools instead, so this server is for MCP clients outside the deployment.

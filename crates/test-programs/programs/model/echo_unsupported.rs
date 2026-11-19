@@ -1,12 +1,10 @@
-//! The echo default refuses what it cannot honour: `format::schema`, a
-//! generation control, and an MCP server are each `unsupported`.
+//! The echo default refuses what it cannot honour: `format::schema` and a
+//! generation control are each `unsupported`.
 
 #![cfg(target_arch = "wasm32")]
 
 use omnia_sdk::WasiProvider;
-use omnia_sdk::model::{
-    Error, Format, Generation, McpGrant, Model as _, Request, SchemaFormat, Tool,
-};
+use omnia_sdk::model::{Error, Format, Generation, Model as _, Request, SchemaFormat};
 use test_programs::{VERDICT_SCHEMA, user};
 
 omnia_sdk::api::command::export!(scenario);
@@ -22,19 +20,13 @@ async fn scenario() {
         .messages(vec![user("hi")])
         .generation(Generation::builder().temperature(0.25).build())
         .build();
-    let server = Request::builder()
-        .messages(vec![user("hi")])
-        .tools(vec![Tool::Mcp(McpGrant::builder().name("docs").url("https://mcp.example").build())])
-        .build();
 
-    for (request, needle) in [
-        (schema, "cannot satisfy format::schema"),
-        (generation, "ignores generation controls"),
-        (server, "reaches no MCP server"),
-    ] {
+    for (request, needle) in
+        [(schema, "cannot satisfy format::schema"), (generation, "ignores generation controls")]
+    {
         let error = WasiProvider.complete(request).await.expect_err("the echo refuses");
         assert!(
-            matches!(error, Error::Backend(ref detail) if detail.starts_with("unsupported: ") && detail.contains(needle)),
+            matches!(error, Error::Unsupported(ref detail) if detail.contains(needle)),
             "unexpected: {error:?}"
         );
     }

@@ -10,7 +10,7 @@ Implements `omnia:model`, the interface the SDK's `Model` calls, over one
 - A guest opens a model by name and begins completions through the handle
   `open` returns. A name the deployment does not declare fails with
   `not-found`. The SDK opens `default` for a request that names no model,
-  and a backend receives it as `Request::model: None`.
+  and a backend receives the name as `Request::model`.
 - A completion is a session. On its `calls` the host asks the guest to run
   a tool, or to judge a candidate answer when the request sets `check`. The
   guest answers each call by its `id` on `results`, in any order.
@@ -24,17 +24,15 @@ Implements `omnia:model`, the interface the SDK's `Model` calls, over one
     which it is `invalid`.
 - The host validates nothing about the answer. `format` steers the
   provider, and acceptance belongs to the guest's `check`.
-- `mcp` is optional. Through it a backend offers the model tools on Model
-  Context Protocol servers, which the backend calls itself.
 - A backend picks a failure's case by returning an
   `omnia_wasi_model::Error`, and a spent budget by returning an
   `omnia_wasi_model::Exhausted`. Any other failure is `other`.
-- The host itself answers `unsupported` only for an MCP server's
-  `authorization`.
+- The host passes `effort` through by name, so a backend that does not
+  know a level fails it with `invalid`.
 
 ## Backend
 
-- **Default**: `ModelDefault` (echo). It answers every completion with its own prompt, so guest wiring runs deterministically with no live model. The last message comes back as a string for `format::text`, and wrapped as `{"echo": ...}` for `format::json`. It serves the models `MODEL_NAMES` lists, comma-separated, and `default` alone when it is unset. Every other name is refused with `not-found`. What an echo cannot honour is `unsupported`: a `format::schema`, a set `generation` field, and an MCP server. A `check` request gets exactly one candidate, so a rejection is `exhausted`. Tests that need a schema answer or a tool turn script `omnia_test::host::ScriptedModel` instead.
+- **Default**: `ModelDefault` (echo). It answers every completion with its own prompt, so guest wiring runs deterministically with no live model. The last message comes back as a string for `format::text`, and wrapped as `{"echo": ...}` for `format::json`. It serves the models `MODEL_NAMES` lists, comma-separated, and `default` alone when it is unset. Every other name is refused with `not-found`. What an echo cannot honour is `unsupported`: a `format::schema` and a set `generation` field. A `check` request gets exactly one candidate, so a rejection is `exhausted`. Tests that need a schema answer or a tool turn script `omnia_test::host::ScriptedModel` instead.
 
 - **Production**: [`omnia-genai`](https://github.com/augentic/omnia-backends/tree/main/crates/genai) (provider APIs via the genai SDK), [`omnia-cursor`](https://github.com/augentic/omnia-backends/tree/main/crates/cursor) (bridge-managed Cursor agent) — a one-line swap in the host, guests untouched (see the [Production Backends guide](https://github.com/augentic/omnia/blob/main/docs/guides/production-backends.md)).
 

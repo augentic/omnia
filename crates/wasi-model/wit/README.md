@@ -1,8 +1,8 @@
 # WebAssembly Interface Types (WIT)
 
 `model.wit` is `omnia:model`, owned by this crate and edited here.
-Every backend serves `types` and `completion`, the `core` world.
-`mcp` is optional, and `imports` adds it.
+Every backend serves `types` and `completion`, the `core` world. `imports`
+includes `core`, and an optional interface joins it there.
 
 ## Deps
 

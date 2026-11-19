@@ -20,27 +20,20 @@ resource model {
   complete: async func(request: request, results: stream<call-result>)
     -> result<session, error>;
 }
-
-// mcp
-complete: async func(
-  model: borrow<model>, request: request, servers: list<server>,
-  results: stream<call-result>,
-) -> result<session, error>;
 ```
 
 | Interface | Role |
 | --------- | ---- |
 | `types` | The types the others share: the `error`, the parts of a request, the calls and their results, the `reply`, and `exhausted`. |
 | `completion` | `open` returns a handle on a model the deployment declares. An undeclared name fails with `not-found`, here or on the first completion. `complete` begins a completion. |
-| `mcp` | Optional. A completion with the tools of Model Context Protocol servers offered beside the request's own. The backend calls these tools itself, and the guest sees none of their calls. |
 
-The `core` world holds `types` and `completion`, which every backend serves. The `imports` world adds `mcp`, and a backend answers `unsupported` for what it does not serve.
+The `core` world holds `types` and `completion`, which every backend serves. The `imports` world includes `core`, and an optional interface joins it there.
 
-Guests normally reach these through the `omnia_sdk::Model` trait, which `omnia_sdk::WasiProvider` implements on `wasm32` over the raw bindings at `omnia_wasi_model::omnia::{completion, mcp, types}`. `Model::complete` and `Model::complete_with` run the session and hand each tool call to a closure (see the [guide](../guides/model-completions.md)). Each maps to the WIT as follows:
+Guests normally reach these through the `omnia_sdk::Model` trait, which `omnia_sdk::WasiProvider` implements on `wasm32` over the raw bindings at `omnia_wasi_model::omnia::{completion, types}`. `Model::complete` and `Model::complete_with` run the session and hand each tool call to a closure (see the [guide](../guides/model-completions.md)). Each maps to the WIT as follows:
 
 - It opens `Request::model`, or `default` when that is `None`.
-- It calls `mcp::complete` when the request grants an MCP server, and `model.complete` otherwise.
-- A `Tool::Function` is a `tool`, and an empty description is `none`. A `Tool::Mcp` is a `server` with no `authorization`, and an empty allowlist is `none`.
+- A `Tool::Function` is a `tool`, and an empty description is `none`.
+- An `Effort` is its level's name: `low`, `medium`, `high`, or an `Effort::Other` level as written.
 - A check reaches the handler as a `ToolCall` named `check` (`model::CHECK_TOOL`) whose `arguments` are the candidate, and its answer goes back as a `verdict`. So a declared tool named `check` fails with `InvalidRequest`.
 
 ## The session
@@ -97,7 +90,7 @@ The guest names the model when it opens it, so a request carries none.
 
 `temperature`, `top-p`, `max-tokens`, `stop-sequences`, `seed`, and `effort`. `max-tokens` bounds one response, and a completion that calls tools takes several. An absent field takes the backend's default, and a backend carries every field given or fails with `unsupported`.
 
-`effort` is how much the model reasons before it answers. `low`, `medium`, and `high` are portable, and a level the backend does not know is `invalid`. This host also knows `minimal`.
+`effort` is how much the model reasons before it answers, by the level's name. `low`, `medium`, and `high` are portable. The host passes a level through as written, and a backend fails one it does not know with `invalid`.
 
 ### `format`
 
@@ -124,22 +117,11 @@ A backend that runs out of candidates on a rejection ends the completion `exhaus
 
 | Field | Meaning |
 | ----- | ------- |
-| `name` | The name the model calls the tool by. A portable name is 1 to 64 characters long and holds only ASCII letters, digits, `_`, and `-`. |
+| `name` | The name the model calls the tool by, given once in a request. A portable name is 1 to 64 characters long and holds only ASCII letters, digits, `_`, and `-`. |
 | `description` | What the tool does, for the model to read. |
 | `input-schema` | The JSON Schema of the tool's arguments. A portable one has a root type of `object`. |
 
-The model calls a tool through the session's `calls`, and the guest runs it. MCP servers are not tools of the request: they are the `servers` of `mcp::complete`.
-
-### `mcp` servers
-
-| Field | Meaning |
-| ----- | ------- |
-| `name` | Names the server to the model, portable as a tool name is. |
-| `url` | The server's HTTP endpoint. |
-| `authorization` | The bearer token the backend sends the server, `none` to send none. |
-| `allowed-tools` | The tools the model may call, `none` for every tool the server lists. |
-
-A backend carries every field given or fails with `unsupported`.
+The model calls a tool through the session's `calls`, and the guest runs it.
 
 ### `grants`
 
@@ -165,12 +147,9 @@ The host makes these checks whatever the backend. Each fails the call it applies
 
 - `open` with an empty name is `invalid`.
 - A request whose messages hold no text is `invalid`.
-- A tool named `read`, `list`, or `write` is `invalid`, and so is one whose `input-schema` is not JSON.
+- A tool named `read`, `list`, or `write` is `invalid`, and so is a name given twice or an `input-schema` that is not JSON.
 - A `format::schema` whose schema is not JSON is `invalid`.
-- An `effort` this host does not know is `invalid`.
 - A `worker` grant without a `workspace` is `invalid`, and so is an entry that breaks its shape.
-- An MCP server whose `allowed-tools` is an empty list is `invalid`.
-- An MCP server that sets an `authorization` is `unsupported`. It is the one case the host answers `unsupported` for.
 - A `workspace` whose root is not one of the guest's mounts, or is not a directory, is `denied`.
 - A `workspace` subpath with an empty, `.`, or `..` segment, or a `\`, is `invalid`, and one that does not exist is `not-found`.
 
@@ -215,7 +194,7 @@ A completion that spent a budget before it had an answer resolves `reply` to `ok
 | `not-found` | The deployment does not declare the model, or the place lent does not exist. |
 | `denied` | The provider refused the caller, or the guest lends a place it does not hold. |
 | `invalid` | The request was rejected, such as a reserved tool name or a schema that is not JSON. The guest's side of the session fails this way too (see [Host checks](#host-checks)). |
-| `unsupported` | A valid request this backend cannot serve, such as a `generation` field, a `format`, or an MCP server it cannot carry. |
+| `unsupported` | A valid request this backend cannot serve, such as a `generation` field or a `format` it cannot carry. |
 | `unavailable` | The provider did not answer, or turned the call away for now as a rate limit does. |
 | `other` | Any other failure, such as a call to a tool the request does not declare. |
 
@@ -225,14 +204,15 @@ The SDK reports these as an `omnia_sdk::model::Error`:
 
 - `invalid` is `InvalidRequest`.
 - `exhausted` is `BudgetExhausted`. Its detail is the last correction when the last candidate was rejected, and the `exhausted` detail otherwise.
-- Every other case is `Backend`, its detail prefixed with the case, as in `not-found: …`.
+- `other` is `Backend`.
+- Every other case is the variant of its name: `NotFound`, `Denied`, `Unsupported`, or `Unavailable`.
 
-`ToolFailed` is never returned: a tool's failure text reaches the model instead.
+Each converts to an `omnia_sdk::Error` coded as `model::Error::code` names it: a `BadRequest` for `InvalidRequest` and `BudgetExhausted`, a `BadGateway` for `Unavailable` and `Backend`, and a `ServerError` for the rest.
 
 ## Backends implementing this interface
 
 | Backend | Location | Notes |
 | ------- | -------- | ----- |
-| `ModelDefault` | in-tree (`wasi-model`) | Deterministic echo over the models `MODEL_NAMES` declares (comma-separated, default `default`). A `format::text` answer is the last message, and a `format::json` one wraps it as `{"echo": ...}`. A `format::schema`, a set `generation` field, and an MCP server are `unsupported`. It honours `check` once, so a rejection is `exhausted`. |
-| `omnia-genai` | omnia-backends repo | Provider APIs in-process. Drives the function-tool session loop and the `check` loop. Advertises `shell` over a lend beneath a configured shell root, bounded by `grants.worker`. No MCP. |
-| `omnia-cursor` | omnia-backends repo | Bridge-managed Cursor agent (`cursor-sdk-bridge`). Function tools bridge into the session as SDK custom tools, and MCP servers pass inline with an advisory allowlist. Workspace optional (tools-only in a private directory when unlent). 120s default inactivity timeout. |
+| `ModelDefault` | in-tree (`wasi-model`) | Deterministic echo over the models `MODEL_NAMES` declares (comma-separated, default `default`). A `format::text` answer is the last message, and a `format::json` one wraps it as `{"echo": ...}`. A `format::schema` and a set `generation` field are `unsupported`. It honours `check` once, so a rejection is `exhausted`. |
+| `omnia-genai` | omnia-backends repo | Provider APIs in-process. Drives the function-tool session loop and the `check` loop. Advertises `shell` over a lend beneath a configured shell root, bounded by `grants.worker`. |
+| `omnia-cursor` | omnia-backends repo | Bridge-managed Cursor agent (`cursor-sdk-bridge`). Function tools bridge into the session as SDK custom tools. Workspace optional (tools-only in a private directory when unlent). 120s default inactivity timeout. |

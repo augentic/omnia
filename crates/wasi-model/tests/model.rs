@@ -103,21 +103,21 @@ impl ModelClient for IgnoringToolFailure {
 #[derive(Clone, Debug)]
 struct Faulting {
     inner: ScriptedModel,
-    opened: Arc<Mutex<Vec<Option<String>>>>,
+    opened: Arc<Mutex<Vec<String>>>,
 }
 
 impl ModelClient for Faulting {
     fn complete(&self, request: Request, tool_host: Arc<dyn ToolHost>) -> FutureResult<Answer> {
         self.opened.lock().expect("opened models").push(request.model.clone());
-        let fault: anyhow::Error = match request.model.as_deref() {
-            None => return self.inner.complete(request, tool_host),
-            Some("not-found") => Error::NotFound("not found by the suite".to_owned()).into(),
-            Some("denied") => Error::Denied("denied by the suite".to_owned()).into(),
-            Some("invalid") => Error::Invalid("invalid in the suite".to_owned()).into(),
-            Some("unsupported") => Error::Unsupported("unsupported by the suite".to_owned()).into(),
-            Some("unavailable") => Error::Unavailable("unavailable in the suite".to_owned()).into(),
-            Some("exhausted") => Exhausted::new("exhausted in the suite").into(),
-            Some(_) => anyhow::anyhow!("an untyped backend failure"),
+        let fault: anyhow::Error = match request.model.as_str() {
+            "default" => return self.inner.complete(request, tool_host),
+            "not-found" => Error::NotFound("not found by the suite".to_owned()).into(),
+            "denied" => Error::Denied("denied by the suite".to_owned()).into(),
+            "invalid" => Error::Invalid("invalid in the suite".to_owned()).into(),
+            "unsupported" => Error::Unsupported("unsupported by the suite".to_owned()).into(),
+            "unavailable" => Error::Unavailable("unavailable in the suite".to_owned()).into(),
+            "exhausted" => Exhausted::new("exhausted in the suite").into(),
+            _ => anyhow::anyhow!("an untyped backend failure"),
         };
         async move { Err(fault) }.boxed()
     }
@@ -207,6 +207,7 @@ async fn model_request_shape() {
     assert_eq!(seen.len(), 1);
     assert_eq!(seen[0].tools, ["docs"]);
     assert_eq!(seen[0].temperature, Some(0.25));
+    assert_eq!(seen[0].effort.as_deref(), Some("max"));
     assert_eq!(
         seen[0].worker,
         Some(SeenWorker {
@@ -243,16 +244,16 @@ async fn model_error_codes() {
     // the host refused every other call before it reached the backend
     let opened = faulting.opened.lock().expect("opened models").clone();
     assert_eq!(
-        opened.iter().map(Option::as_deref).collect::<Vec<_>>(),
+        opened,
         [
-            Some("not-found"),
-            Some("denied"),
-            Some("invalid"),
-            Some("unsupported"),
-            Some("unavailable"),
-            Some("other"),
-            Some("exhausted"),
-            None,
+            "not-found",
+            "denied",
+            "invalid",
+            "unsupported",
+            "unavailable",
+            "other",
+            "exhausted",
+            "default"
         ]
     );
     faulting.inner.assert_exhausted();
@@ -289,6 +290,8 @@ async fn model_usage() {
             input_tokens: 3,
             output_tokens: 5,
             reasoning_tokens: Some(1),
+            cache_read_tokens: Some(2),
+            cache_write_tokens: None,
         }),
         transcript: None,
     };
@@ -615,7 +618,7 @@ fn candidate(text: &str) -> String {
 fn mixed_roles() {
     let messages = [(Role::User, "hi"), (Role::Assistant, "yo"), (Role::System, "note")];
     let prompt = Request {
-        model: None,
+        model: "default".to_owned(),
         system: Some("be terse".to_owned()),
         messages: messages
             .into_iter()

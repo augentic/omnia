@@ -2,14 +2,14 @@
 
 use std::future::Future;
 
-use omnia_wasi_model::omnia::{completion, mcp, types};
+use omnia_wasi_model::omnia::{completion, types};
 use omnia_wasi_model::wit_stream;
 use wasip3::filesystem::preopens;
 
 use super::lend::resolve_lend;
 use crate::model::{
-    CHECK_TOOL, Effort, Error, Format, Function, Generation, McpGrant, Message, Reply, Request,
-    Role, Tool, ToolCall, Usage, WorkerGrant,
+    CHECK_TOOL, Error, Format, Function, Generation, Message, Reply, Request, Role, Tool, ToolCall,
+    Usage, WorkerGrant,
 };
 use crate::{Model, WasiProvider};
 
@@ -39,17 +39,13 @@ impl Model for WasiProvider {
             },
         };
 
-        // split the guest's tools from the MCP servers, refusing the name a check arrives under
+        // the guest's tools, refusing the name a check arrives under
         let mut tools = Vec::new();
-        let mut servers = Vec::new();
-        for tool in request.tools {
-            match tool {
-                Tool::Function(function) if function.name == CHECK_TOOL => {
-                    return Err(Error::InvalidRequest(format!("reserved tool name: {CHECK_TOOL}")));
-                }
-                Tool::Function(function) => tools.push(function.into()),
-                Tool::Mcp(grant) => servers.push(grant.into()),
+        for Tool::Function(function) in request.tools {
+            if function.name == CHECK_TOOL {
+                return Err(Error::InvalidRequest(format!("reserved tool name: {CHECK_TOOL}")));
             }
+            tools.push(function.into());
         }
 
         let wire = completion::Request {
@@ -69,12 +65,7 @@ impl Model for WasiProvider {
         let name = request.model.unwrap_or_else(|| DEFAULT_MODEL.to_owned());
         let model = completion::open(name).await?;
         let (mut results, results_rx) = wit_stream::new();
-        let session = if servers.is_empty() {
-            model.complete(wire, results_rx).await?
-        } else {
-            mcp::complete(&model, wire, servers, results_rx).await?
-        };
-        let completion::Session { mut calls, reply } = session;
+        let completion::Session { mut calls, reply } = model.complete(wire, results_rx).await?;
 
         // serial by design: each result feeds the same model turn; a rejected
         // write means the host stopped reading, and the closed stream ends the loop
@@ -146,18 +137,8 @@ impl From<Generation> for types::Generation {
             max_tokens: generation.max_tokens,
             stop_sequences: generation.stop,
             seed: generation.seed,
-            effort: generation.effort.map(|effort| level(effort).to_owned()),
+            effort: generation.effort.as_ref().map(|effort| effort.as_str().to_owned()),
         }
-    }
-}
-
-// The level `omnia:model` names an effort by.
-const fn level(effort: Effort) -> &'static str {
-    match effort {
-        Effort::Minimal => "minimal",
-        Effort::Low => "low",
-        Effort::Medium => "medium",
-        Effort::High => "high",
     }
 }
 
@@ -184,17 +165,6 @@ impl From<Function> for types::Tool {
     }
 }
 
-impl From<McpGrant> for mcp::Server {
-    fn from(grant: McpGrant) -> Self {
-        Self {
-            name: grant.name,
-            url: grant.url,
-            authorization: None,
-            allowed_tools: Some(grant.tools).filter(|tools| !tools.is_empty()),
-        }
-    }
-}
-
 impl From<WorkerGrant> for types::WorkerGrant {
     fn from(grant: WorkerGrant) -> Self {
         Self {
@@ -217,29 +187,24 @@ impl From<types::Reply> for Reply {
 impl From<types::Usage> for Usage {
     fn from(usage: types::Usage) -> Self {
         Self {
-            input_tokens: saturate(usage.input_tokens),
-            output_tokens: saturate(usage.output_tokens),
-            reasoning_tokens: usage.reasoning_tokens.map(saturate),
+            input_tokens: usage.input_tokens,
+            output_tokens: usage.output_tokens,
+            reasoning_tokens: usage.reasoning_tokens,
+            cache_read_tokens: usage.cache_read_tokens,
+            cache_write_tokens: usage.cache_write_tokens,
         }
     }
 }
 
-fn saturate(tokens: u64) -> u32 {
-    u32::try_from(tokens).unwrap_or(u32::MAX)
-}
-
-// The SDK's four cases name the request's faults and the budget's; every
-// other failure is the backend's, prefixed with its case.
 impl From<types::Error> for Error {
     fn from(error: types::Error) -> Self {
-        let (case, detail) = match error {
-            types::Error::Invalid(detail) => return Self::InvalidRequest(detail),
-            types::Error::NotFound(detail) => ("not-found", detail),
-            types::Error::Denied(detail) => ("denied", detail),
-            types::Error::Unsupported(detail) => ("unsupported", detail),
-            types::Error::Unavailable(detail) => ("unavailable", detail),
-            types::Error::Other(detail) => ("other", detail),
-        };
-        Self::Backend(format!("{case}: {detail}"))
+        match error {
+            types::Error::Invalid(detail) => Self::InvalidRequest(detail),
+            types::Error::NotFound(detail) => Self::NotFound(detail),
+            types::Error::Denied(detail) => Self::Denied(detail),
+            types::Error::Unsupported(detail) => Self::Unsupported(detail),
+            types::Error::Unavailable(detail) => Self::Unavailable(detail),
+            types::Error::Other(detail) => Self::Backend(detail),
+        }
     }
 }

@@ -201,7 +201,7 @@ When writing `wasm32`-only code (as in `examples/`), you can also call the `omni
 | Config | `Config` | `omnia_wasi_config` | `examples/config` | — |
 | Identity/OAuth | `Identity` | `omnia_wasi_identity::omnia::credentials` | `examples/identity` | — |
 | Outbound HTTP | `HttpClient` | `omnia_wasi_http` | `examples/http-proxy` | — |
-| Model completions | `Model` | `omnia_wasi_model::omnia::{completion, mcp}` | `examples/model` | [Model Completions](model-completions.md) |
+| Model completions | `Model` | `omnia_wasi_model::omnia::{completion, types}` | `examples/model` | [Model Completions](model-completions.md) |
 | Version control | `Vcs` | `omnia_wasi_vcs` | — | — |
 | Dynamic plugins | `Plugins` | `omnia_sdk::plugins` | — | — |
 | WebSockets | `WebSockets` | `omnia_wasi_websocket` | `examples/websocket` | [Messaging § WebSockets](messaging.md#websockets) |

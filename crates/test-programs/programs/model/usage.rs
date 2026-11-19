@@ -20,6 +20,8 @@ async fn scenario() {
             input_tokens: 3,
             output_tokens: 5,
             reasoning_tokens: Some(1),
+            cache_read_tokens: Some(2),
+            cache_write_tokens: None,
         })
     );
 }

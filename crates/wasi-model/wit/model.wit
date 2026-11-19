@@ -270,7 +270,8 @@ interface completion {
     /// `none` takes the backend's defaults.
     generation: option<generation>,
     format: format,
-    /// The tools the guest runs for the model.
+    /// The tools the guest runs for the model. A name given twice is
+    /// `invalid`.
     tools: list<tool>,
     grants: grants,
     /// Whether the guest judges each candidate answer.
@@ -316,39 +317,6 @@ interface completion {
   open: async func(name: string) -> result<model, error>;
 }
 
-/// Optional: tools served by Model Context Protocol servers, which the
-/// backend calls itself.
-///
-/// The guest runs none of these tools and sees none of their calls.
-interface mcp {
-  use types.{call-result, error};
-  use completion.{model, request, session};
-
-  /// A server whose tools the model may call.
-  ///
-  /// A backend carries every field given or fails with `unsupported`.
-  record server {
-    /// Names the server to the model, portable as a tool name is.
-    name: string,
-    /// The server's HTTP endpoint.
-    url: string,
-    /// The bearer token the backend sends the server, `none` to send none.
-    authorization: option<string>,
-    /// The tools the model may call, `none` for every tool the server
-    /// lists. An empty list is `invalid`.
-    allowed-tools: option<list<string>>,
-  }
-
-  /// Begin a completion as `model.complete` does, with the tools of
-  /// `servers` offered beside the request's own.
-  ///
-  /// It fails as `model.complete` does.
-  complete: async func(
-    model: borrow<model>, request: request, servers: list<server>,
-    results: stream<call-result>,
-  ) -> result<session, error>;
-}
-
 /// What every backend serves.
 world core {
   import types;
@@ -359,5 +327,4 @@ world core {
 /// serve.
 world imports {
   include core;
-  import mcp;
 }

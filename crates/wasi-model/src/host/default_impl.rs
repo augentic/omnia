@@ -5,9 +5,9 @@
 //! `format`, so guest wiring and prompt assembly can be smoke-tested with no
 //! live model. What an echo cannot honour is `unsupported`: a
 //! `format::schema` (no fabricated value can conform to an arbitrary guest
-//! schema), a generation control, or an MCP server. A request that asks for
-//! a `check` gets exactly one: the echo has no second candidate, so a
-//! rejection is `exhausted`.
+//! schema) or a generation control. A request that asks for a `check` gets
+//! exactly one: the echo has no second candidate, so a rejection is
+//! `exhausted`.
 //! Deployments bind a real backend (`omnia-genai`, `omnia-cursor`); tests
 //! define inline canned `ModelClient` impls that return a fixed answer.
 
@@ -104,7 +104,7 @@ impl ModelClient for ModelDefault {
 impl ModelDefault {
     // Echo the last message's content, shaped to the request's `format`.
     fn echo(&self, request: &Request) -> Result<String, Error> {
-        let name = request.model.as_deref().unwrap_or("default");
+        let name = &request.model;
         if !self.models.contains(name) {
             return Err(Error::NotFound(format!("model `{name}` is not declared")));
         }
@@ -117,9 +117,6 @@ impl ModelDefault {
         };
         if request.generation.as_ref().is_some_and(Generation::is_set) {
             return Err(unsupported("ignores generation controls"));
-        }
-        if !request.mcp_servers().is_empty() {
-            return Err(unsupported("reaches no MCP server"));
         }
         Ok(answer)
     }

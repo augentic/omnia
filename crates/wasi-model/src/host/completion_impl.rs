@@ -11,7 +11,6 @@ use wasmtime::component::{Access, Accessor, FutureReader, Resource, StreamReader
 use crate::host::generated::omnia::model::completion::{
     self, Host, HostModel, HostModelWithStore, HostWithStore, Session,
 };
-use crate::host::generated::omnia::model::mcp::Server;
 use crate::host::generated::omnia::model::types::CallResult;
 use crate::host::session::{
     CallsProducer, Halt, Replied, ReplyTask, ResultsConsumer, SessionClose, ToolSession,
@@ -47,8 +46,7 @@ impl<B: Send + 'static> HostModelWithStore<StoreCtx<B>> for WasiModel {
         request: completion::Request, results: StreamReader<CallResult>,
     ) -> impl Future<Output = Result<Session, Error>> {
         std::future::ready(
-            accessor
-                .with(|mut access| Self::begin(&mut access, &self_, request, Vec::new(), results)),
+            accessor.with(|mut access| Self::begin(&mut access, &self_, request, results)),
         )
     }
 
@@ -61,14 +59,13 @@ impl<B: Send + 'static> HostModelWithStore<StoreCtx<B>> for WasiModel {
 }
 
 impl WasiModel {
-    // Begin a completion of `request` by the model `handle` names, with the
-    // tools of `servers` beside the request's own. A request the host
-    // refuses fails here, and closes `results`.
-    pub(crate) fn begin<B: Send + 'static>(
+    // Begin a completion of `request` by the model `handle` names. A request
+    // the host refuses fails here, and closes `results`.
+    fn begin<B: Send + 'static>(
         access: &mut Access<'_, StoreCtx<B>, Self>, handle: &Resource<ModelHandle>,
-        request: completion::Request, servers: Vec<Server>, mut results: StreamReader<CallResult>,
+        request: completion::Request, mut results: StreamReader<CallResult>,
     ) -> Result<Session, Error> {
-        let (request, workspace) = match Self::admit(access, handle, request, servers) {
+        let (request, workspace) = match Self::admit(access, handle, request) {
             Ok(admitted) => admitted,
             Err(error) => {
                 results.close(&mut *access)?;
@@ -113,10 +110,10 @@ impl WasiModel {
     // The request as its backend receives it, and the workspace it lends.
     fn admit<B>(
         access: &mut Access<'_, StoreCtx<B>, Self>, handle: &Resource<ModelHandle>,
-        request: completion::Request, servers: Vec<Server>,
+        request: completion::Request,
     ) -> Result<(Request, Option<Workspace>), Error> {
         let name = access.get().table.get(handle)?.name.clone();
-        let request = Request::new(name, request, servers)?;
+        let request = Request::new(name, request);
         request.validate()?;
 
         let workspace = match &request.grants.workspace {

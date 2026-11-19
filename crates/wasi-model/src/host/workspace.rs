@@ -8,7 +8,7 @@
 //! reopening the subpath beneath it so the lend can never escape the mount.
 
 use std::io::{self, Read as _};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context as _, anyhow, ensure};
@@ -137,11 +137,14 @@ pub fn resolve(
     })
 }
 
-// Refuse a subpath that is not a plain relative `/`-separated path.
+// Refuse a subpath that is not a plain relative `/`-separated path. The
+// component walk is what catches a Windows drive prefix such as `C:evil`,
+// which is not a child name there.
 fn check_subpath(subpath: &str) -> Result<(), Error> {
     let plain = !subpath.starts_with('/')
         && !subpath.contains('\\')
-        && subpath.split('/').all(|part| !part.is_empty() && part != "." && part != "..");
+        && subpath.split('/').all(|part| !part.is_empty() && part != "." && part != "..")
+        && Path::new(subpath).components().all(|part| matches!(part, Component::Normal(_)));
     if !plain {
         return Err(Error::Invalid(format!(
             "grants.workspace subpath `{subpath}` is not a plain relative path"

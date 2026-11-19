@@ -1,23 +1,20 @@
 //! The request a backend receives, the checks the host holds it to, and
 //! prompt shaping.
 
+use std::collections::HashSet;
 use std::fmt;
 use std::net::IpAddr;
 
-use crate::host::generated::omnia::model::{completion, mcp, types};
+use crate::host::generated::omnia::model::{completion, types};
 use crate::host::{Error, Format, Grants, Message, Role, WorkerGrant};
 
 const RESERVED_TOOLS: &[&str] = &["read", "list", "write"];
 
-// The model a request opens when it names none, which a backend receives as
-// `Request::model: None`.
-const DEFAULT_MODEL: &str = "default";
-
 /// A guest's request, as its backend receives it.
 #[derive(Debug)]
 pub struct Request {
-    /// The model the guest opened, `None` for `default`.
-    pub model: Option<String>,
+    /// The name the guest opened the model by.
+    pub model: String,
     /// Standing instructions, read before `messages`.
     pub system: Option<String>,
     /// The conversation so far, oldest first.
@@ -26,7 +23,7 @@ pub struct Request {
     pub generation: Option<Generation>,
     /// The shape the answer should take.
     pub format: Format,
-    /// The tools the guest runs, then the MCP servers the guest offers.
+    /// The tools the guest runs for the model.
     pub tools: Vec<Tool>,
     /// What the guest lends the completion.
     pub grants: Grants,
@@ -50,21 +47,10 @@ pub struct Generation {
     pub stop: Vec<String>,
     /// The seed that makes sampling repeatable.
     pub seed: Option<u64>,
-    /// How much the model reasons before it answers.
-    pub effort: Option<Effort>,
-}
-
-/// How much the model reasons before it answers.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Effort {
-    /// The least reasoning the model does.
-    Minimal,
-    /// Less reasoning.
-    Low,
-    /// Balanced reasoning.
-    Medium,
-    /// The most reasoning.
-    High,
+    /// How much the model reasons before it answers, by the level's name.
+    /// `low`, `medium`, and `high` are portable, and a backend fails a level
+    /// it does not know with [`Error::Invalid`].
+    pub effort: Option<String>,
 }
 
 /// A tool offered to the model.
@@ -72,8 +58,6 @@ pub enum Effort {
 pub enum Tool {
     /// A tool the guest runs.
     Function(Function),
-    /// A Model Context Protocol server, whose tools the backend calls itself.
-    Mcp(Mcp),
 }
 
 /// A tool the guest runs for the model.
@@ -81,69 +65,30 @@ pub enum Tool {
 pub struct Function {
     /// The name the model calls the tool by.
     pub name: String,
-    /// What the tool does, for the model to read. Empty where the guest gave
+    /// What the tool does, for the model to read, `None` where the guest gave
     /// none.
-    pub description: String,
+    pub description: Option<String>,
     /// The JSON Schema of the tool's arguments.
     pub parameters: String,
 }
 
-/// A Model Context Protocol server whose tools the model may call.
-#[derive(Clone, Debug)]
-pub struct Mcp {
-    /// Names the server to the model.
-    pub name: String,
-    /// The tools the model may call, empty for every tool the server lists.
-    pub tools: Vec<String>,
-    /// The server's HTTP endpoint.
-    pub url: String,
-}
-
 impl Request {
-    // The request the guest sent to the model `name`, with the tools of
-    // `servers` after its own.
-    pub(crate) fn new(
-        name: String, request: completion::Request, servers: Vec<mcp::Server>,
-    ) -> Result<Self, Error> {
-        let mut tools: Vec<Tool> =
-            request.tools.into_iter().map(|tool| Tool::Function(tool.into())).collect();
-        for server in servers {
-            tools.push(Tool::Mcp(server.try_into()?));
-        }
-
-        Ok(Self {
-            model: (name != DEFAULT_MODEL).then_some(name),
+    pub(crate) fn new(name: String, request: completion::Request) -> Self {
+        Self {
+            model: name,
             system: request.system,
             messages: request.messages,
-            generation: request.generation.map(Generation::try_from).transpose()?,
+            generation: request.generation.map(Into::into),
             format: request.format,
-            tools,
+            tools: request.tools.into_iter().map(|tool| Tool::Function(tool.into())).collect(),
             grants: request.grants,
             check: request.check,
-        })
+        }
     }
 
-    /// The request's MCP server grants, each carrying its own endpoint URL.
-    #[must_use]
-    pub fn mcp_servers(&self) -> Vec<&Mcp> {
-        self.tools
-            .iter()
-            .filter_map(|tool| match tool {
-                Tool::Mcp(grant) => Some(grant),
-                Tool::Function(_) => None,
-            })
-            .collect()
-    }
-
-    /// The names of the request's function tools.
+    /// The names of the request's tools.
     pub fn tool_names(&self) -> Vec<String> {
-        self.tools
-            .iter()
-            .filter_map(|tool| match tool {
-                Tool::Function(function) => Some(function.name.clone()),
-                Tool::Mcp(_) => None,
-            })
-            .collect()
+        self.tools.iter().map(|Tool::Function(function)| function.name.clone()).collect()
     }
 
     /// Validate the request and its tools.
@@ -152,12 +97,13 @@ impl Request {
     ///
     /// Returns an [`Error::Invalid`] error if the request is invalid.
     pub fn validate(&self) -> Result<(), Error> {
-        for tool in &self.tools {
-            let Tool::Function(function) = tool else {
-                continue;
-            };
+        let mut names = HashSet::new();
+        for Tool::Function(function) in &self.tools {
             if RESERVED_TOOLS.contains(&function.name.as_str()) {
                 return Err(Error::Invalid(format!("reserved tool name: {}", function.name)));
+            }
+            if !names.insert(function.name.as_str()) {
+                return Err(Error::Invalid(format!("duplicate tool name: {}", function.name)));
             }
             if serde_json::from_str::<serde_json::Value>(&function.parameters).is_err() {
                 return Err(Error::Invalid(format!(
@@ -192,33 +138,9 @@ impl From<types::Tool> for Function {
     fn from(tool: types::Tool) -> Self {
         Self {
             name: tool.name,
-            description: tool.description.unwrap_or_default(),
+            description: tool.description,
             parameters: tool.input_schema,
         }
-    }
-}
-
-impl TryFrom<mcp::Server> for Mcp {
-    type Error = Error;
-
-    fn try_from(server: mcp::Server) -> Result<Self, Error> {
-        if server.authorization.is_some() {
-            return Err(Error::Unsupported(format!(
-                "MCP server `{}` sets an authorization, which this host does not send",
-                server.name
-            )));
-        }
-        if server.allowed_tools.as_ref().is_some_and(Vec::is_empty) {
-            return Err(Error::Invalid(format!(
-                "MCP server `{}` allows an empty list of tools",
-                server.name
-            )));
-        }
-        Ok(Self {
-            name: server.name,
-            tools: server.allowed_tools.unwrap_or_default(),
-            url: server.url,
-        })
     }
 }
 
@@ -233,31 +155,15 @@ impl Generation {
     }
 }
 
-impl TryFrom<types::Generation> for Generation {
-    type Error = Error;
-
-    fn try_from(generation: types::Generation) -> Result<Self, Error> {
-        Ok(Self {
+impl From<types::Generation> for Generation {
+    fn from(generation: types::Generation) -> Self {
+        Self {
             temperature: generation.temperature,
             top_p: generation.top_p,
             max_tokens: generation.max_tokens,
             stop: generation.stop_sequences,
             seed: generation.seed,
-            effort: generation.effort.as_deref().map(Effort::try_from).transpose()?,
-        })
-    }
-}
-
-impl TryFrom<&str> for Effort {
-    type Error = Error;
-
-    fn try_from(level: &str) -> Result<Self, Error> {
-        match level {
-            "minimal" => Ok(Self::Minimal),
-            "low" => Ok(Self::Low),
-            "medium" => Ok(Self::Medium),
-            "high" => Ok(Self::High),
-            level => Err(Error::Invalid(format!("unknown effort `{level}`"))),
+            effort: generation.effort,
         }
     }
 }

@@ -80,7 +80,7 @@ impl<T: JsonSchema + DeserializeOwned + Send> Question<T> {
         self
     }
 
-    /// Function tools and MCP grants offered to the model.
+    /// Function tools offered to the model.
     #[must_use]
     pub fn tools(mut self, tools: Vec<Tool>) -> Self {
         self.request.tools = tools;

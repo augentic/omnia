@@ -368,12 +368,10 @@ impl From<&Request> for Seen {
             tools: request
                 .tools
                 .iter()
-                .map(|tool| match tool {
-                    Tool::Function(function) => function.name.clone(),
-                    Tool::Mcp(mcp) => mcp.name.clone(),
-                })
+                .map(|Tool::Function(function)| function.name.clone())
                 .collect(),
             temperature: request.generation.as_ref().and_then(|generation| generation.temperature),
+            effort: request.generation.as_ref().and_then(|generation| generation.effort.clone()),
             // the descriptor cannot cross into a plain record; the subpath is what the guest chose
             workspace: request.grants.workspace.as_ref().map(|location| location.subpath.clone()),
             worker: request.grants.worker.as_ref().map(SeenWorker::from),

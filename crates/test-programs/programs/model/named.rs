@@ -20,7 +20,7 @@ async fn scenario() {
     let request = Request::builder().model("slow").messages(vec![user("hi")]).build();
     let error = WasiProvider.complete(request).await.expect_err("an undeclared model fails");
     assert!(
-        matches!(error, Error::Backend(ref detail) if detail.starts_with("not-found: ") && detail.contains("`slow`")),
+        matches!(error, Error::NotFound(ref detail) if detail.contains("`slow`")),
         "unexpected: {error:?}"
     );
 }

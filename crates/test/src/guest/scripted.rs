@@ -220,14 +220,7 @@ impl Model for ScriptedModel {
 /// The function tools a request declares, in declaration order.
 #[must_use]
 pub fn function_tools(request: &Request) -> Vec<&Function> {
-    request
-        .tools
-        .iter()
-        .filter_map(|tool| match tool {
-            Tool::Function(function) => Some(function),
-            Tool::Mcp(_) => None,
-        })
-        .collect()
+    request.tools.iter().map(|Tool::Function(function)| function).collect()
 }
 
 /// A keyed `Plugins` loader: per-name digests and refusals, every load
@@ -432,12 +425,14 @@ impl From<&Request> for Seen {
             tools: request
                 .tools
                 .iter()
-                .map(|tool| match tool {
-                    Tool::Function(function) => function.name.clone(),
-                    Tool::Mcp(mcp) => mcp.name.clone(),
-                })
+                .map(|Tool::Function(function)| function.name.clone())
                 .collect(),
             temperature: request.generation.as_ref().and_then(|generation| generation.temperature),
+            effort: request
+                .generation
+                .as_ref()
+                .and_then(|generation| generation.effort.as_ref())
+                .map(|effort| effort.as_str().to_owned()),
             workspace: request.workspace.clone(),
             worker: request.worker.as_ref().map(SeenWorker::from),
             check: request.check,

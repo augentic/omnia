@@ -8,7 +8,6 @@
 mod answer;
 mod completion_impl;
 mod default_impl;
-mod mcp_impl;
 mod request;
 mod session;
 mod tool_host;
@@ -51,8 +50,8 @@ use self::generated::omnia::model::types::Host as TypesHost;
 pub use self::generated::omnia::model::types::{
     Format, Grants, Location, Message, Role, Schema, WorkerGrant,
 };
-use self::generated::omnia::model::{completion, mcp, types};
-pub use self::request::{Effort, Function, Generation, Mcp, Request, Tool};
+use self::generated::omnia::model::{completion, types};
+pub use self::request::{Function, Generation, Request, Tool};
 pub use self::session::Limits;
 pub use self::tool_host::*;
 
@@ -67,8 +66,7 @@ pub struct WasiModel;
 impl<B: Provides<Self>> Host<B> for WasiModel {
     fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
         types::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
-        completion::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
-        Ok(mcp::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?)
+        Ok(completion::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?)
     }
 }
 
@@ -80,9 +78,9 @@ impl<B: Provides<Self>> Host<B> for WasiModel {
 pub trait ModelClient: Debug + Send + Sync + 'static {
     /// Run the model on `request` until it has an answer.
     ///
-    /// [`Request::model`] names the model the guest opened, and is `None` for
-    /// `default`. The model runs the guest's tools and checks through
-    /// `tool_host`.
+    /// [`Request::model`] is the name the guest opened the model by. The SDK
+    /// opens `default` for a request that names none. The model runs the
+    /// guest's tools and checks through `tool_host`.
     ///
     /// A failure reaches the guest as follows:
     ///

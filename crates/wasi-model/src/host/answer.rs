@@ -48,27 +48,33 @@ impl From<Answer> for types::Reply {
     }
 }
 
-/// The tokens a completion spent, as its backend counts them.
+/// The tokens a completion spent, as its backend counts them over every
+/// response the model wrote.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Usage {
-    /// The tokens the model read.
-    pub input_tokens: u32,
+    /// The tokens the model read, cached ones included.
+    pub input_tokens: u64,
     /// The tokens the model wrote, reasoning included.
-    pub output_tokens: u32,
+    pub output_tokens: u64,
     /// The part of `output_tokens` spent on reasoning, `None` where the
     /// backend keeps no count.
-    pub reasoning_tokens: Option<u32>,
+    pub reasoning_tokens: Option<u64>,
+    /// The part of `input_tokens` read from a cache, `None` where the backend
+    /// keeps no count.
+    pub cache_read_tokens: Option<u64>,
+    /// The part of `input_tokens` written to a cache, `None` where the backend
+    /// keeps no count.
+    pub cache_write_tokens: Option<u64>,
 }
 
-// the seam keeps no cache counts, so the guest reads them as unknown
 impl From<Usage> for types::Usage {
     fn from(usage: Usage) -> Self {
         Self {
-            input_tokens: usage.input_tokens.into(),
-            output_tokens: usage.output_tokens.into(),
-            reasoning_tokens: usage.reasoning_tokens.map(Into::into),
-            cache_read_tokens: None,
-            cache_write_tokens: None,
+            input_tokens: usage.input_tokens,
+            output_tokens: usage.output_tokens,
+            reasoning_tokens: usage.reasoning_tokens,
+            cache_read_tokens: usage.cache_read_tokens,
+            cache_write_tokens: usage.cache_write_tokens,
         }
     }
 }
