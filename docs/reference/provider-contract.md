@@ -51,12 +51,12 @@ The deadline layer is added last, so it runs first and `trace` reads the stamped
 
 ### Messaging
 
-The host subscribes to each of `Router::topics` and hands every delivery to `Router::handle`. Before it does, it sets the delivery's `deadline` metadata entry, replacing any entry of that name the broker delivered, whatever its case. It then acts on the `omnia_sdk::Error` a failure returns:
+The host subscribes to each of `Router::topics` and hands every delivery to `Router::handle`. Before it does, it sets the delivery's `deadline`, which the router passes on as `Metadata::deadline`. A failure settles the delivery, with the `omnia_sdk::Error`'s text as the reason:
 
-- It drops a delivery that fails with the code `undecodable`, which no redelivery decodes.
-- It redelivers a delivery that fails with a `BadGateway`, which may succeed later.
+- A `BadRequest`, such as the code `undecodable`, rejects it, since no redelivery handles it.
+- Any other failure releases it, since it may succeed later.
 
-What becomes of any other failure is the host's own policy.
+What a backend does with a rejected or released delivery is its own policy.
 
 ### Commands
 
@@ -64,15 +64,15 @@ What becomes of any other failure is the host's own policy.
 
 ### Deadline carriers
 
-Every carrier holds the deadline as decimal milliseconds since the Unix epoch:
+Every carrier holds the deadline as milliseconds since the Unix epoch:
 
 | Transport | Carrier |
 | --------- | ------- |
-| HTTP | The `x-deadline` header |
-| Messaging | The `deadline` metadata entry |
-| Command | The `<PREFIX>_DEADLINE` environment variable |
+| HTTP | The `x-deadline` header, as decimal text |
+| Messaging | The delivery's `deadline` |
+| Command | The `<PREFIX>_DEADLINE` environment variable, as decimal text |
 
-`Metadata::from_lookup` parses the carrier into `Metadata::deadline`, and a value that does not parse reads as none. The host's stamp replaces any value the caller sent, because the deadline is the host's budget for the invocation.
+`Metadata::from_lookup` parses a text carrier into `Metadata::deadline`, and a value that does not parse reads as none. The host's stamp replaces any value the caller sent, because the deadline is the host's budget for the invocation.
 
 ## Obligations
 

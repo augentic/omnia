@@ -26,7 +26,7 @@ use wasmtime::StoreContextMut;
 use wasmtime::component::{Destination, Source, StreamConsumer, StreamProducer, StreamResult};
 
 use crate::host::generated::omnia::model::types::{self, Call, CallResult, Candidate, ToolCall};
-use crate::host::{Error, FutureResult, ToolOutcome};
+use crate::host::{Budget, Error, FutureResult, ToolOutcome};
 
 const CALL_QUEUE: usize = 8;
 
@@ -136,10 +136,13 @@ impl ToolSession {
         if let Ask::Tool(name) = ask {
             if inner.remaining == 0 {
                 inner.calls = None;
-                return Err(inner.record(Halt::Exhausted(format!(
-                    "tool-call budget of {} exhausted at `{name}`",
-                    self.limits.max_tool_calls
-                ))));
+                return Err(inner.record(Halt::Exhausted(
+                    Budget::ToolCalls,
+                    format!(
+                        "tool-call budget of {} exhausted at `{name}`",
+                        self.limits.max_tool_calls
+                    ),
+                )));
             }
             inner.remaining -= 1;
         }
@@ -160,10 +163,10 @@ impl ToolSession {
                 let mut inner = self.lock();
                 inner.pending.remove(id);
                 inner.calls = None;
-                Err(inner.record(Halt::Exhausted(format!(
-                    "{ask} got no result within {:?}",
-                    self.limits.tool_timeout
-                ))))
+                Err(inner.record(Halt::Exhausted(
+                    Budget::CallTime,
+                    format!("{ask} got no result within {:?}", self.limits.tool_timeout),
+                )))
             }
             Ok(Err(_closed)) => Err(self.halt(Halt::Invalid(format!(
                 "the guest closed its results stream before answering {ask}"
@@ -279,7 +282,7 @@ impl Inner {
 // Why host enforcement ended a completion, whatever its backend returns.
 pub enum Halt {
     Invalid(String),
-    Exhausted(String),
+    Exhausted(Budget, String),
     Other(String),
 }
 
@@ -287,7 +290,11 @@ impl Halt {
     pub fn into_reply(self) -> Replied {
         match self {
             Self::Invalid(detail) => Err(Error::Invalid(detail)),
-            Self::Exhausted(detail) => Ok(Err(types::Exhausted { detail, usage: None })),
+            Self::Exhausted(budget, detail) => Ok(Err(types::Exhausted {
+                budget,
+                detail,
+                usage: None,
+            })),
             Self::Other(detail) => Err(Error::Other(detail)),
         }
     }
@@ -297,7 +304,7 @@ impl fmt::Display for Halt {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Invalid(detail) => write!(f, "invalid: {detail}"),
-            Self::Exhausted(detail) => write!(f, "exhausted: {detail}"),
+            Self::Exhausted(_, detail) => write!(f, "exhausted: {detail}"),
             Self::Other(detail) => write!(f, "other: {detail}"),
         }
     }

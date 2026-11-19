@@ -45,7 +45,7 @@ impl ContainerHandle {
         let info = self.inner.info()?;
         Ok(wit::ContainerMetadata {
             name: info.name,
-            created_at: (info.created_at > 0).then_some(info.created_at),
+            created_at: (info.created_at > 0).then(|| millis(info.created_at)),
         })
     }
 
@@ -175,8 +175,8 @@ impl<T> HostContainerWithStore<T> for WasiBlobStore {
 
     fn put(
         mut host: Access<'_, T, Self>, self_: Resource<ContainerHandle>, name: String,
-        mut data: StreamReader<u8>, mut finished: FutureReader<Result<()>>, attributes: Attributes,
-        when: Option<Precondition>,
+        size: Option<u64>, mut data: StreamReader<u8>, mut finished: FutureReader<Result<()>>,
+        attributes: Attributes, when: Option<Precondition>,
     ) -> wasmtime::Result<FutureReader<Result<std::result::Result<Stored, Conflict>>>> {
         let container = host.get().table.get(&self_)?.clone();
 
@@ -193,7 +193,7 @@ impl<T> HostContainerWithStore<T> for WasiBlobStore {
         let staging = Staging::default();
         let (reply, stored) = oneshot::channel();
         data.pipe(&mut host, Collect(staging.clone()))?;
-        finished.pipe(&mut host, Commit::new(container, name, staging, reply))?;
+        finished.pipe(&mut host, Commit::new(container, name, size, staging, reply))?;
         FutureReader::new(&mut host, async move {
             let stored = stored.await.unwrap_or_else(|_| {
                 Err(Error::Other("the write ended before `finished` resolved".to_owned()))
@@ -328,13 +328,18 @@ fn etag(object: &ObjectMetadata) -> String {
     format!("{:x}-{:x}", object.created_at, object.size)
 }
 
+// a `Container` reports seconds, and the WIT carries milliseconds
+const fn millis(seconds: u64) -> u64 {
+    seconds.saturating_mul(1000)
+}
+
 impl From<ObjectMetadata> for types::ObjectMetadata {
     fn from(object: ObjectMetadata) -> Self {
         Self {
             etag: etag(&object),
             name: object.name,
             size: object.size,
-            modified_at: object.created_at,
+            modified_at: millis(object.created_at),
             version: None,
             attributes: Attributes {
                 content_type: None,
@@ -354,7 +359,7 @@ impl From<ObjectMetadata> for ObjectEntry {
             etag: etag(&object),
             name: object.name,
             size: object.size,
-            modified_at: object.created_at,
+            modified_at: millis(object.created_at),
         }
     }
 }

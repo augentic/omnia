@@ -1,4 +1,4 @@
-package omnia:vault@0.1.0;
+package omnia:vault@0.2.0;
 
 /// The types the vault interfaces share.
 ///
@@ -10,24 +10,17 @@ package omnia:vault@0.1.0;
 /// - A portable secret name is 1 to 63 characters long and holds only
 ///   lowercase ASCII letters, digits, and `-`.
 /// - A portable value is not empty and at most 16 KiB.
+///
+/// An `error` from a vault interface means:
+///
+/// - `not-found`: the locker is not declared by the deployment. An absent
+///   secret is not an error.
+/// - `invalid`: the request was rejected, such as a zero `limit` or a name
+///   or value the backend cannot store.
+/// - `unavailable`: the secret store did not answer, or the call exceeded
+///   its bound.
 interface types {
-  /// Why a call failed.
-  variant error {
-    /// The locker is not declared by the deployment. An absent secret is
-    /// not an error.
-    not-found(string),
-    /// The caller may not make the call.
-    denied(string),
-    /// The request was rejected, such as a zero `limit` or a name or value
-    /// the backend cannot store.
-    invalid(string),
-    /// A valid request this backend cannot serve.
-    unsupported(string),
-    /// The secret store did not answer, or the call exceeded its bound.
-    unavailable(string),
-    /// Any other failure.
-    other(string),
-  }
+  use omnia:types/types@0.1.0.{error};
 }
 
 /// Secrets in one locker. Every backend serves this interface.

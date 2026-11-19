@@ -13,25 +13,19 @@ package omnia:docstore@0.1.0;
 /// - A portable body is a JSON object of at most 256 KiB that keeps to
 ///   I-JSON (RFC 7493). Each of its top-level names starts with an ASCII
 ///   letter and holds only ASCII letters, digits, and `_`.
+///
+/// An `error` from a document store interface means:
+///
+/// - `not-found`: the collection is not declared by the deployment. An
+///   absent document is not an error.
+/// - `invalid`: the request was rejected, such as a body that is not a JSON
+///   object, a zero `limit`, or a cursor the backend did not issue.
+/// - `unsupported`: a valid request this backend cannot serve, such as an
+///   order it cannot keep.
+/// - `unavailable`: the backing store did not answer, or the call exceeded
+///   its bound.
 interface types {
-  /// Why a call failed.
-  variant error {
-    /// The collection is not declared by the deployment. An absent document
-    /// is not an error.
-    not-found(string),
-    /// The caller may not make the call.
-    denied(string),
-    /// The request was rejected, such as a body that is not a JSON object,
-    /// a zero `limit`, or a cursor the backend did not issue.
-    invalid(string),
-    /// A valid request this backend cannot serve, such as an order it
-    /// cannot keep.
-    unsupported(string),
-    /// The backing store did not answer, or the call exceeded its bound.
-    unavailable(string),
-    /// Any other failure.
-    other(string),
-  }
+  use omnia:types/types@0.1.0.{error, json};
 
   /// A token for one stored state of a document, compared only for equality.
   ///
@@ -43,8 +37,8 @@ interface types {
   /// A stored document.
   record document {
     id: string,
-    /// The body, a JSON object encoded as UTF-8.
-    data: list<u8>,
+    /// The body, a JSON object.
+    data: json,
     revision: revision,
   }
 
@@ -79,7 +73,7 @@ interface types {
 /// - a number may be written another way, so `1.0` may read back as `1`,
 ///   though never `1` as `1.0`.
 interface collection {
-  use types.{conflict, document, error, precondition, revision};
+  use types.{conflict, document, error, json, precondition, revision};
 
   /// A value a test compares a field with.
   variant value {
@@ -178,7 +172,7 @@ interface collection {
     /// Store `data` as the body of the document `id`, replacing any body
     /// there, and return its revision. With `when`, only while the
     /// precondition holds.
-    put: async func(id: string, data: list<u8>, when: option<precondition>)
+    put: async func(id: string, data: json, when: option<precondition>)
       -> result<result<revision, conflict>, error>;
 
     /// Store each body under its id. An id given twice is `invalid` and
@@ -186,12 +180,16 @@ interface collection {
     ///
     /// Each write is atomic and the batch is not, so a failure may leave
     /// part of it stored.
-    put-many: async func(documents: list<tuple<string, list<u8>>>) -> result<_, error>;
+    put-many: async func(documents: list<tuple<string, json>>) -> result<_, error>;
 
     /// Delete the document `id`, and with `when` only while it has that
-    /// revision. Deleting an absent document succeeds.
+    /// revision. Return whether a document was removed.
+    ///
+    /// Without `when`, deleting an absent document succeeds with `false`.
+    /// With it, an absent document is a `conflict` whose `current` is
+    /// `none`.
     delete: async func(id: string, when: option<revision>)
-      -> result<result<_, conflict>, error>;
+      -> result<result<bool, conflict>, error>;
 
     /// Delete the document at each of `ids`. An id already absent is
     /// skipped.

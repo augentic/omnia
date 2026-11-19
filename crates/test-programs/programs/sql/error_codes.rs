@@ -6,8 +6,6 @@
 //! - The host refuses a statement that starts a transaction, a temporal value
 //!   outside its format, and a call on an ended transaction, each as
 //!   `invalid`.
-//! - The SDK refuses a `u64` above `i64::MAX` as `invalid` before it reaches
-//!   the host.
 //! - The suite's faulting backend fails the rest by database name, and serves
 //!   `untransacted` with no transactions.
 
@@ -29,16 +27,12 @@ async fn scenario() {
 
     // the host's refusals
     expect_code(provider.execute("BEGIN", &[]).await, 500, "invalid");
-    let date = [Value::Date(Some("29/02/2024".to_owned()))];
+    let date = [Value::Date("29/02/2024".to_owned())];
     expect_code(provider.query("SELECT $1", &date).await, 500, "invalid");
     let transaction = provider.begin().await.expect("begin");
     expect_code(transaction.execute("SELEKT nonsense", &[]).await, 500, "invalid");
     expect_code(transaction.execute("SELECT 1", &[]).await, 500, "invalid");
     drop(transaction);
-
-    // the SDK's refusal
-    let past = [Value::from(u64::MAX)];
-    expect_code(provider.query("SELECT $1", &past).await, 500, "invalid");
 
     // the backend's chosen cases
     for (database, status, code) in [

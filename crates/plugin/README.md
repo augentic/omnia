@@ -4,18 +4,18 @@ The `omnia:plugins` capability for the [omnia](https://github.com/augentic/omnia
 
 ## Interface
 
-Implements `omnia:plugins`, the interface the SDK's `Plugins` calls. A caller names a `source` with an optional `when` digest, and the host acquires the bytes inside the deployment's grant, verifies them, and admits them through the runtime's admission seam under the name the source derives. Component bytes never cross the interface, and nothing a caller passes widens the grant.
+Implements `omnia:plugins`, the interface the SDK's `Plugins` calls. A caller names a `source`, and the host acquires the bytes inside the deployment's grant, verifies them, and admits them through the runtime's admission seam under the name the source derives. Component bytes never cross the interface, and nothing a caller passes widens the grant.
 
-- `declared(name)` names one of the deployment's `[[guest]]` entries. A name outside the guest list is `not-found`. One not yet loaded goes through the runtime's own first-use seam (`Runtime::guest`, the same one a route or a link call loads it through), and an active one is attested, not fetched. The entry carries the pin, so a `when` is `invalid`.
-- `path(p)` names a component beneath one of the deployment's read-only mounts, and registers as its file stem. It loads through the mount it lies beneath alone:
+- `declared(name)` names one of the deployment's `[[guest]]` entries. A name outside the guest list is `not-found`. One not yet loaded goes through the runtime's own first-use seam (`Runtime::guest`, the same one a route or a link call loads it through), and an active one is attested, not fetched. The entry carries the pin, so the source carries none.
+- `path(file)` names a component beneath one of the deployment's read-only mounts, with an optional `pin`, and registers as its file stem. It loads through the mount it lies beneath alone:
   - a path that is not plain and relative is `invalid`;
   - one beneath no mount, or with no file, is `not-found`;
   - one beneath a writable mount is `denied` before the file is read, as is a link that leads out of its mount;
   - a writable mount overlapping a read-only mount's directory, by identity rather than path, is refused at assembly.
-- `release(reference, registry?)` names an exact `namespace:name@version`, and registers as the reference without its version. The deployment's package store serves a release it holds. Otherwise the routing the deployment's `registries` declares fetches it, and it is written to the store once. The load's `registry` serves only a namespace that routing leaves open, and what it fetches is never stored. A `registry` other than the routed one is `denied`, and a release nothing routes or holds is `not-found`.
+- `release(reference, registry?, pin?)` names an exact `namespace:name@version`, and registers as the reference without its version. The deployment's package store serves a release it holds. Otherwise the routing the deployment's `registries` declares fetches it, and it is written to the store once. The load's `registry` serves only a namespace that routing leaves open, and what it fetches is never stored. A `registry` other than the routed one is `denied`, and a release nothing routes or holds is `not-found`.
 - A path or release that would register under a declared name is `denied` whether or not that guest has loaded, the name being its entry's alone.
 - A path or release the caller names admits raw wasm alone. A declared `source.path` admits a pre-compiled artifact only when its entry pins the `digest`, since an unpinned file is read while guests run, and a declared `source.package` admits raw wasm alone. Bytes that break these rules, miss the entry's pin, or do not load as a component are `invalid`.
-- A `when` is a `sha256:<hex>` digest, and any other is `invalid`. A caller-named load whose bytes miss it, or whose name is active under other bytes, loads nothing and answers a `conflict`: the digest found, and the plugin active under the name.
+- A `pin` is a `sha256:<hex>` digest, and any other is `invalid`. A caller-named load whose bytes miss it, or whose name is active under other bytes, loads nothing and answers a `conflict`: the digest found, and the plugin active under the name.
 - A mount, store, or registry that did not produce the bytes is `unavailable`, and a registration that failed is `other`.
 - `WasiPlugins` answers `unsupported` for a runtime with no loader installed and for a release with no registry client.
 

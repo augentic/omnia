@@ -11,11 +11,11 @@ use crate::host::{Result, WasiWebSocket, WebSocketClient};
 
 impl<T> HostWithStore<T> for WasiWebSocket {
     async fn send(
-        accessor: &Accessor<T, Self>, c: Resource<ClientProxy>, connection: ConnectionId,
+        accessor: &Accessor<T, Self>, c: Resource<ClientProxy>, connections: Vec<ConnectionId>,
         message: types::Message,
     ) -> Result<()> {
         let client = get_client(accessor, &c)?;
-        client.send(Event::from(message), Some(vec![connection])).await?;
+        client.send(Event::from(message), Some(connections)).await?;
 
         Ok(())
     }

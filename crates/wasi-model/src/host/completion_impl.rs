@@ -116,7 +116,7 @@ impl WasiModel {
         let request = Request::new(name, request);
         request.validate()?;
 
-        let workspace = match &request.grants.workspace {
+        let workspace = match request.grants.location() {
             Some(location) => {
                 let mounts = access.data_mut().mounts();
                 let descriptor = access.get().table.get(&location.root)?;

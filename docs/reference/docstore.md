@@ -23,10 +23,10 @@ open: async func(name: string) -> result<collection, error>;
 get: async func(id: string) -> result<option<document>, error>;
 get-many: async func(ids: list<string>) -> result<list<option<document>>, error>;
 exists: async func(id: string) -> result<bool, error>;
-put: async func(id: string, data: list<u8>, when: option<precondition>)
+put: async func(id: string, data: json, when: option<precondition>)
   -> result<result<revision, conflict>, error>;
-put-many: async func(documents: list<tuple<string, list<u8>>>) -> result<_, error>;
-delete: async func(id: string, when: option<revision>) -> result<result<_, conflict>, error>;
+put-many: async func(documents: list<tuple<string, json>>) -> result<_, error>;
+delete: async func(id: string, when: option<revision>) -> result<result<bool, conflict>, error>;
 delete-many: async func(ids: list<string>) -> result<_, error>;
 query: async func(filter: filter, order-by: list<sort-field>, after: option<string>, limit: option<u32>)
   -> result<page, error>;
@@ -40,7 +40,7 @@ query: async func(filter: filter, order-by: list<sort-field>, after: option<stri
 | `exists` | Whether a document is stored under the id. |
 | `put` | Store the body under the id, replacing any body there, and return its revision. With `when`, only while the precondition holds. |
 | `put-many` | Store each body under its id. An id given twice is `invalid` and writes nothing. Each write is atomic and the batch is not. |
-| `delete` | Delete the document, and with `when` only while it has that revision. Deleting an absent document succeeds. |
+| `delete` | Delete the document, and with `when` only while it has that revision, and return whether one was removed. Without `when`, deleting an absent document succeeds with `false`. With it, an absent document is a `conflict` whose `current` is `none`. |
 | `delete-many` | Delete the document at each id, skipping any already absent. |
 | `query` | One page of the documents a filter selects (see [Query contract](#query-contract)). |
 
@@ -57,7 +57,7 @@ Guests normally call these through the `omnia_sdk::DocumentDb` trait, which `omn
 - `get` is `get`.
 - `insert` is `put` with `absent`. A conflict is `Ok(Err(Exists))`, an outcome rather than an error.
 - `put` is `put` with no precondition.
-- `delete` is `exists`, then `delete`, and answers what `exists` found. The two calls are not one atomic step.
+- `delete` is `delete` with no revision, and answers whether it removed a document.
 - `query` sends the `Filter` tree as groups (see [Filters](#filters)). `Query::after` is the WIT `after`, and `Page::next` is the page's `next`. A `Query::offset` fails with `unsupported`.
 
 ## Types
@@ -67,7 +67,7 @@ Guests normally call these through the `omnia_sdk::DocumentDb` trait, which `omn
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
 | `id` | `string` | Primary key within the collection. |
-| `data` | `list<u8>` | The body, a JSON object encoded as UTF-8. |
+| `data` | `json` | The body, a JSON object. |
 | `revision` | `revision` | A token for this stored state of the document. |
 
 ### `revision`

@@ -4,7 +4,6 @@
 //! `workspace` handle:
 //!
 //! - a lookup that finds nothing is `NotFound`, naming what was asked;
-//! - `init` where a repository already is succeeds;
 //! - a conflict is a `Merged` with no commit, and a diverged push is
 //!   `Diverged`;
 //! - a log and a status of 1,001 entries come back whole and in order.
@@ -77,9 +76,8 @@ async fn scenario() {
     );
     assert_eq!(WasiProvider.head("./unborn").await, Err(Error::NotFound("HEAD".to_owned())));
 
-    // repositories laid down here, one where a repository already is
+    // repositories laid down here
     WasiProvider.init("./fresh").await.expect("init");
-    WasiProvider.init("./existing").await.expect("init where a repository is");
     WasiProvider.add(".", "./.cache/work", "sha:main").await.expect("add");
     WasiProvider.remove("./.cache/work").await.expect("remove");
 

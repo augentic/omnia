@@ -567,9 +567,9 @@ async fn named_package() {
 // a deployment mounting the scratch directory read-only as `.`: a path that
 // escapes or is not plain (the mount itself, a `.` or empty segment, a
 // backslash), a missing file, junk, a pre-compiled artifact, a malformed or
-// missed pin, a stem the deployment declares (the requester itself, loaded
-// and running), and a declared name pinned by the call. Nothing a row names
-// is ever admitted — the requester stays the registry's one guest.
+// missed pin, and a stem the deployment declares (the requester itself,
+// loaded and running). Nothing a row names is ever admitted — the requester
+// stays the registry's one guest.
 #[tokio::test]
 async fn named_locations() {
     let scratch = scratch();
@@ -587,7 +587,7 @@ async fn named_locations() {
     // 64 bytes but 32 characters, so only the hex check refuses it
     let not_ascii = format!("sha256:{}", "é".repeat(32));
 
-    let rows: [&[&str]; 17] = [
+    let rows: [&[&str]; 16] = [
         &["path", "../plugin.wasm", "invalid", "plain relative path"],
         &["path", "/etc/passwd", "invalid", "plain relative path"],
         &["path", ".", "invalid", "plain relative path"],
@@ -604,7 +604,6 @@ async fn named_locations() {
         &["path", "plugin.wasm", "invalid", "is not 64 hex characters", &not_hex],
         &["path", "plugin.wasm", "invalid", "is not 64 hex characters", &not_ascii],
         &["path", "requester.wasm", "denied", "declares"],
-        &["declared", "requester", "invalid", "takes no digest", &other],
     ];
     for row in rows {
         let manifest = requester(test_programs::PLUGINS_REFUSED).mounts([scratch.mount(false)]);

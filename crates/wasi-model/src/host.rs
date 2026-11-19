@@ -16,7 +16,7 @@ mod workspace;
 mod generated {
     #![allow(missing_docs, reason = "wasmtime bindgen output")]
 
-    pub use self::omnia::model::types::Error;
+    pub use self::omnia::types::types::Error;
     pub use super::completion_impl::ModelHandle;
 
     wasmtime::component::bindgen!({
@@ -31,7 +31,7 @@ mod generated {
             "omnia:model/completion.model": ModelHandle,
         },
         trappable_error_type: {
-            "omnia:model/types.error" => Error,
+            "omnia:types/types.error" => Error,
         },
     });
 }
@@ -48,9 +48,10 @@ pub use self::default_impl::{ConnectOptions, ModelDefault};
 pub use self::generated::Error;
 use self::generated::omnia::model::types::Host as TypesHost;
 pub use self::generated::omnia::model::types::{
-    Format, Grants, Location, Message, Role, Schema, WorkerGrant,
+    Budget, Effort, Format, Grants, Location, Message, Role, Schema, WorkerGrant, WorkspaceGrant,
 };
 use self::generated::omnia::model::{completion, types};
+use self::generated::omnia::types::types as omnia_types;
 pub use self::request::{Function, Generation, Request, Tool};
 pub use self::session::Limits;
 pub use self::tool_host::*;
@@ -65,6 +66,7 @@ pub struct WasiModel;
 
 impl<B: Provides<Self>> Host<B> for WasiModel {
     fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
+        omnia_types::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
         types::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
         Ok(completion::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?)
     }
@@ -127,7 +129,9 @@ impl From<ResourceTableError> for Error {
     }
 }
 
-impl TypesHost for HostView<'_, dyn ModelClient> {
+impl TypesHost for HostView<'_, dyn ModelClient> {}
+
+impl omnia_types::Host for HostView<'_, dyn ModelClient> {
     fn convert_error(&mut self, err: Error) -> wasmtime::Result<Error> {
         Ok(err)
     }

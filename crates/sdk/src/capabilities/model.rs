@@ -97,9 +97,8 @@ pub struct Request {
     #[builder(into)]
     pub workspace: Option<String>,
     /// What the worker a backend runs for this completion may reach beyond
-    /// its lend, through `grants.worker`. Requires [`Request::workspace`]:
-    /// a worker reaches beyond a lend it has. `None` grants nothing beyond
-    /// the lend.
+    /// its lend. Requires [`Request::workspace`]: a worker reaches beyond a
+    /// lend it has. `None` grants nothing beyond the lend.
     pub worker: Option<WorkerGrant>,
 }
 

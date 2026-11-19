@@ -13,28 +13,24 @@ package omnia:sql@0.1.0;
 /// - A portable row holds at most 1 MiB of values.
 /// - A portable `text` value holds no NUL character, and a portable
 ///   `float32` or `float64` is finite.
+///
+/// An `error` from a SQL interface means:
+///
+/// - `not-found`: the database is not declared by the deployment. A query
+///   that selects no row is not an error.
+/// - `denied`: the caller may not use the database, or lacks a privilege
+///   the statement needs.
+/// - `invalid`: the request was rejected, such as SQL that does not
+///   prepare, a table the database lacks, or a parameter that does not
+///   bind.
+/// - `unsupported`: a valid request this backend cannot serve, such as a
+///   column type it cannot return.
+/// - `unavailable`: the database did not answer, or the call exceeded its
+///   bound. Work the database rolls back to let another transaction
+///   proceed fails this way too.
+/// - `other`: any other failure, such as a write a constraint refuses.
 interface types {
-  /// Why a call failed.
-  variant error {
-    /// The database is not declared by the deployment. A query that selects
-    /// no row is not an error.
-    not-found(string),
-    /// The caller may not use the database, or lacks a privilege the
-    /// statement needs.
-    denied(string),
-    /// The request was rejected, such as SQL that does not prepare, a table
-    /// the database lacks, or a parameter that does not bind.
-    invalid(string),
-    /// A valid request this backend cannot serve, such as a column type it
-    /// cannot return.
-    unsupported(string),
-    /// The database did not answer, or the call exceeded its bound. Work the
-    /// database rolls back to let another transaction proceed fails this way
-    /// too.
-    unavailable(string),
-    /// Any other failure, such as a write a constraint refuses.
-    other(string),
-  }
+  use omnia:types/types@0.1.0.{error};
 
   /// A SQL value, bound as a parameter or read from a column.
   ///

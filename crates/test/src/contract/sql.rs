@@ -207,26 +207,13 @@ pub async fn values(db: &impl SqlDb) {
         Value::from(true),
         Value::from(false),
         Value::from(vec![0_u8, 1, 254, 255]),
-        Value::Date(Some(DATE.to_owned())),
-        Value::Time(Some(TIME.to_owned())),
-        Value::Timestamp(Some(STAMP.to_owned())),
-        Value::Timestamp(Some(STAMPTZ.to_owned())),
+        Value::Date(DATE.to_owned()),
+        Value::Time(TIME.to_owned()),
+        Value::Timestamp(STAMP.to_owned()),
+        Value::Timestamp(STAMPTZ.to_owned()),
     ];
-    let null = [
-        Value::from(2_i64),
-        Value::Int32(None),
-        Value::Int64(None),
-        Value::Float(None),
-        Value::Double(None),
-        Value::Str(None),
-        Value::Boolean(None),
-        Value::Boolean(None),
-        Value::Binary(None),
-        Value::Date(None),
-        Value::Time(None),
-        Value::Timestamp(None),
-        Value::Timestamp(None),
-    ];
+    let mut null = [const { Value::Null }; 13];
+    null[0] = Value::from(2_i64);
     for params in [given, null] {
         assert_eq!(db.execute(insert, &params).await.expect("insert"), 1);
     }

@@ -4,8 +4,8 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_wasi_messaging::request_reply;
-use omnia_wasi_messaging::types::{Client, Message};
+use omnia_wasi_messaging::omnia::request_reply;
+use omnia_wasi_messaging::omnia::types::{Client, Message};
 
 omnia_sdk::api::command::export!(scenario);
 
@@ -15,7 +15,6 @@ async fn scenario() {
     let request = Message {
         data: b"ping".to_vec(),
         content_type: None,
-        id: None,
         key: None,
         metadata: Vec::new(),
     };

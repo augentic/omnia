@@ -51,8 +51,8 @@ pub trait Vcs: Send + Sync {
     /// Merges `revision` into the working copy at `at` under `policy`
     /// and advances its head.
     ///
-    /// A working copy with pending changes is refused with
-    /// [`Error::Other`], and nothing changes.
+    /// A working copy with pending changes is [`Error::Pending`] naming
+    /// their paths, and nothing changes.
     fn merge(
         &self, at: &str, revision: &str, message: &str, policy: &[Rule],
     ) -> impl Future<Output = Result<Merged, Error>> + Send;
@@ -65,13 +65,14 @@ pub trait Vcs: Send + Sync {
 
     /// A repository with no history at `at`.
     ///
-    /// A repository already at `at` is kept as it was.
+    /// A repository already at `at` is [`Error::Exists`], and stays as it
+    /// was.
     fn init(&self, at: &str) -> impl Future<Output = Result<(), Error>> + Send;
 
     /// A working copy of `repo` at `at`, on `revision` and on no label.
     ///
-    /// A directory at `at` that holds anything is refused with
-    /// [`Error::Other`].
+    /// A directory at `at` that holds anything is [`Error::Exists`], and
+    /// stays as it was.
     fn add(
         &self, repo: &str, at: &str, revision: &str,
     ) -> impl Future<Output = Result<(), Error>> + Send;
@@ -85,8 +86,8 @@ pub trait Vcs: Send + Sync {
 
     /// A clone of `url` at `at`.
     ///
-    /// A directory at `at` that holds anything is refused with
-    /// [`Error::Other`].
+    /// A directory at `at` that holds anything is [`Error::Exists`], and
+    /// stays as it was.
     fn clone_repo(
         &self, url: &str, at: &str, options: CloneOptions,
     ) -> impl Future<Output = Result<(), Error>> + Send;
@@ -200,7 +201,8 @@ pub enum Error {
     /// The location holds no repository or working copy.
     #[error("not a repository")]
     NotARepository,
-    /// A working copy already exists at the location.
+    /// The location already holds a repository, or files a new working copy
+    /// would overwrite.
     #[error("already exists: {0}")]
     Exists(String),
     /// A revision, remote, or label the repository does not know.

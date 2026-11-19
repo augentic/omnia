@@ -15,6 +15,7 @@ one `DocStoreClient` per backend.
 - A write returns the document's revision, which a read of the same body
   reports. A `put` with `absent` creates the document only when the id is
   free, and otherwise returns a `conflict` carrying the document it found.
+- `delete` answers whether it removed a document.
 - `get-many`, `put-many`, and `delete-many` make one call per id. A
   `put-many` that gives an id twice writes nothing.
 - A query's filter is a list of groups: every group must hold, and a group

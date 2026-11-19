@@ -20,23 +20,18 @@ package omnia:otel@0.2.0;
 /// - An attribute key is not empty, and a list of attributes holds each
 ///   key once.
 /// - The telemetry of one call is at most 4 MiB as an OTLP request.
+///
+/// An `error` from a telemetry interface means:
+///
+/// - `not-found`: the collector has no endpoint for the signal.
+/// - `denied`: the collector refused the deployment's credentials.
+/// - `invalid`: the telemetry was rejected, such as an id that is not
+///   hexadecimal. Sending it again fails again.
+/// - `unsupported`: a valid export this backend cannot serve.
+/// - `unavailable`: the collector did not answer, or the export exceeded
+///   its bound.
 interface types {
-  /// Why a call failed.
-  variant error {
-    /// The collector has no endpoint for the signal.
-    not-found(string),
-    /// The collector refused the deployment's credentials.
-    denied(string),
-    /// The telemetry was rejected, such as an id that is not hexadecimal.
-    /// Sending it again fails again.
-    invalid(string),
-    /// A valid export this backend cannot serve.
-    unsupported(string),
-    /// The collector did not answer, or the export exceeded its bound.
-    unavailable(string),
-    /// Any other failure.
-    other(string),
-  }
+  use omnia:types/types@0.1.0.{error};
 
   /// The id of a trace, as W3C Trace Context writes it.
   type trace-id = string;
@@ -338,13 +333,18 @@ interface metrics {
   %export: async func(scope-metrics: list<scope-metrics>) -> result<_, error>;
 }
 
+// wit-parser excludes a gated interface's types only where each carries the
+// interface's gate, so every type and `use` inside one repeats it
 /// Optional: log records.
+@unstable(feature = logs)
 interface logs {
+  @unstable(feature = logs)
   use types.{
     any-value, error, instrumentation-scope, key-value, span-id, trace-flags, trace-id,
   };
 
   /// One log record.
+  @unstable(feature = logs)
   record log-record {
     /// When the event happened. `none` when unknown.
     time-unix-nano: option<u64>,
@@ -370,6 +370,7 @@ interface logs {
   }
 
   /// The log records one instrumentation scope produced.
+  @unstable(feature = logs)
   record scope-logs {
     /// `none` when the scope is unknown.
     scope: option<instrumentation-scope>,
@@ -396,7 +397,11 @@ world core {
 
 /// Every interface. A backend answers `unsupported` for what it does not
 /// serve.
+///
+/// `logs` is unstable, and a guest binds it by enabling the feature of that
+/// name. Every host links it.
 world imports {
   include core;
+  @unstable(feature = logs)
   import logs;
 }

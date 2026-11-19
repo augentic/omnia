@@ -98,7 +98,10 @@ async fn scenario() {
 
     // a subpath nothing holds yet is no workspace, and `init` lays it down
     refused(store::open(at(root, "fresh/repo")).await.err(), "not-found", "holds no directory");
-    let fresh = store::init(at(root, "fresh/repo")).await.expect("init at a new subpath");
+    let fresh = store::init(at(root, "fresh/repo"))
+        .await
+        .expect("init at a new subpath")
+        .expect("a new workspace");
     assert_eq!(
         fresh.head().await.expect("head of what init laid down"),
         Some("head-sha".to_owned())

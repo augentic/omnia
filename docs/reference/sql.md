@@ -148,15 +148,16 @@ The SDK reports each case as an `omnia_sdk::Error` coded with the case's name: a
 
 ## The SDK's value mapping
 
-`omnia_sdk::sql::Value` keeps its own cases, each holding an `Option`. The SDK binds them as follows:
+`omnia_sdk::sql::Value` mirrors the WIT's cases, with `Null` for `none`. The SDK binds them as follows:
 
-- `None` in any case binds `none`, which is `NULL`.
+- `Null` binds `none`, which is `NULL`.
 - `Int32`, `Int64`, `Boolean`, `Date`, and `Time` bind their own case, `Str` binds `text`, and `Binary` binds `binary`.
 - `Float` binds `float32`, and `Double` binds `float64`.
-- `Uint32` binds `int64`. `Uint64` binds `int64`, and a value above `i64::MAX` fails with the code `invalid` before it reaches the host.
 - `Timestamp` binds `timestamp-tz` when it carries a `Z` or an offset after its date, and `timestamp` otherwise.
 
-It reads each case back into the one it binds from. Both `timestamp` and `timestamp-tz` read as `Timestamp`, and `none` reads as `Str(None)`, whatever its column's type. `Row::get` then decodes a column as a Rust type, whichever backend returned it:
+`Value::from` builds the case a Rust value maps to, and builds `Null` from a `None`. A `u32` builds an `Int64`, and a `u64` binds once the caller converts it to an `i64`.
+
+It reads each case back into the one it binds from. Both `timestamp` and `timestamp-tz` read as `Timestamp`, and `none` reads as `Null`, whatever its column's type. `Row::get` then decodes a column as a Rust type, whichever backend returned it:
 
 - `i32` and `i64` from either integer case, in range;
 - `f64` from `float32` or `float64`;

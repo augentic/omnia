@@ -18,7 +18,8 @@ one `BlobStoreClient` per backend.
   `finished` with `ok`.
 - `list` answers one page of the names under a prefix, flat or folded at
   the next `/`, with the cursor that resumes it.
-- `admin`, `uploads`, and `presign` are optional.
+- `admin`, `uploads`, and `presign` are optional. `uploads` and `presign`
+  are unstable, and a guest binds one by enabling the feature of its name.
 - The host answers `unsupported` for what `Container` cannot express yet:
   - a `put`, `delete`, `copy`, or `rename` with a precondition;
   - a `put` with attributes;

@@ -10,8 +10,9 @@ exports through, over one `OtelClient` per backend.
 - Records carry the names of OTLP, the OpenTelemetry Protocol, and mean
   what OTLP means by them. Every time is in nanoseconds since the Unix
   epoch.
-- Every backend serves `traces` and `metrics`. `logs` is optional, and this
-  host answers every `logs` export with `unsupported`.
+- Every backend serves `traces` and `metrics`. `logs` is optional and
+  unstable: a guest binds it by enabling the `logs` feature, and this host
+  answers every `logs` export with `unsupported`.
 - The guest exports its own telemetry. The host adds the deployment's
   resource and hands each call to the backend as one OTLP request.
 - `current-span-context` is the host's span for the call the guest is

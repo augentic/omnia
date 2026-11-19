@@ -29,6 +29,7 @@ wasmtime = { workspace = true, features = ["runtime"] }
 
 # guest dependencies
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+omnia-wasi-types.workspace = true
 wit-bindgen.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]

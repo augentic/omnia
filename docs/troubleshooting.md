@@ -66,7 +66,7 @@ A guest named a `path` or `release` whose derived name — the path's file stem,
 
 ### `... resolved to sha256:..., not its declared digest ...`
 
-The guest's bytes do not hash to the `digest` its `[[guest]]` entry pins. For a guest loaded at boot (embedded bytes, `run <component>`) this fails startup; for a first-use guest it fails the use that named it — the request, the run, the link call, or the `load`. Either the artifact changed under the deployment — rebuild it or restore the pinned one — or the pin is stale: an unpinned load reports the resolved digest on its handle, which is the value to commit. A `path` or `release` load whose own `when` misses loads nothing and answers a `conflict` instead, which `Plugins` reports as `... resolved to sha256:..., not the pinned ...`.
+The guest's bytes do not hash to the `digest` its `[[guest]]` entry pins. For a guest loaded at boot (embedded bytes, `run <component>`) this fails startup; for a first-use guest it fails the use that named it — the request, the run, the link call, or the `load`. Either the artifact changed under the deployment — rebuild it or restore the pinned one — or the pin is stale: an unpinned load reports the resolved digest on its handle, which is the value to commit. A `path` or `release` load whose own `pin` misses loads nothing and answers a `conflict` instead, which `Plugins` reports as `... resolved to sha256:..., not the pinned ...`.
 
 ### `... is pre-compiled and is read from unpinned ... while guests run: pin its digest`
 

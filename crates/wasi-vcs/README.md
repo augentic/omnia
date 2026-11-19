@@ -9,8 +9,8 @@ SDK's `Vcs` calls, over one `VcsClient` per backend.
 
 - A guest opens the repository or working copy at a `location`, and calls
   it through the `workspace` handle `open` returns. A place that holds none
-  fails with `not-found`. `init` lays a repository down, and keeps one
-  already there.
+  fails with `not-found`. `init` lays a repository down, and answers
+  `occupied` where one already is.
 - A `location` is a mount root the guest holds and a plain relative
   subpath, as `omnia:model`'s is. `init`, `add`, and `clone` lay its
   directory down where nothing stands. The host resolves it before any
@@ -27,9 +27,14 @@ SDK's `Vcs` calls, over one `VcsClient` per backend.
 - A lookup that finds nothing is `none`, not an error. That covers a
   revision, a bookmark, a remote's bookmark, and the `head` of a workspace
   with no commits.
-- A merge that leaves conflicts answers a `merge-conflict` naming their
-  paths. A push the remote moved past answers `diverged`. A merge into
-  pending changes fails with `invalid`, and nothing is merged.
+- An outcome a guest acts on is a result of its own, not an `error`:
+  - `init`, `add`, and `clone` into a place already taken answer
+    `occupied`;
+  - a merge that leaves conflicts answers `unmerged` naming their paths,
+    and a merge into pending changes answers `unmerged` naming those,
+    with nothing merged;
+  - a push the remote moved past answers `diverged`, with the commit the
+    repository last saw the remote's bookmark at.
 - `log` and `status` answer a page of at most 1,000 entries, and its
   `next` cursor resumes the listing.
 - `workspaces` is optional, and adds and removes a further workspace of a
@@ -37,11 +42,12 @@ SDK's `Vcs` calls, over one `VcsClient` per backend.
   bookmark, and pushes. `WasiVcs` serves both.
 - A backend picks a failure's case by returning an `omnia_wasi_vcs::Error`:
   - `NotARepository` and `NotFound` are `not-found`;
-  - `Exists` and `Pending` are `invalid`;
   - `Access` is `unavailable`;
-  - `Diverged` is a push's `diverged` outcome, and `other` from any other
-    call;
-  - `Other` and any untyped failure are `other`.
+  - `Exists` is the `occupied` outcome of `init`, `add`, and `clone`;
+  - `Pending` is a merge's `unmerged` outcome;
+  - `Diverged` is a push's `diverged` outcome;
+  - each of those three from any other call, `Other`, and any untyped
+    failure are `other`.
 - The host answers `unsupported` for what `VcsClient` cannot express yet:
   - a `log` with no base;
   - a `set-bookmark` with a precondition.

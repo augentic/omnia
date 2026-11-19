@@ -13,16 +13,16 @@ use crate::host::{Error, MessagingClient, Result, WasiMessaging};
 
 impl<T> HostWithStore<T> for WasiMessaging {
     async fn request(
-        accessor: &Accessor<T, Self>, c: Resource<ClientProxy>, topic: Topic,
-        message: types::Message, timeout_ms: Option<u32>,
+        accessor: &Accessor<T, Self>, client: Resource<ClientProxy>, topic: Topic,
+        message: types::Message, timeout_ms: Option<u64>,
     ) -> Result<types::Message> {
         if timeout_ms == Some(0) {
             return Err(Error::Invalid("a request waits at least 1 ms".to_owned()));
         }
-        let client = get_client(accessor, &c)?;
-        let request = Message::try_from(message)?;
+        let client = get_client(accessor, &client)?;
+        let request = Message::from(message);
         let options = timeout_ms.map(|timeout_ms| RequestOptions {
-            timeout: Some(Duration::from_millis(u64::from(timeout_ms))),
+            timeout: Some(Duration::from_millis(timeout_ms)),
             ..RequestOptions::default()
         });
 
@@ -31,14 +31,14 @@ impl<T> HostWithStore<T> for WasiMessaging {
     }
 
     async fn reply(
-        accessor: &Accessor<T, Self>, reply_to: String, message: types::Message,
+        accessor: &Accessor<T, Self>, client: Resource<ClientProxy>, reply_to: String,
+        message: types::Message,
     ) -> Result<()> {
         if reply_to.is_empty() {
             return Err(Error::Invalid("a reply needs the address a delivery carried".to_owned()));
         }
-        let message = Message::try_from(message)?;
-
-        let client = accessor.with(|mut store| store.get().client.endpoint()).await?;
+        let client = get_client(accessor, &client)?;
+        let message = Message::from(message);
         client.send(reply_to, message).await?;
 
         Ok(())

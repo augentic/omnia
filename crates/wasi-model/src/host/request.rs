@@ -6,7 +6,7 @@ use std::fmt;
 use std::net::IpAddr;
 
 use crate::host::generated::omnia::model::{completion, types};
-use crate::host::{Error, Format, Grants, Message, Role, WorkerGrant};
+use crate::host::{Effort, Error, Format, Grants, Location, Message, Role, WorkerGrant};
 
 const RESERVED_TOOLS: &[&str] = &["read", "list", "write"];
 
@@ -47,10 +47,9 @@ pub struct Generation {
     pub stop: Vec<String>,
     /// The seed that makes sampling repeatable.
     pub seed: Option<u64>,
-    /// How much the model reasons before it answers, by the level's name.
-    /// `low`, `medium`, and `high` are portable, and a backend fails a level
-    /// it does not know with [`Error::Invalid`].
-    pub effort: Option<String>,
+    /// How much the model reasons before it answers. A backend fails an
+    /// [`Effort::Other`] level it does not know with [`Error::Invalid`].
+    pub effort: Option<Effort>,
 }
 
 /// A tool offered to the model.
@@ -123,14 +122,39 @@ impl Request {
             return Err(Error::Invalid("format schema is not valid JSON".to_owned()));
         }
 
-        if let Some(worker) = &self.grants.worker {
-            if self.grants.workspace.is_none() {
-                return Err(Error::Invalid("a worker grant requires a workspace lend".to_owned()));
-            }
+        if let Some(worker) = self.grants.worker() {
             worker.validate().map_err(Error::Invalid)?;
         }
 
         Ok(())
+    }
+}
+
+impl Grants {
+    /// The directory lent to the completion, `None` where the guest lends none.
+    #[must_use]
+    pub fn location(&self) -> Option<&Location> {
+        self.workspace.as_ref().map(|workspace| &workspace.location)
+    }
+
+    /// What the backend's worker may reach beyond the lent directory, `None`
+    /// where the guest grants nothing more.
+    #[must_use]
+    pub fn worker(&self) -> Option<&WorkerGrant> {
+        self.workspace.as_ref().and_then(|workspace| workspace.worker.as_ref())
+    }
+}
+
+impl Effort {
+    /// The level's name: `low`, `medium`, `high`, or the backend's own.
+    #[must_use]
+    pub const fn as_str(&self) -> &str {
+        match self {
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+            Self::Other(level) => level.as_str(),
+        }
     }
 }
 

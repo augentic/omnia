@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 
 use futures::FutureExt as _;
 use omnia_wasi_model::{
-    Answer, Exhausted, Format, FutureResult, Limits, ModelClient, Request, Tool, ToolHost,
+    Answer, Budget, Exhausted, Format, FutureResult, Limits, ModelClient, Request, Tool, ToolHost,
     WorkerGrant,
 };
 
@@ -336,7 +336,7 @@ impl ModelClient for ScriptedModel {
                     // the next scripted answer is the corrected attempt; none left is
                     // the budget, typed so the host surfaces `exhausted`
                     Err(correction) if this.script.remaining() == 0 => {
-                        return Err(Exhausted::new(correction).into());
+                        return Err(Exhausted::new(Budget::Responses, correction).into());
                     }
                     Err(_) => {}
                 }
@@ -371,10 +371,14 @@ impl From<&Request> for Seen {
                 .map(|Tool::Function(function)| function.name.clone())
                 .collect(),
             temperature: request.generation.as_ref().and_then(|generation| generation.temperature),
-            effort: request.generation.as_ref().and_then(|generation| generation.effort.clone()),
+            effort: request
+                .generation
+                .as_ref()
+                .and_then(|generation| generation.effort.as_ref())
+                .map(|effort| effort.as_str().to_owned()),
             // the descriptor cannot cross into a plain record; the subpath is what the guest chose
-            workspace: request.grants.workspace.as_ref().map(|location| location.subpath.clone()),
-            worker: request.grants.worker.as_ref().map(SeenWorker::from),
+            workspace: request.grants.location().map(|location| location.subpath.clone()),
+            worker: request.grants.worker().map(SeenWorker::from),
             check: request.check,
         }
     }

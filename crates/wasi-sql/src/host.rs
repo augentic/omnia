@@ -8,7 +8,7 @@ mod store_impl;
 mod transactions_impl;
 
 mod generated {
-    pub use self::omnia::sql::types::Error;
+    pub use self::omnia::types::types::Error;
     pub use super::database_impl::DatabaseHandle;
     pub use super::transactions_impl::TransactionHandle;
 
@@ -23,7 +23,7 @@ mod generated {
             "omnia:sql/transactions.transaction": TransactionHandle,
         },
         trappable_error_type: {
-            "omnia:sql/types.error" => Error,
+            "omnia:types/types.error" => Error,
         },
     });
 }
@@ -40,6 +40,7 @@ pub use self::default_impl::{ConnectOptions, SqlDefault};
 pub use self::generated::Error;
 use self::generated::omnia::sql::types::Host as TypesHost;
 use self::generated::omnia::sql::{database, store, transactions, types};
+use self::generated::omnia::types::types as omnia_types;
 pub use self::resource::*;
 
 type Result<T> = std::result::Result<T, Error>;
@@ -51,6 +52,7 @@ pub struct WasiSql;
 
 impl<B: Provides<Self>> Host<B> for WasiSql {
     fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
+        omnia_types::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
         types::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
         database::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
         store::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
@@ -90,7 +92,9 @@ impl From<ResourceTableError> for Error {
     }
 }
 
-impl TypesHost for HostView<'_, dyn SqlClient> {
+impl TypesHost for HostView<'_, dyn SqlClient> {}
+
+impl omnia_types::Host for HostView<'_, dyn SqlClient> {
     fn convert_error(&mut self, err: Error) -> wasmtime::Result<Error> {
         Ok(err)
     }

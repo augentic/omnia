@@ -6,9 +6,12 @@ use opentelemetry_proto::tonic::common::v1::{
 use opentelemetry_proto::tonic::resource::v1::Resource;
 
 use crate::host::generated::omnia::otel::types;
+use crate::host::generated::omnia::types::types as omnia_types;
 use crate::host::{Error, OtelClient, Result};
 
-impl types::Host for HostView<'_, dyn OtelClient> {
+impl types::Host for HostView<'_, dyn OtelClient> {}
+
+impl omnia_types::Host for HostView<'_, dyn OtelClient> {
     fn convert_error(&mut self, err: Error) -> wasmtime::Result<Error> {
         Ok(err)
     }

@@ -115,60 +115,42 @@ pub const DEFAULT: &str = "default";
 
 /// A SQL scalar: a statement parameter or a column value.
 ///
-/// Every case holds an `Option`, and `None` is `NULL`. The `From` impls build
-/// the case a Rust value maps to, and `Option` of one maps `None` to that
-/// case's `NULL`. A `NULL` reads back as `Str(None)`, whatever its column's
-/// type.
+/// The `From` impls build the case a Rust value maps to, and `Option` of one
+/// maps `None` to [`Null`](Self::Null). A `u32` binds as an
+/// [`Int64`](Self::Int64), and a `u64` binds only once converted to an `i64`.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
+    /// `NULL`, in a column of any type.
+    Null,
     /// Signed 32-bit integer.
-    Int32(Option<i32>),
+    Int32(i32),
     /// Signed 64-bit integer.
-    Int64(Option<i64>),
-    /// Unsigned 32-bit integer, which travels as a signed 64-bit one.
-    Uint32(Option<u32>),
-    /// Unsigned 64-bit integer, which travels as a signed 64-bit one, so a
-    /// value above `i64::MAX` fails with the code `invalid`.
-    Uint64(Option<u64>),
+    Int64(i64),
     /// 32-bit floating-point number.
-    Float(Option<f32>),
+    Float(f32),
     /// 64-bit floating-point number.
-    Double(Option<f64>),
+    Double(f64),
     /// UTF-8 string.
-    Str(Option<String>),
+    Str(String),
     /// Boolean value.
-    Boolean(Option<bool>),
+    Boolean(bool),
     /// A `YYYY-MM-DD` date.
-    Date(Option<String>),
+    Date(String),
     /// An `HH:MM:SS` time, with optional fractional seconds.
-    Time(Option<String>),
+    Time(String),
     /// A `YYYY-MM-DD HH:MM:SS` timestamp, with optional fractional seconds.
     ///
     /// One in RFC 3339 form, with a `Z` or an offset, is a `TIMESTAMPTZ`.
-    Timestamp(Option<String>),
+    Timestamp(String),
     /// Opaque binary bytes.
-    Binary(Option<Bytes>),
+    Binary(Bytes),
 }
 
 impl Value {
     /// Whether this value is `NULL`.
     #[must_use]
     pub const fn is_null(&self) -> bool {
-        matches!(
-            self,
-            Self::Int32(None)
-                | Self::Int64(None)
-                | Self::Uint32(None)
-                | Self::Uint64(None)
-                | Self::Float(None)
-                | Self::Double(None)
-                | Self::Str(None)
-                | Self::Boolean(None)
-                | Self::Date(None)
-                | Self::Time(None)
-                | Self::Timestamp(None)
-                | Self::Binary(None)
-        )
+        matches!(self, Self::Null)
     }
 }
 
@@ -177,12 +159,6 @@ macro_rules! value_from {
         $(
             impl From<$ty> for Value {
                 fn from(value: $ty) -> Self {
-                    Self::$case(Some(value))
-                }
-            }
-
-            impl From<Option<$ty>> for Value {
-                fn from(value: Option<$ty>) -> Self {
                     Self::$case(value)
                 }
             }
@@ -194,35 +170,33 @@ value_from! {
     String => Str,
     i32 => Int32,
     i64 => Int64,
-    u32 => Uint32,
-    u64 => Uint64,
     f32 => Float,
     f64 => Double,
     bool => Boolean,
     Bytes => Binary,
 }
 
-impl From<&str> for Value {
-    fn from(value: &str) -> Self {
-        Self::Str(Some(value.to_owned()))
+impl From<u32> for Value {
+    fn from(value: u32) -> Self {
+        Self::Int64(i64::from(value))
     }
 }
 
-impl From<Option<&str>> for Value {
-    fn from(value: Option<&str>) -> Self {
-        Self::Str(value.map(str::to_owned))
+impl From<&str> for Value {
+    fn from(value: &str) -> Self {
+        Self::Str(value.to_owned())
     }
 }
 
 impl From<Vec<u8>> for Value {
     fn from(value: Vec<u8>) -> Self {
-        Self::Binary(Some(Bytes::from(value)))
+        Self::Binary(Bytes::from(value))
     }
 }
 
-impl From<Option<Vec<u8>>> for Value {
-    fn from(value: Option<Vec<u8>>) -> Self {
-        Self::Binary(value.map(Bytes::from))
+impl<T: Into<Self>> From<Option<T>> for Value {
+    fn from(value: Option<T>) -> Self {
+        value.map_or(Self::Null, Into::into)
     }
 }
 
@@ -333,13 +307,9 @@ impl<'a, T: FromColumn<'a>> FromColumn<'a> for Option<T> {
 impl FromColumn<'_> for i64 {
     fn from_column(column: &str, value: &Value) -> Result<Self> {
         match value {
-            Value::Int64(Some(v)) => Ok(*v),
-            Value::Int32(Some(v)) => Ok(Self::from(*v)),
-            Value::Uint32(Some(v)) => Ok(Self::from(*v)),
-            Value::Uint64(Some(v)) => {
-                Self::try_from(*v).map_err(|err| column_overflow(column, "i64", err))
-            }
-            v if v.is_null() => Err(column_null(column)),
+            Value::Int64(v) => Ok(*v),
+            Value::Int32(v) => Ok(Self::from(*v)),
+            Value::Null => Err(column_null(column)),
             other => Err(column_mismatch(column, "an integer", other)),
         }
     }
@@ -354,18 +324,8 @@ impl FromColumn<'_> for i32 {
 
 impl FromColumn<'_> for u64 {
     fn from_column(column: &str, value: &Value) -> Result<Self> {
-        match value {
-            Value::Uint64(Some(v)) => Ok(*v),
-            Value::Uint32(Some(v)) => Ok(Self::from(*v)),
-            Value::Int64(Some(v)) => {
-                Self::try_from(*v).map_err(|err| column_overflow(column, "u64", err))
-            }
-            Value::Int32(Some(v)) => {
-                Self::try_from(*v).map_err(|err| column_overflow(column, "u64", err))
-            }
-            v if v.is_null() => Err(column_null(column)),
-            other => Err(column_mismatch(column, "an integer", other)),
-        }
+        let wide = i64::from_column(column, value)?;
+        Self::try_from(wide).map_err(|err| column_overflow(column, "u64", err))
     }
 }
 
@@ -379,9 +339,9 @@ impl FromColumn<'_> for u32 {
 impl FromColumn<'_> for f64 {
     fn from_column(column: &str, value: &Value) -> Result<Self> {
         match value {
-            Value::Double(Some(v)) => Ok(*v),
-            Value::Float(Some(v)) => Ok(Self::from(*v)),
-            v if v.is_null() => Err(column_null(column)),
+            Value::Double(v) => Ok(*v),
+            Value::Float(v) => Ok(Self::from(*v)),
+            Value::Null => Err(column_null(column)),
             other => Err(column_mismatch(column, "a float", other)),
         }
     }
@@ -390,8 +350,8 @@ impl FromColumn<'_> for f64 {
 impl FromColumn<'_> for f32 {
     fn from_column(column: &str, value: &Value) -> Result<Self> {
         match value {
-            Value::Float(Some(v)) => Ok(*v),
-            v if v.is_null() => Err(column_null(column)),
+            Value::Float(v) => Ok(*v),
+            Value::Null => Err(column_null(column)),
             other => Err(column_mismatch(column, "a 32-bit float", other)),
         }
     }
@@ -400,16 +360,10 @@ impl FromColumn<'_> for f32 {
 impl FromColumn<'_> for bool {
     fn from_column(column: &str, value: &Value) -> Result<Self> {
         match value {
-            Value::Boolean(Some(v)) => Ok(*v),
-            Value::Int32(Some(0))
-            | Value::Int64(Some(0))
-            | Value::Uint32(Some(0))
-            | Value::Uint64(Some(0)) => Ok(false),
-            Value::Int32(Some(1))
-            | Value::Int64(Some(1))
-            | Value::Uint32(Some(1))
-            | Value::Uint64(Some(1)) => Ok(true),
-            v if v.is_null() => Err(column_null(column)),
+            Value::Boolean(v) => Ok(*v),
+            Value::Int32(0) | Value::Int64(0) => Ok(false),
+            Value::Int32(1) | Value::Int64(1) => Ok(true),
+            Value::Null => Err(column_null(column)),
             other => Err(column_mismatch(column, "a boolean", other)),
         }
     }
@@ -418,11 +372,8 @@ impl FromColumn<'_> for bool {
 impl<'a> FromColumn<'a> for &'a str {
     fn from_column(column: &str, value: &'a Value) -> Result<Self> {
         match value {
-            Value::Str(Some(v))
-            | Value::Date(Some(v))
-            | Value::Time(Some(v))
-            | Value::Timestamp(Some(v)) => Ok(v.as_str()),
-            v if v.is_null() => Err(column_null(column)),
+            Value::Str(v) | Value::Date(v) | Value::Time(v) | Value::Timestamp(v) => Ok(v.as_str()),
+            Value::Null => Err(column_null(column)),
             other => Err(column_mismatch(column, "a string", other)),
         }
     }
@@ -437,8 +388,8 @@ impl<'a> FromColumn<'a> for String {
 impl<'a> FromColumn<'a> for &'a [u8] {
     fn from_column(column: &str, value: &'a Value) -> Result<Self> {
         match value {
-            Value::Binary(Some(v)) => Ok(v.as_ref()),
-            v if v.is_null() => Err(column_null(column)),
+            Value::Binary(v) => Ok(v.as_ref()),
+            Value::Null => Err(column_null(column)),
             other => Err(column_mismatch(column, "binary bytes", other)),
         }
     }
@@ -453,8 +404,8 @@ impl<'a> FromColumn<'a> for Vec<u8> {
 impl FromColumn<'_> for Bytes {
     fn from_column(column: &str, value: &Value) -> Result<Self> {
         match value {
-            Value::Binary(Some(v)) => Ok(v.clone()),
-            v if v.is_null() => Err(column_null(column)),
+            Value::Binary(v) => Ok(v.clone()),
+            Value::Null => Err(column_null(column)),
             other => Err(column_mismatch(column, "binary bytes", other)),
         }
     }

@@ -13,7 +13,7 @@ mod types_impl;
 mod generated {
     #![allow(missing_docs, reason = "wasmtime bindgen output")]
 
-    pub use self::omnia::websocket::types::Error;
+    pub use self::omnia::types::types::Error;
     pub use crate::host::resource::ClientProxy;
 
     wasmtime::component::bindgen!({
@@ -29,7 +29,7 @@ mod generated {
             "omnia:websocket/types.client": ClientProxy,
         },
         trappable_error_type: {
-            "omnia:websocket/types.error" => Error,
+            "omnia:types/types.error" => Error,
         },
     });
 }
@@ -42,6 +42,7 @@ use omnia_core::{Host, HostCtx, Provides, Runtime, StoreCtx};
 use wasmtime::component::{Linker, ResourceTableError};
 
 pub use self::default_impl::{ConnectOptions, WebSocketDefault};
+use self::generated::omnia::types::types as omnia_types;
 use self::generated::omnia::websocket::{broadcast, connections, types};
 pub use self::generated::{Error, Websocket};
 pub use self::resource::*;
@@ -57,6 +58,7 @@ pub struct WasiWebSocket;
 
 impl<B: Provides<Self>> Host<B> for WasiWebSocket {
     fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
+        omnia_types::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
         types::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
         connections::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
         Ok(broadcast::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?)

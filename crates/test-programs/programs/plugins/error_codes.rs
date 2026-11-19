@@ -4,6 +4,7 @@
 //!
 //! - The suite's faulting source fails `fault:<case>@1.0.0` with that case.
 //! - It serves the echoer as `test:echoer@1.0.0`, which the pin here misses.
+//! - A declared name with a pin is refused before it reaches the host.
 
 #![cfg(target_arch = "wasm32")]
 
@@ -38,6 +39,10 @@ async fn scenario() {
     let pin: Digest = MISSED.parse().expect("a well-formed digest");
     let conflict = WasiProvider.load(&release("test:echoer@1.0.0"), Some(&pin)).await;
     expect_code(conflict, (400, "refused"), echoer);
+
+    // a declared name the call pins, which the SDK refuses unsent
+    let declared = WasiProvider.load(&Location::Declared("echoer".to_owned()), Some(&pin)).await;
+    expect_code(declared, (400, "refused"), "takes no digest");
 }
 
 fn release(reference: &str) -> Location {

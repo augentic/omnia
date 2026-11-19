@@ -7,6 +7,7 @@ use wasmtime::component::{Access, Accessor, Resource};
 use crate::host::generated::omnia::messaging::types::{
     self, Delivery, Host, HostClient, HostClientWithStore,
 };
+use crate::host::generated::omnia::types::types as omnia_types;
 use crate::host::resource::{ClientProxy, Message, Metadata};
 use crate::host::{Error, MessagingClient, Result, WasiMessaging};
 
@@ -38,7 +39,9 @@ impl<T> HostClientWithStore<T> for WasiMessaging {
     }
 }
 
-impl Host for HostView<'_, dyn MessagingClient> {
+impl Host for HostView<'_, dyn MessagingClient> {}
+
+impl omnia_types::Host for HostView<'_, dyn MessagingClient> {
     fn convert_error(&mut self, err: Error) -> wasmtime::Result<Error> {
         Ok(err)
     }
@@ -47,15 +50,9 @@ impl Host for HostView<'_, dyn MessagingClient> {
 impl HostClient for HostView<'_, dyn MessagingClient> {}
 
 // the seam carries `content-type` and `key` as the metadata entries of those
-// names, each replacing an entry of that name in any case, and carries no id
-impl TryFrom<types::Message> for Message {
-    type Error = Error;
-
-    fn try_from(message: types::Message) -> Result<Self> {
-        if message.id.is_some() {
-            return Err(Error::Unsupported("no backend carries a message id".to_owned()));
-        }
-
+// names, each replacing an entry of that name in any case
+impl From<types::Message> for Message {
+    fn from(message: types::Message) -> Self {
         let mut metadata = Metadata::from(message.metadata);
         for (name, value) in [(CONTENT_TYPE, message.content_type), (KEY, message.key)] {
             if let Some(value) = value {
@@ -66,7 +63,7 @@ impl TryFrom<types::Message> for Message {
 
         let mut outgoing = Self::new(message.data);
         outgoing.metadata = (!metadata.is_empty()).then_some(metadata);
-        Ok(outgoing)
+        outgoing
     }
 }
 
@@ -78,14 +75,14 @@ impl From<Message> for types::Message {
         Self {
             data: message.payload,
             content_type,
-            id: None,
             key,
             metadata: metadata.into(),
         }
     }
 }
 
-// no backend reports a position, an attempt count, or a publish time yet
+// no backend reports a position, an attempt count, or a publish time yet, and
+// only the trigger sets a deadline
 impl From<Message> for Delivery {
     fn from(mut message: Message) -> Self {
         let topic = std::mem::take(&mut message.topic);
@@ -97,6 +94,7 @@ impl From<Message> for Delivery {
             position: None,
             attempt: None,
             published_at: None,
+            deadline: None,
         }
     }
 }

@@ -10,13 +10,7 @@ use test_programs::{raw_lookup, raw_model, raw_request};
 omnia_sdk::api::command::export!(scenario);
 
 async fn scenario() {
-    let request = raw_request(
-        vec![raw_lookup()],
-        types::Grants {
-            workspace: None,
-            worker: None,
-        },
-    );
+    let request = raw_request(vec![raw_lookup()], types::Grants { workspace: None });
     let model = raw_model().await;
     let (results, results_rx) = wit_stream::new();
     let session = model.complete(request, results_rx).await.expect("session opens");

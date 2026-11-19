@@ -54,6 +54,11 @@ async fn state_conflict() {
 }
 
 #[tokio::test]
+async fn state_revision() {
+    state::revision(&memory()).await;
+}
+
+#[tokio::test]
 async fn state_counter() {
     state::counter(&memory()).await;
 }

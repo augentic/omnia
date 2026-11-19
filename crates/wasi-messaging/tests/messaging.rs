@@ -188,25 +188,28 @@ async fn messaging_keyed() {
     );
 
     // Incoming handler: the guest's router finds the key on the delivery, and
-    // the host's deadline replaces one the delivery carried, whatever its case.
+    // reads the host's deadline rather than a `Deadline` entry it carried.
     sent.metadata.get_or_insert_default().insert("Deadline".to_owned(), "1".to_owned());
     handler.handle(sent).await.expect("handled");
 
     runtime.shutdown();
 }
 
-// A guest's returned `Err` comes back as its own outcome, carrying the
-// guest's error, rather than flattened into success or mistaken for a trap.
+// A guest's settlement comes back as its own outcome, carrying the guest's
+// reason and delay, rather than flattened into success or mistaken for a trap.
 #[tokio::test]
 async fn messaging_handle_err() {
     let runtime =
         boot(&sole(test_programs::MESSAGING_HANDLE_ERR), Backends::defaults().await).await;
     let handler = handler(&runtime);
 
-    let error =
-        handler.handle(order("orders")).await.expect_err("the guest's error is the handler's");
+    let error = handler.handle(order("orders")).await.expect_err("the guest releases the order");
     assert!(
-        matches!(&error, HandleError::Rejected(Error::Other(reason)) if reason == "rejected orders"),
+        matches!(
+            &error,
+            HandleError::Released { reason, delay: Some(delay) }
+                if reason == "released orders" && *delay == Duration::from_millis(250)
+        ),
         "unexpected error: {error}"
     );
 
@@ -446,7 +449,7 @@ async fn messaging_error_codes() {
 }
 
 // The SDK settles a handler's failure by its class, and the host hands the
-// backend the case the guest returned.
+// backend the settlement the guest returned.
 #[tokio::test]
 async fn messaging_outcomes() {
     let runtime = boot(&sole(test_programs::MESSAGING_OUTCOMES), Backends::defaults().await).await;
@@ -454,17 +457,17 @@ async fn messaging_outcomes() {
 
     let error = handler.handle(order("orders")).await.expect_err("an undecodable order fails");
     assert!(
-        matches!(&error, HandleError::Rejected(Error::Invalid(reason)) if reason.contains("undecodable")),
+        matches!(&error, HandleError::Rejected(reason) if reason.contains("undecodable")),
         "unexpected error: {error}"
     );
     let error = handler.handle(order("pricing")).await.expect_err("an unanswered upstream fails");
     assert!(
-        matches!(&error, HandleError::Rejected(Error::Unavailable(reason)) if reason.contains("pricing")),
+        matches!(&error, HandleError::Released { reason, delay: None } if reason.contains("pricing")),
         "unexpected error: {error}"
     );
     let error = handler.handle(order("ledger")).await.expect_err("a refused entry fails");
     assert!(
-        matches!(&error, HandleError::Rejected(Error::Other(reason)) if reason.contains("ledger")),
+        matches!(&error, HandleError::Released { reason, delay: None } if reason.contains("ledger")),
         "unexpected error: {error}"
     );
 

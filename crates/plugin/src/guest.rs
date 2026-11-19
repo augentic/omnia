@@ -7,6 +7,9 @@ mod generated {
     wit_bindgen::generate!({
         world: "imports",
         path: "wit",
+        with: {
+            "omnia:types/types@0.1.0": omnia_wasi_types::omnia::types,
+        },
         generate_all,
     });
 }

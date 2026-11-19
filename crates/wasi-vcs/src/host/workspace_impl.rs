@@ -5,14 +5,14 @@ use omnia_core::{HostView, StoreCtx};
 use wasmtime::component::{Access, Accessor, Resource};
 
 use crate::host::generated::omnia::vcs::types::{
-    CommitId, Conflict, Error, Location, Precondition,
+    CommitId, Conflict, Error, Location, Occupied, Precondition,
 };
 use crate::host::generated::omnia::vcs::workspace::{
-    self, Host, HostWorkspace, HostWorkspaceWithStore, LogPage, MergeConflict, StatusPage,
+    self, Host, HostWorkspace, HostWorkspaceWithStore, LogPage, StatusPage, Unmerged,
 };
 use crate::host::location::Intent;
 use crate::host::{
-    Change, ChangeKind, Entry, Error as BackendError, FutureResult, Place, Rule, Strategy,
+    Change, ChangeKind, Entry, Error as BackendError, FutureResult, Merged, Place, Rule, Strategy,
     VcsClient, WasiVcs,
 };
 
@@ -169,29 +169,32 @@ impl<T> HostWorkspaceWithStore<T> for WasiVcs {
     async fn merge(
         accessor: &Accessor<T, Self>, self_: Resource<WorkspaceHandle>, revision: String,
         message: String, policy: Vec<workspace::Rule>,
-    ) -> Result<Result<CommitId, MergeConflict>, Error> {
+    ) -> Result<Result<CommitId, Unmerged>, Error> {
         let workspace = WorkspaceHandle::lookup(accessor, &self_)?;
         workspace.writable()?;
 
         // only a working copy with nothing pending takes a merge
         let pending = workspace.call(accessor, |client, place| client.pending(place)).await?;
         if !pending.is_empty() {
-            return Err(Error::Invalid(format!(
-                "the working copy holds {} pending changes",
-                pending.len()
-            )));
+            let paths = pending.into_iter().map(|change| change.path).collect();
+            return Ok(Err(Unmerged::Pending(sorted(paths))));
         }
 
         let policy = policy.into_iter().map(Into::into).collect();
         let merged = workspace
             .call(accessor, |client, place| client.merge(place, revision, message, policy))
-            .await?;
-        let Some(commit) = merged.commit else {
-            let mut paths = merged.conflicts;
-            paths.sort();
-            return Ok(Err(MergeConflict { paths }));
-        };
-        Ok(Ok(commit))
+            .await;
+        match merged.map_err(BackendError::typed) {
+            Ok(Merged {
+                commit: Some(commit), ..
+            }) => Ok(Ok(commit)),
+            Ok(Merged {
+                commit: None,
+                conflicts,
+            }) => Ok(Err(Unmerged::Conflicts(sorted(conflicts)))),
+            Err(BackendError::Pending(paths)) => Ok(Err(Unmerged::Pending(sorted(paths)))),
+            Err(err) => Err(err.into()),
+        }
     }
 
     async fn bookmark(
@@ -229,6 +232,21 @@ pub fn found<R>(answer: anyhow::Result<R>) -> Result<Option<R>, Error> {
         Err(BackendError::NotFound(_)) => Ok(None),
         Err(err) => Err(err.into()),
     }
+}
+
+// What a call that lays a workspace down did. A backend's `Exists` is the
+// place found occupied.
+pub fn laid<R>(answer: anyhow::Result<R>) -> Result<Result<R, Occupied>, Error> {
+    match answer.map_err(BackendError::typed) {
+        Ok(value) => Ok(Ok(value)),
+        Err(BackendError::Exists(detail)) => Ok(Err(Occupied { detail })),
+        Err(err) => Err(err.into()),
+    }
+}
+
+fn sorted(mut paths: Vec<String>) -> Vec<String> {
+    paths.sort();
+    paths
 }
 
 // The entries a page holds: `limit`, capped at `MAX_PAGE_SIZE`, which is

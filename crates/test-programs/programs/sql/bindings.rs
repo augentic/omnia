@@ -3,7 +3,8 @@
 //! - The unnamed handle and `second` are separate databases, and `execute`
 //!   counts the rows a statement touched.
 //! - A transaction on `second` commits there alone.
-//! - A `u32` and a `u64` up to `i64::MAX` read back as they were bound.
+//! - A `u32` binds as a signed 64-bit integer, and an `i64::MAX` column reads
+//!   back as a `u64`.
 
 #![cfg(target_arch = "wasm32")]
 
@@ -43,7 +44,7 @@ async fn scenario() {
     let widest = i64::MAX.cast_unsigned();
     let insert = "INSERT INTO counts (c_u32, c_u64) VALUES ($1, $2)";
     let inserted =
-        WasiProvider.execute(insert, &[Value::from(u32::MAX), Value::from(widest)]).await;
+        WasiProvider.execute(insert, &[Value::from(u32::MAX), Value::from(i64::MAX)]).await;
     assert_eq!(inserted.expect("insert counts"), 1);
     let rows = WasiProvider.query("SELECT c_u32, c_u64 FROM counts", &[]).await.expect("select");
     let [row] = &rows[..] else {

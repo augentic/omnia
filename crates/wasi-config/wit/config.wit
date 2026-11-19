@@ -7,25 +7,17 @@ package omnia:config@0.1.0;
 ///
 /// - A portable key is 1 to 253 bytes long and holds only uppercase ASCII
 ///   letters, digits, and `_`. It does not start with a digit.
+///
+/// An `error` from a configuration interface means:
+///
+/// - `not-found`: the source the deployment names does not exist. An unset
+///   key is not an error.
+/// - `invalid`: the request was rejected, such as a zero `limit` or a key
+///   the backend cannot read.
+/// - `unavailable`: the configuration source did not answer, or the call
+///   exceeded its bound.
 interface types {
-  /// Why a call failed.
-  variant error {
-    /// The source the deployment names does not exist. An unset key is not
-    /// an error.
-    not-found(string),
-    /// The caller may not make the call.
-    denied(string),
-    /// The request was rejected, such as a zero `limit` or a key the backend
-    /// cannot read.
-    invalid(string),
-    /// A valid request this backend cannot serve.
-    unsupported(string),
-    /// The configuration source did not answer, or the call exceeded its
-    /// bound.
-    unavailable(string),
-    /// Any other failure.
-    other(string),
-  }
+  use omnia:types/types@0.1.0.{error};
 }
 
 /// The configuration a deployment sets for its guest. Every backend serves

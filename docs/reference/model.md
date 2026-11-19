@@ -1,6 +1,6 @@
 # Model Interface Reference
 
-Reference for the `omnia:model` package (version `0.2.0`): its interfaces, the session and its calls, the request, the checks the host enforces, the reply and `exhausted`, the errors, and the backend matrix. The walk-through is in [Model Completions and MCP](../guides/model-completions.md), and the authoritative WIT is [`crates/wasi-model/wit/model.wit`](../../crates/wasi-model/wit/model.wit).
+Reference for the `omnia:model` package (version `0.3.0`): its interfaces, the session and its calls, the request, the checks the host enforces, the reply and `exhausted`, the errors, and the backend matrix. The walk-through is in [Model Completions and MCP](../guides/model-completions.md), and the authoritative WIT is [`crates/wasi-model/wit/model.wit`](../../crates/wasi-model/wit/model.wit).
 
 - [Interfaces](#interfaces)
 - [The session](#the-session)
@@ -90,7 +90,7 @@ The guest names the model when it opens it, so a request carries none.
 
 `temperature`, `top-p`, `max-tokens`, `stop-sequences`, `seed`, and `effort`. `max-tokens` bounds one response, and a completion that calls tools takes several. An absent field takes the backend's default, and a backend carries every field given or fails with `unsupported`.
 
-`effort` is how much the model reasons before it answers, by the level's name. `low`, `medium`, and `high` are portable. The host passes a level through as written, and a backend fails one it does not know with `invalid`.
+`effort` is how much the model reasons before it answers: `low`, `medium`, `high`, or `other`, a level by the backend's own name such as `minimal`. The first three are portable. The host passes a level through as written, and a backend fails one it does not know with `invalid`.
 
 ### `format`
 
@@ -125,9 +125,9 @@ The model calls a tool through the session's `calls`, and the guest runs it.
 
 ### `grants`
 
-`workspace` is the directory the completion works in, an `option<location>`. A `location` is a `root`, a borrow of a `wasi:filesystem` directory descriptor the guest holds, plus a `subpath` beneath it. An empty subpath names the root itself. Being a typed resource borrow, a location cannot be forged. The host resolves it to an authorised mount by directory identity, so nothing outside a mount is reached. Backends then reach it as bounded `read`, `list`, and `write` through `ToolHost` (genai), or as the absolute local path (the cursor agent's working directory).
+`workspace` is the directory the guest lends the completion, an `option<workspace-grant>`. A `workspace-grant` is the `location` the completion works in and the `worker` grant that reaches beyond it, so a worker grant cannot be given without a lend. A `location` is a `root`, a borrow of a `wasi:filesystem` directory descriptor the guest holds, plus a `subpath` beneath it. An empty subpath names the root itself. Being a typed resource borrow, a location cannot be forged. The host resolves it to an authorised mount by directory identity, so nothing outside a mount is reached. Backends then reach it as bounded `read`, `list`, and `write` through `ToolHost` (genai), or as the absolute local path (the cursor agent's working directory).
 
-`worker` is what a backend's worker may reach beyond the workspace, an `option<worker-grant>`. A worker is a process the backend runs for the completion, such as a command the model asks for. The guest states the grant, because it knows the toolchain the completion runs:
+`worker` is what a backend's worker may reach beyond the `location`, an `option<worker-grant>`. A worker is a process the backend runs for the completion, such as a command the model asks for. The guest states the grant, because it knows the toolchain the completion runs:
 
 - `egress` lists the host names the worker may connect to through the backend's proxy. Each is a whole name, or `*.suffix` for a domain and every host beneath it. None is an IP literal, and none carries a port, a scheme, or a path.
 - `read` lists the directories the worker may read beside the workspace. Each is `~/<path>` beneath the operator's home, where `<path>` follows the rule of `location.subpath` and is not empty. A directory the machine lacks grants nothing.
@@ -149,7 +149,7 @@ The host makes these checks whatever the backend. Each fails the call it applies
 - A request whose messages hold no text is `invalid`.
 - A tool named `read`, `list`, or `write` is `invalid`, and so is a name given twice or an `input-schema` that is not JSON.
 - A `format::schema` whose schema is not JSON is `invalid`.
-- A `worker` grant without a `workspace` is `invalid`, and so is an entry that breaks its shape.
+- A `worker` grant entry that breaks its shape is `invalid`.
 - A `workspace` whose root is not one of the guest's mounts, or is not a directory, is `denied`.
 - A `workspace` subpath with an empty, `.`, or `..` segment, or a `\`, is `invalid`, and one that does not exist is `not-found`.
 
@@ -180,12 +180,15 @@ A `usage` counts over every response the model wrote:
 
 The last three are `none` where the backend keeps no count.
 
-A completion that spent a budget before it had an answer resolves `reply` to `ok(err(exhausted))`, an outcome rather than an error. Its `detail` says which budget ran out, for a person to read, and its `usage` is what the completion spent. The deployment sets the budgets. They bound:
+A completion that spent a budget before it had an answer resolves `reply` to `ok(err(exhausted))`, an outcome rather than an error. Its `budget` names the budget that ran out, its `detail` says how, for a person to read, and its `usage` is what the completion spent. The deployment sets the budgets:
 
-- the responses the model writes, and the tokens in them;
-- the tool calls a completion makes;
-- the time the guest takes to answer a call;
-- the time the completion takes.
+| `budget` | Bounds |
+| -------- | ------ |
+| `responses` | The responses the model writes. |
+| `tokens` | The tokens in those responses. |
+| `tool-calls` | The tool calls a completion makes. |
+| `call-time` | The time the guest takes to answer a call. |
+| `completion-time` | The time the completion takes. |
 
 ## Errors
 
@@ -214,5 +217,5 @@ Each converts to an `omnia_sdk::Error` coded as `model::Error::code` names it: a
 | Backend | Location | Notes |
 | ------- | -------- | ----- |
 | `ModelDefault` | in-tree (`wasi-model`) | Deterministic echo over the models `MODEL_NAMES` declares (comma-separated, default `default`). A `format::text` answer is the last message, and a `format::json` one wraps it as `{"echo": ...}`. A `format::schema` and a set `generation` field are `unsupported`. It honours `check` once, so a rejection is `exhausted`. |
-| `omnia-genai` | omnia-backends repo | Provider APIs in-process. Drives the function-tool session loop and the `check` loop. Advertises `shell` over a lend beneath a configured shell root, bounded by `grants.worker`. |
+| `omnia-genai` | omnia-backends repo | Provider APIs in-process. Drives the function-tool session loop and the `check` loop. Advertises `shell` over a lend beneath a configured shell root, bounded by the lend's `worker` grant. |
 | `omnia-cursor` | omnia-backends repo | Bridge-managed Cursor agent (`cursor-sdk-bridge`). Function tools bridge into the session as SDK custom tools. Workspace optional (tools-only in a private directory when unlent). 120s default inactivity timeout. |

@@ -7,8 +7,8 @@ use std::fmt;
 
 use serde_json::Value;
 
-use crate::host::Format;
 use crate::host::generated::omnia::model::types;
+use crate::host::{Budget, Format};
 
 /// A backend's result: the answer text, optional usage, and transcript.
 ///
@@ -85,7 +85,9 @@ impl From<Usage> for types::Usage {
 /// the `exhausted` outcome, not an [`Error`](crate::Error).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Exhausted {
-    /// Which budget ran out, for a person to read.
+    /// The budget that ran out.
+    pub budget: Budget,
+    /// How it ran out, for a person to read.
     pub detail: String,
     /// The tokens spent before it ran out, `None` where the backend reports
     /// none.
@@ -93,10 +95,11 @@ pub struct Exhausted {
 }
 
 impl Exhausted {
-    /// An exhaustion that `detail` describes, with no usage.
+    /// An exhaustion of `budget` that `detail` describes, with no usage.
     #[must_use]
-    pub fn new(detail: impl Into<String>) -> Self {
+    pub fn new(budget: Budget, detail: impl Into<String>) -> Self {
         Self {
+            budget,
             detail: detail.into(),
             usage: None,
         }
@@ -114,6 +117,7 @@ impl std::error::Error for Exhausted {}
 impl From<Exhausted> for types::Exhausted {
     fn from(exhausted: Exhausted) -> Self {
         Self {
+            budget: exhausted.budget,
             detail: exhausted.detail,
             usage: exhausted.usage.map(Into::into),
         }

@@ -2,13 +2,11 @@
 //!
 //! - The host refuses telemetry that is not portable as `invalid`, naming
 //!   the span and the field, before any of it reaches the backend.
-//! - The host answers `unsupported` for logs, which it does not serve.
 //! - The suite's faulting backend fails the rest by the name of the first
 //!   span or metric.
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_wasi_otel::omnia::logs;
 use omnia_wasi_otel::omnia::metrics::{
     self, Exemplar, Gauge, Metric, MetricData, Number, NumberDataPoint, ScopeMetrics,
 };
@@ -58,9 +56,6 @@ async fn scenario() {
         trace_id: None,
     }];
     assert_eq!(case(export_metric(exemplar).await), "invalid");
-
-    // the interface the host does not serve
-    assert_eq!(case(logs::export(Vec::new()).await), "unsupported");
 
     // the backend's chosen cases
     for name in ["not-found", "denied", "invalid", "unsupported", "unavailable", "other"] {

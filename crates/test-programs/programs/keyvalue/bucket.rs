@@ -9,7 +9,8 @@
 //!   `invalid`.
 //! - `keys::list` pages the keys under a prefix.
 //! - A zero TTL, a non-canonical counter, and a zero `limit` are `invalid`.
-//! - The calls the backend trait cannot express yet are `unsupported`.
+//! - A `matches` write takes any lifetime. A delete with a revision removes
+//!   only the entry it names, and otherwise conflicts with the entry found.
 
 #![cfg(target_arch = "wasm32")]
 
@@ -25,9 +26,9 @@ async fn scenario() {
     let bucket = store::open("bucket".to_owned()).await.expect("open");
 
     // the host seeded `counter` as `37`, and an absent counter starts at zero
-    let counted = bucket.increment("counter".to_owned(), 5, Lifetime::Keep).await;
+    let counted = bucket.increment("counter".to_owned(), 5, None).await;
     assert_eq!(counted.expect("increment"), 42);
-    let counted = bucket.increment("fresh".to_owned(), 3, Lifetime::Keep).await;
+    let counted = bucket.increment("fresh".to_owned(), 3, Some(HOUR_MS)).await;
     assert_eq!(counted.expect("increment"), 3);
     assert_eq!(value(&bucket, "counter").await.as_deref(), Some(&b"42"[..]));
 
@@ -97,6 +98,8 @@ async fn scenario() {
     // refused as `invalid`
     let zero_ttl = bucket.set("zero".to_owned(), b"v".to_vec(), Lifetime::TtlMs(0), None).await;
     assert!(matches!(zero_ttl, Err(Error::Invalid(_))), "{zero_ttl:?}");
+    let zero_ttl = bucket.increment("zero".to_owned(), 1, Some(0)).await;
+    assert!(matches!(zero_ttl, Err(Error::Invalid(_))), "{zero_ttl:?}");
     assert_eq!(value(&bucket, "zero").await, None);
     let zero_limit = keys::list(&bucket, String::new(), None, Some(0)).await;
     assert!(matches!(zero_limit, Err(Error::Invalid(_))), "{zero_limit:?}");
@@ -104,19 +107,24 @@ async fn scenario() {
         write(&bucket, "padded", text.as_bytes(), Lifetime::Forever, None)
             .await
             .expect("unconditional");
-        let counted = bucket.increment("padded".to_owned(), 1, Lifetime::Keep).await;
+        let counted = bucket.increment("padded".to_owned(), 1, None).await;
         assert!(matches!(counted, Err(Error::Invalid(_))), "`{text}` counted: {counted:?}");
     }
 
-    // refused as `unsupported` until backends carry revisions and lifetimes
+    // `matches` writes with a lifetime of its own
     let revision = bucket.get("b".to_owned()).await.expect("get").expect("an entry").revision;
-    let delete = bucket.delete("b".to_owned(), Some(revision.clone())).await;
-    assert!(matches!(delete, Err(Error::Unsupported(_))), "{delete:?}");
-    let matching = Some(Precondition::Matches(revision));
-    let replace = bucket.set("b".to_owned(), b"3".to_vec(), Lifetime::Forever, matching).await;
-    assert!(matches!(replace, Err(Error::Unsupported(_))), "{replace:?}");
-    let counted = bucket.increment("counter".to_owned(), 1, Lifetime::Forever).await;
-    assert!(matches!(counted, Err(Error::Unsupported(_))), "{counted:?}");
+    let matching = Some(Precondition::Matches(revision.clone()));
+    let replaced = write(&bucket, "b", b"3", Lifetime::TtlMs(HOUR_MS), matching).await;
+    let replaced = replaced.expect("a match");
+
+    // a delete with a revision removes only the entry it names
+    let stale = bucket.delete("b".to_owned(), Some(revision)).await.expect("delete");
+    let found = current(stale.expect_err("a stale delete"));
+    assert_eq!(found, Some((b"3".to_vec(), replaced.clone())));
+    let deleted = bucket.delete("b".to_owned(), Some(replaced.clone())).await.expect("delete");
+    deleted.expect("a matching delete");
+    let absent = bucket.delete("b".to_owned(), Some(replaced)).await.expect("delete");
+    assert_eq!(current(absent.expect_err("an absent key matched")), None);
 }
 
 async fn write(

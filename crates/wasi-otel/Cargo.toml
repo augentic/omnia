@@ -35,6 +35,7 @@ wasmtime.workspace = true
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom.workspace = true
 omnia-guest-macros.workspace = true
+omnia-wasi-types.workspace = true
 opentelemetry = { workspace = true, features = ["metrics", "trace"] }
 tracing-opentelemetry = { workspace = true, features = ["metrics"] }
 tracing-subscriber = { workspace = true, features = ["ansi"] }

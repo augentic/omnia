@@ -10,13 +10,13 @@ use crate::source::Location;
 
 impl<T> loader::HostWithStore<T> for WasiPlugins {
     async fn load(
-        accessor: &Accessor<T, Self>, source: types::Source, when: Option<types::Digest>,
+        accessor: &Accessor<T, Self>, source: types::Source,
     ) -> Result<Result<types::Plugin, types::Conflict>, Error> {
-        let from = Location::from(source);
+        let (from, pin) = source.into_parts();
         let plugins = accessor
             .with(|mut store| store.get().plugins)
             .ok_or_else(|| LoadError::no_plugins(&from))?;
-        let pin = when
+        let pin = pin
             .map(|digest| digest.parse::<Digest>())
             .transpose()
             .map_err(|error| LoadError::Invalid(format!("{error:#}")))?;
@@ -40,15 +40,22 @@ impl From<LoadError> for Error {
     }
 }
 
-impl From<types::Source> for Location {
-    fn from(source: types::Source) -> Self {
-        match source {
-            types::Source::Declared(name) => Self::Declared(name),
-            types::Source::Path(path) => Self::Path(path),
-            types::Source::Release(types::Release { reference, registry }) => Self::Registry {
-                package: reference,
-                endpoint: registry,
-            },
+impl types::Source {
+    fn into_parts(self) -> (Location, Option<types::Digest>) {
+        match self {
+            Self::Declared(name) => (Location::Declared(name), None),
+            Self::Path(types::File { path, pin }) => (Location::Path(path), pin),
+            Self::Release(types::Release {
+                reference,
+                registry,
+                pin,
+            }) => (
+                Location::Registry {
+                    package: reference,
+                    endpoint: registry,
+                },
+                pin,
+            ),
         }
     }
 }

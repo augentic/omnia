@@ -25,8 +25,8 @@ use axum::routing::post;
 use axum::{Json, Router};
 use bytes::Bytes;
 use http_body_util::Full;
-use omnia_wasi_messaging::types::{Client, Delivery, Error, Message};
-use omnia_wasi_messaging::{producer, request_reply};
+use omnia_wasi_messaging::omnia::types::{Client, Delivery, Error, Message, Release, Settle};
+use omnia_wasi_messaging::omnia::{producer, request_reply};
 use serde_json::{Value, json};
 use wasip3::exports::http::handler::Guest;
 use wasip3::http::types::{ErrorCode, Request, Response};
@@ -83,17 +83,16 @@ fn message(data: impl Into<Vec<u8>>) -> Message {
     Message {
         data: data.into(),
         content_type: None,
-        id: None,
         key: None,
         metadata: Vec::new(),
     }
 }
 
 pub struct Messaging;
-omnia_wasi_messaging::export!(Messaging with_types_in omnia_wasi_messaging);
+omnia_wasi_messaging::export!(Messaging);
 
-impl omnia_wasi_messaging::incoming_handler::Guest for Messaging {
-    async fn handle(delivery: Delivery) -> Result<(), Error> {
+impl omnia_wasi_messaging::omnia::incoming_handler::Guest for Messaging {
+    async fn handle(delivery: Delivery) -> Result<(), Settle> {
         tracing::debug!("start processing msg");
 
         let topic = delivery.topic.clone();
@@ -138,7 +137,7 @@ impl omnia_wasi_messaging::incoming_handler::Guest for Messaging {
             }
             "c" => {
                 let data_str = String::from_utf8(delivery.message.data)
-                    .map_err(|e| Error::Other(format!("not utf8: {e}")))?;
+                    .map_err(|e| Settle::Reject(format!("not utf8: {e}")))?;
                 tracing::debug!("message received on topic 'c': {data_str}");
 
                 // HACK!: outbound http here proves wasip3's wit-bindgen matches the
@@ -148,7 +147,7 @@ impl omnia_wasi_messaging::incoming_handler::Guest for Messaging {
                     .method(http::Method::POST)
                     .uri("http://localhost:8080/upstream")
                     .body(Full::new(Bytes::from(data_str.clone())))
-                    .map_err(|e| Error::Other(format!("building request: {e}")))?;
+                    .map_err(|e| Settle::Reject(format!("building request: {e}")))?;
 
                 println!("calling upstream HTTP from messaging handler");
                 let upstream_body = match omnia_wasi_http::handle(upstream).await {
@@ -166,7 +165,10 @@ impl omnia_wasi_messaging::incoming_handler::Guest for Messaging {
                     format!("Hello from topic c | input: {data_str} | upstream: {upstream_body}");
 
                 if let Some(reply_to) = delivery.reply_to {
-                    request_reply::reply(reply_to, message(combined)).await?;
+                    let client = Client::connect("default".to_string()).await.map_err(release)?;
+                    request_reply::reply(&client, reply_to, message(combined))
+                        .await
+                        .map_err(release)?;
                 }
             }
             _ => {
@@ -177,4 +179,12 @@ impl omnia_wasi_messaging::incoming_handler::Guest for Messaging {
         tracing::debug!("finished processing msg");
         Ok(())
     }
+}
+
+// a failure that may pass, so the broker delivers the message again
+fn release(error: Error) -> Settle {
+    Settle::Release(Release {
+        reason: error.to_string(),
+        delay_ms: None,
+    })
 }

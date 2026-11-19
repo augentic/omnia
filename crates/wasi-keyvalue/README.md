@@ -21,15 +21,15 @@ one `Bucket` per backend.
 - A write names its lifetime. `forever` and `ttl-ms` replace an entry's
   lifetime. `keep` and `keep-or-ttl-ms` leave an existing entry the time it
   has left. A zero TTL is rejected before the backend sees it.
-- A write returns the entry's revision. A `set` with a precondition writes
-  only while it holds, and otherwise returns a `conflict` carrying the entry
-  it found.
-- `increment` stores a counter as decimal text, which `get` reads back.
+- A write returns the entry's revision. A `set` with a precondition, or a
+  `delete` with a revision, acts only while it holds, and otherwise returns
+  a `conflict` carrying the entry it found.
+- `increment` stores a counter as decimal text, which `get` reads back. Its
+  `ttl-ms` applies only to a counter it creates.
 - `keys` is optional, and pages the keys under a prefix.
-- The host answers `unsupported` for what `Bucket` cannot express yet:
-  - a `delete` with a revision;
-  - a `set` with `matches` and `forever` or `ttl-ms`;
-  - an `increment` with `forever` or `ttl-ms`.
+- A `Bucket` checks a precondition in the same atomic step as its write. A
+  backend that keeps no revision of its own reports `Revision::of` the
+  stored bytes.
 
 ## Backend
 

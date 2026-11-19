@@ -6,7 +6,7 @@ mod store_impl;
 mod types_impl;
 
 mod generated {
-    pub use self::omnia::config::types::Error;
+    pub use self::omnia::types::types::Error;
 
     wasmtime::component::bindgen!({
         world: "imports",
@@ -15,7 +15,7 @@ mod generated {
             default: store | tracing | trappable,
         },
         trappable_error_type: {
-            "omnia:config/types.error" => Error,
+            "omnia:types/types.error" => Error,
         },
     });
 }
@@ -30,6 +30,7 @@ use wasmtime::component::Linker;
 pub use self::default_impl::ConfigDefault;
 pub use self::generated::Error;
 use self::generated::omnia::config::{entries, store, types};
+use self::generated::omnia::types::types as omnia_types;
 
 /// Result type for configuration operations.
 pub type Result<T> = std::result::Result<T, Error>;
@@ -41,6 +42,7 @@ pub struct WasiConfig;
 
 impl<B: Provides<Self>> Host<B> for WasiConfig {
     fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
+        omnia_types::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
         types::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
         store::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
         Ok(entries::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?)

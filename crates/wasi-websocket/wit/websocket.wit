@@ -1,4 +1,4 @@
-package omnia:websocket@0.1.0;
+package omnia:websocket@0.2.0;
 
 /// The types the WebSocket interfaces share.
 ///
@@ -7,24 +7,17 @@ package omnia:websocket@0.1.0;
 ///
 /// - A portable message is at most 128 KiB, counting text as UTF-8.
 /// - A portable close code is 1000, or from 3000 to 4999.
+///
+/// An `error` from a WebSocket interface means:
+///
+/// - `not-found`: the service is not declared by the deployment. A
+///   connection that is not open is not an error.
+/// - `invalid`: the request was rejected, such as a message over the
+///   backend's bound, or a close code no endpoint may send.
+/// - `unavailable`: the service did not answer, or the call exceeded its
+///   bound.
 interface types {
-  /// Why a call failed.
-  variant error {
-    /// The service is not declared by the deployment. A connection that is
-    /// not open is not an error.
-    not-found(string),
-    /// The caller may not make the call.
-    denied(string),
-    /// The request was rejected, such as a message over the backend's
-    /// bound, or a close code no endpoint may send.
-    invalid(string),
-    /// A valid request this backend cannot serve.
-    unsupported(string),
-    /// The service did not answer, or the call exceeded its bound.
-    unavailable(string),
-    /// Any other failure.
-    other(string),
-  }
+  use omnia:types/types@0.1.0.{error, timestamp};
 
   /// A backend's id for one connection, opaque to the guest.
   ///
@@ -38,6 +31,9 @@ interface types {
   type route = string;
 
   /// Entries that travel beside a message, each name once.
+  ///
+  /// A name matches `[a-z][a-z0-9-]*`, as a portable messaging name does,
+  /// and a value is printable ASCII.
   type metadata = list<tuple<string, string>>;
 
   /// A message, which RFC 6455 carries in text or binary frames.
@@ -75,8 +71,10 @@ interface types {
     /// The route the backend gave the message, `none` where it gives none.
     route: option<route>,
     message: message,
-    /// The host's entries, and those the backend keeps for the connection.
+    /// The entries the backend keeps for the connection.
     metadata: metadata,
+    /// When the host stops waiting for `handle` to return.
+    deadline: option<timestamp>,
   }
 }
 
@@ -84,11 +82,11 @@ interface types {
 interface connections {
   use types.{client, close-frame, connection-id, error, message};
 
-  /// Send `message` to `connection`.
+  /// Send `message` to each of `connections`.
   ///
-  /// `ok` means the backend took the message for delivery, not that the
-  /// peer received it. A connection that is not open drops the message.
-  send: async func(client: borrow<client>, connection: connection-id, message: message)
+  /// `ok` means the backend took the message for delivery, not that a peer
+  /// received it. A connection that is not open is skipped.
+  send: async func(client: borrow<client>, connections: list<connection-id>, message: message)
     -> result<_, error>;
 
   /// Close `connection`, sending `frame` to its peer.
@@ -124,9 +122,8 @@ interface incoming-handler {
 
   /// Handle one message a connection sent.
   ///
-  /// The host sets the `deadline` entry of the event's metadata to when it
-  /// stops waiting, as decimal milliseconds since the Unix epoch. An error
-  /// leaves the connection open.
+  /// The host sets the event's `deadline`. An error leaves the connection
+  /// open.
   handle: async func(event: event) -> result<_, error>;
 }
 

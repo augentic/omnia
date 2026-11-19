@@ -62,7 +62,8 @@ const LONG: usize = 1001;
 // call carries:
 //
 // - `head` at `plain` is no repository, and at `unborn` finds no commit;
-// - `init` at `existing` finds a repository there already;
+// - `init` at `existing`, and `add` and `clone_repo` at `taken`, find the
+//   place held, naming it;
 // - `pending` at `dirty` is three changes and at `big` is `LONG`, both out
 //   of path order, and elsewhere is none;
 // - a log of `long-<n>` runs from `n` to the end of a `LONG`-commit chain,
@@ -223,12 +224,11 @@ impl VcsClient for Recorder {
     }
 
     fn init(&self, at: Place) -> FutureResult<()> {
-        let path = held(&at);
-        self.record(format!("init {path}"));
+        self.record(format!("init {}", held(&at)));
         let name = named(&at);
         async move {
             if name == "existing" {
-                return Err(Error::Exists(path).into());
+                return Err(Error::Exists(name).into());
             }
             Ok(())
         }
@@ -237,7 +237,14 @@ impl VcsClient for Recorder {
 
     fn add(&self, repo: Place, at: Place, revision: String) -> FutureResult<()> {
         self.record(format!("add {} {} {revision}", held(&repo), held(&at)));
-        async { Ok(()) }.boxed()
+        let name = named(&at);
+        async move {
+            if name == "taken" {
+                return Err(Error::Exists(name).into());
+            }
+            Ok(())
+        }
+        .boxed()
     }
 
     fn remove(&self, at: Place) -> FutureResult<()> {
@@ -267,7 +274,14 @@ impl VcsClient for Recorder {
 
     fn clone_repo(&self, url: String, at: Place, options: CloneOptions) -> FutureResult<()> {
         self.record(format!("clone {url} {} depth={:?}", held(&at), options.depth));
-        async { Ok(()) }.boxed()
+        let name = named(&at);
+        async move {
+            if name == "taken" {
+                return Err(Error::Exists(name).into());
+            }
+            Ok(())
+        }
+        .boxed()
     }
 
     fn fetch(&self, repo: Place, remote: String) -> FutureResult<()> {
@@ -343,14 +357,15 @@ async fn vcs_flow() {
     .await;
 
     // Every call opened its workspace with a `head` first, but `init` and
-    // `clone_repo`, which lay their place down. A path no preopen answers
-    // reached nothing.
-    for created in ["fresh", "existing", ".cache/work", "clone"] {
+    // `clone_repo`, which lay their place down. A diverged push read back
+    // the remote bookmark it reports. A path no preopen answers reached
+    // nothing.
+    for created in ["fresh", ".cache/work", "clone"] {
         assert!(project.path().join(created).is_dir(), "host created `{created}`");
     }
     let root = shown(project.path());
-    let [work, dirty, unborn, big, fresh, existing, cache, clone] =
-        ["work", "dirty", "unborn", "big", "fresh", "existing", ".cache/work", "clone"]
+    let [work, dirty, unborn, big, fresh, cache, clone] =
+        ["work", "dirty", "unborn", "big", "fresh", ".cache/work", "clone"]
             .map(|subpath| shown(&project.path().join(subpath)));
     let (ws, sub) = (shown(&workspaces.path().join("repo")), shown(&nested.path().join("repo")));
     assert_eq!(
@@ -379,7 +394,6 @@ async fn vcs_flow() {
             format!("head {unborn}"),
             format!("head {unborn}"),
             format!("init {fresh}"),
-            format!("init {existing}"),
             format!("head {root}"),
             format!("add {root} {cache} sha:main"),
             format!("head {cache}"),
@@ -397,6 +411,7 @@ async fn vcs_flow() {
             format!("push {clone} origin emery/rev"),
             format!("head {clone}"),
             format!("push {clone} moved emery/rev"),
+            format!("fetched {clone} moved emery/rev"),
             format!("head {root}"),
             format!("resolve {root} missing"),
             format!("head {clone}"),
@@ -429,10 +444,11 @@ async fn vcs_workspace() {
     // The refusals the host makes itself reached no backend call: a zero
     // `limit`, a log with no base, a precondition, a removed handle, and a
     // clone of no depth. A merge into pending changes reached only the
-    // `pending` that found them.
+    // `pending` that found them, and a diverged push read back the remote
+    // bookmark it reports.
     let root = shown(project.path());
-    let [fresh, plain, unborn, dirty, work, cache, clone] =
-        ["fresh", "plain", "unborn", "dirty", "work", ".cache/work", "clone"]
+    let [fresh, existing, plain, unborn, dirty, work, cache, taken, clone] =
+        ["fresh", "existing", "plain", "unborn", "dirty", "work", ".cache/work", "taken", "clone"]
             .map(|subpath| shown(&project.path().join(subpath)));
     assert_eq!(
         recorder.calls(),
@@ -440,6 +456,7 @@ async fn vcs_workspace() {
             format!("head {root}"),
             format!("init {fresh}"),
             format!("head {fresh}"),
+            format!("init {existing}"),
             format!("head {plain}"),
             format!("resolve {root} main"),
             format!("resolve {root} missing"),
@@ -465,6 +482,8 @@ async fn vcs_workspace() {
             format!("add {root} {cache} sha:main"),
             format!("head {cache}"),
             format!("remove {cache}"),
+            format!("add {root} {taken} sha:main"),
+            format!("clone https://example.test/repo.git {taken} depth=Some(1)"),
             format!("clone https://example.test/repo.git {clone} depth=Some(1)"),
             format!("fetch {clone} origin"),
             format!("fetched {clone} origin emery/rev"),
@@ -472,6 +491,7 @@ async fn vcs_workspace() {
             format!("fetched {clone} unknown emery/rev"),
             format!("push {clone} origin emery/rev"),
             format!("push {clone} moved emery/rev"),
+            format!("fetched {clone} moved emery/rev"),
         ]
     );
 }
@@ -530,6 +550,7 @@ async fn vcs_locations() {
 async fn vcs_error_codes() {
     let project = scratch();
     fs::create_dir(project.path().join("plain")).expect("creating a directory with no workspace");
+    fs::create_dir(project.path().join("dirty")).expect("creating a working copy");
     let readonly = scratch();
 
     let recorder = run_guest(
@@ -542,6 +563,8 @@ async fn vcs_error_codes() {
     // opened its workspace.
     let root = shown(project.path());
     let (ro, plain) = (shown(readonly.path()), shown(&project.path().join("plain")));
+    let [existing, dirty] =
+        ["existing", "dirty"].map(|subpath| shown(&project.path().join(subpath)));
     assert_eq!(
         recorder.calls(),
         [
@@ -566,6 +589,10 @@ async fn vcs_error_codes() {
             format!("head {plain}"),
             format!("head {root}"),
             format!("push {root} moved main"),
+            format!("fetched {root} moved main"),
+            format!("init {existing}"),
+            format!("head {dirty}"),
+            format!("pending {dirty}"),
         ]
     );
 }

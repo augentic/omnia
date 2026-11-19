@@ -49,10 +49,7 @@ async fn scenario() {
 }
 
 const fn no_grants() -> types::Grants<'static> {
-    types::Grants {
-        workspace: None,
-        worker: None,
-    }
+    types::Grants { workspace: None }
 }
 
 // the `omnia:model` case an SDK failure reports

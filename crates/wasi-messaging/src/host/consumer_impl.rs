@@ -13,7 +13,7 @@ use crate::host::{Error, MessagingClient, Result, WasiMessaging};
 
 impl<T> HostWithStore<T> for WasiMessaging {
     fn receive(
-        _: &Accessor<T, Self>, _: Resource<ClientProxy>, _: String, _: u32, _: u32,
+        _: &Accessor<T, Self>, _: Resource<ClientProxy>, _: String, _: u32, _: u64,
     ) -> impl Future<Output = Result<Vec<Resource<Lease>>>> + Send {
         std::future::ready(Err(unsupported()))
     }
@@ -36,7 +36,7 @@ impl<T> HostLeaseWithStore<T> for WasiMessaging {
     }
 
     fn release(
-        _: &Accessor<T, Self>, _: Resource<Lease>, _: Option<u32>,
+        _: &Accessor<T, Self>, _: Resource<Lease>, _: Option<u64>,
     ) -> impl Future<Output = Result<()>> + Send {
         std::future::ready(Err(unsupported()))
     }

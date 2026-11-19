@@ -6,14 +6,14 @@
 
 use std::time::Duration;
 
-use omnia_wasi_messaging::incoming_handler::Guest;
-use omnia_wasi_messaging::types::{Delivery, Error};
+use omnia_wasi_messaging::omnia::incoming_handler::Guest;
+use omnia_wasi_messaging::omnia::types::{Delivery, Settle};
 
 struct Messaging;
-omnia_wasi_messaging::export!(Messaging with_types_in omnia_wasi_messaging);
+omnia_wasi_messaging::export!(Messaging);
 
 impl Guest for Messaging {
-    async fn handle(_delivery: Delivery) -> Result<(), Error> {
+    async fn handle(_delivery: Delivery) -> Result<(), Settle> {
         // `thread::sleep` waits on WASI 0.3's async `wait-for`, which the
         // async-typed `handle` may block on, so the fiber suspends and the
         // host's timeout lands; a busy loop would not be cancellable without

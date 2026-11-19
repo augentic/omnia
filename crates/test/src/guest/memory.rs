@@ -10,7 +10,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use anyhow::{Context, anyhow};
 use bytes::Bytes;
 use omnia_sdk::blobstore::{ContainerMetadata, ObjectMetadata};
-use omnia_sdk::keyvalue::{Conflict, DEFAULT};
+use omnia_sdk::keyvalue::{DEFAULT, Entry, Precondition, Revision};
 use omnia_sdk::{BlobStore, Error, Page, Result, SecretStore, StateStore};
 
 /// A state snapshot: bucket to key to raw bytes.
@@ -20,12 +20,12 @@ pub type BlobSnapshot = BTreeMap<String, BTreeMap<String, Vec<u8>>>;
 
 /// In-memory state, blob, and secret storage; clones share one store.
 ///
-/// Every method of all three traits is real: `compare_and_swap` and
-/// `increment` hold the store's lock across their read-modify-write, and
-/// `get_range` clamps its half-open range to the object. The provided
-/// `BlobStore` operations (`exists`, `clear`, `copy`, ...) compose these
-/// primitives. A listing answers one page, and resumes after the key or
-/// name it is given.
+/// Every method of all three traits is real: `set_if` and `increment` hold
+/// the store's lock across their read-modify-write, and `get_range` clamps
+/// its half-open range to the object. The provided operations
+/// (`compare_and_swap`, and `BlobStore`'s `exists`, `clear`, `copy`, ...)
+/// compose these primitives. A listing answers one page, and resumes after
+/// the key or name it is given.
 ///
 /// A handle addresses one state bucket and one secret locker, both named
 /// [`DEFAULT`] until [`named`](Self::named) returns a handle on another name
@@ -34,6 +34,8 @@ pub type BlobSnapshot = BTreeMap<String, BTreeMap<String, Vec<u8>>>;
 ///
 /// - [`bucket`](Self::bucket) declares a bucket, and a call on an undeclared
 ///   one fails with the code `not-found`.
+/// - Every write moves an entry to a revision of its own, so two writes of
+///   the same bytes never share one.
 /// - A zero TTL fails with the code `invalid` and writes nothing.
 /// - A counter is stored as the decimal text `omnia:keyvalue` specifies, so a
 ///   test seeds one with [`insert_state`](Self::insert_state).
@@ -236,14 +238,38 @@ impl Memory {
         })
     }
 
-    fn get_state(&self, key: &str) -> Result<Option<Bytes>> {
-        self.in_bucket(|bucket| bucket.get(key).map(|entry| Bytes::from(entry.bytes.clone())))
+    fn get_state(&self, key: &str) -> Result<Option<Entry>> {
+        self.in_bucket(|bucket| bucket.get(key).map(StateEntry::entry))
     }
 
     fn set_state(&self, key: &str, value: &[u8], ttl: Option<Duration>) -> Result<()> {
         let ttl = checked(ttl)?;
+        let revision = self.tick();
         self.in_bucket(|bucket| {
-            drop(bucket.insert(key.to_owned(), StateEntry::new(value.to_vec(), ttl)));
+            drop(bucket.insert(key.to_owned(), StateEntry::new(value.to_vec(), ttl, revision)));
+        })
+    }
+
+    fn set_state_if(
+        &self, key: &str, value: &[u8], ttl: Option<Duration>, when: &Precondition,
+    ) -> Result<Result<Revision, Option<Entry>>> {
+        let ttl = checked(ttl)?;
+        let revision = self.tick();
+        self.in_bucket(|bucket| {
+            let existing = bucket.get(key).cloned();
+            let holds = match when {
+                Precondition::Absent => existing.is_none(),
+                Precondition::Matches(expected) => {
+                    existing.as_ref().is_some_and(|entry| entry.revision() == *expected)
+                }
+            };
+            if !holds {
+                return Err(existing.as_ref().map(StateEntry::entry));
+            }
+            let entry = StateEntry::atomic(existing, value.to_vec(), ttl, revision);
+            let written = entry.revision();
+            drop(bucket.insert(key.to_owned(), entry));
+            Ok(written)
         })
     }
 
@@ -251,30 +277,16 @@ impl Memory {
         self.in_bucket(|bucket| drop(bucket.remove(key)))
     }
 
-    fn swap_state(
-        &self, key: &str, current: Option<&[u8]>, new: &[u8], ttl: Option<Duration>,
-    ) -> Result<Result<(), Conflict>> {
-        let ttl = checked(ttl)?;
-        self.in_bucket(|bucket| {
-            let existing = bucket.get(key).cloned();
-            let observed = existing.as_ref().map(|entry| entry.bytes.as_slice());
-            if observed != current {
-                let current = observed.map(Bytes::copy_from_slice);
-                return Err(Conflict { current });
-            }
-            drop(bucket.insert(key.to_owned(), StateEntry::atomic(existing, new.to_vec(), ttl)));
-            Ok(())
-        })
-    }
-
     fn increment_state(&self, key: &str, delta: i64, ttl: Option<Duration>) -> Result<i64> {
         let ttl = checked(ttl)?;
+        let revision = self.tick();
         self.in_bucket(|bucket| {
             let existing = bucket.get(key).cloned();
             let incremented = add_i64(existing.as_ref().map(|entry| entry.bytes.as_slice()), delta)
                 .with_context(|| format!("incrementing `{key}` by {delta}"))
                 .map_err(|err| Error::server_error("invalid", format!("{err:#}")))?;
-            let entry = StateEntry::atomic(existing, incremented.to_string().into_bytes(), ttl);
+            let bytes = incremented.to_string().into_bytes();
+            let entry = StateEntry::atomic(existing, bytes, ttl, revision);
             drop(bucket.insert(key.to_owned(), entry));
             Ok(incremented)
         })?
@@ -348,6 +360,10 @@ impl StateStore for Memory {
     type Named = Self;
 
     fn get(&self, key: &str) -> impl Future<Output = Result<Option<Bytes>>> + Send {
+        ready(self.get_state(key).map(|entry| entry.map(|entry| entry.value)))
+    }
+
+    fn get_entry(&self, key: &str) -> impl Future<Output = Result<Option<Entry>>> + Send {
         ready(self.get_state(key))
     }
 
@@ -357,14 +373,14 @@ impl StateStore for Memory {
         ready(self.set_state(key, value, ttl))
     }
 
-    fn delete(&self, key: &str) -> impl Future<Output = Result<()>> + Send {
-        ready(self.delete_state(key))
+    fn set_if(
+        &self, key: &str, value: &[u8], ttl: Option<Duration>, when: Precondition,
+    ) -> impl Future<Output = Result<Result<Revision, Option<Entry>>>> + Send {
+        ready(self.set_state_if(key, value, ttl, &when))
     }
 
-    fn compare_and_swap(
-        &self, key: &str, current: Option<&[u8]>, new: &[u8], ttl: Option<Duration>,
-    ) -> impl Future<Output = Result<Result<(), Conflict>>> + Send {
-        ready(self.swap_state(key, current, new, ttl))
+    fn delete(&self, key: &str) -> impl Future<Output = Result<()>> + Send {
+        ready(self.delete_state(key))
     }
 
     fn increment(
@@ -489,21 +505,41 @@ struct StateEntry {
     bytes: Vec<u8>,
     // `None` never expires; a TTL too long for an `Instant` is the same
     expires_at: Option<Instant>,
+    // the store's tick at the write
+    revision: u64,
 }
 
 impl StateEntry {
-    fn new(bytes: Vec<u8>, ttl: Option<Duration>) -> Self {
+    fn new(bytes: Vec<u8>, ttl: Option<Duration>, revision: u64) -> Self {
         Self {
             bytes,
             expires_at: ttl.and_then(|ttl| Instant::now().checked_add(ttl)),
+            revision,
         }
     }
 
     // an atomic applies its TTL only on create; a live entry keeps the time it has left
-    fn atomic(existing: Option<Self>, bytes: Vec<u8>, ttl: Option<Duration>) -> Self {
+    fn atomic(
+        existing: Option<Self>, bytes: Vec<u8>, ttl: Option<Duration>, revision: u64,
+    ) -> Self {
         match existing {
-            Some(existing) => Self { bytes, ..existing },
-            None => Self::new(bytes, ttl),
+            Some(existing) => Self {
+                bytes,
+                revision,
+                ..existing
+            },
+            None => Self::new(bytes, ttl, revision),
+        }
+    }
+
+    fn revision(&self) -> Revision {
+        Revision::from(self.revision.to_string())
+    }
+
+    fn entry(&self) -> Entry {
+        Entry {
+            value: Bytes::copy_from_slice(&self.bytes),
+            revision: self.revision(),
         }
     }
 

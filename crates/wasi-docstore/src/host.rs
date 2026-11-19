@@ -6,7 +6,7 @@ mod resource;
 mod store_impl;
 
 mod generated {
-    pub use self::omnia::docstore::types::Error;
+    pub use self::omnia::types::types::Error;
     pub use super::collection_impl::CollectionHandle;
 
     wasmtime::component::bindgen!({
@@ -19,7 +19,7 @@ mod generated {
             "omnia:docstore/collection.collection": CollectionHandle,
         },
         trappable_error_type: {
-            "omnia:docstore/types.error" => Error,
+            "omnia:types/types.error" => Error,
         },
     });
 }
@@ -34,6 +34,7 @@ pub use self::default_impl::{ConnectOptions, DocStoreDefault};
 pub use self::generated::Error;
 use self::generated::omnia::docstore::types::Host as TypesHost;
 use self::generated::omnia::docstore::{collection, store, types};
+use self::generated::omnia::types::types as omnia_types;
 pub use self::resource::*;
 
 /// Result type for docstore operations.
@@ -46,6 +47,7 @@ pub struct WasiDocStore;
 
 impl<B: Provides<Self>> Host<B> for WasiDocStore {
     fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
+        omnia_types::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
         types::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
         collection::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
         Ok(store::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?)
@@ -120,7 +122,9 @@ impl From<ResourceTableError> for Error {
     }
 }
 
-impl TypesHost for HostView<'_, dyn DocStoreClient> {
+impl TypesHost for HostView<'_, dyn DocStoreClient> {}
+
+impl omnia_types::Host for HostView<'_, dyn DocStoreClient> {
     fn convert_error(&mut self, err: Error) -> wasmtime::Result<Error> {
         Ok(err)
     }

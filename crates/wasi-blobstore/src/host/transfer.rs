@@ -13,9 +13,9 @@ use parking_lot::Mutex;
 use wasmtime::StoreContextMut;
 use wasmtime::component::{FutureConsumer, Source, StreamConsumer, StreamResult};
 
-use crate::host::Result;
 use crate::host::container_impl::ContainerHandle;
 use crate::host::generated::omnia::blobstore::types::Stored;
+use crate::host::{Error, Result};
 
 // The bytes one `put` has received. It empties to `None` once `finished`
 // resolves, which refuses any later write.
@@ -73,13 +73,14 @@ pub struct Commit {
 
 impl Commit {
     pub fn new(
-        container: ContainerHandle, name: String, staging: Staging,
+        container: ContainerHandle, name: String, size: Option<u64>, staging: Staging,
         reply: oneshot::Sender<Result<Stored>>,
     ) -> Self {
         Self {
             write: Some(Write {
                 container,
                 name,
+                size,
                 staging,
             }),
             writing: None,
@@ -132,12 +133,25 @@ impl<D> FutureConsumer<D> for Commit {
 struct Write {
     container: ContainerHandle,
     name: String,
+    size: Option<u64>,
     staging: Staging,
 }
 
 impl Write {
     fn commit(self) -> BoxFuture<'static, Result<Stored>> {
         let data = self.staging.take().freeze();
-        async move { self.container.write(self.name, data).await }.boxed()
+        async move {
+            if let Some(size) = self.size
+                && size != data.len() as u64
+            {
+                return Err(Error::Invalid(format!(
+                    "`{}` was put as {size} bytes, and its stream held {}",
+                    self.name,
+                    data.len()
+                )));
+            }
+            self.container.write(self.name, data).await
+        }
+        .boxed()
     }
 }

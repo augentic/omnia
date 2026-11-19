@@ -4,7 +4,7 @@ mod loader_impl;
 mod types_impl;
 
 mod generated {
-    pub use self::omnia::plugins::types::Error;
+    pub use self::omnia::types::types::Error;
 
     wasmtime::component::bindgen!({
         world: "imports",
@@ -13,7 +13,7 @@ mod generated {
             default: store | tracing | trappable,
         },
         trappable_error_type: {
-            "omnia:plugins/types.error" => Error,
+            "omnia:types/types.error" => Error,
         },
     });
 }
@@ -24,6 +24,7 @@ use omnia_core::{Backends, Host, StoreCtx};
 use wasmtime::component::{HasData, Linker};
 
 use self::generated::omnia::plugins::{loader, types};
+use self::generated::omnia::types::types as omnia_types;
 use crate::loader::Plugins;
 
 /// Host-side service for `omnia:plugins` — the loader capability this crate
@@ -37,6 +38,7 @@ impl HasData for WasiPlugins {
 
 impl<B: Backends> Host<B> for WasiPlugins {
     fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
+        omnia_types::add_to_linker::<_, Self>(linker, view)?;
         types::add_to_linker::<_, Self>(linker, view)?;
         Ok(loader::add_to_linker::<_, Self>(linker, view)?)
     }

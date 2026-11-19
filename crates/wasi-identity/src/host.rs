@@ -8,7 +8,7 @@ mod stub_impl;
 mod types_impl;
 
 mod generated {
-    pub use self::omnia::identity::types::Error;
+    pub use self::omnia::types::types::Error;
     pub use crate::host::resource::IdentityProxy;
 
     wasmtime::component::bindgen!({
@@ -21,7 +21,7 @@ mod generated {
             "omnia:identity/credentials.identity": IdentityProxy,
         },
         trappable_error_type: {
-            "omnia:identity/types.error" => Error,
+            "omnia:types/types.error" => Error,
         },
     });
 }
@@ -37,6 +37,7 @@ use wasmtime::component::{Linker, ResourceTableError};
 pub use self::default_impl::IdentityDefault;
 pub use self::generated::Error;
 use self::generated::omnia::identity::{credentials, types};
+use self::generated::omnia::types::types as omnia_types;
 pub use self::resource::*;
 pub use self::stub_impl::{IdentityStub, StubOptions};
 
@@ -50,6 +51,7 @@ pub struct WasiIdentity;
 
 impl<B: Provides<Self>> Host<B> for WasiIdentity {
     fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
+        omnia_types::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
         types::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
         Ok(credentials::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?)
     }

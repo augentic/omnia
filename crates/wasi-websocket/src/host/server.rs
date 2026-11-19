@@ -14,9 +14,6 @@ use crate::host::generated::WebsocketIndices;
 use crate::host::generated::omnia::websocket::types;
 use crate::host::resource::{Event, Events};
 
-// the metadata entry omnia-sdk's `Metadata` reads a guest's deadline from
-const DEADLINE: &str = "deadline";
-
 #[instrument("websocket-server", skip(state))]
 pub async fn run<B>(state: &Runtime<B>) -> Result<()>
 where
@@ -100,9 +97,8 @@ where
     /// catch-all guest when it carries none).
     ///
     /// An event with no matching route is dropped silently. The guest
-    /// receives the event with its `deadline` metadata entry set to the
-    /// instant the guest timeout expires, in milliseconds since the Unix
-    /// epoch. A guest's error leaves the connection open.
+    /// receives the event with its `deadline` set to the instant the guest
+    /// timeout expires. A guest's error leaves the connection open.
     ///
     /// # Errors
     ///
@@ -137,8 +133,7 @@ where
                 || format!("routed guest `{guest_id}` does not export the websocket handler"),
             )?;
 
-        let deadline = deadline_millis(self.state.options().guest_timeout);
-        event.metadata.push((DEADLINE.to_owned(), deadline.to_string()));
+        event.deadline = Some(deadline_millis(self.state.options().guest_timeout));
 
         let mut store = self.state.build_store(self.state.store());
         let instance = self.state.instantiate(guest.instance_pre(), &mut store).await?;

@@ -16,24 +16,19 @@ impl DocumentDb for WasiProvider {
     }
 
     async fn insert(&self, collection: &str, document: &Document) -> Result<Result<(), Exists>> {
-        let (id, data) = (document.id.clone(), document.data.to_vec());
+        let (id, data) = (document.id.clone(), json(document)?);
         let written = open(collection).await?.put(id, data, Some(Precondition::Absent)).await?;
         Ok(written.map(|_revision| ()).map_err(|_conflict| Exists))
     }
 
     async fn put(&self, collection: &str, document: &Document) -> Result<()> {
-        let (id, data) = (document.id.clone(), document.data.to_vec());
+        let (id, data) = (document.id.clone(), json(document)?);
         open(collection).await?.put(id, data, None).await??;
         Ok(())
     }
 
-    // `exists` then `delete` is two calls, so a concurrent write can change
-    // the answer between them
     async fn delete(&self, collection: &str, id: &str) -> Result<bool> {
-        let collection = open(collection).await?;
-        let existed = collection.exists(id.to_owned()).await?;
-        collection.delete(id.to_owned(), None).await??;
-        Ok(existed)
+        Ok(open(collection).await?.delete(id.to_owned(), None).await??)
     }
 
     async fn query(&self, collection: &str, query: &Query) -> Result<Page<Document>> {
@@ -59,17 +54,11 @@ async fn open(name: &str) -> Result<Collection> {
     Ok(store::open(name.to_owned()).await?)
 }
 
-impl From<types::Error> for Error {
-    fn from(err: types::Error) -> Self {
-        match err {
-            types::Error::NotFound(message) => Self::server_error("not-found", message),
-            types::Error::Denied(message) => Self::server_error("denied", message),
-            types::Error::Invalid(message) => Self::server_error("invalid", message),
-            types::Error::Unsupported(message) => Self::server_error("unsupported", message),
-            types::Error::Unavailable(message) => Self::bad_gateway("unavailable", message),
-            types::Error::Other(message) => Self::server_error("other", message),
-        }
-    }
+fn json(document: &Document) -> Result<String> {
+    let body = str::from_utf8(&document.data).map_err(|err| {
+        Error::server_error("invalid", format!("the body of `{}` is not UTF-8: {err}", document.id))
+    })?;
+    Ok(body.to_owned())
 }
 
 // a write with no precondition has none to fail

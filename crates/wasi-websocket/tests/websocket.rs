@@ -153,14 +153,17 @@ async fn websocket_handler_echo() {
 async fn websocket_close() {
     let (server, addr, mut events) = serve().await;
 
-    // the peer speaks first, so the test learns its connection's id
-    let mut peer = connect(addr).await;
-    peer.send(Message::text("hello")).await.expect("the peer sends");
-    let connection = next(&mut events).await.socket_addr.expect("the event names its connection");
+    // each peer speaks first, so the test learns its connection's id
+    let mut first = connect(addr).await;
+    first.send(Message::text("hello")).await.expect("the first peer sends");
+    let one = next(&mut events).await.socket_addr.expect("the event names its connection");
+    let mut second = connect(addr).await;
+    second.send(Message::text("hello")).await.expect("the second peer sends");
+    let two = next(&mut events).await.socket_addr.expect("the event names its connection");
 
     let status = Deployment::new()
         .guest("guest", test_programs::WEBSOCKET_CLOSE)
-        .args([connection])
+        .args([one, two])
         .run_host::<WasiWebSocket, _>(Backends::new(server))
         .await
         .expect("guest runs");
@@ -170,14 +173,17 @@ async fn websocket_close() {
         code: CloseCode::Normal,
         reason: "done".into(),
     };
-    assert_eq!(receive(&mut peer).await, Message::Close(Some(done)));
+    assert_eq!(receive(&mut first).await, Message::text("both"));
+    assert_eq!(receive(&mut first).await, Message::Close(Some(done)));
+    assert_eq!(receive(&mut second).await, Message::text("both"));
+    quiet(&mut second).await;
 }
 
-// fails every send with the kind its connection is named for, recording each
-// connection so the run's exchanges are pinned
+// fails every send with the kind its first connection is named for,
+// recording each send's connections so the run's exchanges are pinned
 #[derive(Clone, Debug, Default)]
 struct Faulting {
-    sent: Arc<Mutex<Vec<String>>>,
+    sent: Arc<Mutex<Vec<Vec<String>>>>,
 }
 
 impl WebSocketClient for Faulting {
@@ -193,15 +199,14 @@ impl Endpoint for Faulting {
     }
 
     fn send(&self, _event: Event, sockets: Option<Vec<String>>) -> FutureResult<()> {
-        let mut sockets = sockets.expect("a send names its connection");
-        let connection = sockets.pop().expect("one connection");
-        self.sent.lock().expect("sent connections").push(connection.clone());
-        let fault = match connection.as_str() {
-            "not-found" => Error::NotFound("not found by the suite".to_owned()).into(),
-            "denied" => Error::Denied("denied by the suite".to_owned()).into(),
-            "invalid" => Error::Invalid("invalid in the suite".to_owned()).into(),
-            "unsupported" => Error::Unsupported("unsupported by the suite".to_owned()).into(),
-            "unavailable" => Error::Unavailable("unavailable in the suite".to_owned()).into(),
+        let sockets = sockets.expect("a send names its connections");
+        self.sent.lock().expect("sent connections").push(sockets.clone());
+        let fault = match sockets.first().map(String::as_str) {
+            Some("not-found") => Error::NotFound("not found by the suite".to_owned()).into(),
+            Some("denied") => Error::Denied("denied by the suite".to_owned()).into(),
+            Some("invalid") => Error::Invalid("invalid in the suite".to_owned()).into(),
+            Some("unsupported") => Error::Unsupported("unsupported by the suite".to_owned()).into(),
+            Some("unavailable") => Error::Unavailable("unavailable in the suite".to_owned()).into(),
             _ => anyhow::anyhow!("an untyped backend failure"),
         };
         async move { Err(fault) }.boxed()
@@ -219,7 +224,19 @@ async fn websocket_error_codes() {
         .expect("guest runs");
     assert_eq!(status, ExitStatus::SUCCESS, "guest failed");
 
-    // the host refused every other call before it reached the backend
+    // the host refused every other call before it reached the backend, and
+    // a send to two connections reached it once
     let sent = backends.websocket.sent.lock().expect("sent connections").clone();
-    assert_eq!(sent, ["not-found", "denied", "invalid", "unsupported", "unavailable", "other"]);
+    assert_eq!(
+        sent,
+        [
+            vec!["not-found"],
+            vec!["denied"],
+            vec!["invalid"],
+            vec!["unsupported"],
+            vec!["unavailable"],
+            vec!["other"],
+            vec!["unavailable", "other"],
+        ]
+    );
 }

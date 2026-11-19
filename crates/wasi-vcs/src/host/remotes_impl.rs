@@ -4,22 +4,26 @@ use omnia_core::{HostView, StoreCtx};
 use wasmtime::component::{Accessor, Resource};
 
 use crate::host::generated::omnia::vcs::remotes::{Diverged, Host, HostWithStore};
-use crate::host::generated::omnia::vcs::types::{CommitId, Error, Location};
+use crate::host::generated::omnia::vcs::types::{CommitId, Error, Location, Occupied};
 use crate::host::location::Intent;
-use crate::host::workspace_impl::WorkspaceHandle;
+use crate::host::workspace_impl::{WorkspaceHandle, found, laid};
 use crate::host::{CloneOptions, Error as BackendError, VcsClient, WasiVcs};
 
 impl<B: Send + 'static> HostWithStore<StoreCtx<B>> for WasiVcs {
     async fn clone(
         accessor: &Accessor<StoreCtx<B>, Self>, url: String, at: Location, depth: Option<u32>,
-    ) -> Result<Resource<WorkspaceHandle>, Error> {
+    ) -> Result<Result<Resource<WorkspaceHandle>, Occupied>, Error> {
         if depth == Some(0) {
             return Err(Error::Invalid("a clone `depth` must be at least 1".to_owned()));
         }
         let workspace = WorkspaceHandle::resolve(accessor, &at, Intent::Create)?;
         let options = CloneOptions { depth };
-        workspace.call(accessor, |client, place| client.clone_repo(url, place, options)).await?;
-        workspace.push(accessor)
+        let made =
+            workspace.call(accessor, |client, place| client.clone_repo(url, place, options)).await;
+        match laid(made)? {
+            Ok(()) => Ok(Ok(workspace.push(accessor)?)),
+            Err(occupied) => Ok(Err(occupied)),
+        }
     }
 
     async fn fetch(
@@ -55,10 +59,19 @@ impl<B: Send + 'static> HostWithStore<StoreCtx<B>> for WasiVcs {
     ) -> Result<Result<(), Diverged>, Error> {
         let workspace = WorkspaceHandle::lookup(accessor, &workspace)?;
         workspace.writable()?;
-        let pushed = workspace.call(accessor, |client, place| client.push(place, remote, name));
-        match pushed.await.map_err(BackendError::typed) {
+        let pushed = workspace
+            .call(accessor, |client, place| client.push(place, remote.clone(), name.clone()))
+            .await;
+        match pushed.map_err(BackendError::typed) {
             Ok(()) => Ok(Ok(())),
-            Err(BackendError::Diverged(bookmark)) => Ok(Err(Diverged { bookmark })),
+            Err(BackendError::Diverged(_)) => {
+                let seen = workspace
+                    .call(accessor, |client, place| client.fetched(place, remote, name))
+                    .await;
+                Ok(Err(Diverged {
+                    current: found(seen)?,
+                }))
+            }
             Err(err) => Err(err.into()),
         }
     }

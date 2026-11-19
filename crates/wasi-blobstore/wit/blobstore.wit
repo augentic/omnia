@@ -13,23 +13,17 @@ package omnia:blobstore@0.1.0;
 /// segment is not empty, holds only ASCII letters, digits, `.`, `_`, and
 /// `-`, and is neither `.` nor `..`. A portable container never holds both
 /// an object `a` and an object under `a/`.
+///
+/// An `error` from a blob store interface means:
+///
+/// - `not-found`: a container, an upload, or the source of a copy does not
+///   exist. An absent object is not an error.
+/// - `invalid`: the request was rejected, such as a name the backend cannot
+///   store.
+/// - `unavailable`: the backing store did not answer, or the call exceeded
+///   its bound.
 interface types {
-  /// Why a call failed.
-  variant error {
-    /// A container, an upload, or the source of a copy does not exist. An
-    /// absent object is not an error.
-    not-found(string),
-    /// The caller may not make the call.
-    denied(string),
-    /// The request was rejected, such as a name the backend cannot store.
-    invalid(string),
-    /// A valid request this backend cannot serve.
-    unsupported(string),
-    /// The backing store did not answer, or the call exceeded its bound.
-    unavailable(string),
-    /// Any other failure.
-    other(string),
-  }
+  use omnia:types/types@0.1.0.{error, timestamp};
 
   /// A token for one stored state of an object, compared only for equality.
   ///
@@ -48,7 +42,7 @@ interface types {
     cache-control: option<string>,
     /// The caller's own entries, each key once.
     ///
-    /// A portable key matches `[a-z][a-z0-9_]*`, and a portable value is
+    /// A portable key matches `[a-z][a-z0-9]*`, and a portable value is
     /// printable ASCII.
     metadata: list<tuple<string, string>>,
   }
@@ -58,8 +52,8 @@ interface types {
     name: string,
     /// The object's size in bytes.
     size: u64,
-    /// When the object was last written, in seconds since the Unix epoch.
-    modified-at: u64,
+    /// When the object was last written.
+    modified-at: timestamp,
     etag: etag,
   }
 
@@ -68,8 +62,8 @@ interface types {
     name: string,
     /// The object's size in bytes.
     size: u64,
-    /// When the object was last written, in seconds since the Unix epoch.
-    modified-at: u64,
+    /// When the object was last written.
+    modified-at: timestamp,
     etag: etag,
     /// The version this state is kept as, `none` where the container keeps
     /// no versions.
@@ -89,8 +83,9 @@ interface types {
 
   /// A write whose precondition did not hold.
   record conflict {
-    /// The name of the object left as it was.
-    name: string,
+    /// The etag of the object found in its place, `none` when the name is
+    /// absent.
+    current: option<etag>,
   }
 
   /// What a write stored.
@@ -107,14 +102,15 @@ interface types {
 interface container {
   use types.{
     attributes, conflict, error, etag, object-entry, object-metadata, precondition, stored,
+    timestamp,
   };
 
   /// A container's metadata.
   record container-metadata {
     name: string,
-    /// When the container was created, in seconds since the Unix epoch.
-    /// `none` where the store records no time.
-    created-at: option<u64>,
+    /// When the container was created, `none` where the store records no
+    /// time.
+    created-at: option<timestamp>,
   }
 
   /// The bytes a read selects, clamped to the object's length.
@@ -174,11 +170,15 @@ interface container {
     /// Store the bytes of `data` as the object `name`, replacing any object
     /// there.
     ///
-    /// `finished` commits the write with `ok`. With an error the write
-    /// stores nothing and the error comes back. `attributes` replaces the
-    /// object's attributes, and `when` guards the write.
+    /// - `finished` commits the write with `ok`. With an error the write
+    ///   stores nothing and the error comes back.
+    /// - `size`, when given, is the length of `data`. A backend may need it
+    ///   to store a large object, and a stream of any other length is
+    ///   `invalid` and stores nothing.
+    /// - `attributes` replaces the object's attributes, and `when` guards
+    ///   the write.
     put: func(
-      name: string, data: stream<u8>, finished: future<result<_, error>>,
+      name: string, size: option<u64>, data: stream<u8>, finished: future<result<_, error>>,
       attributes: attributes, when: option<precondition>,
     ) -> future<result<result<stored, conflict>, error>>;
 
@@ -275,16 +275,22 @@ interface admin {
     -> result<names, error>;
 }
 
+// wit-parser excludes a gated interface's types only where each carries the
+// interface's gate, so every type and `use` inside one repeats it
 /// Optional: an object assembled from parts, over as many invocations as it
 /// takes.
 ///
 /// A portable upload numbers its parts from 1 to 10,000, and every part but
 /// the highest holds at least 5 MiB.
+@unstable(feature = uploads)
 interface uploads {
+  @unstable(feature = uploads)
   use types.{attributes, conflict, error, precondition, stored};
+  @unstable(feature = uploads)
   use container.{container};
 
   /// A part an upload holds.
+  @unstable(feature = uploads)
   record part {
     number: u32,
     /// The part's size in bytes.
@@ -292,6 +298,7 @@ interface uploads {
   }
 
   /// An upload in progress.
+  @unstable(feature = uploads)
   resource upload {
     /// The token `resume` reopens this upload with. Dropping the handle
     /// keeps the upload.
@@ -329,18 +336,22 @@ interface uploads {
 ///
 /// A presigned request is a bearer capability the host cannot take back, so a
 /// deployment may refuse every one with `denied`.
+@unstable(feature = presign)
 interface presign {
-  use types.{attributes, error, precondition};
+  @unstable(feature = presign)
+  use types.{attributes, error, precondition, timestamp};
+  @unstable(feature = presign)
   use container.{container};
 
   /// A request a client sends as given, until it expires.
+  @unstable(feature = presign)
   record presigned-request {
     url: string,
     /// The headers the client sends with the request.
     headers: list<tuple<string, string>>,
-    /// When the request expires, in seconds since the Unix epoch. A backend
-    /// may issue a shorter life than asked, never a longer one.
-    expires-at: u64,
+    /// When the request expires. A backend may issue a shorter life than
+    /// asked, never a longer one.
+    expires-at: timestamp,
   }
 
   /// A `GET` that reads the object `name`, valid for `ttl-ms` milliseconds.
@@ -363,9 +374,14 @@ world core {
 
 /// Every interface. A backend answers `unsupported` for what it does not
 /// serve.
+///
+/// `uploads` and `presign` are unstable, and a guest binds them by enabling
+/// the feature of that name. Every host links them.
 world imports {
   include core;
   import admin;
+  @unstable(feature = uploads)
   import uploads;
+  @unstable(feature = presign)
   import presign;
 }

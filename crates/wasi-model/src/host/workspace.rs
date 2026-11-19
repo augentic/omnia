@@ -1,8 +1,8 @@
 //! Workspace resolution in the host.
 //!
-//! A guest lends a `wasi:filesystem` workspace through
-//! `grants.workspace: option<location>` — a borrowed mount-root descriptor
-//! plus a relative subpath. This module turns that location into an owned,
+//! A guest lends a `wasi:filesystem` workspace through the `location` of
+//! `grants.workspace` — a borrowed mount-root descriptor plus a relative
+//! subpath. This module turns that location into an owned,
 //! `Send + Sync` [`Workspace`] the backend can use across `.await` points,
 //! *after* proving the lent root is one the deployment authorized and
 //! reopening the subpath beneath it so the lend can never escape the mount.

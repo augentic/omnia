@@ -1,6 +1,6 @@
 //! [`Vcs`] over `omnia:vcs`.
 
-use omnia_wasi_vcs::omnia::workspace::{self, Workspace};
+use omnia_wasi_vcs::omnia::workspace::{self, Unmerged, Workspace};
 use omnia_wasi_vcs::omnia::{remotes, store, types, workspaces};
 use wasip3::filesystem::preopens;
 use wasip3::filesystem::types::Descriptor;
@@ -35,16 +35,17 @@ impl Vcs for WasiProvider {
         let policy = policy.iter().cloned().map(Into::into).collect();
         let workspace = open(at).await?;
         let merged = workspace.merge(revision.to_owned(), message.to_owned(), policy).await?;
-        Ok(match merged {
-            Ok(commit) => Merged {
+        match merged {
+            Ok(commit) => Ok(Merged {
                 commit: Some(commit),
                 conflicts: Vec::new(),
-            },
-            Err(conflict) => Merged {
+            }),
+            Err(Unmerged::Conflicts(paths)) => Ok(Merged {
                 commit: None,
-                conflicts: conflict.paths,
-            },
-        })
+                conflicts: paths,
+            }),
+            Err(Unmerged::Pending(paths)) => Err(Error::Pending(paths)),
+        }
     }
 
     async fn log(&self, repo: &str, revision: &str, base: &str) -> Result<Vec<Entry>, Error> {
@@ -64,14 +65,14 @@ impl Vcs for WasiProvider {
 
     async fn init(&self, at: &str) -> Result<(), Error> {
         let directories = preopens();
-        store::init(lend(&directories, at)?).await?;
+        store::init(lend(&directories, at)?).await??;
         Ok(())
     }
 
     async fn add(&self, repo: &str, at: &str, revision: &str) -> Result<(), Error> {
         let workspace = open(repo).await?;
         let directories = preopens();
-        workspaces::add(&workspace, lend(&directories, at)?, revision.to_owned()).await?;
+        workspaces::add(&workspace, lend(&directories, at)?, revision.to_owned()).await??;
         Ok(())
     }
 
@@ -96,7 +97,7 @@ impl Vcs for WasiProvider {
 
     async fn clone_repo(&self, url: &str, at: &str, options: CloneOptions) -> Result<(), Error> {
         let directories = preopens();
-        remotes::clone(url.to_owned(), lend(&directories, at)?, options.depth).await?;
+        remotes::clone(url.to_owned(), lend(&directories, at)?, options.depth).await??;
         Ok(())
     }
 
@@ -125,7 +126,7 @@ impl Vcs for WasiProvider {
     async fn push(&self, repo: &str, remote: &str, label: &str) -> Result<(), Error> {
         let workspace = open(repo).await?;
         let pushed = remotes::push(&workspace, remote.to_owned(), label.to_owned()).await?;
-        pushed.map_err(|diverged| Error::Diverged(diverged.bookmark))
+        pushed.map_err(|_diverged| Error::Diverged(label.to_owned()))
     }
 }
 
@@ -220,5 +221,11 @@ impl From<types::Error> for Error {
 impl From<types::Conflict> for Error {
     fn from(_: types::Conflict) -> Self {
         Self::Other("the host reported a conflict on an unconditional bookmark move".to_owned())
+    }
+}
+
+impl From<types::Occupied> for Error {
+    fn from(occupied: types::Occupied) -> Self {
+        Self::Exists(occupied.detail)
     }
 }

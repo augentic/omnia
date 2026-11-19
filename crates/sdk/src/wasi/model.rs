@@ -8,8 +8,8 @@ use wasip3::filesystem::preopens;
 
 use super::lend::resolve_lend;
 use crate::model::{
-    CHECK_TOOL, Error, Format, Function, Generation, Message, Reply, Request, Role, Tool, ToolCall,
-    Usage, WorkerGrant,
+    CHECK_TOOL, Effort, Error, Format, Function, Generation, Message, Reply, Request, Role, Tool,
+    ToolCall, Usage, WorkerGrant,
 };
 use crate::{Model, WasiProvider};
 
@@ -21,6 +21,13 @@ impl Model for WasiProvider {
         H: FnMut(ToolCall) -> F + Send,
         F: Future<Output = Result<String, String>> + Send,
     {
+        // a worker grant nests in the lend it reaches beyond
+        if request.worker.is_some() && request.workspace.is_none() {
+            return Err(Error::InvalidRequest(
+                "a worker grant requires a workspace lend".to_owned(),
+            ));
+        }
+
         // the lent workspace borrows a descriptor, so the table outlives `complete`
         let directories =
             if request.workspace.is_some() { preopens::get_directories() } else { vec![] };
@@ -55,8 +62,10 @@ impl Model for WasiProvider {
             format: request.format.into(),
             tools,
             grants: types::Grants {
-                workspace,
-                worker: request.worker.map(Into::into),
+                workspace: workspace.map(|location| types::WorkspaceGrant {
+                    location,
+                    worker: request.worker.map(Into::into),
+                }),
             },
             check: request.check,
         };
@@ -137,7 +146,18 @@ impl From<Generation> for types::Generation {
             max_tokens: generation.max_tokens,
             stop_sequences: generation.stop,
             seed: generation.seed,
-            effort: generation.effort.as_ref().map(|effort| effort.as_str().to_owned()),
+            effort: generation.effort.map(Into::into),
+        }
+    }
+}
+
+impl From<Effort> for types::Effort {
+    fn from(effort: Effort) -> Self {
+        match effort {
+            Effort::Low => Self::Low,
+            Effort::Medium => Self::Medium,
+            Effort::High => Self::High,
+            Effort::Other(level) => Self::Other(level),
         }
     }
 }

@@ -7,8 +7,7 @@ use crate::{Plugins, WasiProvider};
 
 impl Plugins for WasiProvider {
     async fn load(&self, from: &Location, digest: Option<&Digest>) -> Result<Plugin, Error> {
-        let when = digest.map(ToString::to_string);
-        match loader::load(types::Source::from(from), when).await? {
+        match loader::load(source(from, digest)?).await? {
             Ok(loaded) => {
                 let digest = loaded.digest.parse().map_err(|error: Error| {
                     Error::Internal(format!("host reported a malformed digest: {error}"))
@@ -18,6 +17,29 @@ impl Plugins for WasiProvider {
             Err(conflict) => Err(Error::Refused(conflicted(from, digest, &conflict))),
         }
     }
+}
+
+// the deployment's entry pins a declared guest, so its source carries no pin
+fn source(from: &Location, pin: Option<&Digest>) -> Result<types::Source, Error> {
+    let pin = pin.map(ToString::to_string);
+    let source = match from {
+        Location::Declared(name) if pin.is_some() => {
+            return Err(Error::Refused(format!(
+                "`{name}` is declared by the deployment, which pins it; the load takes no digest"
+            )));
+        }
+        Location::Declared(name) => types::Source::Declared(name.clone()),
+        Location::Path(path) => types::Source::Path(types::File {
+            path: path.clone(),
+            pin,
+        }),
+        Location::Registry { package, endpoint } => types::Source::Release(types::Release {
+            reference: package.clone(),
+            registry: endpoint.clone(),
+            pin,
+        }),
+    };
+    Ok(source)
 }
 
 // the bytes found and what they missed: the load's pin, or the bytes already
@@ -32,19 +54,6 @@ fn conflicted(from: &Location, pin: Option<&Digest>, conflict: &types::Conflict)
             format!("`{}` is loaded from {}, not {found}", current.name, current.digest)
         }
         (_, None) => format!("`{}` was active under bytes other than {found}", from.name()),
-    }
-}
-
-impl From<&Location> for types::Source {
-    fn from(location: &Location) -> Self {
-        match location {
-            Location::Declared(name) => Self::Declared(name.clone()),
-            Location::Path(path) => Self::Path(path.clone()),
-            Location::Registry { package, endpoint } => Self::Release(types::Release {
-                reference: package.clone(),
-                registry: endpoint.clone(),
-            }),
-        }
     }
 }
 

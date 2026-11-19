@@ -164,7 +164,8 @@ fn stat_timestamps() {
     let first = now(memory.stat("c", "first")).expect("stat").expect("first");
     let second = now(memory.stat("c", "second")).expect("stat").expect("second");
 
-    assert!(container.created_at < first.created_at && first.created_at < second.created_at);
+    let created = container.created_at.expect("the double records when it created a container");
+    assert!(created < first.created_at && first.created_at < second.created_at);
     assert_eq!((second.size, second.container.as_str()), (2, "c"));
     assert_eq!(now(memory.stat("c", "missing")).expect("stat"), None);
     assert_eq!(now(memory.container_info("missing")).expect("container info"), None);

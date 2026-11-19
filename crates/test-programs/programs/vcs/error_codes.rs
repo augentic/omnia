@@ -1,8 +1,9 @@
 //! Every case a backend's failure reaches the guest as. Over the raw
 //! bindings, each `VcsClient` error variant arrives as its `omnia:vcs` case.
 //! Through the SDK, each case the SDK can reach lowers to its `vcs::Error`,
-//! and that to an `omnia_sdk::Error` status and code. The SDK sends no
-//! precondition and no log without a base, so it never reaches
+//! and that to an `omnia_sdk::Error` status and code. An occupied place and
+//! a merge into pending changes reach it as `Exists` and `Pending`. The SDK
+//! sends no precondition and no log without a base, so it never reaches
 //! `unsupported`. The suite's backend fails `descends` by the ancestor's
 //! name.
 
@@ -33,9 +34,9 @@ async fn scenario() {
     .expect("open the project");
     for (fault, case, detail) in [
         ("not-a-repository", "not-found", "not a repository"),
-        ("exists", "invalid", "already exists: held"),
+        ("exists", "other", "already exists: held"),
         ("not-found", "not-found", "not-found"),
-        ("pending", "invalid", "pending changes: a.rs, b.rs"),
+        ("pending", "other", "pending changes: a.rs, b.rs"),
         ("access", "unavailable", "refused"),
         ("diverged", "other", "diverged: main"),
         ("other", "other", "broken"),
@@ -51,7 +52,7 @@ async fn scenario() {
     // each case the SDK reaches, as its error and its status
     for (fault, error, status, code) in [
         ("not-found", VcsError::NotFound("not-found".to_owned()), 404, "not-found"),
-        ("exists", VcsError::Other("invalid: already exists: held".to_owned()), 500, "other"),
+        ("exists", VcsError::Other("already exists: held".to_owned()), 500, "other"),
         ("access", VcsError::Access("refused".to_owned()), 502, "access"),
         ("other", VcsError::Other("broken".to_owned()), 500, "other"),
     ] {
@@ -65,6 +66,11 @@ async fn scenario() {
     lowers(absent, &VcsError::NotARepository, 400, "not-a-repository");
     let diverged = WasiProvider.push(".", "moved", "main").await.expect_err("a moved bookmark");
     lowers(diverged, &VcsError::Diverged("main".to_owned()), 400, "diverged");
+    let existing = WasiProvider.init("./existing").await.expect_err("a repository already there");
+    lowers(existing, &VcsError::Exists("existing".to_owned()), 400, "exists");
+    let dirty = WasiProvider.merge("./dirty", "feature", "merge it", &[]).await;
+    let pending = VcsError::Pending(vec!["a.rs".to_owned(), "b.rs".to_owned(), "c.rs".to_owned()]);
+    lowers(dirty.expect_err("a merge into pending changes"), &pending, 400, "pending");
 }
 
 fn case_of(error: &Error) -> (&'static str, &str) {

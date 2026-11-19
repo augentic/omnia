@@ -5,7 +5,19 @@ package omnia:messaging@0.1.0;
 /// Every backend carries a portable topic, and may reject any other as
 /// `invalid`. A portable topic is one or more segments joined by `.`. Each
 /// segment is not empty and holds only ASCII letters, digits, `_`, and `-`.
+///
+/// An `error` from a messaging interface means:
+///
+/// - `not-found`: the broker or the subscription is not declared by the
+///   deployment.
+/// - `denied`: the caller may not use the broker or the topic.
+/// - `invalid`: the request was rejected, such as a topic the backend
+///   cannot carry.
+/// - `unavailable`: the broker did not answer, or the call exceeded its
+///   bound.
 interface types {
+  use omnia:types/types@0.1.0.{error, timestamp};
+
   /// A topic, which some brokers call a subject or a channel.
   type topic = string;
 
@@ -25,22 +37,6 @@ interface types {
   /// A broker's token for one stored message, opaque to the guest.
   type position = string;
 
-  /// Why a call failed.
-  variant error {
-    /// The broker or the subscription is not declared by the deployment.
-    not-found(string),
-    /// The caller may not use the broker or the topic.
-    denied(string),
-    /// The request was rejected, such as a topic the backend cannot carry.
-    invalid(string),
-    /// A valid request this backend cannot serve.
-    unsupported(string),
-    /// The broker did not answer, or the call exceeded its bound.
-    unavailable(string),
-    /// Any other failure.
-    other(string),
-  }
-
   /// A connection to a broker.
   resource client {
     /// Connect to the broker `name`, a binding the deployment declares. An
@@ -56,9 +52,6 @@ interface types {
     data: list<u8>,
     /// The media type of `data`.
     content-type: option<string>,
-    /// The sender's id for the message. A broker that removes duplicates
-    /// keeps one message for each id it sees within its window.
-    id: option<string>,
     /// The ordering key. Where the broker orders by key, messages that
     /// share one arrive in the order they were sent.
     key: option<string>,
@@ -79,9 +72,31 @@ interface types {
     /// How many times the broker has delivered the message, counting this
     /// one. `none` where the broker keeps no count.
     attempt: option<u32>,
-    /// When the broker took the message, in milliseconds since the Unix
-    /// epoch. `none` where the broker records no time.
-    published-at: option<u64>,
+    /// When the broker took the message. `none` where the broker records no
+    /// time.
+    published-at: option<timestamp>,
+    /// When the host stops waiting for `handle` to return. `none` on a
+    /// delivery the guest receives or reads itself.
+    deadline: option<timestamp>,
+  }
+
+  /// What becomes of a delivery `handle` did not accept.
+  variant settle {
+    /// The message can never be handled, for the reason given. The broker
+    /// delivers it no more, and the backend drops or dead-letters it.
+    reject(string),
+    /// The failure may pass. A backend that redelivers delivers the message
+    /// again.
+    release(release),
+  }
+
+  /// A delivery `handle` gives back for another attempt.
+  record release {
+    /// Why the delivery failed, for a person to read.
+    reason: string,
+    /// The fewest milliseconds before the next delivery, where the backend
+    /// can delay one. `none` leaves the delay to the backend.
+    delay-ms: option<u64>,
   }
 }
 
@@ -93,7 +108,7 @@ interface producer {
   ///
   /// `ok` means the backend took the message for delivery, not that a
   /// subscriber received it.
-  send: async func(c: borrow<client>, topic: topic, message: message) -> result<_, error>;
+  send: async func(client: borrow<client>, topic: topic, message: message) -> result<_, error>;
 }
 
 /// Optional: a request that awaits one reply.
@@ -106,15 +121,21 @@ interface request-reply {
   /// `none`. A request nothing answers in that time fails with
   /// `unavailable`. A zero `timeout-ms` is `invalid`.
   request: async func(
-    c: borrow<client>, topic: topic, message: message, timeout-ms: option<u32>,
+    client: borrow<client>, topic: topic, message: message, timeout-ms: option<u64>,
   ) -> result<message, error>;
 
-  /// Answer the request whose delivery carried `reply-to`.
-  reply: async func(reply-to: string, message: message) -> result<_, error>;
+  /// Answer the request whose delivery carried `reply-to`, through the broker
+  /// `client` connects to.
+  reply: async func(client: borrow<client>, reply-to: string, message: message)
+    -> result<_, error>;
 }
 
+// wit-parser excludes a gated interface's types only where each carries the
+// interface's gate, so every type and `use` inside one repeats it
 /// Optional: taking messages in batches and settling each one.
+@unstable(feature = consumer)
 interface consumer {
+  @unstable(feature = consumer)
   use types.{client, delivery, error};
 
   /// One message the guest holds, which the broker delivers to nobody else
@@ -123,6 +144,7 @@ interface consumer {
   /// A lease ends when it is settled, when the subscription's time limit
   /// passes, or when the handle is dropped. The last two release the
   /// message. A lease settles once.
+  @unstable(feature = consumer)
   resource lease {
     /// The message the lease holds.
     delivery: func() -> delivery;
@@ -131,8 +153,9 @@ interface consumer {
     accept: async func() -> result<_, error>;
 
     /// Give the message back for another delivery, no sooner than
-    /// `delay-ms` milliseconds from now where given.
-    release: async func(delay-ms: option<u32>) -> result<_, error>;
+    /// `delay-ms` milliseconds from now where given. A zero `delay-ms`, like
+    /// `none`, gives it back at once.
+    release: async func(delay-ms: option<u64>) -> result<_, error>;
 
     /// The message can never be handled. The broker delivers it no more,
     /// and dead-letters it where the subscription says so.
@@ -146,21 +169,24 @@ interface consumer {
   /// declares.
   ///
   /// The call returns as soon as a message is ready, and with none once
-  /// `wait-ms` milliseconds pass. `max` is at most 1,000, and zero is
-  /// `invalid`.
+  /// `wait-ms` milliseconds pass. A zero `wait-ms` returns at once with what
+  /// is ready. `max` is at most 1,000, and zero is `invalid`.
   receive: async func(
-    c: borrow<client>, subscription: string, max: u32, wait-ms: u32,
+    client: borrow<client>, subscription: string, max: u32, wait-ms: u64,
   ) -> result<list<lease>, error>;
 }
 
 /// Optional: topics as an ordered log, written under a condition and read
 /// back from a position.
+@unstable(feature = log)
 interface log {
-  use types.{client, message, delivery, position, pattern, error, topic};
+  @unstable(feature = log)
+  use types.{client, message, delivery, position, pattern, error, timestamp, topic};
 
   /// What must hold for an append to take effect.
   ///
   /// A backend that cannot check it atomically fails with `unsupported`.
+  @unstable(feature = log)
   variant precondition {
     /// The topic holds no message.
     absent,
@@ -169,6 +195,7 @@ interface log {
   }
 
   /// An append whose precondition did not hold.
+  @unstable(feature = log)
   record conflict {
     /// The position of the newest message found, `none` when the topic
     /// holds none.
@@ -176,22 +203,19 @@ interface log {
   }
 
   /// Where a read starts.
+  @unstable(feature = log)
   variant start {
     /// The oldest message the topics hold.
     first,
     /// The message that follows this position.
     after(position),
-    /// The first message the broker took at or after this time, in
-    /// milliseconds since the Unix epoch.
-    since(u64),
+    /// The first message the broker took at or after this instant.
+    since(timestamp),
   }
 
   /// Send `message` to `topic` and return where the broker stored it.
-  ///
-  /// A message the broker already stored under the same `id` returns the
-  /// position of the first.
   append: async func(
-    c: borrow<client>, topic: topic, message: message, when: option<precondition>,
+    client: borrow<client>, topic: topic, message: message, when: option<precondition>,
   ) -> result<result<position, conflict>, error>;
 
   /// The messages of the topics `pattern` names, from `start`, oldest first.
@@ -201,15 +225,18 @@ interface log {
   /// than 1,000. A zero `limit` is `invalid`. An empty list means the topics
   /// hold nothing later. A read settles nothing and moves no subscription.
   read: async func(
-    c: borrow<client>, pattern: pattern, start: start, limit: option<u32>,
+    client: borrow<client>, pattern: pattern, start: start, limit: option<u32>,
   ) -> result<list<delivery>, error>;
 }
 
 /// Optional: listing and purging the topics a broker holds.
+@unstable(feature = admin)
 interface admin {
+  @unstable(feature = admin)
   use types.{client, pattern, topic, error};
 
   /// One page of topic names.
+  @unstable(feature = admin)
   record names {
     /// The topics on this page, in no particular order.
     topics: list<topic>,
@@ -222,31 +249,24 @@ interface admin {
   /// A page holds at most `limit` names and never more than 1,000. A zero
   /// `limit` is `invalid`. `after` is the `next` of the previous page.
   list-topics: async func(
-    c: borrow<client>, pattern: pattern, after: option<string>, limit: option<u32>,
+    client: borrow<client>, pattern: pattern, after: option<string>, limit: option<u32>,
   ) -> result<names, error>;
 
   /// Delete the messages of every topic `pattern` names, and return how
   /// many.
-  purge-topics: async func(c: borrow<client>, pattern: pattern) -> result<u64, error>;
+  purge-topics: async func(client: borrow<client>, pattern: pattern) -> result<u64, error>;
 }
 
 /// The messages a deployment routes to the guest, one call for each.
 interface incoming-handler {
-  use types.{delivery, error};
+  use types.{delivery, settle};
 
   /// Handle one delivery, which a broker may make more than once.
   ///
-  /// The host sets the `deadline` entry of the delivery's metadata to when
-  /// it stops waiting, as decimal milliseconds since the Unix epoch. What
-  /// `handle` returns settles the delivery:
-  ///
-  /// - `ok` accepts it. The broker delivers the message no more.
-  /// - `invalid` rejects it, as a message no redelivery makes handleable.
-  ///   The backend drops or dead-letters it.
-  /// - `unavailable` releases it, as a failure that may pass. A backend
-  ///   that redelivers delivers the message again.
-  /// - Any other case is the backend's to decide.
-  handle: async func(delivery: delivery) -> result<_, error>;
+  /// The host sets the delivery's `deadline`. `ok` accepts the delivery, and
+  /// the broker delivers the message no more. A `settle` rejects or releases
+  /// it.
+  handle: async func(delivery: delivery) -> result<_, settle>;
 }
 
 /// What every backend serves.
@@ -257,11 +277,17 @@ world core {
 
 /// Every interface. A backend answers `unsupported` for what it does not
 /// serve.
+///
+/// `consumer`, `log`, and `admin` are unstable, and a guest binds them by
+/// enabling the feature of that name. Every host links them.
 world imports {
   include core;
   import request-reply;
+  @unstable(feature = consumer)
   import consumer;
+  @unstable(feature = log)
   import log;
+  @unstable(feature = admin)
   import admin;
 }
 

@@ -26,9 +26,12 @@ Implements `omnia:model`, the interface the SDK's `Model` calls, over one
   provider, and acceptance belongs to the guest's `check`.
 - A backend picks a failure's case by returning an
   `omnia_wasi_model::Error`, and a spent budget by returning an
-  `omnia_wasi_model::Exhausted`. Any other failure is `other`.
-- The host passes `effort` through by name, so a backend that does not
-  know a level fails it with `invalid`.
+  `omnia_wasi_model::Exhausted` naming the `Budget` that ran out. Any
+  other failure is `other`.
+- The host passes `effort` through as the guest gave it, so a backend
+  fails an `other` level it does not know with `invalid`.
+- A workspace lend carries the `worker` grant, so a worker grant cannot
+  be given without a lend.
 
 ## Backend
 

@@ -13,7 +13,7 @@ use moka::sync::Cache;
 use omnia_core::Connect;
 use tracing::instrument;
 
-use crate::host::resource::{Bucket, FutureResult};
+use crate::host::resource::{Bucket, Entry, FutureResult, Lifetime, Precondition, Revision};
 use crate::host::{Error, KeyValueClient};
 
 #[expect(missing_docs, reason = "`FromEnv` has no docs")]
@@ -135,26 +135,53 @@ impl std::fmt::Debug for InMemBucket {
 }
 
 impl Bucket for InMemBucket {
-    fn get(&self, key: String) -> FutureResult<Option<Vec<u8>>> {
+    fn get(&self, key: String) -> FutureResult<Option<Entry>> {
         tracing::trace!("getting key: {key} from bucket: {}", self.name);
-        let result = self.cache.get(&key).map(|entry| entry.bytes);
+        let result = self.cache.get(&key).map(Stored::entry);
         async move { Ok(result) }.boxed()
     }
 
-    fn set(&self, key: String, value: Vec<u8>, ttl: Option<Duration>) -> FutureResult<()> {
+    fn set(
+        &self, key: String, value: Vec<u8>, lifetime: Lifetime, when: Option<Precondition>,
+    ) -> FutureResult<Result<Revision, Option<Entry>>> {
         tracing::trace!("setting key: {key} in bucket: {}", self.name);
+
         let lock = self.key_lock(&key);
-        let _guard = lock.lock().expect("key lock poisoned");
-        self.cache.insert(key, Entry::new(value, ttl));
-        async move { Ok(()) }.boxed()
+        let result = {
+            let _guard = lock.lock().expect("key lock poisoned");
+            let existing = self.cache.get(&key);
+            let current = existing.as_ref().map(Stored::revision);
+            if when.is_some_and(|when| !when.holds(current.as_ref())) {
+                Err(existing.map(Stored::entry))
+            } else {
+                let revision = Revision::of(&value);
+                self.cache.insert(key, Stored::write(existing, value, lifetime));
+                Ok(revision)
+            }
+        };
+
+        async move { Ok(result) }.boxed()
     }
 
-    fn delete(&self, key: String) -> FutureResult<()> {
+    fn delete(
+        &self, key: String, when: Option<Revision>,
+    ) -> FutureResult<Result<(), Option<Entry>>> {
         tracing::trace!("deleting key: {key} from bucket: {}", self.name);
+
         let lock = self.key_lock(&key);
-        let _guard = lock.lock().expect("key lock poisoned");
-        self.cache.invalidate(&key);
-        async move { Ok(()) }.boxed()
+        let result = {
+            let _guard = lock.lock().expect("key lock poisoned");
+            let existing = self.cache.get(&key);
+            let current = existing.as_ref().map(Stored::revision);
+            if when.is_some_and(|revision| current != Some(revision)) {
+                Err(existing.map(Stored::entry))
+            } else {
+                self.cache.invalidate(&key);
+                Ok(())
+            }
+        };
+
+        async move { Ok(result) }.boxed()
     }
 
     fn exists(&self, key: String) -> FutureResult<bool> {
@@ -180,58 +207,44 @@ impl Bucket for InMemBucket {
                 .map_err(|err| {
                     Error::Invalid(format!("incrementing `{key}` by {delta}: {err:#}"))
                 })?;
-            self.cache.insert(key, Entry::atomic(existing, encode_i64(incremented), ttl));
+            let written = Stored::write(existing, encode_i64(incremented), Lifetime::Keep(ttl));
+            self.cache.insert(key, written);
             Ok(incremented)
         })();
 
         async move { result }.boxed()
     }
-
-    fn compare_and_swap(
-        &self, key: String, current: Option<Vec<u8>>, new: Vec<u8>, ttl: Option<Duration>,
-    ) -> FutureResult<Result<(), Option<Vec<u8>>>> {
-        tracing::trace!("swapping key: {key} in bucket: {}", self.name);
-
-        let lock = self.key_lock(&key);
-        let result = {
-            let _guard = lock.lock().expect("key lock poisoned");
-            let existing = self.cache.get(&key);
-            let observed = existing.as_ref().map(|entry| entry.bytes.clone());
-            if observed == current {
-                self.cache.insert(key, Entry::atomic(existing, new, ttl));
-                Ok(())
-            } else {
-                Err(observed)
-            }
-        };
-
-        async move { Ok(result) }.boxed()
-    }
 }
 
-type BucketCache = Cache<String, Entry>;
+type BucketCache = Cache<String, Stored>;
 type KeyLocks = Arc<Mutex<HashMap<String, Weak<Mutex<()>>>>>;
 
 #[derive(Clone)]
-struct Entry {
+struct Stored {
     bytes: Vec<u8>,
     // `None` never expires; a TTL too long for an `Instant` is the same
     expires_at: Option<Instant>,
 }
 
-impl Entry {
-    fn new(bytes: Vec<u8>, ttl: Option<Duration>) -> Self {
-        Self {
-            bytes,
-            expires_at: ttl.and_then(|ttl| Instant::now().checked_add(ttl)),
+impl Stored {
+    fn write(existing: Option<Self>, bytes: Vec<u8>, lifetime: Lifetime) -> Self {
+        match (lifetime, existing) {
+            (Lifetime::Keep(_), Some(existing)) => Self { bytes, ..existing },
+            (Lifetime::Keep(ttl) | Lifetime::Replace(ttl), _) => Self {
+                bytes,
+                expires_at: ttl.and_then(|ttl| Instant::now().checked_add(ttl)),
+            },
         }
     }
 
-    // an atomic applies its TTL only on create; a live entry keeps the time it has left
-    fn atomic(existing: Option<Self>, bytes: Vec<u8>, ttl: Option<Duration>) -> Self {
-        match existing {
-            Some(existing) => Self { bytes, ..existing },
-            None => Self::new(bytes, ttl),
+    fn revision(&self) -> Revision {
+        Revision::of(&self.bytes)
+    }
+
+    fn entry(self) -> Entry {
+        Entry {
+            revision: self.revision(),
+            value: self.bytes,
         }
     }
 }
@@ -239,13 +252,13 @@ impl Entry {
 // expires each entry at its own deadline, on create and on every update
 struct Deadline;
 
-impl Expiry<String, Entry> for Deadline {
-    fn expire_after_create(&self, _key: &String, entry: &Entry, at: Instant) -> Option<Duration> {
+impl Expiry<String, Stored> for Deadline {
+    fn expire_after_create(&self, _key: &String, entry: &Stored, at: Instant) -> Option<Duration> {
         entry.expires_at.map(|expires_at| expires_at.saturating_duration_since(at))
     }
 
     fn expire_after_update(
-        &self, _key: &String, entry: &Entry, at: Instant, _remaining: Option<Duration>,
+        &self, _key: &String, entry: &Stored, at: Instant, _remaining: Option<Duration>,
     ) -> Option<Duration> {
         entry.expires_at.map(|expires_at| expires_at.saturating_duration_since(at))
     }

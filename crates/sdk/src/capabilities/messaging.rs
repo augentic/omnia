@@ -15,14 +15,16 @@ pub trait Publisher: Send + Sync {
     fn publish(&self, topic: &str, message: &Message) -> impl Future<Output = Result<()>> + Send;
 }
 
-/// Metadata entry name for [`Message::key`] over `wasi:messaging`.
+/// The header name that stands for [`Message::key`].
+///
+/// A header of this name, in any case, is the message's key unless
+/// [`Message::with_key`] sets one.
 pub const KEY: &str = "key";
 
 /// A message to publish through a [`Publisher`].
 ///
-/// Over `wasi:messaging` the [`key`](Self::key) travels as the [`KEY`]
-/// metadata entry, and [`Delivery::key`](crate::api::messaging::Delivery::key)
-/// reads it back.
+/// A subscriber reads the [`key`](Self::key) back as
+/// [`Delivery::key`](crate::api::messaging::Delivery::key).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Message {

@@ -1,16 +1,16 @@
 //! Every `omnia:messaging` error case reaches the guest as its own code: a
 //! `BadGateway` for `unavailable`, and a `ServerError` for the rest. The
 //! suite's faulting broker fails a send by its topic. The host refuses an
-//! undeclared broker, a message id, a zero timeout, an empty reply address,
-//! and every interface it does not serve, so none of them reaches the broker.
+//! undeclared broker, a zero timeout, and an empty reply address, so none of
+//! them reaches the broker.
 
 #![cfg(target_arch = "wasm32")]
 
 use std::fmt::Debug;
 
 use omnia_sdk::{Publisher as _, WasiProvider, messaging};
-use omnia_wasi_messaging::types::{Client, Error, Message};
-use omnia_wasi_messaging::{admin, consumer, log, producer, request_reply};
+use omnia_wasi_messaging::omnia::request_reply;
+use omnia_wasi_messaging::omnia::types::{Client, Error, Message};
 
 omnia_sdk::api::command::export!(scenario);
 
@@ -31,31 +31,15 @@ async fn scenario() {
     // the host's own rules
     assert_eq!(case(Client::connect("undeclared".to_owned()).await), "not-found");
     let client = Client::connect("default".to_owned()).await.expect("connect");
-    let identified = Message {
-        id: Some("order-1".to_owned()),
-        ..order()
-    };
-    assert_eq!(case(producer::send(&client, "orders".to_owned(), identified).await), "unsupported");
     let unbounded = request_reply::request(&client, "orders".to_owned(), order(), Some(0)).await;
     assert_eq!(case(unbounded), "invalid");
-    assert_eq!(case(request_reply::reply(String::new(), order()).await), "invalid");
-
-    // the interfaces the host does not serve
-    let received = consumer::receive(&client, "orders".to_owned(), 1, 0).await;
-    assert_eq!(case(received), "unsupported");
-    let appended = log::append(&client, "orders".to_owned(), order(), None).await;
-    assert_eq!(case(appended), "unsupported");
-    let read = log::read(&client, "orders".to_owned(), log::Start::First, None).await;
-    assert_eq!(case(read), "unsupported");
-    assert_eq!(case(admin::list_topics(&client, ">".to_owned(), None, None).await), "unsupported");
-    assert_eq!(case(admin::purge_topics(&client, ">".to_owned()).await), "unsupported");
+    assert_eq!(case(request_reply::reply(&client, String::new(), order()).await), "invalid");
 }
 
 fn order() -> Message {
     Message {
         data: b"order".to_vec(),
         content_type: None,
-        id: None,
         key: None,
         metadata: Vec::new(),
     }

@@ -14,15 +14,14 @@ over one `Endpoint` per backend.
 - A message is text or binary, and travels in a frame of that type. Every
   backend carries a portable message and close frame, and may reject any
   other with `invalid`.
-- `connections` sends to one connection, closes one, and asks whether one
-  is open. A connection that is not open drops a send, and closing it
-  succeeds. A close code no endpoint may send is `invalid`, and so is a
+- `connections` sends to the connections a guest names, closes one, and
+  asks whether one is open. A send skips a connection that is not open,
+  and closing one succeeds. A close code no endpoint may send is `invalid`, and so is a
   reason over 123 bytes.
 - `broadcast` is optional, and sends to every open connection except those
   the guest names.
 - A receiving guest exports `incoming-handler`. The host routes each event
-  to a guest, and sets its `deadline` metadata entry to when it stops
-  waiting. An error leaves the connection open.
+  to a guest, and sets its `deadline` to when it stops waiting. An error leaves the connection open.
 - The host answers `unsupported` for what a backend's `Endpoint` does not
   serve yet:
   - `close` and `exists`;

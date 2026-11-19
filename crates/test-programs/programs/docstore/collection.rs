@@ -6,6 +6,7 @@
 //!   conflicts with the stored document.
 //! - The batch calls answer in request order, and an id given twice is
 //!   `invalid`.
+//! - A delete answers whether it removed a document.
 //! - A filter's groups read as `a and (b or c)`.
 //! - A small `limit` walks every match once, even past a document deleted
 //!   from an earlier page, and a page holds at most 1,000 documents.
@@ -63,8 +64,9 @@ async fn scenario() {
     assert!(!docs.exists("b".to_owned()).await.expect("exists"));
     assert!(docs.exists("c".to_owned()).await.expect("exists"));
 
-    // deleting an absent document succeeds
-    docs.delete("b".to_owned(), None).await.expect("delete absent").expect("unconditional");
+    // deleting an absent document succeeds and removes nothing
+    let removed = docs.delete("b".to_owned(), None).await.expect("delete absent");
+    assert!(!removed.expect("unconditional"));
 
     // a filter's groups read as `a and (b or c)`
     for (id, stored) in [
@@ -103,7 +105,8 @@ async fn scenario() {
     let page = query.query(Vec::new(), by_rank.clone(), None, Some(2)).await.expect("query");
     let first: Vec<&str> = page.documents.iter().map(|document| document.id.as_str()).collect();
     assert_eq!(first, ["q1", "q2"]);
-    query.delete("q1".to_owned(), None).await.expect("delete").expect("unconditional");
+    let removed = query.delete("q1".to_owned(), None).await.expect("delete");
+    assert!(removed.expect("unconditional"));
     let rest = walk(&query, &by_rank, page.next).await;
     assert_eq!(rest, ["q3", "q4", "q5"]);
 
@@ -118,9 +121,9 @@ async fn scenario() {
     assert_eq!(full.documents.len() + tail.documents.len(), 1005);
 
     // refused as `invalid`
-    let raw = docs.put("raw".to_owned(), b"not json".to_vec(), None).await;
+    let raw = docs.put("raw".to_owned(), "not json".to_owned(), None).await;
     assert!(matches!(raw, Err(Error::Invalid(_))), "{raw:?}");
-    let array = docs.put("array".to_owned(), b"[1]".to_vec(), None).await;
+    let array = docs.put("array".to_owned(), "[1]".to_owned(), None).await;
     assert!(matches!(array, Err(Error::Invalid(_))), "{array:?}");
     let twice = vec![entry("twice", &json!({"n": 1})), entry("twice", &json!({"n": 2}))];
     let twice = docs.put_many(twice).await;
@@ -144,7 +147,7 @@ async fn scenario() {
 
     // refused as `unsupported` until backends carry revisions and arrays
     let matching = Some(Precondition::Matches(second.clone()));
-    let replace = docs.put("a".to_owned(), b"{}".to_vec(), matching).await;
+    let replace = docs.put("a".to_owned(), "{}".to_owned(), matching).await;
     assert!(matches!(replace, Err(Error::Unsupported(_))), "{replace:?}");
     let delete = docs.delete("a".to_owned(), Some(second)).await;
     assert!(matches!(delete, Err(Error::Unsupported(_))), "{delete:?}");
@@ -156,7 +159,7 @@ async fn scenario() {
 async fn put(
     collection: &Collection, id: &str, body: &serde_json::Value, when: Option<Precondition>,
 ) -> Result<Revision, Conflict> {
-    let written = collection.put(id.to_owned(), body.to_string().into_bytes(), when).await;
+    let written = collection.put(id.to_owned(), body.to_string(), when).await;
     written.unwrap_or_else(|err| panic!("put `{id}`: {err:?}"))
 }
 
@@ -212,14 +215,14 @@ fn integers(integers: &[i64]) -> Vec<Value> {
     integers.iter().copied().map(Value::Integer).collect()
 }
 
-fn entry(id: &str, body: &serde_json::Value) -> (String, Vec<u8>) {
-    (id.to_owned(), body.to_string().into_bytes())
+fn entry(id: &str, body: &serde_json::Value) -> (String, String) {
+    (id.to_owned(), body.to_string())
 }
 
 fn ids(ids: &[&str]) -> Vec<String> {
     ids.iter().map(|&id| id.to_owned()).collect()
 }
 
-fn body(data: &[u8]) -> serde_json::Value {
-    serde_json::from_slice(data).expect("a JSON body")
+fn body(data: &str) -> serde_json::Value {
+    serde_json::from_str(data).expect("a JSON body")
 }

@@ -11,7 +11,8 @@ use std::sync::{Arc, Mutex};
 use omnia::{Connect as _, ExitStatus};
 use omnia_test::host::{Backends, Deployment};
 use omnia_wasi_keyvalue::{
-    Bucket, ConnectOptions, Error, FutureResult, KeyValueClient, KeyValueDefault, WasiKeyValue,
+    Bucket, ConnectOptions, Error, FutureResult, KeyValueClient, KeyValueDefault, Lifetime,
+    WasiKeyValue,
 };
 
 // Every guest program in `crates/test-programs` must have a matching test
@@ -38,7 +39,8 @@ async fn declaring(buckets: &[&str]) -> KeyValueDefault {
 async fn keyvalue_bucket() {
     let backends = Backends::defaults().await.keyvalue(declaring(&["bucket"]).await);
     let bucket = backends.keyvalue.open_bucket("bucket".to_owned()).await.expect("bucket");
-    bucket.set("counter".to_owned(), b"37".to_vec(), None).await.expect("seed");
+    let seeded = bucket.set("counter".to_owned(), b"37".to_vec(), Lifetime::Replace(None), None);
+    seeded.await.expect("seed").expect("no precondition");
 
     run_guest(test_programs::KEYVALUE_BUCKET, backends.clone()).await;
 
@@ -47,13 +49,11 @@ async fn keyvalue_bucket() {
     let bucket = backends.keyvalue.open_bucket("bucket".to_owned()).await.expect("bucket");
     let mut keys = bucket.keys().await.expect("keys");
     keys.sort();
-    assert_eq!(
-        keys,
-        ["b", "counter", "fresh", "kept", "lock", "padded", "page.1", "page.2", "page.3"]
-    );
-    assert_eq!(bucket.get("counter".to_owned()).await.expect("get"), Some(b"42".to_vec()));
-    assert_eq!(bucket.get("fresh".to_owned()).await.expect("get"), Some(b"3".to_vec()));
-    assert_eq!(bucket.get("b".to_owned()).await.expect("get"), Some(b"2".to_vec()));
+    assert_eq!(keys, ["counter", "fresh", "kept", "lock", "padded", "page.1", "page.2", "page.3"]);
+    let counter = bucket.get("counter".to_owned()).await.expect("get").map(|entry| entry.value);
+    assert_eq!(counter, Some(b"42".to_vec()));
+    let fresh = bucket.get("fresh".to_owned()).await.expect("get").map(|entry| entry.value);
+    assert_eq!(fresh, Some(b"3".to_vec()));
 }
 
 #[tokio::test]

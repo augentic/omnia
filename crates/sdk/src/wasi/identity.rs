@@ -3,10 +3,10 @@
 use std::borrow::Cow;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use omnia_wasi_identity::omnia::{credentials, types};
+use omnia_wasi_identity::omnia::credentials;
 
 use crate::identity::{AccessToken, DEFAULT};
-use crate::{Error, HasIdentity, Identity, Result, WasiProvider};
+use crate::{HasIdentity, Identity, Result, WasiProvider};
 
 static DEFAULT_HANDLE: Handle = Handle {
     name: Cow::Borrowed(DEFAULT),
@@ -51,17 +51,4 @@ fn time_left(expires_at: u64) -> Duration {
     UNIX_EPOCH.checked_add(Duration::from_millis(expires_at)).map_or(Duration::MAX, |expiry| {
         expiry.duration_since(SystemTime::now()).unwrap_or_default()
     })
-}
-
-impl From<types::Error> for Error {
-    fn from(err: types::Error) -> Self {
-        match err {
-            types::Error::NotFound(message) => Self::server_error("not-found", message),
-            types::Error::Denied(message) => Self::server_error("denied", message),
-            types::Error::Invalid(message) => Self::server_error("invalid", message),
-            types::Error::Unsupported(message) => Self::server_error("unsupported", message),
-            types::Error::Unavailable(message) => Self::bad_gateway("unavailable", message),
-            types::Error::Other(message) => Self::server_error("other", message),
-        }
-    }
 }

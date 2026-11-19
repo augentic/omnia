@@ -1,17 +1,18 @@
 //! Every `omnia:websocket` error case reaches the guest as its own code: a
 //! `BadGateway` for `unavailable`, and a `ServerError` for the rest. The
-//! suite's faulting backend fails a send by the connection it names. The
-//! host refuses an undeclared service and a close frame no endpoint may
-//! send, and answers `unsupported` for every call the backend does not
-//! serve, so none of them reaches the backend.
+//! suite's faulting backend fails a send by the first connection it names,
+//! and a send to several connections is one send. The host refuses an
+//! undeclared service and a close frame no endpoint may send, and answers
+//! `unsupported` for every call the backend does not serve, so none of them
+//! reaches the backend.
 
 #![cfg(target_arch = "wasm32")]
 
 use std::fmt::Debug;
 
 use omnia_sdk::{WasiProvider, WebSockets as _};
-use omnia_wasi_websocket::types::{Client, CloseFrame, Error, Message};
-use omnia_wasi_websocket::{broadcast, connections};
+use omnia_wasi_websocket::omnia::types::{Client, CloseFrame, Error, Message};
+use omnia_wasi_websocket::omnia::{broadcast, connections};
 
 omnia_sdk::api::command::export!(scenario);
 
@@ -27,6 +28,8 @@ async fn scenario() {
     ] {
         expect_code(WasiProvider.send_to(&[connection], b"ping").await, status, code);
     }
+    let both = WasiProvider.send_to(&["unavailable", "other"], b"ping").await;
+    expect_code(both, 502, "unavailable");
 
     // the host's own rules
     assert_eq!(case(Client::connect("undeclared".to_owned()).await), "not-found");

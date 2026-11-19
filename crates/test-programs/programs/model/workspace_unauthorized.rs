@@ -29,11 +29,13 @@ async fn scenario() {
         .expect("open nested dir");
 
     let grants = types::Grants {
-        workspace: Some(types::Location {
-            root: &nested,
-            subpath: String::new(),
+        workspace: Some(types::WorkspaceGrant {
+            location: types::Location {
+                root: &nested,
+                subpath: String::new(),
+            },
+            worker: None,
         }),
-        worker: None,
     };
 
     let model = raw_model().await;

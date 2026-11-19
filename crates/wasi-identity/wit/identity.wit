@@ -1,4 +1,4 @@
-package omnia:identity@0.1.0;
+package omnia:identity@0.2.0;
 
 /// The types the identity interfaces share.
 ///
@@ -9,22 +9,17 @@ package omnia:identity@0.1.0;
 ///   digits, `_`, and `-`.
 /// - A portable scope is an OAuth 2.0 scope token: one or more printable
 ///   ASCII characters other than space, `"`, and `\`.
+///
+/// An `error` from an identity interface means:
+///
+/// - `not-found`: the identity is not declared by the deployment.
+/// - `denied`: the issuer refused the identity a token.
+/// - `invalid`: the request was rejected, such as a scope the issuer does
+///   not know.
+/// - `unavailable`: the issuer did not answer, or the call exceeded its
+///   bound.
 interface types {
-  /// Why a call failed.
-  variant error {
-    /// The identity is not declared by the deployment.
-    not-found(string),
-    /// The issuer refused the identity a token.
-    denied(string),
-    /// The request was rejected, such as a scope the issuer does not know.
-    invalid(string),
-    /// A valid request this backend cannot serve.
-    unsupported(string),
-    /// The issuer did not answer, or the call exceeded its bound.
-    unavailable(string),
-    /// Any other failure.
-    other(string),
-  }
+  use omnia:types/types@0.1.0.{error, timestamp};
 
   /// An OAuth 2.0 bearer token and when it expires.
   ///
@@ -32,11 +27,11 @@ interface types {
   record access-token {
     /// The token, opaque to the guest.
     token: string,
-    /// When the token expires, in milliseconds since the Unix epoch.
+    /// When the token expires.
     ///
     /// A backend whose issuer states no expiry reports the lifetime the
     /// issuer documents.
-    expires-at: u64,
+    expires-at: timestamp,
   }
 }
 

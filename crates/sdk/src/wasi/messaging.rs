@@ -1,8 +1,10 @@
 //! [`Publisher`] over `omnia:messaging`, and the guest's `omnia:messaging` export.
 
+use std::time::{Duration, UNIX_EPOCH};
+
 use bytes::Bytes;
-use omnia_wasi_messaging::producer;
-use omnia_wasi_messaging::types::{self as wire, Client};
+use omnia_wasi_messaging::omnia::producer;
+use omnia_wasi_messaging::omnia::types::{self as wire, Client};
 
 use crate::api::Router;
 use crate::api::messaging::Delivery;
@@ -18,7 +20,6 @@ impl Publisher for WasiProvider {
         let outgoing = wire::Message {
             data: message.payload.to_vec(),
             content_type: message.content_type.clone(),
-            id: None,
             key: message.key.clone(),
             metadata: message
                 .headers
@@ -30,53 +31,48 @@ impl Publisher for WasiProvider {
     }
 }
 
-impl From<wire::Error> for Error {
-    fn from(err: wire::Error) -> Self {
-        match err {
-            wire::Error::NotFound(message) => Self::server_error("not-found", message),
-            wire::Error::Denied(message) => Self::server_error("denied", message),
-            wire::Error::Invalid(message) => Self::server_error("invalid", message),
-            wire::Error::Unsupported(message) => Self::server_error("unsupported", message),
-            wire::Error::Unavailable(message) => Self::bad_gateway("unavailable", message),
-            wire::Error::Other(message) => Self::server_error("other", message),
-        }
-    }
-}
-
 /// Dispatch one `omnia:messaging` delivery through `router`.
 ///
 /// The delivery runs inside the guest telemetry scope.
 /// [`messaging::export!`](crate::api::messaging::export!) expands to this
 /// call, and a hand-written `omnia:messaging` export calls it directly.
 ///
-/// What `handle` returns settles the delivery. A failure crosses carrying its
-/// [`Error`]'s text, as the case its class settles as:
+/// What `handle` returns settles the delivery. A failure carries its
+/// [`Error`]'s text as the reason:
 ///
-/// - A [`BadRequest`](Error::BadRequest) is `invalid`, which no redelivery handles.
-/// - A [`BadGateway`](Error::BadGateway) is `unavailable`, which may pass.
-/// - Any other failure is `other`, which the backend settles as it decides.
+/// - A [`BadRequest`](Error::BadRequest) rejects the delivery, as a message no
+///   redelivery handles.
+/// - Any other failure releases it, as a failure that may pass.
 ///
 /// # Errors
 ///
-/// Returns the WIT delivery failure.
+/// Returns how a delivery the router failed to handle settles.
 #[omnia_wasi_otel::instrument(name = "messaging_guest_handle")]
 pub async fn handle<P: Send + Sync + 'static>(
     router: &Router<P>, delivery: wire::Delivery,
-) -> Result<(), wire::Error> {
-    let wire::Delivery { topic, message, .. } = delivery;
+) -> Result<(), wire::Settle> {
+    let wire::Delivery {
+        topic,
+        message,
+        deadline,
+        ..
+    } = delivery;
     let delivery = Delivery {
         topic: (!topic.is_empty()).then_some(topic),
         payload: Bytes::from(message.data),
         key: message.key,
         content_type: message.content_type,
         metadata: message.metadata,
+        deadline: deadline.and_then(|millis| UNIX_EPOCH.checked_add(Duration::from_millis(millis))),
     };
     router.handle(delivery).await.map_err(|error| {
-        let text = error.to_string();
+        let reason = error.to_string();
         match error {
-            Error::BadRequest { .. } => wire::Error::Invalid(text),
-            Error::BadGateway { .. } => wire::Error::Unavailable(text),
-            _ => wire::Error::Other(text),
+            Error::BadRequest { .. } => wire::Settle::Reject(reason),
+            _ => wire::Settle::Release(wire::Release {
+                reason,
+                delay_ms: None,
+            }),
         }
     })
 }

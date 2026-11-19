@@ -23,11 +23,13 @@ async fn scenario() {
         ["../escape", "/abs", "docs\\guides", "docs//guides", ".", "..", "a/../b", "./a", "a/"]
     {
         let grants = types::Grants {
-            workspace: Some(types::Location {
-                root,
-                subpath: subpath.to_owned(),
+            workspace: Some(types::WorkspaceGrant {
+                location: types::Location {
+                    root,
+                    subpath: subpath.to_owned(),
+                },
+                worker: None,
             }),
-            worker: None,
         };
 
         let (results, results_rx) = wit_stream::new();

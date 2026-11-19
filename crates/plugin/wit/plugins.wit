@@ -1,4 +1,4 @@
-package omnia:plugins@0.1.0;
+package omnia:plugins@0.2.0;
 
 /// The types the plugin interfaces share.
 ///
@@ -14,26 +14,20 @@ package omnia:plugins@0.1.0;
 ///   letter. The version is one exact semantic version.
 /// - A portable registry is a host name, with an optional `:port`.
 /// - A portable digest is `sha256:` and 64 lowercase hexadecimal digits.
+///
+/// An `error` from a plugin interface means:
+///
+/// - `not-found`: the source names nothing. No guest is declared or loaded
+///   under the name, no file is at the path, or no store or registry holds
+///   the release.
+/// - `denied`: the deployment does not grant the load, such as a path
+///   beneath a writable mount.
+/// - `invalid`: the request was rejected, such as a malformed digest, or
+///   the bytes are not a component the deployment can run.
+/// - `unavailable`: the mount, the store, or the registry did not produce
+///   the bytes.
 interface types {
-  /// Why a call failed.
-  variant error {
-    /// The source names nothing. No guest is declared or loaded under the
-    /// name, no file is at the path, or no store or registry holds the
-    /// release.
-    not-found(string),
-    /// The deployment does not grant the load, such as a path beneath a
-    /// writable mount.
-    denied(string),
-    /// The request was rejected, such as a malformed digest, or the bytes
-    /// are not a component the deployment can run.
-    invalid(string),
-    /// A valid request this backend cannot serve.
-    unsupported(string),
-    /// The mount, the store, or the registry did not produce the bytes.
-    unavailable(string),
-    /// Any other failure.
-    other(string),
-  }
+  use omnia:types/types@0.1.0.{error};
 
   /// The digest of a component's bytes.
   ///
@@ -55,6 +49,18 @@ interface types {
     /// - A backend that cannot fetch from a named registry fails with
     ///   `unsupported`.
     registry: option<string>,
+    /// The digest the release's bytes must hash to, `none` to load
+    /// whatever bytes it holds.
+    pin: option<digest>,
+  }
+
+  /// A component file beneath a read-only mount.
+  record file {
+    /// The file, as a portable path.
+    path: string,
+    /// The digest the file's bytes must hash to, `none` to load whatever
+    /// bytes it holds.
+    pin: option<digest>,
   }
 
   /// Where a guest's bytes come from, and so the name it loads under.
@@ -64,9 +70,8 @@ interface types {
   variant source {
     /// A guest the deployment declares, by its name.
     declared(string),
-    /// The component at this path, beneath a read-only mount. It loads
-    /// under the file's name without its extension.
-    path(string),
+    /// This file. It loads under the file's name without its extension.
+    path(file),
     /// This release, from the deployment's package store when it holds it
     /// and from a registry otherwise. It loads under its reference without
     /// the version.
@@ -99,24 +104,23 @@ interface types {
 /// A deployment has one loader, so there is no handle to open. A loaded
 /// guest stays loaded, and no call here unloads or replaces one.
 interface loader {
-  use types.{conflict, digest, error, plugin, source};
+  use types.{conflict, error, plugin, source};
 
-  /// Load the guest `source` names and return it. With `when`, only while
-  /// its bytes hash to that digest.
+  /// Load the guest `source` names and return it.
   ///
   /// - `declared` returns the guest loaded under the name. When none is, it
   ///   loads the one the deployment declares, held to any digest the
-  ///   deployment pins. It takes no `when`, and one given is `invalid`.
-  /// - `path` and `release` load raw WebAssembly alone, and never under a
-  ///   name the deployment declares. A pre-compiled component is `invalid`,
-  ///   and a declared name is `denied`.
+  ///   deployment pins.
+  /// - `path` and `release` load raw WebAssembly alone, held to their
+  ///   `pin`, and never under a name the deployment declares. A
+  ///   pre-compiled component is `invalid`, and a declared name is
+  ///   `denied`.
   /// - A source that names nothing fails with `not-found`.
   /// - Loading the same bytes under a name again succeeds and returns the
   ///   guest as it stands.
-  /// - A `conflict` loads nothing. The bytes missed `when`, or a guest is
-  ///   loaded under the name from other bytes.
-  load: async func(source: source, when: option<digest>)
-    -> result<result<plugin, conflict>, error>;
+  /// - A `conflict` loads nothing. The bytes missed the source's `pin`, or
+  ///   a guest is loaded under the name from other bytes.
+  load: async func(source: source) -> result<result<plugin, conflict>, error>;
 }
 
 /// What every backend serves.

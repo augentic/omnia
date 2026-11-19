@@ -54,7 +54,7 @@ impl<T> HostCollectionWithStore<T> for WasiDocStore {
     ) -> Result<Option<types::Document>> {
         let collection = CollectionHandle::lookup(accessor, &self_)?;
         let found = collection.call(accessor, |client, name| client.get(name, id)).await?;
-        Ok(found.map(types::Document::from))
+        found.map(types::Document::try_from).transpose()
     }
 
     async fn get_many(
@@ -64,7 +64,7 @@ impl<T> HostCollectionWithStore<T> for WasiDocStore {
         let mut documents = Vec::with_capacity(ids.len());
         for id in ids {
             let found = collection.call(accessor, |client, name| client.get(name, id)).await?;
-            documents.push(found.map(types::Document::from));
+            documents.push(found.map(types::Document::try_from).transpose()?);
         }
         Ok(documents)
     }
@@ -78,12 +78,15 @@ impl<T> HostCollectionWithStore<T> for WasiDocStore {
     }
 
     async fn put(
-        accessor: &Accessor<T, Self>, self_: Resource<CollectionHandle>, id: String, data: Vec<u8>,
+        accessor: &Accessor<T, Self>, self_: Resource<CollectionHandle>, id: String, data: String,
         when: Option<Precondition>,
     ) -> Result<std::result::Result<Revision, Conflict>> {
         let collection = CollectionHandle::lookup(accessor, &self_)?;
         let written = revision(&object(&id, &data)?);
-        let document = Document { id, data };
+        let document = Document {
+            id,
+            data: data.into_bytes(),
+        };
 
         match when {
             None => {
@@ -98,7 +101,7 @@ impl<T> HostCollectionWithStore<T> for WasiDocStore {
                 let current =
                     collection.call(accessor, |client, name| client.get(name, id)).await?;
                 Ok(Err(Conflict {
-                    current: current.map(types::Document::from),
+                    current: current.map(types::Document::try_from).transpose()?,
                 }))
             }
             Some(Precondition::Matches(_)) => {
@@ -109,7 +112,7 @@ impl<T> HostCollectionWithStore<T> for WasiDocStore {
 
     async fn put_many(
         accessor: &Accessor<T, Self>, self_: Resource<CollectionHandle>,
-        documents: Vec<(String, Vec<u8>)>,
+        documents: Vec<(String, String)>,
     ) -> Result<()> {
         if let Some(id) = repeated(&documents) {
             return Err(Error::Invalid(format!("`{id}` is given more than once")));
@@ -120,7 +123,10 @@ impl<T> HostCollectionWithStore<T> for WasiDocStore {
 
         let collection = CollectionHandle::lookup(accessor, &self_)?;
         for (id, data) in documents {
-            let document = Document { id, data };
+            let document = Document {
+                id,
+                data: data.into_bytes(),
+            };
             collection.call(accessor, |client, name| client.put(name, document)).await?;
         }
         Ok(())
@@ -129,13 +135,13 @@ impl<T> HostCollectionWithStore<T> for WasiDocStore {
     async fn delete(
         accessor: &Accessor<T, Self>, self_: Resource<CollectionHandle>, id: String,
         when: Option<Revision>,
-    ) -> Result<std::result::Result<(), Conflict>> {
+    ) -> Result<std::result::Result<bool, Conflict>> {
         let collection = CollectionHandle::lookup(accessor, &self_)?;
         if when.is_some() {
             return Err(collection.unsupported("check a revision before a delete"));
         }
-        collection.call(accessor, |client, name| client.delete(name, id)).await?;
-        Ok(Ok(()))
+        let removed = collection.call(accessor, |client, name| client.delete(name, id)).await?;
+        Ok(Ok(removed))
     }
 
     async fn delete_many(
@@ -174,8 +180,9 @@ impl<T> HostCollectionWithStore<T> for WasiDocStore {
 
         let result =
             collection.call(accessor, |client, name| client.query(name, tree, options)).await?;
+        let documents = result.documents.into_iter().map(types::Document::try_from);
         Ok(Page {
-            documents: result.documents.into_iter().map(types::Document::from).collect(),
+            documents: documents.collect::<Result<_>>()?,
             next: result.continuation,
         })
     }
@@ -189,8 +196,8 @@ impl<T> HostCollectionWithStore<T> for WasiDocStore {
 }
 
 // a body the guest writes is a JSON object, refused before the backend sees it
-fn object(id: &str, data: &[u8]) -> Result<Value> {
-    match serde_json::from_slice(data) {
+fn object(id: &str, data: &str) -> Result<Value> {
+    match serde_json::from_str(data) {
         Ok(body @ Value::Object(_)) => Ok(body),
         Ok(_) => Err(Error::Invalid(format!("the body of `{id}` is not a JSON object"))),
         Err(err) => Err(Error::Invalid(format!("the body of `{id}` is not JSON: {err}"))),
@@ -204,19 +211,20 @@ fn revision(body: &Value) -> Revision {
     Digest::of(body.to_string().as_bytes()).to_string()
 }
 
-impl From<Document> for types::Document {
-    fn from(document: Document) -> Self {
-        let revision = serde_json::from_slice(&document.data)
-            .map_or_else(|_| Digest::of(&document.data).to_string(), |body| revision(&body));
-        Self {
-            id: document.id,
-            data: document.data,
-            revision,
-        }
+impl TryFrom<Document> for types::Document {
+    type Error = Error;
+
+    fn try_from(document: Document) -> Result<Self> {
+        let Document { id, data } = document;
+        let data = String::from_utf8(data)
+            .map_err(|err| Error::Other(format!("the body of `{id}` is not UTF-8: {err}")))?;
+        let revision = serde_json::from_str(&data)
+            .map_or_else(|_| Digest::of(data.as_bytes()).to_string(), |body| revision(&body));
+        Ok(Self { id, data, revision })
     }
 }
 
-fn repeated(documents: &[(String, Vec<u8>)]) -> Option<&str> {
+fn repeated(documents: &[(String, String)]) -> Option<&str> {
     let mut seen = HashSet::new();
     documents.iter().map(|(id, _)| id.as_str()).find(|id| !seen.insert(*id))
 }

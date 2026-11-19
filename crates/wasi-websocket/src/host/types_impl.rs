@@ -4,6 +4,7 @@
 use omnia_core::HostView;
 use wasmtime::component::{Access, Accessor, Resource};
 
+use crate::host::generated::omnia::types::types as omnia_types;
 use crate::host::generated::omnia::websocket::types::{
     self, Host, HostClient, HostClientWithStore,
 };
@@ -39,7 +40,9 @@ impl<T> HostClientWithStore<T> for WasiWebSocket {
     }
 }
 
-impl Host for HostView<'_, dyn WebSocketClient> {
+impl Host for HostView<'_, dyn WebSocketClient> {}
+
+impl omnia_types::Host for HostView<'_, dyn WebSocketClient> {
     fn convert_error(&mut self, err: Error) -> wasmtime::Result<Error> {
         Ok(err)
     }
@@ -73,8 +76,8 @@ impl TryFrom<Event> for types::Message {
     }
 }
 
-// the seam carries no backend metadata yet, and the trigger adds the host's
-// entries
+// the seam carries no backend metadata yet, and only the trigger sets a
+// deadline
 impl TryFrom<Event> for types::Event {
     type Error = Error;
 
@@ -88,6 +91,7 @@ impl TryFrom<Event> for types::Event {
             route,
             message: types::Message::try_from(event)?,
             metadata: Vec::new(),
+            deadline: None,
         })
     }
 }

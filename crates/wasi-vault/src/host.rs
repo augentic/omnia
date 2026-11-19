@@ -7,7 +7,7 @@ mod store_impl;
 mod types_impl;
 
 mod generated {
-    pub use self::omnia::vault::types::Error;
+    pub use self::omnia::types::types::Error;
     pub use crate::host::resource::LockerProxy;
 
     wasmtime::component::bindgen!({
@@ -20,7 +20,7 @@ mod generated {
             "omnia:vault/locker.locker": LockerProxy,
         },
         trappable_error_type: {
-            "omnia:vault/types.error" => Error,
+            "omnia:types/types.error" => Error,
         },
     });
 }
@@ -34,6 +34,7 @@ use wasmtime::component::{Linker, ResourceTableError};
 
 pub use self::default_impl::{ConnectOptions, VaultDefault};
 pub use self::generated::Error;
+use self::generated::omnia::types::types as omnia_types;
 use self::generated::omnia::vault::{locker, store, types};
 pub use self::resource::*;
 
@@ -47,6 +48,7 @@ pub struct WasiVault;
 
 impl<B: Provides<Self>> Host<B> for WasiVault {
     fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
+        omnia_types::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
         types::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
         locker::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
         Ok(store::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?)

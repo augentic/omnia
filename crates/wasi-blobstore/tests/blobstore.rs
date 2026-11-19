@@ -34,3 +34,16 @@ async fn blobstore_blob_store() {
     // the guest's bytes are stored as they are
     assert_eq!(backends.object("contract-host", "raw").await, Some(b"raw".to_vec()));
 }
+
+#[tokio::test]
+async fn blobstore_container() {
+    let backends = Backends::defaults().await;
+    backends.blobstore.create_container("objects".to_owned()).await.expect("objects");
+
+    run_guest(test_programs::BLOBSTORE_CONTAINER, backends.clone()).await;
+
+    // a write the guest abandoned or cut short stored nothing
+    assert_eq!(backends.object("objects", "digits").await, Some(b"0123456789".to_vec()));
+    assert_eq!(backends.object("objects", "abandoned").await, None);
+    assert_eq!(backends.object("objects", "short").await, None);
+}

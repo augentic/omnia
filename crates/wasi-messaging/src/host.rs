@@ -16,7 +16,7 @@ mod types_impl;
 mod generated {
     #![allow(missing_docs, clippy::empty_enums, reason = "wasmtime bindgen output")]
 
-    pub use self::omnia::messaging::types::Error;
+    pub use self::omnia::types::types::Error;
     pub use crate::host::resource::ClientProxy;
 
     wasmtime::component::bindgen!({
@@ -32,7 +32,7 @@ mod generated {
             "omnia:messaging/types.client": ClientProxy,
         },
         trappable_error_type: {
-            "omnia:messaging/types.error" => Error,
+            "omnia:types/types.error" => Error,
         },
     });
 }
@@ -46,6 +46,7 @@ use wasmtime::component::{Linker, ResourceTableError};
 
 pub use self::default_impl::MessagingDefault;
 use self::generated::omnia::messaging::{admin, consumer, log, producer, request_reply, types};
+use self::generated::omnia::types::types as omnia_types;
 pub use self::generated::{Error, Messaging};
 pub use self::resource::*;
 pub use self::server::MessagingHandler;
@@ -60,12 +61,25 @@ pub struct WasiMessaging;
 
 impl<B: Provides<Self>> Host<B> for WasiMessaging {
     fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
+        omnia_types::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
         types::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
         producer::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
         request_reply::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
-        consumer::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
-        log::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
-        Ok(admin::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?)
+        consumer::add_to_linker::<_, Self>(
+            linker,
+            consumer::LinkOptions::default().consumer(true),
+            StoreCtx::view::<Self>,
+        )?;
+        log::add_to_linker::<_, Self>(
+            linker,
+            log::LinkOptions::default().log(true),
+            StoreCtx::view::<Self>,
+        )?;
+        Ok(admin::add_to_linker::<_, Self>(
+            linker,
+            admin::LinkOptions::default().admin(true),
+            StoreCtx::view::<Self>,
+        )?)
     }
 
     async fn run(runtime: &Runtime<B>) -> anyhow::Result<()> {

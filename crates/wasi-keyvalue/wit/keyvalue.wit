@@ -11,24 +11,17 @@ package omnia:keyvalue@0.1.0;
 ///   bytes long. Each segment is not empty and holds only ASCII letters,
 ///   digits, `_`, and `-`.
 /// - A portable value is at most 512 KiB.
+///
+/// An `error` from a key-value interface means:
+///
+/// - `not-found`: the bucket is not declared by the deployment. An absent
+///   key is not an error.
+/// - `invalid`: the request was rejected, such as a zero TTL or a key the
+///   backend cannot store.
+/// - `unavailable`: the backing store did not answer, or the call exceeded
+///   its bound.
 interface types {
-  /// Why a call failed.
-  variant error {
-    /// The bucket is not declared by the deployment. An absent key is not
-    /// an error.
-    not-found(string),
-    /// The caller may not make the call.
-    denied(string),
-    /// The request was rejected, such as a zero TTL or a key the backend
-    /// cannot store.
-    invalid(string),
-    /// A valid request this backend cannot serve.
-    unsupported(string),
-    /// The backing store did not answer, or the call exceeded its bound.
-    unavailable(string),
-    /// Any other failure.
-    other(string),
-  }
+  use omnia:types/types@0.1.0.{error};
 
   /// A token for one stored state of an entry, compared only for equality.
   ///
@@ -113,7 +106,10 @@ interface bucket {
       -> result<_, error>;
 
     /// Delete the entry at `key`, and with `when` only while it has that
-    /// revision. Deleting an absent key succeeds.
+    /// revision.
+    ///
+    /// Without `when`, deleting an absent key succeeds. With it, an absent
+    /// key is a `conflict` whose `current` is `none`.
     delete: async func(key: string, when: option<revision>)
       -> result<result<_, conflict>, error>;
 
@@ -123,11 +119,15 @@ interface bucket {
     /// Add `delta` to the counter at `key` and return the new value. An
     /// absent counter starts at zero.
     ///
+    /// A counter this call creates expires after `ttl-ms`, and never
+    /// without it. An existing counter keeps the time it has left. A zero
+    /// `ttl-ms` is `invalid` and changes nothing.
+    ///
     /// A counter is stored as decimal text, so `get` reads one and `set`
     /// writes one. The text is `0`, or an optional `-` and digits that do
     /// not start with `0`. Any other value, or a sum outside a signed
     /// 64-bit integer, is `invalid` and changes nothing.
-    increment: async func(key: string, delta: s64, lifetime: lifetime)
+    increment: async func(key: string, delta: s64, ttl-ms: option<u64>)
       -> result<s64, error>;
   }
 }

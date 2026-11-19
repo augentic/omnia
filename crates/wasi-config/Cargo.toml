@@ -27,6 +27,7 @@ wasmtime = { workspace = true, features = ["component-model-async"] }
 
 # guest dependencies
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+omnia-wasi-types.workspace = true
 wit-bindgen.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]

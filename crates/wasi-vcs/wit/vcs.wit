@@ -1,4 +1,4 @@
-package omnia:vcs@0.1.0;
+package omnia:vcs@0.2.0;
 
 /// The types the version control interfaces share.
 ///
@@ -14,29 +14,22 @@ package omnia:vcs@0.1.0;
 /// - A portable revision is a bookmark name, or a commit id, whole or as a
 ///   prefix no other commit id shares.
 /// - A portable message is not empty and has no whitespace at either end.
+///
+/// An `error` from a version control interface means:
+///
+/// - `not-found`: no workspace is at the place, or the repository does not
+///   know a revision, a bookmark, or a remote the call needs. A lookup
+///   that finds nothing is not an error.
+/// - `denied`: the caller may not make the call, such as a place the guest
+///   does not hold, a change beneath a read-only mount, or a remote that
+///   refuses the caller.
+/// - `invalid`: the request was rejected, such as a subpath that breaks its
+///   rule or one a file holds.
+/// - `unavailable`: a remote did not answer, or the call exceeded its
+///   bound.
 interface types {
+  use omnia:types/types@0.1.0.{error};
   use wasi:filesystem/types@0.3.2.{descriptor};
-
-  /// Why a call failed.
-  variant error {
-    /// No workspace is at the place, or the repository does not know a
-    /// revision, a bookmark, or a remote the call needs. A lookup that
-    /// finds nothing is not an error.
-    not-found(string),
-    /// The caller may not make the call, such as a place the guest does not
-    /// hold, a change beneath a read-only mount, or a remote that refuses
-    /// the caller.
-    denied(string),
-    /// The request was rejected, such as a subpath that breaks its rule, a
-    /// place that is already taken, or a merge into pending changes.
-    invalid(string),
-    /// A valid request this backend cannot serve.
-    unsupported(string),
-    /// A remote did not answer, or the call exceeded its bound.
-    unavailable(string),
-    /// Any other failure.
-    other(string),
-  }
 
   /// A place beneath an authorised mount.
   ///
@@ -69,6 +62,12 @@ interface types {
     /// The commit the bookmark points at, `none` when the repository has no
     /// bookmark of that name.
     current: option<commit-id>,
+  }
+
+  /// A place that already holds what a call would lay down there.
+  record occupied {
+    /// What the backend found, for a person to read.
+    detail: string,
   }
 }
 
@@ -156,10 +155,14 @@ interface workspace {
     strategy: strategy,
   }
 
-  /// A merge that sealed nothing.
-  record merge-conflict {
-    /// The paths left in conflict, in path order.
-    paths: list<string>,
+  /// Why a merge sealed nothing.
+  variant unmerged {
+    /// The paths the merge left in conflict, in path order. The working
+    /// copy stays on its head with nothing pending.
+    conflicts(list<string>),
+    /// The paths the working copy holds pending, in path order. The merge
+    /// started nothing.
+    pending(list<string>),
   }
 
   /// An open workspace.
@@ -220,13 +223,13 @@ interface workspace {
     /// - The first rule in `policy` that matches a path both sides changed
     ///   settles that path. The backend merges every other path. A path
     ///   neither can settle is left in conflict.
-    /// - A merge that leaves a path in conflict seals nothing. The working
-    ///   copy stays on its head with nothing pending.
-    /// - A working copy with pending changes is `invalid`. A revision that
+    /// - A merge that leaves a path in conflict seals nothing, and is
+    ///   `conflicts`.
+    /// - A working copy with pending changes is `pending`. A revision that
     ///   names no commit is `not-found`. A strategy the backend does not
     ///   have is `unsupported`. None of the three changes anything.
     merge: async func(revision: string, message: string, policy: list<rule>)
-      -> result<result<commit-id, merge-conflict>, error>;
+      -> result<result<commit-id, unmerged>, error>;
 
     /// The commit the bookmark `name` points at, `none` when the repository
     /// has no such bookmark.
@@ -248,7 +251,7 @@ interface workspace {
 
 /// The workspaces a guest may open. Every backend serves this interface.
 interface store {
-  use types.{error, location};
+  use types.{error, location, occupied};
   use workspace.{workspace};
 
   /// Open the workspace at `at`.
@@ -260,24 +263,24 @@ interface store {
   /// Create a repository with no commits at `at` and open its workspace.
   ///
   /// The place becomes the working copy, and the files already there are
-  /// pending. A missing directory is created. Creating one where a
-  /// workspace already is keeps that workspace as it was.
-  init: async func(at: location) -> result<workspace, error>;
+  /// pending. A missing directory is created. A place that already holds a
+  /// workspace is `occupied` and stays as it was.
+  init: async func(at: location) -> result<result<workspace, occupied>, error>;
 }
 
 /// Optional: more workspaces of one repository.
 interface workspaces {
-  use types.{error, location};
+  use types.{error, location, occupied};
   use workspace.{workspace};
 
   /// Add a workspace of the same repository at `at`, on the commit
   /// `revision` names, and open it.
   ///
-  /// A missing directory is created. One that holds anything is `invalid`
+  /// A missing directory is created. One that holds anything is `occupied`
   /// and stays as it was. A revision that names no commit fails with
   /// `not-found`.
   add: async func(workspace: borrow<workspace>, at: location, revision: string)
-    -> result<workspace, error>;
+    -> result<result<workspace, occupied>, error>;
 
   /// Remove the workspace and the files of its working copy. Its pending
   /// changes are discarded, and the handle then fails with `not-found`.
@@ -292,13 +295,14 @@ interface workspaces {
 /// How a remote is reached, and with what credentials, is the deployment's
 /// to configure.
 interface remotes {
-  use types.{commit-id, error, location};
+  use types.{commit-id, error, location, occupied};
   use workspace.{workspace};
 
   /// A push the remote's bookmark had moved past.
   record diverged {
-    /// The bookmark, left as it was on the remote.
-    bookmark: string,
+    /// The commit the repository last saw the remote's bookmark at, as
+    /// `bookmark` reports it. It may trail the remote until a `fetch`.
+    current: option<commit-id>,
   }
 
   /// Clone the repository at `url` into `at` and open its workspace.
@@ -309,11 +313,11 @@ interface remotes {
   /// - `depth` keeps that many commits of each bookmark's history, and
   ///   `none` keeps all of it. Zero is `invalid`. History left out is
   ///   absent, so `log` ends there.
-  /// - A missing directory is created. One that holds anything is `invalid`
-  ///   and stays as it was.
+  /// - A missing directory is created. One that holds anything is
+  ///   `occupied` and stays as it was.
   /// - A `url` that holds no repository fails with `not-found`.
   clone: async func(url: string, at: location, depth: option<u32>)
-    -> result<workspace, error>;
+    -> result<result<workspace, occupied>, error>;
 
   /// Bring the commits and bookmarks of `remote` into the repository.
   ///

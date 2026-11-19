@@ -3,21 +3,23 @@
 //!
 //! - `open` and `init` give handles, and `open` where no workspace is
 //!   fails with `not-found`.
+//! - `init` where a workspace already is, and `add` or `clone` into a
+//!   place that holds anything, are `occupied`.
 //! - A lookup that finds nothing is `none`.
 //! - Pages of one walk a log and a status, and a zero `limit` is
 //!   `invalid`.
 //! - A log with no base and a bookmark precondition are `unsupported`.
-//! - A merge seals a commit or reports its conflicts, and a merge into
-//!   pending changes is `invalid`.
+//! - A merge seals a commit, or names the paths it left in conflict or the
+//!   pending ones it would not merge into.
 //! - The handle of a removed workspace fails with `not-found`.
 //! - A clone of no depth is `invalid`. An unknown remote is `not-found`,
 //!   where a bookmark the repository has not seen is `none`. A push the
-//!   remote moved past is `diverged`.
+//!   remote moved past is `diverged`, with the commit last seen there.
 
 #![cfg(target_arch = "wasm32")]
 
 use omnia_wasi_vcs::omnia::types::{Error, Location, Precondition};
-use omnia_wasi_vcs::omnia::workspace::{ChangeKind, LogEntry, Rule, Strategy};
+use omnia_wasi_vcs::omnia::workspace::{ChangeKind, LogEntry, Rule, Strategy, Unmerged};
 use omnia_wasi_vcs::omnia::{remotes, store, workspaces};
 use wasip3::filesystem::preopens;
 use wasip3::filesystem::types::Descriptor;
@@ -35,10 +37,12 @@ async fn scenario() {
         .map(|(dir, _)| dir)
         .expect("host mounts `.`");
 
-    // handles, and a place that holds no workspace
+    // handles, a place that already holds a workspace, and one that holds none
     let project = store::open(at(root, "")).await.expect("open the project");
-    let fresh = store::init(at(root, "fresh")).await.expect("init");
+    let fresh = store::init(at(root, "fresh")).await.expect("init").expect("a new workspace");
     assert_eq!(fresh.head().await.expect("head of what init made"), Some("head-sha".to_owned()));
+    let existing = store::init(at(root, "existing")).await.expect("init");
+    assert_eq!(existing.expect_err("a workspace already there").detail, "existing");
     refused(store::open(at(root, "plain")).await.err(), "not-found", "not a repository");
 
     // a lookup that finds nothing
@@ -124,21 +128,28 @@ async fn scenario() {
     let merged = work.merge("feature".to_owned(), "merge it".to_owned(), policy).await;
     assert_eq!(merged.expect("merge").ok(), Some("m:feature".to_owned()));
     let conflicted = work.merge("conflicting".to_owned(), "merge it".to_owned(), vec![]).await;
-    let conflict = conflicted.expect("merge").expect_err("a merge left in conflict");
-    assert_eq!(conflict.paths, ["Cargo.lock", "z.lock"], "in path order");
-    refused(
-        dirty.merge("feature".to_owned(), "merge it".to_owned(), vec![]).await.err(),
-        "invalid",
-        "3 pending changes",
-    );
+    let unmerged = conflicted.expect("merge").expect_err("a merge left in conflict");
+    let Unmerged::Conflicts(paths) = unmerged else {
+        panic!("expected the paths in conflict, got {unmerged:?}");
+    };
+    assert_eq!(paths, ["Cargo.lock", "z.lock"], "in path order");
+    let into_pending = dirty.merge("feature".to_owned(), "merge it".to_owned(), vec![]).await;
+    let unmerged = into_pending.expect("merge").expect_err("a merge into pending changes");
+    let Unmerged::Pending(paths) = unmerged else {
+        panic!("expected the pending paths, got {unmerged:?}");
+    };
+    assert_eq!(paths, ["a.rs", "b.rs", "c.rs"], "in path order");
 
-    // a second workspace, removed
+    // a second workspace, removed, and a place already taken
     let added = workspaces::add(&project, at(root, ".cache/work"), "sha:main".to_owned())
         .await
-        .expect("add");
+        .expect("add")
+        .expect("a new workspace");
     assert_eq!(added.head().await.expect("head of what add made"), Some("head-sha".to_owned()));
     workspaces::remove(&added).await.expect("remove");
     refused(added.head().await.err(), "not-found", "removed");
+    let taken = workspaces::add(&project, at(root, "taken"), "sha:main".to_owned()).await;
+    assert_eq!(taken.expect("add").expect_err("a place that holds files").detail, "taken");
 
     // remotes
     refused(
@@ -146,7 +157,12 @@ async fn scenario() {
         "invalid",
         "depth",
     );
-    let clone = remotes::clone(URL.to_owned(), at(root, "clone"), Some(1)).await.expect("clone");
+    let taken = remotes::clone(URL.to_owned(), at(root, "taken"), Some(1)).await;
+    assert_eq!(taken.expect("clone").expect_err("a place that holds files").detail, "taken");
+    let clone = remotes::clone(URL.to_owned(), at(root, "clone"), Some(1))
+        .await
+        .expect("clone")
+        .expect("a new workspace");
     remotes::fetch(&clone, "origin".to_owned()).await.expect("fetch");
     assert_eq!(
         remotes::bookmark(&clone, "origin".to_owned(), "emery/rev".to_owned())
@@ -171,7 +187,7 @@ async fn scenario() {
         .expect("a forward push");
     let pushed = remotes::push(&clone, "moved".to_owned(), "emery/rev".to_owned()).await;
     let diverged = pushed.expect("push").expect_err("a push the remote moved past");
-    assert_eq!(diverged.bookmark, "emery/rev");
+    assert_eq!(diverged.current, Some("rmt:moved:emery/rev".to_owned()));
 }
 
 fn at<'a>(root: &'a Descriptor, subpath: &str) -> Location<'a> {

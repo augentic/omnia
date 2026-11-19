@@ -7,7 +7,7 @@ mod traces_impl;
 mod types_impl;
 
 mod generated {
-    pub use self::omnia::otel::types::Error;
+    pub use self::omnia::types::types::Error;
 
     wasmtime::component::bindgen!({
         world: "imports",
@@ -16,7 +16,7 @@ mod generated {
             default: store | tracing | trappable,
         },
         trappable_error_type: {
-            "omnia:otel/types.error" => Error,
+            "omnia:types/types.error" => Error,
         },
     });
 }
@@ -31,6 +31,7 @@ use wasmtime::component::Linker;
 pub use self::default_impl::OtelDefault;
 pub use self::generated::Error;
 use self::generated::omnia::otel::{logs, metrics, traces, types};
+use self::generated::omnia::types::types as omnia_types;
 
 type Result<T> = std::result::Result<T, Error>;
 
@@ -41,10 +42,15 @@ pub struct WasiOtel;
 
 impl<B: Provides<Self>> Host<B> for WasiOtel {
     fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
+        omnia_types::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
         types::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
         traces::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
         metrics::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
-        Ok(logs::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?)
+        Ok(logs::add_to_linker::<_, Self>(
+            linker,
+            logs::LinkOptions::default().logs(true),
+            StoreCtx::view::<Self>,
+        )?)
     }
 }
 

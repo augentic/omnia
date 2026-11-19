@@ -15,8 +15,8 @@ use omnia::{Connect as _, ExitStatus, Mount};
 use omnia_test::host::{Backends, Deployment, ScriptedModel, scratch};
 use omnia_test::{Exchange, SeenFormat, SeenWorker};
 use omnia_wasi_model::{
-    Answer, ConnectOptions, Error, Exhausted, Format, FutureResult, Grants, Limits, Message,
-    ModelClient, ModelDefault, Request, Role, Schema, ToolHost, Usage, WasiModel,
+    Answer, Budget, ConnectOptions, Error, Exhausted, Format, FutureResult, Grants, Limits,
+    Message, ModelClient, ModelDefault, Request, Role, Schema, ToolHost, Usage, WasiModel,
 };
 
 // Every guest program in `crates/test-programs` must have a matching test
@@ -116,7 +116,7 @@ impl ModelClient for Faulting {
             "invalid" => Error::Invalid("invalid in the suite".to_owned()).into(),
             "unsupported" => Error::Unsupported("unsupported by the suite".to_owned()).into(),
             "unavailable" => Error::Unavailable("unavailable in the suite".to_owned()).into(),
-            "exhausted" => Exhausted::new("exhausted in the suite").into(),
+            "exhausted" => Exhausted::new(Budget::Tokens, "exhausted in the suite").into(),
             _ => anyhow::anyhow!("an untyped backend failure"),
         };
         async move { Err(fault) }.boxed()
@@ -630,10 +630,7 @@ fn mixed_roles() {
         generation: None,
         format: Format::Text,
         tools: vec![],
-        grants: Grants {
-            workspace: None,
-            worker: None,
-        },
+        grants: Grants { workspace: None },
         check: false,
     }
     .to_string();

@@ -12,7 +12,7 @@ mod uploads_impl;
 mod generated {
     #![allow(missing_docs, clippy::empty_enums, reason = "wasmtime bindgen output")]
 
-    pub use self::omnia::blobstore::types::Error;
+    pub use self::omnia::types::types::Error;
     pub use super::container_impl::ContainerHandle;
 
     wasmtime::component::bindgen!({
@@ -25,7 +25,7 @@ mod generated {
             "omnia:blobstore/container.container": ContainerHandle,
         },
         trappable_error_type: {
-            "omnia:blobstore/types.error" => Error,
+            "omnia:types/types.error" => Error,
         },
     });
 }
@@ -43,6 +43,7 @@ pub use self::default_impl::BlobStoreDefault;
 pub use self::generated::Error;
 use self::generated::omnia::blobstore::types::Host as TypesHost;
 use self::generated::omnia::blobstore::{admin, container, presign, store, types, uploads};
+use self::generated::omnia::types::types as omnia_types;
 
 impl Error {
     /// The [`NotFound`](Self::NotFound) error for the container `name`, which does not exist.
@@ -82,12 +83,21 @@ pub struct WasiBlobStore;
 
 impl<B: Provides<Self>> Host<B> for WasiBlobStore {
     fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
+        omnia_types::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
         types::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
         container::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
         store::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
         admin::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
-        uploads::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
-        Ok(presign::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?)
+        uploads::add_to_linker::<_, Self>(
+            linker,
+            uploads::LinkOptions::default().uploads(true),
+            StoreCtx::view::<Self>,
+        )?;
+        Ok(presign::add_to_linker::<_, Self>(
+            linker,
+            presign::LinkOptions::default().presign(true),
+            StoreCtx::view::<Self>,
+        )?)
     }
 }
 
@@ -116,7 +126,9 @@ pub trait BlobStoreClient: Debug + Send + Sync + 'static {
     fn container_exists(&self, name: String) -> FutureResult<bool>;
 }
 
-impl TypesHost for HostView<'_, dyn BlobStoreClient> {
+impl TypesHost for HostView<'_, dyn BlobStoreClient> {}
+
+impl omnia_types::Host for HostView<'_, dyn BlobStoreClient> {
     fn convert_error(&mut self, err: Error) -> wasmtime::Result<Error> {
         Ok(err)
     }

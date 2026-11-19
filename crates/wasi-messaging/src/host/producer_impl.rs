@@ -11,11 +11,11 @@ use crate::host::{MessagingClient, Result, WasiMessaging};
 
 impl<T> HostWithStore<T> for WasiMessaging {
     async fn send(
-        accessor: &Accessor<T, Self>, c: Resource<ClientProxy>, topic: Topic,
+        accessor: &Accessor<T, Self>, client: Resource<ClientProxy>, topic: Topic,
         message: types::Message,
     ) -> Result<()> {
-        let client = get_client(accessor, &c)?;
-        let message = Message::try_from(message)?;
+        let client = get_client(accessor, &client)?;
+        let message = Message::from(message);
         client.send(topic, message).await?;
 
         Ok(())

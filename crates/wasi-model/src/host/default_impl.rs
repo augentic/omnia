@@ -20,7 +20,8 @@ use omnia_core::Connect;
 use serde_json::json;
 
 use crate::host::{
-    Answer, Error, Exhausted, Format, FutureResult, Generation, ModelClient, Request, ToolHost,
+    Answer, Budget, Error, Exhausted, Format, FutureResult, Generation, ModelClient, Request,
+    ToolHost,
 };
 
 #[expect(missing_docs, reason = "`FromEnv` has no docs")]
@@ -93,7 +94,9 @@ impl ModelClient for ModelDefault {
         async move {
             let answer = answer?;
             if check && tool_host.check(answer.clone()).await?.is_err() {
-                return Err(Exhausted::new("the echo proposes one candidate").into());
+                return Err(
+                    Exhausted::new(Budget::Responses, "the echo proposes one candidate").into()
+                );
             }
             Ok(Answer::from(answer))
         }

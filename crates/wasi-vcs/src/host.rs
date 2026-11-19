@@ -16,7 +16,7 @@ mod workspaces_impl;
 mod generated {
     #![allow(missing_docs, reason = "wasmtime bindgen output")]
 
-    pub use self::omnia::vcs::types::Error;
+    pub use self::omnia::types::types::Error;
     pub use super::workspace_impl::WorkspaceHandle;
 
     wasmtime::component::bindgen!({
@@ -31,7 +31,7 @@ mod generated {
             "omnia:vcs/workspace.workspace": WorkspaceHandle,
         },
         trappable_error_type: {
-            "omnia:vcs/types.error" => Error,
+            "omnia:types/types.error" => Error,
         },
     });
 }
@@ -42,6 +42,7 @@ pub use omnia_core::FutureResult;
 use omnia_core::{Host, HostCtx, HostView, Provides, StoreCtx};
 use wasmtime::component::{Linker, ResourceTableError};
 
+use self::generated::omnia::types::types as omnia_types;
 use self::generated::omnia::vcs::types::Host as TypesHost;
 use self::generated::omnia::vcs::{remotes, store, types, workspace, workspaces};
 pub use self::location::Place;
@@ -57,6 +58,7 @@ pub struct WasiVcs;
 
 impl<B: Provides<Self>> Host<B> for WasiVcs {
     fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
+        omnia_types::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
         types::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
         workspace::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
         store::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
@@ -77,9 +79,10 @@ impl<B: Provides<Self>> Host<B> for WasiVcs {
 ///
 /// - `open` calls [`head`](Self::head) to check that a workspace is at the
 ///   place. [`Error::NotFound`] there is a workspace with no commits.
-/// - `init` keeps the workspace an [`Error::Exists`] reports.
 /// - `merge` calls [`pending`](Self::pending) first, and merges only into a
 ///   working copy with nothing pending.
+/// - `push` calls [`fetched`](Self::fetched) after a push that diverged,
+///   for the commit its outcome reports.
 /// - A lookup reads [`Error::NotFound`] as finding nothing.
 /// - What these methods cannot express fails with `unsupported`: a `log`
 ///   with no base, and a bookmark precondition.
@@ -88,10 +91,13 @@ impl<B: Provides<Self>> Host<B> for WasiVcs {
 /// its `anyhow` error. The guest sees:
 ///
 /// - [`Error::NotARepository`] and [`Error::NotFound`] as `not-found`;
-/// - [`Error::Exists`] and [`Error::Pending`] as `invalid`;
-/// - [`Error::Access`] as `unavailable`;
+/// - [`Error::Exists`] from [`init`](Self::init), [`add`](Self::add), and
+///   [`clone_repo`](Self::clone_repo) as their `occupied` outcome;
+/// - [`Error::Pending`] from [`merge`](Self::merge) as its `pending`
+///   outcome;
 /// - [`Error::Diverged`] from [`push`](Self::push) as its `diverged`
 ///   outcome;
+/// - [`Error::Access`] as `unavailable`;
 /// - any other failure as `other`, with its full context chain.
 ///
 /// The `remotes` operation `clone` is `clone_repo` here, since `clone(&self,
@@ -129,6 +135,8 @@ pub trait VcsClient: Debug + Send + Sync + 'static {
     fn init(&self, at: Place) -> FutureResult<()>;
 
     /// A working copy of `repo` at `at`, on the commit `revision` names.
+    ///
+    /// A place that holds anything is [`Error::Exists`].
     fn add(&self, repo: Place, at: Place, revision: String) -> FutureResult<()>;
 
     /// Remove the working copy at `at` and its files.
@@ -138,6 +146,8 @@ pub trait VcsClient: Debug + Send + Sync + 'static {
     fn pending(&self, at: Place) -> FutureResult<Vec<Change>>;
 
     /// A clone of `url` at `at`.
+    ///
+    /// A place that holds anything is [`Error::Exists`].
     fn clone_repo(&self, url: String, at: Place, options: CloneOptions) -> FutureResult<()>;
 
     /// Bring `remote`'s commits and bookmarks into the repository at `repo`.
@@ -245,9 +255,10 @@ impl From<Error> for generated::Error {
         match err {
             Error::NotARepository => Self::NotFound(err.to_string()),
             Error::NotFound(name) => Self::NotFound(name),
-            Error::Exists(_) | Error::Pending(_) => Self::Invalid(err.to_string()),
             Error::Access(detail) => Self::Unavailable(detail),
-            Error::Diverged(_) => Self::Other(err.to_string()),
+            Error::Exists(_) | Error::Pending(_) | Error::Diverged(_) => {
+                Self::Other(err.to_string())
+            }
             Error::Other(detail) => Self::Other(detail),
         }
     }
@@ -265,7 +276,9 @@ impl From<ResourceTableError> for generated::Error {
     }
 }
 
-impl TypesHost for HostView<'_, dyn VcsClient> {
+impl TypesHost for HostView<'_, dyn VcsClient> {}
+
+impl omnia_types::Host for HostView<'_, dyn VcsClient> {
     fn convert_error(&mut self, err: generated::Error) -> wasmtime::Result<generated::Error> {
         Ok(err)
     }

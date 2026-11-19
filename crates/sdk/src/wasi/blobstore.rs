@@ -39,7 +39,8 @@ impl BlobStore for WasiProvider {
             cache_control: None,
             metadata: Vec::new(),
         };
-        let reply = handle.put(name, reader, finished, &attributes, None);
+        let size = Some(data.len() as u64);
+        let reply = handle.put(name, size, reader, finished, &attributes, None);
 
         // a short write or a refused `finished` means the host refused the
         // write, and its reply says why
@@ -151,31 +152,19 @@ async fn read(content: Option<Content>) -> Result<Option<Bytes>> {
     Ok(Some(Bytes::from(bytes)))
 }
 
-fn since_epoch(seconds: u64) -> SystemTime {
-    UNIX_EPOCH + Duration::from_secs(seconds)
+fn since_epoch(millis: u64) -> SystemTime {
+    UNIX_EPOCH + Duration::from_millis(millis)
 }
 
-impl From<types::Error> for Error {
-    fn from(err: types::Error) -> Self {
-        match err {
-            types::Error::NotFound(message) => Self::server_error("not-found", message),
-            types::Error::Denied(message) => Self::server_error("denied", message),
-            types::Error::Invalid(message) => Self::server_error("invalid", message),
-            types::Error::Unsupported(message) => Self::server_error("unsupported", message),
-            types::Error::Unavailable(message) => Self::bad_gateway("unavailable", message),
-            types::Error::Other(message) => Self::server_error("other", message),
-        }
-    }
-}
-
+// a write with no precondition has none to fail
 impl From<Conflict> for Error {
-    fn from(conflict: Conflict) -> Self {
-        Self::server_error("conflict", format!("`{}` failed its precondition", conflict.name))
+    fn from(_: Conflict) -> Self {
+        Self::server_error("other", "the host reported a conflict on an unconditional write")
     }
 }
 
 impl From<container::ContainerMetadata> for ContainerMetadata {
     fn from(info: container::ContainerMetadata) -> Self {
-        Self::new(info.name, since_epoch(info.created_at.unwrap_or_default()))
+        Self::new(info.name, info.created_at.map(since_epoch))
     }
 }

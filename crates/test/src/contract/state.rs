@@ -13,7 +13,7 @@
 use std::time::Duration;
 
 use bytes::Bytes;
-use omnia_sdk::keyvalue::{Conflict, DEFAULT};
+use omnia_sdk::keyvalue::{Conflict, DEFAULT, Entry, Precondition};
 use omnia_sdk::{StateStore, StateStoreExt};
 
 use super::expect_code;
@@ -77,17 +77,20 @@ pub async fn zero_ttl(store: &impl StateStore) {
     store.set("zero_ttl", b"old", None).await.expect("set without a TTL");
 
     let set = store.set("zero_ttl", b"new", zero).await;
+    let set_if = store.set_if("zero_ttl", b"new", zero, Precondition::Absent).await;
     let swap = store.compare_and_swap("zero_ttl", Some(b"old"), b"new", zero).await;
     let increment = store.increment("zero_ttl.counter", 1, zero).await;
 
     expect_code(set, "invalid", "set with a zero TTL");
+    expect_code(set_if, "invalid", "set_if with a zero TTL");
     expect_code(swap, "invalid", "compare_and_swap with a zero TTL");
     expect_code(increment, "invalid", "increment with a zero TTL");
     assert_eq!(value(store, "zero_ttl").await, Some(b"old".to_vec()), "a zero TTL wrote the value");
     assert_eq!(counter_at(store, "zero_ttl.counter").await, 0, "a zero TTL wrote the counter");
 }
 
-/// [`compare_and_swap`](StateStore::compare_and_swap) and
+/// [`set_if`](StateStore::set_if),
+/// [`compare_and_swap`](StateStore::compare_and_swap), and
 /// [`increment`](StateStore::increment) apply their TTL to an entry they
 /// create.
 ///
@@ -95,24 +98,33 @@ pub async fn zero_ttl(store: &impl StateStore) {
 ///
 /// Panics if a created entry outlives its TTL.
 pub async fn create_ttl(store: &impl StateStore, wait: impl AsyncFn(Duration)) {
+    let created = store.set_if("create_ttl.entry", b"new", Some(TTL), Precondition::Absent).await;
     let swapped = store.compare_and_swap("create_ttl.lock", None, b"held", Some(TTL)).await;
     let counted = store.increment("create_ttl.counter", 1, Some(TTL)).await;
+    created.expect("set_if").expect("a create conflicted");
     assert_eq!(swapped.expect("compare_and_swap"), Ok(()), "a creating swap conflicted");
     assert_eq!(counted.expect("increment"), 1);
 
     wait(EXPIRED).await;
 
+    assert_eq!(value(store, "create_ttl.entry").await, None, "a created entry outlived its TTL");
     assert_eq!(value(store, "create_ttl.lock").await, None, "a created lock outlived its TTL");
     assert_eq!(counter_at(store, "create_ttl.counter").await, 0, "a counter outlived its TTL");
 }
 
-/// An update through [`compare_and_swap`](StateStore::compare_and_swap) or
+/// An update through [`set_if`](StateStore::set_if),
+/// [`compare_and_swap`](StateStore::compare_and_swap), or
 /// [`increment`](StateStore::increment) keeps the time the entry has left.
 ///
 /// # Panics
 ///
 /// Panics if an update refreshes, extends, or clears the entry's lifetime.
 pub async fn update_ttl(store: &impl StateStore, wait: impl AsyncFn(Duration)) {
+    store.set("update_ttl.entry", b"one", Some(TTL)).await.expect("set with a TTL");
+    let stored = entry(store, "update_ttl.entry").await.expect("a stored entry");
+    let matching = Precondition::Matches(stored.revision);
+    let updated = store.set_if("update_ttl.entry", b"two", Some(LONG), matching).await;
+    updated.expect("set_if").expect("a matching revision conflicted");
     store.set("update_ttl.value", b"one", Some(TTL)).await.expect("set with a TTL");
     let swapped =
         store.compare_and_swap("update_ttl.value", Some(b"one"), b"two", Some(LONG)).await;
@@ -123,6 +135,7 @@ pub async fn update_ttl(store: &impl StateStore, wait: impl AsyncFn(Duration)) {
 
     wait(EXPIRED).await;
 
+    assert_eq!(value(store, "update_ttl.entry").await, None, "a set_if refreshed the lifetime");
     assert_eq!(value(store, "update_ttl.value").await, None, "a swap refreshed the lifetime");
     assert_eq!(counter_at(store, "update_ttl.counter").await, 0, "an increment refreshed it");
 }
@@ -163,6 +176,50 @@ pub async fn conflict(store: &impl StateStore) {
     assert_eq!(present.expect("compare_and_swap"), Err(found.clone()));
     assert_eq!(stale.expect("compare_and_swap"), Err(found));
     assert_eq!(value(store, "conflict").await, Some(b"one".to_vec()), "a conflicting swap wrote");
+}
+
+/// A write's revision is the one [`get_entry`](StateStore::get_entry)
+/// reports, and a [`set_if`](StateStore::set_if) whose precondition does not
+/// hold changes nothing and returns the entry it found.
+///
+/// # Panics
+///
+/// Panics if a revision does not match the stored state, or a failed
+/// precondition writes or reports another entry.
+pub async fn revision(store: &impl StateStore) {
+    assert_eq!(entry(store, "revision").await, None, "an absent key has an entry");
+    let created = store.set_if("revision", b"one", None, Precondition::Absent).await;
+    let created = created.expect("set_if").expect("a create conflicted");
+    let stored = entry(store, "revision").await;
+    assert_eq!(stored.as_ref().map(|stored| &stored.revision), Some(&created));
+
+    // `absent` creates once
+    let again = store.set_if("revision", b"two", None, Precondition::Absent).await;
+    assert_eq!(again.expect("set_if"), Err(stored), "a second create landed");
+
+    // `matches` writes over the revision it names, and conflicts on any other
+    let matching = Precondition::Matches(created.clone());
+    let updated = store.set_if("revision", b"two", None, matching).await;
+    let updated = updated.expect("set_if").expect("a matching revision conflicted");
+    assert_ne!(updated, created, "new bytes kept the revision");
+    let stale = store.set_if("revision", b"three", None, Precondition::Matches(created)).await;
+    let found = Entry {
+        value: Bytes::from_static(b"two"),
+        revision: updated.clone(),
+    };
+    assert_eq!(stale.expect("set_if"), Err(Some(found)));
+
+    // a write with no precondition moves the revision on
+    store.set("revision", b"four", None).await.expect("set");
+    let moved = store.set_if("revision", b"five", None, Precondition::Matches(updated)).await;
+    let moved = moved.expect("set_if").map_err(|found| found.map(|found| found.value));
+    assert_eq!(moved, Err(Some(Bytes::from_static(b"four"))), "a set kept the revision");
+
+    // a revision never matches an absent key
+    let current = entry(store, "revision").await.expect("a stored entry").revision;
+    let absent = store.set_if("revision.absent", b"v", None, Precondition::Matches(current)).await;
+    assert_eq!(absent.expect("set_if"), Err(None));
+    assert_eq!(value(store, "revision.absent").await, None, "an unmatched revision wrote");
 }
 
 /// [`increment`](StateStore::increment) starts an absent counter at zero, and
@@ -213,13 +270,17 @@ pub async fn undeclared(store: &impl StateStore) {
     let undeclared = store.named(UNDECLARED);
 
     let get = undeclared.get("undeclared").await;
+    let get_entry = undeclared.get_entry("undeclared").await;
     let set = undeclared.set("undeclared", b"v", None).await;
+    let set_if = undeclared.set_if("undeclared", b"v", None, Precondition::Absent).await;
     let delete = undeclared.delete("undeclared").await;
     let swap = undeclared.compare_and_swap("undeclared", None, b"v", None).await;
     let increment = undeclared.increment("undeclared", 1, None).await;
 
     expect_code(get, "not-found", "get on an undeclared bucket");
+    expect_code(get_entry, "not-found", "get_entry on an undeclared bucket");
     expect_code(set, "not-found", "set on an undeclared bucket");
+    expect_code(set_if, "not-found", "set_if on an undeclared bucket");
     expect_code(delete, "not-found", "delete on an undeclared bucket");
     expect_code(swap, "not-found", "compare_and_swap on an undeclared bucket");
     expect_code(increment, "not-found", "increment on an undeclared bucket");
@@ -272,6 +333,10 @@ pub async fn malformed_json(store: &impl StateStore) {
 
 async fn value(store: &impl StateStore, key: &str) -> Option<Vec<u8>> {
     store.get(key).await.unwrap_or_else(|err| panic!("get `{key}`: {err}")).map(Vec::from)
+}
+
+async fn entry(store: &impl StateStore, key: &str) -> Option<Entry> {
+    store.get_entry(key).await.unwrap_or_else(|err| panic!("get_entry `{key}`: {err}"))
 }
 
 async fn counter_at(store: &impl StateStore, key: &str) -> i64 {

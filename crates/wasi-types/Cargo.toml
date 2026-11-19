@@ -1,0 +1,20 @@
+[package]
+name = "omnia-wasi-types"
+description = "The WASI types every Omnia interface shares"
+readme = "README.md"
+authors.workspace = true
+categories.workspace = true
+edition.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[lints]
+workspace = true
+
+# guest dependencies
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wit-bindgen.workspace = true

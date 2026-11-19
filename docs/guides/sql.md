@@ -99,7 +99,7 @@ let agencies: Vec<Agency> = WasiProvider
     .context("executing query")?;
 ```
 
-Each integer case reads as any integer type its value fits, so a column Postgres returns as `Int32` and SQLite as `Int64` reads as `i32` from both. `Float` and `Double` read as `f64`, and `bool` also reads an integer `0` or `1`, which is how SQLite returns a `BOOLEAN`. A date, time, or timestamp reads as a `String` in its case's format, and SQLite returns it exactly as bound. Every backend reads a `NULL` back as `Str(None)`, whatever its column's type, and `Option<T>` reads it as `None`. The [reference](../reference/sql.md#values-and-column-types) lists what each backend returns for each column type.
+Each integer case reads as any integer type its value fits, so a column Postgres returns as `Int32` and SQLite as `Int64` reads as `i32` from both. `Float` and `Double` read as `f64`, and `bool` also reads an integer `0` or `1`, which is how SQLite returns a `BOOLEAN`. A date, time, or timestamp reads as a `String` in its case's format, and SQLite returns it exactly as bound. Every backend reads a `NULL` back as `Value::Null`, whatever its column's type, and `Option<T>` reads it as `None`. The [reference](../reference/sql.md#values-and-column-types) lists what each backend returns for each column type.
 
 Because `SqlDb` is a trait, handlers written against `P: SqlDb` run unchanged natively against `omnia_test::guest::Provider`. It scripts the rows and counts each statement returns, and records the database each ran against and each transaction's statements and outcome — see [Testing Omnia-Based Code](testing-omnia-code.md).
 

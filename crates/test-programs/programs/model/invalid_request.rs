@@ -1,4 +1,5 @@
-//! The host refuses malformed requests before the backend runs.
+//! The host refuses malformed requests before the backend runs, and the SDK
+//! refuses one the WIT cannot carry.
 
 #![cfg(target_arch = "wasm32")]
 
@@ -86,6 +87,7 @@ async fn scenario() {
         Request::builder().messages(vec![user("hi")]).format(verdict("not json")).build();
     assert!(refused(unparseable_schema).await.contains("not valid JSON"));
 
+    // a worker grant nests in its lend, so the SDK refuses one without
     let unlent =
         Request::builder().messages(vec![user("hi")]).worker(egress("registry.npmjs.org")).build();
     assert_eq!(refused(unlent).await, "a worker grant requires a workspace lend");

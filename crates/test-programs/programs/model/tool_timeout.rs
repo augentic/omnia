@@ -10,13 +10,7 @@ use test_programs::{raw_lookup, raw_model, raw_request};
 omnia_sdk::api::command::export!(scenario);
 
 async fn scenario() {
-    let request = raw_request(
-        vec![raw_lookup()],
-        types::Grants {
-            workspace: None,
-            worker: None,
-        },
-    );
+    let request = raw_request(vec![raw_lookup()], types::Grants { workspace: None });
     let model = raw_model().await;
     let (results, results_rx) = wit_stream::new();
     let session = model.complete(request, results_rx).await.expect("session opens");
@@ -34,5 +28,6 @@ async fn scenario() {
 
     let exhausted =
         outcome.expect("a timeout is an outcome").expect_err("unanswered call times out");
+    assert!(matches!(exhausted.budget, types::Budget::CallTime), "unexpected: {exhausted:?}");
     assert!(exhausted.detail.contains("no result within"), "unexpected: {exhausted:?}");
 }
