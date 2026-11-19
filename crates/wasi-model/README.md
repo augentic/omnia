@@ -1,10 +1,10 @@
 # Omnia WASI Model
 
-This crate provides the Model interface for the Omnia runtime, and the guest-side `Sections` prompt builder.
+This crate provides the Model interface for the Omnia runtime. The guest-side `Sections` prompt builder is `omnia_sdk::model::prompt`.
 
 ## Interface
 
-Implements `omnia:model`, the interface the SDK's `Model` calls, over one
+Implements `omnia:model`, the interface the SDK's `model` module binds, over one
 `ModelClient` per backend.
 
 - A guest opens a model by name and begins completions through the handle

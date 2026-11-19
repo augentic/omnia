@@ -15,8 +15,8 @@ use opentelemetry::trace::{
 };
 use opentelemetry::{Context, InstrumentationScope, KeyValue};
 
-use crate::guest::convert::unix_nanos;
-use crate::guest::generated::omnia::otel::traces as wasi;
+use crate::otel::convert::unix_nanos;
+use crate::otel::traces as wasi;
 
 /// Ended spans awaiting export, shared between every span and [`export`].
 pub type SpanBuffer = Arc<Mutex<Vec<(Arc<InstrumentationScope>, wasi::Span)>>>;

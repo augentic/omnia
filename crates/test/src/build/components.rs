@@ -229,8 +229,8 @@ impl Components {
                 .unwrap_or_else(|err| panic!("spawning the {WASM_TARGET} fixture build: {err}"));
             assert!(
                 status.success(),
-                "the fixture components could not be built; install the target with `rustup \
-                 target add {WASM_TARGET}` and retry"
+                "the {WASM_TARGET} fixture build failed ({status}), and its compiler errors are \
+                 above. A missing target installs with `rustup target add {WASM_TARGET}`."
             );
         }
 

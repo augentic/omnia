@@ -3,8 +3,7 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_sdk::WasiProvider;
-use omnia_sdk::model::{Model as _, Request};
+use omnia_sdk::model::Request;
 use test_programs::user;
 use wasip3::filesystem::preopens;
 
@@ -13,8 +12,11 @@ omnia_sdk::api::command::export!(scenario);
 async fn scenario() {
     assert!(preopens::get_directories().iter().any(|(_, name)| name == "."), "host must mount `.`");
 
-    let reply = WasiProvider
-        .complete(Request::builder().messages(vec![user("workspace")]).workspace(".").build())
+    let reply = Request::builder()
+        .messages(vec![user("workspace")])
+        .workspace(".")
+        .build()
+        .complete()
         .await
         .expect("workspace tools answer");
     // seed.txt content, then the sorted root listing after the backend's write.

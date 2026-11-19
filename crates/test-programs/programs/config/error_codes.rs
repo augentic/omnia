@@ -9,8 +9,8 @@
 
 use std::fmt::Debug;
 
-use omnia_sdk::{Config as _, Result, WasiProvider};
-use omnia_wasi_config::omnia::{entries, types};
+use omnia_sdk::Result;
+use omnia_sdk::config::{self, entries, types};
 
 omnia_sdk::api::command::export!(scenario);
 
@@ -24,7 +24,7 @@ async fn scenario() {
         ("UNAVAILABLE", 502, "unavailable"),
         ("OTHER", 500, "other"),
     ] {
-        expect_code(WasiProvider.get(key).await, status, code);
+        expect_code(config::parse::<String>(key).await, status, code);
     }
 
     // a listing the backend does not serve

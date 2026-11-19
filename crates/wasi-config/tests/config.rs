@@ -39,6 +39,14 @@ async fn config_seeded() {
     run_guest(test_programs::CONFIG_SEEDED, backends).await;
 }
 
+#[tokio::test]
+async fn config_settings() {
+    let backends = omnia_test::host::Backends::defaults()
+        .await
+        .config([("ORDERS_REGION", "eu"), ("RETRIES", "3")]);
+    run_guest(test_programs::CONFIG_SETTINGS, backends).await;
+}
+
 // `omnia_test`'s bundle holds the default backend alone, and the error row
 // runs over a faulting one
 #[derive(Clone, Debug)]

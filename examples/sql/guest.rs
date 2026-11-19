@@ -1,9 +1,9 @@
 //! # SQL Wasm Guest (Default Backend)
 //!
-//! Demonstrates `omnia:sql`: creating the schema over the raw bindings, then
-//! running hand-written CRUD SQL with `$1`, `$2`, ... placeholders through
-//! the `SqlDb` capability, with rows decoded into a record type through
-//! `FromRow`.
+//! Demonstrates `omnia:sql`: opening the default database and creating the
+//! schema, then running hand-written CRUD SQL with `$1`, `$2`, ...
+//! placeholders through the `Database` helpers, with rows decoded into a
+//! record type through `FromRow`.
 
 #![cfg(target_arch = "wasm32")]
 
@@ -12,12 +12,10 @@ use axum::extract::Path;
 use axum::routing::{delete, get};
 use axum::{Json, Router};
 use chrono::Utc;
-use omnia_sdk::sql::{self, FromRow, Value};
-use omnia_sdk::{SqlDb, SqlDbExt as _, WasiProvider};
-use omnia_wasi_sql::omnia::store;
+use omnia_sdk::sql::database::Database;
+use omnia_sdk::sql::{self, FromRow, Value, store};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use tracing::Level;
 use wasip3::exports::http::handler::Guest;
 use wasip3::http::types::{ErrorCode, Request, Response};
 
@@ -25,21 +23,20 @@ struct Http;
 wasip3::http::service::export!(Http);
 
 impl Guest for Http {
-    #[omnia_wasi_otel::instrument(name = "http_guest_handle", level = Level::DEBUG)]
     async fn handle(request: Request) -> Result<Response, ErrorCode> {
         let router = Router::new()
             .route("/agencies", get(list_agencies).post(create_agency))
             .route("/agencies/{id}", delete(delete_agency));
-        omnia_wasi_http::serve(router, request).await
+        omnia_sdk::http::serve(router, request).await
     }
 }
 
 #[axum::debug_handler]
-#[omnia_wasi_otel::instrument]
+#[omnia_sdk::otel::instrument]
 async fn list_agencies() -> omnia_sdk::Result<Json<serde_json::Value>> {
-    ensure_schema().await?;
+    let database = database().await?;
 
-    let agencies: Vec<Agency> = WasiProvider
+    let agencies: Vec<Agency> = database
         .query_as(
             "SELECT agency_id, name, url, timezone, created_at FROM agency ORDER BY created_at DESC",
             &[],
@@ -51,11 +48,11 @@ async fn list_agencies() -> omnia_sdk::Result<Json<serde_json::Value>> {
 }
 
 #[axum::debug_handler]
-#[omnia_wasi_otel::instrument]
+#[omnia_sdk::otel::instrument]
 async fn create_agency(
     Json(req): Json<CreateAgencyRequest>,
 ) -> omnia_sdk::Result<Json<serde_json::Value>> {
-    ensure_schema().await?;
+    let database = database().await?;
 
     let agency = Agency {
         agency_id: req.agency_id,
@@ -65,8 +62,8 @@ async fn create_agency(
         created_at: Utc::now().format("%Y-%m-%d %H:%M:%S").to_string(),
     };
 
-    WasiProvider
-        .execute(
+    database
+        .exec(
             "INSERT INTO agency (agency_id, name, url, timezone, created_at) \
              VALUES ($1, $2, $3, $4, $5)",
             &[
@@ -85,12 +82,12 @@ async fn create_agency(
 
 // zero affected rows means it did not exist
 #[axum::debug_handler]
-#[omnia_wasi_otel::instrument]
+#[omnia_sdk::otel::instrument]
 async fn delete_agency(Path(id): Path<i64>) -> omnia_sdk::Result<Json<serde_json::Value>> {
-    ensure_schema().await?;
+    let database = database().await?;
 
-    let rows_affected = WasiProvider
-        .execute("DELETE FROM agency WHERE agency_id = $1", &[Value::from(id)])
+    let rows_affected = database
+        .exec("DELETE FROM agency WHERE agency_id = $1", &[Value::from(id)])
         .await
         .context("deleting agency")?;
 
@@ -101,8 +98,9 @@ async fn delete_agency(Path(id): Path<i64>) -> omnia_sdk::Result<Json<serde_json
     Ok(Json(json!({ "message": "agency deleted", "agency_id": id })))
 }
 
-// runs per request, since each is handled by a fresh instance; fine for an example
-async fn ensure_schema() -> Result<()> {
+// creates the schema per request, since each is handled by a fresh instance;
+// fine for an example
+async fn database() -> Result<Database> {
     let database = store::open(sql::DEFAULT.to_owned()).await.context("opening the database")?;
 
     let create_agency = "CREATE TABLE IF NOT EXISTS agency (
@@ -113,9 +111,9 @@ async fn ensure_schema() -> Result<()> {
         created_at TEXT NOT NULL
     )";
 
-    database.execute(create_agency.to_owned(), vec![]).await.context("creating agency table")?;
+    database.exec(create_agency, &[]).await.context("creating agency table")?;
 
-    Ok(())
+    Ok(database)
 }
 
 // Row mapping

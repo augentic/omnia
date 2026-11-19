@@ -17,11 +17,11 @@ use opentelemetry::metrics::{
 };
 use opentelemetry::{InstrumentationScope, KeyValue};
 
-use crate::guest::aggregate::{
+use crate::otel::aggregate::{
     self, Aggregate, GaugeData, HistogramData, LastValue, Measurement, Sum, SumData,
 };
-use crate::guest::convert::unix_nanos;
-use crate::guest::generated::omnia::otel::metrics as wasi;
+use crate::otel::convert::unix_nanos;
+use crate::otel::metrics as wasi;
 
 /// Provides meters whose synchronous instruments record into a shared
 /// registry.

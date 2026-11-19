@@ -9,9 +9,8 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_sdk::WasiProvider;
-use omnia_sdk::model::{Format, Message, Model as _, Request, Role, SchemaFormat};
-use omnia_wasi_model::prompt::Sections;
+use omnia_sdk::model::prompt::Sections;
+use omnia_sdk::model::{Format, Message, Request, Role, SchemaFormat};
 use wasip3::exports::cli::run::Guest;
 use wasip3::filesystem::preopens;
 
@@ -58,5 +57,5 @@ async fn default_completion() -> String {
         .maybe_workspace(workspace)
         .build();
 
-    render(WasiProvider.complete(request).await)
+    render(request.complete().await)
 }

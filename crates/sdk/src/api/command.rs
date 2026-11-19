@@ -9,7 +9,7 @@
 //! a decoder of its own. The closed [`Router`](crate::api::Router)
 //! [`run`](crate::api::Router#method.run)s argv:
 //!
-//! - the verb's [`Handler`] runs over the router's provider
+//! - the verb's [`Handler`] runs on the decoded arguments
 //! - a success body is encoded onto stdout in the selected [`Format`], its
 //!   text form the output's [`Render`]
 //! - a [`Failure`] envelope goes to stderr at
@@ -46,12 +46,12 @@
 //!     }
 //! }
 //!
-//! async fn greet<P>(_context: Context<P>, input: Greet) -> omnia_sdk::Result<Greeting> {
+//! async fn greet(_context: Context, input: Greet) -> omnia_sdk::Result<Greeting> {
 //!     Ok(Greeting { text: format!("hello, {}", input.name) })
 //! }
 //!
-//! pub fn command_router<P: Send + Sync + 'static>(provider: P) -> Router<P> {
-//!     Handlers::new().command("greet", greet).with_state(provider)
+//! pub fn command_router() -> Router {
+//!     Handlers::new().command("greet", greet).into_router()
 //! }
 //!
 //! command::export!(command_router);
@@ -77,9 +77,6 @@ pub use self::program::{Parsed, Shell, Verbosity, completions, parse};
 #[macro_export]
 macro_rules! __export_command {
     ($entry:path $(,)?) => {
-        $crate::api::command::export!($entry, $crate::WasiProvider);
-    };
-    ($entry:path, $provider:expr $(,)?) => {
         #[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
         const _: () = {
             struct CliGuest;
@@ -88,10 +85,9 @@ macro_rules! __export_command {
 
             impl $crate::wasip3::exports::cli::run::Guest for CliGuest {
                 async fn run() -> ::core::result::Result<(), ()> {
-                    $crate::wasi::command::Export::run(
+                    $crate::api::command::Export::run(
                         $entry,
-                        $provider,
-                        $crate::wasi::command::Package {
+                        $crate::api::command::Package {
                             version: ::core::env!("CARGO_PKG_VERSION"),
                             description: ::core::env!("CARGO_PKG_DESCRIPTION"),
                         },
@@ -107,16 +103,15 @@ macro_rules! __export_command {
 /// Bind a command router fn (or a zero-argument `async fn` entry) as the
 /// guest's `wasi:cli/run` export.
 ///
-/// Calls a router fn with `WasiProvider` (or with the provider expression
-/// passed as a second argument) and runs the WASI command-line arguments
-/// through the resulting [`Router`](crate::api::Router), or awaits a
+/// Runs the WASI command-line arguments through the
+/// [`Router`](crate::api::Router) a router fn returns, or awaits a
 /// zero-argument `async fn` returning [`IntoExit`], inside the guest
 /// telemetry scope. The router's program answers `--version` with the
 /// invoking crate's `CARGO_PKG_VERSION` and opens `--help` with its
 /// `CARGO_PKG_DESCRIPTION` unless
 /// [`Router::version`](crate::api::Router#method.version) or
-/// [`Router::about`](crate::api::Router#method.about) set them. Expands to nothing
-/// on native targets, where a test or a native host serves the router itself.
+/// [`Router::about`](crate::api::Router#method.about) set them. Expands to
+/// nothing on native targets.
 ///
 /// ```rust,ignore
 /// use omnia_sdk::api::command;
@@ -125,6 +120,64 @@ macro_rules! __export_command {
 /// ```
 #[doc(inline)]
 pub use crate::__export_command as export;
+
+/// Run a guest command entry at the `wasi:cli/run` boundary.
+///
+/// Awaits `entry` inside the guest telemetry scope, flushes stdout, and exits
+/// the process with any non-zero status the entry reports. [`export!`] runs
+/// its entry through it, and a hand-written `wasi:cli/run` export calls it
+/// directly.
+#[cfg(target_arch = "wasm32")]
+pub async fn execute<E: IntoExit>(entry: impl Future<Output = E>) {
+    // `scope` exports telemetry before an `exit-with-code`, which never returns.
+    let result = crate::otel::scope(|| entry).await.into_exit();
+    // `exit-with-code` exits immediately, meaning stdout never flushes
+    let _ = std::io::stdout().flush();
+    if let Err(code) = result
+        && code != 0
+    {
+        wasip3::cli::exit::exit_with_code(code);
+    }
+}
+
+#[doc(hidden)]
+pub struct Package {
+    pub version: &'static str,
+    pub description: &'static str,
+}
+
+// What `export!` accepts as its entry. `M` tells the two shapes apart: `()`
+// for a zero-argument `async fn`, the `Router` for a router fn.
+#[doc(hidden)]
+pub trait Export<M> {
+    fn run(self, package: Package) -> impl Future<Output = ()>;
+}
+
+#[cfg(target_arch = "wasm32")]
+impl<F, Fut, E> Export<()> for F
+where
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = E>,
+    E: IntoExit,
+{
+    async fn run(self, _package: Package) {
+        execute(self()).await;
+    }
+}
+
+#[cfg(all(target_arch = "wasm32", feature = "command"))]
+impl<F> Export<crate::api::Router> for F
+where
+    F: FnOnce() -> crate::api::Router,
+{
+    async fn run(self, package: Package) {
+        execute(async move {
+            let router = self().package(package.version, package.description);
+            router.run(wasip3::cli::environment::get_arguments()).await
+        })
+        .await;
+    }
+}
 
 /// The exit status of a command-line usage error (`EX_USAGE`).
 pub const USAGE_EXIT: u8 = 64;
@@ -383,22 +436,20 @@ struct FailureWire<'a> {
 
 type HintFn<'a> = Arc<dyn Fn(&crate::Error) -> Option<Cow<'static, str>> + Send + Sync + 'a>;
 
-/// The command projector: a verb run over a shared provider, its output
-/// encoded onto a [`Response`], with the [`Failure`] envelope on stderr.
-pub struct Command<'a, P> {
-    provider: &'a Arc<P>,
+/// The command projector: a verb run with one invocation's metadata, its
+/// output encoded onto a [`Response`], with the [`Failure`] envelope on
+/// stderr.
+pub struct Command<'a> {
     metadata: &'a Metadata,
     format: Format,
     hint: Option<HintFn<'a>>,
 }
 
-impl<'a, P: Send + Sync + 'static> Command<'a, P> {
-    /// Project verbs over `provider` with `metadata`, encoding bodies as
-    /// `format`.
+impl<'a> Command<'a> {
+    /// Project verbs with `metadata`, encoding bodies as `format`.
     #[must_use]
-    pub const fn new(provider: &'a Arc<P>, metadata: &'a Metadata, format: Format) -> Self {
+    pub const fn new(metadata: &'a Metadata, format: Format) -> Self {
         Self {
-            provider,
             metadata,
             format,
             hint: None,
@@ -414,17 +465,17 @@ impl<'a, P: Send + Sync + 'static> Command<'a, P> {
         self
     }
 
-    /// Run one verb: invoke `handler` on `input` over the provider and
-    /// encode the output in the projector's [`Format`].
+    /// Run one verb: invoke `handler` on `input` and encode the output in
+    /// the projector's [`Format`].
     ///
     /// A failure is the [`Failure`] envelope over the [`Error`](crate::Error)
     /// that [`Handler::Error`] describes.
     pub async fn call<F, I>(&self, handler: F, input: I) -> Response
     where
-        F: Handler<P, I>,
+        F: Handler<I>,
         F::Output: Serialize + Render,
     {
-        match handler.call(Context::shared(self.provider, self.metadata), input).await {
+        match handler.call(Context::new(self.metadata.clone()), input).await {
             Ok(output) => Response::success(self.format.encode(&output).bytes),
             Err(error) => self.refuse(crate::Error::from_chain(&error)),
         }
@@ -437,7 +488,7 @@ impl<'a, P: Send + Sync + 'static> Command<'a, P> {
     }
 }
 
-impl<P> fmt::Debug for Command<'_, P> {
+impl fmt::Debug for Command<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Command")
             .field("format", &self.format)

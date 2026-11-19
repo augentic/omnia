@@ -7,6 +7,28 @@ includes = ["git::https://github.com/augentic/toolkit.git//mise/rust.toml?ref=v0
 OUTDATED_IGNORE = "cap-fs-ext,cap-std,cap-primitives,thiserror"
 
 # -------------------------------------
+# Guest bindings (project-specific; mirrored by the `bindings` job in
+# `.github/workflows/ci.yaml`, so bump the tool pins in both)
+# -------------------------------------
+
+[tasks.bindings]
+description = "Regenerate crates/sdk/src/bindings from the WIT under crates/wasi-*/wit and crates/plugin/wit"
+tools = { jq = "1.8", "cargo:wit-bindgen-cli" = "0.63.0" }
+run = "scripts/bindings"
+
+[tasks.bindings-check]
+description = "Fail if crates/sdk/src/bindings is stale, then check a built guest targets the staged world"
+tools = { jq = "1.8", "cargo:wit-bindgen-cli" = "0.63.0", "cargo:wasm-tools" = "1.263.0" }
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+ws="$(cargo locate-project --workspace --message-format=plain)"
+ws="${ws%/Cargo.toml}"
+cargo build --locked -p test-programs --example config_seeded --target wasm32-wasip3
+scripts/bindings --check "${CARGO_TARGET_DIR:-$ws/target}/wasm32-wasip3/debug/examples/config_seeded.wasm"
+'''
+
+# -------------------------------------
 # Examples (project-specific; the generic Rust tasks live in the include)
 # -------------------------------------
 

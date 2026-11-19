@@ -2,17 +2,17 @@
 
 How to test a guest crate or an embedder built on omnia, using the `omnia-test` crate. The [Testing Policy](testing-policy.md) covers how the omnia repository tests itself; this page is for code that depends on omnia.
 
-## The three rungs
+## The rungs
 
-A guest is a handler compiled to a `wasm32-wasip3` component and run by a host runtime. Each of those layers is a place to test, and `omnia-test` puts one feature behind each:
+A guest is a handler compiled to a `wasm32-wasip3` component and run by a host runtime. Its host calls are component imports, which panic off `wasm32`, so a handler is tested as the component it ships in. `omnia-test` puts one feature behind each place to test:
 
 | Rung | Feature | What runs | Against |
 | ---- | ------- | --------- | ------- |
-| Handler | `guest` | The handler's own logic, compiled natively | One in-memory double per `omnia_sdk` capability trait |
-| Component | `host` | The compiled component, through omnia's own runtime | `Backends`, the twelve in-memory host defaults with the model scripted |
+| Component | `host` | The compiled component, through omnia's own runtime | `Backends`, the in-memory host defaults, each swappable for a scripted or recording backend |
+| Contract | `contract` | The behaviour rows every backend of an interface meets, inside a guest | The host the guest runs over, and its backend |
 | Fixture | `build` | The nested cargo build a `build.rs` runs to produce those components | `std` only |
 
-There is no default feature: a consumer names the rung it uses. Most guest crates need only the handler rung; the component rung is for behaviour that exists at the WASI boundary (the wiring a `runtime!` compiles in, plugin loading, workspace tools); the fixture rung is for a crate that drives its own components through the component rung.
+There is no default feature: a consumer names the rung it uses. A guest crate takes the component and fixture rungs: its `build.rs` compiles its component, and its tests boot it. A backend crate adds the contract rows. A handler that reaches no host interface also runs natively, through `Router::handle`, `Router::run`, or the `axum::Router` a `Router` converts into.
 
 ## Depending on the crate
 
@@ -20,50 +20,63 @@ Two lines cover a typical consumer:
 
 ```toml
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-omnia-test = { version = "0.36", features = ["guest", "host"] }
+omnia-test = { version = "0.39", features = ["host"] }
 
 [build-dependencies]
-omnia-test = { version = "0.36", features = ["build"] }
+omnia-test = { version = "0.39", features = ["build"] }
 ```
 
-The target gate on the dev line is the canonical shape for a guest crate: handler tests compile natively, and the component never sees the crate. Without `contract`, the crate is also empty on `wasm32`, so an ungated line resolves on both targets and contributes nothing to the component. The `build` line stays `std`-only by contract (omnia's CI guards its dependency tree), so it never pulls the runtime into a `build.rs`.
+The target gate on the dev line keeps the runtime out of the component's build. Without `contract`, the crate is also empty on `wasm32`, so an ungated line resolves on both targets and contributes nothing to the component. The `build` line stays `std`-only by contract (omnia's CI guards its dependency tree), so it never pulls the runtime into a `build.rs`.
 
-## Handler rung: `omnia_test::guest::Provider`
+## Handler tests: the component over scripted backends
 
-A guest wires its routers to `omnia_sdk::WasiProvider`, which implements every capability trait over the WASI bindings on `wasm32`:
+A handler test boots the guest's own component over `Backends`, swaps in a scripted or recording backend for each host the handler reaches, and drives one trigger in process:
+
+- `Deployment::boot(backends, link)` links the hosts the guest imports and answers the booted `Runtime`.
+- `send(&runtime, request)` serves one HTTP request and answers the reply with its body collected.
+- `deliver(&runtime, topic, payload)` delivers one message and answers the `HandleError` the guest settles it with.
+- `precompiled(path)` compiles the component ahead of time once, so a suite that boots per test pays for one compile.
 
 ```rust,ignore
-omnia_sdk::api::http::export!(http_router);
-```
-
-A test runs the same handler natively against `omnia_test::guest::Provider`. It is one native provider among others: a native host serves the same handlers over a provider of its own ([Provider Contract](../reference/provider-contract.md)). `Provider` implements every capability trait over one `pub` field per double, each seeded through a consuming builder of the same name:
-
-```rust,ignore
-use omnia_test::guest::{MapConfig, Provider};
-
-fn provider() -> Provider {
-    Provider::default().config(MapConfig::default().with([("ENV", "dev")]))
-}
+use omnia_test::host::{Backends, Deployment, MatchedHttp, Sink, precompiled, send};
+use omnia_wasi_http::WasiHttp;
+use omnia_wasi_messaging::WasiMessaging;
+use omnia_wasi_otel::WasiOtel;
 
 #[tokio::test]
-async fn device_site_header() {
-    let provider = provider();
-    handle(&provider, payload).await;
+async fn rename() {
+    let price = Response::new(Bytes::from_static(br#"{"price":12}"#));
+    let http = MatchedHttp::default().on(Method::GET, "https://prices.test/items/7", price);
+    let sink = Sink::default();
+    let backends = Backends::defaults().await.http(http.clone()).messaging(sink.clone());
+    let runtime = Deployment::new()
+        .guest("items", precompiled(ITEMS_WASM).expect("the component precompiles"))
+        .boot(backends, |deployment| {
+            deployment.host::<WasiHttp>()?;
+            deployment.host::<WasiMessaging>()?;
+            deployment.host::<WasiOtel>()?;
+            Ok(())
+        })
+        .await
+        .expect("runtime boots");
 
-    let published = provider.publisher.sent();
-    assert_eq!(published[0].0, "dev-realtime-tally-apc.v2");
+    let response = send(&runtime, rename(7)).await.expect("rename served");
+    assert_eq!(response.status(), StatusCode::CREATED);
+    assert_eq!(http.requests().len(), 1);
+    assert_eq!(sink.sent()[0].topic, "items.renamed");
+    runtime.shutdown();
 }
 ```
 
-The handler's own bounds pick out the capabilities it touches, so a test seeds only those fields and leaves the rest at their defaults. `StateStore`, `BlobStore`, and `SecretStore` share one `storage` field — one `Memory` serves all three, the shape a production provider's storage backend has. `Memory` declares the `default` bucket and locker, and `Memory::default().bucket(name)` and `.locker(name)` declare each other bucket and locker a handler names, so a `named(..)` call on an undeclared one fails with `NotFound` as it does in a deployment. A blob call on an object in a container nothing created fails with `NotFound` too, so a test creates each container a handler uses, or seeds it with `insert_container` or `insert_object`. It enforces TTLs by the same rules as the host. `Memory::named(name)` addresses another bucket and locker of the same store, so a test reads back what a handler wrote through a named handle. The full field/double table is on the struct's rustdoc: `MapConfig`, `MatchedHttp`, `FixedIdentity`, `Sink` (for `Publisher` and `WebSockets`), `Memory`, `MemoryDocs`, `ScriptedTables` (for `SqlDb`), `ScriptedModel` (for `Model`), `ScriptedLoader` (for `Plugins`), and `ScriptedVcs` (for `Vcs`).
+The `export!` macros open the guest's telemetry scope, which imports `omnia:otel`, so a deployment links `WasiOtel` beside the hosts its handlers reach. The scripted and recording backends each serve one host:
 
-A test that drives the router rather than a handler builds it once, `handlers().with_state(provider.clone())`, and runs one request through it with `omnia_test::guest::send(&router, request)`, which answers the reply with its body collected, or one delivery with `omnia_test::guest::deliver(&router, topic, payload)`.
+- `MatchedHttp` answers outbound `wasi:http` by method and URL, and records every request.
+- `ScriptedTables` answers `omnia:sql` statements by predicate, and records each statement and transaction.
+- `Sink` records every message and WebSocket send.
+- `FixedIdentity` answers a fixed token for every identity, and records the scopes asked for.
+- `ScriptedModel` answers completions from a script.
 
-Every capability trait is also implemented for `Arc<T>`, `&T`, and `Box<T>`, so a handler bounded on `P: StateStore` accepts `Arc<Memory>` directly.
-
-That covers the two other shapes a test provider takes. A handler bounded on a single capability needs no struct at all: pass `Arc<Memory>` (or `&Memory`) where the provider goes. A bespoke struct — generic over a storage type, say, or holding a double behind an `Arc` — hand-writes its impls, each method forwarding to the field that carries the double, exactly as a production provider over a custom backend would.
-
-A hand-written capability impl proves it keeps the trait's contract with the rows in `omnia_test::contract` (behind the `contract` feature, which also builds on `wasm32`): one generic `async fn` per invariant, which panics when the provider breaks it. `omnia-test` runs the `contract::state` and `contract::blob` rows over `Memory` and the `contract::document` rows over `MemoryDocs` ([`tests/contract.rs`](../../crates/test/tests/contract.rs)), and a guest runs the same rows over `WasiProvider` against the real host ([`programs/keyvalue/state_store.rs`](../../crates/test-programs/programs/keyvalue/state_store.rs), [`programs/blobstore/blob_store.rs`](../../crates/test-programs/programs/blobstore/blob_store.rs), [`programs/docstore/document_db.rs`](../../crates/test-programs/programs/docstore/document_db.rs)). The `contract::sql` rows run only in a guest ([`programs/sql/sql_db.rs`](../../crates/test-programs/programs/sql/sql_db.rs)), because `ScriptedTables` scripts its rows rather than storing them. Passing the rows is the first of the [provider obligations](../reference/provider-contract.md#obligations).
+A call no rule matches fails in the guest with an error naming it, so the reply carries it to the assertion. `Backends::config([("KEY", "value")])` seeds configuration, and the in-memory defaults serve key-value, blob, document, and vault state. `backends.state(key)` and `backends.object(container, name)` read back what a guest wrote.
 
 ## Component rung: `Deployment` over `Backends`
 
@@ -100,7 +113,13 @@ The generated `main` and `run` stay untouched; the test reaches the same hosts t
 
 ### `Backends`
 
-`Backends::defaults()` is deterministic: it reads no environment variable and opens no socket. Config answers from the map seeded by `Backends::config([("KEY", "value")])` alone, the websocket backend serves no listener, and the HTTP client and `SQLite` connection (one private `:memory:` database per bundle) are built from fixed options. The key-value backend declares the `default` bucket alone; a guest that names others runs over `keyvalue(KeyValueDefault::connect_with(ConnectOptions { buckets }).await?)`. The document-store, SQL, identity, vault, and echo model backends likewise serve `default` alone, and a guest that names others runs over `docstore(DocStoreDefault::connect_with(ConnectOptions { collections }).await?)`, `sql(SqlDefault::connect_with(ConnectOptions { database, databases }).await?)`, `identity(IdentityStub::connect_with(StubOptions { names }).await?)`, `vault(VaultDefault::connect_with(ConnectOptions { lockers }).await?)`, or `model(ModelDefault::connect_with(ConnectOptions { models }).await?)`. Every swappable host is a type parameter of `Backends` defaulting to its in-memory backend, with a consuming setter of the same name: `Backends::model(m)` swaps in any `ModelClient`, and `keyvalue`, `blobstore`, `docstore`, `sql`, `vault`, `messaging`, `identity`, and `otel` take any backend of theirs — a production backend crate's client, or a recording wrapper around the default — so the same guests run over it. `ScriptedModel` is the scripted model, sharing its `Script` core with the handler rung's `ScriptedModel` so a script reads identically at both rungs. Each scripted completion may run tool calls and workspace `read`/`write`/`list` steps ahead of its answer, recording every exchange; an overrun answers the guest softly and fails the test at `assert_exhausted()`.
+`Backends::defaults()` is deterministic: it reads no environment variable and opens no socket. Config answers from the map seeded by `Backends::config([("KEY", "value")])` alone, the websocket backend serves no listener, and the HTTP client and `SQLite` connection (one private `:memory:` database per bundle) are built from fixed options. The key-value backend declares the `default` bucket alone; a guest that names others runs over `keyvalue(KeyValueDefault::connect_with(ConnectOptions { buckets }).await?)`. The document-store, SQL, identity, vault, and echo model backends likewise serve `default` alone, and a guest that names others runs over `docstore(DocStoreDefault::connect_with(ConnectOptions { collections }).await?)`, `sql(SqlDefault::connect_with(ConnectOptions { database, databases }).await?)`, `identity(IdentityStub::connect_with(StubOptions { names }).await?)`, `vault(VaultDefault::connect_with(ConnectOptions { lockers }).await?)`, or `model(ModelDefault::connect_with(ConnectOptions { models }).await?)`. Every swappable host is a type parameter of `Backends` defaulting to its in-memory backend, with a consuming setter of the same name: `Backends::model(m)` swaps in any `ModelClient`, and `keyvalue`, `blobstore`, `docstore`, `sql`, `vault`, `messaging`, `identity`, `otel`, `vcs`, `http`, and `websocket` take any backend of theirs — a production backend crate's client, a scripted backend, or a recording wrapper around the default — so the same guests run over it. `ScriptedModel` is the scripted model, over the `Script` core. Each scripted completion may run tool calls and workspace `read`/`write`/`list` steps ahead of its answer, recording every exchange; an overrun answers the guest softly and fails the test at `assert_exhausted()`.
+
+## Contract rows
+
+`omnia_test::contract` holds one `async fn` per invariant every backend of `omnia:keyvalue`, `omnia:blobstore`, `omnia:docstore`, or `omnia:sql` meets. The rows run inside a guest, over the `omnia_sdk` bindings, so the `contract` feature builds on `wasm32`. A row panics when the backend behind the host breaks its invariant, which traps the guest and fails the test that booted it.
+
+omnia's own guests run the rows over the in-memory defaults: [`programs/keyvalue/state_store.rs`](../../crates/test-programs/programs/keyvalue/state_store.rs), [`programs/blobstore/blob_store.rs`](../../crates/test-programs/programs/blobstore/blob_store.rs), [`programs/docstore/document_db.rs`](../../crates/test-programs/programs/docstore/document_db.rs), and [`programs/sql/sql_db.rs`](../../crates/test-programs/programs/sql/sql_db.rs). A production backend crate runs the same programs over its own client. Passing the rows is the first of the [provider obligations](../reference/provider-contract.md#obligations).
 
 ## Fixture rung: `Components` in `build.rs`
 
@@ -121,6 +140,6 @@ fn main() {
 
 ## Examples to read
 
-- Handler rung: [`crates/tally-connector/tests/static.rs`](https://github.com/augentic/omnia-exemplar/blob/main/crates/tally-connector/tests/static.rs) in the exemplar — a `Config + Publisher` handler run against `omnia_test::guest::Provider`, seeded config, published records asserted.
-- Component rung and the overlay: [`crates/test/tests/host.rs`](../../crates/test/tests/host.rs) — `runtime_overlay` and `overlay_mount` drive a `runtime!` module's `Hooks` through `Deployment::from(manifest())`.
+- Handler tests: [`crates/test/tests/host.rs`](../../crates/test/tests/host.rs) — `harness_flow` boots one guest over `ScriptedTables`, `MatchedHttp`, `Sink`, and `FixedIdentity`, and drives it with `send` and `deliver`.
+- Component rung and the overlay: the same suite — `runtime_overlay` and `overlay_mount` drive a `runtime!` module's `Hooks` through `Deployment::from(manifest())`.
 - Fixture rung: [`crates/test-programs/build.rs`](../../crates/test-programs/build.rs), the build that feeds omnia's own e2e suites — in the guest package itself, which the `wasm32` no-op makes safe.

@@ -2,13 +2,9 @@
 //!
 //! Every group must hold, and a group holds when any of its conditions does.
 
-use super::{ComparisonOp, Filter, ScalarValue};
+use super::{ComparisonOp, Filter, ScalarValue, collection};
 use crate::{Error, Result};
 
-#[cfg_attr(
-    not(all(target_arch = "wasm32", target_os = "wasi")),
-    expect(dead_code, reason = "only the WASI glue reads a condition")
-)]
 #[derive(Clone)]
 pub struct Condition {
     pub field: String,
@@ -16,10 +12,6 @@ pub struct Condition {
     pub negated: bool,
 }
 
-#[cfg_attr(
-    not(all(target_arch = "wasm32", target_os = "wasi")),
-    expect(dead_code, reason = "only the WASI glue reads a test")
-)]
 #[derive(Clone)]
 pub enum Test {
     Eq(Value),
@@ -34,16 +26,50 @@ pub enum Test {
     Null,
 }
 
-#[cfg_attr(
-    not(all(target_arch = "wasm32", target_os = "wasi")),
-    expect(dead_code, reason = "only the WASI glue reads a value")
-)]
 #[derive(Clone)]
 pub enum Value {
     Boolean(bool),
     Integer(i64),
     Number(f64),
     Text(String),
+}
+
+impl From<Condition> for collection::Condition {
+    fn from(condition: Condition) -> Self {
+        Self {
+            field: condition.field,
+            test: condition.test.into(),
+            negated: condition.negated,
+        }
+    }
+}
+
+impl From<Test> for collection::Test {
+    fn from(test: Test) -> Self {
+        match test {
+            Test::Eq(value) => Self::Eq(value.into()),
+            Test::Lt(value) => Self::Lt(value.into()),
+            Test::Lte(value) => Self::Lte(value.into()),
+            Test::Gt(value) => Self::Gt(value.into()),
+            Test::Gte(value) => Self::Gte(value.into()),
+            Test::In(values) => Self::In(values.into_iter().map(Into::into).collect()),
+            Test::StartsWith(pattern) => Self::StartsWith(pattern),
+            Test::EndsWith(pattern) => Self::EndsWith(pattern),
+            Test::Contains(pattern) => Self::Contains(pattern),
+            Test::Null => Self::Null,
+        }
+    }
+}
+
+impl From<Value> for collection::Value {
+    fn from(value: Value) -> Self {
+        match value {
+            Value::Boolean(boolean) => Self::Boolean(boolean),
+            Value::Integer(integer) => Self::Integer(integer),
+            Value::Number(number) => Self::Number(number),
+            Value::Text(text) => Self::Text(text),
+        }
+    }
 }
 
 impl Filter {

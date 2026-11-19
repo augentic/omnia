@@ -3,8 +3,7 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_sdk::WasiProvider;
-use omnia_sdk::model::{Error, Model as _, Request};
+use omnia_sdk::model::{Error, Request};
 use test_programs::{lookup, user};
 
 omnia_sdk::api::command::export!(scenario);
@@ -12,10 +11,8 @@ omnia_sdk::api::command::export!(scenario);
 async fn scenario() {
     for (kind, outcome) in [("result", Ok("hello")), ("failure", Err("oops!"))] {
         let request = Request::builder().messages(vec![user("hi")]).tools(vec![lookup()]).build();
-        let error = WasiProvider
-            .complete_with(request, |_call| async move {
-                outcome.map(str::to_owned).map_err(str::to_owned)
-            })
+        let error = request
+            .complete_with(|_call| async move { outcome.map(str::to_owned).map_err(str::to_owned) })
             .await
             .expect_err("oversize text fails the completion");
 

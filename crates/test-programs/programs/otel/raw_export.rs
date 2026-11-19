@@ -11,15 +11,13 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_wasi_otel::omnia::metrics::{
+use omnia_sdk::otel::metrics::{
     self, AggregationTemporality, Buckets, Exemplar, ExponentialHistogram,
     ExponentialHistogramDataPoint, Gauge, Histogram, HistogramDataPoint, Metric, MetricData,
     Number, NumberDataPoint, ScopeMetrics, Sum,
 };
-use omnia_wasi_otel::omnia::traces::{
-    self, Event, Link, ScopeSpans, Span, SpanContext, SpanKind, Status,
-};
-use omnia_wasi_otel::omnia::types::{AnyValue, InstrumentationScope, KeyValue};
+use omnia_sdk::otel::traces::{self, Event, Link, ScopeSpans, Span, SpanContext, SpanKind, Status};
+use omnia_sdk::otel::types::{AnyValue, InstrumentationScope, KeyValue};
 
 omnia_sdk::api::command::export!(scenario);
 

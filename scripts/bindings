@@ -1,0 +1,116 @@
+#!/usr/bin/env bash
+# Regenerates the omnia-sdk guest bindings from the WIT the host crates own.
+#
+#   scripts/bindings                     regenerate crates/sdk/src/bindings
+#   scripts/bindings --check [GUEST]     fail if a regeneration differs from
+#                                        the committed bindings, then check
+#                                        that GUEST (a command component)
+#                                        targets the staged world
+#
+# Every `crates/wasi-*/wit` and `crates/plugin/wit` package is staged once
+# under `target/omnia-sdk-wit`, beside the WASI packages the pinned `wasip3`
+# ships, and one aggregate package, `omnia:sdk`, includes each package's
+# `imports` world. The output follows `wasi-rs`'s `ci/regenerate.sh`: one
+# `imports.rs` for every import, and one file per export world whose import
+# types point back at it.
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$root"
+
+check=false
+guest=""
+if [ "${1:-}" = "--check" ]; then
+  check=true
+  guest="${2:-}"
+fi
+
+metadata="$(cargo metadata --format-version 1 --locked)"
+version="$(jq -r '.packages[] | select(.name == "omnia-sdk") | .version' <<<"$metadata")"
+wasip3="$(jq -r '.packages[] | select(.name == "wasip3") | .manifest_path' <<<"$metadata")"
+wasip3="$(dirname "$wasip3")"
+
+# --- stage ---
+
+stage="target/omnia-sdk-wit"
+rm -rf "$stage"
+mkdir -p "$stage/deps"
+cp "$wasip3"/wit/deps/*.wit "$stage/deps/"
+
+includes=""
+for file in crates/wasi-*/wit/*.wit crates/plugin/wit/*.wit; do
+  package="$(sed -n 's/^package \(.*\);$/\1/p' "$file")"
+  name="${package%@*}"
+  mkdir -p "$stage/deps/${name/:/-}"
+  cp "$file" "$stage/deps/${name/:/-}/"
+  if grep -q '^world imports ' "$file"; then
+    includes="$includes  include $name/imports@${package#*@};"$'\n'
+  fi
+done
+
+cat >"$stage/sdk.wit" <<EOF
+package omnia:sdk@$version;
+
+world imports {
+$includes}
+
+world messaging {
+  export omnia:messaging/incoming-handler@0.1.0;
+}
+
+world websocket {
+  export omnia:websocket/incoming-handler@0.1.0;
+}
+
+world command {
+  include imports;
+  include wasi:cli/command@0.3.2;
+}
+EOF
+
+# --- generate ---
+
+out="crates/sdk/src/bindings"
+if $check; then
+  out="$(mktemp -d)"
+  trap 'rm -rf "$out"' EXIT
+fi
+mkdir -p "$out"
+
+generate() {
+  wit-bindgen rust "$stage" --out-dir "$out" --format \
+    --runtime-path wasip3::wit_bindgen::rt "$@"
+}
+
+wasi="wasi:filesystem/types@0.3.2=wasip3::filesystem::types"
+wasi="$wasi,wasi:clocks/system-clock@0.3.2=wasip3::clocks::system_clock"
+wasi="$wasi,wasi:clocks/types@0.3.2=wasip3::clocks::types"
+generate \
+  --world omnia:sdk/imports \
+  --generate-all \
+  --with "$wasi" \
+  --type-section-suffix "rust-omnia-sdk-$version"
+
+for world in messaging websocket; do
+  with="omnia:types/types@0.1.0=crate::bindings::imports::omnia::types::types"
+  with="$with,omnia:$world/types@0.1.0=crate::bindings::imports::omnia::$world::types"
+  generate \
+    --world "omnia:sdk/$world" \
+    --with "$with" \
+    --type-section-suffix "rust-omnia-sdk-$version-$world-world" \
+    --default-bindings-module '$crate' \
+    --pub-export-macro \
+    --export-macro-name "_export_$world"
+done
+
+# --- check ---
+
+if $check; then
+  diff -ru crates/sdk/src/bindings "$out" || {
+    echo "crates/sdk/src/bindings is stale: run \`mise run bindings\`" >&2
+    exit 1
+  }
+  if [ -n "$guest" ]; then
+    wasm-tools component targets "$stage" "$guest" --world omnia:sdk/command
+  fi
+fi

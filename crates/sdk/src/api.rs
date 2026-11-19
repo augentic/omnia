@@ -1,41 +1,37 @@
 //! Transport-neutral handler invocation and transport adapters.
 //!
-//! Application logic is a [`Handler`]: any `async fn(Context<P>, I)`
-//! returning a `Result`. A module registers its HTTP paths, messaging
-//! topics, and subcommands on a [`Handlers`] of its own and the guest merges
-//! them (`Handlers::from([..])` or [`Handlers::merge`]), closing the whole
-//! with [`Handlers::with_state`] into a [`Router`] that serves HTTP
-//! requests, dispatches messaging deliveries, and runs argv. The router owns
-//! the provider, and its dispatch builds each handler's [`Context`] over it.
-//! [`Context::new`] builds one directly to unit-test a handler. Each
-//! transport's `export!` macro binds the router as the guest's WASI export.
+//! Application logic is a [`Handler`]: any `async fn(Context, I)` returning
+//! a `Result`. A module registers its HTTP paths, messaging topics, and
+//! subcommands on a [`Handlers`] of its own and the guest merges them
+//! (`Handlers::from([..])` or [`Handlers::merge`]), closing the whole with
+//! [`Handlers::into_router`] into a [`Router`] that serves HTTP requests,
+//! dispatches messaging deliveries, and runs argv. A handler reaches the host
+//! through the crate's bindings, and its [`Context`] carries the call's
+//! [`Metadata`]. Each transport's `export!` macro binds the router fn as the
+//! guest's WASI export.
 //!
-//! ```rust,ignore
+//! ```rust
 //! use std::convert::Infallible;
 //!
 //! use omnia_sdk::api::{Context, Handlers, Router};
 //! use serde::Deserialize;
-//!
-//! struct Provider;
 //!
 //! #[derive(Deserialize)]
 //! struct Greet {
 //!     name: String,
 //! }
 //!
-//! async fn greet(context: Context<Provider>, input: Greet) -> Result<String, Infallible> {
+//! async fn greet(context: Context, input: Greet) -> Result<String, Infallible> {
 //!     Ok(format!("hello, {} ({:?})", input.name, context.metadata.request_id))
 //! }
 //!
-//! fn router(provider: Provider) -> Router<Provider> {
-//!     Handlers::new().topic("greet", greet).with_state(provider)
+//! fn router() -> Router {
+//!     Handlers::new().topic("greet", greet).into_router()
 //! }
 //! ```
 
 use std::error::Error;
-use std::fmt;
 use std::future::Future;
-use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use serde::de::DeserializeOwned;
@@ -124,83 +120,29 @@ fn request_id() -> String {
 
 /// Context owned by one handler call.
 ///
-/// With the `http` feature it is also an axum extractor over the `Arc<P>` in
-/// the router state, so an HTTP handler is `async fn(Context<P>, ..)`.
-#[derive(Clone, Debug)]
-pub struct Context<P> {
-    pub(crate) provider: Arc<P>,
-
+/// With the `http` feature it is also an axum extractor, so an HTTP handler
+/// is `async fn(Context, ..)`.
+#[derive(Clone, Debug, Default)]
+pub struct Context {
     /// Transport-neutral invocation metadata.
     pub metadata: Metadata,
 }
 
-impl<P> Context<P> {
-    /// Create a context outside a [`Router`], typically to unit-test a handler.
-    pub fn new(provider: P, metadata: Metadata) -> Self {
-        Self {
-            provider: Arc::new(provider),
-            metadata,
-        }
-    }
-
-    pub(crate) fn shared(provider: &Arc<P>, metadata: &Metadata) -> Self {
-        Self {
-            provider: Arc::clone(provider),
-            metadata: metadata.clone(),
-        }
-    }
-
-    /// Return the provider used to fulfil the call.
+impl Context {
+    /// A context carrying `metadata`, typically to unit-test a handler.
     #[must_use]
-    pub fn provider(&self) -> &P {
-        &self.provider
+    pub const fn new(metadata: Metadata) -> Self {
+        Self { metadata }
     }
 }
 
-// one accessor per capability, so a handler bounded on two traits that both
-// define a method (`Config::get`, `StateStore::get`) names the one it means
-// without UFCS
-macro_rules! accessors {
-    ($($(#[$meta:meta])* $name:ident: $trait:ident),* $(,)?) => {
-        $(
-            $(#[$meta])*
-            impl<P: crate::$trait> Context<P> {
-                #[doc = concat!(
-                    "Borrow the provider as a [`", stringify!($trait), "`](crate::",
-                    stringify!($trait), ")."
-                )]
-                #[must_use]
-                pub fn $name(&self) -> &impl crate::$trait {
-                    &*self.provider
-                }
-            }
-        )*
-    };
-}
-
-accessors! {
-    blobs: BlobStore,
-    config: Config,
-    docs: DocumentDb,
-    http: HttpClient,
-    identity: Identity,
-    model: Model,
-    plugins: Plugins,
-    publisher: Publisher,
-    secrets: SecretStore,
-    sql: SqlDb,
-    state: StateStore,
-    vcs: Vcs,
-    websockets: WebSockets,
-}
-
-/// An application handler: any `async fn(Context<P>, I) -> Result<O, E>`.
+/// An application handler: any `async fn(Context, I) -> Result<O, E>`.
 ///
 /// The context comes first, as it does for an HTTP handler that takes
 /// [`Context`] as its leading extractor. Every such fn (and every `Clone`
 /// closure of that shape) is a `Handler` through the blanket impl; implement
 /// the trait by hand only for a non-fn type.
-pub trait Handler<P, I>: Clone + Send + Sync + 'static {
+pub trait Handler<I>: Clone + Send + Sync + 'static {
     /// The typed handler output.
     type Output: Send;
 
@@ -223,15 +165,15 @@ pub trait Handler<P, I>: Clone + Send + Sync + 'static {
     ///
     /// Returns the handler's error.
     fn call(
-        self, context: Context<P>, input: I,
+        self, context: Context, input: I,
     ) -> impl Future<Output = Result<Self::Output, Self::Error>> + Send;
 }
 
 // `I` is a trait parameter rather than an associated type: an associated
 // `Input` would be unconstrained in this blanket impl (E0207).
-impl<F, Fut, P, I, O, E> Handler<P, I> for F
+impl<F, Fut, I, O, E> Handler<I> for F
 where
-    F: FnOnce(Context<P>, I) -> Fut + Clone + Send + Sync + 'static,
+    F: FnOnce(Context, I) -> Fut + Clone + Send + Sync + 'static,
     Fut: Future<Output = Result<O, E>> + Send,
     O: Send,
     E: Error + Send + Sync + 'static,
@@ -240,39 +182,33 @@ where
     type Output = O;
 
     fn call(
-        self, context: Context<P>, input: I,
+        self, context: Context, input: I,
     ) -> impl Future<Output = Result<Self::Output, Self::Error>> + Send {
         self(context, input)
     }
 }
 
-/// HTTP routes, messaging topics, and subcommands awaiting the provider they
-/// run over.
+/// HTTP routes, messaging topics, and subcommands awaiting their [`Router`].
 ///
 /// A module registers its paths, topics, and subcommands on one of these and
 /// the guest merges them (`Handlers::from([..])` or [`merge`](Self::merge)),
-/// closing the whole with [`with_state`](Self::with_state) into a [`Router`].
-/// Two handlers for one path and method, one topic, or one subcommand are
-/// refused when they meet.
-#[must_use = "handlers serve nothing until closed into a `Router` with `with_state`"]
-pub struct Handlers<P: Send + Sync + 'static> {
+/// closing the whole with [`into_router`](Self::into_router). Two handlers
+/// for one path and method, one topic, or one subcommand are refused when
+/// they meet.
+#[derive(Clone, Debug, Default)]
+#[must_use = "handlers serve nothing until closed with `into_router`"]
+pub struct Handlers {
     #[cfg(feature = "http")]
-    http: axum::Router<Arc<P>>,
-    topics: Topics<P>,
+    http: axum::Router,
+    topics: Topics,
     #[cfg(feature = "command")]
-    commands: Commands<P>,
+    commands: Commands,
 }
 
-impl<P: Send + Sync + 'static> Handlers<P> {
+impl Handlers {
     /// Create an empty set of handlers.
     pub fn new() -> Self {
-        Self {
-            #[cfg(feature = "http")]
-            http: axum::Router::new(),
-            topics: Topics::new(),
-            #[cfg(feature = "command")]
-            commands: Commands::new(),
-        }
+        Self::default()
     }
 
     /// Register one handler for one exact topic, decoding the payload as JSON.
@@ -282,7 +218,7 @@ impl<P: Send + Sync + 'static> Handlers<P> {
     /// Panics when the topic is empty or already registered.
     pub fn topic<F, I>(mut self, topic: impl Into<String>, handler: F) -> Self
     where
-        F: Handler<P, I>,
+        F: Handler<I>,
         I: DeserializeOwned + Send + 'static,
     {
         self.topics = self.topics.route(topic, handler);
@@ -300,7 +236,7 @@ impl<P: Send + Sync + 'static> Handlers<P> {
     /// Panics when the topic is empty or already registered.
     pub fn topic_with<F, I, D>(mut self, topic: impl Into<String>, handler: F, decode: D) -> Self
     where
-        F: Handler<P, I>,
+        F: Handler<I>,
         I: Send + 'static,
         D: Fn(&Delivery) -> crate::Result<I> + Send + Sync + 'static,
     {
@@ -324,17 +260,12 @@ impl<P: Send + Sync + 'static> Handlers<P> {
         }
     }
 
-    /// Close the handlers over `provider` as the [`Router`] that serves HTTP
-    /// requests, dispatches messaging deliveries, and runs argv.
-    ///
-    /// Every handler call, on the router or a clone of it, shares the one
-    /// provider.
-    pub fn with_state(self, provider: P) -> Router<P> {
-        let provider = Arc::new(provider);
+    /// Close the handlers into the [`Router`] that serves HTTP requests,
+    /// dispatches messaging deliveries, and runs argv.
+    pub fn into_router(self) -> Router {
         Router {
             #[cfg(feature = "http")]
-            http: self.http.with_state(Arc::clone(&provider)),
-            provider,
+            http: self.http,
             topics: self.topics,
             #[cfg(feature = "command")]
             program: Program::new(self.commands),
@@ -342,64 +273,34 @@ impl<P: Send + Sync + 'static> Handlers<P> {
     }
 }
 
-impl<P: Send + Sync + 'static> Default for Handlers<P> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl<P: Send + Sync + 'static, const N: usize> From<[Self; N]> for Handlers<P> {
+impl<const N: usize> From<[Self; N]> for Handlers {
     fn from(parts: [Self; N]) -> Self {
         parts.into_iter().reduce(Self::merge).unwrap_or_default()
     }
 }
 
-impl<P: Send + Sync + 'static> Clone for Handlers<P> {
-    fn clone(&self) -> Self {
-        Self {
-            #[cfg(feature = "http")]
-            http: self.http.clone(),
-            topics: self.topics.clone(),
-            #[cfg(feature = "command")]
-            commands: self.commands.clone(),
-        }
-    }
-}
-
-impl<P: Send + Sync + 'static> fmt::Debug for Handlers<P> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut debug = f.debug_struct("Handlers");
-        #[cfg(feature = "http")]
-        debug.field("http", &self.http);
-        debug.field("topics", &self.topics);
-        #[cfg(feature = "command")]
-        debug.field("commands", &self.commands);
-        debug.finish()
-    }
-}
-
 // links to `command`-only methods take an anchor, which resolves without the feature
-/// A finished router over one shared provider, ready to serve HTTP requests,
-/// dispatch messaging deliveries, and run argv.
+/// A finished router, ready to serve HTTP requests, dispatch messaging
+/// deliveries, and run argv.
 ///
-/// [`Handlers::with_state`] is the one way to build it: every route, topic,
+/// [`Handlers::into_router`] is the one way to build it: every route, topic,
 /// and subcommand is registered on a [`Handlers`] first. With the `command`
 /// feature the router is also the program clap shows around its subcommands:
 /// [`name`](Self#method.name), [`version`](Self#method.version),
 /// [`about`](Self#method.about), and [`env_prefix`](Self#method.env_prefix)
 /// set what `--help`, `--version`, and [`Metadata::from_env`] read, and
 /// [`hints`](Self#method.hints) the remedy every failure may carry.
+#[derive(Clone, Debug)]
 #[must_use = "a router serves nothing until it handles a request or delivery or runs argv"]
-pub struct Router<P: Send + Sync + 'static = ()> {
-    provider: Arc<P>,
+pub struct Router {
     #[cfg(feature = "http")]
     http: axum::Router,
-    topics: Topics<P>,
+    topics: Topics,
     #[cfg(feature = "command")]
-    program: Program<P>,
+    program: Program,
 }
 
-impl<P: Send + Sync + 'static> Router<P> {
+impl Router {
     /// The exact topics registered on this router, in order.
     pub fn topics(&self) -> impl Iterator<Item = &str> {
         self.topics.topics()
@@ -423,31 +324,6 @@ impl<P: Send + Sync + 'static> Router<P> {
     ///   `undecodable` when the payload does not decode.
     /// - The handler's error when it fails, as [`Handler::Error`] describes.
     pub async fn handle(&self, delivery: Delivery) -> crate::Result<()> {
-        self.topics.handle(delivery, &self.provider).await
-    }
-}
-
-impl<P: Send + Sync + 'static> Clone for Router<P> {
-    fn clone(&self) -> Self {
-        Self {
-            provider: Arc::clone(&self.provider),
-            #[cfg(feature = "http")]
-            http: self.http.clone(),
-            topics: self.topics.clone(),
-            #[cfg(feature = "command")]
-            program: self.program.clone(),
-        }
-    }
-}
-
-impl<P: Send + Sync + 'static> fmt::Debug for Router<P> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut debug = f.debug_struct("Router");
-        #[cfg(feature = "http")]
-        debug.field("http", &self.http);
-        debug.field("topics", &self.topics);
-        #[cfg(feature = "command")]
-        debug.field("program", &self.program);
-        debug.finish_non_exhaustive()
+        self.topics.handle(delivery).await
     }
 }

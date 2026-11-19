@@ -19,31 +19,22 @@ workspace = true
 # No default: a consumer names the rung it uses, and a build-dependency line
 # that forgets `default-features = false` still pulls nothing but `std`.
 default = []
-# Behaviour rows every provider of a capability trait meets, on both
-# native and `wasm32` targets.
+# Behaviour rows every backend of an `omnia:*` interface meets, run by a guest
+# component over the `omnia_sdk` bindings.
 contract = [
-    "dep:bytes",
     "dep:omnia-sdk",
     "dep:serde_json",
 ]
-# Native doubles for the `omnia_sdk` capability traits, plus the `Provider` that bundles them
-# and the `send`/`deliver` router drivers.
-# No host crate belongs here: a stem's test build must not compile `wasmtime`.
-guest = [
-    "dep:anyhow",
-    "dep:bytes",
-    "dep:http",
-    "dep:http-body",
-    "dep:http-body-util",
-    "dep:omnia-sdk",
-    "dep:serde_json",
-    "dep:tower",
-]
-# The component runtime harness: `Deployment`, `Backends`, `ScriptedModel`, `Scratch`.
+# The component runtime harness: `Deployment`, `Backends`, the scripted and recording
+# backends, the `send`/`deliver` triggers, and `Scratch`.
 host = [
     "dep:anyhow",
+    "dep:bytes",
     "dep:futures",
+    "dep:http",
+    "dep:http-body-util",
     "dep:omnia",
+    "omnia/jit",
     "omnia/loader",
     "omnia/link",
     "dep:omnia-wasi-blobstore",
@@ -75,7 +66,6 @@ serde_json = { workspace = true, optional = true }
 anyhow = { workspace = true, optional = true }
 futures = { workspace = true, optional = true }
 http = { workspace = true, optional = true }
-http-body = { workspace = true, optional = true }
 http-body-util = { workspace = true, optional = true }
 omnia = { workspace = true, optional = true }
 omnia-wasi-blobstore = { workspace = true, optional = true }
@@ -92,22 +82,19 @@ omnia-wasi-vault = { workspace = true, optional = true }
 omnia-wasi-vcs = { workspace = true, optional = true }
 omnia-wasi-websocket = { workspace = true, optional = true }
 tempfile = { workspace = true, optional = true }
-tower = { workspace = true, features = ["util"], optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 anyhow.workspace = true
-axum.workspace = true
 bytes.workspace = true
 http.workspace = true
-http-body-util.workspace = true
 omnia.workspace = true
-omnia-sdk = { workspace = true, default-features = false, features = ["http"] }
 omnia-wasi-blobstore.workspace = true
 omnia-wasi-config.workspace = true
 omnia-wasi-keyvalue.workspace = true
 omnia-wasi-model.workspace = true
 omnia-wasi-otel.workspace = true
 omnia-wasi-sql.workspace = true
+serde_json.workspace = true
 test-programs.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
@@ -118,26 +105,6 @@ required-features = ["host"]
 
 [[test]]
 name = "script"
-
-[[test]]
-name = "guest_scripted"
-required-features = ["guest"]
-
-[[test]]
-name = "guest_stores"
-required-features = ["guest"]
-
-[[test]]
-name = "contract"
-required-features = ["contract", "guest"]
-
-[[test]]
-name = "guest_router"
-required-features = ["guest"]
-
-[[test]]
-name = "provider"
-required-features = ["guest"]
 
 [[test]]
 name = "host"

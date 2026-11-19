@@ -14,8 +14,8 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_wasi_vcs::omnia::store;
-use omnia_wasi_vcs::omnia::types::{Error, Location};
+use omnia_sdk::vcs::store;
+use omnia_sdk::vcs::types::{Error, Location};
 use wasip3::filesystem::preopens;
 use wasip3::filesystem::types::{Descriptor, DescriptorFlags, OpenFlags, PathFlags};
 

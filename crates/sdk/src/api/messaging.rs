@@ -3,7 +3,7 @@
 //! A module registers its topics on a [`Handlers`](crate::api::Handlers) of
 //! its own and the guest merges each (`Handlers::from([..])` or
 //! [`Handlers::merge`](crate::api::Handlers::merge)), closing the whole with
-//! [`Handlers::with_state`](crate::api::Handlers::with_state) into its one
+//! [`Handlers::into_router`](crate::api::Handlers::into_router) into its one
 //! [`Router`](crate::api::Router). A topic decodes JSON unless registered
 //! with [`Handlers::topic_with`](crate::api::Handlers::topic_with).
 //! [`export!`] binds the router fn as the guest's `omnia:messaging` handler.
@@ -26,23 +26,17 @@ use crate::api::{Context, Handler, Metadata};
 #[macro_export]
 macro_rules! __export_messaging {
     ($router:path $(,)?) => {
-        $crate::api::messaging::export!($router, $crate::WasiProvider);
-    };
-    ($router:path, $provider:expr $(,)?) => {
         #[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
         const _: () = {
             struct MessagingGuest;
 
-            $crate::omnia_wasi_messaging::export!(
-                MessagingGuest with_types_in $crate::omnia_wasi_messaging
-            );
+            $crate::messaging::export!(MessagingGuest);
 
-            impl $crate::omnia_wasi_messaging::omnia::incoming_handler::Guest for MessagingGuest {
+            impl $crate::exports::messaging::incoming_handler::Guest for MessagingGuest {
                 async fn handle(
-                    delivery: $crate::omnia_wasi_messaging::omnia::types::Delivery,
-                ) -> ::core::result::Result<(), $crate::omnia_wasi_messaging::omnia::types::Settle>
-                {
-                    $crate::wasi::messaging::handle(&$router($provider), delivery).await
+                    delivery: $crate::messaging::types::Delivery,
+                ) -> ::core::result::Result<(), $crate::messaging::types::Settle> {
+                    $crate::api::messaging::handle(&$router(), delivery).await
                 }
             }
         };
@@ -51,11 +45,9 @@ macro_rules! __export_messaging {
 
 /// Bind a router fn as the guest's `omnia:messaging` export.
 ///
-/// Calls the router fn on each delivery with `WasiProvider`, or with the
-/// provider expression passed as a second argument, and dispatches the
-/// delivery through the resulting [`Router`](crate::api::Router). Expands to
-/// nothing on native targets, where a test or a native host serves the router
-/// itself.
+/// Calls the router fn on each delivery and dispatches the delivery through
+/// the [`Router`](crate::api::Router) it returns, as `handle` does. Expands
+/// to nothing on native targets.
 ///
 /// ```rust,ignore
 /// use omnia_sdk::api::messaging;
@@ -76,7 +68,7 @@ pub struct Delivery {
     pub payload: Bytes,
 
     /// The key that orders and partitions the message, when the publisher set
-    /// one with [`Message::with_key`](crate::messaging::Message::with_key).
+    /// one with [`Message::with_key`](crate::messaging::types::Message::with_key).
     pub key: Option<String>,
 
     /// The optional payload media type.
@@ -130,20 +122,64 @@ impl Delivery {
     }
 }
 
-pub(crate) struct Topics<P: Send + Sync + 'static> {
-    routes: BTreeMap<String, Arc<dyn ErasedRoute<P>>>,
+/// Dispatch one `omnia:messaging` delivery through `router`.
+///
+/// The delivery runs inside the guest telemetry scope.
+/// [`export!`] expands to this call, and a hand-written `omnia:messaging`
+/// export calls it directly. What `handle` returns settles the delivery, and
+/// a failure carries its [`Error`](crate::Error)'s text as the reason:
+///
+/// - A [`BadRequest`](crate::Error::BadRequest) rejects the delivery, as a
+///   message no redelivery handles.
+/// - Any other failure releases it, as a failure that may pass.
+///
+/// # Errors
+///
+/// Returns how a delivery the router failed to handle settles.
+#[cfg(target_arch = "wasm32")]
+#[crate::otel::instrument(name = "messaging_guest_handle")]
+pub async fn handle(
+    router: &crate::api::Router, delivery: crate::messaging::types::Delivery,
+) -> Result<(), crate::messaging::types::Settle> {
+    use std::time::{Duration, UNIX_EPOCH};
+
+    use crate::messaging::types::{Release, Settle};
+
+    let crate::messaging::types::Delivery {
+        topic,
+        message,
+        deadline,
+        ..
+    } = delivery;
+    let delivery = Delivery {
+        topic: (!topic.is_empty()).then_some(topic),
+        payload: Bytes::from(message.data),
+        key: message.key,
+        content_type: message.content_type,
+        metadata: message.metadata,
+        deadline: deadline.and_then(|millis| UNIX_EPOCH.checked_add(Duration::from_millis(millis))),
+    };
+    router.handle(delivery).await.map_err(|error| {
+        let reason = error.to_string();
+        match error {
+            crate::Error::BadRequest { .. } => Settle::Reject(reason),
+            _ => Settle::Release(Release {
+                reason,
+                delay_ms: None,
+            }),
+        }
+    })
 }
 
-impl<P: Send + Sync + 'static> Topics<P> {
-    pub(crate) fn new() -> Self {
-        Self {
-            routes: BTreeMap::new(),
-        }
-    }
+#[derive(Clone, Default)]
+pub(crate) struct Topics {
+    routes: BTreeMap<String, Arc<dyn ErasedRoute>>,
+}
 
+impl Topics {
     pub(crate) fn route<F, I>(self, topic: impl Into<String>, handler: F) -> Self
     where
-        F: Handler<P, I>,
+        F: Handler<I>,
         I: DeserializeOwned + Send + 'static,
     {
         self.route_with(topic, handler, |delivery: &Delivery| {
@@ -154,11 +190,11 @@ impl<P: Send + Sync + 'static> Topics<P> {
 
     pub(crate) fn route_with<F, I, D>(self, topic: impl Into<String>, handler: F, decode: D) -> Self
     where
-        F: Handler<P, I>,
+        F: Handler<I>,
         I: Send + 'static,
         D: Fn(&Delivery) -> crate::Result<I> + Send + Sync + 'static,
     {
-        let route = Route::<P, F, I, D> {
+        let route = Route::<F, I, D> {
             handler,
             decode,
             marker: PhantomData,
@@ -174,17 +210,17 @@ impl<P: Send + Sync + 'static> Topics<P> {
         self.routes.keys().map(String::as_str)
     }
 
-    pub(crate) async fn handle(&self, delivery: Delivery, provider: &Arc<P>) -> crate::Result<()> {
+    pub(crate) async fn handle(&self, delivery: Delivery) -> crate::Result<()> {
         let topic = delivery.topic.as_deref().ok_or_else(|| {
             crate::Error::bad_request("missing-topic", "the delivery has no topic")
         })?;
         let route = self.routes.get(topic).ok_or_else(|| {
             crate::Error::not_found("unhandled-topic", format!("no route for topic `{topic}`"))
         })?;
-        route.dispatch(&delivery, provider).await
+        route.dispatch(&delivery).await
     }
 
-    fn insert(mut self, topic: String, route: Arc<dyn ErasedRoute<P>>) -> Self {
+    fn insert(mut self, topic: String, route: Arc<dyn ErasedRoute>) -> Self {
         assert!(!topic.is_empty(), "messaging topic cannot be empty");
         assert!(!self.routes.contains_key(&topic), "duplicate messaging topic `{topic}`");
         self.routes.insert(topic, route);
@@ -192,15 +228,7 @@ impl<P: Send + Sync + 'static> Topics<P> {
     }
 }
 
-impl<P: Send + Sync + 'static> Clone for Topics<P> {
-    fn clone(&self) -> Self {
-        Self {
-            routes: self.routes.clone(),
-        }
-    }
-}
-
-impl<P: Send + Sync + 'static> fmt::Debug for Topics<P> {
+impl fmt::Debug for Topics {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_set().entries(self.routes.keys()).finish()
     }
@@ -208,24 +236,23 @@ impl<P: Send + Sync + 'static> fmt::Debug for Topics<P> {
 
 type DispatchFuture<'a> = Pin<Box<dyn Future<Output = crate::Result<()>> + Send + 'a>>;
 
-trait ErasedRoute<P: Send + Sync + 'static>: Send + Sync {
-    fn dispatch<'a>(&'a self, delivery: &'a Delivery, provider: &'a Arc<P>) -> DispatchFuture<'a>;
+trait ErasedRoute: Send + Sync {
+    fn dispatch<'a>(&'a self, delivery: &'a Delivery) -> DispatchFuture<'a>;
 }
 
-struct Route<P, F, I, D> {
+struct Route<F, I, D> {
     handler: F,
     decode: D,
-    marker: PhantomData<fn(P) -> I>,
+    marker: PhantomData<fn() -> I>,
 }
 
-impl<P, F, I, D> ErasedRoute<P> for Route<P, F, I, D>
+impl<F, I, D> ErasedRoute for Route<F, I, D>
 where
-    P: Send + Sync + 'static,
-    F: Handler<P, I>,
+    F: Handler<I>,
     I: Send + 'static,
     D: Fn(&Delivery) -> crate::Result<I> + Send + Sync + 'static,
 {
-    fn dispatch<'a>(&'a self, delivery: &'a Delivery, provider: &'a Arc<P>) -> DispatchFuture<'a> {
+    fn dispatch<'a>(&'a self, delivery: &'a Delivery) -> DispatchFuture<'a> {
         let metadata = Metadata {
             deadline: delivery.deadline,
             ..Metadata::from_lookup(|name| {
@@ -249,7 +276,7 @@ where
                 })?;
                 self.handler
                     .clone()
-                    .call(Context::shared(provider, &metadata), input)
+                    .call(Context::new(metadata), input)
                     .await
                     .map(|_| ())
                     .map_err(|error| crate::Error::from_chain(&error))

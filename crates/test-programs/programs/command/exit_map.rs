@@ -9,32 +9,30 @@
 use omnia_sdk::api::{Context, Handlers, Router, command};
 use omnia_sdk::{Error, bad_gateway, bad_request, not_found};
 
-struct Provider;
-
-async fn ok(_context: Context<Provider>, (): ()) -> Result<String, Error> {
+async fn ok(_context: Context, (): ()) -> Result<String, Error> {
     Ok("ok".to_owned())
 }
 
-async fn bad(_context: Context<Provider>, (): ()) -> Result<(), Error> {
+async fn bad(_context: Context, (): ()) -> Result<(), Error> {
     Err(bad_request!("refused as a bad request"))
 }
 
-async fn missing(_context: Context<Provider>, (): ()) -> Result<(), Error> {
+async fn missing(_context: Context, (): ()) -> Result<(), Error> {
     Err(not_found!("refused as not found"))
 }
 
-async fn upstream(_context: Context<Provider>, (): ()) -> Result<(), Error> {
+async fn upstream(_context: Context, (): ()) -> Result<(), Error> {
     Err(bad_gateway!("refused as a bad gateway"))
 }
 
-fn command_router(provider: Provider) -> Router<Provider> {
+fn command_router() -> Router {
     Handlers::new()
         .command("ok", ok)
         .command("bad", bad)
         .command("missing", missing)
         .command("upstream", upstream)
-        .with_state(provider)
+        .into_router()
         .name("exit-map")
 }
 
-command::export!(command_router, Provider);
+command::export!(command_router);

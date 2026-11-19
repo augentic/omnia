@@ -9,10 +9,8 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_sdk::WasiProvider;
-use omnia_sdk::vcs::{Error as VcsError, Vcs as _};
-use omnia_wasi_vcs::omnia::store;
-use omnia_wasi_vcs::omnia::types::{Error, Location};
+use omnia_sdk::vcs::types::{Error, Location};
+use omnia_sdk::vcs::{self, Error as VcsError, store};
 use wasip3::filesystem::preopens;
 
 omnia_sdk::api::command::export!(scenario);
@@ -56,19 +54,19 @@ async fn scenario() {
         ("access", VcsError::Access("refused".to_owned()), 502, "access"),
         ("other", VcsError::Other("broken".to_owned()), 500, "other"),
     ] {
-        let lowered = WasiProvider.descends(".", fault, "sha:main").await;
+        let lowered = vcs::descends(".", fault, "sha:main").await;
         lowers(lowered.expect_err("the backend fails"), &error, status, code);
     }
     let denied = "denied: the workspace is beneath a read-only mount".to_owned();
-    let refused = WasiProvider.commit("ro", "seal it").await.expect_err("a change beneath `ro`");
+    let refused = vcs::commit("ro", "seal it").await.expect_err("a change beneath `ro`");
     lowers(refused, &VcsError::Other(denied), 500, "other");
-    let absent = WasiProvider.head("./plain").await.expect_err("no workspace at `plain`");
+    let absent = vcs::head("./plain").await.expect_err("no workspace at `plain`");
     lowers(absent, &VcsError::NotARepository, 400, "not-a-repository");
-    let diverged = WasiProvider.push(".", "moved", "main").await.expect_err("a moved bookmark");
+    let diverged = vcs::push(".", "moved", "main").await.expect_err("a moved bookmark");
     lowers(diverged, &VcsError::Diverged("main".to_owned()), 400, "diverged");
-    let existing = WasiProvider.init("./existing").await.expect_err("a repository already there");
+    let existing = vcs::init("./existing").await.expect_err("a repository already there");
     lowers(existing, &VcsError::Exists("existing".to_owned()), 400, "exists");
-    let dirty = WasiProvider.merge("./dirty", "feature", "merge it", &[]).await;
+    let dirty = vcs::merge("./dirty", "feature", "merge it", &[]).await;
     let pending = VcsError::Pending(vec!["a.rs".to_owned(), "b.rs".to_owned(), "c.rs".to_owned()]);
     lowers(dirty.expect_err("a merge into pending changes"), &pending, 400, "pending");
 }

@@ -14,9 +14,9 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_wasi_sql::omnia::database::{Database, Statement};
-use omnia_wasi_sql::omnia::types::{Error, ResultSet, Row, Value};
-use omnia_wasi_sql::omnia::{store, transactions};
+use omnia_sdk::sql::database::{Database, Statement};
+use omnia_sdk::sql::types::{Error, ResultSet, Row, Value};
+use omnia_sdk::sql::{store, transactions};
 
 omnia_sdk::api::command::export!(scenario);
 

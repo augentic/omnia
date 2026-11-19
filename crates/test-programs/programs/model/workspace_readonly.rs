@@ -2,8 +2,7 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_sdk::WasiProvider;
-use omnia_sdk::model::{Error, Model as _, Request};
+use omnia_sdk::model::{Error, Request};
 use test_programs::user;
 use wasip3::filesystem::preopens;
 
@@ -12,8 +11,11 @@ omnia_sdk::api::command::export!(scenario);
 async fn scenario() {
     assert!(preopens::get_directories().iter().any(|(_, name)| name == "."), "host must mount `.`");
 
-    let error = WasiProvider
-        .complete(Request::builder().messages(vec![user("hi")]).workspace(".").build())
+    let error = Request::builder()
+        .messages(vec![user("hi")])
+        .workspace(".")
+        .build()
+        .complete()
         .await
         .expect_err("write against a read-only mount fails");
     assert!(

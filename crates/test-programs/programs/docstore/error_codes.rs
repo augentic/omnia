@@ -8,20 +8,20 @@
 
 use std::fmt::Debug;
 
-use omnia_sdk::docstore::Document;
-use omnia_sdk::{DocumentDb as _, Result, WasiProvider};
+use omnia_sdk::docstore::store;
+use omnia_sdk::docstore::types::Document;
+use omnia_sdk::{Error, Result};
 
 omnia_sdk::api::command::export!(scenario);
 
 async fn scenario() {
-    let provider = WasiProvider;
-
     // the host's own rule
-    let raw = Document::new("raw", b"[1]");
-    expect_code(provider.put("default", &raw).await, 500, "invalid");
+    let default = store::open("default".to_owned()).await.expect("open the default collection");
+    let raw = default.put("raw".to_owned(), "[1]".to_owned(), None).await;
+    expect_code(raw.map_err(Error::from), 500, "invalid");
 
     // the default backend's own rule
-    expect_code(provider.get("undeclared", "id").await, 500, "not-found");
+    expect_code(get("undeclared", "id").await, 500, "not-found");
 
     // the backend's chosen cases
     for (collection, status, code) in [
@@ -30,8 +30,13 @@ async fn scenario() {
         ("unavailable", 502, "unavailable"),
         ("other", 500, "other"),
     ] {
-        expect_code(provider.get(collection, "id").await, status, code);
+        expect_code(get(collection, "id").await, status, code);
     }
+}
+
+async fn get(collection: &str, id: &str) -> Result<Option<Document>> {
+    let collection = store::open(collection.to_owned()).await?;
+    Ok(collection.get(id.to_owned()).await?)
 }
 
 fn expect_code<T: Debug>(result: Result<T>, status: u16, code: &str) {

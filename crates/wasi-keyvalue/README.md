@@ -4,7 +4,7 @@ This crate provides the Key-Value interface for the Omnia runtime.
 
 ## Interface
 
-Implements `omnia:keyvalue`, the interface the SDK's `StateStore` calls, over
+Implements `omnia:keyvalue`, the interface the SDK's `keyvalue` module binds, over
 one `Bucket` per backend.
 
 - A guest opens a bucket by name and calls it through the handle `open`

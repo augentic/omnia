@@ -20,8 +20,8 @@ workspace = true
 default = ["http"]
 
 # Enables the axum-backed `api::http` handler support and the `mcp` server.
-# The outbound `HttpClient` capability and `Error::status()` need no feature.
-http = ["dep:axum", "dep:http-body", "dep:tower"]
+# The outbound `http` helpers and `Error::status()` need no feature.
+http = ["dep:axum", "dep:tower"]
 
 # Enables the clap-backed `api::command` façade (argv parsing, `--format`,
 # shell completions).
@@ -34,9 +34,11 @@ bon.workspace = true
 bytes.workspace = true
 clap = { workspace = true, features = ["string"], optional = true }
 clap_complete = { workspace = true, optional = true }
+futures.workspace = true
 getrandom.workspace = true
 http.workspace = true
-http-body = { workspace = true, optional = true }
+http-body.workspace = true
+http-body-util.workspace = true
 omnia-guest-macros.workspace = true
 schemars.workspace = true
 serde.workspace = true
@@ -44,32 +46,13 @@ serde_json.workspace = true
 thiserror.workspace = true
 tower = { workspace = true, optional = true }
 tracing.workspace = true
-
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-futures.workspace = true
-http-body-util.workspace = true
-omnia-plugin.workspace = true
-omnia-wasi-blobstore.workspace = true
-omnia-wasi-config.workspace = true
-omnia-wasi-docstore.workspace = true
-omnia-wasi-http.workspace = true
-omnia-wasi-identity.workspace = true
-omnia-wasi-keyvalue.workspace = true
-omnia-wasi-messaging.workspace = true
-omnia-wasi-model.workspace = true
-omnia-wasi-otel.workspace = true
-omnia-wasi-sql.workspace = true
-omnia-wasi-types.workspace = true
-omnia-wasi-vault.workspace = true
-omnia-wasi-vcs.workspace = true
-omnia-wasi-websocket.workspace = true
 wasip3.workspace = true
 
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+opentelemetry = { workspace = true, features = ["metrics", "trace"] }
+tracing-opentelemetry = { workspace = true, features = ["metrics"] }
+tracing-subscriber = { workspace = true, features = ["ansi"] }
+
 [dev-dependencies]
-http-body-util.workspace = true
 tokio = { workspace = true, features = ["macros", "rt"] }
 tracing-subscriber.workspace = true
-
-[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-omnia-test = { workspace = true, default-features = false, features = ["guest"] }
-trybuild.workspace = true

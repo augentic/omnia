@@ -5,8 +5,7 @@
 
 use std::future::ready;
 
-use omnia_sdk::WasiProvider;
-use omnia_sdk::model::{CHECK_TOOL, Model as _, Request};
+use omnia_sdk::model::{CHECK_TOOL, Request};
 use test_programs::user;
 
 omnia_sdk::api::command::export!(scenario);
@@ -15,8 +14,8 @@ async fn scenario() {
     let request = Request::builder().messages(vec![user("hi")]).check(true).build();
 
     let mut candidates = Vec::new();
-    let reply = WasiProvider
-        .complete_with(request, |call| {
+    let reply = request
+        .complete_with(|call| {
             assert_eq!(call.name, CHECK_TOOL);
             candidates.push(call.arguments.clone());
             ready(if call.arguments == "hi" {

@@ -4,8 +4,8 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_wasi_websocket::omnia::connections;
-use omnia_wasi_websocket::omnia::types::{Client, CloseFrame, Message};
+use omnia_sdk::websocket::connections;
+use omnia_sdk::websocket::types::{Client, CloseFrame, Message};
 
 omnia_sdk::api::command::export!(scenario);
 

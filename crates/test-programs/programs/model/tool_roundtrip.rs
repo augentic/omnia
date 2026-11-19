@@ -2,8 +2,7 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_sdk::WasiProvider;
-use omnia_sdk::model::{Model as _, Request, ToolCall};
+use omnia_sdk::model::{Request, ToolCall};
 use test_programs::{lookup, user};
 
 omnia_sdk::api::command::export!(scenario);
@@ -12,8 +11,8 @@ async fn scenario() {
     let request = Request::builder().messages(vec![user("hi")]).tools(vec![lookup()]).build();
 
     let mut calls: Vec<ToolCall> = Vec::new();
-    let reply = WasiProvider
-        .complete_with(request, |call| {
+    let reply = request
+        .complete_with(|call| {
             calls.push(call);
             async { Ok::<_, String>("42".to_owned()) }
         })

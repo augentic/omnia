@@ -15,8 +15,7 @@ wit_bindgen::generate!({
     generate_all,
 });
 
-use omnia_sdk::WasiProvider;
-use omnia_sdk::plugins::{Digest, Location, Plugins as _};
+use omnia_sdk::plugins::{Digest, Location};
 
 use crate::omnia_test::link::ops;
 
@@ -53,8 +52,7 @@ async fn scenario() {
 
     // Two requests for one location: whichever admits first, the other
     // attests the same registration.
-    let (first, second) =
-        futures::join!(WasiProvider.load(&from, None), WasiProvider.load(&from, None));
+    let (first, second) = futures::join!(from.load(None), from.load(None));
     let first = first.expect("the first load succeeds");
     let second = second.expect("the racing load succeeds");
     assert_eq!(first.id(), name, "a guest registers under its location's name");
@@ -81,7 +79,7 @@ async fn scenario() {
     // A declared entry carries its own pin; a path or a package takes the
     // digest the first load reported.
     let pin = (!matches!(from, Location::Declared(_))).then_some(digest);
-    let again = WasiProvider.load(&from, pin).await.expect("a later load attests");
+    let again = from.load(pin).await.expect("a later load attests");
     assert_eq!(again.id(), name);
     assert_eq!(again.digest(), digest);
 }

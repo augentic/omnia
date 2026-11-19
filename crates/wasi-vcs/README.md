@@ -5,7 +5,7 @@ This crate provides the version-control interface for the Omnia runtime: the `om
 ## Interface
 
 Implements `omnia:vcs` ([`wit/vcs.wit`](wit/vcs.wit)), the interface the
-SDK's `Vcs` calls, over one `VcsClient` per backend.
+SDK's `vcs` module binds, over one `VcsClient` per backend.
 
 - A guest opens the repository or working copy at a `location`, and calls
   it through the `workspace` handle `open` returns. A place that holds none
@@ -74,7 +74,7 @@ omnia::runtime!({
 });
 ```
 
-A guest reaches the interface through `omnia_sdk::Vcs`, naming every location as a deployment-local path (`"."` the project mount, `"./.cache/repo"` beneath it), or through the raw `omnia_wasi_vcs::omnia::{store, workspace, workspaces, remotes}` bindings.
+A guest reaches the interface through `omnia_sdk::Vcs`, naming every location as a deployment-local path (`"."` the project mount, `"./.cache/repo"` beneath it), or through the raw `omnia_sdk::vcs::{store, workspace, workspaces, remotes}` bindings.
 
 ## License
 

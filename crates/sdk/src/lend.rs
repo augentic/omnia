@@ -2,8 +2,8 @@
 //!
 //! A capability that lends a directory to the host names it with a plain
 //! path — `"."` for the project mount, `"/mount/sub"` or `"./sub"` beneath
-//! one — and [`WasiProvider`](crate::WasiProvider) resolves that path against
-//! the guest's preopens at the call site: the longest preopen whose name
+//! one — and the crate resolves that path against the guest's preopens at
+//! the call site: the longest preopen whose name
 //! equals the path or prefixes it at a `/` boundary is the lent root
 //! descriptor, and the remainder rides as the grant's subpath (empty for the
 //! mount itself). The one rule serves every lending capability, so a path

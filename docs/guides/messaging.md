@@ -10,57 +10,36 @@ The [`messaging`](../../examples/messaging/) example demonstrates every pattern 
 
 Connect a client by name, build a `Message`, and send it to a topic:
 
-```rust
-use omnia_wasi_messaging::omnia::producer;
-use omnia_wasi_messaging::omnia::types::{Client, Message};
-
-let client = Client::connect("default".to_string()).await?;
-let message = Message {
-    data: payload_bytes,
-    content_type: Some("application/json".to_string()),
-    key: Some("example_key".to_string()),
-    metadata: vec![("tenant".to_string(), "acme".to_string())],
-};
-
-producer::send(&client, "orders.created".to_string(), message).await?;
-```
-
-The content type, key, and metadata travel with the message, and on Kafka the key also drives partition assignment. A backend carries every field given or fails with `unsupported`. A portable metadata name matches `[a-z][a-z0-9-]*`. A deployment declares one broker, `default`, and connecting to any other name fails with `not-found`.
-
-A handler reaches the same producer through the `Publisher` capability, which publishes an `omnia_sdk::messaging::Message`. `Message::json` serializes a value under the `application/json` content type, and `with_key` sets its key:
-
 ```rust,noplayground
-let message = Message::json(&order)?.with_key(&order.customer_id).with_header("tenant", "acme");
-context.publisher().publish("orders.created", &message).await?;
+use omnia_sdk::messaging::types::{Client, Message};
+use omnia_sdk::messaging::{DEFAULT, producer};
+
+let client = Client::connect(DEFAULT.to_owned()).await?;
+let message = Message::json(&order)?.with_key(&order.customer_id).with_metadata("tenant", "acme");
+producer::send(&client, "orders.created".to_owned(), message).await?;
 ```
+
+`Message::new(bytes)` builds a message from raw bytes, and `Message::json(&value)` serializes a value under the `application/json` content type. `with_key`, `with_content_type`, and `with_metadata` set the rest. The content type, key, and metadata travel with the message, and on Kafka the key also drives partition assignment. A backend carries every field given or fails with `unsupported`. A portable metadata name matches `[a-z][a-z0-9-]*`. A deployment declares one broker, `default`, and connecting to any other name fails with `not-found`.
 
 ## Handling incoming messages
 
 Messaging is a **trigger**: the host (`WasiMessaging`) subscribes to topics and delivers each message to the guest's exported handler, instantiating a fresh guest instance per message:
 
 ```rust,noplayground
-use omnia_sdk::api::{Context, Handlers, Router};
-use omnia_wasi_messaging::omnia::types::{Delivery, Settle};
+use omnia_sdk::api::{Context, Handlers, Router, messaging};
 
-pub struct Messaging;
-omnia_wasi_messaging::export!(Messaging);
-
-async fn create_order(
-    context: Context<MyProvider>, input: CreateOrder,
-) -> Result<(), omnia_sdk::Error> {
+async fn create_order(context: Context, input: CreateOrder) -> Result<(), omnia_sdk::Error> {
     // ...
 }
 
-fn router() -> Router<MyProvider> {
-    Handlers::new().topic("orders.created", create_order).with_state(MyProvider)
+fn router() -> Router {
+    Handlers::new().topic("orders.created", create_order).into_router()
 }
 
-impl omnia_wasi_messaging::omnia::incoming_handler::Guest for Messaging {
-    async fn handle(delivery: Delivery) -> Result<(), Settle> {
-        omnia_sdk::wasi::messaging::handle(&router(), delivery).await
-    }
-}
+messaging::export!(router);
 ```
+
+A guest that writes the raw export implements `omnia_sdk::exports::messaging::incoming_handler::Guest`, binds it with `omnia_sdk::messaging::export!`, and dispatches through `omnia_sdk::api::messaging::handle` (see [Writing Guests](writing-guests.md#handling-incoming-messages)).
 
 The guest router matches registered topics exactly; broker subscription patterns remain host configuration (`KAFKA_TOPICS`, `NATS_TOPICS`). `topic` decodes JSON and returns `Ok(())` for successful handler output. `Router::handle` reports a failure as an `omnia_sdk::Error`, whose code names it. A payload that does not decode is a `BadRequest` with the code `undecodable`. A delivery with no topic is a `BadRequest` with the code `missing-topic`, and one no route takes is a `NotFound` with the code `unhandled-topic`. A handler's failure takes its class and code from the first `omnia_sdk::Error`, `vcs::Error`, `plugins::Error`, or `model::Error` in its source chain, and anything else is a `ServerError`.
 
@@ -122,29 +101,27 @@ Semantics to keep in mind when moving from the default to a broker: the in-memor
 
 The `omnia:websocket` interface is the same trigger shape pointed at WebSocket connections. The host (`WasiWebSocket`, default backend `WebSocketDefault`, a tungstenite server on `WEBSOCKET_ADDR`) accepts connections, names each with an opaque id, and delivers every message a peer sends to the guest's exported `incoming-handler`. A message is text or binary, and travels in a frame of that type. Guests send to the connections they name through `connections`, and reach every open one through `broadcast`:
 
-```rust
-use omnia_wasi_websocket::omnia::types::{Client, Error, Event, Message};
-use omnia_wasi_websocket::omnia::{broadcast, connections};
+```rust,noplayground
+use omnia_sdk::websocket::types::{Client, Error, Event, Message};
+use omnia_sdk::websocket::{DEFAULT, broadcast, connections};
 
 // Push text to every connected client
-let ws = Client::connect("default".to_string()).await?;
+let ws = Client::connect(DEFAULT.to_owned()).await?;
 broadcast::send(&ws, Message::Text(payload), Vec::new()).await?;
 
 // Receive inbound messages
 struct WebSocket;
-omnia_wasi_websocket::export!(WebSocket);
+omnia_sdk::websocket::export!(WebSocket);
 
-impl omnia_wasi_websocket::omnia::incoming_handler::Guest for WebSocket {
+impl omnia_sdk::exports::websocket::incoming_handler::Guest for WebSocket {
     async fn handle(event: Event) -> Result<(), Error> {
         // react, or echo back to the sender
-        let ws = Client::connect("default".to_string()).await?;
+        let ws = Client::connect(DEFAULT.to_owned()).await?;
         connections::send(&ws, vec![event.connection], event.message).await
     }
 }
 ```
 
 The host sets each event's `deadline` to when it stops waiting for `handle`.
-
-A handler sends through the `WebSockets` capability instead: `broadcast(data)` reaches every open connection, and `send_to(sockets, data)` the connections named, each in a binary frame.
 
 The [`websocket`](../../examples/websocket/) example pairs an HTTP control endpoint (POST a message) with a WebSocket broadcast to all connected clients. In manifests, `routes.websocket` entries use the same pattern syntax as messaging routes.

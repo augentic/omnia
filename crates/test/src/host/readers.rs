@@ -20,8 +20,8 @@ where
     O: Sync,
     C: Sync,
 {
-    /// One entry of the bucket the guest's `StateStore` writes, as the guest
-    /// reads it through the keyvalue handle.
+    /// One entry of the [`STATE_BUCKET`] bucket, as a guest reads it through
+    /// the keyvalue handle.
     ///
     /// The bytes are the guest's own, and an entry whose TTL has passed
     /// reads as absent.

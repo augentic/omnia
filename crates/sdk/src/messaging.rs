@@ -1,53 +1,28 @@
-//! Message publishing capability.
+//! `omnia:messaging`, the topics a deployment's broker serves.
+//!
+//! A guest connects a [`Client`](types::Client) to a broker, [`DEFAULT`]
+//! unless the deployment declares another, and sends a
+//! [`Message`](types::Message) through [`producer::send`] or
+//! [`request_reply::request`]. It receives through the handler [`export!`]
+//! binds.
 
-use std::collections::HashMap;
-use std::future::Future;
-
-use bytes::Bytes;
 use serde::Serialize;
 
+pub use crate::bindings::imports::omnia::messaging::{producer, request_reply, types};
 use crate::{Error, Result};
 
-/// Publish messages to the topics a deployment's broker serves.
-#[omnia_guest_macros::capability]
-pub trait Publisher: Send + Sync {
-    /// Publish `message` to `topic`.
-    fn publish(&self, topic: &str, message: &Message) -> impl Future<Output = Result<()>> + Send;
-}
+/// The broker a guest's own [`Client`](types::Client) connects to.
+pub const DEFAULT: &str = "default";
 
-/// The header name that stands for [`Message::key`].
-///
-/// A header of this name, in any case, is the message's key unless
-/// [`Message::with_key`] sets one.
-pub const KEY: &str = "key";
-
-/// A message to publish through a [`Publisher`].
-///
-/// A subscriber reads the [`key`](Self::key) back as
-/// [`Delivery::key`](crate::api::messaging::Delivery::key).
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-#[non_exhaustive]
-pub struct Message {
-    /// The message payload.
-    pub payload: Bytes,
-
-    /// The key that orders and partitions the message, when it has one.
-    pub key: Option<String>,
-
-    /// The payload's media type, when the message names one.
-    pub content_type: Option<String>,
-
-    /// The message headers.
-    pub headers: HashMap<String, String>,
-}
-
-impl Message {
-    /// A message carrying `payload`, with no key, content type, or headers.
+impl types::Message {
+    /// A message carrying `data`, with no key, content type, or metadata.
     #[must_use]
-    pub fn new(payload: &[u8]) -> Self {
+    pub fn new(data: impl Into<Vec<u8>>) -> Self {
         Self {
-            payload: Bytes::copy_from_slice(payload),
-            ..Self::default()
+            data: data.into(),
+            content_type: None,
+            key: None,
+            metadata: Vec::new(),
         }
     }
 
@@ -55,17 +30,10 @@ impl Message {
     ///
     /// # Errors
     ///
-    /// A [`ServerError`](Error::ServerError) with the code `invalid` when
+    /// [`ServerError`](Error::ServerError) with the code `invalid` when
     /// `value` does not serialize.
     pub fn json<T: Serialize + ?Sized>(value: &T) -> Result<Self> {
-        let payload = serde_json::to_vec(value).map_err(|err| {
-            Error::server_error("invalid", format!("encoding message payload: {err}"))
-        })?;
-        Ok(Self {
-            payload: Bytes::from(payload),
-            content_type: Some("application/json".to_owned()),
-            ..Self::default()
-        })
+        Ok(Self::new(encode(value)?).with_content_type(JSON))
     }
 
     /// Set the key that orders and partitions the message.
@@ -75,17 +43,41 @@ impl Message {
         self
     }
 
-    /// Set the payload's media type.
+    /// Set the data's media type.
     #[must_use]
     pub fn with_content_type(mut self, content_type: impl Into<String>) -> Self {
         self.content_type = Some(content_type.into());
         self
     }
 
-    /// Attach a header to the message.
+    /// Attach a metadata entry to the message.
     #[must_use]
-    pub fn with_header(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
-        self.headers.insert(key.into(), value.into());
+    pub fn with_metadata(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        self.metadata.push((name.into(), value.into()));
         self
     }
 }
+
+const JSON: &str = "application/json";
+
+fn encode<T: Serialize + ?Sized>(value: &T) -> Result<Vec<u8>> {
+    serde_json::to_vec(value)
+        .map_err(|err| Error::server_error("invalid", format!("encoding message payload: {err}")))
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __export_messaging_guest {
+    ($ty:ident) => {
+        $crate::_export_messaging!($ty);
+    };
+}
+
+/// Export a type as the guest's `omnia:messaging/incoming-handler`.
+///
+/// The type implements
+/// [`Guest`](crate::exports::messaging::incoming_handler::Guest). A guest
+/// that routes by topic binds a router with
+/// [`api::messaging::export!`](crate::api::messaging::export!) instead.
+#[doc(inline)]
+pub use crate::__export_messaging_guest as export;

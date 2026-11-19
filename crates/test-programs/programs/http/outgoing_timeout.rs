@@ -7,7 +7,7 @@
 #![cfg(target_arch = "wasm32")]
 
 use http::{Method, Request};
-use omnia_sdk::{ConfigExt as _, WasiProvider};
+use omnia_sdk::config;
 use wasip3::http::client;
 use wasip3::http::types::{ErrorCode, RequestOptions};
 use wasip3::http_compat::{IncomingMessage as _, RequestOptionsExtension, http_into_wasi_request};
@@ -19,21 +19,21 @@ omnia_sdk::api::command::export!(scenario);
 const TIMEOUT: u64 = 200_000_000;
 
 async fn scenario() {
-    let origin: String = WasiProvider.require("ORIGIN").await.expect("ORIGIN seeded");
+    let origin: String = config::require("ORIGIN").await.expect("ORIGIN seeded");
 
     // the head never comes; the connect is bounded too, as the first byte is
     // awaited on top of it
     let options = RequestOptions::new();
     options.set_connect_timeout(Some(TIMEOUT)).expect("connect timeout");
     options.set_first_byte_timeout(Some(TIMEOUT)).expect("first-byte timeout");
-    let error = omnia_wasi_http::handle(request(&origin, "/head", options))
+    let error = omnia_sdk::http::send(request(&origin, "/head", options))
         .await
         .expect_err("a head that never comes must time out");
     let code = error.downcast_ref::<ErrorCode>().expect("a wasi:http error code");
     assert!(matches!(code, ErrorCode::ConnectionReadTimeout), "got {code:?}");
 
     // the body stops short; its error rides the trailers future, which
-    // `omnia_wasi_http::handle` does not await, so the raw bindings read it
+    // `omnia_sdk::http::send` does not await, so the raw bindings read it
     let options = RequestOptions::new();
     options.set_between_bytes_timeout(Some(TIMEOUT)).expect("between-bytes timeout");
     let wasi_request =

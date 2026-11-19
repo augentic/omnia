@@ -11,10 +11,10 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_wasi_blobstore::omnia::container::{ByteRange, Container, Content, Listing};
-use omnia_wasi_blobstore::omnia::store;
-use omnia_wasi_blobstore::omnia::types::{Attributes, Conflict, Error, ObjectEntry, Stored};
-use omnia_wasi_blobstore::{wit_future, wit_stream};
+use omnia_sdk::blobstore::container::{ByteRange, Container, Content, Listing};
+use omnia_sdk::blobstore::store;
+use omnia_sdk::blobstore::types::{Attributes, Conflict, Error, ObjectEntry, Stored};
+use omnia_sdk::{wit_future, wit_stream};
 
 omnia_sdk::api::command::export!(scenario);
 

@@ -12,7 +12,7 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_wasi_otel::omnia::traces;
+use omnia_sdk::otel::traces;
 use opentelemetry::trace::{
     SpanContext, SpanId, TraceContextExt as _, TraceFlags, TraceId, TraceState, Tracer as _,
 };
@@ -27,7 +27,7 @@ async fn scenario() {
 
 // ERROR-level throughout: every span must pass the guest's default
 // `EnvFilter` (the test environment sets no `RUST_LOG`).
-#[omnia_wasi_otel::instrument(level = Level::ERROR)]
+#[omnia_sdk::otel::instrument(level = Level::ERROR)]
 async fn parent() {
     let host = traces::current_span_context().expect("the host has a span for the run");
     let current = Context::current().span().span_context().trace_id();
@@ -60,5 +60,5 @@ async fn parent() {
     });
 }
 
-#[omnia_wasi_otel::instrument(level = Level::ERROR)]
+#[omnia_sdk::otel::instrument(level = Level::ERROR)]
 fn sibling() {}

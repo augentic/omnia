@@ -1,59 +1,60 @@
-//! Configuration lookup capability.
+//! `omnia:config`, the configuration a deployment sets for its guest.
+//!
+//! [`require`] and [`parse`] read a key as a typed value. [`store::get`] reads
+//! it raw.
 
 use std::fmt;
-use std::future::Future;
 use std::str::FromStr;
 
+pub use crate::bindings::imports::omnia::config::{entries, store, types};
 use crate::{Error, Result};
 
-/// Read the configuration a deployment sets for its guest.
+/// The value set for `key`, parsed as `T`.
 ///
-/// An unset key is `Ok(None)`, not an error. Typed reads over the string
-/// values are [`ConfigExt`].
-#[omnia_guest_macros::capability]
-pub trait Config: Send + Sync {
-    /// The value set for `key`, or `None` when it is unset.
-    fn get(&self, key: &str) -> impl Future<Output = Result<Option<String>>> + Send;
+/// # Errors
+///
+/// - [`ServerError`](Error::ServerError) with the code `not-found` when `key`
+///   is unset, or `invalid` when its value does not parse as `T`.
+/// - The host's failure, under its code, when the configuration source does
+///   not answer.
+pub async fn require<T>(key: &str) -> Result<T>
+where
+    T: FromStr,
+    T::Err: fmt::Display,
+{
+    required(key, parse(key).await?)
 }
 
-/// Typed reads over any [`Config`].
+/// The value set for `key` parsed as `T`, or `None` when it is unset.
 ///
-/// Blanket-implemented for every [`Config`]; never implemented by hand.
-pub trait ConfigExt: Config {
-    /// The value set for `key`, parsed as `T`.
-    ///
-    /// An unset key fails with the code `not-found`, and a value that does
-    /// not parse as `T` with the code `invalid`.
-    fn require<T>(&self, key: &str) -> impl Future<Output = Result<T>> + Send
-    where
-        T: FromStr,
-        T::Err: fmt::Display,
-    {
-        async move {
-            self.parse(key)
-                .await?
-                .ok_or_else(|| Error::server_error("not-found", format!("`{key}` is not set")))
-        }
-    }
+/// # Errors
+///
+/// - [`ServerError`](Error::ServerError) with the code `invalid` when the
+///   value does not parse as `T`.
+/// - The host's failure, under its code, when the configuration source does
+///   not answer.
+pub async fn parse<T>(key: &str) -> Result<Option<T>>
+where
+    T: FromStr,
+    T::Err: fmt::Display,
+{
+    typed(key, store::get(key.to_owned()).await?)
+}
 
-    /// The value set for `key` parsed as `T`, or `None` when it is unset.
-    ///
-    /// A value that does not parse as `T` fails with the code `invalid`.
-    fn parse<T>(&self, key: &str) -> impl Future<Output = Result<Option<T>>> + Send
-    where
-        T: FromStr,
-        T::Err: fmt::Display,
-    {
-        async move {
-            let Some(value) = self.get(key).await? else {
-                return Ok(None);
-            };
+fn required<T>(key: &str, value: Option<T>) -> Result<T> {
+    value.ok_or_else(|| Error::server_error("not-found", format!("`{key}` is not set")))
+}
+
+fn typed<T>(key: &str, value: Option<String>) -> Result<Option<T>>
+where
+    T: FromStr,
+    T::Err: fmt::Display,
+{
+    value
+        .map(|value| {
             value
                 .parse::<T>()
-                .map(Some)
                 .map_err(|err| Error::server_error("invalid", format!("`{key}` is invalid: {err}")))
-        }
-    }
+        })
+        .transpose()
 }
-
-impl<P: Config + ?Sized> ConfigExt for P {}

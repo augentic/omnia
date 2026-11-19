@@ -3,8 +3,7 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_sdk::WasiProvider;
-use omnia_sdk::model::{Error, Model as _, Request};
+use omnia_sdk::model::{Error, Request};
 use test_programs::user;
 use wasip3::filesystem::preopens;
 
@@ -16,8 +15,11 @@ async fn scenario() {
     for needle in
         ["exceeds workspace read limit", "write limit exceeded", "directory exceeds listing limit"]
     {
-        let error = WasiProvider
-            .complete(Request::builder().messages(vec![user("workspace")]).workspace(".").build())
+        let error = Request::builder()
+            .messages(vec![user("workspace")])
+            .workspace(".")
+            .build()
+            .complete()
             .await
             .expect_err("a capped workspace step fails the completion");
         assert!(

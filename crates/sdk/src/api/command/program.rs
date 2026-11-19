@@ -76,20 +76,15 @@ pub struct Verbosity {
     pub quiet: u8,
 }
 
-pub struct Commands<P: Send + Sync + 'static> {
-    routes: BTreeMap<String, ErasedCommand<P>>,
+#[derive(Clone, Default)]
+pub struct Commands {
+    routes: BTreeMap<String, ErasedCommand>,
 }
 
-impl<P: Send + Sync + 'static> Commands<P> {
-    pub const fn new() -> Self {
-        Self {
-            routes: BTreeMap::new(),
-        }
-    }
-
+impl Commands {
     pub fn route<F, I>(self, name: impl Into<String>, handler: F) -> Self
     where
-        F: Handler<P, I>,
+        F: Handler<I>,
         F::Output: Serialize + Render,
         I: clap::Args + Send + 'static,
     {
@@ -103,13 +98,13 @@ impl<P: Send + Sync + 'static> Commands<P> {
 
     pub fn route_with<F, I, D>(self, command: clap::Command, handler: F, decode: D) -> Self
     where
-        F: Handler<P, I>,
+        F: Handler<I>,
         F::Output: Serialize + Render,
         I: Send + 'static,
         D: Fn(&clap::ArgMatches) -> crate::Result<I> + Send + Sync + 'static,
     {
         let name = command.get_name().to_owned();
-        let route = Route::<P, F, I, D> {
+        let route = Route::<F, I, D> {
             handler,
             decode,
             marker: PhantomData,
@@ -131,7 +126,7 @@ impl<P: Send + Sync + 'static> Commands<P> {
         self.routes.keys().map(String::as_str)
     }
 
-    fn insert(mut self, name: String, entry: ErasedCommand<P>) -> Self {
+    fn insert(mut self, name: String, entry: ErasedCommand) -> Self {
         assert!(!name.is_empty(), "command name cannot be empty");
         assert!(!self.routes.contains_key(&name), "duplicate command `{name}`");
         self.routes.insert(name, entry);
@@ -139,58 +134,41 @@ impl<P: Send + Sync + 'static> Commands<P> {
     }
 }
 
-impl<P: Send + Sync + 'static> Clone for Commands<P> {
-    fn clone(&self) -> Self {
-        Self {
-            routes: self.routes.clone(),
-        }
-    }
-}
-
-impl<P: Send + Sync + 'static> fmt::Debug for Commands<P> {
+impl fmt::Debug for Commands {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_set().entries(self.routes.keys()).finish()
     }
 }
 
-struct ErasedCommand<P: Send + Sync + 'static> {
+#[derive(Clone)]
+struct ErasedCommand {
     command: clap::Command,
-    route: Arc<dyn ErasedRoute<P>>,
-}
-
-impl<P: Send + Sync + 'static> Clone for ErasedCommand<P> {
-    fn clone(&self) -> Self {
-        Self {
-            command: self.command.clone(),
-            route: Arc::clone(&self.route),
-        }
-    }
+    route: Arc<dyn ErasedRoute>,
 }
 
 type DispatchFuture<'a> = Pin<Box<dyn Future<Output = Response> + Send + 'a>>;
 
-trait ErasedRoute<P: Send + Sync + 'static>: Send + Sync {
+trait ErasedRoute: Send + Sync {
     fn dispatch<'a>(
-        &'a self, matches: &'a clap::ArgMatches, command: &'a Command<'a, P>,
+        &'a self, matches: &'a clap::ArgMatches, command: &'a Command<'a>,
     ) -> DispatchFuture<'a>;
 }
 
-struct Route<P, F, I, D> {
+struct Route<F, I, D> {
     handler: F,
     decode: D,
-    marker: PhantomData<fn(P) -> I>,
+    marker: PhantomData<fn() -> I>,
 }
 
-impl<P, F, I, D> ErasedRoute<P> for Route<P, F, I, D>
+impl<F, I, D> ErasedRoute for Route<F, I, D>
 where
-    P: Send + Sync + 'static,
-    F: Handler<P, I>,
+    F: Handler<I>,
     F::Output: Serialize + Render,
     I: Send + 'static,
     D: Fn(&clap::ArgMatches) -> crate::Result<I> + Send + Sync + 'static,
 {
     fn dispatch<'a>(
-        &'a self, matches: &'a clap::ArgMatches, command: &'a Command<'a, P>,
+        &'a self, matches: &'a clap::ArgMatches, command: &'a Command<'a>,
     ) -> DispatchFuture<'a> {
         Box::pin(async move {
             match (self.decode)(matches) {
@@ -203,8 +181,9 @@ where
 
 // The subcommands a closed router runs, with the program identity
 // clap shows around them.
-pub struct Program<P: Send + Sync + 'static> {
-    pub commands: Commands<P>,
+#[derive(Clone)]
+pub struct Program {
+    pub commands: Commands,
     pub name: Option<String>,
     pub version: Option<String>,
     pub about: Option<String>,
@@ -212,8 +191,8 @@ pub struct Program<P: Send + Sync + 'static> {
     pub hint: Option<HintFn<'static>>,
 }
 
-impl<P: Send + Sync + 'static> Program<P> {
-    pub const fn new(commands: Commands<P>) -> Self {
+impl Program {
+    pub const fn new(commands: Commands) -> Self {
         Self {
             commands,
             name: None,
@@ -240,23 +219,20 @@ impl<P: Send + Sync + 'static> Program<P> {
         Response::success(out)
     }
 
-    pub async fn run(
-        &self, provider: &Arc<P>, argv: impl IntoIterator<Item: Into<OsString>>,
-    ) -> Response {
+    pub async fn run(&self, argv: impl IntoIterator<Item: Into<OsString>>) -> Response {
         let argv: Vec<OsString> = argv.into_iter().map(Into::into).collect();
         let bin = self.bin_name(&argv);
         let prefix =
             self.env_prefix.clone().unwrap_or_else(|| bin.to_ascii_uppercase().replace('-', "_"));
         let metadata = Metadata::from_env(&prefix);
-        self.dispatch(provider, argv, &metadata).await
+        self.dispatch(argv, &metadata).await
     }
 
     pub async fn run_with(
-        &self, provider: &Arc<P>, argv: impl IntoIterator<Item: Into<OsString>>,
-        metadata: &Metadata,
+        &self, argv: impl IntoIterator<Item: Into<OsString>>, metadata: &Metadata,
     ) -> Response {
         let argv: Vec<OsString> = argv.into_iter().map(Into::into).collect();
-        self.dispatch(provider, argv, metadata).await
+        self.dispatch(argv, metadata).await
     }
 
     fn bin_name<'a>(&'a self, argv: &'a [OsString]) -> &'a str {
@@ -291,9 +267,7 @@ impl<P: Send + Sync + 'static> Program<P> {
         command
     }
 
-    async fn dispatch(
-        &self, provider: &Arc<P>, argv: Vec<OsString>, metadata: &Metadata,
-    ) -> Response {
+    async fn dispatch(&self, argv: Vec<OsString>, metadata: &Metadata) -> Response {
         let bin = self.bin_name(&argv).to_owned();
         let command = self.build_command(&bin);
         let matches = match command.try_get_matches_from(argv) {
@@ -305,7 +279,7 @@ impl<P: Send + Sync + 'static> Program<P> {
             .expect("globals augmented on command");
         let (name, sub_matches) = matches.subcommand().expect("subcommand_required is enabled");
         let entry = self.commands.routes.get(name).expect("matched subcommand is registered");
-        let mut projector = Command::new(provider, metadata, globals.format);
+        let mut projector = Command::new(metadata, globals.format);
         if let Some(hint) = &self.hint {
             projector.hint = Some(Arc::clone(hint));
         }
@@ -319,20 +293,7 @@ impl<P: Send + Sync + 'static> Program<P> {
     }
 }
 
-impl<P: Send + Sync + 'static> Clone for Program<P> {
-    fn clone(&self) -> Self {
-        Self {
-            commands: self.commands.clone(),
-            name: self.name.clone(),
-            version: self.version.clone(),
-            about: self.about.clone(),
-            env_prefix: self.env_prefix.clone(),
-            hint: self.hint.clone(),
-        }
-    }
-}
-
-impl<P: Send + Sync + 'static> fmt::Debug for Program<P> {
+impl fmt::Debug for Program {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Program")
             .field("commands", &self.commands)
@@ -373,7 +334,7 @@ pub fn completions<A: clap::CommandFactory>(shell: Shell, name: &str) -> Respons
     Response::success(out)
 }
 
-impl<P: Send + Sync + 'static> Handlers<P> {
+impl Handlers {
     /// Register one handler for one subcommand, decoding its arguments
     /// through [`clap::Args`].
     ///
@@ -386,7 +347,7 @@ impl<P: Send + Sync + 'static> Handlers<P> {
     /// Panics when `name` is empty or already registered.
     pub fn command<F, I>(mut self, name: impl Into<String>, handler: F) -> Self
     where
-        F: Handler<P, I>,
+        F: Handler<I>,
         F::Output: Serialize + Render,
         I: clap::Args + Send + 'static,
     {
@@ -405,7 +366,7 @@ impl<P: Send + Sync + 'static> Handlers<P> {
     /// Panics when the subcommand's name is empty or already registered.
     pub fn command_with<F, I, D>(mut self, command: clap::Command, handler: F, decode: D) -> Self
     where
-        F: Handler<P, I>,
+        F: Handler<I>,
         F::Output: Serialize + Render,
         I: Send + 'static,
         D: Fn(&clap::ArgMatches) -> crate::Result<I> + Send + Sync + 'static,
@@ -415,7 +376,7 @@ impl<P: Send + Sync + 'static> Handlers<P> {
     }
 }
 
-impl<P: Send + Sync + 'static> Router<P> {
+impl Router {
     /// Set the program name shown in usage and help text.
     ///
     /// Defaults to `argv[0]` (or `"app"` when `argv` is empty).
@@ -473,14 +434,14 @@ impl<P: Send + Sync + 'static> Router<P> {
     /// Run argv: parse it, read [`Metadata::from_env`], and dispatch the
     /// matched subcommand.
     pub async fn run(&self, argv: impl IntoIterator<Item: Into<OsString>>) -> Response {
-        self.program.run(&self.provider, argv).await
+        self.program.run(argv).await
     }
 
     /// Run argv with explicit `metadata`.
     pub async fn run_with(
         &self, argv: impl IntoIterator<Item: Into<OsString>>, metadata: &Metadata,
     ) -> Response {
-        self.program.run_with(&self.provider, argv, metadata).await
+        self.program.run_with(argv, metadata).await
     }
 
     // The defaults `export!` stamps from the guest crate's manifest.

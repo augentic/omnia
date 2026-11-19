@@ -3,16 +3,13 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_sdk::WasiProvider;
-use omnia_sdk::model::{
-    Error, Format, Function, Model as _, Request, SchemaFormat, Tool, WorkerGrant,
-};
+use omnia_sdk::model::{Error, Format, Function, Request, SchemaFormat, Tool, WorkerGrant};
 use test_programs::{lookup, user};
 
 omnia_sdk::api::command::export!(scenario);
 
 async fn refused(request: Request) -> String {
-    match WasiProvider.complete(request).await {
+    match request.complete().await {
         Err(Error::InvalidRequest(detail)) => detail,
         other => panic!("expected invalid-request, got {other:?}"),
     }

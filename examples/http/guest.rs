@@ -11,7 +11,6 @@
 use axum::routing::get;
 use axum::{Json, Router};
 use serde_json::{Value, json};
-use tracing::Level;
 use wasip3::exports::http::handler::Guest;
 use wasip3::http::types::{ErrorCode, Request, Response};
 
@@ -19,21 +18,20 @@ struct HttpGuest;
 wasip3::http::service::export!(HttpGuest);
 
 impl Guest for HttpGuest {
-    #[omnia_wasi_otel::instrument(name = "http_guest_handle", level = Level::DEBUG)]
     async fn handle(request: Request) -> Result<Response, ErrorCode> {
         let router = Router::new().route("/", get(echo_get).post(echo_post));
-        omnia_wasi_http::serve(router, request).await
+        omnia_sdk::http::serve(router, request).await
     }
 }
 
-#[omnia_wasi_otel::instrument]
+#[omnia_sdk::otel::instrument]
 async fn echo_get() -> omnia_sdk::Result<Json<Value>> {
     Ok(Json(json!({
         "message": "Hello from echo_get!"
     })))
 }
 
-#[omnia_wasi_otel::instrument]
+#[omnia_sdk::otel::instrument]
 async fn echo_post(Json(body): Json<Value>) -> omnia_sdk::Result<Json<Value>> {
     Ok(Json(json!({
         "message": "Hello from echo_post!",

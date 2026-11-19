@@ -1,37 +1,22 @@
-//! Plugin-loading (requester) capability over `omnia:plugins/loader`.
+//! `omnia:plugins`, the guests a guest late-binds into its deployment.
 //!
-//! The requester surface for any application that late-binds guests into its
-//! deployment: the guest names a [`Location`] — a guest the deployment
-//! declares, a component beneath one of its read-only mounts, or a package
-//! one of its registries serves — and the host acquires, verifies, and
-//! admits the bytes it finds there, or attests the guest if it is already
-//! active, handing back a typed [`Plugin`] handle. Component bytes never
-//! cross the interface, and every location resolves inside what the
-//! deployment granted.
+//! A guest names a [`Location`]:
+//!
+//! - a guest the deployment declares
+//! - a component beneath one of its read-only mounts
+//! - a package one of its registries serves
+//!
+//! [`Location::load`] has the host acquire, verify, and admit the bytes it
+//! finds there, or attest the guest when it is already active, and answers
+//! a [`Plugin`] handle. Component bytes never cross the interface, and every
+//! location resolves inside what the deployment granted.
 
-use std::future::Future;
 use std::path::Path;
 use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
-/// Plugin loading (Omnia Plugins).
-///
-/// `WasiProvider` delegates to `omnia:plugins/loader`.
-#[omnia_guest_macros::capability]
-pub trait Plugins: Send + Sync {
-    /// Ensure the guest `from` names is active and return its handle, held
-    /// to `digest` when one is given; idempotent on (name, digest).
-    ///
-    /// # Errors
-    ///
-    /// Returns the loader's typed refusal ([`Error`]) when the deployment's
-    /// grant does not serve the location, or the host cannot acquire,
-    /// verify, validate, or register the bytes.
-    fn load(
-        &self, from: &Location, digest: Option<&Digest>,
-    ) -> impl Future<Output = Result<Plugin, Error>> + Send;
-}
+pub use crate::bindings::imports::omnia::plugins::{loader, types};
 
 /// A validated `sha256:<hex>` content digest, canonicalized to lowercase.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -129,6 +114,66 @@ pub enum Location {
 }
 
 impl Location {
+    /// Ensure the guest this location names is active and return its handle,
+    /// held to `digest` when one is given.
+    ///
+    /// A load is idempotent on the name and digest.
+    ///
+    /// # Errors
+    ///
+    /// The loader's typed refusal, an [`Error`], when the deployment's grant
+    /// does not serve the location, or the host cannot acquire, verify,
+    /// validate, or register the bytes.
+    pub async fn load(&self, digest: Option<&Digest>) -> Result<Plugin, Error> {
+        match loader::load(self.source(digest)?).await? {
+            Ok(loaded) => {
+                let digest = loaded.digest.parse().map_err(|error: Error| {
+                    Error::Internal(format!("host reported a malformed digest: {error}"))
+                })?;
+                Ok(Plugin::new(loaded.name, digest, loaded.exports))
+            }
+            Err(conflict) => Err(Error::Refused(self.conflicted(digest, &conflict))),
+        }
+    }
+
+    // the deployment's entry pins a declared guest, so its source carries no pin
+    fn source(&self, pin: Option<&Digest>) -> Result<types::Source, Error> {
+        let pin = pin.map(ToString::to_string);
+        let source = match self {
+            Self::Declared(name) if pin.is_some() => {
+                return Err(Error::Refused(format!(
+                    "`{name}` is declared by the deployment, which pins it; the load takes no digest"
+                )));
+            }
+            Self::Declared(name) => types::Source::Declared(name.clone()),
+            Self::Path(path) => types::Source::Path(types::File {
+                path: path.clone(),
+                pin,
+            }),
+            Self::Registry { package, endpoint } => types::Source::Release(types::Release {
+                reference: package.clone(),
+                registry: endpoint.clone(),
+                pin,
+            }),
+        };
+        Ok(source)
+    }
+
+    // the bytes found and what they missed: the load's pin, or the bytes
+    // already active under the name
+    fn conflicted(&self, pin: Option<&Digest>, conflict: &types::Conflict) -> String {
+        let found = &conflict.found;
+        match (pin, &conflict.current) {
+            (Some(pin), _) if pin.as_str() != found => {
+                format!("`{self}` resolved to {found}, not the pinned {pin}")
+            }
+            (_, Some(current)) => {
+                format!("`{}` is loaded from {}, not {found}", current.name, current.digest)
+            }
+            (_, None) => format!("`{}` was active under bytes other than {found}", self.name()),
+        }
+    }
+
     /// The name a guest loaded from this location registers under.
     #[must_use]
     pub fn name(&self) -> &str {
@@ -254,6 +299,22 @@ impl From<Error> for crate::Error {
             Error::Unavailable(description) => Self::BadGateway { code, description },
             Error::Internal(description) => Self::ServerError { code, description },
             Error::Refused(description) => Self::BadRequest { code, description },
+        }
+    }
+}
+
+// a retry cannot mend what the request or the grant got wrong, so those
+// cases refuse
+impl From<types::Error> for Error {
+    fn from(error: types::Error) -> Self {
+        match error {
+            types::Error::NotFound(detail)
+            | types::Error::Denied(detail)
+            | types::Error::Invalid(detail) => Self::Refused(detail),
+            types::Error::Unavailable(detail) => Self::Unavailable(detail),
+            types::Error::Unsupported(detail) | types::Error::Other(detail) => {
+                Self::Internal(detail)
+            }
         }
     }
 }

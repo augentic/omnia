@@ -18,8 +18,7 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 use super::{
-    CHECK_TOOL, Error, Format, Message, Model, Request, Role, SchemaFormat, Tool, ToolCall,
-    WorkerGrant,
+    CHECK_TOOL, Error, Format, Message, Request, Role, SchemaFormat, Tool, ToolCall, WorkerGrant,
 };
 
 /// What a check found wrong with a candidate, one finding per line of the
@@ -149,8 +148,8 @@ impl<T: JsonSchema + DeserializeOwned + Send> Question<T> {
     /// - `Backend` when the backend finished with no accepted answer: it
     ///   never ran the check, or returned after a rejection.
     /// - Any other host error, unchanged.
-    pub async fn ask<M: Model>(
-        &self, model: &M, turn: impl Into<String>, tools: Option<Tools>,
+    pub async fn ask(
+        &self, turn: impl Into<String>, tools: Option<Tools>,
         mut check: impl FnMut(&T) -> Result<(), Findings> + Send,
     ) -> Result<T, Error> {
         let mut request = self.request.clone();
@@ -192,7 +191,7 @@ impl<T: JsonSchema + DeserializeOwned + Send> Question<T> {
             Box::pin(ready(result))
         };
 
-        let outcome = model.complete_with(request, handler).await;
+        let outcome = request.complete_with(handler).await;
         match (outcome, accepted, mismatch) {
             (Ok(_), Some(answer), _) => Ok(answer),
             (Ok(_), None, _) if candidates == 0 => {

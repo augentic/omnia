@@ -5,21 +5,20 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_sdk::{Config, WasiProvider};
-use omnia_wasi_config::omnia::entries;
+use omnia_sdk::config::{self, entries};
 
 omnia_sdk::api::command::export!(scenario);
 
 async fn scenario() {
     // reads
-    let greeting = WasiProvider.get("GREETING").await.expect("seeded key");
+    let greeting = config::parse::<String>("GREETING").await.expect("seeded key");
     assert_eq!(greeting.as_deref(), Some("hello"));
-    let empty = WasiProvider.get("EMPTY").await.expect("seeded key");
+    let empty = config::parse::<String>("EMPTY").await.expect("seeded key");
     assert_eq!(empty.as_deref(), Some(""), "an empty value is set");
-    let path = WasiProvider.get("PATH").await.expect("an unset key is not an error");
+    let path = config::parse::<String>("PATH").await.expect("an unset key is not an error");
     assert_eq!(path, None, "the process environment does not leak");
 
-    // a full listing, through the raw binding since `Config` has none
+    // a full listing
     let all = entries::list(String::new(), None, None).await.expect("list every entry");
     assert_eq!(all.next, None, "one page holds every entry");
     assert_eq!(

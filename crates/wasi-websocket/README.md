@@ -4,7 +4,7 @@ This crate provides the WebSocket interface for the Omnia runtime.
 
 ## Interface
 
-Implements `omnia:websocket`, the interface the SDK's `WebSockets` calls,
+Implements `omnia:websocket`, the interface the SDK's `websocket` module binds,
 over one `Endpoint` per backend.
 
 - A guest connects to a WebSocket service by name. The deployment declares

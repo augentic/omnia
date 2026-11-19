@@ -1,7 +1,7 @@
 //! # Aggregate
 //!
 //! The accumulators behind the guest's synchronous instruments: what each
-//! records per attribute set and what one collection yields. `metrics` wraps
+//! records per attribute set and what one collection yields. `meter` wraps
 //! them in the `opentelemetry` instrument handles and converts each
 //! collection into the `omnia:otel` records.
 

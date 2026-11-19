@@ -52,13 +52,12 @@ The host answers `unsupported` for the calls a backend cannot express yet:
 - a `delete` with a revision;
 - an `array-contains` test.
 
-Guests normally call these through the `omnia_sdk::DocumentDb` trait, which `omnia_sdk::WasiProvider` implements on `wasm32` over the raw bindings at `omnia_wasi_docstore::omnia::{store, collection, types}`. Each trait call opens the collection it names, and maps to the WIT as follows:
+Guests call these through `omnia_sdk::docstore`, which re-exports the bindings as `store`, `collection`, and `types`. `store::open(name)` opens a `Collection`, whose generated methods are the WIT's own. Its helpers map to the WIT as follows:
 
-- `get` is `get`.
+- `get_as` is `get`, with the body decoded as `T`. `Document::decode` decodes a document `get` returned.
 - `insert` is `put` with `absent`. A conflict is `Ok(Err(Exists))`, an outcome rather than an error.
-- `put` is `put` with no precondition.
-- `delete` is `delete` with no revision, and answers whether it removed a document.
-- `query` sends the `Filter` tree as groups (see [Filters](#filters)). `Query::after` is the WIT `after`, and `Page::next` is the page's `next`. A `Query::offset` fails with `unsupported`.
+- `upsert` is `put` with no precondition.
+- `find` is `query`, sending the `Filter` tree as groups (see [Filters](#filters)). `Query::after` is the WIT `after`, and the page's `next` is the cursor for the next page. A `Query::offset` fails with `unsupported`.
 
 ## Types
 
@@ -165,7 +164,7 @@ On the guest side, build a filter with the `Filter` constructors from `omnia_sdk
 | `Filter::negate(filter)` (also the `!` operator) | Logical NOT of any sub-tree. Portable. |
 | `Filter::on_date(field, "YYYY-MM-DD")` | Convenience: expands to a `gte`/`lt` timestamp range covering the UTC day. **Fallible** — returns an error for an invalid date. |
 
-`DocumentDb::query` writes the tree as groups before it reaches the host:
+`Collection::find` writes the tree as groups before it reaches the host:
 
 - each `not` is pushed down to the fields by De Morgan's laws;
 - `ne`, `not_in_list`, and `is_not_null` become negated `eq`, `in`, and `null` tests;
@@ -182,7 +181,7 @@ The SDK sends `Bool` as `boolean`, `Int32` and `Int64` as `integer`, `Float64` a
 
 ### Reference semantics
 
-`Filter::matches` and `SortField::compare` in `omnia_sdk::docstore` define how a filter selects a JSON document and how a sort field orders two. Their rustdoc states the rules: dotted field paths, a missing field reading as `null`, ordering only between comparable types, and a fixed type rank for sorting. The default backend evaluates queries by the same rules, and `omnia_test::guest::MemoryDocs` calls the two functions directly. A provider that evaluates queries itself calls them too, rather than writing its own evaluator.
+`Filter::matches` and `SortField::compare` in `omnia_sdk::docstore` define how a filter selects a JSON document and how a sort field orders two. Their rustdoc states the rules: dotted field paths, a missing field reading as `null`, ordering only between comparable types, and a fixed type rank for sorting. The default backend evaluates queries by the same rules. A provider that evaluates queries itself calls the two functions, rather than writing its own evaluator.
 
 ### Host-enforced limits
 
@@ -201,7 +200,7 @@ It also rejects an ordering test given a boolean, and a number that is not finit
 - a tree nests at most `Filter::MAX_DEPTH` deep, which is 5;
 - an `and` or `or` has at least one child.
 
-It also refuses a `Binary` value, and an ordering comparison with `null` or a boolean. `DocumentDb::query` calls it, so through the SDK every limit fails the query with `invalid` before the query reaches the host. `omnia_test::guest::MemoryDocs` refuses the same filters.
+It also refuses a `Binary` value, and an ordering comparison with `null` or a boolean. `Collection::find` calls it, so through the SDK every limit fails the query with `invalid` before the query reaches the host.
 
 ## Sorting and pagination
 

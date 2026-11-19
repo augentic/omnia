@@ -21,7 +21,7 @@ struct Http;
 wasip3::http::service::export!(Http);
 
 impl Guest for Http {
-    #[omnia_wasi_otel::instrument(name = "http_guest_handle", level = Level::DEBUG)]
+    #[omnia_sdk::otel::instrument(name = "http_guest_handle", level = Level::DEBUG)]
     async fn handle(request: Request) -> Result<Response, ErrorCode> {
         // tracing-based metrics
         tracing::info!(monotonic_counter.tracing_counter = 1, key1 = "value 1");
@@ -60,14 +60,14 @@ impl Guest for Http {
                         .allow_origin(Any),
                 );
 
-                omnia_wasi_http::serve(router, request)
+                omnia_sdk::http::serve(router, request)
             })
             .await
     }
 }
 
 #[axum::debug_handler]
-#[omnia_wasi_otel::instrument]
+#[omnia_sdk::otel::instrument]
 async fn handler(Json(body): Json<Value>) -> omnia_sdk::Result<Json<Value>> {
     tracing::info!("handling request: {:?}", body);
     Ok(Json(json!({

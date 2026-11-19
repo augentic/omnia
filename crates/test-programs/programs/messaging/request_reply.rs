@@ -4,8 +4,8 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_wasi_messaging::omnia::request_reply;
-use omnia_wasi_messaging::omnia::types::{Client, Message};
+use omnia_sdk::messaging::request_reply;
+use omnia_sdk::messaging::types::{Client, Message};
 
 omnia_sdk::api::command::export!(scenario);
 

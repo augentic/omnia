@@ -8,16 +8,16 @@
 use std::fmt::Debug;
 use std::time::Duration;
 
-use omnia_sdk::{Result, StateStore as _, WasiProvider};
+use omnia_sdk::Result;
+use omnia_sdk::keyvalue::{DEFAULT, store};
 
 omnia_sdk::api::command::export!(scenario);
 
 async fn scenario() {
-    let provider = WasiProvider;
-
     // the host's own rules
-    expect_code(provider.set("key", b"v", Some(Duration::ZERO)).await, 500, "invalid");
-    expect_code(provider.named("undeclared").get("key").await, 500, "not-found");
+    let default = store::open(DEFAULT.to_owned()).await.expect("open the default bucket");
+    expect_code(default.set_json("key", "v", Some(Duration::ZERO)).await, 500, "invalid");
+    expect_code(get("undeclared").await, 500, "not-found");
 
     // the backend's chosen cases
     for (bucket, status, code) in [
@@ -26,8 +26,12 @@ async fn scenario() {
         ("unavailable", 502, "unavailable"),
         ("other", 500, "other"),
     ] {
-        expect_code(provider.named(bucket).get("key").await, status, code);
+        expect_code(get(bucket).await, status, code);
     }
+}
+
+async fn get(bucket: &str) -> Result<Option<String>> {
+    store::open(bucket.to_owned()).await?.get_json("key").await
 }
 
 fn expect_code<T: Debug>(result: Result<T>, status: u16, code: &str) {

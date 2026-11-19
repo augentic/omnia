@@ -9,10 +9,8 @@
 
 use std::fmt::Debug;
 
-use omnia_sdk::WasiProvider;
-use omnia_sdk::model::{Error, Model as _, Reply, Request};
-use omnia_wasi_model::omnia::{completion, types};
-use omnia_wasi_model::wit_stream;
+use omnia_sdk::model::{Error, Reply, Request, completion, types};
+use omnia_sdk::wit_stream;
 use test_programs::{raw_lookup, raw_model, raw_request, user};
 
 omnia_sdk::api::command::export!(scenario);
@@ -23,7 +21,7 @@ async fn scenario() {
         ["not-found", "denied", "invalid", "unsupported", "unavailable", "other", "exhausted"]
     {
         let request = Request::builder().model(name).messages(vec![user("hi")]).build();
-        assert_eq!(code(WasiProvider.complete(request).await), name);
+        assert_eq!(code(request.complete().await), name);
     }
 
     // the host's own rules

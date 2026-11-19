@@ -49,7 +49,7 @@ The `core` world holds `types`, `store`, and `database`, which every backend ser
 - `execute` returns how many rows a statement changed. A statement that changes no row, such as DDL, returns zero.
 - `batch` runs its statements in order, in one transaction, and returns each one's changed-row count. A failing statement rolls back the whole batch, and the call fails with that statement's error. An empty batch returns an empty list.
 
-A `database` handle holds the connection `open` returned until its first call. Every later call opens a connection for that call alone. Guests reach these interfaces through the `omnia_sdk::SqlDb` trait, which opens a database for each call and each transaction. The provider's own handle opens `default`, and `named(name)` opens `name`.
+A `database` handle holds the connection `open` returned until its first call. Every later call opens a connection for that call alone. Guests reach these interfaces through `omnia_sdk::sql`, which re-exports the bindings with helpers on the `database` and `transaction` handles (see the [guide](../guides/sql.md)).
 
 ## Statements and placeholders
 

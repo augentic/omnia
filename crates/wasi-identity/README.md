@@ -4,12 +4,12 @@ This crate provides the Identity interface for the Omnia runtime.
 
 ## Interface
 
-Implements `omnia:identity`, the interface the SDK's `Identity` calls, over
+Implements `omnia:identity`, the interface the SDK's `identity` module binds, over
 one `IdentityClient` per backend.
 
 - A guest opens an identity by name and asks for tokens through the handle
   `open` returns. A name the deployment does not declare fails with
-  `not-found`. The SDK's unnamed handle opens `default`.
+  `not-found`. A guest that names no other opens `default`.
 - Every backend accepts a portable name and scope, and may reject any other
   with `invalid`:
   - a name is not empty and holds only ASCII letters, digits, `_`, and `-`;

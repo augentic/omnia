@@ -31,9 +31,7 @@ struct RawText {
     text: String,
 }
 
-fn echo<P: Send + Sync + 'static>(
-    context: Context<P>, input: EchoInput,
-) -> Ready<Result<EchoOutput, omnia_sdk::Error>> {
+fn echo(context: Context, input: EchoInput) -> Ready<Result<EchoOutput, omnia_sdk::Error>> {
     ready(Ok(EchoOutput {
         name: input.name,
         count: input.count.unwrap_or(1),
@@ -52,7 +50,7 @@ fn delivery(topic: Option<&str>, payload: &[u8]) -> Delivery {
 
 #[tokio::test]
 async fn exact_topic() {
-    let router = Handlers::new().topic("events.created", echo).with_state(());
+    let router = Handlers::new().topic("events.created", echo).into_router();
 
     router
         .handle(delivery(Some("events.created"), br#"{"name":"message","count":2}"#))
@@ -66,7 +64,7 @@ async fn exact_topic() {
 
 #[tokio::test]
 async fn malformed_delivery() {
-    let router = Handlers::new().topic("events", echo).with_state(());
+    let router = Handlers::new().topic("events", echo).into_router();
 
     assert_eq!(
         router.handle(delivery(None, br#"{"name":"message"}"#)).await,
@@ -94,27 +92,23 @@ fn unavailable() -> omnia_sdk::Error {
 #[tokio::test]
 async fn failing_handler() {
     let router = Handlers::new()
-        .topic("gateway", |_: Context<()>, _: EchoInput| {
+        .topic("gateway", |_: Context, _: EchoInput| {
             ready(Err::<(), _>(bad_gateway!("upstream did not answer")))
         })
-        .topic("store", |_: Context<()>, _: EchoInput| ready(Err::<(), _>(unavailable())))
-        .topic("order", |_: Context<()>, _: EchoInput| {
-            ready(Err::<(), _>(PlaceError(unavailable())))
-        })
-        .topic("request", |_: Context<()>, _: EchoInput| {
-            ready(Err::<(), _>(bad_request!("no name")))
-        })
-        .topic("format", |_: Context<()>, _: EchoInput| ready(Err::<(), _>(fmt::Error)))
-        .topic("revision", |_: Context<()>, _: EchoInput| {
+        .topic("store", |_: Context, _: EchoInput| ready(Err::<(), _>(unavailable())))
+        .topic("order", |_: Context, _: EchoInput| ready(Err::<(), _>(PlaceError(unavailable()))))
+        .topic("request", |_: Context, _: EchoInput| ready(Err::<(), _>(bad_request!("no name"))))
+        .topic("format", |_: Context, _: EchoInput| ready(Err::<(), _>(fmt::Error)))
+        .topic("revision", |_: Context, _: EchoInput| {
             ready(Err::<(), _>(vcs::Error::NotFound("v1".into())))
         })
-        .topic("plugin", |_: Context<()>, _: EchoInput| {
+        .topic("plugin", |_: Context, _: EchoInput| {
             ready(Err::<(), _>(plugins::Error::Refused("unsigned".into())))
         })
-        .topic("review", |_: Context<()>, _: EchoInput| {
+        .topic("review", |_: Context, _: EchoInput| {
             ready(Err::<(), _>(ReviewError(model::Error::Unavailable("rate limited".into()))))
         })
-        .with_state(());
+        .into_router();
 
     for (topic, status, code, text) in [
         ("gateway", 502, "bad_gateway", "upstream did not answer"),
@@ -139,7 +133,7 @@ async fn failing_handler() {
 #[tokio::test]
 async fn topic_span() {
     let (spans, _guard) = Spans::install();
-    let router = Handlers::new().topic("events.created", echo).with_state(());
+    let router = Handlers::new().topic("events.created", echo).into_router();
     let delivery = Delivery::new("events.created", br#"{"name":"message"}"#)
         .with_metadata("request-id", "req-1")
         .with_metadata("correlation-id", "corr-1");
@@ -159,7 +153,7 @@ async fn topic_span() {
 #[tokio::test]
 async fn invalid_payload_span() {
     let (spans, _guard) = Spans::install();
-    let router = Handlers::new().topic("events.created", echo).with_state(());
+    let router = Handlers::new().topic("events.created", echo).into_router();
     let delivery = Delivery::new("events.created", b"not-json")
         .with_metadata("request-id", "req-1")
         .with_metadata("correlation-id", "corr-1");
@@ -181,7 +175,7 @@ async fn invalid_payload_span() {
 #[test]
 #[should_panic(expected = "duplicate messaging topic")]
 fn duplicate_topic() {
-    let _handlers = Handlers::<()>::new().topic("events", echo).topic("events", echo);
+    let _handlers = Handlers::new().topic("events", echo).topic("events", echo);
 }
 
 #[tokio::test]
@@ -189,7 +183,7 @@ async fn merged_routes() {
     let created = Handlers::new().topic("events.created", echo);
     let deleted = Handlers::new().topic("events.deleted", echo);
     let updated = Handlers::new().topic("events.updated", echo);
-    let router = Handlers::from([created, deleted, updated]).with_state(());
+    let router = Handlers::from([created, deleted, updated]).into_router();
 
     for topic in ["events.created", "events.deleted", "events.updated"] {
         router
@@ -211,12 +205,10 @@ async fn merged_routes() {
 #[should_panic(expected = "duplicate messaging topic `events`")]
 fn duplicate_topic_merged() {
     let _handlers =
-        Handlers::<()>::new().topic("events", echo).merge(Handlers::new().topic("events", echo));
+        Handlers::new().topic("events", echo).merge(Handlers::new().topic("events", echo));
 }
 
-fn raw_text<P: Send + Sync + 'static>(
-    _context: Context<P>, input: RawText,
-) -> Ready<Result<String, omnia_sdk::Error>> {
+fn raw_text(_context: Context, input: RawText) -> Ready<Result<String, omnia_sdk::Error>> {
     ready(Ok(input.text))
 }
 
@@ -230,7 +222,7 @@ async fn topic_with_raw_payload() {
                 })
                 .map_err(|error| bad_request!("payload is not utf-8: {error}"))
         })
-        .with_state(());
+        .into_router();
 
     router
         .handle(delivery(Some("events.raw"), b"not-json"))
@@ -252,12 +244,12 @@ async fn tenant_metadata() {
     let seen = Arc::new(Mutex::new(None));
     let record = {
         let seen = Arc::clone(&seen);
-        move |context: Context<()>, _input: EchoInput| {
+        move |context: Context, _input: EchoInput| {
             *seen.lock().expect("record") = context.metadata.tenant;
             ready(Ok::<(), omnia_sdk::Error>(()))
         }
     };
-    let router = Handlers::new().topic("events", record).with_state(());
+    let router = Handlers::new().topic("events", record).into_router();
 
     router
         .handle(delivery(Some("events"), br#"{"name":"message"}"#))

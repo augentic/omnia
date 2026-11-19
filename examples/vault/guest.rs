@@ -25,9 +25,8 @@ use anyhow::Context;
 use axum::routing::post;
 use axum::{Json, Router};
 use bytes::Bytes;
-use omnia_wasi_vault::omnia::store;
+use omnia_sdk::vault::store;
 use serde_json::Value;
-use tracing::Level;
 use wasip3::exports::http::handler::Guest;
 use wasip3::http::types::{ErrorCode, Request, Response};
 
@@ -35,14 +34,13 @@ struct Http;
 wasip3::http::service::export!(Http);
 
 impl Guest for Http {
-    #[omnia_wasi_otel::instrument(name = "http_guest_handle", level = Level::DEBUG)]
     async fn handle(request: Request) -> Result<Response, ErrorCode> {
         let router = Router::new().route("/", post(handler));
-        omnia_wasi_http::serve(router, request).await
+        omnia_sdk::http::serve(router, request).await
     }
 }
 
-#[omnia_wasi_otel::instrument]
+#[omnia_sdk::otel::instrument]
 async fn handler(body: Bytes) -> omnia_sdk::Result<Json<Value>> {
     let locker = store::open("default".to_string()).await.context("failed to open vault locker")?;
 

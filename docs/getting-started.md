@@ -19,19 +19,17 @@ cargo build --example http-wasm --target wasm32-wasip3
 
 This produces `target/wasm32-wasip3/debug/examples/http_wasm.wasm` (note: the file name uses underscores).
 
-The guest itself is ordinary Rust. In an Omnia service, you write plain [Axum](https://github.com/tokio-rs/axum) handlers on a `Router` whose state is the capability-serving provider, shared as an `Arc<P>`, and export the WASI HTTP interface with `omnia_sdk::api::http::export!`:
+The guest itself is ordinary Rust. In an Omnia service, you write plain [Axum](https://github.com/tokio-rs/axum) handlers, register them on `Handlers`, and export the WASI HTTP interface with `omnia_sdk::api::http::export!`:
 
 ```rust,noplayground
-pub fn http_router<P: Send + Sync + 'static>(provider: P) -> Router {
-    Router::new()
-        .route("/", get(echo_get).post(echo_post))
-        .with_state(Arc::new(provider))
+fn router() -> Router {
+    Handlers::new().route("/", get(echo_get).post(echo_post)).into_router()
 }
 
-omnia_sdk::api::http::export!(http_router);
+omnia_sdk::api::http::export!(router);
 ```
 
-A handler reaches its capabilities through the `omnia_sdk::api::Context<P>` extractor; `get`, `post`, and the input extractors are axum's own. On `wasm32`, `http::export!` expands to the raw WASI `wasip3::http::service::export!` implementation, calls `http_router(omnia_sdk::WasiProvider)`, and serves each request through `omnia_wasi_http::serve` inside an `http_guest_handle` OpenTelemetry span (the standalone `examples/http/guest.rs` writes that expansion out explicitly so you can see the underlying WASI boundary).
+A handler takes the call's metadata through the `omnia_sdk::api::Context` extractor; `get`, `post`, and the input extractors are axum's own. On `wasm32`, `http::export!` expands to the raw WASI `wasip3::http::service::export!` implementation, calls `router()`, and serves each request through `omnia_sdk::http::serve` inside an `http_guest_handle` OpenTelemetry span (the standalone `examples/http/guest.rs` writes that expansion out explicitly so you can see the underlying WASI boundary).
 
 ## Step 2: Run it in a host
 
@@ -68,22 +66,25 @@ omnia::runtime!({
 
 Each entry pairs a **WASI host** (the interface guests see, e.g. `WasiKeyValue`) with a **backend** (the implementation behind it, e.g. `KeyValueDefault`, an in-memory cache). The macro generates `main`, connects the backends, links the interfaces, and starts the servers.
 
-## Step 4: Use a stateful capability
+## Step 4: Use a stateful interface
 
-In application handlers, capabilities are traits the context's accessors borrow the provider as (implemented by `WasiProvider` in the guest and by `omnia_test::guest::Provider` in native tests), such as `StateStore` for key-value storage through `context.state()`:
+A handler reaches host state through an interface module of `omnia_sdk`, such as `keyvalue` for key-value storage. It opens a bucket the deployment declares and calls its methods:
 
 ```rust,noplayground
-async fn store_item<P: StateStore>(
-    context: Context<P>, Json(input): Json<ItemInput>,
+use omnia_sdk::keyvalue::{DEFAULT, store};
+
+async fn store_item(
+    _context: Context, Json(input): Json<ItemInput>,
 ) -> Result<Json<ItemReply>, Error> {
-    context.state().set("my_key", input.body.as_bytes(), None).await?;
-    let res = context.state().get("my_key").await?;
+    let bucket = store::open(DEFAULT.to_owned()).await?;
+    bucket.set_json("my_key", &input.body, None).await?;
+    let res: Option<String> = bucket.get_json("my_key").await?;
     tracing::debug!("found val: {res:?}");
     // ...
 }
 ```
 
-Under the hood, `WasiProvider` calls Omnia's `omnia:keyvalue` interface. The standalone `keyvalue` example (`examples/keyvalue/guest.rs`) calls it directly to demonstrate the raw WIT binding, opening a bucket handle and calling it:
+`set_json` and `get_json` are helpers over the generated `set` and `get`, which move raw bytes. The standalone `keyvalue` example (`examples/keyvalue/guest.rs`) calls those directly to demonstrate the WIT binding:
 
 ```rust,noplayground
 async fn handler(body: Bytes) -> omnia_sdk::Result<Json<Value>> {

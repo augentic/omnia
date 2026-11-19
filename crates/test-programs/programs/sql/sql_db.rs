@@ -1,15 +1,15 @@
-//! The `omnia_test::contract::sql` rows over `WasiProvider`, all at once, so
-//! the host's `omnia:sql` and its backend meet the `SqlDb` contract.
+//! The `omnia_test::contract::sql` rows over the `default` database, all at
+//! once, so the host's `omnia:sql` and its backend meet the contract.
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_sdk::WasiProvider;
+use omnia_sdk::sql::{DEFAULT, store};
 use omnia_test::contract::sql;
 
 omnia_sdk::api::command::export!(scenario);
 
 async fn scenario() {
-    let db = WasiProvider;
+    let db = store::open(DEFAULT.to_owned()).await.expect("open the default database");
 
     futures::join!(
         sql::batch(&db),

@@ -1,116 +1,140 @@
-//! Relational database capability, SQL value types, and typed row decoding.
+//! `omnia:sql`, parameterized SQL against the databases a deployment declares.
+//!
+//! A guest opens a [`Database`] with [`store::open`], [`DEFAULT`] unless the
+//! deployment declares another. Beside the generated methods, a database and
+//! a [`Transaction`](transactions::Transaction) bind [`Value`] parameters:
+//!
+//! - [`query_as`](Database::query_as) decodes each selected row as a
+//!   [`FromRow`], a [`Row`] included.
+//! - [`exec`](Database::exec) returns the number of rows a statement changed.
+//!
+//! [`ResultSet::read`] collects the rows of a raw query.
+//!
+//! A statement numbers its parameters `$1`, `$2`, and so on. Each binds the
+//! value at that position, in any order and as often as it appears. The
+//! [SQL reference](https://github.com/augentic/omnia/blob/main/docs/reference/sql.md)
+//! lists the dialect and column types every backend runs.
+//!
+//! Each call on a database commits before it returns, and a statement that
+//! starts or ends a transaction or a savepoint, such as `BEGIN`, fails with
+//! the code `invalid`. [`transactions::begin`] starts a transaction instead:
+//!
+//! - Its statements commit or roll back together, and dropping it rolls back.
+//! - After a statement in it fails, the transaction is over and its changes
+//!   are rolled back, so `commit` fails with the code `invalid`.
+//! - A call on the database made before the transaction ends may wait for
+//!   it, so a guest ends the transaction before it awaits one.
 
 use std::fmt;
-use std::future::Future;
 
 use bytes::Bytes;
 pub use omnia_guest_macros::FromRow;
 
 use crate::Result;
+pub use crate::bindings::imports::omnia::sql::{database, store, transactions, types};
+use crate::sql::database::Database;
+use crate::sql::types::ResultSet;
 
-/// Run parameterized SQL against the databases a deployment declares.
-///
-/// A handle runs statements on one database. A provider's own handle uses
-/// [`sql::DEFAULT`](DEFAULT), and [`named`](Self::named) selects another. A
-/// database the deployment does not declare fails on first use. Typed row
-/// decoding is [`SqlDbExt`].
-///
-/// A statement numbers its parameters `$1`, `$2`, and so on. Each binds the
-/// value at that position, in any order and as often as it appears. The
-/// [SQL reference](https://github.com/augentic/omnia/blob/main/docs/reference/sql.md)
-/// lists the dialect and column types every provider runs.
-///
-/// Each call commits before it returns. A statement that starts or ends a
-/// transaction or a savepoint, such as `BEGIN` or `COMMIT`, fails with the
-/// code `invalid`, and [`begin`](Self::begin) starts a [`Transaction`].
-#[omnia_guest_macros::capability]
-pub trait SqlDb: Send + Sync {
-    /// The handle [`named`](Self::named) returns.
-    type Named: SqlDb<Named = Self::Named>;
-
-    /// The transaction [`begin`](Self::begin) returns.
-    type Transaction: Transaction;
-
-    /// Run `sql` with `params` bound and return the rows it selects.
-    fn query(&self, sql: &str, params: &[Value]) -> impl Future<Output = Result<Vec<Row>>> + Send;
-
-    /// Run `sql` with `params` bound and return the number of rows it changed.
-    fn execute(&self, sql: &str, params: &[Value]) -> impl Future<Output = Result<u64>> + Send;
-
-    /// Run `statements` in order, in one transaction, and return each one's changed-row count.
-    ///
-    /// A failing statement rolls back the whole batch and returns its error.
-    fn batch(&self, statements: &[Statement]) -> impl Future<Output = Result<Vec<u64>>> + Send;
-
-    /// Begin a transaction on this handle's database.
+impl Database {
+    /// Run `sql` with `params` bound and decode each row it selects as `T`.
     ///
     /// # Errors
     ///
-    /// - A [`ServerError`](crate::Error::ServerError) with the code
-    ///   `unsupported` when the provider serves no transactions.
-    /// - A [`BadGateway`](crate::Error::BadGateway) with the code
-    ///   `unavailable` when it has no connection to give.
-    fn begin(&self) -> impl Future<Output = Result<Self::Transaction>> + Send;
-
-    /// A handle to the database `name` on the same provider.
-    fn named(&self, name: &str) -> Self::Named;
-}
-
-/// A transaction on one database, which [`SqlDb::begin`] starts.
-///
-/// Its statements follow the rules of [`SqlDb`], and commit or roll back
-/// together.
-///
-/// - Dropping it rolls back.
-/// - After [`query`](Self::query) or [`execute`](Self::execute) fails, the
-///   transaction is over and its changes are rolled back, so
-///   [`commit`](Self::commit) fails with the code `invalid`.
-/// - A call on the database made before the transaction ends may wait for it,
-///   so a guest ends the transaction before it awaits one.
-pub trait Transaction: Send + Sync {
-    /// Run `sql` with `params` bound and return the rows it selects.
-    fn query(&self, sql: &str, params: &[Value]) -> impl Future<Output = Result<Vec<Row>>> + Send;
+    /// - [`ServerError`](crate::Error::ServerError) with the code `invalid`
+    ///   when a row does not decode as `T`.
+    /// - The host's failure, under its code.
+    pub async fn query_as<T: FromRow>(&self, sql: &str, params: &[Value]) -> Result<Vec<T>> {
+        let selected = self.query(sql.to_owned(), bind(params)).await?;
+        decode(&selected.read().await?)
+    }
 
     /// Run `sql` with `params` bound and return the number of rows it changed.
-    fn execute(&self, sql: &str, params: &[Value]) -> impl Future<Output = Result<u64>> + Send;
-
-    /// Commit every change the transaction made.
     ///
-    /// A commit that fails committed nothing, unless it failed with the code
-    /// `unavailable`, when the outcome is unknown.
-    fn commit(self) -> impl Future<Output = Result<()>> + Send;
-
-    /// Discard every change the transaction made.
-    fn rollback(self) -> impl Future<Output = Result<()>> + Send;
-
-    /// Run `sql` with `params` bound and decode each row it selects as `T`.
+    /// # Errors
     ///
-    /// A row that does not decode fails with the code `invalid`, and leaves
-    /// the transaction open.
-    fn query_as<T: FromRow>(
-        &self, sql: &str, params: &[Value],
-    ) -> impl Future<Output = Result<Vec<T>>> + Send {
-        async move { self.query(sql, params).await?.iter().map(T::from_row).collect() }
+    /// The host's failure, under its code.
+    pub async fn exec(&self, sql: &str, params: &[Value]) -> Result<u64> {
+        Ok(self.execute(sql.to_owned(), bind(params)).await?)
     }
 }
 
-/// Typed row decoding over any [`SqlDb`].
-///
-/// Blanket-implemented for every [`SqlDb`]; never implemented by hand.
-pub trait SqlDbExt: SqlDb {
+impl transactions::Transaction {
     /// Run `sql` with `params` bound and decode each row it selects as `T`.
     ///
-    /// A row that does not decode fails with the code `invalid`.
-    fn query_as<T: FromRow>(
-        &self, sql: &str, params: &[Value],
-    ) -> impl Future<Output = Result<Vec<T>>> + Send {
-        async move { self.query(sql, params).await?.iter().map(T::from_row).collect() }
+    /// A row that does not decode leaves the transaction open.
+    ///
+    /// # Errors
+    ///
+    /// - [`ServerError`](crate::Error::ServerError) with the code `invalid`
+    ///   when a row does not decode as `T`.
+    /// - The host's failure, under its code.
+    pub async fn query_as<T: FromRow>(&self, sql: &str, params: &[Value]) -> Result<Vec<T>> {
+        let selected = self.query(sql.to_owned(), bind(params)).await?;
+        decode(&selected.read().await?)
+    }
+
+    /// Run `sql` with `params` bound and return the number of rows it changed.
+    ///
+    /// # Errors
+    ///
+    /// The host's failure, under its code.
+    pub async fn exec(&self, sql: &str, params: &[Value]) -> Result<u64> {
+        Ok(self.execute(sql.to_owned(), bind(params)).await?)
     }
 }
 
-impl<P: SqlDb + ?Sized> SqlDbExt for P {}
+impl ResultSet {
+    /// Collect every row the query selected, each column under its name.
+    ///
+    /// # Errors
+    ///
+    /// The host's failure, under its code, when the query fails after its
+    /// columns arrive.
+    pub async fn read(self) -> Result<Vec<Row>> {
+        let Self {
+            columns,
+            rows,
+            finished,
+        } = self;
+        let rows = rows.collect().await;
+        finished.await?;
 
-/// The database a provider's own [`SqlDb`] handle uses.
+        Ok(rows
+            .into_iter()
+            .map(|values| Row {
+                fields: columns
+                    .iter()
+                    .zip(values)
+                    .map(|(name, value)| Field {
+                        name: name.clone(),
+                        value: Value::from(value),
+                    })
+                    .collect(),
+            })
+            .collect())
+    }
+}
+
+impl database::Statement {
+    /// A statement of a [`batch`](Database::batch) running `sql` with
+    /// `params` bound.
+    pub fn new(sql: impl Into<String>, params: &[Value]) -> Self {
+        Self {
+            sql: sql.into(),
+            params: bind(params),
+        }
+    }
+}
+
+fn bind(params: &[Value]) -> Vec<Option<types::Value>> {
+    params.iter().cloned().map(Option::from).collect()
+}
+
+fn decode<T: FromRow>(rows: &[Row]) -> Result<Vec<T>> {
+    rows.iter().map(T::from_row).collect()
+}
+
+/// The database a guest opens when the deployment names no other.
 pub const DEFAULT: &str = "default";
 
 /// A SQL scalar: a statement parameter or a column value.
@@ -200,6 +224,53 @@ impl<T: Into<Self>> From<Option<T>> for Value {
     }
 }
 
+impl From<types::Value> for Value {
+    fn from(value: types::Value) -> Self {
+        match value {
+            types::Value::Boolean(v) => Self::Boolean(v),
+            types::Value::Int32(v) => Self::Int32(v),
+            types::Value::Int64(v) => Self::Int64(v),
+            types::Value::Float32(v) => Self::Float(v),
+            types::Value::Float64(v) => Self::Double(v),
+            types::Value::Text(v) => Self::Str(v),
+            types::Value::Binary(v) => Self::Binary(Bytes::from(v)),
+            types::Value::Date(v) => Self::Date(v),
+            types::Value::Time(v) => Self::Time(v),
+            types::Value::Timestamp(v) | types::Value::TimestampTz(v) => Self::Timestamp(v),
+        }
+    }
+}
+
+/// The wire value a [`Value`] binds as, `None` for [`Null`](Value::Null).
+///
+/// A [`Timestamp`](Value::Timestamp) with an RFC 3339 offset binds as a
+/// `timestamp-tz`.
+impl From<Value> for Option<types::Value> {
+    fn from(value: Value) -> Self {
+        let value = match value {
+            Value::Null => return None,
+            Value::Int32(v) => types::Value::Int32(v),
+            Value::Int64(v) => types::Value::Int64(v),
+            Value::Float(v) => types::Value::Float32(v),
+            Value::Double(v) => types::Value::Float64(v),
+            Value::Str(v) => types::Value::Text(v),
+            Value::Boolean(v) => types::Value::Boolean(v),
+            Value::Date(v) => types::Value::Date(v),
+            Value::Time(v) => types::Value::Time(v),
+            Value::Timestamp(v) if has_offset(&v) => types::Value::TimestampTz(v),
+            Value::Timestamp(v) => types::Value::Timestamp(v),
+            Value::Binary(v) => types::Value::Binary(v.to_vec()),
+        };
+        Some(value)
+    }
+}
+
+// an RFC 3339 offset follows the time, past the `YYYY-MM-DD` date
+fn has_offset(timestamp: &str) -> bool {
+    let time = timestamp.get(10..).unwrap_or_default();
+    time.ends_with(['Z', 'z']) || time.contains(['+', '-'])
+}
+
 /// One named column in a result [`Row`].
 #[derive(Clone, Debug, PartialEq)]
 pub struct Field {
@@ -235,27 +306,6 @@ impl Row {
             .map(|field| &field.value)
             .ok_or_else(|| column_missing(column))?;
         T::from_column(column, value)
-    }
-}
-
-/// One statement of a [`batch`](SqlDb::batch): its SQL and the values it binds.
-#[derive(Clone, Debug, PartialEq)]
-#[non_exhaustive]
-pub struct Statement {
-    /// The SQL text.
-    pub sql: String,
-
-    /// The values bound to the statement's placeholders, in order.
-    pub params: Vec<Value>,
-}
-
-impl Statement {
-    /// A statement running `sql` with `params` bound.
-    pub fn new(sql: impl Into<String>, params: impl Into<Vec<Value>>) -> Self {
-        Self {
-            sql: sql.into(),
-            params: params.into(),
-        }
     }
 }
 
@@ -424,4 +474,10 @@ pub trait FromRow: Sized {
     /// when a required column is missing, `NULL`, or of an incompatible
     /// [`Value`].
     fn from_row(row: &Row) -> Result<Self>;
+}
+
+impl FromRow for Row {
+    fn from_row(row: &Row) -> Result<Self> {
+        Ok(row.clone())
+    }
 }

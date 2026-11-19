@@ -5,8 +5,6 @@
 mod support;
 
 use std::future::{Ready, ready};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, UNIX_EPOCH};
 
 use axum::Json;
@@ -14,13 +12,16 @@ use axum::body::Body;
 use axum::extract::{Path, Query};
 use axum::middleware::from_fn;
 use axum::routing::get;
+use bytes::Bytes;
 use http::header::CONTENT_TYPE;
-use http::{Request, StatusCode};
+use http::{Request, Response, StatusCode};
+use http_body_util::BodyExt as _;
 use omnia_sdk::api::http::trace;
+use omnia_sdk::api::messaging::Delivery;
 use omnia_sdk::api::{Context, Handlers, Metadata, Router};
-use omnia_sdk::{Config, ErrorBody, StateStore, not_found};
-use omnia_test::guest::{self, MapConfig, Provider};
+use omnia_sdk::{ErrorBody, not_found};
 use serde::{Deserialize, Serialize};
+use tower::ServiceExt as _;
 
 use self::support::{Spans, fields};
 
@@ -46,19 +47,7 @@ struct Ids {
     context: Option<String>,
 }
 
-struct StatefulProvider {
-    calls: AtomicUsize,
-}
-
-#[derive(Serialize)]
-struct ProviderObservation {
-    address: usize,
-    call: usize,
-}
-
-fn echo<P: Send + Sync>(
-    context: Context<P>, input: EchoInput,
-) -> Ready<Result<EchoOutput, omnia_sdk::Error>> {
+fn echo(context: Context, input: EchoInput) -> Ready<Result<EchoOutput, omnia_sdk::Error>> {
     ready(Ok(EchoOutput {
         name: input.name,
         count: input.count.unwrap_or(1),
@@ -69,24 +58,31 @@ fn echo<P: Send + Sync>(
     }))
 }
 
-async fn echo_route<P: Send + Sync>(
-    context: Context<P>, Query(input): Query<EchoInput>,
+async fn echo_route(
+    context: Context, Query(input): Query<EchoInput>,
 ) -> Result<Json<EchoOutput>, omnia_sdk::Error> {
     echo(context, input).await.map(Json)
 }
 
-fn handlers<P: Send + Sync + 'static>() -> Handlers<P> {
+fn handlers() -> Handlers {
     Handlers::from([Handlers::new().route("/echo", get(echo_route)).topic("echo", echo)])
 }
 
 fn router() -> Router {
-    handlers().with_state(()).layer(from_fn(trace))
+    handlers().into_router().layer(from_fn(trace))
+}
+
+async fn respond(router: impl Into<axum::Router>, request: Request<Body>) -> Response<Bytes> {
+    let response = router.into().oneshot(request).await.expect("an axum router is infallible");
+    let (parts, body) = response.into_parts();
+    let body = body.collect().await.expect("the response body is whole").to_bytes();
+    Response::from_parts(parts, body)
 }
 
 async fn send(
     router: impl Into<axum::Router>, request: Request<Body>,
 ) -> (StatusCode, serde_json::Value) {
-    let response = guest::send(&router.into(), request).await;
+    let response = respond(router, request).await;
     let value = serde_json::from_slice(response.body()).unwrap_or(serde_json::Value::Null);
     (response.status(), value)
 }
@@ -94,7 +90,7 @@ async fn send(
 async fn send_raw(
     router: axum::Router, request: Request<Body>,
 ) -> (StatusCode, Option<String>, String) {
-    let response = guest::send(&router, request).await;
+    let response = respond(router, request).await;
     let content_type =
         response.headers().get(CONTENT_TYPE).map(|value| value.to_str().unwrap().to_owned());
     let body = String::from_utf8(response.body().to_vec()).expect("utf-8 body");
@@ -106,7 +102,7 @@ async fn invoke_direct() {
     let mut metadata = Metadata::default();
     metadata.correlation_id = Some("call-1".to_string());
     metadata.tenant = Some("acme".to_string());
-    let context = Context::new((), metadata);
+    let context = Context::new(metadata);
 
     let output = echo(
         context,
@@ -122,28 +118,6 @@ async fn invoke_direct() {
     assert_eq!(output.count, 2);
     assert_eq!(output.correlation_id.as_deref(), Some("call-1"));
     assert_eq!(output.tenant.as_deref(), Some("acme"));
-}
-
-// `Config` and `StateStore` both define `get`; the accessors pick one
-// without UFCS
-#[tokio::test]
-async fn context_accessors() {
-    async fn lookup<P: Config + StateStore>(
-        context: Context<P>, key: String,
-    ) -> Result<(Option<String>, Option<bytes::Bytes>), omnia_sdk::Error> {
-        let setting = context.config().get(&key).await?;
-        let state = context.state().get(&key).await?;
-        Ok((setting, state))
-    }
-
-    let provider = Provider::default().config(MapConfig::default().with([("region", "eu")]));
-    provider.storage.insert_state("region", b"eu-west");
-    let context = Context::new(provider, Metadata::default());
-
-    let (setting, state) = lookup(context, "region".to_string()).await.expect("lookup");
-
-    assert_eq!(setting.as_deref(), Some("eu"));
-    assert_eq!(state.as_deref(), Some(b"eu-west".as_slice()));
 }
 
 #[tokio::test]
@@ -169,7 +143,7 @@ async fn context_extractor() {
 // The extractor stands alone: without the `trace` layer it reads the headers itself.
 #[tokio::test]
 async fn extractor_no_trace() {
-    let router = axum::Router::new().route("/echo", get(echo_route)).with_state(Arc::new(()));
+    let router = axum::Router::new().route("/echo", get(echo_route));
     let request = Request::get("/echo?name=plan")
         .header("x-request-id", "req-1")
         .body(Body::empty())
@@ -185,7 +159,7 @@ fn is_minted_id(id: &str) -> bool {
     id.len() == 32 && id.bytes().all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
 }
 
-async fn ids(metadata: Metadata, context: Context<()>) -> Json<Ids> {
+async fn ids(metadata: Metadata, context: Context) -> Json<Ids> {
     Json(Ids {
         metadata: metadata.request_id,
         context: context.metadata.request_id,
@@ -196,8 +170,7 @@ async fn ids(metadata: Metadata, context: Context<()>) -> Json<Ids> {
 // extractor, and the `Context` extractor all carry.
 #[tokio::test]
 async fn missing_request_id() {
-    let router =
-        axum::Router::new().route("/ids", get(ids)).layer(from_fn(trace)).with_state(Arc::new(()));
+    let router = axum::Router::new().route("/ids", get(ids)).layer(from_fn(trace));
     let request = Request::get("/ids").body(Body::empty()).expect("build request");
     let (status, value) = send(router, request).await;
 
@@ -233,10 +206,7 @@ async fn trace_span() {
 #[tokio::test]
 async fn trace_route_template() {
     let (spans, _guard) = Spans::install();
-    let router = axum::Router::new()
-        .route("/items/{id}", get(lookup))
-        .layer(from_fn(trace))
-        .with_state(Arc::new(()));
+    let router = axum::Router::new().route("/items/{id}", get(lookup)).layer(from_fn(trace));
     let request = Request::get("/items/42").body(Body::empty()).expect("build request");
 
     let (status, _) = send(router, request).await;
@@ -263,40 +233,13 @@ async fn trace_unmatched_path() {
     );
 }
 
-async fn observe(context: Context<StatefulProvider>) -> Json<ProviderObservation> {
-    Json(ProviderObservation {
-        address: std::ptr::from_ref(context.provider()).addr(),
-        call: context.provider().calls.fetch_add(1, Ordering::SeqCst) + 1,
-    })
-}
-
-#[tokio::test]
-async fn shared_provider() {
-    let router = axum::Router::new()
-        .route("/first", get(observe))
-        .route("/second", get(observe))
-        .with_state(Arc::new(StatefulProvider {
-            calls: AtomicUsize::new(0),
-        }));
-
-    let (_, first) =
-        send(router.clone(), Request::get("/first").body(Body::empty()).expect("build request"))
-            .await;
-    let (_, second) =
-        send(router, Request::get("/second").body(Body::empty()).expect("build request")).await;
-
-    assert_eq!(first["address"], second["address"]);
-    assert_eq!(first["call"], 1);
-    assert_eq!(second["call"], 2);
-}
-
 async fn lookup(Path(id): Path<String>) -> Result<Json<String>, omnia_sdk::Error> {
     Err(not_found!("no item {id}"))
 }
 
 #[tokio::test]
 async fn error_body_json() {
-    let router = axum::Router::new().route("/items/{id}", get(lookup)).with_state(Arc::new(()));
+    let router = axum::Router::new().route("/items/{id}", get(lookup));
     let request = Request::get("/items/42").body(Body::empty()).expect("build request");
     let (status, content_type, body) = send_raw(router, request).await;
 
@@ -315,7 +258,7 @@ async fn save() -> Result<Json<serde_json::Value>, omnia_sdk::Error> {
 
 #[tokio::test]
 async fn anyhow_error_body() {
-    let router = axum::Router::new().route("/save", get(save)).with_state(Arc::new(()));
+    let router = axum::Router::new().route("/save", get(save));
     let request = Request::get("/save").body(Body::empty()).expect("build request");
     let (status, content_type, body) = send_raw(router, request).await;
 
@@ -377,10 +320,11 @@ async fn route_and_topic() {
     let router = router();
     let request = Request::get("/echo?name=both").body(Body::empty()).expect("build request");
 
-    let response = guest::send(&router, request).await;
+    let response = respond(router.clone(), request).await;
     assert_eq!(response.status(), StatusCode::OK);
 
-    guest::deliver(&router, "echo", br#"{"name":"both"}"#)
+    router
+        .handle(Delivery::new("echo", br#"{"name":"both"}"#))
         .await
         .expect("router dispatches delivery");
 }
@@ -415,7 +359,7 @@ async fn capability_errors() {
         }
     }
 
-    let router = axum::Router::new().route("/err/{kind}", get(route)).with_state(Arc::new(()));
+    let router = axum::Router::new().route("/err/{kind}", get(route));
 
     for (path, expected_status, expected_code) in [
         ("/err/vcs-not-a-repository", StatusCode::BAD_REQUEST, "not-a-repository"),

@@ -17,11 +17,9 @@
 
 use std::iter;
 
-use omnia_wasi_docstore::omnia::collection::{
-    Collection, Condition, Filter, SortField, Test, Value,
-};
-use omnia_wasi_docstore::omnia::store;
-use omnia_wasi_docstore::omnia::types::{Conflict, Error, Precondition, Revision};
+use omnia_sdk::docstore::collection::{Collection, Condition, Filter, SortField, Test, Value};
+use omnia_sdk::docstore::store;
+use omnia_sdk::docstore::types::{Conflict, Error, Precondition, Revision};
 use serde_json::json;
 
 omnia_sdk::api::command::export!(scenario);

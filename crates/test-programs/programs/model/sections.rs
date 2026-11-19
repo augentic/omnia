@@ -2,10 +2,9 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_sdk::WasiProvider;
-use omnia_sdk::model::{Model as _, Request};
-use omnia_wasi_model::omnia::types::Role as WireRole;
-use omnia_wasi_model::prompt::{Example, Sections};
+use omnia_sdk::model::Request;
+use omnia_sdk::model::prompt::{Example, Sections};
+use omnia_sdk::model::types::Role as WireRole;
 use test_programs::user;
 
 omnia_sdk::api::command::export!(scenario);
@@ -47,8 +46,11 @@ async fn scenario() {
     assert_eq!(messages[0].role, WireRole::User);
     assert_eq!(messages[0].content, "do it");
 
-    let reply = WasiProvider
-        .complete(Request::builder().maybe_system(system).messages(vec![user(&user_turn)]).build())
+    let reply = Request::builder()
+        .maybe_system(system)
+        .messages(vec![user(&user_turn)])
+        .build()
+        .complete()
         .await
         .expect("echo answers");
     assert_eq!(reply.answer, user_turn);

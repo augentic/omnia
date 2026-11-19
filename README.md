@@ -58,23 +58,23 @@ The [`examples/`](examples/README.md) directory contains a complete working gues
 | [`omnia-plugin`](crates/plugin)           | `omnia:plugins/loader` capability — loader host, the deployment's grant (declared guest names, read-only mount roots, registry routing), registry acquisition, and plugin stores; selected by omnia's `loader` feature |
 | [`omnia-cli`](crates/cli)                 | Leaf `run` grammar — clap plus argv-precedence; selected by omnia's `cli` feature |
 | [`omnia-compile`](crates/compile)         | Leaf ahead-of-time compiler — `CompileOptions` and `compile`, over wasmtime alone; its Cranelift backend is what omnia's `jit` feature turns on |
-| [`omnia-sdk`](crates/sdk)                 | Guest SDK — `Handler`/`Context`/`Handlers`, HTTP/messaging routers and the command façade, errors, capabilities, and MCP support |
-| [`omnia-guest-macros`](crates/guest-macros)     | `#[instrument]` observability attribute and `#[derive(Provider)]` for guests               |
+| [`omnia-sdk`](crates/sdk)                 | Guest SDK — the generated bindings and their helpers, `Handler`/`Context`/`Handlers`, HTTP/messaging routers and the command façade, errors, and MCP support |
+| [`omnia-guest-macros`](crates/guest-macros)     | `#[instrument]` observability attribute and the `Settings` and `FromRow` derives for guests |
 | [`omnia-host-macros`](crates/host-macros)       | `runtime!` for host runtime generation and `#[derive(HostCtx)]` for host crates            |
-| [`omnia-wasi-blobstore`](crates/wasi-blobstore) | omnia:blobstore host and guest bindings                                                    |
-| [`omnia-wasi-config`](crates/wasi-config)       | omnia:config host and guest bindings                                                       |
-| [`omnia-wasi-docstore`](crates/wasi-docstore)   | Document-store host and guest bindings                                                     |
-| [`omnia-wasi-http`](crates/wasi-http)           | wasi:http host and guest bindings                                                          |
-| [`omnia-wasi-identity`](crates/wasi-identity)   | Identity/OAuth host and guest bindings                                                     |
-| [`omnia-wasi-keyvalue`](crates/wasi-keyvalue)   | omnia:keyvalue host and guest bindings                                                     |
-| [`omnia-wasi-messaging`](crates/wasi-messaging) | Messaging host and guest bindings                                                          |
-| [`omnia-wasi-model`](crates/wasi-model)         | omnia:model completion host and guest bindings                                             |
-| [`omnia-wasi-otel`](crates/wasi-otel)           | OpenTelemetry host and guest bindings                                                      |
-| [`omnia-wasi-sql`](crates/wasi-sql)             | omnia:sql host and guest bindings                                                          |
+| [`omnia-wasi-blobstore`](crates/wasi-blobstore) | omnia:blobstore host                                                                       |
+| [`omnia-wasi-config`](crates/wasi-config)       | omnia:config host                                                                          |
+| [`omnia-wasi-docstore`](crates/wasi-docstore)   | Document-store host                                                                        |
+| [`omnia-wasi-http`](crates/wasi-http)           | wasi:http host                                                                             |
+| [`omnia-wasi-identity`](crates/wasi-identity)   | Identity/OAuth host                                                                        |
+| [`omnia-wasi-keyvalue`](crates/wasi-keyvalue)   | omnia:keyvalue host                                                                        |
+| [`omnia-wasi-messaging`](crates/wasi-messaging) | Messaging host                                                                             |
+| [`omnia-wasi-model`](crates/wasi-model)         | omnia:model completion host                                                                |
+| [`omnia-wasi-otel`](crates/wasi-otel)           | OpenTelemetry host                                                                         |
+| [`omnia-wasi-sql`](crates/wasi-sql)             | omnia:sql host                                                                             |
 | [`omnia-wasi-types`](crates/wasi-types)         | omnia:types, the error, timestamp, and JSON types every interface shares                   |
-| [`omnia-wasi-vault`](crates/wasi-vault)         | Secrets-vault host and guest bindings                                                      |
-| [`omnia-wasi-vcs`](crates/wasi-vcs)             | omnia:vcs version-control host and guest bindings; no default backend                      |
-| [`omnia-wasi-websocket`](crates/wasi-websocket) | WebSocket host and guest bindings                                                          |
+| [`omnia-wasi-vault`](crates/wasi-vault)         | Secrets-vault host                                                                         |
+| [`omnia-wasi-vcs`](crates/wasi-vcs)             | omnia:vcs version-control host; no default backend                                         |
+| [`omnia-wasi-websocket`](crates/wasi-websocket) | WebSocket host                                                                             |
 
 ## License
 

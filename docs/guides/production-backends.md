@@ -68,7 +68,7 @@ Every backend reads its connection settings from environment variables at startu
 
 Each crate's README in the `omnia-backends` repository documents its complete variable set.
 
-A guest addresses a binding by name, and a provider's own handle uses the name `default`. A production backend serves `default` from its main connection and each further name from the configuration that declares it. `omnia-postgres`, for one, serves `default` from `POSTGRES_URL` and a guest's `SqlDb::named("eventstore")` from `POSTGRES_URL__EVENTSTORE`, once `POSTGRES_POOLS` lists `eventstore`.
+A guest opens a binding by name, `default` unless it names another. A production backend serves `default` from its main connection and each further name from the configuration that declares it. `omnia-postgres`, for one, serves `default` from `POSTGRES_URL` and a guest's `sql::store::open("eventstore")` from `POSTGRES_URL__EVENTSTORE`, once `POSTGRES_POOLS` lists `eventstore`.
 
 ## Verifying against the real service
 

@@ -1,24 +1,22 @@
 //! HTTP handlers over plain axum.
 //!
-//! A route is an ordinary axum handler on an `axum::Router` whose state is
-//! the shared provider, an `Arc<P>`. The handler reaches its capabilities
-//! through the [`Context`] extractor, reads its input with axum's `Path`,
-//! `Query`, and `Json` extractors, and answers a `Result` whose error is an
-//! [`Error`](crate::Error), the JSON [`ErrorBody`] at its status; `?` on an
-//! `anyhow::Error` reaches the same envelope. A domain error with a wire shape
-//! of its own implements `IntoResponse` itself. A module builds its routes
-//! and topics on a [`Handlers`] of its own and the guest merges them
+//! A route is an ordinary axum handler. It reads the call's [`Metadata`]
+//! through the [`Context`] extractor, its input with axum's `Path`, `Query`,
+//! and `Json` extractors, and answers a `Result` whose error is an
+//! [`Error`](crate::Error), the JSON [`ErrorBody`] at its status. `?` on an
+//! `anyhow::Error` reaches the same envelope, and a domain error with a wire
+//! shape of its own implements `IntoResponse` itself. A module builds its
+//! routes and topics on a [`Handlers`] of its own and the guest merges them
 //! (`Handlers::from([..])` or [`Handlers::merge`]) into its one
-//! [`api::Router`](Router) with `with_state(provider)`.
+//! [`api::Router`](Router) with [`into_router`](Handlers::into_router).
 //! [`export!`] binds the router fn as the guest's `wasi:http` handler and
 //! serves each request inside the `handler` span [`trace`] opens.
 
 use std::convert::Infallible;
 use std::future::{Future, ready};
-use std::sync::Arc;
 
 use axum::Json;
-use axum::extract::{FromRef, FromRequestParts, MatchedPath, Request};
+use axum::extract::{FromRequestParts, MatchedPath, Request};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use axum::routing::MethodRouter;
@@ -33,9 +31,6 @@ use crate::api::{Context, Handlers, Metadata, Router};
 #[macro_export]
 macro_rules! __export_http {
     ($router:path $(,)?) => {
-        $crate::api::http::export!($router, $crate::WasiProvider);
-    };
-    ($router:path, $provider:expr $(,)?) => {
         #[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
         const _: () = {
             struct HttpGuest;
@@ -49,7 +44,7 @@ macro_rules! __export_http {
                     $crate::wasip3::http::types::Response,
                     $crate::wasip3::http::types::ErrorCode,
                 > {
-                    $crate::wasi::http::serve($router($provider), request).await
+                    $crate::http::serve($router(), request).await
                 }
             }
         };
@@ -58,11 +53,9 @@ macro_rules! __export_http {
 
 /// Bind a router fn as the guest's `wasi:http` export.
 ///
-/// Calls the router fn on each request with `WasiProvider`, or with the
-/// provider expression passed as a second argument, and serves the request
-/// through the resulting router inside the `handler` span [`trace`] opens.
-/// Expands to nothing on native targets, where a test or a native host serves
-/// the router itself.
+/// Calls the router fn on each request and serves the request through the
+/// router it returns, an [`api::Router`](Router) or an `axum::Router`, inside
+/// the `handler` span [`trace`] opens. Expands to nothing on native targets.
 ///
 /// ```rust,ignore
 /// use omnia_sdk::api::http;
@@ -76,7 +69,7 @@ pub use crate::__export_http as export;
 /// correlation ids, its method, and its route.
 ///
 /// Apply with `axum::middleware::from_fn(trace)` on a native host or in a
-/// test. In a guest, [`export!`] and `wasi::http::serve` apply it to the
+/// test. In a guest, [`export!`] and `http::serve` apply it to the
 /// router they serve. The ids the span carries are the ones the
 /// [`Metadata`] and [`Context`] extractors hand the handler, a minted request
 /// id included. The `route` is the template the router matched, such as
@@ -130,42 +123,34 @@ impl<S: Send + Sync> FromRequestParts<S> for Metadata {
     }
 }
 
-impl<P, S> FromRequestParts<S> for Context<P>
-where
-    P: Send + Sync + 'static,
-    S: Send + Sync,
-    Arc<P>: FromRef<S>,
-{
+impl<S: Send + Sync> FromRequestParts<S> for Context {
     type Rejection = Infallible;
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let metadata = Metadata::from_request_parts(parts, state).await?;
-        Ok(Self {
-            provider: Arc::from_ref(state),
-            metadata,
-        })
+        Ok(Self { metadata })
     }
 }
 
-impl<P: Send + Sync + 'static> Handlers<P> {
+impl Handlers {
     /// Register a [`MethodRouter`] at `path`.
     ///
     /// # Panics
     ///
     /// Panics when `path` overlaps an existing route for the same method.
-    pub fn route(mut self, path: &str, method_router: MethodRouter<Arc<P>>) -> Self {
+    pub fn route(mut self, path: &str, method_router: MethodRouter) -> Self {
         self.http = self.http.route(path, method_router);
         self
     }
 }
 
-impl<P: Send + Sync + 'static> From<Handlers<P>> for axum::Router<Arc<P>> {
-    fn from(handlers: Handlers<P>) -> Self {
+impl From<Handlers> for axum::Router {
+    fn from(handlers: Handlers) -> Self {
         handlers.http
     }
 }
 
-impl<P: Send + Sync + 'static> Router<P> {
+impl Router {
     /// Apply a [`tower::Layer`] to every HTTP route on this router.
     pub fn layer<L>(mut self, layer: L) -> Self
     where
@@ -183,15 +168,14 @@ impl<P: Send + Sync + 'static> Router<P> {
     }
 }
 
-impl<P: Send + Sync + 'static> From<Router<P>> for axum::Router {
-    fn from(router: Router<P>) -> Self {
+impl From<Router> for axum::Router {
+    fn from(router: Router) -> Self {
         router.http
     }
 }
 
-impl<P, B> tower::Service<::http::Request<B>> for Router<P>
+impl<B> tower::Service<::http::Request<B>> for Router
 where
-    P: Send + Sync + 'static,
     B: http_body::Body<Data = bytes::Bytes> + Send + 'static,
     B::Error: Into<axum::BoxError>,
 {

@@ -4,8 +4,7 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_sdk::WasiProvider;
-use omnia_sdk::plugins::{Digest, Location, Plugins as _};
+use omnia_sdk::plugins::{Digest, Location};
 
 omnia_sdk::api::command::export!(scenario);
 
@@ -17,7 +16,7 @@ async fn scenario() {
     let recorded = recorded.parse::<Digest>().expect("the recorded digest");
 
     let from = Location::Declared(name.clone());
-    let plugin = WasiProvider.load(&from, None).await.expect("an active guest attests");
+    let plugin = from.load(None).await.expect("an active guest attests");
     assert_eq!(plugin.id(), name);
     assert_eq!(plugin.digest(), &recorded, "the handle attests the digest boot recorded");
 }

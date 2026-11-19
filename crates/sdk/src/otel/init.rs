@@ -11,7 +11,7 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Layer as _, Registry};
 
-use crate::guest::{metrics, tracing};
+use crate::otel::{meter, tracer};
 
 static TELEMETRY: OnceLock<Option<Telemetry>> = OnceLock::new();
 
@@ -42,13 +42,13 @@ pub async fn scope<F: Future>(inner: impl FnOnce() -> F) -> F::Output {
 /// application logic. Safe to call when telemetry was never initialized.
 pub async fn flush() {
     let Some(telemetry) = telemetry() else { return };
-    tracing::export(&telemetry.spans).await;
-    metrics::export(&telemetry.meters).await;
+    tracer::export(&telemetry.spans).await;
+    meter::export(&telemetry.meters).await;
 }
 
 struct Telemetry {
-    spans: tracing::SpanBuffer,
-    meters: metrics::MeterProvider,
+    spans: tracer::SpanBuffer,
+    meters: meter::MeterProvider,
 }
 
 fn init() -> Result<Telemetry> {
@@ -57,11 +57,11 @@ fn init() -> Result<Telemetry> {
         .with_writer(std::io::stderr)
         .with_filter(filter_fn(|meta| !meta.is_span()));
 
-    let (tracer_provider, spans) = tracing::TracerProvider::new();
+    let (tracer_provider, spans) = tracer::TracerProvider::new();
     let tracing_layer =
         tracing_layer().with_tracer(tracer_provider.tracer("global")).with_threads(false);
 
-    let meter_provider = metrics::MeterProvider::default();
+    let meter_provider = meter::MeterProvider::default();
     let metrics_layer = MetricsLayer::new(meter_provider.clone());
 
     Registry::default()

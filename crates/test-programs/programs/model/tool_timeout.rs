@@ -3,8 +3,8 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_wasi_model::omnia::{completion, types};
-use omnia_wasi_model::wit_stream;
+use omnia_sdk::model::{completion, types};
+use omnia_sdk::wit_stream;
 use test_programs::{raw_lookup, raw_model, raw_request};
 
 omnia_sdk::api::command::export!(scenario);

@@ -7,7 +7,7 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use omnia_wasi_identity::omnia::{credentials, types};
+use omnia_sdk::identity::{credentials, types};
 
 omnia_sdk::api::command::export!(scenario);
 

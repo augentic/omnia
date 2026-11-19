@@ -10,15 +10,15 @@ pub fn body(attrs: Attributes, item_fn: &ItemFn) -> proc_macro2::TokenStream {
     let block = item_fn.block.clone();
 
     let span_name = attrs.name.unwrap_or_else(|| LitStr::new(&name.to_string(), name.span()));
-    // Routed through `omnia_wasi_otel` so callers need no direct `tracing` dependency.
-    let tracing = quote! { omnia_wasi_otel::__private::tracing };
+    // Routed through `omnia_sdk` so callers need no direct `tracing` dependency.
+    let tracing = quote! { ::omnia_sdk::otel::__private::tracing };
     let level =
         attrs.level.map_or_else(|| quote! { #tracing::Level::INFO }, |level| quote! {#level});
 
     // The closure defers `span!` until `scope` has initialized telemetry.
     if item_fn.sig.asyncness.is_some() {
         quote! {
-            omnia_wasi_otel::scope(move || #tracing::Instrument::instrument(
+            ::omnia_sdk::otel::scope(move || #tracing::Instrument::instrument(
                 async move #block,
                 #tracing::span!(#level, #span_name)
             )).await

@@ -2,15 +2,16 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_sdk::WasiProvider;
-use omnia_sdk::model::{Model as _, Request, Usage};
+use omnia_sdk::model::{Request, Usage};
 use test_programs::user;
 
 omnia_sdk::api::command::export!(scenario);
 
 async fn scenario() {
-    let reply = WasiProvider
-        .complete(Request::builder().messages(vec![user("hi")]).build())
+    let reply = Request::builder()
+        .messages(vec![user("hi")])
+        .build()
+        .complete()
         .await
         .expect("canned answer carries usage");
     assert_eq!(reply.answer, "hi");

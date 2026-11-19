@@ -56,7 +56,7 @@ async fn echo(names: &[&str]) -> ModelDefault {
 // Scenario backends
 // ------------------------------------------------------------------------
 //
-// Most scenarios script `omnia_test::host::ScriptedModel`; the three below
+// Most scenarios script `omnia_test::host::ScriptedModel`; the ones below
 // exercise behaviour a FIFO script cannot express and stay by hand.
 
 // Two concurrent `lookup` calls, answered in issue order, prove results
@@ -120,6 +120,39 @@ impl ModelClient for Faulting {
             _ => anyhow::anyhow!("an untyped backend failure"),
         };
         async move { Err(fault) }.boxed()
+    }
+}
+
+// answers the script with `check` stripped, so no candidate reaches the
+// guest's check. By hand: a script honours the flag.
+#[derive(Clone, Debug)]
+struct Unchecked(ScriptedModel);
+
+impl ModelClient for Unchecked {
+    fn complete(&self, request: Request, tool_host: Arc<dyn ToolHost>) -> FutureResult<Answer> {
+        self.0.complete(
+            Request {
+                check: false,
+                ..request
+            },
+            tool_host,
+        )
+    }
+}
+
+// offers one candidate the check rejects, then answers with it anyway. By
+// hand: a script stops on a rejection only when it runs out.
+#[derive(Clone, Copy, Debug)]
+struct Heedless;
+
+impl ModelClient for Heedless {
+    fn complete(&self, _request: Request, tool_host: Arc<dyn ToolHost>) -> FutureResult<Answer> {
+        async move {
+            let outcome = tool_host.check(FAIL.to_owned()).await?;
+            assert!(outcome.is_err(), "the check rejects the candidate");
+            Ok(FAIL.into())
+        }
+        .boxed()
     }
 }
 
@@ -377,6 +410,56 @@ async fn model_check_plain() {
 
     // The echo default honours `check` too: its one candidate is the prompt.
     run_guest(test_programs::MODEL_CHECK_PLAIN, vec![], echo(&["default"]).await).await;
+}
+
+#[tokio::test]
+async fn model_check_recovered() {
+    let model = ScriptedModel::answering([FAIL, PASS, r#"{"other":1}"#, PASS]);
+    let model = run_scripted(test_programs::MODEL_CHECK_RECOVERED, vec![], model).await;
+    let exchanges = model.exchanges();
+    assert_eq!(exchanges.len(), 4);
+
+    let custom = format!("REJECTED {FAIL}: verdict must be `pass`; findings must be empty");
+    assert_eq!(exchanges[0], check(FAIL, Err(&custom)));
+    assert_eq!(exchanges[1], check(PASS, Ok("")));
+    let correction = exchanges[2].outcome.clone().expect_err("the mismatch is rejected");
+    assert!(correction.contains("does not match the expected shape"), "{correction}");
+    assert_eq!(exchanges[3], check(PASS, Ok("")));
+}
+
+#[tokio::test]
+async fn model_check_tools() {
+    let model = ScriptedModel::answering([PASS, PASS])
+        .calling(0, [("lookup", r#"{"id":1}"#)])
+        .calling(1, [("lookup", r#"{"id":1}"#)]);
+    let model = run_scripted(test_programs::MODEL_CHECK_TOOLS, vec![], model).await;
+    let exchanges = model.exchanges();
+    assert_eq!(exchanges.len(), 4);
+
+    assert_eq!(exchanges[0].outcome, Ok("looked up 1".to_owned()));
+    assert_eq!(exchanges[1], check(PASS, Ok("")));
+    let refusal = exchanges[2].outcome.clone().expect_err("the guest passed no tools");
+    assert!(refusal.contains("tool `lookup` has no handler"), "{refusal}");
+    assert_eq!(exchanges[3], check(PASS, Ok("")));
+}
+
+#[tokio::test]
+async fn model_check_unheeded() {
+    let unchecked = Unchecked(ScriptedModel::answering([PASS]));
+    unheeded(unchecked, "the backend finished without running the check").await;
+    unheeded(Heedless, "the backend finished on a candidate the check rejected").await;
+}
+
+// the guest fails unless its question ends in the backend error `expected`
+async fn unheeded<M: ModelClient + Clone>(model: M, expected: &str) {
+    let backends = Backends::defaults().await.model(model);
+    let status = Deployment::new()
+        .guest("guest", test_programs::MODEL_CHECK_UNHEEDED)
+        .args([expected])
+        .run_host::<WasiModel, _>(backends)
+        .await
+        .expect("guest runs");
+    assert_eq!(status, ExitStatus::SUCCESS, "the guest saw another outcome than `{expected}`");
 }
 
 #[tokio::test]

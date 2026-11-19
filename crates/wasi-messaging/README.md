@@ -4,8 +4,8 @@ This crate provides the Messaging interface for the Omnia runtime.
 
 ## Interface
 
-Implements `omnia:messaging`, the interface the SDK's `Publisher` and
-`messaging::export!` call, over one `Endpoint` per backend.
+Implements `omnia:messaging`, the interface the SDK's `messaging` module
+and `messaging::export!` bind, over one `Endpoint` per backend.
 
 - A guest connects to a broker by name. The deployment declares one,
   `default`, and any other name fails with `not-found`.

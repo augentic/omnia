@@ -25,8 +25,8 @@ use axum::routing::post;
 use axum::{Json, Router};
 use bytes::Bytes;
 use http_body_util::Full;
-use omnia_wasi_messaging::omnia::types::{Client, Delivery, Error, Message, Release, Settle};
-use omnia_wasi_messaging::omnia::{producer, request_reply};
+use omnia_sdk::messaging::types::{Client, Delivery, Error, Message, Release, Settle};
+use omnia_sdk::messaging::{producer, request_reply};
 use serde_json::{Value, json};
 use wasip3::exports::http::handler::Guest;
 use wasip3::http::types::{ErrorCode, Request, Response};
@@ -40,7 +40,7 @@ impl Guest for Http {
             .route("/pub-sub", post(pub_sub))
             .route("/request-reply", post(request_reply_handler))
             .route("/upstream", post(upstream_handler));
-        omnia_wasi_http::serve(router, request).await
+        omnia_sdk::http::serve(router, request).await
     }
 }
 
@@ -89,9 +89,9 @@ fn message(data: impl Into<Vec<u8>>) -> Message {
 }
 
 pub struct Messaging;
-omnia_wasi_messaging::export!(Messaging);
+omnia_sdk::messaging::export!(Messaging);
 
-impl omnia_wasi_messaging::omnia::incoming_handler::Guest for Messaging {
+impl omnia_sdk::exports::messaging::incoming_handler::Guest for Messaging {
     async fn handle(delivery: Delivery) -> Result<(), Settle> {
         tracing::debug!("start processing msg");
 
@@ -150,7 +150,7 @@ impl omnia_wasi_messaging::omnia::incoming_handler::Guest for Messaging {
                     .map_err(|e| Settle::Reject(format!("building request: {e}")))?;
 
                 println!("calling upstream HTTP from messaging handler");
-                let upstream_body = match omnia_wasi_http::handle(upstream).await {
+                let upstream_body = match omnia_sdk::http::send(upstream).await {
                     Ok(resp) => {
                         println!("upstream responded: {}", resp.status());
                         String::from_utf8_lossy(resp.body()).to_string()

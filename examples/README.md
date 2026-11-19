@@ -44,7 +44,7 @@ Each example directory has a `README.md` with test commands and example-specific
 | [`messaging`](messaging) | Pub-sub, request-reply, and fan-out (`omnia:messaging`) |
 | [`model`](model) | Model completion across the `omnia:model` boundary with the scripted test double |
 | [`otel`](otel) | Guest OpenTelemetry instrumentation (`omnia:otel`) |
-| [`sql`](sql) | CRUD over `omnia:sql` through the `SqlDb` capability, with schema setup over the raw bindings |
+| [`sql`](sql) | CRUD over `omnia:sql` through the `Database` helpers, with schema setup on the `default` database |
 | [`vault`](vault) | Secret storage (`omnia:vault`) |
 | [`websocket`](websocket) | Real-time bidirectional messaging (`omnia:websocket`) |
 

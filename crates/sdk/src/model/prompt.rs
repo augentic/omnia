@@ -5,8 +5,7 @@
 //! this builder turns a role/task/context template into those channels
 //! before `complete` is called.
 
-#[cfg(target_arch = "wasm32")]
-use crate::omnia::types::{Message, Role};
+use crate::model::types::{Message, Role};
 
 /// Structured prompt template assembled into `system` / `messages` channels.
 #[derive(Clone, Debug, Default)]
@@ -68,7 +67,6 @@ impl Sections {
 
     /// Assemble the template into the request's chat channels: the system
     /// string (led by `preamble` when given) and a single user turn.
-    #[cfg(target_arch = "wasm32")]
     #[must_use]
     pub fn channels(&self, preamble: Option<&str>) -> (Option<String>, Vec<Message>) {
         let (system, user) = self.assemble(preamble);

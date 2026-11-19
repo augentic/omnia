@@ -3,7 +3,6 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_sdk::WasiProvider;
 use omnia_sdk::model::Question;
 use test_programs::Verdict;
 
@@ -12,7 +11,7 @@ omnia_sdk::api::command::export!(scenario);
 async fn scenario() {
     let verdict = Question::<Verdict>::new("verdict")
         .system("judge")
-        .ask(&WasiProvider, "judge this", None, Verdict::passing)
+        .ask("judge this", None, Verdict::passing)
         .await
         .expect("the candidate passes the check");
     assert_eq!(

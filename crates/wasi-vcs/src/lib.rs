@@ -1,4 +1,5 @@
 #![doc = include_str!("../README.md")]
+#![cfg(not(target_arch = "wasm32"))]
 
 //! # WASI VCS
 //!
@@ -7,13 +8,5 @@
 //! each call to a version-control backend, which works through an open
 //! directory handle beneath the mount and never sees a descriptor.
 
-cfg_select! {
-    target_arch = "wasm32" => {
-        mod guest;
-        pub use guest::*;
-    }
-    _ => {
-        mod host;
-        pub use host::*;
-    }
-}
+mod host;
+pub use host::*;

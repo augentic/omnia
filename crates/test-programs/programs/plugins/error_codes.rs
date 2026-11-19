@@ -10,8 +10,7 @@
 
 use std::fmt::Debug;
 
-use omnia_sdk::WasiProvider;
-use omnia_sdk::plugins::{Digest, Error, Location, Plugins as _};
+use omnia_sdk::plugins::{Digest, Error, Location};
 
 omnia_sdk::api::command::export!(scenario);
 
@@ -32,16 +31,16 @@ async fn scenario() {
         ("unavailable", 502, "unavailable"),
     ] {
         let from = release(&format!("fault:{case}@1.0.0"));
-        expect_code(WasiProvider.load(&from, None).await, (status, code), case);
+        expect_code(from.load(None).await, (status, code), case);
     }
 
     // a release whose bytes miss the pin
     let pin: Digest = MISSED.parse().expect("a well-formed digest");
-    let conflict = WasiProvider.load(&release("test:echoer@1.0.0"), Some(&pin)).await;
+    let conflict = release("test:echoer@1.0.0").load(Some(&pin)).await;
     expect_code(conflict, (400, "refused"), echoer);
 
     // a declared name the call pins, which the SDK refuses unsent
-    let declared = WasiProvider.load(&Location::Declared("echoer".to_owned()), Some(&pin)).await;
+    let declared = Location::Declared("echoer".to_owned()).load(Some(&pin)).await;
     expect_code(declared, (400, "refused"), "takes no digest");
 }
 

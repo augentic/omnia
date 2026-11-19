@@ -1,86 +1,134 @@
-//! JSON document store capability.
+//! `omnia:docstore`, the collections of JSON documents a deployment declares.
+//!
+//! A guest opens a [`Collection`] with [`store::open`]. Beside the generated
+//! methods, a collection stores and reads documents as typed JSON, and
+//! [`find`](Collection::find) runs a [`Query`].
 //!
 //! [`Filter::matches`] and [`SortField::compare`] define how a query selects
-//! and orders JSON documents. A provider that evaluates queries itself calls
+//! and orders JSON documents. A backend that evaluates queries itself calls
 //! them rather than writing its own evaluator.
+//!
+//! Every backend serves a portable query:
+//!
+//! - [`Filter::Compare`] with a value other than `null`, [`Filter::InList`],
+//!   and [`Filter::NotInList`], on top-level fields;
+//! - combined with [`Filter::And`], [`Filter::Or`], and [`Filter::Not`];
+//! - at most 15 comparisons, counting each value of a list;
+//! - an empty `order_by`;
+//! - a `limit`, with the page's `next` cursor.
+//!
+//! A zero `limit`, or a filter [`Filter::check`] refuses, fails with the
+//! code `invalid`. A backend serves every other feature as defined, or fails
+//! the query with the code `unsupported`, and never ignores one. The
+//! [document store reference](https://github.com/augentic/omnia/blob/main/docs/reference/docstore.md#query-contract)
+//! lists the portable names and the optional features.
 
 pub(crate) mod groups;
 
 use std::cmp::Ordering;
-use std::future::Future;
 use std::ops::Not;
 
-use bytes::Bytes;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
-use crate::{Error, Page, Result};
+pub use crate::bindings::imports::omnia::docstore::{collection, store, types};
+use crate::docstore::collection::Collection;
+use crate::{Error, Result};
 
-/// Store and query JSON documents in a deployment's collections.
-///
-/// A query's filters and paging are defined by [`Filter::matches`] and
-/// [`SortField::compare`]. Typed reads of a document body are
-/// [`DocumentDbExt`].
-///
-/// Every provider serves a portable query:
-///
-/// - [`Filter::Compare`] with a value other than `null`, [`Filter::InList`],
-///   and [`Filter::NotInList`], on top-level fields;
-/// - combined with [`Filter::And`], [`Filter::Or`], and [`Filter::Not`];
-/// - at most 15 comparisons, counting each value of a list;
-/// - an empty `order_by`;
-/// - a `limit`, with the [`Page::next`] cursor.
-///
-/// A zero `limit`, or a filter [`Filter::check`] refuses, fails with the
-/// code `invalid`. An `offset` fails with the code `unsupported`. A provider
-/// serves every other feature as defined, or fails the query with the code
-/// `unsupported`, and never ignores one. The
-/// [document store reference](https://github.com/augentic/omnia/blob/main/docs/reference/docstore.md#query-contract)
-/// lists the portable names and the optional features.
-#[omnia_guest_macros::capability]
-pub trait DocumentDb: Send + Sync {
-    /// Fetch the document `id` from `collection`, or `None` when it is absent.
-    fn get(
-        &self, collection: &str, id: &str,
-    ) -> impl Future<Output = Result<Option<Document>>> + Send;
+impl Collection {
+    /// The document `id` with its JSON decoded as `T`, or `None` when it is
+    /// absent.
+    ///
+    /// # Errors
+    ///
+    /// - [`ServerError`](Error::ServerError) with the code `invalid` when the
+    ///   JSON does not decode as `T`.
+    /// - The host's failure, under its code.
+    pub async fn get_as<T: DeserializeOwned>(&self, id: &str) -> Result<Option<T>> {
+        self.get(id.to_owned()).await?.map(|document| document.decode()).transpose()
+    }
 
-    /// Insert `document` into `collection`, unless its id is already stored.
+    /// Store `value` as the JSON of the document `id`, unless `id` is stored.
     ///
     /// A stored id answers `Ok(Err(Exists))` and leaves the stored document
     /// untouched.
-    fn insert(
-        &self, collection: &str, document: &Document,
-    ) -> impl Future<Output = Result<Result<(), Exists>>> + Send;
-
-    /// Store `document` in `collection`, replacing any document with its id.
-    fn put(&self, collection: &str, document: &Document)
-    -> impl Future<Output = Result<()>> + Send;
-
-    /// Delete the document `id` from `collection`, answering whether one was removed.
-    fn delete(&self, collection: &str, id: &str) -> impl Future<Output = Result<bool>> + Send;
-
-    /// One page of the documents in `collection` that `query` selects.
-    fn query(
-        &self, collection: &str, query: &Query,
-    ) -> impl Future<Output = Result<Page<Document>>> + Send;
-}
-
-/// Typed reads over any [`DocumentDb`].
-///
-/// Blanket-implemented for every [`DocumentDb`]; never implemented by hand.
-pub trait DocumentDbExt: DocumentDb {
-    /// Fetch the document `id` and decode its JSON body as `T`.
     ///
-    /// A body that is not the JSON of a `T` fails with the code `invalid`.
-    fn get_as<T: DeserializeOwned>(
-        &self, collection: &str, id: &str,
-    ) -> impl Future<Output = Result<Option<T>>> + Send {
-        async move { self.get(collection, id).await?.map(|document| document.decode()).transpose() }
+    /// # Errors
+    ///
+    /// - [`ServerError`](Error::ServerError) with the code `invalid` when
+    ///   `value` does not serialize.
+    /// - The host's failure, under its code.
+    pub async fn insert<T: Serialize + Sync + ?Sized>(
+        &self, id: &str, value: &T,
+    ) -> Result<Result<(), Exists>> {
+        let data = encode(id, value)?;
+        let written = self.put(id.to_owned(), data, Some(types::Precondition::Absent)).await?;
+        Ok(written.map(|_revision| ()).map_err(|_conflict| Exists))
+    }
+
+    /// Store `value` as the JSON of the document `id`, replacing any there.
+    ///
+    /// # Errors
+    ///
+    /// - [`ServerError`](Error::ServerError) with the code `invalid` when
+    ///   `value` does not serialize.
+    /// - The host's failure, under its code.
+    pub async fn upsert<T: Serialize + Sync + ?Sized>(&self, id: &str, value: &T) -> Result<()> {
+        self.put(id.to_owned(), encode(id, value)?, None).await??;
+        Ok(())
+    }
+
+    /// One page of the documents `query` selects.
+    ///
+    /// # Errors
+    ///
+    /// - [`ServerError`](Error::ServerError) with the code `invalid` for a
+    ///   filter [`Filter::check`] refuses, or `unsupported` for an `offset`.
+    /// - The host's failure, under its code: `unsupported` for a feature the
+    ///   backend does not serve.
+    pub async fn find(&self, query: &Query) -> Result<collection::Page> {
+        if query.offset.is_some() {
+            return Err(Error::server_error("unsupported", "a document query takes no `offset`"));
+        }
+        let filter = match &query.filter {
+            Some(filter) => filter.groups()?,
+            None => Vec::new(),
+        };
+        let filter = filter.into_iter().map(|group| group.into_iter().map(Into::into).collect());
+        let order_by = query.order_by.iter().map(Into::into).collect();
+        Ok(self.query(filter.collect(), order_by, query.after.clone(), query.limit).await?)
     }
 }
 
-impl<P: DocumentDb + ?Sized> DocumentDbExt for P {}
+impl types::Document {
+    /// Deserialize the document's JSON as `T`.
+    ///
+    /// # Errors
+    ///
+    /// [`ServerError`](Error::ServerError) with the code `invalid` when the
+    /// JSON does not decode as `T`.
+    pub fn decode<T: DeserializeOwned>(&self) -> Result<T> {
+        decode(&self.id, self.data.as_bytes())
+    }
+}
+
+// a write with no precondition has none to fail
+impl From<types::Conflict> for Error {
+    fn from(_: types::Conflict) -> Self {
+        Self::server_error("other", "the host reported a conflict on an unconditional write")
+    }
+}
+
+fn encode<T: Serialize + ?Sized>(id: &str, value: &T) -> Result<String> {
+    serde_json::to_string(value)
+        .map_err(|err| Error::server_error("invalid", format!("encoding document `{id}`: {err}")))
+}
+
+fn decode<T: DeserializeOwned>(id: &str, data: &[u8]) -> Result<T> {
+    serde_json::from_slice(data)
+        .map_err(|err| Error::server_error("invalid", format!("decoding document `{id}`: {err}")))
+}
 
 /// Scalar values for filter comparisons.
 #[derive(Debug, Clone, PartialEq)]
@@ -572,6 +620,15 @@ impl SortField {
     }
 }
 
+impl From<&SortField> for collection::SortField {
+    fn from(sort: &SortField) -> Self {
+        Self {
+            field: sort.field.clone(),
+            descending: sort.descending,
+        }
+    }
+}
+
 fn json_cmp(a: &Value, b: &Value) -> Ordering {
     const fn rank(value: &Value) -> u8 {
         match value {
@@ -613,62 +670,12 @@ pub struct Query {
     /// A query that sets it fails with the code `unsupported`.
     pub offset: Option<u32>,
 
-    /// The [`next`](Page::next) cursor of the previous page, or `None` for the
-    /// first page.
+    /// The `next` cursor of the previous [`collection::Page`], or `None` for
+    /// the first page.
     pub after: Option<String>,
 }
 
-/// Stored document: identifier plus JSON body bytes.
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
-pub struct Document {
-    /// Primary key string.
-    pub id: String,
-
-    /// JSON payload.
-    pub data: Bytes,
-}
-
-impl Document {
-    /// The document `id` names, with `data` as its JSON body.
-    pub fn new(id: impl Into<String>, data: &[u8]) -> Self {
-        Self {
-            id: id.into(),
-            data: Bytes::copy_from_slice(data),
-        }
-    }
-
-    /// The document `id` names, with `value` serialized as its JSON body.
-    ///
-    /// # Errors
-    ///
-    /// A [`ServerError`](Error::ServerError) with the code `invalid` when
-    /// `value` does not serialize.
-    pub fn json<T: Serialize + ?Sized>(id: impl Into<String>, value: &T) -> Result<Self> {
-        let id = id.into();
-        let data = serde_json::to_vec(value).map_err(|err| {
-            Error::server_error("invalid", format!("encoding document `{id}`: {err}"))
-        })?;
-        Ok(Self {
-            id,
-            data: Bytes::from(data),
-        })
-    }
-
-    /// Deserialize the JSON body as `T`.
-    ///
-    /// # Errors
-    ///
-    /// A [`ServerError`](Error::ServerError) with the code `invalid` when the
-    /// body is not the JSON of a `T`.
-    pub fn decode<T: DeserializeOwned>(&self) -> Result<T> {
-        serde_json::from_slice(&self.data).map_err(|err| {
-            Error::server_error("invalid", format!("decoding document `{}`: {err}", self.id))
-        })
-    }
-}
-
-/// The outcome of an [`insert`](DocumentDb::insert) whose id is already stored.
+/// The outcome of an [`insert`](Collection::insert) whose id is already stored.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Exists;
 

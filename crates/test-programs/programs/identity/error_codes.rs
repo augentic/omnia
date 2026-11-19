@@ -7,7 +7,8 @@
 
 use std::fmt::Debug;
 
-use omnia_sdk::{Identity as _, Result, WasiProvider};
+use omnia_sdk::Result;
+use omnia_sdk::identity::{AccessToken, credentials};
 
 omnia_sdk::api::command::export!(scenario);
 
@@ -20,8 +21,12 @@ async fn scenario() {
         ("unavailable", 502, "unavailable"),
         ("other", 500, "other"),
     ] {
-        expect_code(WasiProvider.named(name).token(&["read"]).await, status, code);
+        expect_code(token(name).await, status, code);
     }
+}
+
+async fn token(name: &str) -> Result<AccessToken> {
+    credentials::open(name.to_owned()).await?.token(&["read"]).await
 }
 
 fn expect_code<T: Debug>(result: Result<T>, status: u16, code: &str) {

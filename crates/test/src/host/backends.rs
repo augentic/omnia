@@ -9,7 +9,7 @@ use omnia_wasi_config::{ConfigDefault, WasiConfig};
 use omnia_wasi_docstore::{
     ConnectOptions as DocStoreOptions, DocStoreClient, DocStoreDefault, WasiDocStore,
 };
-use omnia_wasi_http::{ConnectOptions as HttpOptions, HttpDefault, WasiHttp};
+use omnia_wasi_http::{ConnectOptions as HttpOptions, HttpBorrow, HttpDefault, WasiHttp};
 use omnia_wasi_identity::{IdentityClient, IdentityStub, WasiIdentity};
 use omnia_wasi_keyvalue::{
     ConnectOptions as KeyValueOptions, KeyValueClient, KeyValueDefault, WasiKeyValue,
@@ -20,13 +20,13 @@ use omnia_wasi_otel::{OtelClient, OtelDefault, WasiOtel};
 use omnia_wasi_sql::{ConnectOptions as SqlOptions, SqlClient, SqlDefault, WasiSql};
 use omnia_wasi_vault::{ConnectOptions as VaultOptions, VaultClient, VaultDefault, WasiVault};
 use omnia_wasi_vcs::{VcsClient, WasiVcs};
-use omnia_wasi_websocket::{WasiWebSocket, WebSocketDefault};
+use omnia_wasi_websocket::{WasiWebSocket, WebSocketClient, WebSocketDefault};
 
 #[cfg(doc)]
-use super::ScriptedModel;
+use super::{MatchedHttp, ScriptedModel, Sink};
 
-/// The keyvalue bucket `omnia_sdk`'s wasm32 `StateStore` opens, the one bucket
-/// the default keyvalue backend declares.
+/// The one bucket the default keyvalue backend declares, the `DEFAULT`
+/// bucket of `omnia_sdk::keyvalue`.
 pub const STATE_BUCKET: &str = "default";
 
 /// Every host's default backend as one bundle, each swappable for another
@@ -58,8 +58,8 @@ pub const STATE_BUCKET: &str = "default";
 ///
 /// One type parameter per swappable host, each defaulting to the in-memory
 /// backend, so `Backends` with no arguments is the all-default bundle and a
-/// setter changes exactly one parameter. Config, HTTP, and websocket have no
-/// production backend to swap in and stay concrete. Version control has no
+/// setter changes exactly one parameter. Config alone stays concrete, since
+/// the map a scenario seeds is the whole backend. Version control has no
 /// in-memory backend at all: the slot holds [`NoVcs`] until
 /// [`vcs`](Self::vcs) fills it, and a deployment linking `WasiVcs` over the
 /// default bundle fails to link.
@@ -75,6 +75,8 @@ pub struct Backends<
     I = IdentityStub,
     O = OtelDefault,
     C = NoVcs,
+    H = HttpDefault,
+    W = WebSocketDefault,
 > {
     /// The `omnia:blobstore` backend.
     pub blobstore: B,
@@ -82,8 +84,8 @@ pub struct Backends<
     pub config: ConfigDefault,
     /// The `omnia:docstore` backend.
     pub docstore: D,
-    /// Outbound `wasi:http`.
-    pub http: HttpDefault,
+    /// The outbound `wasi:http` backend.
+    pub http: H,
     /// The `omnia:identity` backend.
     pub identity: I,
     /// The `omnia:keyvalue` backend.
@@ -100,8 +102,9 @@ pub struct Backends<
     pub vault: V,
     /// The `omnia:vcs` backend, [`NoVcs`] until one is set.
     pub vcs: C,
-    /// In-process `omnia:websocket` serving no listener.
-    pub websocket: WebSocketDefault,
+    /// The `omnia:websocket` backend, by default in process with no
+    /// listener.
+    pub websocket: W,
 }
 
 impl Backends {
@@ -147,7 +150,7 @@ impl Backends {
     }
 }
 
-impl<M, K, B, D, S, V, G, I, O, C> Backends<M, K, B, D, S, V, G, I, O, C> {
+impl<M, K, B, D, S, V, G, I, O, C, H, W> Backends<M, K, B, D, S, V, G, I, O, C, H, W> {
     /// The same bundle answering `omnia:config` lookups from `vars` alone.
     #[must_use]
     pub fn config<Key, Value>(mut self, vars: impl IntoIterator<Item = (Key, Value)>) -> Self
@@ -162,7 +165,9 @@ impl<M, K, B, D, S, V, G, I, O, C> Backends<M, K, B, D, S, V, G, I, O, C> {
     /// The same bundle answering completions with `model` — a
     /// [`ScriptedModel`] or any other `ModelClient`.
     #[must_use]
-    pub fn model<N: ModelClient + Clone>(self, model: N) -> Backends<N, K, B, D, S, V, G, I, O, C> {
+    pub fn model<N: ModelClient + Clone>(
+        self, model: N,
+    ) -> Backends<N, K, B, D, S, V, G, I, O, C, H, W> {
         Backends {
             blobstore: self.blobstore,
             config: self.config,
@@ -184,7 +189,7 @@ impl<M, K, B, D, S, V, G, I, O, C> Backends<M, K, B, D, S, V, G, I, O, C> {
     #[must_use]
     pub fn keyvalue<N: KeyValueClient + Clone>(
         self, keyvalue: N,
-    ) -> Backends<M, N, B, D, S, V, G, I, O, C> {
+    ) -> Backends<M, N, B, D, S, V, G, I, O, C, H, W> {
         Backends {
             blobstore: self.blobstore,
             config: self.config,
@@ -206,7 +211,7 @@ impl<M, K, B, D, S, V, G, I, O, C> Backends<M, K, B, D, S, V, G, I, O, C> {
     #[must_use]
     pub fn blobstore<N: BlobStoreClient + Clone>(
         self, blobstore: N,
-    ) -> Backends<M, K, N, D, S, V, G, I, O, C> {
+    ) -> Backends<M, K, N, D, S, V, G, I, O, C, H, W> {
         Backends {
             blobstore,
             config: self.config,
@@ -228,7 +233,7 @@ impl<M, K, B, D, S, V, G, I, O, C> Backends<M, K, B, D, S, V, G, I, O, C> {
     #[must_use]
     pub fn docstore<N: DocStoreClient + Clone>(
         self, docstore: N,
-    ) -> Backends<M, K, B, N, S, V, G, I, O, C> {
+    ) -> Backends<M, K, B, N, S, V, G, I, O, C, H, W> {
         Backends {
             blobstore: self.blobstore,
             config: self.config,
@@ -248,7 +253,7 @@ impl<M, K, B, D, S, V, G, I, O, C> Backends<M, K, B, D, S, V, G, I, O, C> {
 
     /// The same bundle serving `omnia:sql` from `sql`.
     #[must_use]
-    pub fn sql<N: SqlClient + Clone>(self, sql: N) -> Backends<M, K, B, D, N, V, G, I, O, C> {
+    pub fn sql<N: SqlClient + Clone>(self, sql: N) -> Backends<M, K, B, D, N, V, G, I, O, C, H, W> {
         Backends {
             blobstore: self.blobstore,
             config: self.config,
@@ -268,7 +273,9 @@ impl<M, K, B, D, S, V, G, I, O, C> Backends<M, K, B, D, S, V, G, I, O, C> {
 
     /// The same bundle serving `omnia:vault` from `vault`.
     #[must_use]
-    pub fn vault<N: VaultClient + Clone>(self, vault: N) -> Backends<M, K, B, D, S, N, G, I, O, C> {
+    pub fn vault<N: VaultClient + Clone>(
+        self, vault: N,
+    ) -> Backends<M, K, B, D, S, N, G, I, O, C, H, W> {
         Backends {
             blobstore: self.blobstore,
             config: self.config,
@@ -290,7 +297,7 @@ impl<M, K, B, D, S, V, G, I, O, C> Backends<M, K, B, D, S, V, G, I, O, C> {
     #[must_use]
     pub fn messaging<N: MessagingClient + Clone>(
         self, messaging: N,
-    ) -> Backends<M, K, B, D, S, V, N, I, O, C> {
+    ) -> Backends<M, K, B, D, S, V, N, I, O, C, H, W> {
         Backends {
             blobstore: self.blobstore,
             config: self.config,
@@ -312,7 +319,7 @@ impl<M, K, B, D, S, V, G, I, O, C> Backends<M, K, B, D, S, V, G, I, O, C> {
     #[must_use]
     pub fn identity<N: IdentityClient + Clone>(
         self, identity: N,
-    ) -> Backends<M, K, B, D, S, V, G, N, O, C> {
+    ) -> Backends<M, K, B, D, S, V, G, N, O, C, H, W> {
         Backends {
             blobstore: self.blobstore,
             config: self.config,
@@ -332,7 +339,9 @@ impl<M, K, B, D, S, V, G, I, O, C> Backends<M, K, B, D, S, V, G, I, O, C> {
 
     /// The same bundle serving `omnia:otel` from `otel`.
     #[must_use]
-    pub fn otel<N: OtelClient + Clone>(self, otel: N) -> Backends<M, K, B, D, S, V, G, I, N, C> {
+    pub fn otel<N: OtelClient + Clone>(
+        self, otel: N,
+    ) -> Backends<M, K, B, D, S, V, G, I, N, C, H, W> {
         Backends {
             blobstore: self.blobstore,
             config: self.config,
@@ -353,7 +362,7 @@ impl<M, K, B, D, S, V, G, I, O, C> Backends<M, K, B, D, S, V, G, I, O, C> {
     /// The same bundle serving `omnia:vcs` from `vcs`, the one slot with no
     /// default to replace.
     #[must_use]
-    pub fn vcs<N: VcsClient + Clone>(self, vcs: N) -> Backends<M, K, B, D, S, V, G, I, O, N> {
+    pub fn vcs<N: VcsClient + Clone>(self, vcs: N) -> Backends<M, K, B, D, S, V, G, I, O, N, H, W> {
         Backends {
             blobstore: self.blobstore,
             config: self.config,
@@ -370,6 +379,52 @@ impl<M, K, B, D, S, V, G, I, O, C> Backends<M, K, B, D, S, V, G, I, O, C> {
             websocket: self.websocket,
         }
     }
+
+    /// The same bundle answering outbound `wasi:http` with `http` — a
+    /// [`MatchedHttp`] or any other `HttpBorrow`.
+    #[must_use]
+    pub fn http<N: HttpBorrow + Clone + Sync + 'static>(
+        self, http: N,
+    ) -> Backends<M, K, B, D, S, V, G, I, O, C, N, W> {
+        Backends {
+            blobstore: self.blobstore,
+            config: self.config,
+            docstore: self.docstore,
+            http,
+            identity: self.identity,
+            keyvalue: self.keyvalue,
+            messaging: self.messaging,
+            model: self.model,
+            otel: self.otel,
+            sql: self.sql,
+            vault: self.vault,
+            vcs: self.vcs,
+            websocket: self.websocket,
+        }
+    }
+
+    /// The same bundle serving `omnia:websocket` from `websocket` — a
+    /// [`Sink`] or any other `WebSocketClient`.
+    #[must_use]
+    pub fn websocket<N: WebSocketClient + Clone>(
+        self, websocket: N,
+    ) -> Backends<M, K, B, D, S, V, G, I, O, C, H, N> {
+        Backends {
+            blobstore: self.blobstore,
+            config: self.config,
+            docstore: self.docstore,
+            http: self.http,
+            identity: self.identity,
+            keyvalue: self.keyvalue,
+            messaging: self.messaging,
+            model: self.model,
+            otel: self.otel,
+            sql: self.sql,
+            vault: self.vault,
+            vcs: self.vcs,
+            websocket,
+        }
+    }
 }
 
 /// One `Provides` impl per host, each yielding the named field's borrow.
@@ -382,8 +437,8 @@ impl<M, K, B, D, S, V, G, I, O, C> Backends<M, K, B, D, S, V, G, I, O, C> {
 macro_rules! provides {
     ($($host:ty => $field:ident),* $(,)?) => {
         $(
-            impl<M, K, B, D, S, V, G, I, O, C> Provides<$host>
-                for Backends<M, K, B, D, S, V, G, I, O, C>
+            impl<M, K, B, D, S, V, G, I, O, C, H, W> Provides<$host>
+                for Backends<M, K, B, D, S, V, G, I, O, C, H, W>
             where
                 M: ModelClient + Clone,
                 K: KeyValueClient + Clone,
@@ -395,6 +450,8 @@ macro_rules! provides {
                 I: IdentityClient + Clone,
                 O: OtelClient + Clone,
                 C: Clone + Send + Sync + 'static,
+                H: HttpBorrow + Clone + Sync + 'static,
+                W: WebSocketClient + Clone,
             {
                 fn borrow(&mut self) -> <$host as HostCtx>::Borrow<'_> {
                     &mut self.$field
@@ -419,7 +476,8 @@ provides! {
     WasiWebSocket => websocket,
 }
 
-impl<M, K, B, D, S, V, G, I, O, C> Provides<WasiVcs> for Backends<M, K, B, D, S, V, G, I, O, C>
+impl<M, K, B, D, S, V, G, I, O, C, H, W> Provides<WasiVcs>
+    for Backends<M, K, B, D, S, V, G, I, O, C, H, W>
 where
     M: ModelClient + Clone,
     K: KeyValueClient + Clone,
@@ -431,6 +489,8 @@ where
     I: IdentityClient + Clone,
     O: OtelClient + Clone,
     C: VcsClient + Clone,
+    H: HttpBorrow + Clone + Sync + 'static,
+    W: WebSocketClient + Clone,
 {
     fn borrow(&mut self) -> <WasiVcs as HostCtx>::Borrow<'_> {
         &mut self.vcs

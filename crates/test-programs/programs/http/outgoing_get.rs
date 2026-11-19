@@ -1,4 +1,4 @@
-//! One outbound GET through `omnia_wasi_http::handle` against the host's
+//! One outbound GET through `omnia_sdk::http::send` against the host's
 //! loopback origin: the status, marker header, and body the origin answered
 //! arrive intact, and no `ETag` is minted when caching is not requested.
 
@@ -6,12 +6,12 @@
 
 use http::header::ETAG;
 use http::{Method, Request, StatusCode};
-use omnia_sdk::{ConfigExt as _, WasiProvider};
+use omnia_sdk::config;
 
 omnia_sdk::api::command::export!(scenario);
 
 async fn scenario() {
-    let origin: String = WasiProvider.require("ORIGIN").await.expect("ORIGIN seeded");
+    let origin: String = config::require("ORIGIN").await.expect("ORIGIN seeded");
 
     let request = Request::builder()
         .method(Method::GET)
@@ -19,7 +19,7 @@ async fn scenario() {
         .header("x-probe", "1")
         .body(String::new())
         .expect("request");
-    let response = omnia_wasi_http::handle(request).await.expect("handle");
+    let response = omnia_sdk::http::send(request).await.expect("handle");
 
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response.headers().get("x-mock").and_then(|v| v.to_str().ok()), Some("origin"));

@@ -4,7 +4,7 @@ The `omnia:plugins` capability for the [omnia](https://github.com/augentic/omnia
 
 ## Interface
 
-Implements `omnia:plugins`, the interface the SDK's `Plugins` calls. A caller names a `source`, and the host acquires the bytes inside the deployment's grant, verifies them, and admits them through the runtime's admission seam under the name the source derives. Component bytes never cross the interface, and nothing a caller passes widens the grant.
+Implements `omnia:plugins`, the interface the SDK's `plugins` module binds. A caller names a `source`, and the host acquires the bytes inside the deployment's grant, verifies them, and admits them through the runtime's admission seam under the name the source derives. Component bytes never cross the interface, and nothing a caller passes widens the grant.
 
 - `declared(name)` names one of the deployment's `[[guest]]` entries. A name outside the guest list is `not-found`. One not yet loaded goes through the runtime's own first-use seam (`Runtime::guest`, the same one a route or a link call loads it through), and an active one is attested, not fetched. The entry carries the pin, so the source carries none.
 - `path(file)` names a component beneath one of the deployment's read-only mounts, with an optional `pin`, and registers as its file stem. It loads through the mount it lies beneath alone:

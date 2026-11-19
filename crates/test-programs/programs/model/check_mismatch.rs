@@ -3,7 +3,6 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_sdk::WasiProvider;
 use omnia_sdk::model::{Error, Question};
 use test_programs::Verdict;
 
@@ -11,7 +10,7 @@ omnia_sdk::api::command::export!(scenario);
 
 async fn scenario() {
     let error = Question::<Verdict>::new("verdict")
-        .ask(&WasiProvider, "judge this", None, |_: &Verdict| {
+        .ask("judge this", None, |_: &Verdict| {
             panic!("a candidate that does not deserialize never reaches the check")
         })
         .await

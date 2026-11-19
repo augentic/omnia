@@ -3,8 +3,7 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_sdk::WasiProvider;
-use omnia_sdk::model::{Error, Format, Generation, Model as _, Request, SchemaFormat};
+use omnia_sdk::model::{Error, Format, Generation, Request, SchemaFormat};
 use test_programs::{VERDICT_SCHEMA, user};
 
 omnia_sdk::api::command::export!(scenario);
@@ -24,7 +23,7 @@ async fn scenario() {
     for (request, needle) in
         [(schema, "cannot satisfy format::schema"), (generation, "ignores generation controls")]
     {
-        let error = WasiProvider.complete(request).await.expect_err("the echo refuses");
+        let error = request.complete().await.expect_err("the echo refuses");
         assert!(
             matches!(error, Error::Unsupported(ref detail) if detail.contains(needle)),
             "unexpected: {error:?}"

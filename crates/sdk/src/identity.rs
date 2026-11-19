@@ -1,50 +1,52 @@
-//! Identity and access-token capability.
+//! `omnia:identity`, access tokens for the identities a deployment declares.
+//!
+//! A guest opens an [`Identity`](credentials::Identity) with
+//! [`credentials::open`], [`DEFAULT`] unless the deployment declares another.
+//! Beside the generated `get_token`, an identity returns an [`AccessToken`]
+//! whose [`Debug`] form redacts the token.
 
 use std::fmt;
-use std::future::Future;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::Result;
+pub use crate::bindings::imports::omnia::identity::{credentials, types};
 
-/// Obtain access tokens for the identities a deployment declares.
-///
-/// A handle acts as one identity. A provider's own handle uses
-/// [`identity::DEFAULT`](DEFAULT), and [`named`](Self::named) selects
-/// another. An identity the deployment does not declare fails with the code
-/// `not-found` when a token is requested. The bare token string is
-/// [`IdentityExt`].
-#[omnia_guest_macros::capability]
-pub trait Identity: Send + Sync {
-    /// The handle [`named`](Self::named) returns.
-    type Named: Identity<Named = Self::Named>;
-
+impl credentials::Identity {
     /// An access token for this identity, scoped to `scopes`.
     ///
     /// An empty `scopes` asks for the identity's default scopes. A portable
-    /// request names one scope, and a provider may fail any other number with
-    /// the code `unsupported`.
-    fn token(&self, scopes: &[&str]) -> impl Future<Output = Result<AccessToken>> + Send;
+    /// request names one scope.
+    ///
+    /// # Errors
+    ///
+    /// The host's failure, under its code: `unsupported` for a number of
+    /// scopes the backend cannot serve.
+    pub async fn token(&self, scopes: &[&str]) -> Result<AccessToken> {
+        let scopes = scopes.iter().map(|&scope| scope.to_owned()).collect();
+        let token = self.get_token(scopes).await?;
+        Ok(AccessToken::new(token.token, time_left(token.expires_at)))
+    }
 
-    /// A handle to the identity `name` on the same provider.
-    fn named(&self, name: &str) -> Self::Named;
-}
-
-/// Token shorthands over any [`Identity`].
-///
-/// Blanket-implemented for every [`Identity`]; never implemented by hand.
-pub trait IdentityExt: Identity {
     /// The token string for this identity's default scopes.
     ///
-    /// Not every identity has default scopes, and a provider may fail this
-    /// with the code `unsupported`.
-    fn access_token(&self) -> impl Future<Output = Result<String>> + Send {
-        async move { Ok(self.token(&[]).await?.token) }
+    /// # Errors
+    ///
+    /// The host's failure, under its code: `unsupported` when the identity
+    /// has no default scopes.
+    pub async fn access_token(&self) -> Result<String> {
+        Ok(self.token(&[]).await?.token)
     }
 }
 
-impl<P: Identity + ?Sized> IdentityExt for P {}
+// the time left before `expires_at`, an instant in milliseconds since the Unix
+// epoch, and zero once it has passed
+fn time_left(expires_at: u64) -> Duration {
+    UNIX_EPOCH.checked_add(Duration::from_millis(expires_at)).map_or(Duration::MAX, |expiry| {
+        expiry.duration_since(SystemTime::now()).unwrap_or_default()
+    })
+}
 
-/// The identity a provider's own [`Identity`] handle uses.
+/// The identity a guest opens when the deployment names no other.
 pub const DEFAULT: &str = "default";
 
 /// An `OAuth` 2.0 access token and how long it stays valid.
@@ -56,8 +58,8 @@ pub struct AccessToken {
     /// The `OAuth` 2.0 access token.
     pub token: String,
 
-    /// How long the token stays valid, counted from when [`Identity::token`]
-    /// returned it.
+    /// How long the token stays valid, counted from when
+    /// [`token`](credentials::Identity::token) returned it.
     pub expires_in: Duration,
 }
 

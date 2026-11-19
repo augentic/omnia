@@ -58,9 +58,7 @@ enum ErrorClass {
     BadGateway,
 }
 
-struct Provider {
-    greeting: &'static str,
-}
+const GREETING: &str = "Hello";
 
 #[derive(Serialize)]
 struct Greeting {
@@ -94,23 +92,23 @@ impl Render for Env {
     }
 }
 
-async fn greet(context: Context<Provider>, input: GreetInput) -> Result<Greeting, Error> {
+async fn greet(_context: Context, input: GreetInput) -> Result<Greeting, Error> {
     Ok(Greeting {
-        greeting: format!("{}, {}!", context.provider().greeting, input.name),
+        greeting: format!("{GREETING}, {}!", input.name),
     })
 }
 
-async fn add(_context: Context<Provider>, input: AddInput) -> Result<Sum, Error> {
+async fn add(_context: Context, input: AddInput) -> Result<Sum, Error> {
     Ok(Sum {
         sum: input.numbers.iter().sum(),
     })
 }
 
-async fn env(_context: Context<Provider>, EnvInput: EnvInput) -> Result<Env, Error> {
+async fn env(_context: Context, EnvInput: EnvInput) -> Result<Env, Error> {
     Ok(Env(std::env::vars().collect()))
 }
 
-async fn fail(_context: Context<Provider>, input: FailInput) -> Result<(), Error> {
+async fn fail(_context: Context, input: FailInput) -> Result<(), Error> {
     Err(match input.class {
         ErrorClass::BadRequest => bad_request!("failing as a bad request"),
         ErrorClass::NotFound => not_found!("failing as not found"),
@@ -119,15 +117,15 @@ async fn fail(_context: Context<Provider>, input: FailInput) -> Result<(), Error
     })
 }
 
-fn command_router(provider: Provider) -> Router<Provider> {
+fn command_router() -> Router {
     Handlers::new()
         .command("greet", greet)
         .command("add", add)
         .command("env", env)
         .command("fail", fail)
-        .with_state(provider)
+        .into_router()
         .name("cli")
         .about("Omnia wasi:cli/command example")
 }
 
-command::export!(command_router, Provider { greeting: "Hello" });
+command::export!(command_router);

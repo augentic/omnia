@@ -29,7 +29,7 @@ resource model {
 
 The `core` world holds `types` and `completion`, which every backend serves. The `imports` world includes `core`, and an optional interface joins it there.
 
-Guests normally reach these through the `omnia_sdk::Model` trait, which `omnia_sdk::WasiProvider` implements on `wasm32` over the raw bindings at `omnia_wasi_model::omnia::{completion, types}`. `Model::complete` and `Model::complete_with` run the session and hand each tool call to a closure (see the [guide](../guides/model-completions.md)). Each maps to the WIT as follows:
+Guests normally reach these through `omnia_sdk::model`, which re-exports the bindings as `completion` and `types`. `Request::complete` and `Request::complete_with` run the session and hand each tool call to a closure (see the [guide](../guides/model-completions.md)). Each maps to the WIT as follows:
 
 - It opens `Request::model`, or `default` when that is `None`.
 - A `Tool::Function` is a `tool`, and an empty description is `none`.

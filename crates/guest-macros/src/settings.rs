@@ -30,7 +30,7 @@ pub fn expand(input: &DeriveInput) -> Result<TokenStream> {
         let ty = &field.ty;
         keys.push(key.clone());
         loads.push(quote! {
-            #ident: ::omnia_sdk::ConfigExt::require::<#ty>(config, #key).await?,
+            #ident: ::omnia_sdk::config::require::<#ty>(#key).await?,
         });
     }
 
@@ -42,7 +42,7 @@ pub fn expand(input: &DeriveInput) -> Result<TokenStream> {
             /// The configuration keys [`Self::load`] reads, one per field.
             pub const KEYS: &'static [&'static str] = &[ #(#keys),* ];
 
-            /// Load every field from its key in `config`.
+            /// Load every field from its key in the deployment's configuration.
             ///
             /// # Errors
             ///
@@ -50,9 +50,7 @@ pub fn expand(input: &DeriveInput) -> Result<TokenStream> {
             ///   unset or its value does not parse as the field's type.
             /// - [`BadGateway`](::omnia_sdk::Error::BadGateway) when the
             ///   configuration source does not answer.
-            pub async fn load<__C: ::omnia_sdk::Config + ?Sized>(
-                config: &__C,
-            ) -> ::omnia_sdk::Result<Self> {
+            pub async fn load() -> ::omnia_sdk::Result<Self> {
                 ::core::result::Result::Ok(Self {
                     #(#loads)*
                 })
