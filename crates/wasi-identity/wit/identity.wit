@@ -1,4 +1,4 @@
-package omnia:identity@0.2.0;
+package omnia:identity@0.1.0;
 
 /// The types the identity interfaces share.
 ///

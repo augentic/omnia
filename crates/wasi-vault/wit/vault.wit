@@ -1,4 +1,4 @@
-package omnia:vault@0.2.0;
+package omnia:vault@0.1.0;
 
 /// The types the vault interfaces share.
 ///

@@ -1,4 +1,4 @@
-package omnia:model@0.3.0;
+package omnia:model@0.1.0;
 
 /// The types the model interfaces share.
 ///

@@ -1,4 +1,4 @@
-package omnia:otel@0.2.0;
+package omnia:otel@0.1.0;
 
 /// The types the telemetry interfaces share.
 ///
