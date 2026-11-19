@@ -208,6 +208,33 @@ Unreleased
   - A request that gives a tool name twice is `invalid`.
   - On `wasm32`, `omnia_wasi_model::omnia` holds the raw bindings, which
     the crate root held.
+- `omnia:vcs`, rewritten in place as the interface `Vcs` calls. `WasiVcs`
+  serves it over one `VcsClient`:
+  - `store.open` answers a `workspace` handle for the repository or
+    working copy at a `location`, and every call goes through it. A place
+    that holds none fails with `not-found`. `store.init` keeps a
+    repository already there.
+  - A lookup that finds nothing is `none`. That covers a revision, a
+    bookmark, a remote's bookmark, and the `head` of a workspace with no
+    commits.
+  - A merge that leaves conflicts answers a `merge-conflict` naming their
+    paths. A push the remote moved past answers `diverged`. A merge into
+    pending changes fails with `invalid`.
+  - `log` and `status` answer one page of at most 1,000 entries, and the
+    cursor that resumes it.
+  - `set-bookmark` takes an `absent` or `matches` precondition, and one
+    that fails answers a `conflict` carrying the commit it found.
+  - The `error` has one case per capability error code.
+  - The optional `workspaces` interface adds and removes a further
+    workspace of a repository. The optional `remotes` interface clones,
+    fetches, reads a remote's bookmark, and pushes.
+  - `WasiVcs` answers `unsupported` for a `log` with no base and a
+    `set-bookmark` with a precondition.
+  - Over `WasiProvider`, `Vcs::init` where a repository already is
+    succeeds. `Vcs::add` and `Vcs::clone_repo` onto a directory that holds
+    anything fail with `Error::Other`. Each failed with `Error::Exists`.
+  - On `wasm32`, `omnia_wasi_vcs::omnia` holds the raw bindings, which the
+    crate root held.
 - The codes of a failed capability call. Its `omnia_sdk::Error` names the
   class of failure in its code:
   - `not-found`, `denied`, `invalid`, `unsupported`, or `other` on a

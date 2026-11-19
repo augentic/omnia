@@ -1,6 +1,6 @@
 //! # WASI VCS Guest
 
-// Bindings for the `omnia:vcs` world.
+// Bindings for `omnia:vcs`.
 mod generated {
     #![allow(missing_docs, clippy::same_length_and_capacity, reason = "wit-bindgen output")]
     wit_bindgen::generate!({
@@ -14,4 +14,7 @@ mod generated {
     });
 }
 
-pub use self::generated::omnia::vcs::*;
+/// `omnia:vcs`, the interfaces behind the SDK's `Vcs`.
+pub mod omnia {
+    pub use crate::guest::generated::omnia::vcs::*;
+}

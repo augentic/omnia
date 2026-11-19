@@ -1,188 +1,357 @@
 package omnia:vcs@0.1.0;
 
-/// Version-controlled repository access in the nouns git and jj share, cut
-/// into three interfaces a backend exports what it has of: `store`, the
-/// commit graph; `workspace`, working copies materialised beneath a mount;
-/// `transport`, remotes and labels. A repository is the location of its
-/// clone and a working copy is its own, so no handle crosses an interface and
-/// no host path reaches a guest. A working copy carries no branch: it sits on
-/// a sealed commit and holds pending changes until `commit` seals them.
+/// The types the version control interfaces share.
+///
+/// Every backend accepts a portable name, and may reject any other as
+/// `invalid`.
+///
+/// - A portable bookmark name is one or more segments joined by `/`. Each
+///   segment holds only ASCII letters, digits, `.`, `_`, and `-`, and starts
+///   and ends with a letter or digit. No segment holds `..` or ends with
+///   `.lock`.
+/// - A portable remote name holds only ASCII letters, digits, `_`, and `-`,
+///   starts with a letter or digit, and is not `git`.
+/// - A portable revision is a bookmark name, or a commit id, whole or as a
+///   prefix no other commit id shares.
+/// - A portable message is not empty and has no whitespace at either end.
 interface types {
-    use wasi:filesystem/types@0.3.2.{descriptor};
+  use wasi:filesystem/types@0.3.2.{descriptor};
 
-    /// A place beneath an authorised mount: `omnia:model`'s `location`. The
-    /// host resolves it against the mount registry, so nothing outside a
-    /// mount is touched.
-    record location {
-        /// Must be an authorised mount root.
-        root: borrow<descriptor>,
-        /// `/`-separated plain relative path beneath `root`; empty names the
-        /// mount itself. Resolved beneath the verified root, so it can never
-        /// escape the mount. The location need not exist yet: `init`, `add`,
-        /// and `clone` create it.
-        subpath: string,
-    }
+  /// Why a call failed.
+  variant error {
+    /// No workspace is at the place, or the repository does not know a
+    /// revision, a bookmark, or a remote the call needs. A lookup that
+    /// finds nothing is not an error.
+    not-found(string),
+    /// The caller may not make the call, such as a place the guest does not
+    /// hold, a change beneath a read-only mount, or a remote that refuses
+    /// the caller.
+    denied(string),
+    /// The request was rejected, such as a subpath that breaks its rule, a
+    /// place that is already taken, or a merge into pending changes.
+    invalid(string),
+    /// A valid request this backend cannot serve.
+    unsupported(string),
+    /// A remote did not answer, or the call exceeded its bound.
+    unavailable(string),
+    /// Any other failure.
+    other(string),
+  }
 
-    /// Typed failure.
-    variant error {
-        /// The location holds no repository or working copy.
-        not-a-repository,
-        /// A working copy already exists at the location.
-        exists(string),
-        /// A revision, remote, or label the repository does not know.
-        not-found(string),
-        /// A working copy holds pending changes where none may.
-        pending(list<string>),
-        /// The remote refused, could not be reached, or wants credentials.
-        access(string),
-        /// The remote's label holds commits the pushed one does not; nothing
-        /// was forced.
-        diverged(string),
-        /// Any other failure, with the backend's detail.
-        other(string),
-    }
+  /// A place beneath an authorised mount.
+  ///
+  /// The host resolves it against the mounts the guest holds, so nothing
+  /// outside a mount is reached.
+  record location {
+    /// A mount root the guest holds. Any other descriptor is `denied`.
+    root: borrow<descriptor>,
+    /// A `/`-separated relative path beneath `root`. No segment is empty,
+    /// `.`, or `..`, and none holds `\`. An empty path names the root
+    /// itself.
+    subpath: string,
+  }
+
+  /// A backend's id for one commit, compared only for equality.
+  type commit-id = string;
+
+  /// What must hold for a bookmark to move.
+  ///
+  /// A backend that cannot check it atomically fails with `unsupported`.
+  variant precondition {
+    /// The repository has no bookmark of that name.
+    absent,
+    /// The bookmark points at this commit.
+    matches(commit-id),
+  }
+
+  /// A bookmark whose precondition did not hold.
+  record conflict {
+    /// The commit the bookmark points at, `none` when the repository has no
+    /// bookmark of that name.
+    current: option<commit-id>,
+  }
 }
 
-/// The commit graph: sealed snapshots, and the merge under a policy.
-interface store {
-    use types.{location, error};
-
-    /// How a conflict at a matching path is resolved before it is reported.
-    enum strategy {
-        /// Both sides' lines kept, each once: declaration and import lists.
-        union,
-        /// The working copy's side kept whole, for the caller to regenerate:
-        /// lockfiles.
-        ours,
-        /// The merged-in side kept whole.
-        theirs,
-    }
-
-    /// A glob over root-relative paths; the first rule that matches applies.
-    record rule {
-        paths: string,
-        strategy: strategy,
-    }
-
-    /// A merge is data, not an error: the commit when it completed, the paths
-    /// in conflict no rule resolved when it did not. The working copy is back
-    /// on its head either way; a backend that records conflicts as commits
-    /// abandons them.
-    record merged {
-        commit: option<string>,
-        conflicts: list<string>,
-    }
-
-    /// One entry of a `log`: a sealed commit's id and its whole message,
-    /// the trailers a caller wrote into it included.
-    record entry {
-        id: string,
-        message: string,
-    }
-
-    /// A label, a tag, or a commit id, whole or a unique prefix, to the
-    /// commit it names. Which of a label and a tag of one spelling answers
-    /// is the backend's: `labelled` is the label, `fetched` a remote's. Any
-    /// other spelling a backend reads is that backend's alone.
-    resolve: async func(repo: location, revision: string) -> result<string, error>;
-
-    /// Whether `ancestor` is in `descendant`'s history, itself included. An
-    /// endpoint the repository does not know is `not-found` naming it.
-    descends: async func(repo: location, ancestor: string, descendant: string) -> result<bool, error>;
-
-    /// The first-parent chain from `revision` back to `base`, newest first,
-    /// `base` itself left out: what was sealed over a base and how each
-    /// commit describes itself. A merge counts once, as the commit that
-    /// sealed it, never through the side it merged in. A `revision` the
-    /// repository does not know is `not-found`; one `base` does not reach is
-    /// the whole chain from `revision`.
-    log: async func(repo: location, revision: string, base: string) -> result<list<entry>, error>;
-
-    /// The sealed commit the working copy at `at` sits on. A working copy
-    /// with no commit yet is `not-found`.
-    head: async func(at: location) -> result<string, error>;
-
-    /// Seals every pending change as one commit; none when there is nothing.
-    commit: async func(at: location, message: string) -> result<option<string>, error>;
-
-    /// Merges `revision` into the working copy's head under `policy` and
-    /// advances it.
-    merge: async func(at: location, revision: string, message: string, policy: list<rule>) -> result<merged, error>;
-}
-
-/// Working copies: a snapshot laid beneath a mount, and what it holds past it.
+/// One workspace: a working copy and the repository it belongs to. Every
+/// backend serves this interface.
+///
+/// A working copy is a directory of files on one commit, its head. What the
+/// files hold that the head does not is pending until `commit` seals it.
+/// Commits and bookmarks belong to the repository, so every workspace of it
+/// sees the same ones.
+///
+/// A guest reads and writes the files through its own mount, so no call
+/// carries file bytes. A working copy is on a commit, not on a bookmark, so
+/// `commit` moves no bookmark a guest set. A backend may keep a bookmark of
+/// its own that follows the workspace `init` or `clone` made.
 interface workspace {
-    use types.{location, error};
+  use types.{commit-id, conflict, error, precondition};
 
-    /// What a working copy did to a path its head does not hold that way.
-    enum change-kind {
-        added,
-        modified,
-        deleted,
-    }
+  /// How a path in a working copy differs from the head.
+  enum change-kind {
+    /// The head does not hold the path.
+    added,
+    /// The head holds the path with other content.
+    modified,
+    /// The head holds the path and the working copy does not.
+    deleted,
+  }
 
-    /// One pending change, its path root-relative to the working copy.
-    record change {
-        path: string,
-        kind: change-kind,
-    }
+  /// One pending change.
+  record change {
+    /// The path, relative to the working copy's root.
+    path: string,
+    /// How the path differs from the head.
+    kind: change-kind,
+  }
 
-    /// A repository with no history, at `at`.
-    init: async func(at: location) -> result<_, error>;
+  /// One page of pending changes.
+  record status-page {
+    /// The changes on this page, in path order.
+    changes: list<change>,
+    /// The cursor that resumes the listing. Only `none` marks the last page.
+    next: option<string>,
+  }
 
-    /// A working copy at `at` on `revision` and on no label: detached in
-    /// git, a named workspace in jj. Where a backend needs a name, it is its
-    /// own.
-    add: async func(repo: location, at: location, revision: string) -> result<_, error>;
+  /// One commit in a log.
+  record log-entry {
+    /// The commit's id.
+    id: commit-id,
+    /// The message the commit holds.
+    message: string,
+  }
 
-    /// Removes the working copy and its files; pending changes go with it.
-    remove: async func(at: location) -> result<_, error>;
+  /// One page of a log.
+  record log-page {
+    /// The commits on this page, newest first.
+    entries: list<log-entry>,
+    /// The cursor that resumes the listing. Only `none` marks the last page.
+    next: option<string>,
+  }
 
-    /// What the working copy holds that `head` does not.
-    pending: async func(at: location) -> result<list<change>, error>;
+  /// How a merge settles a path both sides changed.
+  enum strategy {
+    /// Keep the lines of both sides, each once. It suits a list whose order
+    /// does not matter.
+    union,
+    /// Keep the whole file as the head holds it. It suits a file the caller
+    /// regenerates.
+    ours,
+    /// Keep the whole file as the merged-in commit holds it.
+    theirs,
+  }
+
+  /// A strategy for the paths a pattern matches.
+  record rule {
+    /// A pattern over paths relative to the working copy's root.
+    ///
+    /// - One with no `/` matches a path's last segment at any depth.
+    /// - One with a `/` matches the whole path.
+    /// - `*` matches within one segment, `?` matches one character of it,
+    ///   and `**/` matches any number of whole segments.
+    ///
+    /// Any other syntax is the backend's own.
+    pattern: string,
+    /// What settles a path the pattern matches.
+    strategy: strategy,
+  }
+
+  /// A merge that sealed nothing.
+  record merge-conflict {
+    /// The paths left in conflict, in path order.
+    paths: list<string>,
+  }
+
+  /// An open workspace.
+  resource workspace {
+    /// The commit `revision` names, `none` when it names none.
+    ///
+    /// Where a bookmark and a commit id share a spelling, the backend
+    /// chooses between them. A backend may read other spellings of its own,
+    /// such as a tag.
+    resolve: async func(revision: string) -> result<option<commit-id>, error>;
+
+    /// Whether `ancestor` is in the history of `descendant`. A commit is in
+    /// its own history. A revision that names no commit fails with
+    /// `not-found`.
+    is-ancestor: async func(ancestor: string, descendant: string) -> result<bool, error>;
+
+    /// One page of the log from `revision` back to `base`, newest first.
+    ///
+    /// - The log starts at `revision` and follows each commit's first
+    ///   parent, so a merge is one entry and what it merged in is left out.
+    /// - It ends before the first commit in the history of `base`. With no
+    ///   `base`, it ends at a commit with no parent.
+    /// - A page holds at most `limit` entries and never more than 1,000. A
+    ///   zero `limit` is `invalid`.
+    /// - `after` is the `next` of the previous page of the same listing.
+    /// - A revision that names no commit fails with `not-found`.
+    log: async func(
+      revision: string, base: option<string>, after: option<string>, limit: option<u32>,
+    ) -> result<log-page, error>;
+
+    /// The commit the working copy is on, `none` before its first commit.
+    head: async func() -> result<option<commit-id>, error>;
+
+    /// One page of the working copy's pending changes. A clean working copy
+    /// returns an empty page.
+    ///
+    /// - A new file is `added` whether or not the backend tracks it yet. A
+    ///   file the repository ignores is left out.
+    /// - A rename is a deletion and an addition.
+    /// - A page holds at most `limit` changes and never more than 1,000. A
+    ///   zero `limit` is `invalid`.
+    /// - `after` is the `next` of the previous page of the same listing. A
+    ///   change pending for the whole listing is returned once. One made or
+    ///   undone during it may or may not be.
+    status: async func(after: option<string>, limit: option<u32>)
+      -> result<status-page, error>;
+
+    /// Seal every pending change as one commit and return its id, `none`
+    /// when nothing is pending. The working copy is then on the new commit.
+    commit: async func(message: string) -> result<option<commit-id>, error>;
+
+    /// Merge the commit `revision` names into the head, and seal the result
+    /// as one commit whose first parent is the head.
+    ///
+    /// - The result is the commit the working copy is then on. When the
+    ///   head already holds `revision`, that is the head and nothing is
+    ///   sealed.
+    /// - The first rule in `policy` that matches a path both sides changed
+    ///   settles that path. The backend merges every other path. A path
+    ///   neither can settle is left in conflict.
+    /// - A merge that leaves a path in conflict seals nothing. The working
+    ///   copy stays on its head with nothing pending.
+    /// - A working copy with pending changes is `invalid`. A revision that
+    ///   names no commit is `not-found`. A strategy the backend does not
+    ///   have is `unsupported`. None of the three changes anything.
+    merge: async func(revision: string, message: string, policy: list<rule>)
+      -> result<result<commit-id, merge-conflict>, error>;
+
+    /// The commit the bookmark `name` points at, `none` when the repository
+    /// has no such bookmark.
+    ///
+    /// Only a bookmark answers. A tag, a remote's bookmark, or a commit id
+    /// of the same spelling does not.
+    bookmark: async func(name: string) -> result<option<commit-id>, error>;
+
+    /// Point the bookmark `name` at the commit `revision` names, creating
+    /// the bookmark or moving it. With `when`, only while the precondition
+    /// holds.
+    ///
+    /// No working copy moves with the bookmark. A revision that names no
+    /// commit fails with `not-found`.
+    set-bookmark: async func(name: string, revision: string, when: option<precondition>)
+      -> result<result<_, conflict>, error>;
+  }
 }
 
-/// Remotes and labels: the half that crosses the network, and the one noun
-/// a repository is addressed by from outside it.
-interface transport {
-    use types.{location, error};
+/// The workspaces a guest may open. Every backend serves this interface.
+interface store {
+  use types.{error, location};
+  use workspace.{workspace};
 
-    /// No `bare`: the clone's own working copy is the integration tree, and
-    /// the layout beneath it is the backend's.
-    record clone-options {
-        depth: option<u32>,
-    }
+  /// Open the workspace at `at`.
+  ///
+  /// A place that holds no workspace fails with `not-found`. A directory
+  /// inside a working copy, below its root, holds none.
+  open: async func(at: location) -> result<workspace, error>;
 
-    /// A clone of `url` at `at`, which must hold nothing yet.
-    clone: async func(url: string, at: location, options: clone-options) -> result<_, error>;
-
-    /// Brings `remote`'s commits and labels into the repository.
-    fetch: async func(repo: location, remote: string) -> result<_, error>;
-
-    /// Points the label at the commit, creating or moving it: the one place
-    /// a branch or bookmark exists.
-    label: async func(repo: location, name: string, revision: string) -> result<_, error>;
-
-    /// The commit the label points at, in the namespace `label` writes alone:
-    /// a tag, a remote's label, or a commit of that spelling is never it. A
-    /// label the repository lacks is `not-found`.
-    labelled: async func(repo: location, name: string) -> result<string, error>;
-
-    /// The commit `remote`'s label `name` pointed at when the repository
-    /// last fetched from it, in the namespace `fetch` and `clone` write
-    /// alone: a label, tag, or commit of that spelling is never it. A
-    /// remote the repository lacks, or a label it has not fetched from it,
-    /// is `not-found` naming it.
-    fetched: async func(repo: location, remote: string, name: string) -> result<string, error>;
-
-    /// Sends the label and the commits it reaches to `remote`. A remote whose
-    /// label holds commits the pushed one does not is `diverged`; nothing is
-    /// forced.
-    push: async func(repo: location, remote: string, label: string) -> result<_, error>;
+  /// Create a repository with no commits at `at` and open its workspace.
+  ///
+  /// The place becomes the working copy, and the files already there are
+  /// pending. A missing directory is created. Creating one where a
+  /// workspace already is keeps that workspace as it was.
+  init: async func(at: location) -> result<workspace, error>;
 }
 
+/// Optional: more workspaces of one repository.
+interface workspaces {
+  use types.{error, location};
+  use workspace.{workspace};
+
+  /// Add a workspace of the same repository at `at`, on the commit
+  /// `revision` names, and open it.
+  ///
+  /// A missing directory is created. One that holds anything is `invalid`
+  /// and stays as it was. A revision that names no commit fails with
+  /// `not-found`.
+  add: async func(workspace: borrow<workspace>, at: location, revision: string)
+    -> result<workspace, error>;
+
+  /// Remove the workspace and the files of its working copy. Its pending
+  /// changes are discarded, and the handle then fails with `not-found`.
+  ///
+  /// The workspace `init` or `clone` made cannot be removed, and the call
+  /// is `invalid`.
+  remove: async func(workspace: borrow<workspace>) -> result<_, error>;
+}
+
+/// Optional: the other copies of a repository, which it knows as remotes.
+///
+/// How a remote is reached, and with what credentials, is the deployment's
+/// to configure.
+interface remotes {
+  use types.{commit-id, error, location};
+  use workspace.{workspace};
+
+  /// A push the remote's bookmark had moved past.
+  record diverged {
+    /// The bookmark, left as it was on the remote.
+    bookmark: string,
+  }
+
+  /// Clone the repository at `url` into `at` and open its workspace.
+  ///
+  /// - The clone knows `url` as the remote `origin`. Its working copy is on
+  ///   the commit the remote's default bookmark points at, or on none when
+  ///   the remote has no commits.
+  /// - `depth` keeps that many commits of each bookmark's history, and
+  ///   `none` keeps all of it. Zero is `invalid`. History left out is
+  ///   absent, so `log` ends there.
+  /// - A missing directory is created. One that holds anything is `invalid`
+  ///   and stays as it was.
+  /// - A `url` that holds no repository fails with `not-found`.
+  clone: async func(url: string, at: location, depth: option<u32>)
+    -> result<workspace, error>;
+
+  /// Bring the commits and bookmarks of `remote` into the repository.
+  ///
+  /// No bookmark of the repository moves, and `bookmark` reports what
+  /// arrived. A remote the repository does not know fails with `not-found`.
+  fetch: async func(workspace: borrow<workspace>, remote: string) -> result<_, error>;
+
+  /// The commit the bookmark `name` of `remote` pointed at when the
+  /// repository last saw it, in a fetch or a push. `none` when it has seen
+  /// no such bookmark.
+  ///
+  /// A bookmark the remote has since deleted may still answer. A remote
+  /// the repository does not know fails with `not-found`.
+  bookmark: async func(workspace: borrow<workspace>, remote: string, name: string)
+    -> result<option<commit-id>, error>;
+
+  /// Send the bookmark `name` and the commits it reaches to `remote`, and
+  /// point the remote's bookmark of that name at the same commit.
+  ///
+  /// The remote's bookmark only moves forward. When it holds commits the
+  /// pushed bookmark does not, the push is `diverged` and changes nothing.
+  /// A remote or a bookmark the repository does not know fails with
+  /// `not-found`.
+  push: async func(workspace: borrow<workspace>, remote: string, name: string)
+    -> result<result<_, diverged>, error>;
+}
+
+/// What every backend serves.
+world core {
+  import types;
+  import store;
+  import workspace;
+}
+
+/// Every interface. A backend answers `unsupported` for what it does not
+/// serve.
 world imports {
-    import store;
-    import workspace;
-    import transport;
+  include core;
+  import workspaces;
+  import remotes;
 }

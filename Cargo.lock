@@ -2699,6 +2699,7 @@ dependencies = [
  "omnia-test",
  "parking_lot 0.13.0",
  "test-programs",
+ "thiserror 2.0.21",
  "tokio",
  "tracing",
  "wasip3",

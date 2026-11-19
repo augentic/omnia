@@ -502,6 +502,11 @@ path = "programs/vault/lockers.rs"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "vcs_error_codes"
+path = "programs/vcs/error_codes.rs"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "vcs_flow"
 path = "programs/vcs/flow.rs"
 crate-type = ["cdylib"]
@@ -509,6 +514,11 @@ crate-type = ["cdylib"]
 [[example]]
 name = "vcs_locations"
 path = "programs/vcs/locations.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "vcs_workspace"
+path = "programs/vcs/workspace.rs"
 crate-type = ["cdylib"]
 
 [[example]]

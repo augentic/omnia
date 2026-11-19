@@ -1,0 +1,37 @@
+//! The `omnia:vcs/workspaces` host bindings.
+
+use omnia_core::{HostView, StoreCtx};
+use wasmtime::component::{Accessor, Resource};
+
+use crate::host::generated::omnia::vcs::types::{Error, Location};
+use crate::host::generated::omnia::vcs::workspaces::{Host, HostWithStore};
+use crate::host::location::Intent;
+use crate::host::workspace_impl::WorkspaceHandle;
+use crate::host::{VcsClient, WasiVcs};
+
+impl<B: Send + 'static> HostWithStore<StoreCtx<B>> for WasiVcs {
+    async fn add(
+        accessor: &Accessor<StoreCtx<B>, Self>, workspace: Resource<WorkspaceHandle>, at: Location,
+        revision: String,
+    ) -> Result<Resource<WorkspaceHandle>, Error> {
+        // the repository records the workspace it adds
+        let source = WorkspaceHandle::lookup(accessor, &workspace)?;
+        source.writable()?;
+        let added = WorkspaceHandle::resolve(accessor, &at, Intent::Create)?;
+
+        let place = added.place().clone();
+        source.call(accessor, |client, repo| client.add(repo, place, revision)).await?;
+        added.push(accessor)
+    }
+
+    async fn remove(
+        accessor: &Accessor<StoreCtx<B>, Self>, workspace: Resource<WorkspaceHandle>,
+    ) -> Result<(), Error> {
+        let removed = WorkspaceHandle::lookup(accessor, &workspace)?;
+        removed.writable()?;
+        removed.call(accessor, |client, place| client.remove(place)).await?;
+        WorkspaceHandle::mark_removed(accessor, &workspace)
+    }
+}
+
+impl Host for HostView<'_, dyn VcsClient> {}

@@ -20,6 +20,7 @@ workspace = true
 anyhow.workspace = true
 cap-std.workspace = true
 omnia-core.workspace = true
+thiserror.workspace = true
 tracing.workspace = true
 wasmtime.workspace = true
 wasmtime-wasi.workspace = true

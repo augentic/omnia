@@ -1,6 +1,7 @@
 //! [`Vcs`] over `omnia:vcs`.
 
-use omnia_wasi_vcs::{store, transport, types, workspace};
+use omnia_wasi_vcs::omnia::workspace::{self, Workspace};
+use omnia_wasi_vcs::omnia::{remotes, store, types, workspaces};
 use wasip3::filesystem::preopens;
 use wasip3::filesystem::types::Descriptor;
 
@@ -10,107 +11,131 @@ use crate::{Vcs, WasiProvider};
 
 impl Vcs for WasiProvider {
     async fn resolve(&self, repo: &str, revision: &str) -> Result<String, Error> {
-        let directories = preopens();
-        let repo = lend(&directories, repo)?;
-        Ok(store::resolve(repo, revision.to_owned()).await?)
+        let found = open(repo).await?.resolve(revision.to_owned()).await?;
+        found.ok_or_else(|| Error::NotFound(revision.to_owned()))
     }
 
     async fn descends(&self, repo: &str, ancestor: &str, descendant: &str) -> Result<bool, Error> {
-        let directories = preopens();
-        let repo = lend(&directories, repo)?;
-        Ok(store::descends(repo, ancestor.to_owned(), descendant.to_owned()).await?)
+        let workspace = open(repo).await?;
+        Ok(workspace.is_ancestor(ancestor.to_owned(), descendant.to_owned()).await?)
     }
 
     async fn head(&self, at: &str) -> Result<String, Error> {
-        let directories = preopens();
-        let at = lend(&directories, at)?;
-        Ok(store::head(at).await?)
+        let head = open(at).await?.head().await?;
+        head.ok_or_else(|| Error::NotFound("HEAD".to_owned()))
     }
 
     async fn commit(&self, at: &str, message: &str) -> Result<Option<String>, Error> {
-        let directories = preopens();
-        let at = lend(&directories, at)?;
-        Ok(store::commit(at, message.to_owned()).await?)
+        Ok(open(at).await?.commit(message.to_owned()).await?)
     }
 
     async fn merge(
         &self, at: &str, revision: &str, message: &str, policy: &[Rule],
     ) -> Result<Merged, Error> {
-        let policy: Vec<store::Rule> = policy.iter().cloned().map(Into::into).collect();
-        let directories = preopens();
-        let at = lend(&directories, at)?;
-        let merged = store::merge(at, revision.to_owned(), message.to_owned(), policy).await?;
-        Ok(merged.into())
+        let policy = policy.iter().cloned().map(Into::into).collect();
+        let workspace = open(at).await?;
+        let merged = workspace.merge(revision.to_owned(), message.to_owned(), policy).await?;
+        Ok(match merged {
+            Ok(commit) => Merged {
+                commit: Some(commit),
+                conflicts: Vec::new(),
+            },
+            Err(conflict) => Merged {
+                commit: None,
+                conflicts: conflict.paths,
+            },
+        })
     }
 
     async fn log(&self, repo: &str, revision: &str, base: &str) -> Result<Vec<Entry>, Error> {
-        let directories = preopens();
-        let repo = lend(&directories, repo)?;
-        let entries = store::log(repo, revision.to_owned(), base.to_owned()).await?;
-        Ok(entries.into_iter().map(Into::into).collect())
+        let workspace = open(repo).await?;
+        let mut entries = Vec::new();
+        let mut after = None;
+        loop {
+            let page =
+                workspace.log(revision.to_owned(), Some(base.to_owned()), after, None).await?;
+            entries.extend(page.entries.into_iter().map(Into::into));
+            match page.next {
+                Some(next) => after = Some(next),
+                None => return Ok(entries),
+            }
+        }
     }
 
     async fn init(&self, at: &str) -> Result<(), Error> {
         let directories = preopens();
-        let at = lend(&directories, at)?;
-        Ok(workspace::init(at).await?)
+        store::init(lend(&directories, at)?).await?;
+        Ok(())
     }
 
     async fn add(&self, repo: &str, at: &str, revision: &str) -> Result<(), Error> {
+        let workspace = open(repo).await?;
         let directories = preopens();
-        let repo = lend(&directories, repo)?;
-        let at = lend(&directories, at)?;
-        Ok(workspace::add(repo, at, revision.to_owned()).await?)
+        workspaces::add(&workspace, lend(&directories, at)?, revision.to_owned()).await?;
+        Ok(())
     }
 
     async fn remove(&self, at: &str) -> Result<(), Error> {
-        let directories = preopens();
-        let at = lend(&directories, at)?;
-        Ok(workspace::remove(at).await?)
+        let workspace = open(at).await?;
+        Ok(workspaces::remove(&workspace).await?)
     }
 
     async fn pending(&self, at: &str) -> Result<Vec<Change>, Error> {
-        let directories = preopens();
-        let at = lend(&directories, at)?;
-        let changes = workspace::pending(at).await?;
-        Ok(changes.into_iter().map(Into::into).collect())
+        let workspace = open(at).await?;
+        let mut changes = Vec::new();
+        let mut after = None;
+        loop {
+            let page = workspace.status(after, None).await?;
+            changes.extend(page.changes.into_iter().map(Into::into));
+            match page.next {
+                Some(next) => after = Some(next),
+                None => return Ok(changes),
+            }
+        }
     }
 
     async fn clone_repo(&self, url: &str, at: &str, options: CloneOptions) -> Result<(), Error> {
         let directories = preopens();
-        let at = lend(&directories, at)?;
-        Ok(transport::clone(url.to_owned(), at, options.into()).await?)
+        remotes::clone(url.to_owned(), lend(&directories, at)?, options.depth).await?;
+        Ok(())
     }
 
     async fn fetch(&self, repo: &str, remote: &str) -> Result<(), Error> {
-        let directories = preopens();
-        let repo = lend(&directories, repo)?;
-        Ok(transport::fetch(repo, remote.to_owned()).await?)
+        let workspace = open(repo).await?;
+        Ok(remotes::fetch(&workspace, remote.to_owned()).await?)
     }
 
     async fn label(&self, repo: &str, name: &str, revision: &str) -> Result<(), Error> {
-        let directories = preopens();
-        let repo = lend(&directories, repo)?;
-        Ok(transport::label(repo, name.to_owned(), revision.to_owned()).await?)
+        let workspace = open(repo).await?;
+        workspace.set_bookmark(name.to_owned(), revision.to_owned(), None).await??;
+        Ok(())
     }
 
     async fn labelled(&self, repo: &str, name: &str) -> Result<String, Error> {
-        let directories = preopens();
-        let repo = lend(&directories, repo)?;
-        Ok(transport::labelled(repo, name.to_owned()).await?)
+        let found = open(repo).await?.bookmark(name.to_owned()).await?;
+        found.ok_or_else(|| Error::NotFound(name.to_owned()))
     }
 
     async fn fetched(&self, repo: &str, remote: &str, name: &str) -> Result<String, Error> {
-        let directories = preopens();
-        let repo = lend(&directories, repo)?;
-        Ok(transport::fetched(repo, remote.to_owned(), name.to_owned()).await?)
+        let workspace = open(repo).await?;
+        let found = remotes::bookmark(&workspace, remote.to_owned(), name.to_owned()).await?;
+        found.ok_or_else(|| Error::NotFound(name.to_owned()))
     }
 
     async fn push(&self, repo: &str, remote: &str, label: &str) -> Result<(), Error> {
-        let directories = preopens();
-        let repo = lend(&directories, repo)?;
-        Ok(transport::push(repo, remote.to_owned(), label.to_owned()).await?)
+        let workspace = open(repo).await?;
+        let pushed = remotes::push(&workspace, remote.to_owned(), label.to_owned()).await?;
+        pushed.map_err(|diverged| Error::Diverged(diverged.bookmark))
     }
+}
+
+// A path that holds no workspace is not a repository.
+async fn open(path: &str) -> Result<Workspace, Error> {
+    let directories = preopens();
+    store::open(lend(&directories, path)?).await.map_err(|err| match err {
+        types::Error::NotFound(_) => Error::NotARepository,
+        err => err.into(),
+    })
 }
 
 // the lent root borrows a descriptor, so the preopens outlive the call
@@ -129,16 +154,16 @@ fn lend<'a>(
     })
 }
 
-impl From<Rule> for store::Rule {
+impl From<Rule> for workspace::Rule {
     fn from(rule: Rule) -> Self {
         Self {
-            paths: rule.paths,
+            pattern: rule.paths,
             strategy: rule.strategy.into(),
         }
     }
 }
 
-impl From<Strategy> for store::Strategy {
+impl From<Strategy> for workspace::Strategy {
     fn from(strategy: Strategy) -> Self {
         match strategy {
             Strategy::Union => Self::Union,
@@ -148,17 +173,8 @@ impl From<Strategy> for store::Strategy {
     }
 }
 
-impl From<store::Merged> for Merged {
-    fn from(merged: store::Merged) -> Self {
-        Self {
-            commit: merged.commit,
-            conflicts: merged.conflicts,
-        }
-    }
-}
-
-impl From<store::Entry> for Entry {
-    fn from(entry: store::Entry) -> Self {
+impl From<workspace::LogEntry> for Entry {
+    fn from(entry: workspace::LogEntry) -> Self {
         Self {
             id: entry.id,
             message: entry.message,
@@ -185,22 +201,24 @@ impl From<workspace::ChangeKind> for ChangeKind {
     }
 }
 
-impl From<CloneOptions> for transport::CloneOptions {
-    fn from(options: CloneOptions) -> Self {
-        Self { depth: options.depth }
+// `denied`, `invalid`, and `unsupported` have no variant of their own, so
+// their case leads the detail
+impl From<types::Error> for Error {
+    fn from(err: types::Error) -> Self {
+        match err {
+            types::Error::NotFound(detail) => Self::NotFound(detail),
+            types::Error::Denied(detail) => Self::Other(format!("denied: {detail}")),
+            types::Error::Invalid(detail) => Self::Other(format!("invalid: {detail}")),
+            types::Error::Unsupported(detail) => Self::Other(format!("unsupported: {detail}")),
+            types::Error::Unavailable(detail) => Self::Access(detail),
+            types::Error::Other(detail) => Self::Other(detail),
+        }
     }
 }
 
-impl From<types::Error> for Error {
-    fn from(error: types::Error) -> Self {
-        match error {
-            types::Error::NotARepository => Self::NotARepository,
-            types::Error::Exists(detail) => Self::Exists(detail),
-            types::Error::NotFound(detail) => Self::NotFound(detail),
-            types::Error::Pending(paths) => Self::Pending(paths),
-            types::Error::Access(detail) => Self::Access(detail),
-            types::Error::Diverged(label) => Self::Diverged(label),
-            types::Error::Other(detail) => Self::Other(detail),
-        }
+// a move with no precondition has none to fail
+impl From<types::Conflict> for Error {
+    fn from(_: types::Conflict) -> Self {
+        Self::Other("the host reported a conflict on an unconditional bookmark move".to_owned())
     }
 }

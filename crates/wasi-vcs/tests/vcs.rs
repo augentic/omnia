@@ -2,7 +2,8 @@
 //! from `crates/test-programs` through the omnia runtime over a recording
 //! backend. The guest asserts what crosses the boundary and traps on
 //! failure; the host asserts the place every location resolved to and the
-//! calls the backend saw, in order.
+//! calls the backend saw, in order, so a call the host refused itself is
+//! one the backend never saw.
 
 #![cfg(not(target_arch = "wasm32"))]
 
@@ -52,13 +53,26 @@ async fn run_guest_args(wasm: &str, mounts: Vec<Mount>, args: &[&str]) -> Record
 // Scenario backend
 // ------------------------------------------------------------------------
 
-// Records every call with the host paths the locations resolved to and
-// answers each from a fixed script: `resolve("missing")`,
-// `labelled("missing")`, and `fetched(.., "missing")` are a typed
-// `not-found`, `push(.., "moved", ..)` a typed `diverged`, `push(..,
-// "offline", ..)` an untyped failure, a merge of `conflicting` comes back
-// in conflict, `descends` from `unrelated` is false, and a log is two
-// commits over its base.
+// The entries in the long log and the long status, one more than a page
+// holds.
+const LONG: usize = 1001;
+
+// Records every call with the host path its place resolved to, and answers
+// from a fixed script keyed on the place's last segment and on the names a
+// call carries:
+//
+// - `head` at `plain` is no repository, and at `unborn` finds no commit;
+// - `init` at `existing` finds a repository there already;
+// - `pending` at `dirty` is three changes and at `big` is `LONG`, both out
+//   of path order, and elsewhere is none;
+// - a log of `long-<n>` runs from `n` to the end of a `LONG`-commit chain,
+//   and any other log is two commits;
+// - `resolve`, `labelled`, and `fetched` of `missing` find nothing, and
+//   `fetched` from the remote `unknown` names that remote;
+// - a merge of `conflicting` comes back in conflict, out of path order;
+// - `push` to `moved` diverges;
+// - `descends` from `unrelated` is false, and from a fault's name fails
+//   with that fault.
 #[derive(Clone, Debug, Default)]
 struct Recorder {
     calls: Arc<Mutex<Vec<String>>>,
@@ -94,6 +108,33 @@ fn held(place: &Place) -> String {
     shown(place.path())
 }
 
+fn named(place: &Place) -> String {
+    place.path().file_name().map_or_else(String::new, |name| name.to_string_lossy().into_owned())
+}
+
+// Every variant of the seam's `Error`, and an untyped failure with context.
+fn fault(name: &str) -> Option<anyhow::Error> {
+    let error = match name {
+        "not-a-repository" => Error::NotARepository,
+        "exists" => Error::Exists("held".to_owned()),
+        "not-found" => Error::NotFound("not-found".to_owned()),
+        "pending" => Error::Pending(vec!["a.rs".to_owned(), "b.rs".to_owned()]),
+        "access" => Error::Access("refused".to_owned()),
+        "diverged" => Error::Diverged("main".to_owned()),
+        "other" => Error::Other("broken".to_owned()),
+        "untyped" => return Some(anyhow!("network down").context("fetching")),
+        _ => return None,
+    };
+    Some(error.into())
+}
+
+fn change(path: &str, kind: ChangeKind) -> Change {
+    Change {
+        path: path.to_owned(),
+        kind,
+    }
+}
+
 impl VcsClient for Recorder {
     fn resolve(&self, repo: Place, revision: String) -> FutureResult<String> {
         self.record(format!("resolve {} {revision}", held(&repo)));
@@ -108,12 +149,26 @@ impl VcsClient for Recorder {
 
     fn descends(&self, repo: Place, ancestor: String, descendant: String) -> FutureResult<bool> {
         self.record(format!("descends {} {ancestor} {descendant}", held(&repo)));
-        async move { Ok(ancestor != "unrelated") }.boxed()
+        async move {
+            if let Some(fault) = fault(&ancestor) {
+                return Err(fault);
+            }
+            Ok(ancestor != "unrelated")
+        }
+        .boxed()
     }
 
     fn head(&self, at: Place) -> FutureResult<String> {
         self.record(format!("head {}", held(&at)));
-        async { Ok("head-sha".to_owned()) }.boxed()
+        let name = named(&at);
+        async move {
+            match name.as_str() {
+                "plain" => Err(Error::NotARepository.into()),
+                "unborn" => Err(Error::NotFound("HEAD".to_owned()).into()),
+                _ => Ok("head-sha".to_owned()),
+            }
+        }
+        .boxed()
     }
 
     fn commit(&self, at: Place, message: String) -> FutureResult<Option<String>> {
@@ -131,7 +186,7 @@ impl VcsClient for Recorder {
             if revision == "conflicting" {
                 return Ok(Merged {
                     commit: None,
-                    conflicts: vec!["Cargo.lock".to_owned()],
+                    conflicts: vec!["z.lock".to_owned(), "Cargo.lock".to_owned()],
                 });
             }
             Ok(Merged {
@@ -145,6 +200,14 @@ impl VcsClient for Recorder {
     fn log(&self, repo: Place, revision: String, base: String) -> FutureResult<Vec<Entry>> {
         self.record(format!("log {} {revision} {base}", held(&repo)));
         async move {
+            if let Some(from) = revision.strip_prefix("long-") {
+                let from: usize = from.parse()?;
+                let chain = (from..LONG).map(|n| Entry {
+                    id: format!("long-{n}"),
+                    message: format!("commit {n}"),
+                });
+                return Ok(chain.collect());
+            }
             Ok(vec![
                 Entry {
                     id: format!("l2:{revision}"),
@@ -160,8 +223,16 @@ impl VcsClient for Recorder {
     }
 
     fn init(&self, at: Place) -> FutureResult<()> {
-        self.record(format!("init {}", held(&at)));
-        async { Ok(()) }.boxed()
+        let path = held(&at);
+        self.record(format!("init {path}"));
+        let name = named(&at);
+        async move {
+            if name == "existing" {
+                return Err(Error::Exists(path).into());
+            }
+            Ok(())
+        }
+        .boxed()
     }
 
     fn add(&self, repo: Place, at: Place, revision: String) -> FutureResult<()> {
@@ -176,21 +247,20 @@ impl VcsClient for Recorder {
 
     fn pending(&self, at: Place) -> FutureResult<Vec<Change>> {
         self.record(format!("pending {}", held(&at)));
-        async {
-            Ok(vec![
-                Change {
-                    path: "a.rs".to_owned(),
-                    kind: ChangeKind::Added,
-                },
-                Change {
-                    path: "b.rs".to_owned(),
-                    kind: ChangeKind::Modified,
-                },
-                Change {
-                    path: "c.rs".to_owned(),
-                    kind: ChangeKind::Deleted,
-                },
-            ])
+        let name = named(&at);
+        async move {
+            Ok(match name.as_str() {
+                "dirty" => vec![
+                    change("c.rs", ChangeKind::Deleted),
+                    change("a.rs", ChangeKind::Added),
+                    change("b.rs", ChangeKind::Modified),
+                ],
+                "big" => (0..LONG)
+                    .rev()
+                    .map(|n| change(&format!("f{n:04}.rs"), ChangeKind::Added))
+                    .collect(),
+                _ => vec![],
+            })
         }
         .boxed()
     }
@@ -224,6 +294,9 @@ impl VcsClient for Recorder {
     fn fetched(&self, repo: Place, remote: String, name: String) -> FutureResult<String> {
         self.record(format!("fetched {} {remote} {name}", held(&repo)));
         async move {
+            if remote == "unknown" {
+                return Err(Error::NotFound(remote).into());
+            }
             if name == "missing" {
                 return Err(Error::NotFound(name).into());
             }
@@ -235,9 +308,6 @@ impl VcsClient for Recorder {
     fn push(&self, repo: Place, remote: String, label: String) -> FutureResult<()> {
         self.record(format!("push {} {remote} {label}", held(&repo)));
         async move {
-            if remote == "offline" {
-                return Err(anyhow!("network down"));
-            }
             if remote == "moved" {
                 return Err(Error::Diverged(label).into());
             }
@@ -254,13 +324,13 @@ impl VcsClient for Recorder {
 #[tokio::test]
 async fn vcs_flow() {
     let project = scratch();
-    fs::create_dir(project.path().join("work")).expect("creating the working copy");
+    for dir in ["work", "dirty", "unborn", "big"] {
+        fs::create_dir(project.path().join(dir)).expect("creating a working copy");
+    }
     let workspaces = scratch();
     fs::create_dir(workspaces.path().join("repo")).expect("creating the repository under `ws`");
     let nested = scratch();
     fs::create_dir(nested.path().join("repo")).expect("creating the repository under `ws/sub`");
-    let root = shown(project.path());
-    let under = |subpath: &str| shown(&project.path().join(subpath));
 
     let recorder = run_guest(
         test_programs::VCS_FLOW,
@@ -272,41 +342,136 @@ async fn vcs_flow() {
     )
     .await;
 
-    // Every location resolved beneath its mount, an existing subpath and
-    // one the host laid down for the operation that creates alike, and the
-    // refused calls reached the backend as put. A path no preopen answers
+    // Every call opened its workspace with a `head` first, but `init` and
+    // `clone_repo`, which lay their place down. A path no preopen answers
     // reached nothing.
-    for created in ["fresh", ".cache/work", "clone"] {
+    for created in ["fresh", "existing", ".cache/work", "clone"] {
         assert!(project.path().join(created).is_dir(), "host created `{created}`");
     }
+    let root = shown(project.path());
+    let [work, dirty, unborn, big, fresh, existing, cache, clone] =
+        ["work", "dirty", "unborn", "big", "fresh", "existing", ".cache/work", "clone"]
+            .map(|subpath| shown(&project.path().join(subpath)));
+    let (ws, sub) = (shown(&workspaces.path().join("repo")), shown(&nested.path().join("repo")));
     assert_eq!(
         recorder.calls(),
         [
+            format!("head {root}"),
             format!("resolve {root} main"),
+            format!("head {root}"),
             format!("descends {root} sha:base sha:main"),
+            format!("head {root}"),
             format!("descends {root} unrelated sha:main"),
-            format!("head {}", under("work")),
-            format!("commit {} \"seal it\"", under("work")),
-            format!("merge {} feature \"merge it\" [*.lock=Strategy::Ours]", under("work")),
-            format!("merge {} conflicting \"merge it\" []", under("work")),
+            format!("head {root}"),
             format!("log {root} emery/rev sha:base"),
-            format!("init {}", under("fresh")),
-            format!("add {root} {} sha:main", under(".cache/work")),
-            format!("pending {}", under("work")),
-            format!("remove {}", under(".cache/work")),
-            format!("clone https://example.test/repo.git {} depth=Some(1)", under("clone")),
-            format!("fetch {} origin", under("clone")),
-            format!("label {} emery/rev sha:main", under("clone")),
-            format!("labelled {} emery/rev", under("clone")),
-            format!("fetched {} origin emery/rev", under("clone")),
-            format!("push {} origin emery/rev", under("clone")),
+            format!("head {work}"),
+            format!("head {work}"),
+            format!("head {work}"),
+            format!("commit {work} \"seal it\""),
+            format!("head {work}"),
+            format!("pending {work}"),
+            format!("merge {work} feature \"merge it\" [*.lock=Ours]"),
+            format!("head {work}"),
+            format!("pending {work}"),
+            format!("merge {work} conflicting \"merge it\" []"),
+            format!("head {dirty}"),
+            format!("pending {dirty}"),
+            format!("head {unborn}"),
+            format!("head {unborn}"),
+            format!("init {fresh}"),
+            format!("init {existing}"),
+            format!("head {root}"),
+            format!("add {root} {cache} sha:main"),
+            format!("head {cache}"),
+            format!("remove {cache}"),
+            format!("clone https://example.test/repo.git {clone} depth=Some(1)"),
+            format!("head {clone}"),
+            format!("fetch {clone} origin"),
+            format!("head {clone}"),
+            format!("label {clone} emery/rev sha:main"),
+            format!("head {clone}"),
+            format!("labelled {clone} emery/rev"),
+            format!("head {clone}"),
+            format!("fetched {clone} origin emery/rev"),
+            format!("head {clone}"),
+            format!("push {clone} origin emery/rev"),
+            format!("head {clone}"),
+            format!("push {clone} moved emery/rev"),
+            format!("head {root}"),
             format!("resolve {root} missing"),
-            format!("labelled {} missing", under("clone")),
-            format!("fetched {} origin missing", under("clone")),
-            format!("push {} moved emery/rev", under("clone")),
-            format!("push {} offline emery/rev", under("clone")),
-            format!("head {}", shown(&workspaces.path().join("repo"))),
-            format!("head {}", shown(&nested.path().join("repo"))),
+            format!("head {clone}"),
+            format!("labelled {clone} missing"),
+            format!("head {clone}"),
+            format!("fetched {clone} origin missing"),
+            format!("head {root}"),
+            format!("log {root} long-0 sha:base"),
+            format!("log {root} long-1000 sha:base"),
+            format!("head {big}"),
+            format!("pending {big}"),
+            format!("pending {big}"),
+            format!("head {ws}"),
+            format!("head {ws}"),
+            format!("head {sub}"),
+            format!("head {sub}"),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn vcs_workspace() {
+    let project = scratch();
+    for dir in ["plain", "unborn", "dirty", "work"] {
+        fs::create_dir(project.path().join(dir)).expect("creating a working copy");
+    }
+
+    let recorder = run_guest(test_programs::VCS_WORKSPACE, vec![project.mount(true)]).await;
+
+    // The refusals the host makes itself reached no backend call: a zero
+    // `limit`, a log with no base, a precondition, a removed handle, and a
+    // clone of no depth. A merge into pending changes reached only the
+    // `pending` that found them.
+    let root = shown(project.path());
+    let [fresh, plain, unborn, dirty, work, cache, clone] =
+        ["fresh", "plain", "unborn", "dirty", "work", ".cache/work", "clone"]
+            .map(|subpath| shown(&project.path().join(subpath)));
+    assert_eq!(
+        recorder.calls(),
+        [
+            format!("head {root}"),
+            format!("init {fresh}"),
+            format!("head {fresh}"),
+            format!("head {plain}"),
+            format!("resolve {root} main"),
+            format!("resolve {root} missing"),
+            format!("descends {root} sha:base sha:main"),
+            format!("labelled {root} emery/rev"),
+            format!("labelled {root} missing"),
+            format!("head {unborn}"),
+            format!("head {unborn}"),
+            format!("log {root} long-999 sha:base"),
+            format!("log {root} long-1000 sha:base"),
+            format!("head {dirty}"),
+            format!("pending {dirty}"),
+            format!("pending {dirty}"),
+            format!("pending {dirty}"),
+            format!("label {root} emery/rev sha:main"),
+            format!("head {work}"),
+            format!("commit {work} \"seal it\""),
+            format!("pending {work}"),
+            format!("merge {work} feature \"merge it\" [*.lock=Ours]"),
+            format!("pending {work}"),
+            format!("merge {work} conflicting \"merge it\" []"),
+            format!("pending {dirty}"),
+            format!("add {root} {cache} sha:main"),
+            format!("head {cache}"),
+            format!("remove {cache}"),
+            format!("clone https://example.test/repo.git {clone} depth=Some(1)"),
+            format!("fetch {clone} origin"),
+            format!("fetched {clone} origin emery/rev"),
+            format!("fetched {clone} origin missing"),
+            format!("fetched {clone} unknown emery/rev"),
+            format!("push {clone} origin emery/rev"),
+            format!("push {clone} moved emery/rev"),
         ]
     );
 }
@@ -333,14 +498,17 @@ async fn vcs_locations() {
     )
     .await;
 
-    // Only the read on the read-only mount and the calls at the new subpath
-    // reached the backend; every refusal was the host's, before any call.
-    let fresh = shown(&project.join("fresh/repo"));
+    // Only the workspace on the read-only mount and the one at the new
+    // subpath reached the backend; every refusal was the host's, before any
+    // call.
+    let (ro, fresh) = (shown(readonly.path()), shown(&project.join("fresh/repo")));
     assert_eq!(
         recorder.calls(),
         [
-            format!("head {}", shown(readonly.path())),
+            format!("head {ro}"),
+            format!("head {ro}"),
             format!("init {fresh}"),
+            format!("head {fresh}"),
             format!("head {fresh}"),
         ]
     );
@@ -356,4 +524,48 @@ async fn vcs_locations() {
         "nothing was laid down through `up`"
     );
     assert!(!readonly.path().join("fresh").exists(), "nothing was laid down beneath `ro`");
+}
+
+#[tokio::test]
+async fn vcs_error_codes() {
+    let project = scratch();
+    fs::create_dir(project.path().join("plain")).expect("creating a directory with no workspace");
+    let readonly = scratch();
+
+    let recorder = run_guest(
+        test_programs::VCS_ERROR_CODES,
+        vec![project.mount(true), readonly.mount_as("ro", false)],
+    )
+    .await;
+
+    // The commit beneath `ro` reached the backend only as the `head` that
+    // opened its workspace.
+    let root = shown(project.path());
+    let (ro, plain) = (shown(readonly.path()), shown(&project.path().join("plain")));
+    assert_eq!(
+        recorder.calls(),
+        [
+            format!("head {root}"),
+            format!("descends {root} not-a-repository sha:main"),
+            format!("descends {root} exists sha:main"),
+            format!("descends {root} not-found sha:main"),
+            format!("descends {root} pending sha:main"),
+            format!("descends {root} access sha:main"),
+            format!("descends {root} diverged sha:main"),
+            format!("descends {root} other sha:main"),
+            format!("descends {root} untyped sha:main"),
+            format!("head {root}"),
+            format!("descends {root} not-found sha:main"),
+            format!("head {root}"),
+            format!("descends {root} exists sha:main"),
+            format!("head {root}"),
+            format!("descends {root} access sha:main"),
+            format!("head {root}"),
+            format!("descends {root} other sha:main"),
+            format!("head {ro}"),
+            format!("head {plain}"),
+            format!("head {root}"),
+            format!("push {root} moved main"),
+        ]
+    );
 }

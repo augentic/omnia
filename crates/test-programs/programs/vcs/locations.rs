@@ -1,16 +1,21 @@
 //! Raw bindings: what the host holds a `location` to before any backend
-//! runs. A nested descriptor is not a mount root; a subpath leaves the root,
-//! starts at `/`, or is not plainly spelled; a mutation beneath a read-only
-//! mount is refused where a read is answered; a symlink the guest planted
-//! out of the mount or toward nothing is not a place to create, nor is
-//! anything beneath one that leads out; a subpath that does not exist yet is
-//! `not-a-repository` for a read and laid down for the operation that
-//! creates it.
+//! runs.
+//!
+//! - A root that is a file, or a directory the guest opened beneath its
+//!   mount, is `denied`.
+//! - A subpath that leaves the root, starts at `/`, or is not plainly
+//!   spelled is `invalid`.
+//! - A read-only mount opens a workspace, and refuses `init` and a change
+//!   through the handle as `denied`.
+//! - A name a file or a planted symlink holds is `invalid` for `init`, and
+//!   a subpath that leads out of the mount is `denied`.
+//! - A dangling or missing subpath is `not-found` for `open`, and `init`
+//!   lays a missing one down.
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_wasi_vcs::types::{Error, Location};
-use omnia_wasi_vcs::{store, workspace};
+use omnia_wasi_vcs::omnia::store;
+use omnia_wasi_vcs::omnia::types::{Error, Location};
 use wasip3::filesystem::preopens;
 use wasip3::filesystem::types::{Descriptor, DescriptorFlags, OpenFlags, PathFlags};
 
@@ -18,6 +23,88 @@ omnia_sdk::api::command::export!(scenario);
 
 // a name beside the mount, through the planted `up`; the host checks it never appears
 const OUTSIDE: &str = "up/omnia-vcs-locations-outside";
+
+async fn scenario() {
+    let directories = preopens::get_directories();
+    let root = preopen(&directories, ".");
+    let readonly = preopen(&directories, "ro");
+
+    // a root the guest opened itself is not a mount root
+    let nested = root
+        .open_at(
+            PathFlags::empty(),
+            "nested".to_owned(),
+            OpenFlags::DIRECTORY,
+            DescriptorFlags::READ,
+        )
+        .await
+        .expect("open nested dir");
+    refused(store::open(at(&nested, "")).await.err(), "denied", "not an authorized mount");
+    let file = root
+        .open_at(
+            PathFlags::empty(),
+            "plain.txt".to_owned(),
+            OpenFlags::CREATE,
+            DescriptorFlags::READ | DescriptorFlags::WRITE,
+        )
+        .await
+        .expect("create a file");
+    refused(store::open(at(&file, "")).await.err(), "denied", "must be a directory");
+
+    // a subpath that leaves the root, starts at it, or is not plainly spelled
+    for subpath in ["../escape", "/abs", "a\\b", "a//b", ".", "..", "a/../b", "./a", "a/"]
+        .into_iter()
+        .map(str::to_owned)
+        .chain(wasip3::cli::environment::get_arguments().into_iter().skip(1))
+    {
+        refused(
+            store::open(at(root, &subpath)).await.err(),
+            "invalid",
+            "not a plain relative path",
+        );
+    }
+
+    // a read-only mount opens a workspace and refuses every change
+    let workspace = store::open(at(readonly, "")).await.expect("open beneath a read-only mount");
+    assert_eq!(
+        workspace.head().await.expect("read on a read-only mount"),
+        Some("head-sha".to_owned())
+    );
+    refused(workspace.commit("seal it".to_owned()).await.err(), "denied", "read-only");
+    refused(store::init(at(readonly, "")).await.err(), "denied", "read-only");
+    refused(store::init(at(readonly, "fresh")).await.err(), "denied", "read-only");
+
+    // a name a file or a planted symlink holds is no place to create, and a
+    // subpath that leads out is the escape it is
+    root.symlink_at("../../nowhere".to_owned(), "escape".to_owned())
+        .await
+        .expect("plant a symlink out");
+    root.symlink_at("..".to_owned(), "up".to_owned()).await.expect("plant a symlink to the parent");
+    root.symlink_at("nowhere".to_owned(), "dangling".to_owned())
+        .await
+        .expect("plant a dangling symlink");
+    for subpath in ["plain.txt", "escape", "up", "dangling", "dangling/repo"] {
+        refused(store::init(at(root, subpath)).await.err(), "invalid", "not a directory");
+    }
+    for subpath in ["escape/repo", OUTSIDE] {
+        refused(store::init(at(root, subpath)).await.err(), "denied", "leads out");
+    }
+    for subpath in ["escape", "escape/repo", "up", OUTSIDE] {
+        refused(store::open(at(root, subpath)).await.err(), "denied", "leads out");
+    }
+    for subpath in ["plain.txt", "dangling", "dangling/repo"] {
+        refused(store::open(at(root, subpath)).await.err(), "not-found", "holds no directory");
+    }
+
+    // a subpath nothing holds yet is no workspace, and `init` lays it down
+    refused(store::open(at(root, "fresh/repo")).await.err(), "not-found", "holds no directory");
+    let fresh = store::init(at(root, "fresh/repo")).await.expect("init at a new subpath");
+    assert_eq!(
+        fresh.head().await.expect("head of what init laid down"),
+        Some("head-sha".to_owned())
+    );
+    store::open(at(root, "fresh/repo")).await.expect("open what init laid down");
+}
 
 fn preopen<'a>(directories: &'a [(Descriptor, String)], wanted: &str) -> &'a Descriptor {
     directories
@@ -34,83 +121,18 @@ fn at<'a>(root: &'a Descriptor, subpath: &str) -> Location<'a> {
     }
 }
 
-fn refused(error: Error, detail: &str) {
+fn refused(error: Option<Error>, case: &str, needle: &str) {
+    let error = error.unwrap_or_else(|| panic!("expected a `{case}` refusal, got an answer"));
+    let (actual, detail) = match &error {
+        Error::NotFound(detail) => ("not-found", detail),
+        Error::Denied(detail) => ("denied", detail),
+        Error::Invalid(detail) => ("invalid", detail),
+        Error::Unsupported(detail) => ("unsupported", detail),
+        Error::Unavailable(detail) => ("unavailable", detail),
+        Error::Other(detail) => ("other", detail),
+    };
     assert!(
-        matches!(error, Error::Other(ref message) if message.contains(detail)),
-        "expected `{detail}`, got {error:?}"
-    );
-}
-
-async fn scenario() {
-    let directories = preopens::get_directories();
-    let root = preopen(&directories, ".");
-    let readonly = preopen(&directories, "ro");
-
-    // a descriptor the guest opened beneath the mount is not the mount
-    let nested = root
-        .open_at(
-            PathFlags::empty(),
-            "nested".to_owned(),
-            OpenFlags::DIRECTORY,
-            DescriptorFlags::READ,
-        )
-        .await
-        .expect("open nested dir");
-    let error = store::head(at(&nested, "")).await.expect_err("nested descriptor refused");
-    refused(error, "not an authorized mount");
-
-    // a subpath that leaves the root, starts at it, or is not plainly spelled
-    for subpath in ["../escape", "/abs", "a\\b", "a//b", ".", "..", "a/../b", "./a", "a/"]
-        .into_iter()
-        .map(str::to_owned)
-        .chain(wasip3::cli::environment::get_arguments().into_iter().skip(1))
-    {
-        let error = store::head(at(root, &subpath)).await.expect_err("subpath refused");
-        refused(error, "not a plain relative path");
-    }
-
-    // a read-only mount answers a read and refuses a mutation
-    assert_eq!(store::head(at(readonly, "")).await.expect("read on a read-only mount"), "head-sha");
-    let error = workspace::init(at(readonly, "")).await.expect_err("mutation refused");
-    refused(error, "read-only");
-    let error = workspace::init(at(readonly, "fresh")).await.expect_err("mutation beneath refused");
-    refused(error, "read-only");
-
-    // a symlink the guest planted is not a place to create, whether it leads
-    // out of the mount, to nothing or to a directory, or to nothing within
-    // it; for a read, one that leads out is the escape it is, and one to
-    // nothing within is what it names
-    root.symlink_at("../../nowhere".to_owned(), "escape".to_owned())
-        .await
-        .expect("plant a symlink out");
-    root.symlink_at("..".to_owned(), "up".to_owned()).await.expect("plant a symlink to the parent");
-    root.symlink_at("nowhere".to_owned(), "dangling".to_owned())
-        .await
-        .expect("plant a dangling symlink");
-    for subpath in ["escape", "up", "dangling", "dangling/repo"] {
-        let error = workspace::init(at(root, subpath)).await.expect_err("symlink refused");
-        refused(error, "not a directory");
-    }
-    for subpath in ["escape/repo", OUTSIDE] {
-        let error = workspace::init(at(root, subpath)).await.expect_err("symlink out refused");
-        refused(error, "creating location subpath");
-    }
-    for subpath in ["escape", "escape/repo", "up", OUTSIDE] {
-        let error = store::head(at(root, subpath)).await.expect_err("symlink out refused");
-        refused(error, "opening location subpath");
-    }
-    for subpath in ["dangling", "dangling/repo"] {
-        let error = store::head(at(root, subpath)).await.expect_err("dangling link read");
-        assert!(matches!(error, Error::NotARepository), "at `{subpath}`: {error:?}");
-    }
-
-    // a subpath nothing holds yet is no repository for a read and is laid
-    // down for the operation that creates it
-    let error = store::head(at(root, "fresh/repo")).await.expect_err("read at nothing refused");
-    assert!(matches!(error, Error::NotARepository), "{error:?}");
-    workspace::init(at(root, "fresh/repo")).await.expect("init at a new subpath");
-    assert_eq!(
-        store::head(at(root, "fresh/repo")).await.expect("read at what init laid down"),
-        "head-sha"
+        actual == case && detail.contains(needle),
+        "expected `{case}` with `{needle}`, got {error:?}"
     );
 }
