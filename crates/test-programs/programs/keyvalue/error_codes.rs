@@ -11,7 +11,7 @@ use std::time::Duration;
 use omnia_sdk::Result;
 use omnia_sdk::keyvalue::{DEFAULT, store};
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 async fn scenario() {
     // the host's own rules

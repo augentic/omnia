@@ -13,7 +13,7 @@ use omnia_sdk::vcs::types::{Error, Location};
 use omnia_sdk::vcs::{self, Error as VcsError, store};
 use wasip3::filesystem::preopens;
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 async fn scenario() {
     let directories = preopens::get_directories();

@@ -18,7 +18,7 @@ use omnia_sdk::sql::database::{Database, Statement};
 use omnia_sdk::sql::types::{Error, ResultSet, Row, Value};
 use omnia_sdk::sql::{store, transactions};
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 const DATE: &str = "2024-02-29";
 const TIME: &str = "23:59:58.5";

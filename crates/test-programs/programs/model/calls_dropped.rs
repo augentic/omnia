@@ -7,7 +7,7 @@ use omnia_sdk::model::{completion, types};
 use omnia_sdk::wit_stream;
 use test_programs::{raw_lookup, raw_model, raw_request};
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 async fn scenario() {
     let request = raw_request(vec![raw_lookup()], types::Grants { workspace: None });

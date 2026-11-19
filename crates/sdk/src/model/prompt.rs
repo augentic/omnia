@@ -5,7 +5,7 @@
 //! this builder turns a role/task/context template into those channels
 //! before `complete` is called.
 
-use crate::model::types::{Message, Role};
+use crate::model::Message;
 
 /// Structured prompt template assembled into `system` / `messages` channels.
 #[derive(Clone, Debug, Default)]
@@ -70,13 +70,7 @@ impl Sections {
     #[must_use]
     pub fn channels(&self, preamble: Option<&str>) -> (Option<String>, Vec<Message>) {
         let (system, user) = self.assemble(preamble);
-        (
-            system,
-            vec![Message {
-                role: Role::User,
-                content: user,
-            }],
-        )
+        (system, vec![Message::user(user)])
     }
 }
 

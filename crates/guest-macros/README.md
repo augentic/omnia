@@ -3,7 +3,7 @@
 Procedural macros for Omnia guests:
 
 - **`#[instrument]`** — wraps a function in an OpenTelemetry span. On an async function it also runs the body inside `omnia_sdk::otel::scope`, so the outermost instrumented async function initializes the guest's telemetry and exports it as it returns; a sync function only opens the span. Guests reach it as `omnia_sdk::otel::instrument`.
-- **`#[derive(Settings)]`** — derives a `KEYS` list and an `async fn load()` that reads each field through `omnia_sdk::config::require`. Re-exported as `omnia_sdk::Settings`.
+- **`#[derive(Settings)]`** — derives a `KEYS` list and an `async fn load()` that reads each field through `omnia_sdk::config::require`, or `omnia_sdk::config::parse` for an `Option<T>` field. Re-exported as `omnia_sdk::Settings`.
 - **`#[derive(FromRow)]`** — derives `omnia_sdk::sql::FromRow`, reading each field from the column of the same name. Re-exported as `omnia_sdk::sql::FromRow`.
 
 ## Instrumentation

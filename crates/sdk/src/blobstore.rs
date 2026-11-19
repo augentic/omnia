@@ -1,6 +1,6 @@
 //! `omnia:blobstore`, the containers of binary objects a deployment declares.
 //!
-//! A guest opens a [`Container`] with [`store::open`]. Beside the generated
+//! A guest opens a [`Container`] with [`open`]. Beside the generated
 //! methods, a container reads and writes an object whole:
 //!
 //! - [`read`](Container::read) and [`read_range`](Container::read_range)
@@ -28,9 +28,20 @@ use std::ops::Range;
 use bytes::Bytes;
 
 pub use crate::bindings::imports::omnia::blobstore::{admin, container, store, types};
-use crate::blobstore::container::{ByteRange, Container, Content};
-use crate::blobstore::types::Attributes;
+use crate::blobstore::container::ByteRange;
+pub use crate::blobstore::container::{Container, Content};
+pub use crate::blobstore::types::Attributes;
 use crate::{Error, Result, wit_future, wit_stream};
+
+/// Open the container `name`, a binding the deployment declares.
+///
+/// # Errors
+///
+/// The host's failure, under its code: `not-found` for a container the
+/// deployment does not declare.
+pub async fn open(name: &str) -> Result<Container> {
+    Ok(store::open(name.to_owned()).await?)
+}
 
 impl Container {
     /// The bytes of the object `name`, or `None` when it is absent.
@@ -81,7 +92,7 @@ impl Container {
         writer.write_all(data.to_vec()).await;
         drop(writer);
         let _ = finish.write(Ok(())).await;
-        reply.await??;
+        unconditional(reply.await?)?;
         Ok(())
     }
 }
@@ -113,9 +124,9 @@ impl Default for Attributes {
     }
 }
 
-// a write with no precondition has none to fail
-impl From<types::Conflict> for Error {
-    fn from(_: types::Conflict) -> Self {
-        Self::server_error("other", "the host reported a conflict on an unconditional write")
-    }
+// a call with no precondition has none to fail, so a conflict is the host's
+fn unconditional<T>(outcome: Result<T, types::Conflict>) -> Result<T> {
+    outcome.map_err(|_conflict| {
+        Error::server_error("other", "the host reported a conflict on an unconditional call")
+    })
 }

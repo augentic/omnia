@@ -5,9 +5,7 @@
 //! the [SQL reference](https://github.com/augentic/omnia/blob/main/docs/reference/sql.md#the-portable-dialect)
 //! defines. The database must start without the rows' tables.
 
-use omnia_sdk::sql::database::{Database, Statement};
-use omnia_sdk::sql::transactions::{self, Transaction};
-use omnia_sdk::sql::{FromColumn, Row, Value};
+use omnia_sdk::sql::{Database, FromColumn, Row, Statement, Transaction, Value};
 
 use super::expect_code;
 
@@ -259,7 +257,7 @@ async fn create(db: &Database, ddl: &str) {
 }
 
 async fn begin(db: &Database) -> Transaction {
-    transactions::begin(db).await.unwrap_or_else(|err| panic!("begin: {err}"))
+    db.begin().await.unwrap_or_else(|err| panic!("begin: {err}"))
 }
 
 async fn query(db: &Database, sql: &str, params: &[Value]) -> Vec<Row> {

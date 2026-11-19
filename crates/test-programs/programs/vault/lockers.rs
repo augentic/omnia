@@ -6,7 +6,7 @@
 
 use omnia_sdk::vault::{DEFAULT, store};
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 async fn scenario() {
     let default = store::open(DEFAULT.to_owned()).await.expect("open default");

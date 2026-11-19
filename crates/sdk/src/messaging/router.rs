@@ -1,12 +1,5 @@
-//! Typed messaging routing over application handlers.
-//!
-//! A module registers its topics on a [`Handlers`](crate::api::Handlers) of
-//! its own and the guest merges each (`Handlers::from([..])` or
-//! [`Handlers::merge`](crate::api::Handlers::merge)), closing the whole with
-//! [`Handlers::into_router`](crate::api::Handlers::into_router) into its one
-//! [`Router`](crate::api::Router). A topic decodes JSON unless registered
-//! with [`Handlers::topic_with`](crate::api::Handlers::topic_with).
-//! [`export!`] binds the router fn as the guest's `omnia:messaging` handler.
+//! The topic routes a [`Router`](crate::Router) dispatches each inbound
+//! delivery through.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -20,7 +13,7 @@ use bytes::Bytes;
 use serde::de::DeserializeOwned;
 use tracing::Instrument as _;
 
-use crate::api::{Context, Handler, Metadata};
+use crate::{Context, Handler, Metadata};
 
 #[doc(hidden)]
 #[macro_export]
@@ -30,32 +23,24 @@ macro_rules! __export_messaging {
         const _: () = {
             struct MessagingGuest;
 
-            $crate::messaging::export!(MessagingGuest);
+            $crate::exports::messaging::export!(MessagingGuest);
 
             impl $crate::exports::messaging::incoming_handler::Guest for MessagingGuest {
                 async fn handle(
                     delivery: $crate::messaging::types::Delivery,
                 ) -> ::core::result::Result<(), $crate::messaging::types::Settle> {
-                    $crate::api::messaging::handle(&$router(), delivery).await
+                    $crate::messaging::handle(&$router(), delivery).await
                 }
             }
         };
+
+        // naming the fn keeps a private one from reading as dead code
+        #[cfg(not(all(target_arch = "wasm32", target_os = "wasi")))]
+        const _: () = {
+            let _ = $router;
+        };
     };
 }
-
-/// Bind a router fn as the guest's `omnia:messaging` export.
-///
-/// Calls the router fn on each delivery and dispatches the delivery through
-/// the [`Router`](crate::api::Router) it returns, as `handle` does. Expands
-/// to nothing on native targets.
-///
-/// ```rust,ignore
-/// use omnia_sdk::api::messaging;
-///
-/// messaging::export!(router);
-/// ```
-#[doc(inline)]
-pub use crate::__export_messaging as export;
 
 /// An owned inbound delivery independent of a messaging binding.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -68,7 +53,7 @@ pub struct Delivery {
     pub payload: Bytes,
 
     /// The key that orders and partitions the message, when the publisher set
-    /// one with [`Message::with_key`](crate::messaging::types::Message::with_key).
+    /// one with [`Message::with_key`](crate::messaging::Message::with_key).
     pub key: Option<String>,
 
     /// The optional payload media type.
@@ -125,8 +110,9 @@ impl Delivery {
 /// Dispatch one `omnia:messaging` delivery through `router`.
 ///
 /// The delivery runs inside the guest telemetry scope.
-/// [`export!`] expands to this call, and a hand-written `omnia:messaging`
-/// export calls it directly. What `handle` returns settles the delivery, and
+/// [`export!`](crate::messaging::export!) expands to this call, and a
+/// hand-written `omnia:messaging` export calls it directly. What `handle`
+/// returns settles the delivery, and
 /// a failure carries its [`Error`](crate::Error)'s text as the reason:
 ///
 /// - A [`BadRequest`](crate::Error::BadRequest) rejects the delivery, as a
@@ -139,7 +125,7 @@ impl Delivery {
 #[cfg(target_arch = "wasm32")]
 #[crate::otel::instrument(name = "messaging_guest_handle")]
 pub async fn handle(
-    router: &crate::api::Router, delivery: crate::messaging::types::Delivery,
+    router: &crate::Router, delivery: crate::messaging::types::Delivery,
 ) -> Result<(), crate::messaging::types::Settle> {
     use std::time::{Duration, UNIX_EPOCH};
 

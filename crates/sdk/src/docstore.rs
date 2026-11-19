@@ -1,7 +1,8 @@
 //! `omnia:docstore`, the collections of JSON documents a deployment declares.
 //!
-//! A guest opens a [`Collection`] with [`store::open`]. Beside the generated
-//! methods, a collection stores and reads documents as typed JSON, and
+//! A guest opens a [`Collection`] with [`open`]. Beside the generated
+//! methods, a collection stores and reads documents as typed JSON,
+//! [`remove`](Collection::remove)s one unconditionally, and
 //! [`find`](Collection::find) runs a [`Query`].
 //!
 //! [`Filter::matches`] and [`SortField::compare`] define how a query selects
@@ -33,8 +34,19 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 pub use crate::bindings::imports::omnia::docstore::{collection, store, types};
-use crate::docstore::collection::Collection;
+pub use crate::docstore::collection::{Collection, Page};
+pub use crate::docstore::types::Document;
 use crate::{Error, Result};
+
+/// Open the collection `name`, a binding the deployment declares.
+///
+/// # Errors
+///
+/// The host's failure, under its code: `not-found` for a collection the
+/// deployment does not declare, here or at the first call on it.
+pub async fn open(name: &str) -> Result<Collection> {
+    Ok(store::open(name.to_owned()).await?)
+}
 
 impl Collection {
     /// The document `id` with its JSON decoded as `T`, or `None` when it is
@@ -75,8 +87,19 @@ impl Collection {
     ///   `value` does not serialize.
     /// - The host's failure, under its code.
     pub async fn upsert<T: Serialize + Sync + ?Sized>(&self, id: &str, value: &T) -> Result<()> {
-        self.put(id.to_owned(), encode(id, value)?, None).await??;
+        unconditional(self.put(id.to_owned(), encode(id, value)?, None).await?)?;
         Ok(())
+    }
+
+    /// Delete the document `id`, and answer whether one was removed.
+    ///
+    /// Deleting an absent document succeeds with `false`.
+    ///
+    /// # Errors
+    ///
+    /// The host's failure, under its code.
+    pub async fn remove(&self, id: &str) -> Result<bool> {
+        unconditional(self.delete(id.to_owned(), None).await?)
     }
 
     /// One page of the documents `query` selects.
@@ -84,13 +107,10 @@ impl Collection {
     /// # Errors
     ///
     /// - [`ServerError`](Error::ServerError) with the code `invalid` for a
-    ///   filter [`Filter::check`] refuses, or `unsupported` for an `offset`.
+    ///   filter [`Filter::check`] refuses.
     /// - The host's failure, under its code: `unsupported` for a feature the
     ///   backend does not serve.
-    pub async fn find(&self, query: &Query) -> Result<collection::Page> {
-        if query.offset.is_some() {
-            return Err(Error::server_error("unsupported", "a document query takes no `offset`"));
-        }
+    pub async fn find(&self, query: &Query) -> Result<Page> {
         let filter = match &query.filter {
             Some(filter) => filter.groups()?,
             None => Vec::new(),
@@ -113,11 +133,11 @@ impl types::Document {
     }
 }
 
-// a write with no precondition has none to fail
-impl From<types::Conflict> for Error {
-    fn from(_: types::Conflict) -> Self {
-        Self::server_error("other", "the host reported a conflict on an unconditional write")
-    }
+// a call with no precondition has none to fail, so a conflict is the host's
+fn unconditional<T>(outcome: Result<T, types::Conflict>) -> Result<T> {
+    outcome.map_err(|_conflict| {
+        Error::server_error("other", "the host reported a conflict on an unconditional call")
+    })
 }
 
 fn encode<T: Serialize + ?Sized>(id: &str, value: &T) -> Result<String> {
@@ -145,8 +165,6 @@ pub enum ScalarValue {
     Float64(f64),
     /// UTF-8 string.
     Str(String),
-    /// Opaque bytes, which [`Filter::check`] refuses.
-    Binary(Vec<u8>),
     /// ISO-8601 timestamp string, compared as text.
     Timestamp(String),
 }
@@ -444,8 +462,7 @@ impl Filter {
     /// - a list is empty or holds more than [`MAX_LIST_LEN`](Self::MAX_LIST_LEN) values;
     /// - an [`And`](Self::And) or [`Or`](Self::Or) has no children;
     /// - the filter holds more than [`MAX_CONDITIONS`](Self::MAX_CONDITIONS) conditions;
-    /// - a value is [`Binary`](ScalarValue::Binary), or a
-    ///   [`Float64`](ScalarValue::Float64) that is not finite;
+    /// - a value is a [`Float64`](ScalarValue::Float64) that is not finite;
     /// - an ordering comparison is given [`Null`](ScalarValue::Null) or a
     ///   [`Bool`](ScalarValue::Bool).
     pub fn check(&self) -> Result<()> {
@@ -464,8 +481,6 @@ impl Filter {
     ///   a number, a string with a [`ScalarValue::Str`] or
     ///   [`ScalarValue::Timestamp`]. Equality treats incomparable types as
     ///   unequal.
-    /// - A [`ScalarValue::Binary`] never matches, since JSON has no binary
-    ///   type.
     /// - [`Filter::Contains`], [`Filter::StartsWith`], and
     ///   [`Filter::EndsWith`] match only string fields.
     #[must_use]
@@ -603,6 +618,24 @@ pub struct SortField {
 }
 
 impl SortField {
+    /// Sort by `field` from its least value to its greatest.
+    #[must_use]
+    pub fn asc(field: &str) -> Self {
+        Self {
+            field: field.to_owned(),
+            descending: false,
+        }
+    }
+
+    /// Sort by `field` from its greatest value to its least.
+    #[must_use]
+    pub fn desc(field: &str) -> Self {
+        Self {
+            field: field.to_owned(),
+            descending: true,
+        }
+    }
+
     /// Order two JSON document bodies by this field.
     ///
     /// The field path reads as in [`Filter::matches`]. Values of different
@@ -665,13 +698,8 @@ pub struct Query {
     /// Maximum documents to return.
     pub limit: Option<u32>,
 
-    /// Skip this many documents after filtering and sorting.
-    ///
-    /// A query that sets it fails with the code `unsupported`.
-    pub offset: Option<u32>,
-
-    /// The `next` cursor of the previous [`collection::Page`], or `None` for
-    /// the first page.
+    /// The `next` cursor of the previous [`Page`], or `None` for the first
+    /// page.
     pub after: Option<String>,
 }
 

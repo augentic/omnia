@@ -12,7 +12,7 @@ use omnia_sdk::websocket::types::{Client, Error, Event, Message};
 use omnia_sdk::websocket::{broadcast, connections};
 
 struct WebSocket;
-omnia_sdk::websocket::export!(WebSocket);
+omnia_sdk::exports::websocket::export!(WebSocket);
 
 impl Guest for WebSocket {
     async fn handle(event: Event) -> Result<(), Error> {

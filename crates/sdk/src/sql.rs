@@ -1,11 +1,12 @@
 //! `omnia:sql`, parameterized SQL against the databases a deployment declares.
 //!
-//! A guest opens a [`Database`] with [`store::open`], [`DEFAULT`] unless the
+//! A guest opens a [`Database`] with [`open`], [`DEFAULT`] unless the
 //! deployment declares another. Beside the generated methods, a database and
-//! a [`Transaction`](transactions::Transaction) bind [`Value`] parameters:
+//! a [`Transaction`] bind [`Value`] parameters:
 //!
 //! - [`query_as`](Database::query_as) decodes each selected row as a
 //!   [`FromRow`], a [`Row`] included.
+//! - [`query_opt`](Database::query_opt) decodes the first selected row.
 //! - [`exec`](Database::exec) returns the number of rows a statement changed.
 //!
 //! [`ResultSet::read`] collects the rows of a raw query.
@@ -17,7 +18,7 @@
 //!
 //! Each call on a database commits before it returns, and a statement that
 //! starts or ends a transaction or a savepoint, such as `BEGIN`, fails with
-//! the code `invalid`. [`transactions::begin`] starts a transaction instead:
+//! the code `invalid`. [`Database::begin`] starts a transaction instead:
 //!
 //! - Its statements commit or roll back together, and dropping it rolls back.
 //! - After a statement in it fails, the transaction is over and its changes
@@ -32,10 +33,33 @@ pub use omnia_guest_macros::FromRow;
 
 use crate::Result;
 pub use crate::bindings::imports::omnia::sql::{database, store, transactions, types};
-use crate::sql::database::Database;
-use crate::sql::types::ResultSet;
+pub use crate::sql::database::{Database, Statement};
+pub use crate::sql::transactions::Transaction;
+pub use crate::sql::types::ResultSet;
+
+/// The database a guest opens when the deployment names no other.
+pub const DEFAULT: &str = "default";
+
+/// Open the database `name`, a binding the deployment declares.
+///
+/// # Errors
+///
+/// The host's failure, under its code: `not-found` for a database the
+/// deployment does not declare.
+pub async fn open(name: &str) -> Result<Database> {
+    Ok(store::open(name.to_owned()).await?)
+}
 
 impl Database {
+    /// Start a [`Transaction`] on this database.
+    ///
+    /// # Errors
+    ///
+    /// The host's failure, under its code.
+    pub async fn begin(&self) -> Result<Transaction> {
+        Ok(transactions::begin(self).await?)
+    }
+
     /// Run `sql` with `params` bound and decode each row it selects as `T`.
     ///
     /// # Errors
@@ -46,6 +70,19 @@ impl Database {
     pub async fn query_as<T: FromRow>(&self, sql: &str, params: &[Value]) -> Result<Vec<T>> {
         let selected = self.query(sql.to_owned(), bind(params)).await?;
         decode(&selected.read().await?)
+    }
+
+    /// Run `sql` with `params` bound and decode the first row it selects as
+    /// `T`, or `None` when it selects none.
+    ///
+    /// # Errors
+    ///
+    /// - [`ServerError`](crate::Error::ServerError) with the code `invalid`
+    ///   when the row does not decode as `T`.
+    /// - The host's failure, under its code.
+    pub async fn query_opt<T: FromRow>(&self, sql: &str, params: &[Value]) -> Result<Option<T>> {
+        let selected = self.query(sql.to_owned(), bind(params)).await?;
+        first(&selected.read().await?)
     }
 
     /// Run `sql` with `params` bound and return the number of rows it changed.
@@ -58,7 +95,7 @@ impl Database {
     }
 }
 
-impl transactions::Transaction {
+impl Transaction {
     /// Run `sql` with `params` bound and decode each row it selects as `T`.
     ///
     /// A row that does not decode leaves the transaction open.
@@ -71,6 +108,21 @@ impl transactions::Transaction {
     pub async fn query_as<T: FromRow>(&self, sql: &str, params: &[Value]) -> Result<Vec<T>> {
         let selected = self.query(sql.to_owned(), bind(params)).await?;
         decode(&selected.read().await?)
+    }
+
+    /// Run `sql` with `params` bound and decode the first row it selects as
+    /// `T`, or `None` when it selects none.
+    ///
+    /// A row that does not decode leaves the transaction open.
+    ///
+    /// # Errors
+    ///
+    /// - [`ServerError`](crate::Error::ServerError) with the code `invalid`
+    ///   when the row does not decode as `T`.
+    /// - The host's failure, under its code.
+    pub async fn query_opt<T: FromRow>(&self, sql: &str, params: &[Value]) -> Result<Option<T>> {
+        let selected = self.query(sql.to_owned(), bind(params)).await?;
+        first(&selected.read().await?)
     }
 
     /// Run `sql` with `params` bound and return the number of rows it changed.
@@ -115,7 +167,7 @@ impl ResultSet {
     }
 }
 
-impl database::Statement {
+impl Statement {
     /// A statement of a [`batch`](Database::batch) running `sql` with
     /// `params` bound.
     pub fn new(sql: impl Into<String>, params: &[Value]) -> Self {
@@ -134,8 +186,9 @@ fn decode<T: FromRow>(rows: &[Row]) -> Result<Vec<T>> {
     rows.iter().map(T::from_row).collect()
 }
 
-/// The database a guest opens when the deployment names no other.
-pub const DEFAULT: &str = "default";
+fn first<T: FromRow>(rows: &[Row]) -> Result<Option<T>> {
+    rows.first().map(T::from_row).transpose()
+}
 
 /// A SQL scalar: a statement parameter or a column value.
 ///

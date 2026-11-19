@@ -3,24 +3,21 @@
 //! - Inserted bodies read back intact, and an unknown id reads as `None`.
 //! - `upsert` overwrites an existing id and creates an absent one.
 //! - Queries list in id order, filter, sort with type rank, and paginate.
-//! - A query with an `offset` is `unsupported`.
-//! - `delete` reports whether a document was removed.
+//! - `remove` reports whether a document was removed.
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_sdk::docstore::collection::Collection;
-use omnia_sdk::docstore::types::Document;
-use omnia_sdk::docstore::{Filter, Query, SortField, store};
+use omnia_sdk::docstore::{self, Collection, Document, Filter, Query, SortField};
 use serde_json::{Value, json};
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 const ITEMS: &str = "items";
 const EDGES: &str = "edges";
 
 async fn scenario() {
-    let items = store::open(ITEMS.to_owned()).await.expect("open items");
-    let edges = store::open(EDGES.to_owned()).await.expect("open edges");
+    let items = docstore::open(ITEMS).await.expect("open items");
+    let edges = docstore::open(EDGES).await.expect("open edges");
 
     // seed documents mixing present, explicit null, and absent fields
     insert(&items, "a", json!({"kind": "fruit", "rank": 3, "zone": "z1"})).await;
@@ -51,10 +48,7 @@ async fn scenario() {
     // fruit with a zone, highest rank first, two per page
     let page = Query {
         filter: Some(Filter::and([Filter::eq("kind", "fruit"), Filter::is_not_null("zone")])),
-        order_by: vec![SortField {
-            field: "rank".to_owned(),
-            descending: true,
-        }],
+        order_by: vec![SortField::desc("rank")],
         limit: Some(2),
         ..Query::default()
     };
@@ -69,17 +63,9 @@ async fn scenario() {
     assert_eq!(ids(&rest.documents), ["d"]);
     assert_eq!(rest.next, None);
 
-    // an offset is refused, since a backend pages by cursor alone
-    let offset = Query {
-        offset: Some(1),
-        ..Query::default()
-    };
-    let refused = items.find(&offset).await.expect_err("an offset was served");
-    assert_eq!(refused.code(), "unsupported", "{refused}");
-
-    // delete reports whether a document was removed
-    assert!(delete(&items, "b").await);
-    assert!(!delete(&items, "b").await);
+    // remove reports whether a document was removed
+    assert!(remove(&items, "b").await);
+    assert!(!remove(&items, "b").await);
     assert_eq!(get(&items, "b").await, None);
 
     // absent or incomparable fields across operators and ascending sort order
@@ -98,10 +84,7 @@ async fn scenario() {
     assert_eq!(filter_ids(&edges, Filter::contains("v", "5")).await, ["s"]);
 
     let sorted = Query {
-        order_by: vec![SortField {
-            field: "v".to_owned(),
-            descending: false,
-        }],
+        order_by: vec![SortField::asc("v")],
         ..Query::default()
     };
     let sorted = edges.find(&sorted).await.expect("query sorted edges");
@@ -131,9 +114,8 @@ async fn get(collection: &Collection, id: &str) -> Option<Value> {
     collection.get_as(id).await.unwrap_or_else(|e| panic!("get {id}: {e}"))
 }
 
-async fn delete(collection: &Collection, id: &str) -> bool {
-    let deleted = collection.delete(id.to_owned(), None).await;
-    deleted.unwrap_or_else(|e| panic!("delete {id}: {e}")).expect("an unconditional delete")
+async fn remove(collection: &Collection, id: &str) -> bool {
+    collection.remove(id).await.unwrap_or_else(|e| panic!("remove {id}: {e}"))
 }
 
 fn ids(documents: &[Document]) -> Vec<&str> {

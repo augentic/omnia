@@ -6,8 +6,8 @@ use std::fmt;
 use std::future::{Ready, ready};
 use std::sync::{Arc, Mutex};
 
-use omnia_sdk::api::messaging::Delivery;
-use omnia_sdk::api::{Context, Handlers};
+use omnia_sdk::messaging::Delivery;
+use omnia_sdk::{Context, Handlers};
 use omnia_sdk::{bad_gateway, bad_request, model, plugins, vcs};
 use serde::{Deserialize, Serialize};
 

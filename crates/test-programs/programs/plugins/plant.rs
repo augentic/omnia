@@ -9,7 +9,7 @@
 
 use omnia_sdk::plugins::{Error, Location};
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 async fn scenario() {
     let arguments = wasip3::cli::environment::get_arguments();

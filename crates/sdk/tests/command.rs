@@ -10,11 +10,11 @@ use std::fmt;
 use std::future::{Ready, ready};
 
 use clap::{Args, Parser, Subcommand};
-use omnia_sdk::api::command::{
+use omnia_sdk::command::{
     Command, Failure, Format, IntoExit, Parsed, Render, Response, Shell, USAGE_EXIT, Verbosity,
     completions, parse,
 };
-use omnia_sdk::api::{Context, Handlers, Metadata};
+use omnia_sdk::{Context, Handlers, Metadata};
 use omnia_sdk::{bad_request, not_found, vcs};
 use serde::{Deserialize, Serialize};
 

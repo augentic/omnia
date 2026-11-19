@@ -8,7 +8,7 @@ use omnia_sdk::exports::messaging::incoming_handler::Guest;
 use omnia_sdk::messaging::types::{Delivery, Release, Settle};
 
 struct Messaging;
-omnia_sdk::messaging::export!(Messaging);
+omnia_sdk::exports::messaging::export!(Messaging);
 
 impl Guest for Messaging {
     async fn handle(delivery: Delivery) -> Result<(), Settle> {

@@ -8,7 +8,7 @@
 use axum::handler::Handler;
 use tracing::Level;
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 async fn scenario() {
     fn assert_handler<H: Handler<T, ()>, T>(handler: H) -> H {

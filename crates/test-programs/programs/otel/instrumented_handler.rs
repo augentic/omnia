@@ -6,7 +6,7 @@
 
 use tracing::Level;
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 async fn scenario() {
     traced().await;

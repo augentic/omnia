@@ -16,10 +16,9 @@ use bytes::Bytes;
 use http::header::CONTENT_TYPE;
 use http::{Request, Response, StatusCode};
 use http_body_util::BodyExt as _;
-use omnia_sdk::api::http::trace;
-use omnia_sdk::api::messaging::Delivery;
-use omnia_sdk::api::{Context, Handlers, Metadata, Router};
-use omnia_sdk::{ErrorBody, not_found};
+use omnia_sdk::http::trace;
+use omnia_sdk::messaging::Delivery;
+use omnia_sdk::{Context, ErrorBody, Handlers, Metadata, Router, not_found};
 use serde::{Deserialize, Serialize};
 use tower::ServiceExt as _;
 
@@ -71,6 +70,16 @@ fn handlers() -> Handlers {
 fn router() -> Router {
     handlers().into_router().layer(from_fn(trace))
 }
+
+// named only by the `export!` macros, so a native build that drops the name
+// fails `-D warnings` with `dead_code`
+fn exported() -> Router {
+    handlers().into_router()
+}
+
+omnia_sdk::http::export!(exported);
+omnia_sdk::messaging::export!(exported);
+omnia_sdk::command::export!(exported);
 
 async fn respond(router: impl Into<axum::Router>, request: Request<Body>) -> Response<Bytes> {
     let response = router.into().oneshot(request).await.expect("an axum router is infallible");
@@ -331,7 +340,7 @@ async fn route_and_topic() {
 
 #[tokio::test]
 async fn capability_errors() {
-    use omnia_sdk::{model, plugins, vcs};
+    use omnia_sdk::{keyvalue, model, plugins, vcs};
 
     async fn route(Path(kind): Path<String>) -> Result<Json<()>, omnia_sdk::Error> {
         match kind.as_str() {
@@ -354,6 +363,10 @@ async fn capability_errors() {
             "model-backend" => Err(model::Error::Backend("bridge gone".into()))?,
             "vcs-access-context" => {
                 Err(anyhow::Error::from(vcs::Error::Access("denied".into())).context("push"))?
+            }
+            "wire-context" => {
+                let unavailable = keyvalue::types::Error::Unavailable("store down".into());
+                Err(anyhow::Error::from(unavailable).context("read"))?
             }
             _ => Ok(Json(())),
         }
@@ -380,6 +393,7 @@ async fn capability_errors() {
         ("/err/model-unavailable", StatusCode::BAD_GATEWAY, "unavailable"),
         ("/err/model-backend", StatusCode::BAD_GATEWAY, "backend"),
         ("/err/vcs-access-context", StatusCode::BAD_GATEWAY, "access"),
+        ("/err/wire-context", StatusCode::BAD_GATEWAY, "unavailable"),
     ] {
         let request = Request::get(path).body(Body::empty()).expect("build request");
         let (status, _, body) = send_raw(router.clone(), request).await;
@@ -389,6 +403,7 @@ async fn capability_errors() {
         match path {
             "/err/vcs-pending" => assert_eq!(body.message, "pending changes: a.rs, b.md"),
             "/err/vcs-access-context" => assert_eq!(body.message, "push: access: denied"),
+            "/err/wire-context" => assert_eq!(body.message, "read: store down"),
             _ => {}
         }
     }

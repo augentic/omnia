@@ -6,7 +6,7 @@
 
 use omnia_sdk::plugins::Location;
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 async fn scenario() {
     let plugin = Location::Declared("plugin".to_owned())

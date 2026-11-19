@@ -89,7 +89,7 @@ fn message(data: impl Into<Vec<u8>>) -> Message {
 }
 
 pub struct Messaging;
-omnia_sdk::messaging::export!(Messaging);
+omnia_sdk::exports::messaging::export!(Messaging);
 
 impl omnia_sdk::exports::messaging::incoming_handler::Guest for Messaging {
     async fn handle(delivery: Delivery) -> Result<(), Settle> {

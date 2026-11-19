@@ -1,6 +1,7 @@
 //! `#[derive(Settings)]` and the typed reads beneath it, over the host's
 //! seeded map. A struct loads every field from its key, an unset key fails
 //! with the code `not-found`, and a value that does not parse with `invalid`.
+//! An `Option` field loads as `None` when its key is unset.
 
 #![cfg(target_arch = "wasm32")]
 
@@ -8,7 +9,7 @@ use std::fmt::Debug;
 
 use omnia_sdk::{Error, Result, Settings, config};
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 #[derive(Debug, Settings)]
 #[setting(prefix = "ORDERS_")]
@@ -16,6 +17,8 @@ struct Orders {
     region: String,
     #[setting(key = "RETRIES")]
     retries: u8,
+    currency: Option<String>,
+    discount: Option<u8>,
 }
 
 #[derive(Debug, Settings)]
@@ -32,10 +35,11 @@ struct Mistyped {
 }
 
 async fn scenario() {
-    // a struct loads each field from its key
-    assert_eq!(Orders::KEYS, ["ORDERS_REGION", "RETRIES"]);
-    let orders = Orders::load().await.expect("every key is seeded");
+    // a struct loads each field from its key, and an unset optional one as `None`
+    assert_eq!(Orders::KEYS, ["ORDERS_REGION", "RETRIES", "ORDERS_CURRENCY", "ORDERS_DISCOUNT"]);
+    let orders = Orders::load().await.expect("every required key is seeded");
     assert_eq!((orders.region.as_str(), orders.retries), ("eu", 3));
+    assert_eq!((orders.currency.as_deref(), orders.discount), (Some("nzd"), None));
     expect_code(Unset::load().await, "not-found");
     expect_code(Mistyped::load().await, "invalid");
 

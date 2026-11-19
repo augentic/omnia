@@ -19,7 +19,7 @@ use omnia_sdk::otel::metrics::{
 use omnia_sdk::otel::traces::{self, Event, Link, ScopeSpans, Span, SpanContext, SpanKind, Status};
 use omnia_sdk::otel::types::{AnyValue, InstrumentationScope, KeyValue};
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 const TRACE_ID: &str = "0102030405060708090a0b0c0d0e0f10";
 const SPAN_ID: &str = "1112131415161718";

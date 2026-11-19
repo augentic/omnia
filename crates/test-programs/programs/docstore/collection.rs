@@ -22,7 +22,7 @@ use omnia_sdk::docstore::store;
 use omnia_sdk::docstore::types::{Conflict, Error, Precondition, Revision};
 use serde_json::json;
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 // a cursor still running after this many pages never ends
 const MAX_PAGES: usize = 8;

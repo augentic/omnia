@@ -19,7 +19,7 @@ use omnia_sdk::plugins::{Digest, Location};
 
 use crate::omnia_test::link::ops;
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 // `declared`, `path`, `registry`, or `registry@<endpoint>` — the last naming
 // the registry the load fetches from.

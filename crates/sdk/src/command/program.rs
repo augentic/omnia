@@ -16,7 +16,7 @@ use serde::Serialize;
 use tracing::Instrument as _;
 
 use super::{Command, Format, HintFn, Render, Response, USAGE_EXIT};
-use crate::api::{Handler, Handlers, Metadata, Router};
+use crate::{Handler, Handlers, Metadata, Router};
 
 impl Response {
     /// A usage error rendered by clap, exiting [`USAGE_EXIT`].
@@ -56,7 +56,7 @@ pub enum Parsed<A> {
 /// #[derive(clap::Parser)]
 /// struct App {
 ///     #[command(flatten)]
-///     verbosity: omnia_sdk::api::command::Verbosity,
+///     verbosity: omnia_sdk::command::Verbosity,
 ///
 ///     #[command(subcommand)]
 ///     verb: Verb,

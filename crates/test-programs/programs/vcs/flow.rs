@@ -15,7 +15,7 @@ use omnia_sdk::vcs::{
 };
 use wasip3::filesystem::preopens;
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 // the entries of the long log and status, one more than a page holds
 const LONG: usize = 1001;

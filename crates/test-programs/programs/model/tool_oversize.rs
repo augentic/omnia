@@ -6,7 +6,7 @@
 use omnia_sdk::model::{Error, Request};
 use test_programs::{lookup, user};
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 async fn scenario() {
     for (kind, outcome) in [("result", Ok("hello")), ("failure", Err("oops!"))] {

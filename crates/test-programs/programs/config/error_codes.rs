@@ -12,7 +12,7 @@ use std::fmt::Debug;
 use omnia_sdk::Result;
 use omnia_sdk::config::{self, entries, types};
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 async fn scenario() {
     // the backend's chosen cases

@@ -13,9 +13,9 @@
 
 use std::time::Duration;
 
-use omnia_sdk::keyvalue::bucket::Bucket;
-use omnia_sdk::keyvalue::types::{Conflict, Entry, Lifetime, Precondition, Revision};
-use omnia_sdk::keyvalue::{DEFAULT, store, ttl_ms};
+use omnia_sdk::keyvalue::{
+    self, Bucket, Conflict, DEFAULT, Entry, Lifetime, Precondition, Revision, ttl_ms,
+};
 
 use super::expect_code;
 
@@ -269,7 +269,7 @@ pub async fn named(bucket: &Bucket) {
 ///
 /// Panics if [`UNDECLARED`] opens or fails with another code.
 pub async fn undeclared() {
-    let opened = store::open(UNDECLARED.to_owned()).await;
+    let opened = keyvalue::open(UNDECLARED).await;
 
     expect_code(opened, "not-found", "opening an undeclared bucket");
 }
@@ -351,9 +351,7 @@ async fn conditional(
 }
 
 async fn delete(bucket: &Bucket, key: &str) {
-    let deleted = bucket.delete(key.to_owned(), None).await;
-    let deleted = deleted.unwrap_or_else(|err| panic!("delete `{key}`: {err}"));
-    deleted.unwrap_or_else(|conflict| panic!("an unconditional delete conflicted: {conflict:?}"));
+    bucket.remove(key).await.unwrap_or_else(|err| panic!("delete `{key}`: {err}"));
 }
 
 async fn value(bucket: &Bucket, key: &str) -> Option<Vec<u8>> {
@@ -374,7 +372,7 @@ async fn counter_at(bucket: &Bucket, key: &str) -> i64 {
 }
 
 async fn open(name: &str) -> Bucket {
-    store::open(name.to_owned()).await.unwrap_or_else(|err| panic!("open `{name}`: {err}"))
+    keyvalue::open(name).await.unwrap_or_else(|err| panic!("open `{name}`: {err}"))
 }
 
 fn found_value(conflict: Conflict) -> Option<Vec<u8>> {

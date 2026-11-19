@@ -2,12 +2,10 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_sdk::model::Request;
 use omnia_sdk::model::prompt::{Example, Sections};
-use omnia_sdk::model::types::Role as WireRole;
-use test_programs::user;
+use omnia_sdk::model::{Message, Request};
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 async fn scenario() {
     let sections = Sections {
@@ -42,13 +40,12 @@ async fn scenario() {
 
     let (no_system, messages) = blank.channels(None);
     assert!(no_system.is_none());
-    assert_eq!(messages.len(), 1);
-    assert_eq!(messages[0].role, WireRole::User);
-    assert_eq!(messages[0].content, "do it");
+    assert_eq!(messages, [Message::user("do it")]);
 
+    let (system, messages) = sections.channels(Some("prefer {language}"));
     let reply = Request::builder()
         .maybe_system(system)
-        .messages(vec![user(&user_turn)])
+        .messages(messages)
         .build()
         .complete()
         .await

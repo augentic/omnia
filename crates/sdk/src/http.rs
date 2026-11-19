@@ -3,8 +3,20 @@
 //! - [`fetch`] sends a request whose body is [`Bytes`], and [`fetch_json`]
 //!   reads its JSON reply.
 //! - [`send`] takes any body, and fails with the host's own error.
-//! - `serve` answers an inbound request through an axum router, on `wasm32`
-//!   with the `http` feature.
+//!
+//! With the `http` feature, a route is an ordinary axum handler on a
+//! [`Handlers`](crate::Handlers). It reads the call's
+//! [`Metadata`](crate::Metadata) through the [`Context`](crate::Context)
+//! extractor and its input with axum's `Path`, `Query`, and `Json`
+//! extractors. It answers a `Result` whose error is an [`Error`], the JSON
+//! [`ErrorBody`](crate::ErrorBody) at its status. `?` on an `anyhow::Error`
+//! reaches the same envelope, and a domain error with a wire shape of its own
+//! implements `IntoResponse` itself. [`export!`] binds the router fn as the
+//! guest's `wasi:http` handler, and `serve` answers each request inside the
+//! `handler` span [`trace`] opens.
+
+#[cfg(feature = "http")]
+mod server;
 
 use std::any::Any;
 use std::error::Error as StdError;
@@ -18,7 +30,25 @@ use serde::de::DeserializeOwned;
 use wasip3::http::client;
 use wasip3::http_compat::{IncomingMessage as _, http_from_wasi_response, http_into_wasi_request};
 
+#[cfg(all(feature = "http", target_arch = "wasm32"))]
+pub use self::server::serve;
+#[cfg(feature = "http")]
+pub use self::server::trace;
 use crate::{Error, Result};
+
+/// Bind a router fn as the guest's `wasi:http` export.
+///
+/// Calls the router fn on each request and serves the request through the
+/// router it returns, a [`Router`](crate::Router) or an `axum::Router`,
+/// inside the `handler` span [`trace`] opens. On a native target it binds
+/// nothing, and a private router fn still counts as used.
+///
+/// ```rust,ignore
+/// omnia_sdk::http::export!(router);
+/// ```
+#[cfg(feature = "http")]
+#[doc(inline)]
+pub use crate::__export_http as export;
 
 /// Send `request` through the host's outbound client and return the response.
 ///
@@ -86,34 +116,4 @@ where
     let response = Response::from_parts(parts, bytes.into());
     tracing::trace!("proxy response: {response:?}");
     Ok(response)
-}
-
-/// Serve one `wasi:http` request through `router`.
-///
-/// The request runs inside the guest telemetry scope and the `handler` span
-/// [`trace`](crate::api::http::trace) opens, so a router served here does not
-/// layer `trace` itself. [`http::export!`](crate::api::http::export!) expands
-/// to this call, and a hand-written `wasi:http` export calls it directly.
-///
-/// # Errors
-///
-/// Returns the WASI error code when the request or the router's response
-/// does not convert.
-#[cfg(all(feature = "http", target_arch = "wasm32"))]
-#[crate::otel::instrument(name = "http_guest_handle")]
-pub async fn serve(
-    router: impl Into<axum::Router>, request: wasip3::http::types::Request,
-) -> Result<wasip3::http::types::Response, wasip3::http::types::ErrorCode> {
-    use wasip3::http::types::ErrorCode;
-    use wasip3::http_compat::{http_from_wasi_request, http_into_wasi_response};
-
-    let router = router.into().layer(axum::middleware::from_fn(crate::api::http::trace));
-    let request = http_from_wasi_request(request)?;
-    tracing::trace!("serving request: {:?}", request.headers());
-
-    let response = tower::ServiceExt::oneshot(router, request)
-        .await
-        .map_err(|e| ErrorCode::InternalError(Some(format!("issue processing request: {e}"))))?;
-    tracing::trace!("guest response: {response:?}");
-    http_into_wasi_response(response)
 }

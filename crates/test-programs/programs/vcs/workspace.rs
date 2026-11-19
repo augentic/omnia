@@ -24,7 +24,7 @@ use omnia_sdk::vcs::{remotes, store, workspaces};
 use wasip3::filesystem::preopens;
 use wasip3::filesystem::types::Descriptor;
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 const BASE: &str = "sha:base";
 const URL: &str = "https://example.test/repo.git";

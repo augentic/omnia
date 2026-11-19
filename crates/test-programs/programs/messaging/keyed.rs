@@ -9,12 +9,12 @@
 
 use std::time::SystemTime;
 
-use omnia_sdk::api::messaging::{self, Delivery};
-use omnia_sdk::api::{Context, Handlers, Router};
+use omnia_sdk::messaging::{self, Delivery};
+use omnia_sdk::{Context, Handlers, Router};
 use omnia_sdk::messaging::types::{Client, Message};
 use omnia_sdk::messaging::{DEFAULT, producer};
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 messaging::export!(router);
 
 async fn scenario() {

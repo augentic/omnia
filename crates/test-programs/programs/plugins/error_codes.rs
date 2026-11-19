@@ -12,7 +12,7 @@ use std::fmt::Debug;
 
 use omnia_sdk::plugins::{Digest, Error, Location};
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 const MISSED: &str = "sha256:0000000000000000000000000000000000000000000000000000000000000000";
 

@@ -10,7 +10,7 @@ use std::fmt::Debug;
 use omnia_sdk::Result;
 use omnia_sdk::identity::{AccessToken, credentials};
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 async fn scenario() {
     for (name, status, code) in [

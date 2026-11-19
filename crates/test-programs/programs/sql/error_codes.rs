@@ -17,7 +17,7 @@ use omnia_sdk::Result;
 use omnia_sdk::sql::transactions::{self, Transaction};
 use omnia_sdk::sql::{DEFAULT, Row, Value, store};
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 // each call opens its database, so the suite sees one open per call
 async fn scenario() {

@@ -1,6 +1,6 @@
 //! Shared helpers for the guest scenario programs in `programs/<capability>/`.
 
-use omnia_sdk::model::{Function, Message, Role, Tool, completion, types};
+use omnia_sdk::model::{Function, Message, Tool, completion, types};
 use schemars::JsonSchema;
 use serde::Deserialize;
 
@@ -38,10 +38,7 @@ impl Verdict {
 /// One user chat turn.
 #[must_use]
 pub fn user(content: &str) -> Message {
-    Message {
-        role: Role::User,
-        content: content.to_owned(),
-    }
+    Message::user(content)
 }
 
 /// A declared `lookup` function tool.

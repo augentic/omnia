@@ -6,7 +6,7 @@
 use omnia_sdk::model::{Error, Format, Generation, Request, SchemaFormat};
 use test_programs::{VERDICT_SCHEMA, user};
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 async fn scenario() {
     let schema = Request::builder()

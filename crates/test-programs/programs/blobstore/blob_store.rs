@@ -8,7 +8,7 @@
 use omnia_sdk::blobstore::{admin, store};
 use omnia_test::contract::blob;
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 const SCOPE: &str = "contract";
 const HOST: &str = "contract-host";

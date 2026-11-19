@@ -6,7 +6,7 @@
 use omnia_sdk::model::{Error, Request};
 use test_programs::user;
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 async fn scenario() {
     // No function tools declared; the host rejects the backend's `lookup`

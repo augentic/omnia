@@ -2,12 +2,12 @@
 //! The command façade: argv in, buffered channels and an exit status out.
 //!
 //! With the `command` feature, a subcommand is one more handler on a
-//! [`Handlers`](crate::api::Handlers).
-//! [`Handlers::command`](crate::api::Handlers#method.command) registers it
+//! [`Handlers`](crate::Handlers).
+//! [`Handlers::command`](crate::Handlers#method.command) registers it
 //! beside the paths and topics, decoding its arguments with clap, and
-//! [`Handlers::command_with`](crate::api::Handlers#method.command_with) takes
-//! a decoder of its own. The closed [`Router`](crate::api::Router)
-//! [`run`](crate::api::Router#method.run)s argv:
+//! [`Handlers::command_with`](crate::Handlers#method.command_with) takes
+//! a decoder of its own. The closed [`Router`](crate::Router)
+//! [`run`](crate::Router#method.run)s argv:
 //!
 //! - the verb's [`Handler`] runs on the decoded arguments
 //! - a success body is encoded onto stdout in the selected [`Format`], its
@@ -25,8 +25,8 @@
 //! use std::fmt;
 //!
 //! use clap::Args;
-//! use omnia_sdk::api::command::{self, Render};
-//! use omnia_sdk::api::{Context, Handlers, Router};
+//! use omnia_sdk::command::{self, Render};
+//! use omnia_sdk::{Context, Handlers, Router};
 //! use serde::Serialize;
 //!
 //! /// Greet someone by name.
@@ -65,7 +65,7 @@ use std::sync::Arc;
 use serde::{Serialize, Serializer};
 
 use crate::ErrorBody;
-use crate::api::{Context, Handler, Metadata};
+use crate::{Context, Handler, Metadata};
 
 #[cfg(feature = "command")]
 pub(crate) mod program;
@@ -85,9 +85,9 @@ macro_rules! __export_command {
 
             impl $crate::wasip3::exports::cli::run::Guest for CliGuest {
                 async fn run() -> ::core::result::Result<(), ()> {
-                    $crate::api::command::Export::run(
+                    $crate::command::Export::run(
                         $entry,
-                        $crate::api::command::Package {
+                        $crate::command::Package {
                             version: ::core::env!("CARGO_PKG_VERSION"),
                             description: ::core::env!("CARGO_PKG_DESCRIPTION"),
                         },
@@ -97,6 +97,12 @@ macro_rules! __export_command {
                 }
             }
         };
+
+        // naming the fn keeps a private one from reading as dead code
+        #[cfg(not(all(target_arch = "wasm32", target_os = "wasi")))]
+        const _: () = {
+            let _ = $entry;
+        };
     };
 }
 
@@ -104,17 +110,17 @@ macro_rules! __export_command {
 /// guest's `wasi:cli/run` export.
 ///
 /// Runs the WASI command-line arguments through the
-/// [`Router`](crate::api::Router) a router fn returns, or awaits a
+/// [`Router`](crate::Router) a router fn returns, or awaits a
 /// zero-argument `async fn` returning [`IntoExit`], inside the guest
 /// telemetry scope. The router's program answers `--version` with the
 /// invoking crate's `CARGO_PKG_VERSION` and opens `--help` with its
 /// `CARGO_PKG_DESCRIPTION` unless
-/// [`Router::version`](crate::api::Router#method.version) or
-/// [`Router::about`](crate::api::Router#method.about) set them. Expands to
-/// nothing on native targets.
+/// [`Router::version`](crate::Router#method.version) or
+/// [`Router::about`](crate::Router#method.about) set them. On a native
+/// target it binds nothing, and a private entry fn still counts as used.
 ///
 /// ```rust,ignore
-/// use omnia_sdk::api::command;
+/// use omnia_sdk::command;
 ///
 /// command::export!(command_router);
 /// ```
@@ -166,9 +172,9 @@ where
 }
 
 #[cfg(all(target_arch = "wasm32", feature = "command"))]
-impl<F> Export<crate::api::Router> for F
+impl<F> Export<crate::Router> for F
 where
-    F: FnOnce() -> crate::api::Router,
+    F: FnOnce() -> crate::Router,
 {
     async fn run(self, package: Package) {
         execute(async move {

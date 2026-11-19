@@ -5,7 +5,7 @@
 use omnia_sdk::model::{Format, Request};
 use test_programs::user;
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 async fn scenario() {
     let reply = Request::builder()

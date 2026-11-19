@@ -15,8 +15,8 @@
 
 use std::ops::Range;
 
-use omnia_sdk::blobstore::container::{Container, Listing};
-use omnia_sdk::blobstore::{admin, store};
+use omnia_sdk::blobstore::container::Listing;
+use omnia_sdk::blobstore::{self, Container, admin};
 
 use super::expect_code;
 
@@ -107,7 +107,7 @@ pub async fn delete_absent(scope: &str) {
 }
 
 /// A container nothing created fails with the code `not-found`, at
-/// [`store::open`] or at every call on the handle it opens, and creates
+/// [`blobstore::open`] or at every call on the handle it opens, and creates
 /// nothing.
 ///
 /// The container then reads as absent, and deleting it succeeds.
@@ -121,7 +121,7 @@ pub async fn uncreated(scope: &str) {
     let source = create(scope, "uncreated-source").await;
     write(&source, "doc", b"x").await;
 
-    match store::open(uncreated.clone()).await {
+    match blobstore::open(&uncreated).await {
         Err(err) => expect_code::<(), _>(Err(err), "not-found", "open an uncreated container"),
         Ok(handle) => {
             let get = handle.read("doc").await;
@@ -181,7 +181,7 @@ pub async fn containers(scope: &str) {
     admin::delete_container(container.name()).await.expect("delete the container");
 
     assert!(!container_exists(&container.name()).await, "a deleted container exists");
-    match store::open(container.name()).await {
+    match blobstore::open(&container.name()).await {
         Err(err) => expect_code::<(), _>(Err(err), "not-found", "open a deleted container"),
         Ok(handle) => expect_code(handle.read("doc").await, "not-found", "read a deleted one"),
     }
@@ -340,7 +340,7 @@ async fn rename(source: &Container, name: &str, dest: &Container, dest_name: &st
 }
 
 async fn container_exists(name: &str) -> bool {
-    let exists = store::container_exists(name.to_owned()).await;
+    let exists = blobstore::store::container_exists(name.to_owned()).await;
     exists.unwrap_or_else(|err| panic!("container_exists `{name}`: {err}"))
 }
 

@@ -1,9 +1,19 @@
 //! `omnia:keyvalue`, the buckets of key-value state a deployment declares.
 //!
-//! A guest opens a [`Bucket`] with [`store::open`], [`DEFAULT`] unless the
-//! deployment declares another. Beside the generated methods, a bucket reads
-//! and writes JSON and swaps bytes it expects to find. A TTL becomes a
-//! [`Lifetime`] through `From`.
+//! A guest opens a [`Bucket`] with [`open`], [`DEFAULT`] unless the
+//! deployment declares another. Beside the generated methods, a bucket has
+//! unconditional forms that take borrowed keys and values:
+//!
+//! - [`read`](Bucket::read), [`write`](Bucket::write), and
+//!   [`remove`](Bucket::remove) a value's bytes.
+//! - [`get_json`](Bucket::get_json) and [`set_json`](Bucket::set_json) a
+//!   value as JSON.
+//! - [`compare_and_swap`](Bucket::compare_and_swap) bytes it expects to find.
+//! - [`keys`](Bucket::keys) lists one page of keys.
+//!
+//! The generated `get`, `set`, and `delete` take a [`Precondition`] and
+//! answer a [`Conflict`] when it fails. A TTL becomes a [`Lifetime`] through
+//! `From`.
 //!
 //! The deployment declares its buckets, and opening an undeclared one fails
 //! with the code `not-found`. Every backend accepts a portable key, and a
@@ -23,11 +33,70 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 pub use crate::bindings::imports::omnia::keyvalue::{bucket, keys, store, types};
-use crate::keyvalue::bucket::Bucket;
-use crate::keyvalue::types::Lifetime;
+pub use crate::keyvalue::bucket::Bucket;
+pub use crate::keyvalue::keys::Page;
+pub use crate::keyvalue::types::{Conflict, Entry, Lifetime, Precondition, Revision};
 use crate::{Error, Result};
 
+/// The bucket a guest opens when the deployment names no other.
+pub const DEFAULT: &str = "default";
+
+/// Open the bucket `name`, a binding the deployment declares.
+///
+/// # Errors
+///
+/// The host's failure, under its code: `not-found` for a bucket the
+/// deployment does not declare.
+pub async fn open(name: &str) -> Result<Bucket> {
+    Ok(store::open(name.to_owned()).await?)
+}
+
 impl Bucket {
+    /// The value at `key`, or `None` when it is absent.
+    ///
+    /// # Errors
+    ///
+    /// The host's failure, under its code.
+    pub async fn read(&self, key: &str) -> Result<Option<Vec<u8>>> {
+        Ok(self.get(key.to_owned()).await?.map(|entry| entry.value))
+    }
+
+    /// Store `value` at `key`, replacing any entry and its lifetime.
+    ///
+    /// A `ttl` of `None` keeps the value until it is deleted.
+    ///
+    /// # Errors
+    ///
+    /// The host's failure, under its code: `invalid` for a zero `ttl`.
+    pub async fn write(&self, key: &str, value: &[u8], ttl: Option<Duration>) -> Result<()> {
+        unconditional(self.set(key.to_owned(), value.to_vec(), ttl.into(), None).await?)?;
+        Ok(())
+    }
+
+    /// Delete the entry at `key`. Deleting an absent key succeeds.
+    ///
+    /// # Errors
+    ///
+    /// The host's failure, under its code.
+    pub async fn remove(&self, key: &str) -> Result<()> {
+        unconditional(self.delete(key.to_owned(), None).await?)
+    }
+
+    /// One page of the keys that start with `prefix`, as [`keys::list`]
+    /// pages them.
+    ///
+    /// `after` is the [`next`](Page::next) of the previous page of the same
+    /// listing, and a page holds at most `limit` keys.
+    ///
+    /// # Errors
+    ///
+    /// The host's failure, under its code: `invalid` for a zero `limit`.
+    pub async fn keys(
+        &self, prefix: &str, after: Option<&str>, limit: Option<u32>,
+    ) -> Result<Page> {
+        Ok(keys::list(self, prefix.to_owned(), after.map(str::to_owned), limit).await?)
+    }
+
     /// The JSON value at `key` decoded as `T`, or `None` when it is absent.
     ///
     /// # Errors
@@ -53,7 +122,7 @@ impl Bucket {
         &self, key: &str, value: &T, ttl: Option<Duration>,
     ) -> Result<()> {
         let bytes = encode(key, value)?;
-        self.set(key.to_owned(), bytes, ttl.into(), None).await??;
+        unconditional(self.set(key.to_owned(), bytes, ttl.into(), None).await?)?;
         Ok(())
     }
 
@@ -71,19 +140,17 @@ impl Bucket {
     /// - The host's failure, under its code.
     pub async fn compare_and_swap(
         &self, key: &str, current: Option<&[u8]>, new: &[u8], ttl: Option<Duration>,
-    ) -> Result<Result<(), types::Conflict>> {
+    ) -> Result<Result<(), Conflict>> {
         if ttl == Some(Duration::ZERO) {
             return Err(zero_ttl());
         }
 
         // write under the revision the expected bytes are stored at
         let when = match current {
-            None => types::Precondition::Absent,
+            None => Precondition::Absent,
             Some(expected) => match self.get(key.to_owned()).await? {
-                Some(entry) if entry.value == expected => {
-                    types::Precondition::Matches(entry.revision)
-                }
-                found => return Ok(Err(types::Conflict { current: found })),
+                Some(entry) if entry.value == expected => Precondition::Matches(entry.revision),
+                found => return Ok(Err(Conflict { current: found })),
             },
         };
         let lifetime = ttl.map_or(Lifetime::Keep, |ttl| Lifetime::KeepOrTtlMs(ttl_ms(ttl)));
@@ -113,11 +180,11 @@ impl From<Option<Duration>> for Lifetime {
     }
 }
 
-// a write with no precondition has none to fail
-impl From<types::Conflict> for Error {
-    fn from(_: types::Conflict) -> Self {
-        Self::server_error("other", "the host reported a conflict on an unconditional write")
-    }
+// a call with no precondition has none to fail, so a conflict is the host's
+fn unconditional<T>(outcome: Result<T, Conflict>) -> Result<T> {
+    outcome.map_err(|_conflict| {
+        Error::server_error("other", "the host reported a conflict on an unconditional call")
+    })
 }
 
 fn decode<T: DeserializeOwned>(key: &str, bytes: &[u8]) -> Result<T> {
@@ -133,6 +200,3 @@ fn encode<T: Serialize + ?Sized>(key: &str, value: &T) -> Result<Vec<u8>> {
 fn zero_ttl() -> Error {
     Error::server_error("invalid", "a TTL must be greater than zero")
 }
-
-/// The bucket a guest opens when the deployment names no other.
-pub const DEFAULT: &str = "default";

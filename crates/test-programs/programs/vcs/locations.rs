@@ -19,7 +19,7 @@ use omnia_sdk::vcs::types::{Error, Location};
 use wasip3::filesystem::preopens;
 use wasip3::filesystem::types::{Descriptor, DescriptorFlags, OpenFlags, PathFlags};
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 // a name beside the mount, through the planted `up`; the host checks it never appears
 const OUTSIDE: &str = "up/omnia-vcs-locations-outside";

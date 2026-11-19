@@ -11,7 +11,7 @@ use omnia_sdk::keyvalue::types::Lifetime;
 use omnia_sdk::keyvalue::{DEFAULT, store};
 use omnia_test::contract::state;
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 async fn scenario() {
     let bucket = store::open(DEFAULT.to_owned()).await.expect("open the default bucket");

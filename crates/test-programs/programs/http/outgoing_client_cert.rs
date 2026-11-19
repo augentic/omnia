@@ -20,7 +20,7 @@ use http::{Method, Request, StatusCode};
 use omnia_sdk::config;
 use wasip3::http::types::ErrorCode;
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 const ACCEPTED: [(&str, &str); 3] = [
     ("CLIENT_CERT_OK", "/mtls"),

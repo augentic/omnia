@@ -1,20 +1,100 @@
 //! `omnia:messaging`, the topics a deployment's broker serves.
 //!
-//! A guest connects a [`Client`](types::Client) to a broker, [`DEFAULT`]
-//! unless the deployment declares another, and sends a
-//! [`Message`](types::Message) through [`producer::send`] or
-//! [`request_reply::request`]. It receives through the handler [`export!`]
-//! binds.
+//! A guest [`connect`]s a [`Client`] to a broker, [`DEFAULT`] unless the
+//! deployment declares another. The client [`send`](Client::send)s a
+//! [`Message`], or [`request`](Client::request)s a reply to one.
+//!
+//! A guest receives through its [`Router`](crate::Router). [`export!`] binds
+//! the router fn as the guest's `omnia:messaging` handler, and each
+//! [`Delivery`] reaches the handler registered for its topic. A guest that
+//! settles every delivery itself implements
+//! [`exports::messaging`](crate::exports::messaging) instead.
+
+mod router;
+
+use std::time::Duration;
 
 use serde::Serialize;
 
+pub use self::router::Delivery;
+#[cfg(target_arch = "wasm32")]
+pub use self::router::handle;
+pub(crate) use self::router::Topics;
 pub use crate::bindings::imports::omnia::messaging::{producer, request_reply, types};
+pub use crate::messaging::types::{Client, Message};
 use crate::{Error, Result};
 
-/// The broker a guest's own [`Client`](types::Client) connects to.
+/// Bind a router fn as the guest's `omnia:messaging` export.
+///
+/// Calls the router fn on each delivery and dispatches the delivery through
+/// the [`Router`](crate::Router) it returns, as `handle` does. On a native
+/// target it binds nothing, and a private router fn still counts as used.
+///
+/// ```rust,ignore
+/// omnia_sdk::messaging::export!(router);
+/// ```
+#[doc(inline)]
+pub use crate::__export_messaging as export;
+
+/// The broker a guest's own [`Client`] connects to.
 pub const DEFAULT: &str = "default";
 
-impl types::Message {
+/// Connect to the broker `name`, a binding the deployment declares.
+///
+/// # Errors
+///
+/// The host's failure, under its code: `not-found` for a broker the
+/// deployment does not declare.
+pub async fn connect(name: &str) -> Result<Client> {
+    Ok(Client::connect(name.to_owned()).await?)
+}
+
+impl Client {
+    /// Send `message` to `topic`.
+    ///
+    /// Success means the broker took the message for delivery, not that a
+    /// subscriber received it.
+    ///
+    /// # Errors
+    ///
+    /// The host's failure, under its code.
+    pub async fn send(&self, topic: &str, message: Message) -> Result<()> {
+        Ok(producer::send(self, topic.to_owned(), message).await?)
+    }
+
+    /// Send `message` to `topic` and return the first reply.
+    ///
+    /// The call waits `timeout`, or the backend's bound when `None`.
+    ///
+    /// # Errors
+    ///
+    /// The host's failure, under its code:
+    ///
+    /// - `unavailable` when nothing answers in time;
+    /// - `invalid` for a zero `timeout`.
+    pub async fn request(
+        &self, topic: &str, message: Message, timeout: Option<Duration>,
+    ) -> Result<Message> {
+        let timeout_ms = timeout.map(millis);
+        Ok(request_reply::request(self, topic.to_owned(), message, timeout_ms).await?)
+    }
+
+    /// Answer the request whose delivery carried `reply_to`.
+    ///
+    /// # Errors
+    ///
+    /// The host's failure, under its code.
+    pub async fn reply(&self, reply_to: &str, message: Message) -> Result<()> {
+        Ok(request_reply::reply(self, reply_to.to_owned(), message).await?)
+    }
+}
+
+// rounded up, so only a zero timeout is zero
+fn millis(timeout: Duration) -> u64 {
+    u64::try_from(timeout.as_nanos().div_ceil(1_000_000)).unwrap_or(u64::MAX)
+}
+
+impl Message {
     /// A message carrying `data`, with no key, content type, or metadata.
     #[must_use]
     pub fn new(data: impl Into<Vec<u8>>) -> Self {
@@ -64,20 +144,3 @@ fn encode<T: Serialize + ?Sized>(value: &T) -> Result<Vec<u8>> {
     serde_json::to_vec(value)
         .map_err(|err| Error::server_error("invalid", format!("encoding message payload: {err}")))
 }
-
-#[doc(hidden)]
-#[macro_export]
-macro_rules! __export_messaging_guest {
-    ($ty:ident) => {
-        $crate::_export_messaging!($ty);
-    };
-}
-
-/// Export a type as the guest's `omnia:messaging/incoming-handler`.
-///
-/// The type implements
-/// [`Guest`](crate::exports::messaging::incoming_handler::Guest). A guest
-/// that routes by topic binds a router with
-/// [`api::messaging::export!`](crate::api::messaging::export!) instead.
-#[doc(inline)]
-pub use crate::__export_messaging_guest as export;

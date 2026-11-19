@@ -11,8 +11,7 @@
 use std::iter;
 
 use omnia_sdk::Result;
-use omnia_sdk::docstore::collection::Collection;
-use omnia_sdk::docstore::{Exists, Filter, Query, ScalarValue, SortField, store};
+use omnia_sdk::docstore::{self, Collection, Exists, Filter, Query, ScalarValue, SortField};
 use serde_json::{Value, json};
 
 use super::{expect_code, is_code};
@@ -113,7 +112,7 @@ pub async fn portable_query() {
 /// - an empty list;
 /// - an empty `and`, and an empty `or`;
 /// - one condition more than [`Filter::MAX_CONDITIONS`];
-/// - a [`Binary`](ScalarValue::Binary) value, and a number that is not finite;
+/// - a number that is not finite;
 /// - an ordering comparison with `null`, and one with a boolean.
 ///
 /// # Panics
@@ -133,7 +132,6 @@ pub async fn filter_limits() {
         (Filter::and([]), "an empty `and`"),
         (Filter::or([]), "an empty `or`"),
         (many, "a filter past the condition limit"),
-        (Filter::eq("rank", ScalarValue::Binary(vec![1])), "a binary value"),
         (Filter::gt("rank", f64::NAN), "a number that is not finite"),
         (Filter::gt("rank", ScalarValue::Null), "an ordering comparison with `null`"),
         (Filter::lt("rank", true), "an ordering comparison with a boolean"),
@@ -151,8 +149,7 @@ pub async fn filter_limits() {
 /// - the null predicates, a comparison with `null`, and a list that holds
 ///   `null`;
 /// - a dotted field path;
-/// - `order_by`;
-/// - `offset`.
+/// - `order_by`.
 ///
 /// # Panics
 ///
@@ -183,11 +180,7 @@ pub async fn optional_query() {
         served(selected, &matching(&stored, &filter), &format!("{filter:?}"));
     }
 
-    for descending in [false, true] {
-        let sort = SortField {
-            field: "rank".to_owned(),
-            descending,
-        };
+    for sort in [SortField::asc("rank"), SortField::desc("rank")] {
         let mut expected: Vec<_> = stored.iter().collect();
         expected.sort_by(|(a_id, a), (b_id, b)| sort.compare(a, b).then_with(|| a_id.cmp(b_id)));
         let expected: Vec<String> = expected.into_iter().map(|(id, _)| (*id).to_owned()).collect();
@@ -197,13 +190,6 @@ pub async fn optional_query() {
         };
         served(walk(&collection, &query).await, &expected, &format!("{sort:?}"));
     }
-
-    let unpaged = walk(&collection, &Query::default()).await.expect("query every document");
-    let offset = Query {
-        offset: Some(1),
-        ..Query::default()
-    };
-    served(walk(&collection, &offset).await, &unpaged[1..], "an offset of 1");
 }
 
 // an optional feature is served as the reference defines it, or refused
@@ -216,7 +202,7 @@ fn served(selected: Result<Vec<String>>, expected: &[String], feature: &str) {
 }
 
 async fn open(name: &str) -> Collection {
-    store::open(name.to_owned()).await.unwrap_or_else(|err| panic!("open `{name}`: {err}"))
+    docstore::open(name).await.unwrap_or_else(|err| panic!("open `{name}`: {err}"))
 }
 
 async fn seed(collection: &Collection, stored: &[(&str, Value)]) {

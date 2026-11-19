@@ -16,7 +16,7 @@ use omnia_sdk::blobstore::store;
 use omnia_sdk::blobstore::types::{Attributes, Conflict, Error, ObjectEntry, Stored};
 use omnia_sdk::{wit_future, wit_stream};
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 // the starts of 2020 and of 2100, in milliseconds since the Unix epoch
 const YEAR_2020_MS: u64 = 1_577_836_800_000;

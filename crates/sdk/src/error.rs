@@ -159,27 +159,36 @@ impl Error {
 
     // The first domain error in the source chain keeps its variant and code,
     // and anything else is a `server_error`. The description is the whole
-    // chain, where an `Error` reads as its own description.
+    // chain.
     pub(crate) fn from_chain(error: &(dyn StdError + 'static)) -> Self {
         let links = || iter::successors(Some(error), |&link| link.source());
-        let description = links()
-            .map(|link| {
-                link.downcast_ref::<Self>()
-                    .map_or_else(|| link.to_string(), |error| error.description().to_owned())
-            })
-            .collect::<Vec<_>>()
-            .join(": ");
+        let description = links().map(Self::describe).collect::<Vec<_>>().join(": ");
         match links().find_map(Self::from_domain) {
             Some(error) => error.with_description(description),
             None => Self::server_error("server_error", description),
         }
     }
 
-    // The `Error` a domain error maps to: this type, or a `vcs`, `plugins`,
-    // or `model` error through its own conversion.
+    // An `Error` reads as its own description and a wire error as its
+    // message, since the generated `Display` is the `Debug` form.
+    fn describe(link: &(dyn StdError + 'static)) -> String {
+        if let Some(error) = link.downcast_ref::<Self>() {
+            return error.description().to_owned();
+        }
+        if let Some(error) = link.downcast_ref::<types::Error>() {
+            return error.message().to_owned();
+        }
+        link.to_string()
+    }
+
+    // The `Error` a domain error maps to: this type, or a wire, `vcs`,
+    // `plugins`, or `model` error through its own conversion.
     fn from_domain(error: &(dyn StdError + 'static)) -> Option<Self> {
         if let Some(error) = error.downcast_ref::<Self>() {
             return Some(error.clone());
+        }
+        if let Some(error) = error.downcast_ref::<types::Error>() {
+            return Some(error.clone().into());
         }
         if let Some(error) = error.downcast_ref::<crate::vcs::Error>() {
             return Some(error.clone().into());
@@ -221,6 +230,19 @@ impl From<types::Error> for Error {
             types::Error::Unsupported(message) => Self::server_error("unsupported", message),
             types::Error::Unavailable(message) => Self::bad_gateway("unavailable", message),
             types::Error::Other(message) => Self::server_error("other", message),
+        }
+    }
+}
+
+impl types::Error {
+    fn message(&self) -> &str {
+        match self {
+            Self::NotFound(message)
+            | Self::Denied(message)
+            | Self::Invalid(message)
+            | Self::Unsupported(message)
+            | Self::Unavailable(message)
+            | Self::Other(message) => message,
         }
     }
 }

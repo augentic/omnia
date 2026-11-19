@@ -45,6 +45,8 @@ pub fn instrument(args: TokenStream, item: TokenStream) -> TokenStream {
 ///
 /// A field's key is its name upper-cased behind the struct's
 /// `#[setting(prefix = "..")]`, or the literal in `#[setting(key = "..")]`.
+/// An `Option<T>` field reads through `omnia_sdk::config::parse`, so its key
+/// may be unset.
 #[proc_macro_derive(Settings, attributes(setting))]
 pub fn derive_settings(item: TokenStream) -> TokenStream {
     let input = parse_macro_input!(item as DeriveInput);

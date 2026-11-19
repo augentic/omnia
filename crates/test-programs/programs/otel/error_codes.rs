@@ -13,7 +13,7 @@ use omnia_sdk::otel::metrics::{
 use omnia_sdk::otel::traces::{self, ScopeSpans, Span, SpanContext, SpanKind, Status};
 use omnia_sdk::otel::types::{AnyValue, Error, KeyValue};
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 async fn scenario() {
     // the host's refusals

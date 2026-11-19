@@ -9,7 +9,7 @@ use std::time::Duration;
 use omnia_sdk::identity::{AccessToken, DEFAULT, credentials};
 use omnia_sdk::{Error, Result};
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 async fn scenario() {
     let default = token(DEFAULT, &["read"]).await.expect("default token");

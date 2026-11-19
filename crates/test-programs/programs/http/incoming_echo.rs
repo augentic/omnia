@@ -17,7 +17,7 @@ use axum::http::uri::Authority;
 use axum::middleware::map_request;
 use axum::routing::get;
 use omnia_sdk::Error;
-use omnia_sdk::api::{Context, http};
+use omnia_sdk::{Context, http};
 use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize)]

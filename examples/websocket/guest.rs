@@ -37,7 +37,7 @@ async fn send_message(message: String) -> omnia_sdk::Result<Json<Value>> {
 }
 
 struct WebSocket;
-omnia_sdk::websocket::export!(WebSocket);
+omnia_sdk::exports::websocket::export!(WebSocket);
 
 impl omnia_sdk::exports::websocket::incoming_handler::Guest for WebSocket {
     async fn handle(event: Event) -> Result<(), Error> {

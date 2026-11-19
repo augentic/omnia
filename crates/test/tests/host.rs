@@ -400,12 +400,16 @@ async fn harness_flow() {
         .messaging(sink.clone())
         .websocket(sink.clone())
         .identity(identity.clone());
+    let cache = backends.keyvalue.open_bucket(STATE_BUCKET.to_owned()).await.expect("bucket");
+    let cached = cache.set("names.7".to_owned(), b"widget".to_vec(), Lifetime::Replace(None), None);
+    cached.await.expect("set").expect("no precondition");
     let flow = precompiled(test_programs::HARNESS_FLOW).expect("flow precompiles");
     let runtime = Deployment::new()
         .guest("flow", flow)
-        .boot(backends, |deployment| {
+        .boot(backends.clone(), |deployment| {
             deployment.host::<WasiHttp>()?;
             deployment.host::<WasiIdentity>()?;
+            deployment.host::<WasiKeyValue>()?;
             deployment.host::<WasiMessaging>()?;
             deployment.host::<WasiOtel>()?;
             deployment.host::<WasiSql>()?;
@@ -435,6 +439,8 @@ async fn harness_flow() {
         scopes: vec!["prices.read".to_owned()],
     };
     assert_eq!(identity.asked(), [asked]);
+    assert_eq!(backends.state("prices.7").await, Some(b"12".to_vec()));
+    assert_eq!(backends.state("names.7").await, None);
     let [renamed] = sink.sent().try_into().expect("one message sent");
     assert_eq!(
         (renamed.topic.as_str(), renamed.payload.as_slice()),

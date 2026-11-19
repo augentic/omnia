@@ -19,7 +19,7 @@ use opentelemetry::trace::{
 use opentelemetry::{Context, InstrumentationScope, KeyValue};
 use tracing::{Instrument as _, Level};
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 async fn scenario() {
     parent().await;

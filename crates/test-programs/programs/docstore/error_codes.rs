@@ -12,7 +12,7 @@ use omnia_sdk::docstore::store;
 use omnia_sdk::docstore::types::Document;
 use omnia_sdk::{Error, Result};
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 async fn scenario() {
     // the host's own rule

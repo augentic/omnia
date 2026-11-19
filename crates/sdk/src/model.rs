@@ -253,6 +253,35 @@ pub struct Message {
     pub content: String,
 }
 
+impl Message {
+    /// A [`User`](Role::User) turn carrying `content`.
+    #[must_use]
+    pub fn user(content: impl Into<String>) -> Self {
+        Self {
+            role: Role::User,
+            content: content.into(),
+        }
+    }
+
+    /// An [`Assistant`](Role::Assistant) turn carrying `content`.
+    #[must_use]
+    pub fn assistant(content: impl Into<String>) -> Self {
+        Self {
+            role: Role::Assistant,
+            content: content.into(),
+        }
+    }
+
+    /// A [`System`](Role::System) turn carrying `content`.
+    #[must_use]
+    pub fn system(content: impl Into<String>) -> Self {
+        Self {
+            role: Role::System,
+            content: content.into(),
+        }
+    }
+}
+
 /// Chat turn author.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Role {

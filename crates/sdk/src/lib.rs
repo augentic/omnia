@@ -4,12 +4,13 @@
 #[cfg(target_arch = "wasm32")]
 extern crate self as omnia_sdk;
 
-pub mod api;
 mod bindings;
 pub mod blobstore;
+pub mod command;
 pub mod config;
 pub mod docstore;
 mod error;
+mod handler;
 pub mod http;
 pub mod identity;
 pub mod keyvalue;
@@ -29,11 +30,53 @@ pub use omnia_guest_macros::Settings;
 
 pub use crate::bindings::imports::{wit_future, wit_stream};
 pub use crate::error::*;
+pub use crate::handler::{Context, Handler, Handlers, Metadata, Router};
 
-/// The handlers a guest exports, one `Guest` trait for each.
+/// The handlers a guest implements by hand, each a `Guest` trait beside the
+/// `export!` that binds a type to it.
+///
+/// A guest that routes deliveries by topic binds its [`Router`] with
+/// [`messaging::export!`] instead.
 pub mod exports {
-    pub use crate::bindings::messaging::exports::omnia::messaging;
-    pub use crate::bindings::websocket::exports::omnia::websocket;
+    /// `omnia:messaging/incoming-handler`, for a guest that settles every
+    /// delivery itself.
+    pub mod messaging {
+        pub use crate::bindings::messaging::exports::omnia::messaging::incoming_handler;
+
+        #[doc(hidden)]
+        #[macro_export]
+        macro_rules! __export_messaging_guest {
+            ($ty:ident) => {
+                $crate::_export_messaging!($ty);
+            };
+        }
+
+        /// Export a type as the guest's `omnia:messaging/incoming-handler`.
+        ///
+        /// The type implements [`Guest`](incoming_handler::Guest).
+        #[doc(inline)]
+        pub use crate::__export_messaging_guest as export;
+    }
+
+    /// `omnia:websocket/incoming-handler`, for a guest that answers the
+    /// events of its WebSocket clients.
+    pub mod websocket {
+        pub use crate::bindings::websocket::exports::omnia::websocket::incoming_handler;
+
+        #[doc(hidden)]
+        #[macro_export]
+        macro_rules! __export_websocket_guest {
+            ($ty:ident) => {
+                $crate::_export_websocket!($ty);
+            };
+        }
+
+        /// Export a type as the guest's `omnia:websocket/incoming-handler`.
+        ///
+        /// The type implements [`Guest`](incoming_handler::Guest).
+        #[doc(inline)]
+        pub use crate::__export_websocket_guest as export;
+    }
 
     // the path the generated `export!` macros reach their glue through
     #[doc(hidden)]

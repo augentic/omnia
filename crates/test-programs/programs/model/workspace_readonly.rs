@@ -6,7 +6,7 @@ use omnia_sdk::model::{Error, Request};
 use test_programs::user;
 use wasip3::filesystem::preopens;
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 async fn scenario() {
     assert!(preopens::get_directories().iter().any(|(_, name)| name == "."), "host must mount `.`");

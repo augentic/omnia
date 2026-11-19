@@ -1,17 +1,31 @@
 //! `omnia:identity`, access tokens for the identities a deployment declares.
 //!
-//! A guest opens an [`Identity`](credentials::Identity) with
-//! [`credentials::open`], [`DEFAULT`] unless the deployment declares another.
-//! Beside the generated `get_token`, an identity returns an [`AccessToken`]
-//! whose [`Debug`] form redacts the token.
+//! A guest opens an [`Identity`] with [`open`], [`DEFAULT`] unless the
+//! deployment declares another. Beside the generated `get_token`, an
+//! identity returns an [`AccessToken`] whose [`Debug`] form redacts the
+//! token.
 
 use std::fmt;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::Result;
 pub use crate::bindings::imports::omnia::identity::{credentials, types};
+pub use crate::identity::credentials::Identity;
 
-impl credentials::Identity {
+/// The identity a guest opens when the deployment names no other.
+pub const DEFAULT: &str = "default";
+
+/// Open the identity `name`, a binding the deployment declares.
+///
+/// # Errors
+///
+/// The host's failure, under its code: `not-found` for an identity the
+/// deployment does not declare.
+pub async fn open(name: &str) -> Result<Identity> {
+    Ok(credentials::open(name.to_owned()).await?)
+}
+
+impl Identity {
     /// An access token for this identity, scoped to `scopes`.
     ///
     /// An empty `scopes` asks for the identity's default scopes. A portable
@@ -46,9 +60,6 @@ fn time_left(expires_at: u64) -> Duration {
     })
 }
 
-/// The identity a guest opens when the deployment names no other.
-pub const DEFAULT: &str = "default";
-
 /// An `OAuth` 2.0 access token and how long it stays valid.
 ///
 /// Its [`Debug`] form redacts the token.
@@ -59,7 +70,7 @@ pub struct AccessToken {
     pub token: String,
 
     /// How long the token stays valid, counted from when
-    /// [`token`](credentials::Identity::token) returned it.
+    /// [`token`](Identity::token) returned it.
     pub expires_in: Duration,
 }
 

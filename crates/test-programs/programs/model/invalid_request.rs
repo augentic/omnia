@@ -6,7 +6,7 @@
 use omnia_sdk::model::{Error, Format, Function, Request, SchemaFormat, Tool, WorkerGrant};
 use test_programs::{lookup, user};
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 async fn refused(request: Request) -> String {
     match request.complete().await {

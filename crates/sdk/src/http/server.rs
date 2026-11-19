@@ -1,16 +1,5 @@
-//! HTTP handlers over plain axum.
-//!
-//! A route is an ordinary axum handler. It reads the call's [`Metadata`]
-//! through the [`Context`] extractor, its input with axum's `Path`, `Query`,
-//! and `Json` extractors, and answers a `Result` whose error is an
-//! [`Error`](crate::Error), the JSON [`ErrorBody`] at its status. `?` on an
-//! `anyhow::Error` reaches the same envelope, and a domain error with a wire
-//! shape of its own implements `IntoResponse` itself. A module builds its
-//! routes and topics on a [`Handlers`] of its own and the guest merges them
-//! (`Handlers::from([..])` or [`Handlers::merge`]) into its one
-//! [`api::Router`](Router) with [`into_router`](Handlers::into_router).
-//! [`export!`] binds the router fn as the guest's `wasi:http` handler and
-//! serves each request inside the `handler` span [`trace`] opens.
+//! The inbound side of `wasi:http`: axum routes on a [`Router`], served
+//! inside the `handler` span [`trace`] opens.
 
 use std::convert::Infallible;
 use std::future::{Future, ready};
@@ -24,8 +13,7 @@ use http::HeaderMap;
 use http::request::Parts;
 use tracing::Instrument as _;
 
-use crate::ErrorBody;
-use crate::api::{Context, Handlers, Metadata, Router};
+use crate::{Context, ErrorBody, Handlers, Metadata, Router};
 
 #[doc(hidden)]
 #[macro_export]
@@ -48,29 +36,51 @@ macro_rules! __export_http {
                 }
             }
         };
+
+        // naming the fn keeps a private one from reading as dead code
+        #[cfg(not(all(target_arch = "wasm32", target_os = "wasi")))]
+        const _: () = {
+            let _ = $router;
+        };
     };
 }
 
-/// Bind a router fn as the guest's `wasi:http` export.
+/// Serve one `wasi:http` request through `router`.
 ///
-/// Calls the router fn on each request and serves the request through the
-/// router it returns, an [`api::Router`](Router) or an `axum::Router`, inside
-/// the `handler` span [`trace`] opens. Expands to nothing on native targets.
+/// The request runs inside the guest telemetry scope and the `handler` span
+/// [`trace`] opens, so a router served here does not layer `trace` itself.
+/// [`export!`](crate::http::export!) expands to this call, and a hand-written
+/// `wasi:http` export calls it directly.
 ///
-/// ```rust,ignore
-/// use omnia_sdk::api::http;
+/// # Errors
 ///
-/// http::export!(http_router);
-/// ```
-#[doc(inline)]
-pub use crate::__export_http as export;
+/// Returns the WASI error code when the request or the router's response
+/// does not convert.
+#[cfg(target_arch = "wasm32")]
+#[crate::otel::instrument(name = "http_guest_handle")]
+pub async fn serve(
+    router: impl Into<axum::Router>, request: wasip3::http::types::Request,
+) -> Result<wasip3::http::types::Response, wasip3::http::types::ErrorCode> {
+    use wasip3::http::types::ErrorCode;
+    use wasip3::http_compat::{http_from_wasi_request, http_into_wasi_response};
+
+    let router = router.into().layer(axum::middleware::from_fn(trace));
+    let request = http_from_wasi_request(request)?;
+    tracing::trace!("serving request: {:?}", request.headers());
+
+    let response = tower::ServiceExt::oneshot(router, request)
+        .await
+        .map_err(|e| ErrorCode::InternalError(Some(format!("issue processing request: {e}"))))?;
+    tracing::trace!("guest response: {response:?}");
+    http_into_wasi_response(response)
+}
 
 /// Serve a request inside a `handler` span carrying its request and
 /// correlation ids, its method, and its route.
 ///
 /// Apply with `axum::middleware::from_fn(trace)` on a native host or in a
-/// test. In a guest, [`export!`] and `http::serve` apply it to the
-/// router they serve. The ids the span carries are the ones the
+/// test. In a guest, [`export!`](crate::http::export!) and `serve` apply it
+/// to the router they serve. The ids the span carries are the ones the
 /// [`Metadata`] and [`Context`] extractors hand the handler, a minted request
 /// id included. The `route` is the template the router matched, such as
 /// `/items/{id}`; a request no route matched carries none.

@@ -11,7 +11,7 @@ use std::fmt::Debug;
 use omnia_sdk::messaging::types::{Client, Error, Message};
 use omnia_sdk::messaging::{DEFAULT, producer, request_reply};
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 async fn scenario() {
     // the backend's chosen cases, through the SDK

@@ -1,34 +1,5 @@
-//! Transport-neutral handler invocation and transport adapters.
-//!
-//! Application logic is a [`Handler`]: any `async fn(Context, I)` returning
-//! a `Result`. A module registers its HTTP paths, messaging topics, and
-//! subcommands on a [`Handlers`] of its own and the guest merges them
-//! (`Handlers::from([..])` or [`Handlers::merge`]), closing the whole with
-//! [`Handlers::into_router`] into a [`Router`] that serves HTTP requests,
-//! dispatches messaging deliveries, and runs argv. A handler reaches the host
-//! through the crate's bindings, and its [`Context`] carries the call's
-//! [`Metadata`]. Each transport's `export!` macro binds the router fn as the
-//! guest's WASI export.
-//!
-//! ```rust
-//! use std::convert::Infallible;
-//!
-//! use omnia_sdk::api::{Context, Handlers, Router};
-//! use serde::Deserialize;
-//!
-//! #[derive(Deserialize)]
-//! struct Greet {
-//!     name: String,
-//! }
-//!
-//! async fn greet(context: Context, input: Greet) -> Result<String, Infallible> {
-//!     Ok(format!("hello, {} ({:?})", input.name, context.metadata.request_id))
-//! }
-//!
-//! fn router() -> Router {
-//!     Handlers::new().topic("greet", greet).into_router()
-//! }
-//! ```
+//! The transport-neutral handlers a guest registers, and the router that
+//! serves them over HTTP, messaging, and the command line.
 
 use std::error::Error;
 use std::future::Future;
@@ -36,14 +7,9 @@ use std::time::{Duration, SystemTime};
 
 use serde::de::DeserializeOwned;
 
-pub mod command;
-#[cfg(feature = "http")]
-pub mod http;
-pub mod messaging;
-
 #[cfg(feature = "command")]
-use self::command::program::{Commands, Program};
-use self::messaging::{Delivery, Topics};
+use crate::command::program::{Commands, Program};
+use crate::messaging::{Delivery, Topics};
 
 /// Transport-neutral invocation metadata.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -150,10 +116,12 @@ pub trait Handler<I>: Clone + Send + Sync + 'static {
     ///
     /// A topic or subcommand reports it as an [`Error`](crate::Error):
     ///
-    /// - The first [`Error`](crate::Error), [`vcs::Error`](crate::vcs::Error),
-    ///   [`plugins::Error`](crate::plugins::Error), or
-    ///   [`model::Error`](crate::model::Error) in its source chain sets the
-    ///   variant and code.
+    /// - The first domain error in its source chain sets the variant and
+    ///   code. That is an [`Error`](crate::Error), a host's
+    ///   [`types::Error`](crate::keyvalue::types::Error), a
+    ///   [`vcs::Error`](crate::vcs::Error), a
+    ///   [`plugins::Error`](crate::plugins::Error), or a
+    ///   [`model::Error`](crate::model::Error).
     /// - Any other error is a [`ServerError`](crate::Error::ServerError) with
     ///   the code `server_error`.
     /// - The description is the whole chain.
@@ -195,14 +163,36 @@ where
 /// closing the whole with [`into_router`](Self::into_router). Two handlers
 /// for one path and method, one topic, or one subcommand are refused when
 /// they meet.
+///
+/// # Examples
+///
+/// ```rust
+/// use std::convert::Infallible;
+///
+/// use omnia_sdk::{Context, Handlers, Router};
+/// use serde::Deserialize;
+///
+/// #[derive(Deserialize)]
+/// struct Greet {
+///     name: String,
+/// }
+///
+/// async fn greet(context: Context, input: Greet) -> Result<String, Infallible> {
+///     Ok(format!("hello, {} ({:?})", input.name, context.metadata.request_id))
+/// }
+///
+/// fn router() -> Router {
+///     Handlers::new().topic("greet", greet).into_router()
+/// }
+/// ```
 #[derive(Clone, Debug, Default)]
 #[must_use = "handlers serve nothing until closed with `into_router`"]
 pub struct Handlers {
     #[cfg(feature = "http")]
-    http: axum::Router,
+    pub(crate) http: axum::Router,
     topics: Topics,
     #[cfg(feature = "command")]
-    commands: Commands,
+    pub(crate) commands: Commands,
 }
 
 impl Handlers {
@@ -294,10 +284,10 @@ impl<const N: usize> From<[Self; N]> for Handlers {
 #[must_use = "a router serves nothing until it handles a request or delivery or runs argv"]
 pub struct Router {
     #[cfg(feature = "http")]
-    http: axum::Router,
+    pub(crate) http: axum::Router,
     topics: Topics,
     #[cfg(feature = "command")]
-    program: Program,
+    pub(crate) program: Program,
 }
 
 impl Router {

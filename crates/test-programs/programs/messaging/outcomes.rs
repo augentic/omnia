@@ -7,8 +7,8 @@
 #![cfg(target_arch = "wasm32")]
 
 use omnia_sdk::Error;
-use omnia_sdk::api::messaging::{self, Delivery};
-use omnia_sdk::api::{Context, Handlers, Router};
+use omnia_sdk::messaging::{self, Delivery};
+use omnia_sdk::{Context, Handlers, Router};
 use serde_json::Value;
 
 messaging::export!(router);

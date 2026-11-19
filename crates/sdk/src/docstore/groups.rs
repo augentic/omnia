@@ -258,7 +258,7 @@ fn capped(conditions: usize) -> Result<usize> {
 }
 
 impl Value {
-    // JSON holds no bytes, and only a finite number
+    // JSON holds only a finite number
     fn of(field: &str, value: &ScalarValue) -> Result<Self> {
         match value {
             ScalarValue::Bool(boolean) => Ok(Self::Boolean(*boolean)),
@@ -269,9 +269,6 @@ impl Value {
                 Err(invalid(format!("`{field}` is compared with {number}, which is not finite")))
             }
             ScalarValue::Str(text) | ScalarValue::Timestamp(text) => Ok(Self::Text(text.clone())),
-            ScalarValue::Binary(_) => {
-                Err(invalid(format!("`{field}` is compared with bytes, which JSON does not hold")))
-            }
             ScalarValue::Null => {
                 Err(invalid(format!("`{field}` is compared with `null` by a test that takes none")))
             }

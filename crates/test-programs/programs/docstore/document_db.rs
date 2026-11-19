@@ -10,7 +10,7 @@ use omnia_sdk::docstore::collection::Collection;
 use omnia_sdk::docstore::{Filter, Query, store};
 use omnia_test::contract::document;
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 const AT_LIMITS: &str = "atlimits";
 

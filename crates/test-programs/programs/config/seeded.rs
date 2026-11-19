@@ -7,7 +7,7 @@
 
 use omnia_sdk::config::{self, entries};
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 async fn scenario() {
     // reads

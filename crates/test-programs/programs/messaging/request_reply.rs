@@ -7,7 +7,7 @@
 use omnia_sdk::messaging::request_reply;
 use omnia_sdk::messaging::types::{Client, Message};
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 async fn scenario() {
     let client = Client::connect("default".to_owned()).await.expect("connect");

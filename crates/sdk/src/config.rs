@@ -1,13 +1,24 @@
 //! `omnia:config`, the configuration a deployment sets for its guest.
 //!
-//! [`require`] and [`parse`] read a key as a typed value. [`store::get`] reads
-//! it raw.
+//! [`get`] reads a key as text. [`require`] and [`parse`] read it as a typed
+//! value, and a [`Settings`](crate::Settings) struct loads a part's keys
+//! together.
 
 use std::fmt;
 use std::str::FromStr;
 
 pub use crate::bindings::imports::omnia::config::{entries, store, types};
 use crate::{Error, Result};
+
+/// The value set for `key`, or `None` when it is unset.
+///
+/// # Errors
+///
+/// The host's failure, under its code, when the configuration source does
+/// not answer.
+pub async fn get(key: &str) -> Result<Option<String>> {
+    Ok(store::get(key.to_owned()).await?)
+}
 
 /// The value set for `key`, parsed as `T`.
 ///
@@ -38,7 +49,7 @@ where
     T: FromStr,
     T::Err: fmt::Display,
 {
-    typed(key, store::get(key.to_owned()).await?)
+    typed(key, get(key).await?)
 }
 
 fn required<T>(key: &str, value: Option<T>) -> Result<T> {

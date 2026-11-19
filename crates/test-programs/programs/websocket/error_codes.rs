@@ -13,7 +13,7 @@ use std::fmt::Debug;
 use omnia_sdk::websocket::types::{Client, CloseFrame, Error, Message};
 use omnia_sdk::websocket::{DEFAULT, broadcast, connections};
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 async fn scenario() {
     // the backend's chosen cases, through the SDK

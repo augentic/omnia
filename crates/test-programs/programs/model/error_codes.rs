@@ -13,7 +13,7 @@ use omnia_sdk::model::{Error, Reply, Request, completion, types};
 use omnia_sdk::wit_stream;
 use test_programs::{raw_lookup, raw_model, raw_request, user};
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 async fn scenario() {
     // the backend's chosen cases, through the SDK

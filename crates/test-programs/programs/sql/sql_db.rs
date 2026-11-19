@@ -6,7 +6,7 @@
 use omnia_sdk::sql::{DEFAULT, store};
 use omnia_test::contract::sql;
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 async fn scenario() {
     let db = store::open(DEFAULT.to_owned()).await.expect("open the default database");

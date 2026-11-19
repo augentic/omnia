@@ -7,7 +7,7 @@ use omnia_sdk::model::{Question, ToolCall, Tools};
 use serde::Deserialize;
 use test_programs::{Verdict, lookup};
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 #[derive(Deserialize)]
 struct Lookup {
