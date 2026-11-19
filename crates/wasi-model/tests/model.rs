@@ -1,22 +1,22 @@
-//! End-to-end tests for `omnia:model/completion`: every scenario runs a real
-//! guest component from `crates/test-programs` through the omnia runtime
-//! against an inline scenario backend. The guest asserts what it observes
-//! across the boundary (and traps on failure); the host side asserts wire
-//! fidelity and filesystem effects.
+//! End-to-end tests for `omnia:model`: every scenario runs a real guest
+//! component from `crates/test-programs` through the omnia runtime against
+//! an inline scenario backend. The guest asserts what it observes across the
+//! boundary (and traps on failure); the host side asserts wire fidelity and
+//! filesystem effects.
 
 #![cfg(not(target_arch = "wasm32"))]
 
 use std::fs;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use futures::FutureExt as _;
-use omnia::{ExitStatus, Mount};
+use omnia::{Connect as _, ExitStatus, Mount};
 use omnia_test::host::{Backends, Deployment, ScriptedModel, scratch};
 use omnia_test::{Exchange, SeenFormat, SeenWorker};
 use omnia_wasi_model::{
-    Answer, Format, FutureResult, Grants, Limits, Message, ModelClient, ModelDefault, Request,
-    Role, Schema, ToolHost, Usage, WasiModel,
+    Answer, ConnectOptions, Error, Exhausted, Format, FutureResult, Grants, Limits, Message,
+    ModelClient, ModelDefault, Request, Role, Schema, ToolHost, Usage, WasiModel,
 };
 
 // Every guest program in `crates/test-programs` must have a matching test
@@ -45,12 +45,19 @@ async fn run_scripted(wasm: &str, mounts: Vec<Mount>, model: ScriptedModel) -> S
     model
 }
 
+async fn echo(names: &[&str]) -> ModelDefault {
+    let options = ConnectOptions {
+        models: names.iter().map(|name| (*name).to_owned()).collect(),
+    };
+    ModelDefault::connect_with(options).await.expect("echo model")
+}
+
 // ------------------------------------------------------------------------
 // Scenario backends
 // ------------------------------------------------------------------------
 //
-// Most scenarios script `omnia_test::host::ScriptedModel`; the two below
-// exercise session behaviour a FIFO script cannot express and stay by hand.
+// Most scenarios script `omnia_test::host::ScriptedModel`; the three below
+// exercise behaviour a FIFO script cannot express and stay by hand.
 
 // Two concurrent `lookup` calls, answered in issue order, prove results
 // correlate by id however the guest answers. By hand: a script is serial.
@@ -87,6 +94,32 @@ impl ModelClient for IgnoringToolFailure {
             Ok("should not reach the guest".into())
         }
         .boxed()
+    }
+}
+
+// fails a completion with the case its model is named for, delegating
+// `default` to a script, and records each model so the run's exchanges are
+// pinned
+#[derive(Clone, Debug)]
+struct Faulting {
+    inner: ScriptedModel,
+    opened: Arc<Mutex<Vec<Option<String>>>>,
+}
+
+impl ModelClient for Faulting {
+    fn complete(&self, request: Request, tool_host: Arc<dyn ToolHost>) -> FutureResult<Answer> {
+        self.opened.lock().expect("opened models").push(request.model.clone());
+        let fault: anyhow::Error = match request.model.as_deref() {
+            None => return self.inner.complete(request, tool_host),
+            Some("not-found") => Error::NotFound("not found by the suite".to_owned()).into(),
+            Some("denied") => Error::Denied("denied by the suite".to_owned()).into(),
+            Some("invalid") => Error::Invalid("invalid in the suite".to_owned()).into(),
+            Some("unsupported") => Error::Unsupported("unsupported by the suite".to_owned()).into(),
+            Some("unavailable") => Error::Unavailable("unavailable in the suite".to_owned()).into(),
+            Some("exhausted") => Exhausted::new("exhausted in the suite").into(),
+            Some(_) => anyhow::anyhow!("an untyped backend failure"),
+        };
+        async move { Err(fault) }.boxed()
     }
 }
 
@@ -186,12 +219,44 @@ async fn model_request_shape() {
 
 #[tokio::test]
 async fn model_echo_json() {
-    run_guest(test_programs::MODEL_ECHO_JSON, vec![], ModelDefault).await;
+    run_guest(test_programs::MODEL_ECHO_JSON, vec![], echo(&["default"]).await).await;
 }
 
 #[tokio::test]
-async fn model_echo_schema_rejected() {
-    run_guest(test_programs::MODEL_ECHO_SCHEMA_REJECTED, vec![], ModelDefault).await;
+async fn model_echo_unsupported() {
+    run_guest(test_programs::MODEL_ECHO_UNSUPPORTED, vec![], echo(&["default"]).await).await;
+}
+
+#[tokio::test]
+async fn model_named() {
+    run_guest(test_programs::MODEL_NAMED, vec![], echo(&["default", "fast"]).await).await;
+}
+
+#[tokio::test]
+async fn model_error_codes() {
+    let faulting = Faulting {
+        inner: lookup_turn("unreached"),
+        opened: Arc::default(),
+    };
+    run_guest(test_programs::MODEL_ERROR_CODES, vec![], faulting.clone()).await;
+
+    // the host refused every other call before it reached the backend
+    let opened = faulting.opened.lock().expect("opened models").clone();
+    assert_eq!(
+        opened.iter().map(Option::as_deref).collect::<Vec<_>>(),
+        [
+            Some("not-found"),
+            Some("denied"),
+            Some("invalid"),
+            Some("unsupported"),
+            Some("unavailable"),
+            Some("other"),
+            Some("exhausted"),
+            None,
+        ]
+    );
+    faulting.inner.assert_exhausted();
+    assert!(faulting.inner.exchanges().is_empty(), "the wrong-kind result fails hard");
 }
 
 #[tokio::test]
@@ -308,7 +373,7 @@ async fn model_check_plain() {
     );
 
     // The echo default honours `check` too: its one candidate is the prompt.
-    run_guest(test_programs::MODEL_CHECK_PLAIN, vec![], ModelDefault).await;
+    run_guest(test_programs::MODEL_CHECK_PLAIN, vec![], echo(&["default"]).await).await;
 }
 
 #[tokio::test]
@@ -373,18 +438,28 @@ async fn model_tool_timeout() {
 
 #[tokio::test]
 async fn model_tool_oversize() {
-    let model = lookup_turn("42").limits(Limits {
-        max_result_bytes: 4,
-        ..Limits::default()
-    });
+    // one completion answered with an oversize output, one with an oversize failure
+    let model = ScriptedModel::answering(["42", "42"])
+        .calling(0, [("lookup", "{}")])
+        .calling(1, [("lookup", "{}")])
+        .limits(Limits {
+            max_result_bytes: 4,
+            ..Limits::default()
+        });
     let model = run_scripted(test_programs::MODEL_TOOL_OVERSIZE, vec![], model).await;
-    assert!(model.exchanges().is_empty(), "the oversize result fails hard");
+    assert!(model.exchanges().is_empty(), "the oversize text fails hard");
 }
 
 #[tokio::test]
 async fn model_results_closed() {
     let model = run_scripted(test_programs::MODEL_RESULTS_CLOSED, vec![], lookup_turn("42")).await;
     assert!(model.exchanges().is_empty(), "the closed stream fails hard");
+}
+
+#[tokio::test]
+async fn model_calls_dropped() {
+    let model = run_scripted(test_programs::MODEL_CALLS_DROPPED, vec![], lookup_turn("42")).await;
+    assert!(model.exchanges().is_empty(), "the dropped stream fails hard");
 }
 
 #[tokio::test]

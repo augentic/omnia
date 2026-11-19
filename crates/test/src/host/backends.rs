@@ -17,7 +17,7 @@ use omnia_wasi_keyvalue::{
     ConnectOptions as KeyValueOptions, KeyValueClient, KeyValueDefault, WasiKeyValue,
 };
 use omnia_wasi_messaging::{MessagingClient, MessagingDefault, WasiMessaging};
-use omnia_wasi_model::{ModelClient, ModelDefault, WasiModel};
+use omnia_wasi_model::{ConnectOptions as ModelOptions, ModelClient, ModelDefault, WasiModel};
 use omnia_wasi_otel::{OtelClient, OtelDefault, WasiOtel};
 use omnia_wasi_sql::{ConnectOptions as SqlOptions, SqlClient, SqlDefault, WasiSql};
 use omnia_wasi_vault::{ConnectOptions as VaultOptions, VaultClient, VaultDefault, WasiVault};
@@ -45,17 +45,18 @@ pub const STATE_BUCKET: &str = "default";
 /// environment variable and opens no socket. Config answers from the map
 /// seeded by [`config`](Self::config) alone, the websocket backend serves no
 /// listener, and the HTTP client, keyvalue buckets, docstore collections,
-/// `SQLite` databases, identities, and vault lockers are built from fixed
-/// options rather than `HTTP_CONNECT_TIMEOUT` / `KEYVALUE_BUCKETS` /
-/// `DOCSTORE_COLLECTIONS` / `SQL_DATABASES` / `IDENTITY_NAMES` /
-/// `VAULT_LOCKERS`. The keyvalue backend declares [`STATE_BUCKET`] alone,
-/// the docstore backend the `default` collection alone, the `SQLite` backend
-/// a private `default` database alone, the identity stub the `default`
-/// identity alone, and the vault backend the `default` locker alone. A
-/// scenario that opens another name sets its own backend with
-/// [`keyvalue`](Self::keyvalue), [`docstore`](Self::docstore),
-/// [`sql`](Self::sql), [`identity`](Self::identity), or
-/// [`vault`](Self::vault).
+/// `SQLite` databases, identities, vault lockers, and echo models are built
+/// from fixed options rather than `HTTP_CONNECT_TIMEOUT` /
+/// `KEYVALUE_BUCKETS` / `DOCSTORE_COLLECTIONS` / `SQL_DATABASES` /
+/// `IDENTITY_NAMES` / `VAULT_LOCKERS` / `MODEL_NAMES`. The keyvalue backend
+/// declares [`STATE_BUCKET`] alone, the docstore backend the `default`
+/// collection alone, the `SQLite` backend a private `default` database
+/// alone, the identity stub the `default` identity alone, the vault backend
+/// the `default` locker alone, and the echo model backend the `default`
+/// model alone. A scenario that opens another name sets its own backend
+/// with [`keyvalue`](Self::keyvalue), [`docstore`](Self::docstore),
+/// [`sql`](Self::sql), [`identity`](Self::identity),
+/// [`vault`](Self::vault), or [`model`](Self::model).
 ///
 /// One type parameter per swappable host, each defaulting to the in-memory
 /// backend, so `Backends` with no arguments is the all-default bundle and a
@@ -130,7 +131,7 @@ impl Backends {
             messaging: MessagingDefault::connect_with(NoOptions)
                 .await
                 .expect("in-process messaging"),
-            model: ModelDefault,
+            model: ModelDefault::connect_with(ModelOptions::default()).await.expect("echo model"),
             otel: OtelDefault,
             // a private database per bundle: the crate default is shared process-wide
             sql: SqlDefault::connect_with(SqlOptions {

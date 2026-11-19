@@ -3,24 +3,28 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_wasi_model::{completion, wit_stream};
-use test_programs::{raw_lookup, raw_request};
+use omnia_wasi_model::omnia::{completion, types};
+use omnia_wasi_model::wit_stream;
+use test_programs::{raw_lookup, raw_model, raw_request};
 
 omnia_sdk::api::command::export!(scenario);
 
 async fn scenario() {
     let request = raw_request(
         vec![raw_lookup()],
-        completion::Grants {
+        types::Grants {
             workspace: None,
             worker: None,
         },
     );
+    let model = raw_model().await;
     let (results, results_rx) = wit_stream::new();
-    let session = completion::create(request, results_rx).await.expect("session opens");
+    let session = model.complete(request, results_rx).await.expect("session opens");
     let completion::Session { mut calls, reply } = session;
 
-    let call = calls.next().await.expect("model issues a tool call");
+    let Some(types::Call::Tool(call)) = calls.next().await else {
+        panic!("model issues a tool call");
+    };
     assert_eq!(call.name, "lookup");
 
     // Never answer; holding the results writer open forces the host's
@@ -28,9 +32,7 @@ async fn scenario() {
     let outcome = reply.await;
     drop(results);
 
-    let error = outcome.expect_err("unanswered call times out");
-    assert!(
-        matches!(error, completion::Error::BudgetExhausted(ref detail) if detail.contains("no result within")),
-        "unexpected: {error:?}"
-    );
+    let exhausted =
+        outcome.expect("a timeout is an outcome").expect_err("unanswered call times out");
+    assert!(exhausted.detail.contains("no result within"), "unexpected: {exhausted:?}");
 }

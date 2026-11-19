@@ -10,7 +10,7 @@ package omnia:vcs@0.1.0;
 interface types {
     use wasi:filesystem/types@0.3.2.{descriptor};
 
-    /// A place beneath an authorised mount: the `workspace-grant` idiom. The
+    /// A place beneath an authorised mount: `omnia:model`'s `location`. The
     /// host resolves it against the mount registry, so nothing outside a
     /// mount is touched.
     record location {

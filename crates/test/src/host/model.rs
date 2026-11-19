@@ -5,7 +5,8 @@ use std::sync::{Arc, Mutex};
 
 use futures::FutureExt as _;
 use omnia_wasi_model::{
-    Answer, Error, Format, FutureResult, Limits, ModelClient, Request, Tool, ToolHost, WorkerGrant,
+    Answer, Exhausted, Format, FutureResult, Limits, ModelClient, Request, Tool, ToolHost,
+    WorkerGrant,
 };
 
 use crate::{Exchange, Script, Seen, SeenFormat, SeenWorker};
@@ -69,7 +70,7 @@ impl Completion {
 /// `check` set plays the backend's loop: each scripted turn is one
 /// candidate offered to the guest's `check` and recorded; a rejection
 /// advances to the next turn, and a script exhausted on a rejection is
-/// `budget-exhausted` carrying the correction. A hard session failure —
+/// `exhausted`, its detail the correction. A hard session failure —
 /// undeclared tool, exhausted budget, closed results stream, a workspace op
 /// without a grant — fails the completion the way a real backend's would. A
 /// call past the script fails the completion the guest sees — a panic
@@ -333,9 +334,9 @@ impl ModelClient for ScriptedModel {
                 match outcome {
                     Ok(()) => return Ok(turn.answer),
                     // the next scripted answer is the corrected attempt; none left is
-                    // the budget, typed so the host surfaces `budget-exhausted`
+                    // the budget, typed so the host surfaces `exhausted`
                     Err(correction) if this.script.remaining() == 0 => {
-                        return Err(Error::BudgetExhausted(correction).into());
+                        return Err(Exhausted::new(correction).into());
                     }
                     Err(_) => {}
                 }
@@ -374,7 +375,7 @@ impl From<&Request> for Seen {
                 .collect(),
             temperature: request.generation.as_ref().and_then(|generation| generation.temperature),
             // the descriptor cannot cross into a plain record; the subpath is what the guest chose
-            workspace: request.grants.workspace.as_ref().map(|grant| grant.subpath.clone()),
+            workspace: request.grants.workspace.as_ref().map(|location| location.subpath.clone()),
             worker: request.grants.worker.as_ref().map(SeenWorker::from),
             check: request.check,
         }

@@ -1,14 +1,13 @@
 //! Workspace resolution in the host.
 //!
 //! A guest lends a `wasi:filesystem` workspace through
-//! `grants.workspace: option<workspace-grant>` — a borrowed mount-root
-//! descriptor plus a relative subpath. This module turns that grant into an
-//! owned, `Send + Sync` [`Workspace`] the backend can use across `.await`
-//! points, *after* proving the lent root is one the deployment authorized
-//! and reopening the subpath beneath it so the lend can never escape the
-//! mount.
+//! `grants.workspace: option<location>` — a borrowed mount-root descriptor
+//! plus a relative subpath. This module turns that location into an owned,
+//! `Send + Sync` [`Workspace`] the backend can use across `.await` points,
+//! *after* proving the lent root is one the deployment authorized and
+//! reopening the subpath beneath it so the lend can never escape the mount.
 
-use std::io::Read as _;
+use std::io::{self, Read as _};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -19,8 +18,8 @@ use omnia_core::{FutureResult, MountRegistry};
 use tokio::task::spawn_blocking;
 use wasmtime_wasi::filesystem::Descriptor;
 
-use super::generated::omnia::model::completion::WorkspaceGrant;
 use super::tool_host::DirEntry;
+use super::{Error, Location};
 
 const MAX_READ_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_WRITE_BYTES: usize = 4 * 1024 * 1024;
@@ -96,22 +95,24 @@ impl Workspace {
     }
 }
 
-// Resolve a lent workspace directory and grant into a [`Workspace`].
+// Resolve a lent workspace directory and location into a [`Workspace`].
 pub fn resolve(
-    descriptor: &Descriptor, registry: &MountRegistry, grant: &WorkspaceGrant,
-) -> anyhow::Result<Workspace> {
+    descriptor: &Descriptor, registry: &MountRegistry, location: &Location,
+) -> Result<Workspace, Error> {
     let Descriptor::Dir(dir) = descriptor else {
-        return Err(anyhow!("grants.workspace root must be a directory"));
+        return Err(Error::Denied("grants.workspace root must be a directory".to_owned()));
     };
 
     // cap-std's `Metadata` derives the portable `(dev, ino)` the registry keys on
-    let meta =
-        Metadata::from_file(&dir.dir).context("reading lent workspace directory metadata")?;
-    let entry = registry
-        .match_identity(meta.dev(), meta.ino())
-        .context("lent workspace root is not an authorized mount")?;
+    let meta = Metadata::from_file(&dir.dir).map_err(|error| {
+        Error::Other(format!("reading lent workspace directory metadata: {error}"))
+    })?;
+    let Some(entry) = registry.match_identity(meta.dev(), meta.ino()) else {
+        return Err(Error::Denied("lent workspace root is not an authorized mount".to_owned()));
+    };
 
-    if grant.subpath.is_empty() {
+    let subpath = &location.subpath;
+    if subpath.is_empty() {
         return Ok(Workspace {
             dir: Arc::clone(&entry.dir),
             local_path: entry.host_path.clone(),
@@ -119,26 +120,32 @@ pub fn resolve(
         });
     }
 
-    check_subpath(&grant.subpath)?;
+    check_subpath(subpath)?;
     // cap-std's `open_dir` resolves beneath the verified mount root and
-    // refuses any escape, so the subpath grant inherits the root's authority.
-    let dir = entry
-        .dir
-        .open_dir(&grant.subpath)
-        .with_context(|| format!("opening lent workspace subpath `{}`", grant.subpath))?;
+    // refuses any escape, so the subpath lend inherits the root's authority.
+    let dir = entry.dir.open_dir(subpath).map_err(|error| match error.kind() {
+        io::ErrorKind::NotFound => {
+            Error::NotFound(format!("lent workspace subpath `{subpath}` does not exist"))
+        }
+        _ => Error::Other(format!("opening lent workspace subpath `{subpath}`: {error}")),
+    })?;
 
     Ok(Workspace {
         dir: Arc::new(dir),
-        local_path: entry.host_path.join(&grant.subpath),
+        local_path: entry.host_path.join(subpath),
         writable: entry.writable,
     })
 }
 
 // Refuse a subpath that is not a plain relative `/`-separated path.
-fn check_subpath(subpath: &str) -> anyhow::Result<()> {
+fn check_subpath(subpath: &str) -> Result<(), Error> {
     let plain = !subpath.starts_with('/')
         && !subpath.contains('\\')
         && subpath.split('/').all(|part| !part.is_empty() && part != "." && part != "..");
-    ensure!(plain, "grants.workspace subpath `{subpath}` is not a plain relative path");
+    if !plain {
+        return Err(Error::Invalid(format!(
+            "grants.workspace subpath `{subpath}` is not a plain relative path"
+        )));
+    }
     Ok(())
 }

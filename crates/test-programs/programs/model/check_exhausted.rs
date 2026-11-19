@@ -1,5 +1,6 @@
 //! Every candidate is rejected: the backend's round budget ends the
-//! completion as `budget-exhausted` carrying the guest's own correction.
+//! completion as `exhausted`, which the SDK reports as `BudgetExhausted`
+//! carrying the guest's own correction.
 
 #![cfg(target_arch = "wasm32")]
 

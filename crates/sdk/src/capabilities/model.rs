@@ -1,13 +1,13 @@
 //! Prompt-completion (model) capability.
 //!
-//! Target-independent mirrors of the `omnia:model/completion` records. The
+//! Target-independent mirrors of the `omnia:model` records. The
 //! one record that cannot cross off `wasm32` is the `grants.workspace`
 //! descriptor lend — a `wasi:filesystem` resource that only exists on
 //! `wasm32` — so a guest names the directory with the plain
 //! [`Request::workspace`] path and `WasiProvider` resolves it against the
 //! guest's preopens at the call site, by the lend rule every lending
 //! capability shares: the longest preopen whose name prefixes the path becomes
-//! the lent root descriptor and the remainder rides as the grant's subpath.
+//! the lent root descriptor and the remainder rides as the location's subpath.
 //!
 //! Acceptance of an answer is the guest's: a request with [`Request::check`]
 //! set receives each candidate as a tool call named `check` and answers
@@ -26,9 +26,9 @@ pub use self::question::{Findings, Question, ToolFuture, Tools};
 
 /// Prompt completion (Omnia Model).
 ///
-/// `WasiProvider` delegates to `omnia:model/completion` via `omnia-wasi-model`,
-/// opening the completion session and answering the model's tool calls with
-/// the supplied closure.
+/// `WasiProvider` delegates to `omnia:model` via `omnia-wasi-model`, opening
+/// the request's model and answering the session's tool calls with the
+/// supplied closure.
 #[omnia_guest_macros::capability]
 pub trait Model: Send + Sync {
     /// Single-shot completion returning one reply. Any tool call the model
@@ -47,7 +47,7 @@ pub trait Model: Send + Sync {
     /// [`ToolCall`] values answered serially by `handler` (over the caller's
     /// own locals and authority), and each result feeds the same model turn.
     /// Results correlate by id, so parallel handling stays available through
-    /// the raw `omnia_wasi_model::completion` session bindings.
+    /// the raw `omnia_wasi_model::omnia::completion` session bindings.
     fn complete_with<H, F>(
         &self, request: Request, handler: H,
     ) -> impl Future<Output = Result<Reply, Error>> + Send
@@ -62,7 +62,8 @@ pub const CHECK_TOOL: &str = "check";
 /// Complete request for one completion.
 #[derive(Clone, Debug, Default, PartialEq, Eq, bon::Builder)]
 pub struct Request {
-    /// Opaque model id hint; passed through unchanged. Backend may override.
+    /// The model to open, a binding the deployment declares. `None` opens
+    /// `default`.
     #[builder(into)]
     pub model: Option<String>,
     /// System / instructions channel.
@@ -296,11 +297,19 @@ pub struct Usage {
     pub reasoning_tokens: Option<u32>,
 }
 
-/// Typed completion failure, mirroring the `omnia:model` error variant.
+/// Typed completion failure.
+///
+/// `WasiProvider` maps the `omnia:model` outcomes onto it:
+///
+/// - `invalid` is [`Error::InvalidRequest`];
+/// - an `exhausted` completion is [`Error::BudgetExhausted`];
+/// - every other case is [`Error::Backend`], its detail prefixed with the
+///   case, as in `not-found: …`.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum Error {
-    /// The request itself is malformed (empty `messages`, reserved tool
-    /// name, schema that is not JSON); retrying without changing it is
+    /// The request, or the guest's side of its session, is malformed: empty
+    /// `messages`, a reserved tool name, a schema that is not JSON, or a
+    /// result over the host's size cap. Retrying without changing it is
     /// pointless.
     #[error("invalid request: {0}")]
     InvalidRequest(String),
@@ -308,16 +317,17 @@ pub enum Error {
     /// on a rejected `check`, the detail is that correction text.
     #[error("budget exhausted: {0}")]
     BudgetExhausted(String),
-    /// Non-repairable tool error.
+    /// Non-repairable tool error. `WasiProvider` never returns it: a tool's
+    /// failure text reaches the model instead.
     #[error("tool failed: {0}")]
     ToolFailed(String),
-    /// Transport, process, or provider failure.
+    /// Any other failure of the provider or its backend.
     #[error("backend failure: {0}")]
     Backend(String),
 }
 
 impl Error {
-    /// The kebab-case wire discriminant, stable for callers to branch on.
+    /// The kebab-case code, stable for callers to branch on.
     #[must_use]
     pub const fn code(&self) -> &'static str {
         match self {

@@ -1,10 +1,14 @@
-//! The backend's answer and the candidate extraction it may apply to a
-//! model's final text. Nothing here validates: acceptance is the guest's
-//! `check`, or nothing at all when the request declares none.
+//! The backend's answer, the exhaustion it may report instead, and the
+//! candidate extraction it may apply to a model's final text. Nothing here
+//! validates: acceptance is the guest's `check`, or nothing at all when the
+//! request declares none.
+
+use std::fmt;
 
 use serde_json::Value;
 
-use crate::host::generated::omnia::model::completion::{Format, Usage};
+use crate::host::Format;
+use crate::host::generated::omnia::model::types;
 
 /// A backend's result: the answer text, optional usage, and transcript.
 ///
@@ -32,6 +36,81 @@ impl From<String> for Answer {
 impl From<&str> for Answer {
     fn from(answer: &str) -> Self {
         answer.to_owned().into()
+    }
+}
+
+impl From<Answer> for types::Reply {
+    fn from(answer: Answer) -> Self {
+        Self {
+            answer: answer.answer,
+            usage: answer.usage.map(Into::into),
+        }
+    }
+}
+
+/// The tokens a completion spent, as its backend counts them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Usage {
+    /// The tokens the model read.
+    pub input_tokens: u32,
+    /// The tokens the model wrote, reasoning included.
+    pub output_tokens: u32,
+    /// The part of `output_tokens` spent on reasoning, `None` where the
+    /// backend keeps no count.
+    pub reasoning_tokens: Option<u32>,
+}
+
+// the seam keeps no cache counts, so the guest reads them as unknown
+impl From<Usage> for types::Usage {
+    fn from(usage: Usage) -> Self {
+        Self {
+            input_tokens: usage.input_tokens.into(),
+            output_tokens: usage.output_tokens.into(),
+            reasoning_tokens: usage.reasoning_tokens.map(Into::into),
+            cache_read_tokens: None,
+            cache_write_tokens: None,
+        }
+    }
+}
+
+/// A completion that spent a budget before the model had an answer.
+///
+/// A backend returns it as the completion's error. The guest then receives
+/// the `exhausted` outcome, not an [`Error`](crate::Error).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Exhausted {
+    /// Which budget ran out, for a person to read.
+    pub detail: String,
+    /// The tokens spent before it ran out, `None` where the backend reports
+    /// none.
+    pub usage: Option<Usage>,
+}
+
+impl Exhausted {
+    /// An exhaustion that `detail` describes, with no usage.
+    #[must_use]
+    pub fn new(detail: impl Into<String>) -> Self {
+        Self {
+            detail: detail.into(),
+            usage: None,
+        }
+    }
+}
+
+impl fmt::Display for Exhausted {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "exhausted: {}", self.detail)
+    }
+}
+
+impl std::error::Error for Exhausted {}
+
+impl From<Exhausted> for types::Exhausted {
+    fn from(exhausted: Exhausted) -> Self {
+        Self {
+            detail: exhausted.detail,
+            usage: exhausted.usage.map(Into::into),
+        }
     }
 }
 

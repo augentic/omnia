@@ -217,6 +217,11 @@ path = "programs/messaging/request_reply.rs"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "model_calls_dropped"
+path = "programs/model/calls_dropped.rs"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "model_check_accepted"
 path = "programs/model/check_accepted.rs"
 crate-type = ["cdylib"]
@@ -252,18 +257,28 @@ path = "programs/model/echo_json.rs"
 crate-type = ["cdylib"]
 
 [[example]]
-name = "model_echo_schema_rejected"
-path = "programs/model/echo_schema_rejected.rs"
-crate-type = ["cdylib"]
-
-[[example]]
 name = "model_echo_text"
 path = "programs/model/echo_text.rs"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "model_echo_unsupported"
+path = "programs/model/echo_unsupported.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "model_error_codes"
+path = "programs/model/error_codes.rs"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "model_invalid_request"
 path = "programs/model/invalid_request.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "model_named"
+path = "programs/model/named.rs"
 crate-type = ["cdylib"]
 
 [[example]]

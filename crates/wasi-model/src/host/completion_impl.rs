@@ -1,4 +1,4 @@
-//! The `create` host binding and its reply pipeline.
+//! The `completion` host bindings, and the session every completion begins.
 
 use std::fmt;
 use std::sync::Arc;
@@ -6,101 +6,149 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use futures::{FutureExt as _, future};
 use omnia_core::{HostView, StoreCtx};
-use wasmtime::component::{Accessor, FutureReader, StreamReader};
+use wasmtime::component::{Access, Accessor, FutureReader, Resource, StreamReader};
 
 use crate::host::generated::omnia::model::completion::{
-    Host, HostWithStore, Reply, Session, ToolResult,
+    self, Host, HostModel, HostModelWithStore, HostWithStore, Session,
 };
-use crate::host::session::{CallsProducer, ReplyTask, ResultsConsumer, SessionClose, ToolSession};
+use crate::host::generated::omnia::model::mcp::Server;
+use crate::host::generated::omnia::model::types::CallResult;
+use crate::host::session::{
+    CallsProducer, Halt, Replied, ReplyTask, ResultsConsumer, SessionClose, ToolSession,
+};
 use crate::host::tool_host::DirEntry;
 use crate::host::workspace::{self, Workspace};
-use crate::host::{Error, FutureResult, ModelClient, Request, ToolHost, ToolOutcome, WasiModel};
+use crate::host::{
+    Answer, Error, Exhausted, FutureResult, ModelClient, Request, ToolHost, ToolOutcome, WasiModel,
+};
+
+// The host's side of a guest's `model` handle: the name the guest opened,
+// which its backend receives as `Request::model`.
+#[derive(Debug)]
+pub struct ModelHandle {
+    name: String,
+}
 
 impl<B: Send + 'static> HostWithStore<StoreCtx<B>> for WasiModel {
-    fn create(
-        accessor: &Accessor<StoreCtx<B>, Self>, request: Request,
-        mut results: StreamReader<ToolResult>,
+    fn open(
+        accessor: &Accessor<StoreCtx<B>, Self>, name: String,
+    ) -> impl Future<Output = Result<Resource<ModelHandle>, Error>> {
+        std::future::ready(if name.is_empty() {
+            Err(Error::Invalid("a model name is empty".to_owned()))
+        } else {
+            accessor.with(|mut store| Ok(store.get().table.push(ModelHandle { name })?))
+        })
+    }
+}
+
+impl<B: Send + 'static> HostModelWithStore<StoreCtx<B>> for WasiModel {
+    fn complete(
+        accessor: &Accessor<StoreCtx<B>, Self>, self_: Resource<ModelHandle>,
+        request: completion::Request, results: StreamReader<CallResult>,
     ) -> impl Future<Output = Result<Session, Error>> {
-        std::future::ready(accessor.with(|mut access| {
-            if let Err(error) = request.validate() {
-                results.close(&mut access)?;
+        std::future::ready(
+            accessor
+                .with(|mut access| Self::begin(&mut access, &self_, request, Vec::new(), results)),
+        )
+    }
+
+    fn drop(
+        mut accessor: Access<'_, StoreCtx<B>, Self>, rep: Resource<ModelHandle>,
+    ) -> wasmtime::Result<()> {
+        accessor.get().table.delete(rep)?;
+        Ok(())
+    }
+}
+
+impl WasiModel {
+    // Begin a completion of `request` by the model `handle` names, with the
+    // tools of `servers` beside the request's own. A request the host
+    // refuses fails here, and closes `results`.
+    pub(crate) fn begin<B: Send + 'static>(
+        access: &mut Access<'_, StoreCtx<B>, Self>, handle: &Resource<ModelHandle>,
+        request: completion::Request, servers: Vec<Server>, mut results: StreamReader<CallResult>,
+    ) -> Result<Session, Error> {
+        let (request, workspace) = match Self::admit(access, handle, request, servers) {
+            Ok(admitted) => admitted,
+            Err(error) => {
+                results.close(&mut *access)?;
                 return Err(error);
             }
+        };
 
-            // get workspace
-            let workspace = if let Some(grant) = request.grants.workspace.as_ref() {
+        // call model backend with request and tool host "closure"
+        let limits = access.get().client.limits();
+        let (session, calls_rx) = ToolSession::new(limits, request.tool_names());
+        let tool_host: Arc<dyn ToolHost> = Arc::new(BoundToolHost {
+            session: Arc::clone(&session),
+            workspace,
+        });
+        let answer = access.get().client.complete(request, tool_host);
+
+        results.pipe(&mut *access, ResultsConsumer::new(Arc::clone(&session)))?;
+        let producer = CallsProducer::new(calls_rx, Arc::clone(&session));
+        let mut calls = StreamReader::new(&mut *access, producer)?;
+
+        // extract reply from answer, preferring the session's halt
+        let close = SessionClose::new(Arc::clone(&session));
+        let reply_task = ReplyTask::spawn(async move {
+            let _close = close;
+            let answered = answer.await;
+            session.take_halt().map_or_else(|| reply(answered), Halt::into_reply)
+        });
+
+        // map the reply task to a future
+        let reply_fut = reply_task.join().map(Ok::<_, wasmtime::Error>);
+        let reply = match FutureReader::new(&mut *access, reply_fut) {
+            Ok(reply) => reply,
+            Err(error) => {
+                calls.close(&mut *access)?;
+                return Err(error.into());
+            }
+        };
+
+        Ok(Session { calls, reply })
+    }
+
+    // The request as its backend receives it, and the workspace it lends.
+    fn admit<B>(
+        access: &mut Access<'_, StoreCtx<B>, Self>, handle: &Resource<ModelHandle>,
+        request: completion::Request, servers: Vec<Server>,
+    ) -> Result<(Request, Option<Workspace>), Error> {
+        let name = access.get().table.get(handle)?.name.clone();
+        let request = Request::new(name, request, servers)?;
+        request.validate()?;
+
+        let workspace = match &request.grants.workspace {
+            Some(location) => {
                 let mounts = access.data_mut().mounts();
-                let descriptor = access.get().table.get(&grant.root)?;
-
-                match workspace::resolve(descriptor, &mounts, grant) {
-                    Ok(workspace) => Some(workspace),
-                    Err(error) => {
-                        results.close(&mut access)?;
-                        return Err(error.into());
-                    }
-                }
-            } else {
-                None
-            };
-
-            // call model backend with request and tool host "closure"
-            let limits = access.get().client.limits();
-            let allowed = request.tool_names();
-
-            let (session, calls_rx) = ToolSession::new(limits, allowed);
-            let tool_host: Arc<dyn ToolHost> = Arc::new(BoundToolHost {
-                session: Arc::clone(&session),
-                workspace,
-            });
-            let answer = access.get().client.complete(request, tool_host);
-
-            results.pipe(&mut access, ResultsConsumer::new(Arc::clone(&session)))?;
-            let mut calls = StreamReader::new(&mut access, CallsProducer::new(calls_rx))?;
-
-            // extract reply from answer
-            let close = SessionClose::new(Arc::clone(&session));
-            let reply_task = ReplyTask::spawn(async move {
-                let _close = close;
-                match answer.await {
-                    Ok(answer) => session.take_error().map_or_else(
-                        || {
-                            Ok(Reply {
-                                answer: answer.answer,
-                                usage: answer.usage,
-                            })
-                        },
-                        Err,
-                    ),
-                    // a typed `Error` is kept; anything else is a `backend` failure
-                    Err(error) => Err(session
-                        .take_error()
-                        .unwrap_or_else(|| error.downcast::<Error>().unwrap_or_else(Into::into))),
-                }
-            });
-
-            // map the reply task to a future
-            let reply_fut = reply_task.join().map(Ok::<_, wasmtime::Error>);
-            let reply = match FutureReader::new(&mut access, reply_fut) {
-                Ok(reply) => reply,
-                Err(error) => {
-                    calls.close(&mut access)?;
-                    return Err(error.into());
-                }
-            };
-
-            Ok(Session { calls, reply })
-        }))
+                let descriptor = access.get().table.get(&location.root)?;
+                Some(workspace::resolve(descriptor, &mounts, location)?)
+            }
+            None => None,
+        };
+        Ok((request, workspace))
     }
 }
 
-impl Host for HostView<'_, dyn ModelClient> {
-    fn convert_error(&mut self, err: Error) -> wasmtime::Result<Error> {
-        Ok(err)
+// The reply a backend's answer makes. An `Exhausted` is the `exhausted`
+// outcome, and any other failure keeps its case or is `other`.
+fn reply(answered: anyhow::Result<Answer>) -> Replied {
+    match answered {
+        Ok(answer) => Ok(Ok(answer.into())),
+        Err(error) => match error.downcast::<Exhausted>() {
+            Ok(exhausted) => Ok(Err(exhausted.into())),
+            Err(error) => Err(error.into()),
+        },
     }
 }
+
+impl Host for HostView<'_, dyn ModelClient> {}
+
+impl HostModel for HostView<'_, dyn ModelClient> {}
 
 // The bound tool host, built fresh per completion from the request's grants
-// and the session channels the `create` binding minted.
+// and the session channels its `complete` binding minted.
 struct BoundToolHost {
     session: Arc<ToolSession>,
     workspace: Option<Workspace>,

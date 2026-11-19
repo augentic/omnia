@@ -1,6 +1,6 @@
 # Model Completions and MCP
 
-The `omnia:model/completion` interface lets a sandboxed guest request a completion from a large language model without knowing which model, provider, or agent serves it. The guest states *what* it wants (prompt, response format, capability grants); the host checks the request, injects tools, and runs the backend. Whether an answer is *acceptable* is the guest's call: a request may ask to `check` each candidate, and the backend keeps going until the guest says yes.
+The `omnia:model` interface lets a sandboxed guest request a completion from a large language model without knowing which provider or agent serves it. The guest opens a model by a name the deployment binds, and states *what* it wants (prompt, response format, capability grants); the host checks the request, injects tools, and runs the backend. Whether an answer is *acceptable* is the guest's call: a request may ask to `check` each candidate, and the backend keeps going until the guest says yes.
 
 This page covers the guest API, the grants model, the available backends, and how guests can also *serve* tools to models over MCP (the [Model Context Protocol](https://modelcontextprotocol.io)).
 
@@ -39,7 +39,7 @@ let answer = match WasiProvider.complete(request).await {
 The pieces:
 
 - **`Sections`** — a guest-side builder that assembles the `system` and `messages` channels from structured fields (role, task, context, ...), so prompts stay consistent across guests.
-- **`model: None`** — which concrete model serves the request is deployment configuration; the guest can suggest a model id but usually leaves it to the backend.
+- **`model`** — unset here, so the completion opens the model `default`. A model is a binding the deployment declares, and a name it does not declare fails with `not-found`.
 - **`format`** — `Text`, `Json`, or `Schema` with a JSON Schema. A steering hint for the provider (`response_format` where it constrains decoding, instruction prose where it does not); nothing validates the answer against it. To judge answers, ask for a check (below).
 - **`tools`** — functions the guest itself declares for the model to call, or MCP servers to attach (backend-dependent; see below).
 - **`grants`** — capabilities the guest lends to the completion.
@@ -60,7 +60,7 @@ let outcome = WasiProvider
     .await;
 ```
 
-The closure's `Err` is model-visible failure text the model may repair from; hard failures (budget, timeouts, oversized results) arrive as typed errors on the reply. Under the hood this is the `omnia:model/completion` session — `create` returns a `calls` stream and a `reply` future, and the guest answers on a `results` stream (see the [reference](../reference/model.md)); the sugar runs that dance so most guests never touch it. The host bounds every session: a tool-call budget, a per-result size cap, and a per-call timeout, all backend-configurable.
+The closure's `Err` is model-visible failure text the model may repair from. Hard failures arrive on the reply instead: a spent budget or a timeout as `exhausted`, and an oversized result as `invalid`. Under the hood this is the `omnia:model` session — `complete` on the open model returns a `calls` stream and a `reply` future, and the guest answers each call on a `results` stream (see the [reference](../reference/model.md)); the sugar runs that dance so most guests never touch it. The host bounds every session: a tool-call budget, a per-result size cap, and a per-call timeout, all backend-configurable.
 
 ### Judging the answer: `check` and `Question<T>`
 
@@ -106,9 +106,9 @@ This grant is what drives the host-injected tools. The names `read`, `list`, and
 
 ### `ModelDefault` — deterministic echo (in-tree)
 
-The default backend connects with zero configuration and answers every completion with its own prompt: the last message echoed as a string for `format::text`, wrapped as `{"echo": ...}` for `format::json`. That makes guest wiring and prompt assembly smoke-testable with no live model. `format::schema` requests fail with a `backend` error — no echo can conform to an arbitrary guest schema — so bind a real backend for typed answers. A `check` request gets its one candidate offered once; a rejection is `budget-exhausted`.
+The default backend answers every completion with its own prompt: the last message echoed as a string for `format::text`, wrapped as `{"echo": ...}` for `format::json`. That makes guest wiring and prompt assembly smoke-testable with no live model. It serves the models `MODEL_NAMES` lists, comma-separated, and `default` alone when it is unset; any other name is `not-found`. What an echo cannot honour is `unsupported`: a `format::schema` (no echo can conform to an arbitrary guest schema), a set `generation` field, and an MCP server. So bind a real backend for typed answers. A `check` request gets its one candidate offered once, and a rejection is `exhausted`, which the SDK reports as `Error::BudgetExhausted`.
 
-For tests, CI, and local development of model guests, define an inline `ModelClient` impl that returns a fixed answer — no network, no credentials, fully deterministic, and (unlike an echo) able to satisfy `format::schema` (see the recipe in [Testing Policy](testing-policy.md#canned-model-backends)). The [`model` example](../../examples/model/) serves its fixed schema answer that way:
+For tests, CI, and local development of model guests, define an inline `ModelClient` impl that returns a fixed answer — no network, no credentials, fully deterministic, and (unlike an echo) able to satisfy `format::schema` (see the recipe in [Testing Policy](testing-policy.md#scenario-backends)). The [`model` example](../../examples/model/) serves its fixed schema answer that way:
 
 ```bash
 cargo build --example model-wasm --target wasm32-wasip3

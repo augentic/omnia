@@ -3,10 +3,10 @@
 //!
 //! The boundary itself is plain `system` + `messages` (like provider APIs);
 //! this builder turns a role/task/context template into those channels
-//! before `create` is called.
+//! before `complete` is called.
 
 #[cfg(target_arch = "wasm32")]
-use crate::completion::{Message, Role};
+use crate::omnia::types::{Message, Role};
 
 /// Structured prompt template assembled into `system` / `messages` channels.
 #[derive(Clone, Debug, Default)]

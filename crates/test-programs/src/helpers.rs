@@ -1,7 +1,7 @@
 //! Shared helpers for the guest scenario programs in `programs/<capability>/`.
 
 use omnia_sdk::model::{Function, Message, Role, Tool};
-use omnia_wasi_model::completion;
+use omnia_wasi_model::omnia::{completion, types};
 use schemars::JsonSchema;
 use serde::Deserialize;
 
@@ -53,33 +53,39 @@ pub fn lookup() -> Tool {
     )
 }
 
-/// The raw-bindings `lookup` function tool.
+/// The raw-bindings `lookup` tool.
 #[must_use]
-pub fn raw_lookup() -> completion::Function {
-    completion::Function {
+pub fn raw_lookup() -> types::Tool {
+    types::Tool {
         name: "lookup".to_owned(),
-        description: "test lookup".to_owned(),
-        parameters: "{}".to_owned(),
+        description: Some("test lookup".to_owned()),
+        input_schema: "{}".to_owned(),
     }
 }
 
 /// A minimal raw-bindings request — one `hi` user turn, `format::text` —
-/// with the given function tools and grants.
+/// with the given tools and grants.
 #[must_use]
-pub fn raw_request(
-    tools: Vec<completion::Function>, grants: completion::Grants,
-) -> completion::Request {
+pub fn raw_request(tools: Vec<types::Tool>, grants: types::Grants) -> completion::Request {
     completion::Request {
-        model: None,
         system: None,
-        messages: vec![completion::Message {
-            role: completion::Role::User,
+        messages: vec![types::Message {
+            role: types::Role::User,
             content: "hi".to_owned(),
         }],
         generation: None,
-        format: completion::Format::Text,
-        tools: tools.into_iter().map(completion::Tool::Function).collect(),
+        format: types::Format::Text,
+        tools,
         grants,
         check: false,
     }
+}
+
+/// The deployment's `default` model, opened over the raw bindings.
+///
+/// # Panics
+///
+/// Panics when the host refuses to open it.
+pub async fn raw_model() -> completion::Model {
+    completion::open("default".to_owned()).await.expect("open the default model")
 }

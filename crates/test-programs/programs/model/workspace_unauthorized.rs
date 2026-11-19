@@ -2,8 +2,9 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_wasi_model::{completion, wit_stream};
-use test_programs::raw_request;
+use omnia_wasi_model::omnia::types;
+use omnia_wasi_model::wit_stream;
+use test_programs::{raw_model, raw_request};
 use wasip3::filesystem::preopens;
 use wasip3::filesystem::types::{DescriptorFlags, OpenFlags, PathFlags};
 
@@ -27,21 +28,23 @@ async fn scenario() {
         .await
         .expect("open nested dir");
 
-    let grants = completion::Grants {
-        workspace: Some(completion::WorkspaceGrant {
+    let grants = types::Grants {
+        workspace: Some(types::Location {
             root: &nested,
             subpath: String::new(),
         }),
         worker: None,
     };
 
+    let model = raw_model().await;
     let (results, results_rx) = wit_stream::new();
-    let error = completion::create(raw_request(vec![], grants), results_rx)
+    let error = model
+        .complete(raw_request(vec![], grants), results_rx)
         .await
         .expect_err("nested descriptor is not a mount root");
     drop(results);
     assert!(
-        matches!(error, completion::Error::Backend(ref detail) if detail.contains("not an authorized mount")),
+        matches!(error, types::Error::Denied(ref detail) if detail.contains("not an authorized mount")),
         "unexpected: {error:?}"
     );
 }

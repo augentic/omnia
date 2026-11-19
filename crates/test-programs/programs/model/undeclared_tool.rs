@@ -1,4 +1,5 @@
-//! A backend call to an undeclared tool fails the completion loud.
+//! A backend call to an undeclared tool fails the completion loud, as
+//! `other`.
 
 #![cfg(target_arch = "wasm32")]
 
@@ -24,7 +25,7 @@ async fn scenario() {
         .await
         .expect_err("undeclared tool fails the completion");
     assert!(
-        matches!(error, Error::ToolFailed(ref detail) if detail.contains("does not declare")),
+        matches!(error, Error::Backend(ref detail) if detail.starts_with("other: ") && detail.contains("does not declare")),
         "unexpected: {error:?}"
     );
 }

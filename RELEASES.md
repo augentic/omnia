@@ -188,6 +188,28 @@ Unreleased
   - A span exports the kind the guest gave it, where the host cast the kind
     by position and exported each as another.
   - On `wasm32`, `omnia_wasi_otel::omnia` holds the raw bindings.
+- `omnia:model`, rewritten in place as the interface `Model` calls.
+  `WasiModel` serves it over one `ModelClient`:
+  - `completion.open` answers a `model` handle, and `complete` goes
+    through it. A name the deployment does not declare fails with
+    `not-found`. The SDK opens `default` for a request that names no
+    model.
+  - A session's calls and results are typed. A tool call and a check are
+    each a case of `call`, and the guest answers each by its `id` with a
+    result of the same kind. A result of the wrong kind fails the
+    completion with `invalid`, and so does closing `results` or dropping
+    `calls` while a call is outstanding.
+  - A completion that spent a budget resolves its reply to `exhausted`,
+    an outcome rather than an error, with the usage it spent.
+  - The `error` has one case per capability error code.
+  - `effort` is a string. `low`, `medium`, and `high` are portable, and a
+    level the backend does not know is `invalid`.
+  - The optional `mcp` interface begins a completion with the tools of
+    Model Context Protocol servers beside the request's own.
+  - `WasiModel` answers `unsupported` only for an MCP server's
+    `authorization`.
+  - On `wasm32`, `omnia_wasi_model::omnia` holds the raw bindings, which
+    the crate root held.
 - The codes of a failed capability call. Its `omnia_sdk::Error` names the
   class of failure in its code:
   - `not-found`, `denied`, `invalid`, `unsupported`, or `other` on a
@@ -227,6 +249,10 @@ Unreleased
 - `omnia_wasi_docstore::ConnectOptions`. `DocStoreDefault` serves the
   collections `DOCSTORE_COLLECTIONS` lists, comma-separated, and `default`
   when it is unset.
+- `omnia_wasi_model::ConnectOptions`. `ModelDefault` serves the models
+  `MODEL_NAMES` lists, comma-separated, and `default` when it is unset.
+- `omnia_wasi_model::Exhausted`. A backend returns one to end a completion
+  `exhausted`, with the usage it spent.
 - Extension traits, blanket-implemented over each capability:
   `ConfigExt::{require, parse}`, `DocumentDbExt::get_as`,
   `HttpClientExt::fetch_json`, `IdentityExt::access_token`,
@@ -440,6 +466,34 @@ Unreleased
   seconds the token has left when the backend answers, and its `Debug`
   redacts the token. `IdentityDefault` answers a cached token with the time
   it has left, where it answered the lifetime the token was issued with.
+- Model names are strict. `ModelDefault` opens only the models it
+  declares, and any other fails with `not-found`. A deployment whose guests
+  open a model other than `default` lists it in `MODEL_NAMES`. What an
+  echo cannot honour is `unsupported`: a `format::schema`, a set
+  `generation` field, and an MCP server.
+- A model backend picks a failure's code by returning an
+  `omnia_wasi_model::Error`, whose six cases are the six capability error
+  codes. `Error::InvalidRequest` is `Error::Invalid`, and a spent budget is
+  an `omnia_wasi_model::Exhausted`, where it was `Error::BudgetExhausted`.
+  `ToolFailed` and `Backend` give way to the case that names the failure.
+- `omnia_wasi_model::{Request, Generation, Effort, Tool, Function, Mcp,
+  Usage}` are the crate's own types, where the WIT generated them. Their
+  names and shapes are unchanged, so a backend builds as before.
+- `omnia_wasi_model::Request::model` is the model the guest opened, and
+  `None` for `default`, where it was a hint the guest passed through.
+- `WasiProvider`'s `Model` maps the `omnia:model` outcomes onto
+  `model::Error`:
+  - `invalid` is `InvalidRequest`. A tool result or correction over the
+    host's size cap is one, where it was `ToolFailed`.
+  - `exhausted` is `BudgetExhausted`. Its detail is the last correction
+    when the last candidate was rejected, and the `exhausted` detail
+    otherwise.
+  - Every other case is `Backend`, its detail prefixed with the case, as
+    in `not-found: …`.
+
+  It never returns `ToolFailed`, since a tool's failure text reaches the
+  model instead. A declared tool named `check` fails with
+  `InvalidRequest`, because a check reaches the handler under that name.
 - `BlobStoreClient` states the container rules every backend keeps:
   - `get_container` fails a container that does not exist with
     `omnia_wasi_blobstore::Error::missing_container`.
@@ -651,6 +705,10 @@ Unreleased
   `absent` inserts.
 - The `Default` impl of `DocStoreDefault`. `DocStoreDefault::connect_with`
   takes the `ConnectOptions` that declare its collections.
+- The `Default` impl of `ModelDefault`. `ModelDefault::connect_with` takes
+  the `ConnectOptions` that declare its models.
+- `omnia_wasi_model::{Reply, WorkspaceGrant}`, which the WIT generated. A
+  workspace lend is an `omnia_wasi_model::Location`, with the same fields.
 - The `sql` and `docstore` features of `omnia-sdk`. `SqlDb` and
   `DocumentDb` are always built.
 - `omnia_test::guest::Namespaced`. A test addresses another bucket or

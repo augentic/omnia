@@ -1,11 +1,13 @@
 # WebAssembly Interface Types (WIT)
 
-`model.wit` is the authoritative definition of the `omnia:model@0.2.0` package and its `completion` interface.
-
-`create` is an `async func` like every backend-touching WASI function in this workspace: the host binding runs in wasmtime's concurrent (`store`) mode and awaits the async backend (`ModelClient::complete` returns a future) without blocking the executor.
+`model.wit` is `omnia:model`, owned by this crate and edited here.
+Every backend serves `types` and `completion`, the `core` world.
+`mcp` is optional, and `imports` adds it.
 
 ## Deps
 
-The `deps/` directory vendors the `wasi:filesystem` and `wasi:clocks` packages at version `0.3.2` (p3) — on the `0.3` semver track the runtime serves via `wasmtime_wasi::p3::add_to_linker` — so the `grants.workspace` `borrow<descriptor>` resolves, via the host `bindgen!` `with:` remap onto `wasmtime_wasi::p3::bindings`, to the same `Descriptor` resource the runtime already owns. They are copied verbatim from `wasmtime-wasi`'s `src/p3/wit/deps`.
-
-p3 filesystem reads ride native component-model `stream`/`future` rather than `wasi:io` streams, so the p2-only `io.wit` that `filesystem/types` previously imported is no longer vendored.
+`deps/` vendors `wasi:filesystem` and `wasi:clocks` at `0.3.2`, for the
+`descriptor` a `location` borrows. The host binds them onto
+`wasmtime_wasi::p3::bindings`, so a lent root is the `Descriptor` the
+runtime already holds. They are copied verbatim from `wasmtime-wasi`'s
+`src/p3/wit/deps`.
