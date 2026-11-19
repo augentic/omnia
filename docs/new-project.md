@@ -61,8 +61,7 @@ serde_json = "1"
 use axum::Json;
 use axum::extract::Query;
 use axum::routing::get;
-use omnia_sdk::Error;
-use omnia_sdk::api::{Context, Handlers, Router, http};
+use omnia_sdk::{Context, Error, Handlers, Router, http};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 

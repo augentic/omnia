@@ -25,7 +25,7 @@ use anyhow::Context;
 use axum::routing::post;
 use axum::{Json, Router};
 use bytes::Bytes;
-use omnia_sdk::vault::store;
+use omnia_sdk::vault;
 use serde_json::Value;
 use wasip3::exports::http::handler::Guest;
 use wasip3::http::types::{ErrorCode, Request, Response};
@@ -42,7 +42,7 @@ impl Guest for Http {
 
 #[omnia_sdk::otel::instrument]
 async fn handler(body: Bytes) -> omnia_sdk::Result<Json<Value>> {
-    let locker = store::open("default".to_string()).await.context("failed to open vault locker")?;
+    let locker = vault::open(vault::DEFAULT).await.context("failed to open vault locker")?;
 
     locker.set("greeting".to_string(), body.to_vec()).await.context("issue setting secret")?;
 

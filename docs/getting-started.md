@@ -19,17 +19,17 @@ cargo build --example http-wasm --target wasm32-wasip3
 
 This produces `target/wasm32-wasip3/debug/examples/http_wasm.wasm` (note: the file name uses underscores).
 
-The guest itself is ordinary Rust. In an Omnia service, you write plain [Axum](https://github.com/tokio-rs/axum) handlers, register them on `Handlers`, and export the WASI HTTP interface with `omnia_sdk::api::http::export!`:
+The guest itself is ordinary Rust. In an Omnia service, you write plain [Axum](https://github.com/tokio-rs/axum) handlers, register them on `Handlers`, and export the WASI HTTP interface with `omnia_sdk::http::export!`:
 
 ```rust,noplayground
 fn router() -> Router {
     Handlers::new().route("/", get(echo_get).post(echo_post)).into_router()
 }
 
-omnia_sdk::api::http::export!(router);
+omnia_sdk::http::export!(router);
 ```
 
-A handler takes the call's metadata through the `omnia_sdk::api::Context` extractor; `get`, `post`, and the input extractors are axum's own. On `wasm32`, `http::export!` expands to the raw WASI `wasip3::http::service::export!` implementation, calls `router()`, and serves each request through `omnia_sdk::http::serve` inside an `http_guest_handle` OpenTelemetry span (the standalone `examples/http/guest.rs` writes that expansion out explicitly so you can see the underlying WASI boundary).
+A handler takes the call's metadata through the `omnia_sdk::Context` extractor; `get`, `post`, and the input extractors are axum's own. On `wasm32`, `http::export!` expands to the raw WASI `wasip3::http::service::export!` implementation, calls `router()`, and serves each request through `omnia_sdk::http::serve` inside an `http_guest_handle` OpenTelemetry span (the standalone `examples/http/guest.rs` writes that expansion out explicitly so you can see the underlying WASI boundary).
 
 ## Step 2: Run it in a host
 
@@ -71,12 +71,12 @@ Each entry pairs a **WASI host** (the interface guests see, e.g. `WasiKeyValue`)
 A handler reaches host state through an interface module of `omnia_sdk`, such as `keyvalue` for key-value storage. It opens a bucket the deployment declares and calls its methods:
 
 ```rust,noplayground
-use omnia_sdk::keyvalue::{DEFAULT, store};
+use omnia_sdk::keyvalue;
 
 async fn store_item(
     _context: Context, Json(input): Json<ItemInput>,
 ) -> Result<Json<ItemReply>, Error> {
-    let bucket = store::open(DEFAULT.to_owned()).await?;
+    let bucket = keyvalue::open(keyvalue::DEFAULT).await?;
     bucket.set_json("my_key", &input.body, None).await?;
     let res: Option<String> = bucket.get_json("my_key").await?;
     tracing::debug!("found val: {res:?}");
@@ -84,17 +84,13 @@ async fn store_item(
 }
 ```
 
-`set_json` and `get_json` are helpers over the generated `set` and `get`, which move raw bytes. The standalone `keyvalue` example (`examples/keyvalue/guest.rs`) calls those directly to demonstrate the WIT binding:
+`set_json` and `get_json` are helpers over the generated `set` and `get`, which move raw bytes under a lifetime and an optional precondition. The standalone `keyvalue` example (`examples/keyvalue/guest.rs`) writes raw bytes with `write`, then reads the entry with the generated `get` to update it conditionally:
 
 ```rust,noplayground
 async fn handler(body: Bytes) -> omnia_sdk::Result<Json<Value>> {
-    let bucket = store::open("omnia_bucket".to_string()).await.context("opening bucket")?;
+    let bucket = keyvalue::open("omnia_bucket").await.context("opening bucket")?;
 
-    let stored = bucket
-        .set("my_key".to_string(), body.to_vec(), Lifetime::Forever, None)
-        .await
-        .context("storing data")?;
-    tracing::debug!("stored at revision: {stored:?}");
+    bucket.write("my_key", &body, None).await.context("storing data")?;
 
     let res = bucket.get("my_key".to_string()).await.context("reading data")?;
     tracing::debug!("found entry: {res:?}");

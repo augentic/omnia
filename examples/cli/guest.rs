@@ -15,8 +15,9 @@ use std::fmt;
 
 use clap::{Args, ValueEnum};
 use omnia_sdk::command::{self, Render};
-use omnia_sdk::{Context, Handlers, Router};
-use omnia_sdk::{Error, bad_gateway, bad_request, not_found, server_error};
+use omnia_sdk::{
+    Context, Error, Handlers, Router, bad_gateway, bad_request, not_found, server_error,
+};
 use serde::Serialize;
 
 /// Greet someone by name.

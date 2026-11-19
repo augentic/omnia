@@ -14,8 +14,7 @@ use omnia_sdk::command::{
     Command, Failure, Format, IntoExit, Parsed, Render, Response, Shell, USAGE_EXIT, Verbosity,
     completions, parse,
 };
-use omnia_sdk::{Context, Handlers, Metadata};
-use omnia_sdk::{bad_request, not_found, vcs};
+use omnia_sdk::{Context, Handlers, Metadata, bad_request, not_found, vcs};
 use serde::{Deserialize, Serialize};
 
 use self::support::{Spans, fields};

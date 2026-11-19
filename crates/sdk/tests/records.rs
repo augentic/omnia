@@ -7,14 +7,12 @@
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use omnia_sdk::docstore::types::Document;
+use omnia_sdk::docstore::Document;
 use omnia_sdk::identity::AccessToken;
-use omnia_sdk::keyvalue::types::Lifetime;
-use omnia_sdk::keyvalue::{self};
-use omnia_sdk::messaging::types::Message;
-use omnia_sdk::sql::database::Statement;
+use omnia_sdk::keyvalue::{self, Lifetime};
+use omnia_sdk::messaging::Message;
 use omnia_sdk::sql::types::Value as Wire;
-use omnia_sdk::sql::{Field, FromRow, Row, Value};
+use omnia_sdk::sql::{Field, FromRow, Row, Statement, Value};
 use serde::Deserialize;
 use serde_json::json;
 

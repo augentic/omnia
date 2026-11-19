@@ -20,13 +20,13 @@
 
 use std::time::Instant;
 
-use anyhow::anyhow;
+use anyhow::Context as _;
 use axum::routing::post;
 use axum::{Json, Router};
 use bytes::Bytes;
 use http_body_util::Full;
-use omnia_sdk::messaging::types::{Client, Delivery, Error, Message, Release, Settle};
-use omnia_sdk::messaging::{producer, request_reply};
+use omnia_sdk::messaging::types::{Delivery, Release, Settle};
+use omnia_sdk::messaging::{self, Message};
 use serde_json::{Value, json};
 use wasip3::exports::http::handler::Guest;
 use wasip3::http::types::{ErrorCode, Request, Response};
@@ -47,27 +47,16 @@ impl Guest for Http {
 async fn pub_sub(Json(body): Json<Value>) -> omnia_sdk::Result<Json<Value>> {
     tracing::debug!("sending message to topic 'a'");
 
-    let client =
-        Client::connect("default".to_string()).await.map_err(|e| anyhow!("connect: {e}"))?;
-    let outgoing = Message {
-        content_type: Some("application/json".to_string()),
-        key: Some("example_key".to_string()),
-        ..message(body.to_string())
-    };
-
-    producer::send(&client, "a".to_string(), outgoing)
-        .await
-        .map_err(|e| anyhow!("publishing to topic 'a': {e}"))?;
+    let client = messaging::connect(messaging::DEFAULT).await.context("connect")?;
+    let outgoing = Message::json(&body)?.with_key("example_key");
+    client.send("a", outgoing).await.context("publishing to topic 'a'")?;
 
     Ok(Json(json!({"message": "message published"})))
 }
 
 async fn request_reply_handler(body: Bytes) -> omnia_sdk::Result<Json<Value>> {
-    let client =
-        Client::connect("default".to_string()).await.map_err(|e| anyhow!("connect: {e}"))?;
-    let reply = request_reply::request(&client, "c".to_string(), message(body), None)
-        .await
-        .map_err(|e| anyhow!("request-reply: {e}"))?;
+    let client = messaging::connect(messaging::DEFAULT).await.context("connect")?;
+    let reply = client.request("c", Message::new(body), None).await.context("request-reply")?;
 
     let data_str = String::from_utf8_lossy(&reply.data);
 
@@ -77,15 +66,6 @@ async fn request_reply_handler(body: Bytes) -> omnia_sdk::Result<Json<Value>> {
 // the target for outbound http from the messaging handler
 async fn upstream_handler(body: Bytes) -> Json<Value> {
     Json(json!({"echo": String::from_utf8_lossy(&body)}))
-}
-
-fn message(data: impl Into<Vec<u8>>) -> Message {
-    Message {
-        data: data.into(),
-        content_type: None,
-        key: None,
-        metadata: Vec::new(),
-    }
 }
 
 pub struct Messaging;
@@ -107,17 +87,15 @@ impl omnia_sdk::exports::messaging::incoming_handler::Guest for Messaging {
                 for i in 0..1000 {
                     wit_bindgen::spawn_local(async move {
                         tracing::debug!("sending message iteration {i}");
-                        let Ok(client) = Client::connect("default".to_string()).await else {
+                        let Ok(client) = messaging::connect(messaging::DEFAULT).await else {
                             tracing::error!("failed to connect default client");
                             return;
                         };
 
-                        let keyed = Message {
-                            key: Some(format!("key-{i}")),
-                            ..message(format!("topic a iteration {i}"))
-                        };
+                        let keyed = Message::new(format!("topic a iteration {i}"))
+                            .with_key(format!("key-{i}"));
 
-                        if let Err(e) = producer::send(&client, "b".to_string(), keyed).await {
+                        if let Err(e) = client.send("b", keyed).await {
                             tracing::error!("error sending message to topic 'b': {e}");
                         }
                         tracing::debug!("message iteration {i} sent");
@@ -165,10 +143,8 @@ impl omnia_sdk::exports::messaging::incoming_handler::Guest for Messaging {
                     format!("Hello from topic c | input: {data_str} | upstream: {upstream_body}");
 
                 if let Some(reply_to) = delivery.reply_to {
-                    let client = Client::connect("default".to_string()).await.map_err(release)?;
-                    request_reply::reply(&client, reply_to, message(combined))
-                        .await
-                        .map_err(release)?;
+                    let client = messaging::connect(messaging::DEFAULT).await.map_err(release)?;
+                    client.reply(&reply_to, Message::new(combined)).await.map_err(release)?;
                 }
             }
             _ => {
@@ -182,7 +158,7 @@ impl omnia_sdk::exports::messaging::incoming_handler::Guest for Messaging {
 }
 
 // a failure that may pass, so the broker delivers the message again
-fn release(error: Error) -> Settle {
+fn release(error: omnia_sdk::Error) -> Settle {
     Settle::Release(Release {
         reason: error.to_string(),
         delay_ms: None,

@@ -88,7 +88,7 @@ What serves one `omnia:*` interface to a guest: the [WASI host](#host) for the i
 
 ### Command façade
 
-`omnia_sdk::api::command`, the command-line adapter over the handler contract: `Handlers::command(name, handler)` registers a subcommand beside a module's paths and topics, the closed `Router` `run`s argv (clap decode → handler → encode in the selected `command::Format`, the output's `command::Render` form as text) onto a `Response { stdout, stderr, exit }`, and `command::export!(command_router)` binds the router fn as the `wasi:cli/run` export, writing the channels at that boundary. `parse` and `Command::call` are the same pieces for a hand-written clap grammar. The clap-backed parts ship behind the `command` cargo feature. Distinct from the host-side **`omnia-cli`** crate, which is the `run` grammar of a host binary.
+`omnia_sdk::command`, the command-line adapter over the handler contract: `Handlers::command(name, handler)` registers a subcommand beside a module's paths and topics, the closed `Router` `run`s argv (clap decode → handler → encode in the selected `command::Format`, the output's `command::Render` form as text) onto a `Response { stdout, stderr, exit }`, and `command::export!(command_router)` binds the router fn as the `wasi:cli/run` export, writing the channels at that boundary. `parse` and `Command::call` are the same pieces for a hand-written clap grammar. The clap-backed parts ship behind the `command` cargo feature. Distinct from the host-side **`omnia-cli`** crate, which is the `run` grammar of a host binary.
 
 ### Failure envelope
 

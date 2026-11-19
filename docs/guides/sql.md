@@ -8,18 +8,19 @@ The [`sql`](../../examples/sql/) example is a minimal CRUD service over a single
 
 ## Opening a database
 
-`store::open(name)` opens a `Database` on a name the deployment declares, `sql::DEFAULT` unless it declares another. A `Database` runs SQL through three methods:
+`sql::open(name)` opens a `Database` on a name the deployment declares, `sql::DEFAULT` unless it declares another. A `Database` runs SQL through four methods:
 
 - `query_as` decodes the rows a statement selects (see [Mapping rows](#mapping-rows)).
+- `query_opt` decodes the first row a statement selects, or answers `None` when it selects none.
 - `exec` returns the number of rows a statement changed. DDL runs through it too, and returns zero.
 - `batch` runs a list of `Statement`s in order, in one transaction, and returns each one's count. A failing statement rolls back the whole batch.
 
-Each call commits before it returns, and `transactions::begin` starts a transaction for work that spans several calls (see [Transactions](#transactions)). `query_as` and `exec` take the SQL text and its `$n` parameters as a slice of `Value`s, which convert from Rust scalars and `Option`s of them. `Statement::new(sql, params)` takes the same pair.
+Each call commits before it returns, and `Database::begin` starts a transaction for work that spans several calls (see [Transactions](#transactions)). `query_as`, `query_opt`, and `exec` take the SQL text and its `$n` parameters as a slice of `Value`s, which convert from Rust scalars and `Option`s of them. `Statement::new(sql, params)` takes the same pair.
 
 ```rust,noplayground
-use omnia_sdk::sql::{self, Value, store};
+use omnia_sdk::sql::{self, Value};
 
-let database = store::open(sql::DEFAULT.to_owned()).await?;
+let database = sql::open(sql::DEFAULT).await?;
 ```
 
 Insert with bound parameters — a `None` binds a NULL:
@@ -59,7 +60,7 @@ if rows_affected == 0 {
 A statement against another database goes through a database opened on its name:
 
 ```rust,noplayground
-let events = store::open("eventstore".to_owned()).await?;
+let events = sql::open("eventstore").await?;
 events.exec("DELETE FROM event WHERE agency_id = $1", &[Value::from(id)]).await?;
 ```
 
@@ -105,12 +106,12 @@ A handler test serves the database from `omnia_test::host::ScriptedTables`. It s
 
 ## Transactions
 
-`transactions::begin(&database)` starts a `Transaction` on the database. Its `query_as` and `exec` work as on the database, and `commit` or `rollback` ends it:
+`database.begin()` starts a `Transaction` on the database. Its `query_as`, `query_opt`, and `exec` work as on the database, and `commit` or `rollback` ends it:
 
 ```rust,noplayground
-use omnia_sdk::sql::{Value, transactions};
+use omnia_sdk::sql::Value;
 
-let transfer = transactions::begin(&database).await?;
+let transfer = database.begin().await?;
 let debit = "UPDATE account SET balance = balance - $1 WHERE id = $2";
 transfer.exec(debit, &[Value::from(amount), Value::from(from)]).await?;
 let credit = "UPDATE account SET balance = balance + $1 WHERE id = $2";

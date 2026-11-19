@@ -64,8 +64,7 @@ use std::sync::Arc;
 
 use serde::{Serialize, Serializer};
 
-use crate::ErrorBody;
-use crate::{Context, Handler, Metadata};
+use crate::{Context, ErrorBody, Handler, Metadata};
 
 #[cfg(feature = "command")]
 pub(crate) mod program;

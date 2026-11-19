@@ -38,7 +38,7 @@ curl -X DELETE http://localhost:8080/agencies/1
 
 ## Features Demonstrated
 
-- **Opening a database** — `store::open` on the `default` database, then schema creation with `exec`
+- **Opening a database** — `sql::open` on the `default` database, then schema creation with `exec`
 - **`Database` helpers** — executing SQL with `query_as` / `exec`
 - **Parameterized filters** — `$1`, `$2`, ... placeholders bound from `Value`s
 - **Row mapping** — decoding each `Row` into a `Serialize` struct with `FromRow`

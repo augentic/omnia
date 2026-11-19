@@ -6,8 +6,7 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_sdk::{Context, Handlers, Router, command};
-use omnia_sdk::{Error, bad_gateway, bad_request, not_found};
+use omnia_sdk::{Context, Error, Handlers, Router, bad_gateway, bad_request, command, not_found};
 
 async fn ok(_context: Context, (): ()) -> Result<String, Error> {
     Ok("ok".to_owned())

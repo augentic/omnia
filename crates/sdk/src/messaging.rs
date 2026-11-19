@@ -17,24 +17,12 @@ use std::time::Duration;
 use serde::Serialize;
 
 pub use self::router::Delivery;
+pub(crate) use self::router::Topics;
 #[cfg(target_arch = "wasm32")]
 pub use self::router::handle;
-pub(crate) use self::router::Topics;
 pub use crate::bindings::imports::omnia::messaging::{producer, request_reply, types};
 pub use crate::messaging::types::{Client, Message};
 use crate::{Error, Result};
-
-/// Bind a router fn as the guest's `omnia:messaging` export.
-///
-/// Calls the router fn on each delivery and dispatches the delivery through
-/// the [`Router`](crate::Router) it returns, as `handle` does. On a native
-/// target it binds nothing, and a private router fn still counts as used.
-///
-/// ```rust,ignore
-/// omnia_sdk::messaging::export!(router);
-/// ```
-#[doc(inline)]
-pub use crate::__export_messaging as export;
 
 /// The broker a guest's own [`Client`] connects to.
 pub const DEFAULT: &str = "default";
@@ -144,3 +132,15 @@ fn encode<T: Serialize + ?Sized>(value: &T) -> Result<Vec<u8>> {
     serde_json::to_vec(value)
         .map_err(|err| Error::server_error("invalid", format!("encoding message payload: {err}")))
 }
+
+/// Bind a router fn as the guest's `omnia:messaging` export.
+///
+/// Calls the router fn on each delivery and dispatches the delivery through
+/// the [`Router`](crate::Router) it returns, as `handle` does. On a native
+/// target it binds nothing, and a private router fn still counts as used.
+///
+/// ```rust,ignore
+/// omnia_sdk::messaging::export!(router);
+/// ```
+#[doc(inline)]
+pub use crate::__export_messaging as export;

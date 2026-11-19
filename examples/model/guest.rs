@@ -10,7 +10,7 @@
 #![cfg(target_arch = "wasm32")]
 
 use omnia_sdk::model::prompt::Sections;
-use omnia_sdk::model::{Format, Message, Request, Role, SchemaFormat};
+use omnia_sdk::model::{Format, Message, Request, SchemaFormat};
 use wasip3::exports::cli::run::Guest;
 use wasip3::filesystem::preopens;
 
@@ -47,10 +47,7 @@ async fn default_completion() -> String {
 
     let request = Request::builder()
         .maybe_system(system)
-        .messages(vec![Message {
-            role: Role::User,
-            content: user,
-        }])
+        .messages(vec![Message::user(user)])
         .format(Format::Schema(
             SchemaFormat::builder().name("verdict").schema("{\"type\":\"object\"}").build(),
         ))

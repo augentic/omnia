@@ -12,8 +12,7 @@ use axum::extract::Path;
 use axum::routing::{delete, get};
 use axum::{Json, Router};
 use chrono::Utc;
-use omnia_sdk::sql::database::Database;
-use omnia_sdk::sql::{self, FromRow, Value, store};
+use omnia_sdk::sql::{self, Database, FromRow, Value};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use wasip3::exports::http::handler::Guest;
@@ -101,7 +100,7 @@ async fn delete_agency(Path(id): Path<i64>) -> omnia_sdk::Result<Json<serde_json
 // creates the schema per request, since each is handled by a fresh instance;
 // fine for an example
 async fn database() -> Result<Database> {
-    let database = store::open(sql::DEFAULT.to_owned()).await.context("opening the database")?;
+    let database = sql::open(sql::DEFAULT).await.context("opening the database")?;
 
     let create_agency = "CREATE TABLE IF NOT EXISTS agency (
         agency_id BIGINT PRIMARY KEY,

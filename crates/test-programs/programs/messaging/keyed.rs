@@ -9,10 +9,9 @@
 
 use std::time::SystemTime;
 
-use omnia_sdk::messaging::{self, Delivery};
-use omnia_sdk::{Context, Handlers, Router};
 use omnia_sdk::messaging::types::{Client, Message};
-use omnia_sdk::messaging::{DEFAULT, producer};
+use omnia_sdk::messaging::{self, DEFAULT, Delivery, producer};
+use omnia_sdk::{Context, Handlers, Router};
 
 omnia_sdk::command::export!(scenario);
 messaging::export!(router);

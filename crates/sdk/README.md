@@ -9,8 +9,7 @@ A handler is an `async fn` that takes a `Context`. It reaches the host through a
 ```rust
 use axum::Json;
 use axum::routing::post;
-use omnia_sdk::api::{Context, Handlers, Router, http};
-use omnia_sdk::keyvalue::{DEFAULT, store};
+use omnia_sdk::{Context, Handlers, Router, http, keyvalue};
 use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize, Serialize)]
@@ -20,7 +19,7 @@ struct Item {
 }
 
 async fn create_item(_context: Context, Json(item): Json<Item>) -> omnia_sdk::Result<Json<Item>> {
-    let bucket = store::open(DEFAULT.to_owned()).await?;
+    let bucket = keyvalue::open(keyvalue::DEFAULT).await?;
     bucket.set_json(&item.id, &item, None).await?;
     Ok(Json(item))
 }
@@ -36,39 +35,42 @@ http::export!(router);
 
 ## Interfaces
 
-Each `omnia:*` interface is a module of the bindings `wit-bindgen` generates, committed to the crate. A guest opens a resource on a binding the deployment declares and calls its methods. A module whose bindings a deployment names, such as `keyvalue` or `sql`, has a `DEFAULT` for the one a guest opens when it names no other.
+Each `omnia:*` interface is one module. A module over resources the deployment declares, such as `keyvalue`, `sql`, or `messaging`, has the same shape:
 
-- Absence is `Ok(None)`, not an error.
-- A module's helpers sit beside the generated methods, such as `Bucket::get_json` and `Database::query_as`.
-- `?` converts a binding's error into an `Error` under its code.
+- One opener, `open` or `connect`, takes the name of a binding the deployment declares. A module with a default binding, such as `keyvalue` or `sql`, has a `DEFAULT` naming it.
+- The types a guest holds sit at the module root, such as `keyvalue::Bucket` and `sql::Database`.
+- Helpers are methods on those types. They take `&str` and `&[u8]` and return a flat `Result`.
+- The bindings `wit-bindgen` generates stay public as submodules, such as `keyvalue::store` and `keyvalue::types`, for the raw calls and the conditional writes.
 
-| Module | Entry point | Helpers |
-| ------ | ----------- | ------- |
-| `blobstore` | `store::open`, `admin::create_container` | Whole-object `Container::read`, `read_range`, and `write`. |
-| `config` | `store::get`, `entries::list` | Typed `require` and `parse`, and `#[derive(Settings)]`. |
-| `docstore` | `store::open` | Typed `Collection::get_as`, `insert`, and `upsert`, and `find` over a `Query`. |
-| `http` | `fetch`, `send` | `fetch_json` for a JSON reply, and `serve` for an inbound request. |
-| `identity` | `credentials::open` | `Identity::token`, an `AccessToken` with the time it has left. |
-| `keyvalue` | `store::open` | JSON `Bucket::get_json` and `set_json`, and `compare_and_swap`. |
-| `messaging` | `Client::connect`, `producer::send` | `Message::new` and `Message::json`, with a key and metadata. |
-| `model` | `Request::complete` | `complete_with` for tool calls, and `Question` for a typed answer. |
+Absence is `Ok(None)`, not an error, and `?` converts a binding's error into an `Error` under its code.
+
+| Module | Opener | Helpers |
+| ------ | ------ | ------- |
+| `blobstore` | `open`, `admin::create_container` | Whole-object `Container::read`, `read_range`, and `write`. |
+| `config` | `get` | Typed `require` and `parse`, and `#[derive(Settings)]`. |
+| `docstore` | `open` | Typed `Collection::get_as`, `insert`, `upsert`, and `remove`, and `find` over a `Query`. |
+| `http` | `fetch`, `send` | `fetch_json` for a JSON reply. |
+| `identity` | `open` | `Identity::token`, an `AccessToken` with the time it has left. |
+| `keyvalue` | `open` | `Bucket::read`, `write`, `remove`, and `keys`, JSON `get_json` and `set_json`, and `compare_and_swap`. |
+| `messaging` | `connect` | `Client::send`, `request`, and `reply`, over a `Message::new` or `Message::json`. |
+| `model` | `Request::complete` | `complete_with` for tool calls, `Message::user` and its siblings, and `Question` for a typed answer. |
 | `plugins` | `Location::load` | A validated `Digest`, and the `Plugin` handle a load returns. |
-| `sql` | `store::open`, `transactions::begin` | `query_as` through `FromRow`, and `exec` on a database or a transaction. |
-| `vault` | `store::open` | None: a locker's generated methods. |
+| `sql` | `open` | `query_as` and `query_opt` through `FromRow`, `exec`, and `Database::begin` for a transaction. |
+| `vault` | `open` | None: a locker's generated methods. |
 | `vcs` | `resolve`, `head`, `commit`, and the rest | One fn per operation over a deployment-local path. |
-| `websocket` | `Client::connect`, `connections::send` | None: the generated sends and closes. |
+| `websocket` | `connect` | `Client::broadcast`, `send`, `close`, and `exists`. |
 
 `otel` holds the guest's telemetry library, and `#[omnia_sdk::otel::instrument]` opens a span around a fn. `mcp` serves the Model Context Protocol from a guest, behind the `http` feature.
 
 ## Transports
 
-HTTP routes, messaging topics, and subcommands all register on a `Handlers`. A module registers its own on one, and the guest merges them with `Handlers::from([..])` or `merge` before `into_router` closes the whole into one `Router`. Two handlers for one path and method, one topic, or one subcommand are refused when they meet.
+HTTP routes, messaging topics, and subcommands all register on a `Handlers`. A module registers its own on one, and the guest merges them with `Handlers::from([..])` or `merge` before `into_router` closes the whole into one `Router`. Two handlers for one path and method, one topic, or one subcommand are refused when they meet. `Context`, `Handlers`, `Router`, and `Error` sit at the crate root.
 
-Each transport's `export!` binds the router fn to one WASI export. On native targets it expands to nothing, and a test or a native host serves the router itself.
+Each transport's `export!` binds the router fn to one WASI export: `http::export!`, `messaging::export!`, or `command::export!`. On native targets it binds nothing, and a test or a native host serves the router itself.
 
 ### HTTP
 
-An HTTP handler is a plain [axum](https://github.com/tokio-rs/axum) handler. It takes `Context` as an extractor beside axum's own, such as `Path`, `Query`, and `Json`. The `api::http` module documents the rest.
+An HTTP handler is a plain [axum](https://github.com/tokio-rs/axum) handler. It takes `Context` as an extractor beside axum's own, such as `Path`, `Query`, and `Json`. The `http` module documents the rest.
 
 - `Handlers::route(path, method_router)` binds axum's `get`, `post`, `put`, `patch`, and `delete`, chained per path.
 - `context.metadata` carries the `x-request-id`, `x-correlation-id`, `x-causation-id`, `x-tenant`, and `x-deadline` headers. A missing request id is minted.
@@ -79,12 +81,10 @@ An HTTP handler is a plain [axum](https://github.com/tokio-rs/axum) handler. It 
 use axum::Json;
 use axum::extract::Path;
 use axum::routing::get;
-use omnia_sdk::api::{Context, Handlers};
-use omnia_sdk::keyvalue::{DEFAULT, store};
-use omnia_sdk::not_found;
+use omnia_sdk::{Context, Handlers, keyvalue, not_found};
 
 async fn get_item(_context: Context, Path(id): Path<String>) -> omnia_sdk::Result<Json<Item>> {
-    let bucket = store::open(DEFAULT.to_owned()).await?;
+    let bucket = keyvalue::open(keyvalue::DEFAULT).await?;
     let item = bucket.get_json(&id).await?;
     item.map(Json).ok_or_else(|| not_found!("no item {id}"))
 }
@@ -96,19 +96,19 @@ pub fn handlers() -> Handlers {
 
 ### Messaging
 
-A messaging handler is any `async fn(Context, I) -> Result<O, E>`, the context first as in an HTTP handler. A `Clone` closure of that shape is one too, so a closure can carry configuration. The `api::messaging` module documents the rest.
+A messaging handler is any `async fn(Context, I) -> Result<O, E>`, the context first as in an HTTP handler. A `Clone` closure of that shape is one too, so a closure can carry configuration. The `messaging` module documents the rest.
 
 - `Handlers::topic(topic, handler)` decodes the payload as JSON.
 - `Handlers::topic_with(topic, handler, decode)` takes a decoder over the whole `Delivery`, for any other wire format.
 - A topic matches exactly, with no wildcards.
 - `messaging::export!` binds the `omnia:messaging` handler.
+- A guest that settles every delivery itself implements `exports::messaging` in place of a router.
 
 ```rust,ignore
-use omnia_sdk::api::{Context, Handlers, Router, messaging};
-use omnia_sdk::keyvalue::{DEFAULT, store};
+use omnia_sdk::{Context, Handlers, Router, keyvalue, messaging};
 
 async fn item_created(_context: Context, item: Item) -> omnia_sdk::Result<()> {
-    let bucket = store::open(DEFAULT.to_owned()).await?;
+    let bucket = keyvalue::open(keyvalue::DEFAULT).await?;
     bucket.set_json(&item.id, &item, None).await
 }
 
@@ -121,7 +121,7 @@ messaging::export!(router);
 
 ### Command
 
-A subcommand is one more handler on `Handlers`, behind the `command` feature. Its input implements `clap::Args`, whose doc comments are the help text. Its output implements `Serialize` and `command::Render`. The `api::command` module documents the rest.
+A subcommand is one more handler on `Handlers`, behind the `command` feature. Its input implements `clap::Args`, whose doc comments are the help text. Its output implements `Serialize` and `command::Render`. The `command` module documents the rest.
 
 - `Handlers::command(name, handler)` registers a subcommand.
 - `Handlers::command_with(command, handler, decode)` takes a `clap::Command` and a decoder over its `ArgMatches`, for any other grammar.
@@ -132,8 +132,7 @@ A subcommand is one more handler on `Handlers`, behind the `command` feature. It
 
 ```rust,ignore
 use clap::Args;
-use omnia_sdk::api::{Context, Handlers, Router, command};
-use omnia_sdk::keyvalue::{DEFAULT, store};
+use omnia_sdk::{Context, Handlers, Router, command, keyvalue};
 
 /// Create an item.
 #[derive(Args)]
@@ -147,7 +146,7 @@ struct Create {
 
 async fn create(_context: Context, input: Create) -> omnia_sdk::Result<String> {
     let item = Item { id: input.id, name: input.name };
-    store::open(DEFAULT.to_owned()).await?.set_json(&item.id, &item, None).await?;
+    keyvalue::open(keyvalue::DEFAULT).await?.set_json(&item.id, &item, None).await?;
     Ok(format!("created {}", item.id))
 }
 
@@ -204,8 +203,8 @@ A guest's host calls panic off `wasm32`, so a handler that reaches the host is t
 
 ## Cargo features
 
-- `http` *(default)*: the axum-backed `api::http` handlers, `Error: IntoResponse`, and the `mcp` server. Outbound `http::fetch` needs no feature.
-- `command`: the clap-backed `api::command` program, with `Handlers::command`, `Router::run`, and shell completions. `command::export!` and the `Response` and `Failure` types need no feature.
+- `http` *(default)*: the axum-backed inbound handlers (`http::export!`, `serve`, and `trace`), `Error: IntoResponse`, and the `mcp` server. Outbound `http::fetch` needs no feature.
+- `command`: the clap-backed `command` program, with `Handlers::command`, `Router::run`, and shell completions. `command::export!` and the `Response` and `Failure` types need no feature.
 
 Every interface is always built. A guest that serves no inbound HTTP can disable the default features to shrink its build. A command-only guest is `default-features = false, features = ["command"]`.
 

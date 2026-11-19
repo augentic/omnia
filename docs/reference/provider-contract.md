@@ -17,7 +17,7 @@ A trigger host sets each invocation's metadata before the guest's router reads i
 
 ### HTTP
 
-The `wasi:http` host stamps `x-deadline` on every request and enforces the budget itself, with a timeout around each request. In the guest, `http::export!` serves the request inside the `handler` span `api::http::trace` opens, which reads the stamped header.
+The `wasi:http` host stamps `x-deadline` on every request and enforces the budget itself, with a timeout around each request. In the guest, `http::export!` serves the request inside the `handler` span `http::trace` opens, which reads the stamped header.
 
 ### Messaging
 
@@ -85,7 +85,7 @@ A transport that mints a request id draws it from a CSPRNG. `Metadata::from_look
 
 ### Apply the tracing layer
 
-Each request runs inside the `handler` span `api::http::trace` opens, carrying its ids, method, and route. `http::export!` and `http::serve` apply it inside a guest, and a host that serves a `Router` natively layers it itself. A delivery and a subcommand open the same span through the router's own dispatch.
+Each request runs inside the `handler` span `http::trace` opens, carrying its ids, method, and route. `http::export!` and `http::serve` apply it inside a guest, and a host that serves a `Router` natively layers it itself. A delivery and a subcommand open the same span through the router's own dispatch.
 
 ## The application's half
 

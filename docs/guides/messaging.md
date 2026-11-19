@@ -11,12 +11,11 @@ The [`messaging`](../../examples/messaging/) example demonstrates every pattern 
 Connect a client by name, build a `Message`, and send it to a topic:
 
 ```rust,noplayground
-use omnia_sdk::messaging::types::{Client, Message};
-use omnia_sdk::messaging::{DEFAULT, producer};
+use omnia_sdk::messaging::{self, Message};
 
-let client = Client::connect(DEFAULT.to_owned()).await?;
+let client = messaging::connect(messaging::DEFAULT).await?;
 let message = Message::json(&order)?.with_key(&order.customer_id).with_metadata("tenant", "acme");
-producer::send(&client, "orders.created".to_owned(), message).await?;
+client.send("orders.created", message).await?;
 ```
 
 `Message::new(bytes)` builds a message from raw bytes, and `Message::json(&value)` serializes a value under the `application/json` content type. `with_key`, `with_content_type`, and `with_metadata` set the rest. The content type, key, and metadata travel with the message, and on Kafka the key also drives partition assignment. A backend carries every field given or fails with `unsupported`. A portable metadata name matches `[a-z][a-z0-9-]*`. A deployment declares one broker, `default`, and connecting to any other name fails with `not-found`.
@@ -26,7 +25,7 @@ producer::send(&client, "orders.created".to_owned(), message).await?;
 Messaging is a **trigger**: the host (`WasiMessaging`) subscribes to topics and delivers each message to the guest's exported handler, instantiating a fresh guest instance per message:
 
 ```rust,noplayground
-use omnia_sdk::api::{Context, Handlers, Router, messaging};
+use omnia_sdk::{Context, Handlers, Router, messaging};
 
 async fn create_order(context: Context, input: CreateOrder) -> Result<(), omnia_sdk::Error> {
     // ...
@@ -39,7 +38,7 @@ fn router() -> Router {
 messaging::export!(router);
 ```
 
-A guest that writes the raw export implements `omnia_sdk::exports::messaging::incoming_handler::Guest`, binds it with `omnia_sdk::messaging::export!`, and dispatches through `omnia_sdk::api::messaging::handle` (see [Writing Guests](writing-guests.md#handling-incoming-messages)).
+A guest that writes the raw export implements `omnia_sdk::exports::messaging::incoming_handler::Guest`, binds it with `omnia_sdk::exports::messaging::export!`, and dispatches through `omnia_sdk::messaging::handle` (see [Writing Guests](writing-guests.md#handling-incoming-messages)).
 
 The guest router matches registered topics exactly; broker subscription patterns remain host configuration (`KAFKA_TOPICS`, `NATS_TOPICS`). `topic` decodes JSON and returns `Ok(())` for successful handler output. `Router::handle` reports a failure as an `omnia_sdk::Error`, whose code names it. A payload that does not decode is a `BadRequest` with the code `undecodable`. A delivery with no topic is a `BadRequest` with the code `missing-topic`, and one no route takes is a `NotFound` with the code `unhandled-topic`. A handler's failure takes its class and code from the first `omnia_sdk::Error`, `vcs::Error`, `plugins::Error`, or `model::Error` in its source chain, and anything else is a `ServerError`.
 
@@ -58,15 +57,15 @@ The requester sends and awaits one reply on the same call; the handler answers t
 
 ```rust
 // Requester
-let reply = request_reply::request(&client, "quotes".to_string(), message, None).await?;
+let reply = client.request("quotes", message, None).await?;
 
 // Handler (inside incoming_handler::Guest::handle)
 if let Some(reply_to) = delivery.reply_to {
-    request_reply::reply(&client, reply_to, response).await?;
+    client.reply(&reply_to, response).await?;
 }
 ```
 
-The final `request` argument is an optional timeout in milliseconds; `None` defers to the backend's bound, and zero is `invalid`. A delivery's `reply_to` is `None` when the sender awaits no reply.
+The final `request` argument is an optional `Duration`; `None` defers to the backend's bound, and a zero timeout is `invalid`. A delivery's `reply_to` is `None` when the sender awaits no reply.
 
 ## Fan-out and async work
 
@@ -75,8 +74,8 @@ Handlers can publish further messages, including many at once. Use `wit_bindgen:
 ```rust
 for i in 0..1000 {
     wit_bindgen::spawn_local(async move {
-        let client = Client::connect("default".to_string()).await?;
-        producer::send(&client, "downstream".to_string(), make_message(i)).await
+        let client = messaging::connect(messaging::DEFAULT).await?;
+        client.send("downstream", make_message(i)).await
     });
 }
 ```
@@ -99,24 +98,24 @@ Semantics to keep in mind when moving from the default to a broker: the in-memor
 
 ## WebSockets
 
-The `omnia:websocket` interface is the same trigger shape pointed at WebSocket connections. The host (`WasiWebSocket`, default backend `WebSocketDefault`, a tungstenite server on `WEBSOCKET_ADDR`) accepts connections, names each with an opaque id, and delivers every message a peer sends to the guest's exported `incoming-handler`. A message is text or binary, and travels in a frame of that type. Guests send to the connections they name through `connections`, and reach every open one through `broadcast`:
+The `omnia:websocket` interface is the same trigger shape pointed at WebSocket connections. The host (`WasiWebSocket`, default backend `WebSocketDefault`, a tungstenite server on `WEBSOCKET_ADDR`) accepts connections, names each with an opaque id, and delivers every message a peer sends to the guest's exported `incoming-handler`. A message is text or binary, and travels in a frame of that type. A guest connects a `Client` with `websocket::connect`, sends to the connections it names with `Client::send`, and reaches every open one with `Client::broadcast`. The handler fails with the wire `types::Error`, so inside it the generated `connections` and `broadcast` calls, which fail with that same type, do the sending:
 
 ```rust,noplayground
-use omnia_sdk::websocket::types::{Client, Error, Event, Message};
-use omnia_sdk::websocket::{DEFAULT, broadcast, connections};
+use omnia_sdk::websocket::types::{Client, Error};
+use omnia_sdk::websocket::{self, Event, Message, connections};
 
 // Push text to every connected client
-let ws = Client::connect(DEFAULT.to_owned()).await?;
-broadcast::send(&ws, Message::Text(payload), Vec::new()).await?;
+let ws = websocket::connect(websocket::DEFAULT).await?;
+ws.broadcast(Message::Text(payload), &[]).await?;
 
 // Receive inbound messages
 struct WebSocket;
-omnia_sdk::websocket::export!(WebSocket);
+omnia_sdk::exports::websocket::export!(WebSocket);
 
 impl omnia_sdk::exports::websocket::incoming_handler::Guest for WebSocket {
     async fn handle(event: Event) -> Result<(), Error> {
         // react, or echo back to the sender
-        let ws = Client::connect(DEFAULT.to_owned()).await?;
+        let ws = Client::connect(websocket::DEFAULT.to_owned()).await?;
         connections::send(&ws, vec![event.connection], event.message).await
     }
 }

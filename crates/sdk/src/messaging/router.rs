@@ -158,12 +158,12 @@ pub async fn handle(
 }
 
 #[derive(Clone, Default)]
-pub(crate) struct Topics {
+pub struct Topics {
     routes: BTreeMap<String, Arc<dyn ErasedRoute>>,
 }
 
 impl Topics {
-    pub(crate) fn route<F, I>(self, topic: impl Into<String>, handler: F) -> Self
+    pub fn route<F, I>(self, topic: impl Into<String>, handler: F) -> Self
     where
         F: Handler<I>,
         I: DeserializeOwned + Send + 'static,
@@ -174,7 +174,7 @@ impl Topics {
         })
     }
 
-    pub(crate) fn route_with<F, I, D>(self, topic: impl Into<String>, handler: F, decode: D) -> Self
+    pub fn route_with<F, I, D>(self, topic: impl Into<String>, handler: F, decode: D) -> Self
     where
         F: Handler<I>,
         I: Send + 'static,
@@ -188,15 +188,15 @@ impl Topics {
         self.insert(topic.into(), Arc::new(route))
     }
 
-    pub(crate) fn merge(self, other: Self) -> Self {
+    pub fn merge(self, other: Self) -> Self {
         other.routes.into_iter().fold(self, |routes, (topic, route)| routes.insert(topic, route))
     }
 
-    pub(crate) fn topics(&self) -> impl Iterator<Item = &str> {
+    pub fn topics(&self) -> impl Iterator<Item = &str> {
         self.routes.keys().map(String::as_str)
     }
 
-    pub(crate) async fn handle(&self, delivery: Delivery) -> crate::Result<()> {
+    pub async fn handle(&self, delivery: Delivery) -> crate::Result<()> {
         let topic = delivery.topic.as_deref().ok_or_else(|| {
             crate::Error::bad_request("missing-topic", "the delivery has no topic")
         })?;

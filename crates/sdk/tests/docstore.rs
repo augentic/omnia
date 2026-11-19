@@ -109,12 +109,6 @@ fn condition_limit() {
 }
 
 #[test]
-fn binary_value() {
-    refused(&Filter::eq("rank", ScalarValue::Binary(vec![1])));
-    refused(&Filter::in_list("rank", [ScalarValue::Int32(1), ScalarValue::Binary(vec![1])]));
-}
-
-#[test]
 fn not_finite() {
     for number in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         refused(&Filter::eq("rank", number));

@@ -52,12 +52,13 @@ The host answers `unsupported` for the calls a backend cannot express yet:
 - a `delete` with a revision;
 - an `array-contains` test.
 
-Guests call these through `omnia_sdk::docstore`, which re-exports the bindings as `store`, `collection`, and `types`. `store::open(name)` opens a `Collection`, whose generated methods are the WIT's own. Its helpers map to the WIT as follows:
+Guests call these through `omnia_sdk::docstore`, which re-exports the bindings as `store`, `collection`, and `types`. `docstore::open(name)` opens a `Collection`, whose generated methods are the WIT's own. Its helpers map to the WIT as follows:
 
 - `get_as` is `get`, with the body decoded as `T`. `Document::decode` decodes a document `get` returned.
 - `insert` is `put` with `absent`. A conflict is `Ok(Err(Exists))`, an outcome rather than an error.
 - `upsert` is `put` with no precondition.
-- `find` is `query`, sending the `Filter` tree as groups (see [Filters](#filters)). `Query::after` is the WIT `after`, and the page's `next` is the cursor for the next page. A `Query::offset` fails with `unsupported`.
+- `remove` is `delete` with no revision, and answers whether a document was removed.
+- `find` is `query`, sending the `Filter` tree as groups (see [Filters](#filters)). `Query::after` is the WIT `after`, and the page's `next` is the cursor for the next page.
 
 ## Types
 
@@ -152,7 +153,7 @@ A `value` is a `boolean`, an `integer` (`s64`), a `number` (any finite `f64`), o
 
 ### Guest SDK filters
 
-On the guest side, build a filter with the `Filter` constructors from `omnia_sdk::docstore` (defined in [`crates/sdk/src/capabilities/docstore.rs`](../../crates/sdk/src/capabilities/docstore.rs)):
+On the guest side, build a filter with the `Filter` constructors from `omnia_sdk::docstore` (defined in [`crates/sdk/src/docstore.rs`](../../crates/sdk/src/docstore.rs)):
 
 | Constructor | Predicate |
 | ----------- | --------- |
@@ -175,9 +176,9 @@ So any nesting of `and`, `or`, and `not` reaches every backend as the same group
 
 ### Scalar values
 
-Comparison values are flat scalars (`ScalarValue`): `Null`, `Bool`, `Int32`, `Int64`, `Float64`, `Str`, `Binary`, `Timestamp` (an ISO-8601 string; use the `Timestamp` newtype to distinguish it from a plain string). `From` impls exist for `&str`, `String`, `i32`, `i64`, `f64`, and `bool`, so `Filter::eq("status", "active")` works without explicit wrapping.
+Comparison values are flat scalars (`ScalarValue`): `Null`, `Bool`, `Int32`, `Int64`, `Float64`, `Str`, `Timestamp` (an ISO-8601 string; use the `Timestamp` newtype to distinguish it from a plain string). `From` impls exist for `&str`, `String`, `i32`, `i64`, `f64`, and `bool`, so `Filter::eq("status", "active")` works without explicit wrapping.
 
-The SDK sends `Bool` as `boolean`, `Int32` and `Int64` as `integer`, `Float64` as `number`, and `Str` and `Timestamp` as `text`. A `Timestamp` therefore compares as text, which orders ISO-8601 instants in the same zone correctly. A `Binary` value is refused, since JSON holds no bytes.
+The SDK sends `Bool` as `boolean`, `Int32` and `Int64` as `integer`, `Float64` as `number`, and `Str` and `Timestamp` as `text`. A `Timestamp` therefore compares as text, which orders ISO-8601 instants in the same zone correctly.
 
 ### Reference semantics
 
@@ -200,7 +201,7 @@ It also rejects an ordering test given a boolean, and a number that is not finit
 - a tree nests at most `Filter::MAX_DEPTH` deep, which is 5;
 - an `and` or `or` has at least one child.
 
-It also refuses a `Binary` value, and an ordering comparison with `null` or a boolean. `Collection::find` calls it, so through the SDK every limit fails the query with `invalid` before the query reaches the host.
+It also refuses an ordering comparison with `null` or a boolean. `Collection::find` calls it, so through the SDK every limit fails the query with `invalid` before the query reaches the host.
 
 ## Sorting and pagination
 
@@ -222,7 +223,7 @@ It also refuses a `Binary` value, and an ordering comparison with `null` or a bo
 | `unavailable` | The backing store did not answer, or the call exceeded its bound. |
 | `other` | Any other failure. |
 
-The SDK reports each case as an `omnia_sdk::Error` coded with the case's name: a `BadGateway` for `unavailable`, and a `ServerError` for the rest. Its `delete` answers `false` for an absent document.
+The SDK reports each case as an `omnia_sdk::Error` coded with the case's name: a `BadGateway` for `unavailable`, and a `ServerError` for the rest. `Collection::remove` answers `false` for an absent document.
 
 ## Backends implementing this interface
 

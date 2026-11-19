@@ -64,7 +64,7 @@ A guest's root spans join the host's trace: the host span live when the guest st
 
 ### Guest
 
-The guest's telemetry runtime is `omnia_sdk::otel`. `#[instrument]` on an `async fn` opens a span, and the outermost one runs the lifecycle (`scope`): it installs a `tracing` subscriber on first use and exports every buffered span and recorded metric to the host as the function returns. `command!` does the same for a CLI entry. `omnia_sdk::otel::{traces, metrics, types}` hold the raw bindings, for a guest that builds its own telemetry.
+The guest's telemetry runtime is `omnia_sdk::otel`. `#[instrument]` on an `async fn` opens a span, and the outermost one runs the lifecycle (`scope`): it installs a `tracing` subscriber on first use and exports every buffered span and recorded metric to the host as the function returns. `command::export!` does the same for a CLI entry. `omnia_sdk::otel::{traces, metrics, types}` hold the raw bindings, for a guest that builds its own telemetry.
 
 ```rust,ignore
 #[omnia_sdk::otel::instrument(name = "http_guest_handle")]

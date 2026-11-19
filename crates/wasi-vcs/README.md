@@ -74,7 +74,7 @@ omnia::runtime!({
 });
 ```
 
-A guest reaches the interface through `omnia_sdk::Vcs`, naming every location as a deployment-local path (`"."` the project mount, `"./.cache/repo"` beneath it), or through the raw `omnia_sdk::vcs::{store, workspace, workspaces, remotes}` bindings.
+A guest reaches the interface through `omnia_sdk::vcs`, one fn per operation, naming every location as a deployment-local path (`"."` the project mount, `"./.cache/repo"` beneath it), or through the raw `omnia_sdk::vcs::{store, workspace, workspaces, remotes}` bindings.
 
 ## License
 

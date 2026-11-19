@@ -10,8 +10,8 @@
 
 use axum::routing::post;
 use axum::{Json, Router};
-use omnia_sdk::websocket::broadcast;
-use omnia_sdk::websocket::types::{Client, Error, Event, Message};
+use omnia_sdk::websocket::types::Error;
+use omnia_sdk::websocket::{self, Event, Message};
 use serde_json::{Value, json};
 use wasip3::exports::http;
 use wasip3::http::types::{ErrorCode, Request, Response};
@@ -28,8 +28,8 @@ impl http::handler::Guest for HttpGuest {
 
 #[axum::debug_handler]
 async fn send_message(message: String) -> omnia_sdk::Result<Json<Value>> {
-    let client = Client::connect("default".to_string()).await?;
-    broadcast::send(&client, Message::Text(message), Vec::new()).await?;
+    let client = websocket::connect(websocket::DEFAULT).await?;
+    client.broadcast(Message::Text(message), &[]).await?;
 
     Ok(Json(json!({
     "message": "event sent"

@@ -9,34 +9,43 @@ Unreleased
   `mise run bindings` regenerates them. The CI `bindings` job fails when
   they drift from the WIT, and checks with `wasm-tools` that a built guest
   targets the world they were generated from.
-- One `omnia_sdk` module per interface, re-exporting its generated
-  interfaces with helpers beside the generated methods:
-  - `keyvalue`: `Bucket::get_json`, `set_json`, and `compare_and_swap`,
-    and `Lifetime: From<Duration>`.
-  - `docstore`: `Collection::get_as`, `insert`, `upsert`, and `find`, and
-    `Document::decode`.
+- One `omnia_sdk` module per interface, each in the same shape:
+  - one opener, `open` or `connect`, taking a binding name as `&str`;
+  - a `DEFAULT` where the interface has a default binding;
+  - the types a guest holds re-exported at the module root;
+  - helpers as methods that take `&str` and `&[u8]` and return a flat
+    `Result`;
+  - the generated interfaces as public submodules.
+- The helpers, by module:
+  - `keyvalue`: `Bucket::read`, `write`, `remove`, `keys`, `get_json`,
+    `set_json`, and `compare_and_swap`, and `Lifetime: From<Duration>`.
+  - `docstore`: `Collection::get_as`, `insert`, `upsert`, `remove`, and
+    `find`, `Document::decode`, and `SortField::asc` and `desc`.
   - `blobstore`: `Container::read`, `read_range`, and `write`, and
     `Content::read`.
-  - `sql`: `query_as` and `exec` on a `Database` and a `Transaction`,
-    `ResultSet::read`, and `Statement::new`.
-  - `config`: `require` and `parse`.
+  - `sql`: `Database::begin`, `query_as`, `query_opt`, and `exec` on a
+    `Database` and a `Transaction`, `ResultSet::read`, and `Statement::new`.
+  - `config`: `get`, `require`, and `parse`.
   - `identity`: `Identity::token`, which answers an `AccessToken`, and
     `Identity::access_token`.
-  - `messaging`: `Message::new` and `Message::json`, with `with_key`,
-    `with_content_type`, and `with_metadata`.
-  - `model`: `Request::complete` and `Request::complete_with`.
+  - `messaging`: `Client::send`, `request`, and `reply`, and `Message::new`
+    and `Message::json`, with `with_key`, `with_content_type`, and
+    `with_metadata`.
+  - `model`: `Request::complete` and `Request::complete_with`, and
+    `Message::user`, `assistant`, and `system`.
   - `plugins`: `Location::load`.
   - `vcs`: one fn per operation.
-  - `vault` and `websocket`: the generated interfaces alone.
-
-  A module whose bindings a deployment names has a `DEFAULT`, the name a
-  guest opens when it names no other.
+  - `vault`: the opener alone.
+  - `websocket`: `Client::broadcast`, `send`, `close`, and `exists`.
 - `From<types::Error> for omnia_sdk::Error`, so `?` on a binding call keeps
   the error's case as the code: a `BadGateway` for `unavailable`, and a
-  `ServerError` for every other.
-- `omnia_sdk::messaging::export!` and `omnia_sdk::websocket::export!`, which
-  bind a hand-written `incoming-handler` export. `omnia_sdk::exports` holds
-  the `Guest` traits they bind.
+  `ServerError` for every other. An `anyhow` context around the call keeps
+  the code too.
+- `omnia_sdk::exports::messaging` and `omnia_sdk::exports::websocket`. Each
+  holds an `incoming-handler` `Guest` trait beside the `export!` that binds a
+  hand-written implementation of it.
+- `Option<T>` fields in `#[derive(Settings)]`. A field whose key is unset
+  loads as `None`.
 - Handler-test doubles in `omnia_test::host`, each served to the booted
   component:
   - `MatchedHttp` answers outbound requests by method and URL, through the
@@ -53,12 +62,22 @@ Unreleased
 
 ### Changed
 
-- `omnia_sdk::api` takes no provider. `Context`, `Handler<I>`, `Handlers`,
+- `omnia_sdk::api` is gone, and its items moved:
+  - `Context`, `Metadata`, `Handler`, `Handlers`, and `Router` to the crate
+    root;
+  - `api::http` into `omnia_sdk::http`, beside the outbound `fetch` and
+    `send`;
+  - `api::messaging` into `omnia_sdk::messaging`, whose `export!` binds a
+    router fn;
+  - `api::command` to `omnia_sdk::command`.
+- The handler types take no provider. `Context`, `Handler<I>`, `Handlers`,
   and `Router` lose their type parameter, `Context` carries the call's
   `metadata` alone, and `Handlers::into_router()` replaces
   `with_state(provider)`.
 - `http::export!`, `messaging::export!`, and `command::export!` take the
-  router fn alone.
+  router fn alone. On a native target each binds nothing and still uses the
+  fn, so a private router fn raises no `dead_code`.
+- `model::prompt::Sections::channels` returns the SDK's `Message`.
 - `Question::ask` takes no model.
 - `#[derive(Settings)]` reads through `omnia_sdk::config`, so `load()`
   takes no argument.
@@ -68,9 +87,8 @@ Unreleased
     `#[omnia_sdk::otel::instrument]`;
   - `omnia_wasi_http::{serve, handle}` are `omnia_sdk::http::{serve, send}`;
   - `omnia_wasi_model::prompt` is `omnia_sdk::model::prompt`.
-- `omnia_sdk::wasi::messaging::handle` is `omnia_sdk::api::messaging::handle`,
-  and `omnia_sdk::wasi::command::execute` is
-  `omnia_sdk::api::command::execute`.
+- `omnia_sdk::wasi::messaging::handle` is `omnia_sdk::messaging::handle`,
+  and `omnia_sdk::wasi::command::execute` is `omnia_sdk::command::execute`.
 - `omnia-sdk` depends on `wasip3` alone. Its bindings run on the
   `wit-bindgen` runtime `wasip3` re-exports.
 - The `omnia_test::contract` rows run in a guest over the bindings, and take
@@ -84,6 +102,8 @@ Unreleased
   `StateStore`, `Vcs`, and `WebSockets`, with their `*Ext` and `Has*`
   traits and `omnia_sdk::Page`. A guest calls the bindings.
 - `omnia_sdk::WasiProvider` and `omnia_sdk::wasi`.
+- `docstore::Query::offset` and `docstore::ScalarValue::Binary`. The wire
+  carries neither.
 - `#[derive(Provider)]` and `#[omnia_sdk::capability]`.
 - `Context::provider` and the `Context` accessors, such as `state` and
   `sql`.

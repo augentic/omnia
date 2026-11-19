@@ -8,16 +8,16 @@ The [`docstore`](../../examples/docstore/) example is a minimal GTFS-flavoured s
 
 ## Opening a collection
 
-`omnia_sdk::docstore` carries the interface's bindings and the helpers over them. `store::open(name)` opens a `Collection` the deployment declares:
+`omnia_sdk::docstore` carries the interface's bindings and the helpers over them. `docstore::open(name)` opens a `Collection` the deployment declares:
 
 ```rust,noplayground
-use omnia_sdk::docstore::collection::Collection;
-use omnia_sdk::docstore::types::Document;
-use omnia_sdk::docstore::{Exists, Filter, Query, ScalarValue, SortField, store};
+use omnia_sdk::docstore::{
+    self, Collection, Document, Exists, Filter, Query, ScalarValue, SortField,
+};
 use omnia_sdk::{bad_request, not_found};
 
 async fn stops() -> omnia_sdk::Result<Collection> {
-    Ok(store::open("stops".to_owned()).await?)
+    docstore::open("stops").await
 }
 ```
 
@@ -49,9 +49,9 @@ The four operations:
 | `insert(id, &value)` | Create; answers `Ok(Err(Exists))` and leaves the stored document untouched if the id exists |
 | `get_as::<T>(id)` | Fetch by id, decoded → `Option<T>` |
 | `upsert(id, &value)` | Create or replace |
-| `delete(id, None)` | Remove → `bool` (whether anything was deleted) |
+| `remove(id)` | Remove → `bool` (whether anything was removed) |
 
-The generated `get(id)` answers the stored `Option<Document>`, and `Document::decode` decodes its body. A body is a JSON object, and any other body fails with the code `invalid`. `delete` with a revision removes the document only while it holds that revision, and answers a `Conflict` otherwise. Every call fails with the shared `types::Error`, which `?` converts into an `omnia_sdk::Error` under the code the [reference](../reference/docstore.md#errors) lists.
+The generated `get(id)` answers the stored `Option<Document>`, and `Document::decode` decodes its body. A body is a JSON object, and any other body fails with the code `invalid`. The generated `delete(id, revision)` removes the document only while it holds that revision, and answers a `Conflict` otherwise. Every call fails with the shared `types::Error`, which `?` converts into an `omnia_sdk::Error` under the code the [reference](../reference/docstore.md#errors) lists.
 
 ## Filters
 
@@ -163,13 +163,9 @@ The rest is optional: the string predicates, the null predicates, a comparison w
 ```rust,noplayground
 let query = Query {
     filter,
-    order_by: vec![SortField {
-        field: "stop_name".into(),
-        descending: false,
-    }],
+    order_by: vec![SortField::asc("stop_name")],
     limit: p.limit,
     after: p.after,
-    ..Default::default()
 };
 let page = stops().await?.find(&query).await?;
 
@@ -177,7 +173,7 @@ let stops: Vec<Stop> = page.documents.iter().map(Document::decode).collect::<Res
 Ok(Json(json!({ "stops": stops, "next": page.next })))
 ```
 
-The result is a `collection::Page`: the page's `documents`, plus an opaque `next` cursor when more pages exist. Hand the cursor back as the next query's `after` to resume. Treat it as opaque — its format is backend-specific. A page holds at most 1,000 documents. The cursor is the only way to page, and a query that sets `offset` fails with the code `unsupported`.
+The result is a `collection::Page`: the page's `documents`, plus an opaque `next` cursor when more pages exist. Hand the cursor back as the next query's `after` to resume. Treat it as opaque — its format is backend-specific. A page holds at most 1,000 documents, and the cursor is the only way to page.
 
 ## Backends
 

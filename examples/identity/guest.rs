@@ -16,7 +16,7 @@
 use anyhow::Context;
 use axum::routing::get;
 use axum::{Json, Router};
-use omnia_sdk::identity::credentials;
+use omnia_sdk::identity;
 use serde_json::{Value, json};
 use wasip3::exports::http::handler::Guest;
 use wasip3::http::types::{ErrorCode, Request, Response};
@@ -35,10 +35,9 @@ impl Guest for Http {
 
 #[omnia_sdk::otel::instrument]
 async fn handler() -> omnia_sdk::Result<Json<Value>> {
-    let identity = credentials::open("default".to_string()).await.context("opening identity")?;
+    let credentials = identity::open(identity::DEFAULT).await.context("opening identity")?;
 
-    let scopes = vec![SCOPE.to_string()];
-    let access_token = identity.get_token(scopes).await.context("getting access token")?;
+    let access_token = credentials.token(&[SCOPE]).await.context("getting access token")?;
 
     // Never print the token itself; report only enough to confirm success.
     println!("access token acquired ({} chars)", access_token.token.len());

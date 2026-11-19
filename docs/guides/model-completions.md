@@ -11,7 +11,7 @@ This page covers the guest API, the grants model, the available backends, and ho
 A model guest is typically a command-mode guest (see [Writing Guests](writing-guests.md#command-mode-guests)). It builds a `Request` and calls `Request::complete`:
 
 ```rust,noplayground
-use omnia_sdk::model::{Format, Message, Request, Role, SchemaFormat};
+use omnia_sdk::model::{Format, Message, Request, SchemaFormat};
 
 let (system, user) = Sections {
     role: Some("a terse code reviewer".to_string()),
@@ -23,7 +23,7 @@ let (system, user) = Sections {
 
 let request = Request::builder()
     .maybe_system(system)
-    .messages(vec![Message { role: Role::User, content: user }])
+    .messages(vec![Message::user(user)])
     .format(Format::Schema(
         SchemaFormat::builder().name("verdict").schema("{\"type\":\"object\"}").build(),
     ))

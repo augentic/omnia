@@ -11,8 +11,7 @@ use axum::extract::{Path, Query};
 use axum::routing::get;
 use axum::{Json, Router};
 use omnia_sdk::bad_request;
-use omnia_sdk::docstore::collection::Collection;
-use omnia_sdk::docstore::{self, Filter, SortField, store};
+use omnia_sdk::docstore::{self, Collection, Filter, SortField};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use wasip3::exports::http::handler::Guest;
@@ -67,14 +66,13 @@ async fn create_stop(Json(req): Json<CreateStopRequest>) -> omnia_sdk::Result<Js
 #[axum::debug_handler]
 #[omnia_sdk::otel::instrument]
 async fn get_stop(Path(id): Path<String>) -> omnia_sdk::Result<Json<Value>> {
-    let doc = stops()
+    let stop: Stop = stops()
         .await?
-        .get(id)
+        .get_as(&id)
         .await
         .context("fetching stop")?
         .ok_or_else(|| anyhow!("stop not found"))?;
-    let stop: Stop = doc.decode().context("deserializing stop")?;
-    Ok(Json(json!({ "id": doc.id, "stop": stop })))
+    Ok(Json(json!({ "id": id, "stop": stop })))
 }
 
 #[axum::debug_handler]
@@ -89,7 +87,7 @@ async fn upsert_stop(
 #[axum::debug_handler]
 #[omnia_sdk::otel::instrument]
 async fn delete_stop(Path(id): Path<String>) -> omnia_sdk::Result<Json<Value>> {
-    let removed = stops().await?.delete(id.clone(), None).await.context("deleting stop")??;
+    let removed = stops().await?.remove(&id).await.context("deleting stop")?;
     if !removed {
         return Err(anyhow!("stop not found").into());
     }
@@ -118,13 +116,9 @@ async fn list_stops(Query(p): Query<StopQuery>) -> omnia_sdk::Result<Json<Value>
 
     let query = docstore::Query {
         filter,
-        order_by: vec![SortField {
-            field: "stop_name".into(),
-            descending: false,
-        }],
+        order_by: vec![SortField::asc("stop_name")],
         limit: p.limit,
         after: p.continuation,
-        ..Default::default()
     };
     let page = stops().await?.find(&query).await.context("querying stops")?;
 
@@ -143,5 +137,5 @@ async fn list_stops(Query(p): Query<StopQuery>) -> omnia_sdk::Result<Json<Value>
 }
 
 async fn stops() -> Result<Collection> {
-    store::open("stops".to_owned()).await.context("opening stops")
+    docstore::open("stops").await.context("opening stops")
 }

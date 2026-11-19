@@ -36,20 +36,6 @@ pub use self::server::serve;
 pub use self::server::trace;
 use crate::{Error, Result};
 
-/// Bind a router fn as the guest's `wasi:http` export.
-///
-/// Calls the router fn on each request and serves the request through the
-/// router it returns, a [`Router`](crate::Router) or an `axum::Router`,
-/// inside the `handler` span [`trace`] opens. On a native target it binds
-/// nothing, and a private router fn still counts as used.
-///
-/// ```rust,ignore
-/// omnia_sdk::http::export!(router);
-/// ```
-#[cfg(feature = "http")]
-#[doc(inline)]
-pub use crate::__export_http as export;
-
 /// Send `request` through the host's outbound client and return the response.
 ///
 /// Any status is a response, not an error.
@@ -117,3 +103,17 @@ where
     tracing::trace!("proxy response: {response:?}");
     Ok(response)
 }
+
+/// Bind a router fn as the guest's `wasi:http` export.
+///
+/// Calls the router fn on each request and serves the request through the
+/// router it returns, a [`Router`](crate::Router) or an `axum::Router`,
+/// inside the `handler` span [`trace`] opens. On a native target it binds
+/// nothing, and a private router fn still counts as used.
+///
+/// ```rust,ignore
+/// omnia_sdk::http::export!(router);
+/// ```
+#[cfg(feature = "http")]
+#[doc(inline)]
+pub use crate::__export_http as export;
