@@ -4,17 +4,49 @@ This crate provides the SQL database interface for the Omnia runtime.
 
 ## Interface
 
-Implements `omnia:sql`, the interface the SDK's `SqlDb` calls, and the `wasi:sql` draft for raw-binding guests. Both are served from one `Connection` per backend.
+Implements `omnia:sql`, the interface the SDK's `SqlDb` calls, over one
+`Connection` per backend.
 
-A guest reaches `omnia:sql` through `omnia_sdk::SqlDb`, one host call per method. The provider's own handle runs statements on the database `default`, and `named(name)` on another database the host declares.
-
-- A name the deployment does not declare fails with `not-found`.
-- `batch` runs its statements in one transaction, and a failing statement rolls back the whole batch.
-- The [SQL reference](https://github.com/augentic/omnia/blob/main/docs/reference/sql.md) lists the portable dialect, and how each value binds and reads back on each backend.
+- A guest opens a database by name through `store`, and runs statements on
+  the `database` handle `open` returns. A name the deployment does not
+  declare fails with `not-found`.
+- `transactions` is optional. A backend that serves none fails `begin` with
+  `unsupported`.
+- A statement is one SQL statement, and numbers its parameters `$1`, `$2`,
+  and so on. `none` binds `NULL`.
+- Each `database` call commits before it returns, and `batch` runs its
+  statements in one transaction. The host refuses, with `invalid`, a
+  statement whose first keyword starts or ends a transaction or a
+  savepoint:
+  - `BEGIN`, `START`, `COMMIT`, and `END`;
+  - `ROLLBACK` and `ABORT`;
+  - `SAVEPOINT` and `RELEASE`;
+  - `PREPARE TRANSACTION`.
+- `SET TRANSACTION` passes, so a transaction's first statement may set its
+  isolation level.
+- A transaction runs its calls one at a time, in the order made. `commit`
+  and `rollback` end it. A failed call rolls it back and ends it, and so
+  does dropping it.
+- A transaction holds one of the backend's connections until it ends. A
+  `database` handle holds the connection `open` returned until its first
+  call, and every later call opens one for that call alone.
+- A temporal value must be in its case's format, or the call fails with
+  `invalid`, naming the parameter:
+  - a `date` is `YYYY-MM-DD`;
+  - a `time` is `HH:MM:SS`, with optional fractional seconds;
+  - a `timestamp` is `YYYY-MM-DD HH:MM:SS`, with optional fractional
+    seconds;
+  - a `timestamp-tz` is RFC 3339.
+- The [SQL reference](https://github.com/augentic/omnia/blob/main/docs/reference/sql.md)
+  lists the portable dialect, and how each value binds and reads back on
+  each backend.
 
 ## Backend
 
-- **Host**: Uses `rusqlite` to provide a `SQLite` backend. Supports both in-memory (`:memory:`) and file-based databases.
+- **Default**: `SqlDefault`, over `rusqlite`'s bundled `SQLite`, in memory
+  (`:memory:`) or on file. Every handle on a database shares one
+  connection. While a transaction is open, a call on any other handle waits
+  for it to end, and fails with `unavailable` after five seconds.
 
 ## Configuration
 

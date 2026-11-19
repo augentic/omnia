@@ -466,8 +466,7 @@ fn ensure_wasi_03(id: &GuestId, component: &Component, engine: &Engine) -> Resul
     Ok(())
 }
 
-// the packages wasmtime-wasi served at 0.2; the 0.2 drafts omnia's own hosts
-// serve, such as `wasi:keyvalue`, stay importable
+// the packages wasmtime-wasi served at 0.2
 const WASI_02_PACKAGES: [&str; 7] = [
     "wasi:cli/",
     "wasi:clocks/",
@@ -506,7 +505,7 @@ mod tests {
     #[test]
     fn wasip2_guest() {
         let imports =
-            ["omnia:otel/tracing@0.2.0", "wasi:cli/environment@0.2.6", "wasi:io/streams@0.2.6"];
+            ["omnia:otel/traces@0.2.0", "wasi:cli/environment@0.2.6", "wasi:io/streams@0.2.6"];
         assert_eq!(wasi_02_import(imports), Some("wasi:cli/environment@0.2.6"));
     }
 
@@ -515,11 +514,11 @@ mod tests {
         let imports = [
             "wasi:cli/environment@0.3.2",
             "wasi:clocks/system-clock@0.3.2",
-            "wasi:config/store@0.2.0-rc.1",
-            "wasi:keyvalue/store@0.2.0-draft2",
-            "wasi:messaging/producer@0.2.0-draft",
-            "wasi:sql/readwrite@0.2.0-draft",
-            "omnia:otel/tracing@0.2.0",
+            "omnia:config/store@0.1.0",
+            "omnia:keyvalue/store@0.1.0",
+            "omnia:messaging/producer@0.1.0",
+            "omnia:sql/database@0.1.0",
+            "omnia:otel/traces@0.2.0",
         ];
         assert_eq!(wasi_02_import(imports), None);
     }

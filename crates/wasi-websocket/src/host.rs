@@ -1,8 +1,10 @@
 //! # WASI WebSocket Service
 //!
-//! This module implements a runtime server for websocket
+//! Serves `omnia:websocket` to guests over a [`WebSocketClient`], and runs its
+//! event trigger.
 
-mod client_impl;
+mod broadcast_impl;
+mod connections_impl;
 mod default_impl;
 mod resource;
 mod server;
@@ -11,11 +13,11 @@ mod types_impl;
 mod generated {
     #![allow(missing_docs, reason = "wasmtime bindgen output")]
 
-    pub use self::omnia::websocket::types::Error;
-    pub use crate::host::resource::{ClientProxy, Event};
+    pub use self::omnia::types::types::Error;
+    pub use crate::host::resource::ClientProxy;
 
     wasmtime::component::bindgen!({
-        world: "duplex",
+        world: "websocket",
         path: "wit",
         imports: {
             default: store | tracing | trappable,
@@ -25,10 +27,9 @@ mod generated {
         },
         with: {
             "omnia:websocket/types.client": ClientProxy,
-            "omnia:websocket/types.event": Event,
         },
         trappable_error_type: {
-            "omnia:websocket/types.error" => Error,
+            "omnia:types/types.error" => Error,
         },
     });
 }
@@ -38,27 +39,29 @@ use std::sync::Arc;
 
 pub use omnia_core::FutureResult;
 use omnia_core::{Host, HostCtx, Provides, Runtime, StoreCtx};
-use wasmtime::component::Linker;
+use wasmtime::component::{Linker, ResourceTableError};
 
 pub use self::default_impl::{ConnectOptions, WebSocketDefault};
-pub use self::generated::Duplex;
-pub use self::generated::omnia::websocket::types::Error;
-use self::generated::omnia::websocket::{client, types as generated_types};
+use self::generated::omnia::types::types as omnia_types;
+use self::generated::omnia::websocket::{broadcast, connections, types};
+pub use self::generated::{Error, Websocket};
 pub use self::resource::*;
 pub use self::server::WebSocketHandler;
 
 /// Result type for WebSocket operations.
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// Host-side service for `wasi:websocket`.
+/// Host-side service for `omnia:websocket`.
 #[derive(Clone, Debug, HostCtx)]
 #[host_ctx(client = WebSocketClient)]
 pub struct WasiWebSocket;
 
 impl<B: Provides<Self>> Host<B> for WasiWebSocket {
     fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
-        client::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
-        Ok(generated_types::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?)
+        omnia_types::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
+        types::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
+        connections::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
+        Ok(broadcast::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?)
     }
 
     async fn run(runtime: &Runtime<B>) -> anyhow::Result<()> {
@@ -82,4 +85,22 @@ pub trait WebSocketClient: Debug + Send + Sync + 'static {
     fn endpoint(&self) -> FutureResult<Arc<dyn Endpoint>>;
 }
 
-omnia_core::host_error!(Error, Other);
+// a backend picks the kind by returning an `Error`; any other failure is
+// `other`, with its full context chain
+impl From<anyhow::Error> for Error {
+    fn from(err: anyhow::Error) -> Self {
+        err.downcast::<Self>().unwrap_or_else(|err| Self::Other(format!("{err:#}")))
+    }
+}
+
+impl From<wasmtime::Error> for Error {
+    fn from(err: wasmtime::Error) -> Self {
+        Self::Other(format!("{err:#}"))
+    }
+}
+
+impl From<ResourceTableError> for Error {
+    fn from(err: ResourceTableError) -> Self {
+        Self::Other(err.to_string())
+    }
+}

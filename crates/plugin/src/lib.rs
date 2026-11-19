@@ -1,6 +1,6 @@
 //! # The guest loader
 //!
-//! The `omnia:plugins/loader` capability crate. A caller names where a
+//! The `omnia:plugins` capability crate. A caller names where a
 //! guest's bytes come from — a [`Location`]: a guest the deployment declares,
 //! a component beneath one of its read-only mounts, or a package its store
 //! holds or one of its registries serves — and the host acquires the bytes inside the
@@ -53,7 +53,7 @@ cfg_select! {
 
         pub use self::error::LoadError;
         pub use self::host::{WasiPlugins, WasiPluginsView};
-        pub use self::loader::{Plugin, PluginLoader, Plugins};
+        pub use self::loader::{LoadConflict, Plugin, PluginLoader, Plugins};
         pub use self::registry::RegistryClient;
         pub use self::source::{Location, RegistrySource};
         pub use self::store::{FsStore, NoStore, PackageStore, Reference};

@@ -1,9 +1,9 @@
 //! # SQL Wasm Guest (Default Backend)
 //!
-//! Demonstrates the WASI SQL interface: opening connections, preparing
-//! parameterized statements (`$1`, `$2`, ...) for schema creation, and
-//! running hand-written CRUD SQL through the `SqlDb` capability with
-//! rows decoded into a record type through `FromRow`.
+//! Demonstrates `omnia:sql`: creating the schema over the raw bindings, then
+//! running hand-written CRUD SQL with `$1`, `$2`, ... placeholders through
+//! the `SqlDb` capability, with rows decoded into a record type through
+//! `FromRow`.
 
 #![cfg(target_arch = "wasm32")]
 
@@ -14,8 +14,7 @@ use axum::{Json, Router};
 use chrono::Utc;
 use omnia_sdk::sql::{self, FromRow, Value};
 use omnia_sdk::{SqlDb, SqlDbExt as _, WasiProvider};
-use omnia_wasi_sql::readwrite;
-use omnia_wasi_sql::types::{Connection, Statement};
+use omnia_wasi_sql::omnia::store;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::Level;
@@ -104,9 +103,7 @@ async fn delete_agency(Path(id): Path<i64>) -> omnia_sdk::Result<Json<serde_json
 
 // runs per request, since each is handled by a fresh instance; fine for an example
 async fn ensure_schema() -> Result<()> {
-    let pool = Connection::open(sql::DEFAULT.to_owned())
-        .await
-        .map_err(|e| anyhow!("opening connection: {}", e.trace()))?;
+    let database = store::open(sql::DEFAULT.to_owned()).await.context("opening the database")?;
 
     let create_agency = "CREATE TABLE IF NOT EXISTS agency (
         agency_id BIGINT PRIMARY KEY,
@@ -116,13 +113,7 @@ async fn ensure_schema() -> Result<()> {
         created_at TEXT NOT NULL
     )";
 
-    let stmt = Statement::prepare(create_agency.to_string(), vec![])
-        .await
-        .map_err(|e| anyhow!("preparing agency table creation: {}", e.trace()))?;
-
-    readwrite::exec(&pool, &stmt)
-        .await
-        .map_err(|e| anyhow!("creating agency table: {}", e.trace()))?;
+    database.execute(create_agency.to_owned(), vec![]).await.context("creating agency table")?;
 
     Ok(())
 }

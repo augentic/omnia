@@ -15,8 +15,7 @@ use std::cmp::Ordering;
 
 use serde_json::Value;
 
-use crate::host::generated::omnia::docstore::types::{ComparisonOp, ScalarValue, SortField};
-use crate::host::resource::FilterTree;
+use crate::host::resource::{ComparisonOp, FilterTree, ScalarValue, SortField};
 
 /// Evaluate `tree` against a JSON document body.
 #[must_use]
@@ -62,15 +61,17 @@ pub fn matches(tree: &FilterTree, doc: &Value) -> bool {
     }
 }
 
-/// Compare two documents under `order_by`, field by field.
-///
-/// Values of different JSON types order by a fixed type rank
-/// (null < bool < number < string < array < object) so the sort is total and
-/// deterministic; callers break remaining ties on the document id.
-#[must_use]
-pub fn compare_documents(a: &Value, b: &Value, order_by: &[SortField]) -> Ordering {
-    for sort in order_by {
-        let ord = json_cmp(lookup(a, &sort.field), lookup(b, &sort.field));
+// the values `doc` orders by, one per field of `order_by`
+pub fn sort_key(doc: &Value, order_by: &[SortField]) -> Vec<Value> {
+    order_by.iter().map(|sort| lookup(doc, &sort.field).clone()).collect()
+}
+
+// Values of different JSON types order by a fixed type rank
+// (null < bool < number < string < array < object), so the sort is total and
+// deterministic. Callers break remaining ties on the document id.
+pub fn compare_keys(a: &[Value], b: &[Value], order_by: &[SortField]) -> Ordering {
+    for ((a, b), sort) in a.iter().zip(b).zip(order_by) {
+        let ord = json_cmp(a, b);
         let ord = if sort.descending { ord.reverse() } else { ord };
         if ord != Ordering::Equal {
             return ord;

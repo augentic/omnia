@@ -21,6 +21,7 @@ http.workspace = true
 omnia-sdk = { workspace = true, features = ["command", "http"] }
 omnia-wasi-blobstore.workspace = true
 omnia-wasi-config.workspace = true
+omnia-wasi-docstore.workspace = true
 omnia-wasi-http.workspace = true
 omnia-wasi-identity.workspace = true
 omnia-wasi-keyvalue.workspace = true
@@ -56,6 +57,11 @@ path = "programs/blobstore/blob_store.rs"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "blobstore_container"
+path = "programs/blobstore/container.rs"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "cli_rust_log"
 path = "programs/cli/rust_log.rs"
 crate-type = ["cdylib"]
@@ -66,8 +72,18 @@ path = "programs/command/exit_map.rs"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "config_error_codes"
+path = "programs/config/error_codes.rs"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "config_seeded"
 path = "programs/config/seeded.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "docstore_collection"
+path = "programs/docstore/collection.rs"
 crate-type = ["cdylib"]
 
 [[example]]
@@ -111,13 +127,18 @@ path = "programs/http/outgoing_tls.rs"
 crate-type = ["cdylib"]
 
 [[example]]
-name = "identity_named"
-path = "programs/identity/named.rs"
+name = "identity_credentials"
+path = "programs/identity/credentials.rs"
 crate-type = ["cdylib"]
 
 [[example]]
-name = "identity_stub_token"
-path = "programs/identity/stub_token.rs"
+name = "identity_error_codes"
+path = "programs/identity/error_codes.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "identity_named"
+path = "programs/identity/named.rs"
 crate-type = ["cdylib"]
 
 [[example]]
@@ -171,6 +192,11 @@ path = "programs/link/sleeper.rs"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "messaging_error_codes"
+path = "programs/messaging/error_codes.rs"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "messaging_handle_err"
 path = "programs/messaging/handle_err.rs"
 crate-type = ["cdylib"]
@@ -186,6 +212,11 @@ path = "programs/messaging/keyed.rs"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "messaging_outcomes"
+path = "programs/messaging/outcomes.rs"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "messaging_produce_handle"
 path = "programs/messaging/produce_handle.rs"
 crate-type = ["cdylib"]
@@ -193,6 +224,11 @@ crate-type = ["cdylib"]
 [[example]]
 name = "messaging_request_reply"
 path = "programs/messaging/request_reply.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "model_calls_dropped"
+path = "programs/model/calls_dropped.rs"
 crate-type = ["cdylib"]
 
 [[example]]
@@ -231,18 +267,28 @@ path = "programs/model/echo_json.rs"
 crate-type = ["cdylib"]
 
 [[example]]
-name = "model_echo_schema_rejected"
-path = "programs/model/echo_schema_rejected.rs"
-crate-type = ["cdylib"]
-
-[[example]]
 name = "model_echo_text"
 path = "programs/model/echo_text.rs"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "model_echo_unsupported"
+path = "programs/model/echo_unsupported.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "model_error_codes"
+path = "programs/model/error_codes.rs"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "model_invalid_request"
 path = "programs/model/invalid_request.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "model_named"
+path = "programs/model/named.rs"
 crate-type = ["cdylib"]
 
 [[example]]
@@ -351,6 +397,11 @@ path = "programs/otel/axum_handler.rs"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "otel_error_codes"
+path = "programs/otel/error_codes.rs"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "otel_instrumented_handler"
 path = "programs/otel/instrumented_handler.rs"
 crate-type = ["cdylib"]
@@ -366,6 +417,11 @@ path = "programs/otel/metrics_instruments.rs"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "otel_raw_export"
+path = "programs/otel/raw_export.rs"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "otel_span_tree"
 path = "programs/otel/span_tree.rs"
 crate-type = ["cdylib"]
@@ -378,6 +434,11 @@ crate-type = ["cdylib"]
 [[example]]
 name = "plugins_attest"
 path = "programs/plugins/attest.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "plugins_error_codes"
+path = "programs/plugins/error_codes.rs"
 crate-type = ["cdylib"]
 
 [[example]]
@@ -411,8 +472,18 @@ path = "programs/plugins/unlinked.rs"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "sql_backend_defaults"
+path = "programs/sql/backend_defaults.rs"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "sql_bindings"
 path = "programs/sql/bindings.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "sql_database"
+path = "programs/sql/database.rs"
 crate-type = ["cdylib"]
 
 [[example]]
@@ -421,13 +492,18 @@ path = "programs/sql/error_codes.rs"
 crate-type = ["cdylib"]
 
 [[example]]
-name = "sql_query_exec"
-path = "programs/sql/query_exec.rs"
+name = "sql_sql_db"
+path = "programs/sql/sql_db.rs"
 crate-type = ["cdylib"]
 
 [[example]]
-name = "sql_sql_db"
-path = "programs/sql/sql_db.rs"
+name = "sql_transactions"
+path = "programs/sql/transactions.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "vault_error_codes"
+path = "programs/vault/error_codes.rs"
 crate-type = ["cdylib"]
 
 [[example]]
@@ -441,6 +517,11 @@ path = "programs/vault/lockers.rs"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "vcs_error_codes"
+path = "programs/vcs/error_codes.rs"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "vcs_flow"
 path = "programs/vcs/flow.rs"
 crate-type = ["cdylib"]
@@ -448,6 +529,21 @@ crate-type = ["cdylib"]
 [[example]]
 name = "vcs_locations"
 path = "programs/vcs/locations.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "vcs_workspace"
+path = "programs/vcs/workspace.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "websocket_close"
+path = "programs/websocket/close.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "websocket_error_codes"
+path = "programs/websocket/error_codes.rs"
 crate-type = ["cdylib"]
 
 [[example]]

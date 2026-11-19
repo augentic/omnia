@@ -1,42 +1,96 @@
 package omnia:vault@0.1.0;
 
-interface vault {
-  /// An error type that encapsulates the different errors that can occur fetching secrets
-  variant error {
-    /// The host does not recognize the store identifier requested.
-    no-such-store,
-    /// The requesting component does not have access to the specified store
-    /// (which may or may not exist).
-    access-denied,
-    /// Some implementation-specific error has occurred (e.g. I/O)
-    other(string),
-  }
-
-  /// A locker contains collection of related secrets.
-  resource locker {
-    /// Get the specified secret.
-    ///
-    /// Returns `none` if the specified secret does not exist.
-    get: async func(secret-id: string) -> result<option<list<u8>>, error>;
-    /// Store a secret in the vault. If the `id` already exists, the
-    /// secret will be overwritten.
-    set: async func(secret-id: string, value: list<u8>) -> result<_, error>;
-    /// Delete the specified secret.
-    ///
-    /// Will do nothing if the secret does not exist.
-    delete: async func(secret-id: string) -> result<_, error>;
-    /// Check if the specified secret exists.
-    exists: async func(secret-id: string) -> result<bool, error>;
-    /// List all `secret-id`s in the locker.
-    list-ids: async func() -> result<list<string>, error>;
-  }
-
-  /// Open the specified locker.
-  ///
-  /// `error::no-such-store` will be raised if the `identifier` is not recognized.
-  open: async func(locker-id: string) -> result<locker, error>;
+/// The types the vault interfaces share.
+///
+/// Every backend stores a portable name and a portable value, and may
+/// reject any other as `invalid`.
+///
+/// - A portable locker name is not empty and holds only ASCII letters,
+///   digits, `_`, and `-`.
+/// - A portable secret name is 1 to 63 characters long and holds only
+///   lowercase ASCII letters, digits, and `-`.
+/// - A portable value is not empty and at most 16 KiB.
+///
+/// An `error` from a vault interface means:
+///
+/// - `not-found`: the locker is not declared by the deployment. An absent
+///   secret is not an error.
+/// - `invalid`: the request was rejected, such as a zero `limit` or a name
+///   or value the backend cannot store.
+/// - `unavailable`: the secret store did not answer, or the call exceeded
+///   its bound.
+interface types {
+  use omnia:types/types@0.1.0.{error};
 }
 
+/// Secrets in one locker. Every backend serves this interface.
+///
+/// An absent secret is `none`. A write is atomic, so a reader sees the
+/// value as it was or as it became. A read, a listing included, may trail
+/// a write on a replicated store.
+interface locker {
+  use types.{error};
+
+  /// One page of secret names.
+  record names {
+    /// The secrets on this page, in no particular order.
+    secrets: list<string>,
+    /// The cursor that resumes the listing. Only `none` marks the last page.
+    next: option<string>,
+  }
+
+  /// An open locker.
+  resource locker {
+    /// The value of the secret `name`, `none` when absent.
+    get: async func(name: string) -> result<option<list<u8>>, error>;
+
+    /// Whether the secret `name` exists.
+    exists: async func(name: string) -> result<bool, error>;
+
+    /// Store `value` as the secret `name`, replacing any value there.
+    ///
+    /// A store may keep the value it replaces as a past version. No call
+    /// here reads one.
+    set: async func(name: string, value: list<u8>) -> result<_, error>;
+
+    /// Delete the secret `name`. Deleting an absent secret succeeds.
+    ///
+    /// The name may be set again at once. A store may keep a deleted value
+    /// for recovery, so a delete is not an erasure.
+    delete: async func(name: string) -> result<_, error>;
+
+    /// One page of the secret names that start with `prefix`.
+    ///
+    /// A page holds at most `limit` names and never more than 1,000. A zero
+    /// `limit` is `invalid`. `after` is the `next` of the previous page of
+    /// the same listing. A secret stored for the whole listing is returned
+    /// at least once. One set or deleted during it may or may not be.
+    list-secrets: async func(prefix: string, after: option<string>, limit: option<u32>)
+      -> result<names, error>;
+  }
+}
+
+/// The lockers a guest may open. Every backend serves this interface.
+interface store {
+  use types.{error};
+  use locker.{locker};
+
+  /// Open the locker `name`, a binding the deployment declares. An unnamed
+  /// SDK handle opens `default`.
+  ///
+  /// An undeclared name fails with `not-found`.
+  open: async func(name: string) -> result<locker, error>;
+}
+
+/// What every backend serves.
+world core {
+  import types;
+  import store;
+  import locker;
+}
+
+/// Every interface. A backend answers `unsupported` for what it does not
+/// serve.
 world imports {
-  import vault;
+  include core;
 }

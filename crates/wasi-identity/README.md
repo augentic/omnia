@@ -4,14 +4,31 @@ This crate provides the Identity interface for the Omnia runtime.
 
 ## Interface
 
-Implements the `omnia:identity` WIT interface.
+Implements `omnia:identity`, the interface the SDK's `Identity` calls, over
+one `IdentityClient` per backend.
 
-A guest reaches it through `omnia_sdk::Identity`. The provider's own handle asks for the identity `default`, and `named(name)` asks for another identity the host serves. A name the host does not serve fails with `no-such-identity`, which `Identity` reports with the code `not-found`. A backend refuses one by returning `omnia_wasi_identity::Error::NoSuchIdentity`, and any other backend error is `internal-failure`.
+- A guest opens an identity by name and asks for tokens through the handle
+  `open` returns. A name the deployment does not declare fails with
+  `not-found`. The SDK's unnamed handle opens `default`.
+- Every backend accepts a portable name and scope, and may reject any other
+  with `invalid`:
+  - a name is not empty and holds only ASCII letters, digits, `_`, and `-`;
+  - a scope is an `OAuth` 2.0 scope token, one or more printable ASCII
+    characters other than space, `"`, and `\`.
+- An empty `scopes` asks for the identity's default scopes. A portable
+  request names one scope, and a backend may fail any other number with
+  `unsupported`.
+- A token is an `OAuth` 2.0 bearer token. Its `expires-at` is in
+  milliseconds since the Unix epoch, and `Identity` reports it as the time
+  the token has left.
+- A backend picks a failure's case by returning an
+  `omnia_wasi_identity::Error`, and any other failure is `other`.
+- The host itself answers `unsupported` for nothing.
 
 ## Backend
 
-- **Default**: Uses `oauth2` crate to interact with OAuth2/OIDC providers. Its one set of client credentials is the identity `default`, and it refuses every other name.
-- **Stub**: `IdentityStub` issues a fixed token per identity with no identity provider, for tests and local development. It serves the identities `IDENTITY_NAMES` lists, comma-separated, and `default` alone when it is unset. Each identity's token is distinct, and every other name is refused.
+- **Default**: Uses `oauth2` crate to interact with OAuth2/OIDC providers. Its one set of client credentials is the identity `default`, and it refuses every other name with `not-found`. It caches a token per set of scopes and reports the time a cached token has left. An issuer that states no expiry is taken to issue tokens that last an hour, and any failure to get a token from the issuer is `other`.
+- **Stub**: `IdentityStub` issues a fixed token per identity with no identity provider, for tests and local development. It serves the identities `IDENTITY_NAMES` lists, comma-separated, and `default` alone when it is unset. Each identity's token is distinct and lasts an hour, and every other name is refused with `not-found`.
 
 ## Cargo features
 

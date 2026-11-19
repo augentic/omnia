@@ -30,7 +30,7 @@ Each example directory has a `README.md` with test commands and example-specific
 | Example | Demonstrates |
 | ------- | ------------ |
 | [`http`](http) | Basic HTTP server: WASI HTTP handler + Axum routing |
-| [`keyvalue`](keyvalue) | Storing and retrieving state through `wasi:keyvalue` |
+| [`keyvalue`](keyvalue) | Storing and retrieving state through `omnia:keyvalue` |
 | [`cli`](cli) | A `wasi:cli/run` command-mode guest driven as a one-shot trigger |
 
 ### One per capability
@@ -38,15 +38,15 @@ Each example directory has a `README.md` with test commands and example-specific
 | Example | Demonstrates |
 | ------- | ------------ |
 | [`blobstore`](blobstore) | Object storage containers and blobs (`omnia:blobstore`) |
-| [`config`](config) | Reading runtime configuration (`wasi:config`) |
+| [`config`](config) | Reading runtime configuration (`omnia:config`) |
 | [`docstore`](docstore) | JSON documents with filters, sorting, and pagination (`omnia:docstore`) |
-| [`identity`](identity) | OAuth token acquisition (`wasi:identity`) |
-| [`messaging`](messaging) | Pub-sub, request-reply, and fan-out (`wasi:messaging`) |
+| [`identity`](identity) | OAuth token acquisition (`omnia:identity`) |
+| [`messaging`](messaging) | Pub-sub, request-reply, and fan-out (`omnia:messaging`) |
 | [`model`](model) | Model completion across the `omnia:model` boundary with the scripted test double |
-| [`otel`](otel) | Guest OpenTelemetry instrumentation (`wasi:otel`) |
-| [`sql`](sql) | CRUD over `omnia:sql` through the `SqlDb` capability, with schema setup over the `wasi:sql` draft |
-| [`vault`](vault) | Secret storage (`wasi:vault`) |
-| [`websocket`](websocket) | Real-time bidirectional messaging (`wasi:websocket`) |
+| [`otel`](otel) | Guest OpenTelemetry instrumentation (`omnia:otel`) |
+| [`sql`](sql) | CRUD over `omnia:sql` through the `SqlDb` capability, with schema setup over the raw bindings |
+| [`vault`](vault) | Secret storage (`omnia:vault`) |
+| [`websocket`](websocket) | Real-time bidirectional messaging (`omnia:websocket`) |
 
 ### Composition and deployment patterns
 

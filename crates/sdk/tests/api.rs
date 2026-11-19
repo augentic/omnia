@@ -403,7 +403,10 @@ async fn capability_errors() {
             "plugin-internal" => Err(plugins::Error::Internal("x".into()))?,
             "model-invalid" => Err(model::Error::InvalidRequest("no messages".into()))?,
             "model-budget" => Err(model::Error::BudgetExhausted("3 rounds".into()))?,
-            "model-tool" => Err(model::Error::ToolFailed("lint".into()))?,
+            "model-missing" => Err(model::Error::NotFound("slow".into()))?,
+            "model-denied" => Err(model::Error::Denied("no key".into()))?,
+            "model-unsupported" => Err(model::Error::Unsupported("no effort".into()))?,
+            "model-unavailable" => Err(model::Error::Unavailable("rate limited".into()))?,
             "model-backend" => Err(model::Error::Backend("bridge gone".into()))?,
             "vcs-access-context" => {
                 Err(anyhow::Error::from(vcs::Error::Access("denied".into())).context("push"))?
@@ -427,7 +430,10 @@ async fn capability_errors() {
         ("/err/plugin-internal", StatusCode::INTERNAL_SERVER_ERROR, "internal"),
         ("/err/model-invalid", StatusCode::BAD_REQUEST, "invalid-request"),
         ("/err/model-budget", StatusCode::BAD_REQUEST, "budget-exhausted"),
-        ("/err/model-tool", StatusCode::BAD_GATEWAY, "tool-failed"),
+        ("/err/model-missing", StatusCode::INTERNAL_SERVER_ERROR, "not-found"),
+        ("/err/model-denied", StatusCode::INTERNAL_SERVER_ERROR, "denied"),
+        ("/err/model-unsupported", StatusCode::INTERNAL_SERVER_ERROR, "unsupported"),
+        ("/err/model-unavailable", StatusCode::BAD_GATEWAY, "unavailable"),
         ("/err/model-backend", StatusCode::BAD_GATEWAY, "backend"),
         ("/err/vcs-access-context", StatusCode::BAD_GATEWAY, "access"),
     ] {

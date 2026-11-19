@@ -46,15 +46,15 @@ The embedder-path variant — `no deployment manifest supplied and OMNIA_MANIFES
 
 ### `no guest ... is declared by this deployment`
 
-A guest called `omnia:plugins/loader.load` with a `declared` name the manifest does not declare. A `declared` load names only `[[guest]]` entries (the macro's `guests:`); add one for the name — a manifest file's entry loads at that first `load` — or, for a component the deployment does not declare, have the guest name its `path` beneath a read-only mount or its `registry` package instead. A runtime built without omnia's `loader` feature has no loader at all: a guest importing it fails at instantiation, and a manifest declaring `plugins` or a `source.package` guest is refused at startup until the feature is enabled.
+A guest called `omnia:plugins/loader.load` with a `declared` name the manifest does not declare. A `declared` load names only `[[guest]]` entries (the macro's `guests:`); add one for the name — a manifest file's entry loads at that first `load` — or, for a component the deployment does not declare, have the guest name its `path` beneath a read-only mount or its `release` instead. A runtime built without omnia's `loader` feature has no loader at all: a guest importing it fails at instantiation, and a manifest declaring `plugins` or a `source.package` guest is refused at startup until the feature is enabled.
 
 ### `no registry routes ...`
 
-A `source.package` guest (the macro's `package:`) was first used, or a guest named a `registry` package of its own; the deployment's store holds no release under that reference, and the `registries` configuration (`plugins: { registries: include_str!("wasm-pkg.toml") }` in the macro, `[plugins] registries.path` in a manifest) is absent or names neither a `default_registry` nor the package's namespace. The refusal names the store file that would have served the release: fetch it there (`wkg get <reference> -o <store>/`) or copy a component under that name, route the namespace, pin the package to its registry under `[package_registry_overrides]`, or — for a package a guest names — have the load name its registry `endpoint`, which serves a namespace the configuration routes nowhere (and is never written to the store, so every such load fetches).
+A `source.package` guest (the macro's `package:`) was first used, or a guest named a `release` of its own; the deployment's store holds no release under that reference, and the `registries` configuration (`plugins: { registries: include_str!("wasm-pkg.toml") }` in the macro, `[plugins] registries.path` in a manifest) is absent or names neither a `default_registry` nor the package's namespace. The refusal names the store file that would have served the release: fetch it there (`wkg get <reference> -o <store>/`) or copy a component under that name, route the namespace, pin the package to its registry under `[package_registry_overrides]`, or — for a release a guest names — have the load name its `registry`, which serves a namespace the configuration routes nowhere (and is never written to the store, so every such load fetches).
 
 ### `... is routed to ... by the deployment's registries; it cannot be fetched from ...`
 
-A guest named a `registry` package with an `endpoint` other than the registry the deployment's `registries` routes its namespace to. The deployment's routing outranks the load's: drop the endpoint, or route the namespace to that registry in the configuration.
+A guest named a `release` with a `registry` other than the one the deployment's `registries` routes its namespace to. The deployment's routing outranks the load's: drop the registry, or route the namespace to it in the configuration.
 
 ### `path ... is beneath the writable mount ...`
 
@@ -62,15 +62,15 @@ A guest named a component `path` beneath a mount the deployment marks `writable`
 
 ### `... is a guest this deployment declares, bound by its entry alone`
 
-A guest named a `path` or `registry` package whose derived name — the path's file stem, the package reference without its version — is a `[[guest]]` the deployment declares, whether or not that guest has loaded yet; or an embedder called `Runtime::register` or `Runtime::admit` under such a name. A declared name is bound by its entry alone, on every admission path, so nothing a caller names can seat other bytes under it: load the guest as `declared(name)`, or rename the file or the entry so the two no longer collide.
+A guest named a `path` or `release` whose derived name — the path's file stem, the reference without its version — is a `[[guest]]` the deployment declares, whether or not that guest has loaded yet; or an embedder called `Runtime::register` or `Runtime::admit` under such a name. A declared name is bound by its entry alone, on every admission path, so nothing a caller names can seat other bytes under it: load the guest as `declared(name)`, or rename the file or the entry so the two no longer collide.
 
 ### `... resolved to sha256:..., not its declared digest ...`
 
-The guest's bytes do not hash to the `digest` its `[[guest]]` entry pins, or the one a `path` or `registry` load carried. For a guest loaded at boot (embedded bytes, `run <component>`) this fails startup; for a first-use guest it fails the use that named it — the request, the run, the link call, or the `load`. Either the artifact changed under the deployment — rebuild it or restore the pinned one — or the pin is stale: an unpinned load reports the resolved digest on its handle, which is the value to commit.
+The guest's bytes do not hash to the `digest` its `[[guest]]` entry pins. For a guest loaded at boot (embedded bytes, `run <component>`) this fails startup; for a first-use guest it fails the use that named it — the request, the run, the link call, or the `load`. Either the artifact changed under the deployment — rebuild it or restore the pinned one — or the pin is stale: an unpinned load reports the resolved digest on its handle, which is the value to commit. A `path` or `release` load whose own `pin` misses loads nothing and answers a `conflict` instead, which `Plugins` reports as `... resolved to sha256:..., not the pinned ...`.
 
 ### `... is pre-compiled and is read from unpinned ... while guests run: pin its digest`
 
-A `[[guest]]` with a `source.path` resolved to `omnia compile` output at its first use, and the entry carries no `digest`. A manifest file's path is read while guests are already running, and a pre-compiled artifact is native code, so the runtime admits one from a path only when the entry pins the bytes (`digest = "sha256:…"`, the value the artifact hashes to). Pin the entry, or ship the guest as raw `.wasm`, which the host compiles itself. Embedded bytes (the macro's `path:`) and the component `run <component>` names are unaffected: they were read before any guest ran. Two related refusals: `... is pre-compiled, but a package admits raw wasm alone` is a `source.package` guest whose registry served `omnia compile` output — a package is admitted as raw wasm alone, however it hashes, so publish the `.wasm`; ``the bytes are a pre-compiled artifact; `Verified::wasm` admits raw wasm alone`` is a `path` or `registry` location a guest named itself, or an embedder's `Runtime::register`, both of which take raw wasm only — an artifact your own build produced goes through `Runtime::admit` with `Verified::trusted`.
+A `[[guest]]` with a `source.path` resolved to `omnia compile` output at its first use, and the entry carries no `digest`. A manifest file's path is read while guests are already running, and a pre-compiled artifact is native code, so the runtime admits one from a path only when the entry pins the bytes (`digest = "sha256:…"`, the value the artifact hashes to). Pin the entry, or ship the guest as raw `.wasm`, which the host compiles itself. Embedded bytes (the macro's `path:`) and the component `run <component>` names are unaffected: they were read before any guest ran. Two related refusals: `... is pre-compiled, but a package admits raw wasm alone` is a `source.package` guest whose registry served `omnia compile` output — a package is admitted as raw wasm alone, however it hashes, so publish the `.wasm`; ``the bytes are a pre-compiled artifact; `Verified::wasm` admits raw wasm alone`` is a `path` or `release` a guest named itself, or an embedder's `Runtime::register`, both of which take raw wasm only — an artifact your own build produced goes through `Runtime::admit` with `Verified::trusted`.
 
 ### `Address already in use` on startup
 
@@ -90,7 +90,7 @@ A manifest declares a `source.package` guest, but the runtime has no registry cl
 
 ### `guest ... targets WASI 0.2 (wasm32-wasip2), importing ...; rebuild it for wasm32-wasip3`
 
-The guest was built for WASI 0.2, and the runtime serves WASI 0.3 alone. Rebuild it with `--target wasm32-wasip3` against an `omnia-sdk` of the runtime's release. A compiled-in guest is refused at startup, and a declared or dynamically registered one at its first use. The `wasi:config`, `wasi:keyvalue`, `wasi:messaging`, and `wasi:sql` drafts are versioned `0.2` too, but omnia serves them itself, so they never trigger this refusal.
+The guest was built for WASI 0.2, and the runtime serves WASI 0.3 alone. Rebuild it with `--target wasm32-wasip3` against an `omnia-sdk` of the runtime's release. A compiled-in guest is refused at startup, and a declared or dynamically registered one at its first use.
 
 ### The deployment starts but a guest never runs
 
@@ -146,21 +146,17 @@ One filter governs the host console and every guest: its bare level is a `-v`/`-
 
 ## Model completions
 
-### `the default echo backend cannot satisfy format::schema`
+### `unsupported: the default echo backend …`
 
-The runtime is serving `wasi-model` with the echo `ModelDefault`, which answers text/json completions with the prompt itself but cannot fabricate a value conforming to a guest-supplied JSON Schema. Bind a real backend (`omnia-genai`, `omnia-cursor`) in `runtime!`, or define an inline canned `ModelClient` in tests (see [Testing Policy](guides/testing-policy.md#canned-model-backends)).
+The runtime is serving `wasi-model` with the echo `ModelDefault`, which answers text/json completions with the prompt itself and answers `unsupported` for what an echo cannot honour: a `format::schema` (it cannot fabricate a value conforming to a guest-supplied JSON Schema) or a set `generation` field. Bind a real backend (`omnia-genai`, `omnia-cursor`) in `runtime!`, or define an inline canned `ModelClient` in tests (see [Testing Policy](guides/testing-policy.md#scenario-backends)).
 
 ### `invalid-request` errors
 
-The host rejected the request before any backend ran: empty `messages`, a guest tool named after a reserved name (`read`, `list`, `write`, `check`), function-tool `parameters` that are not valid JSON, or a `format` schema that is not JSON. The message names the violation. A `Question<T>` also reports `InvalidRequest` when a candidate never deserialized as `T` and nothing was accepted — the steering schema and the type disagree.
+The host rejected the request, or the guest's side of its session: messages with no text, a guest tool named after a reserved name (`read`, `list`, `write`, or the SDK's `check`), a tool name given twice, function-tool `parameters` that are not valid JSON, a `format` schema that is not JSON, or a tool result or check correction over the host's per-result size cap. The message names the violation. A `Question<T>` also reports `InvalidRequest` when a candidate never deserialized as `T` and nothing was accepted — the steering schema and the type disagree.
 
 ### `no local tree on this node` (cursor backend)
 
 The cursor backend requires a workspace: the host must mount a directory (`[[mount]]`/`--mount`) *and* the guest must lend it via `grants.workspace`. Absent either half, the spawn is refused.
-
-### MCP tools rejected (`genai` backend)
-
-`Tool::Mcp` grants are only supported by the cursor backend. Use `omnia-cursor`, or restrict the request to `Tool::Function` declarations.
 
 ## Compile / AOT
 

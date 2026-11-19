@@ -1,8 +1,77 @@
-//! Filter tree and resource proxy for `omnia:docstore` host bindings.
+//! The values a backend exchanges with the host.
 
-use crate::host::generated::omnia::docstore::types::{ComparisonOp, ScalarValue};
+/// A stored document, as a backend reads and writes it.
+#[derive(Debug, Clone)]
+pub struct Document {
+    /// The document's id.
+    pub id: String,
+    /// The body, a JSON object encoded as UTF-8.
+    pub data: Vec<u8>,
+}
 
-/// Internal recursive filter representation built from WIT `filter` resource constructors.
+/// A value a filter compares a field with.
+#[derive(Debug, Clone)]
+pub enum ScalarValue {
+    /// JSON `null`.
+    Null,
+    /// A boolean.
+    Boolean(bool),
+    /// A whole number that fits in 32 bits.
+    Int32(i32),
+    /// A whole number.
+    Int64(i64),
+    /// A finite number.
+    Float64(f64),
+    /// Text.
+    Str(String),
+    /// Bytes.
+    Binary(Vec<u8>),
+    /// An RFC 3339 timestamp.
+    Timestamp(String),
+}
+
+/// How a comparison relates a field to its value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ComparisonOp {
+    /// Equal.
+    Eq,
+    /// Not equal.
+    Ne,
+    /// Greater than.
+    Gt,
+    /// Greater than or equal.
+    Gte,
+    /// Less than.
+    Lt,
+    /// Less than or equal.
+    Lte,
+}
+
+/// A field a query orders by.
+#[derive(Debug, Clone)]
+pub struct SortField {
+    /// The field's path.
+    pub field: String,
+    /// Whether the field orders from greatest to least.
+    pub descending: bool,
+}
+
+/// One page of a query, as a backend answers it.
+#[derive(Debug, Clone)]
+pub struct QueryResult {
+    /// The documents on this page, in the order the query asked for.
+    pub documents: Vec<Document>,
+    /// The cursor that resumes the query, `None` on the last page.
+    pub continuation: Option<String>,
+}
+
+/// A query's filter, as a backend evaluates it.
+///
+/// The host builds it from the guest's groups:
+///
+/// - a negated condition is a [`Not`](Self::Not);
+/// - a group of several conditions is an [`Or`](Self::Or);
+/// - several groups are an [`And`](Self::And).
 #[derive(Debug, Clone)]
 pub enum FilterTree {
     /// Field comparison.
@@ -73,7 +142,3 @@ impl FilterTree {
         }
     }
 }
-
-/// Wrapper stored in the wasmtime resource table for `filter` handles.
-#[derive(Debug, Clone)]
-pub struct FilterProxy(pub FilterTree);

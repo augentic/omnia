@@ -1,6 +1,6 @@
 # Config Example
 
-Demonstrates a basic Config using `wasi-config`.
+Demonstrates listing runtime configuration over `omnia:config`.
 
 ## Quick Start
 

@@ -1,0 +1,71 @@
+package omnia:config@0.1.0;
+
+/// The types the configuration interfaces share.
+///
+/// Every backend reads a portable key, and may reject any other as
+/// `invalid`.
+///
+/// - A portable key is 1 to 253 bytes long and holds only uppercase ASCII
+///   letters, digits, and `_`. It does not start with a digit.
+///
+/// An `error` from a configuration interface means:
+///
+/// - `not-found`: the source the deployment names does not exist. An unset
+///   key is not an error.
+/// - `invalid`: the request was rejected, such as a zero `limit` or a key
+///   the backend cannot read.
+/// - `unavailable`: the configuration source did not answer, or the call
+///   exceeded its bound.
+interface types {
+  use omnia:types/types@0.1.0.{error};
+}
+
+/// The configuration a deployment sets for its guest. Every backend serves
+/// this interface.
+///
+/// An unset key is `none`. A key may be set to the empty string. A
+/// deployment may change a value at any time, so two reads of one key may
+/// differ.
+interface store {
+  use types.{error};
+
+  /// The value set for `key`, `none` when it is unset.
+  get: async func(key: string) -> result<option<string>, error>;
+}
+
+/// Optional: enumerating the entries a guest may read.
+interface entries {
+  use types.{error};
+
+  /// One page of a listing.
+  record page {
+    /// Each key on this page with its value, in no particular order.
+    entries: list<tuple<string, string>>,
+    /// The cursor that resumes the listing. Only `none` marks the last page.
+    next: option<string>,
+  }
+
+  /// One page of the entries whose key starts with `prefix`.
+  ///
+  /// A page holds at most `limit` entries and never more than 1,000. A zero
+  /// `limit` is `invalid`. `after` is the `next` of the previous page of the
+  /// same listing. A `prefix` that matches no key returns an empty page.
+  ///
+  /// A key set for the whole listing is returned at least once. One set or
+  /// unset during it may or may not be.
+  %list: async func(prefix: string, after: option<string>, limit: option<u32>)
+    -> result<page, error>;
+}
+
+/// What every backend serves.
+world core {
+  import types;
+  import store;
+}
+
+/// Every interface. A backend answers `unsupported` for what it does not
+/// serve.
+world imports {
+  include core;
+  import entries;
+}

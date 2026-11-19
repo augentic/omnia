@@ -1,4 +1,12 @@
+//! # WASI Messaging Service
+//!
+//! Serves `omnia:messaging` to guests over a [`MessagingClient`], and runs its
+//! delivery trigger.
+
+mod admin_impl;
+mod consumer_impl;
 mod default_impl;
+mod log_impl;
 mod producer_impl;
 mod request_reply_impl;
 mod resource;
@@ -6,28 +14,25 @@ mod server;
 mod types_impl;
 
 mod generated {
-    #![allow(missing_docs, reason = "wasmtime bindgen output")]
+    #![allow(missing_docs, clippy::empty_enums, reason = "wasmtime bindgen output")]
 
-    pub use wasi::messaging::types::Error;
-
-    pub use crate::host::resource::{ClientProxy, Message, RequestOptions};
+    pub use self::omnia::types::types::Error;
+    pub use crate::host::resource::ClientProxy;
 
     wasmtime::component::bindgen!({
-        world: "messaging-request-reply",
+        world: "messaging",
         path: "wit",
         imports: {
-            default:  store | tracing | trappable,
+            default: store | tracing | trappable,
         },
         exports: {
             default: store | tracing | trappable,
         },
         with: {
-            "wasi:messaging/request-reply.request-options": RequestOptions,
-            "wasi:messaging/types.client": ClientProxy,
-            "wasi:messaging/types.message": Message,
+            "omnia:messaging/types.client": ClientProxy,
         },
         trappable_error_type: {
-            "wasi:messaging/types.error" => Error,
+            "omnia:types/types.error" => Error,
         },
     });
 }
@@ -37,28 +42,44 @@ use std::sync::Arc;
 
 pub use omnia_core::FutureResult;
 use omnia_core::{Host, HostCtx, Provides, Runtime, StoreCtx};
-use wasmtime::component::Linker;
+use wasmtime::component::{Linker, ResourceTableError};
 
 pub use self::default_impl::MessagingDefault;
-pub use self::generated::MessagingRequestReply;
-pub use self::generated::wasi::messaging::types::Error;
-use self::generated::wasi::messaging::{producer, request_reply, types};
+use self::generated::omnia::messaging::{admin, consumer, log, producer, request_reply, types};
+use self::generated::omnia::types::types as omnia_types;
+pub use self::generated::{Error, Messaging};
 pub use self::resource::*;
 pub use self::server::MessagingHandler;
 
 /// Result type for messaging operations.
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// Host-side service for `wasi:messaging`.
+/// Host-side service for `omnia:messaging`.
 #[derive(Debug, HostCtx)]
 #[host_ctx(client = MessagingClient)]
 pub struct WasiMessaging;
 
 impl<B: Provides<Self>> Host<B> for WasiMessaging {
     fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
+        omnia_types::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
+        types::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
         producer::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
         request_reply::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
-        Ok(types::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?)
+        consumer::add_to_linker::<_, Self>(
+            linker,
+            consumer::LinkOptions::default().consumer(true),
+            StoreCtx::view::<Self>,
+        )?;
+        log::add_to_linker::<_, Self>(
+            linker,
+            log::LinkOptions::default().log(true),
+            StoreCtx::view::<Self>,
+        )?;
+        Ok(admin::add_to_linker::<_, Self>(
+            linker,
+            admin::LinkOptions::default().admin(true),
+            StoreCtx::view::<Self>,
+        )?)
     }
 
     async fn run(runtime: &Runtime<B>) -> anyhow::Result<()> {
@@ -66,7 +87,7 @@ impl<B: Provides<Self>> Host<B> for WasiMessaging {
     }
 }
 
-/// Service contract for `wasi:messaging` backends.
+/// Service contract for `omnia:messaging` backends.
 ///
 /// This is implemented by the resource-specific provider of messaging
 /// functionality. For example, a NATS, or a Kafka broker.
@@ -82,4 +103,22 @@ pub trait MessagingClient: Debug + Send + Sync + 'static {
     fn endpoint(&self) -> FutureResult<Arc<dyn Endpoint>>;
 }
 
-omnia_core::host_error!(Error, Other);
+// a backend picks the kind by returning an `Error`; any other failure is
+// `other`, with its full context chain
+impl From<anyhow::Error> for Error {
+    fn from(err: anyhow::Error) -> Self {
+        err.downcast::<Self>().unwrap_or_else(|err| Self::Other(format!("{err:#}")))
+    }
+}
+
+impl From<wasmtime::Error> for Error {
+    fn from(err: wasmtime::Error) -> Self {
+        Self::Other(format!("{err:#}"))
+    }
+}
+
+impl From<ResourceTableError> for Error {
+    fn from(err: ResourceTableError) -> Self {
+        Self::Other(err.to_string())
+    }
+}

@@ -1,25 +1,23 @@
+//! # WASI OpenTelemetry Service
+
 mod default_impl;
+mod logs_impl;
 mod metrics_impl;
-mod resource_impl;
-mod tracing_impl;
+mod traces_impl;
 mod types_impl;
 
 mod generated {
-
-    pub use self::omnia::otel::types::Error;
+    pub use self::omnia::types::types::Error;
 
     wasmtime::component::bindgen!({
         world: "imports",
         path: "wit",
         imports: {
-            default: tracing | trappable,
-        },
-        with: {
-            "wasi:clocks": wasmtime_wasi::p3::bindings::clocks,
+            default: store | tracing | trappable,
         },
         trappable_error_type: {
-            "omnia:otel/types.error" => Error,
-        }
+            "omnia:types/types.error" => Error,
+        },
     });
 }
 
@@ -31,36 +29,51 @@ use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
 use wasmtime::component::Linker;
 
 pub use self::default_impl::OtelDefault;
-use self::generated::omnia::otel::{metrics, resource, tracing, types};
+pub use self::generated::Error;
+use self::generated::omnia::otel::{logs, metrics, traces, types};
+use self::generated::omnia::types::types as omnia_types;
 
-/// Host-side service for `wasi:otel`.
+type Result<T> = std::result::Result<T, Error>;
+
+/// Host-side service for `omnia:otel`.
 #[derive(Debug, HostCtx)]
 #[host_ctx(client = OtelClient)]
 pub struct WasiOtel;
 
 impl<B: Provides<Self>> Host<B> for WasiOtel {
     fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
-        tracing::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
-        metrics::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
+        omnia_types::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
         types::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
-        Ok(resource::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?)
+        traces::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
+        metrics::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
+        Ok(logs::add_to_linker::<_, Self>(
+            linker,
+            logs::LinkOptions::default().logs(true),
+            StoreCtx::view::<Self>,
+        )?)
     }
 }
 
 /// Service contract for `omnia:otel` backends.
 ///
 /// This is implemented by the resource-specific provider of OpenTelemetry
-/// functionality.
+/// functionality. Each request carries the deployment's resource and the
+/// guest's telemetry, already checked.
+///
+/// A backend picks a failure's kind by returning an [`Error`] inside its
+/// [`anyhow::Error`], and any other failure is [`Error::Other`].
 pub trait OtelClient: Debug + Send + Sync + 'static {
-    /// Export traces using gRPC.
-    ///
-    /// Errors are logged but not propagated to prevent telemetry failures
-    /// from affecting application logic.
+    /// Export spans, as one OTLP trace request.
     fn export_traces(&self, request: ExportTraceServiceRequest) -> FutureResult<()>;
 
-    /// Export metrics using gRPC.
-    ///
-    /// Errors are logged but not propagated to prevent telemetry failures
-    /// from affecting application logic.
+    /// Export metric points, as one OTLP metrics request.
     fn export_metrics(&self, request: ExportMetricsServiceRequest) -> FutureResult<()>;
+}
+
+// a backend picks the kind by returning an `Error`; any other failure is
+// `other`, with its full context chain
+impl From<anyhow::Error> for Error {
+    fn from(err: anyhow::Error) -> Self {
+        err.downcast::<Self>().unwrap_or_else(|err| Self::Other(format!("{err:#}")))
+    }
 }

@@ -10,6 +10,7 @@ feature-depth = 1
 [advisories]
 unmaintained = "workspace"
 ignore = [
+  { id = "RUSTSEC-2026-0543", reason = "chrono soft-deprecated; workspace migration to jiff is planned" },
 ]
 
 [licenses]

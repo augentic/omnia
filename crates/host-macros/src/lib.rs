@@ -45,7 +45,7 @@ pub fn runtime(input: TokenStream) -> TokenStream {
 /// use omnia_core::{Host, HostCtx, Provides, StoreCtx};
 /// use wasmtime::component::Linker;
 ///
-/// /// Host-side service for `wasi:keyvalue`.
+/// /// Host-side service for `omnia:keyvalue`.
 /// #[derive(Debug, HostCtx)]
 /// #[host_ctx(client = KeyValueClient)]
 /// pub struct WasiKeyValue;

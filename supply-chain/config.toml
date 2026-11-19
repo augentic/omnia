@@ -85,6 +85,9 @@ audit-as-crates-io = false
 [policy.omnia-wasi-sql]
 audit-as-crates-io = false
 
+[policy.omnia-wasi-types]
+audit-as-crates-io = false
+
 [policy.omnia-wasi-vault]
 audit-as-crates-io = false
 
@@ -690,6 +693,14 @@ criteria = "safe-to-deploy"
 version = "0.9.5"
 criteria = "safe-to-deploy"
 
+[[exemptions.rand]]
+version = "0.10.4"
+criteria = "safe-to-deploy"
+
+[[exemptions.rand_pcg]]
+version = "0.10.3"
+criteria = "safe-to-deploy"
+
 [[exemptions.rand_xorshift]]
 version = "0.5.0"
 criteria = "safe-to-deploy"
@@ -827,7 +838,7 @@ version = "1.2.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.smallvec]]
-version = "1.16.5"
+version = "1.16.6"
 criteria = "safe-to-deploy"
 
 [[exemptions.spdx]]
@@ -947,7 +958,7 @@ version = "0.3.23"
 criteria = "safe-to-deploy"
 
 [[exemptions.trybuild]]
-version = "1.0.122"
+version = "1.0.125"
 criteria = "safe-to-run"
 
 [[exemptions.tungstenite]]
@@ -967,7 +978,7 @@ version = "0.2.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.uuid]]
-version = "1.29.2"
+version = "1.29.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.version_check]]
@@ -1060,6 +1071,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.zerofrom-derive]]
 version = "0.1.8"
+criteria = "safe-to-deploy"
+
+[[exemptions.zeroize]]
+version = "1.9.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.zeroize_derive]]

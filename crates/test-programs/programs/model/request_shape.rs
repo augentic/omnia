@@ -1,9 +1,11 @@
-//! `generation`, an MCP grant, and a worker grant cross the boundary intact.
+//! `generation`, a function tool, and a worker grant cross the boundary
+//! intact. An effort level the host does not know reaches the backend by its
+//! name.
 
 #![cfg(target_arch = "wasm32")]
 
 use omnia_sdk::WasiProvider;
-use omnia_sdk::model::{Effort, Generation, McpGrant, Model as _, Request, Tool, WorkerGrant};
+use omnia_sdk::model::{Effort, Function, Generation, Model as _, Request, Tool, WorkerGrant};
 use test_programs::user;
 
 omnia_sdk::api::command::export!(scenario);
@@ -17,11 +19,15 @@ async fn scenario() {
                     Generation::builder()
                         .temperature(0.25)
                         .max_tokens(32)
-                        .effort(Effort::Low)
+                        .effort(Effort::Other("max".to_owned()))
                         .build(),
                 )
-                .tools(vec![Tool::Mcp(
-                    McpGrant::builder().name("docs").url("https://mcp.example").build(),
+                .tools(vec![Tool::Function(
+                    Function::builder()
+                        .name("docs")
+                        .description("search the docs")
+                        .parameters("{}")
+                        .build(),
                 )])
                 .workspace(".")
                 .worker(

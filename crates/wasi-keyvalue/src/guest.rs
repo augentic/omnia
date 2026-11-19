@@ -1,19 +1,19 @@
 //! # WASI Key-Value Guest
 
-// Bindings for `omnia:keyvalue` and the `wasi:keyvalue` draft.
-// See (<https://github.com/WebAssembly/wasi-keyvalue/>)
+// Bindings for `omnia:keyvalue`.
 mod generated {
     #![allow(missing_docs, clippy::same_length_and_capacity, reason = "wit-bindgen output")]
     wit_bindgen::generate!({
-    world: "imports",
-    path: "wit",
-    generate_all,
+        world: "imports",
+        path: "wit",
+        with: {
+            "omnia:types/types@0.1.0": omnia_wasi_types::omnia::types,
+        },
+        generate_all,
     });
 }
 
-/// `omnia:keyvalue`, the interface the SDK's `StateStore` calls.
+/// `omnia:keyvalue`, the interfaces behind the SDK's `StateStore`.
 pub mod omnia {
-    pub use crate::guest::generated::omnia::keyvalue::store;
+    pub use crate::guest::generated::omnia::keyvalue::*;
 }
-
-pub use self::generated::wasi::keyvalue::*;

@@ -51,7 +51,7 @@ async fn seeded_doubles() {
 // the derived impls forward `named` to the field's double
 #[tokio::test]
 async fn named_storage() {
-    let provider = Provider::default().storage(Memory::default().bucket("cache"));
+    let provider = Provider::default().storage(Memory::default().bucket("cache").locker("vault"));
 
     let cache = StateStore::named(&provider, "cache");
     let vault = SecretStore::named(&provider, "vault");

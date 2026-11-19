@@ -6,7 +6,7 @@
 //! [`Handlers::with_state`](crate::api::Handlers::with_state) into its one
 //! [`Router`](crate::api::Router). A topic decodes JSON unless registered
 //! with [`Handlers::topic_with`](crate::api::Handlers::topic_with).
-//! [`export!`] binds the router fn as the guest's `wasi:messaging` handler.
+//! [`export!`] binds the router fn as the guest's `omnia:messaging` handler.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -14,6 +14,7 @@ use std::future::Future;
 use std::marker::PhantomData;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::time::SystemTime;
 
 use bytes::Bytes;
 use serde::de::DeserializeOwned;
@@ -36,19 +37,19 @@ macro_rules! __export_messaging {
                 MessagingGuest with_types_in $crate::omnia_wasi_messaging
             );
 
-            impl $crate::omnia_wasi_messaging::incoming_handler::Guest for MessagingGuest {
+            impl $crate::omnia_wasi_messaging::omnia::incoming_handler::Guest for MessagingGuest {
                 async fn handle(
-                    message: $crate::omnia_wasi_messaging::types::Message,
-                ) -> ::core::result::Result<(), $crate::omnia_wasi_messaging::types::Error>
+                    delivery: $crate::omnia_wasi_messaging::omnia::types::Delivery,
+                ) -> ::core::result::Result<(), $crate::omnia_wasi_messaging::omnia::types::Settle>
                 {
-                    $crate::wasi::messaging::handle(&$router($provider), message).await
+                    $crate::wasi::messaging::handle(&$router($provider), delivery).await
                 }
             }
         };
     };
 }
 
-/// Bind a router fn as the guest's `wasi:messaging` export.
+/// Bind a router fn as the guest's `omnia:messaging` export.
 ///
 /// Calls the router fn on each delivery with `WasiProvider`, or with the
 /// provider expression passed as a second argument, and dispatches the
@@ -83,6 +84,10 @@ pub struct Delivery {
 
     /// Transport metadata in delivery order.
     pub metadata: Vec<(String, String)>,
+
+    /// When the host stops waiting for the handler, which the handler reads
+    /// as [`Metadata::deadline`].
+    pub deadline: Option<SystemTime>,
 }
 
 impl Delivery {
@@ -114,6 +119,13 @@ impl Delivery {
     #[must_use]
     pub fn with_metadata(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
         self.metadata.push((name.into(), value.into()));
+        self
+    }
+
+    /// Set when the host stops waiting for the handler.
+    #[must_use]
+    pub const fn with_deadline(mut self, deadline: SystemTime) -> Self {
+        self.deadline = Some(deadline);
         self
     }
 }
@@ -214,13 +226,16 @@ where
     D: Fn(&Delivery) -> crate::Result<I> + Send + Sync + 'static,
 {
     fn dispatch<'a>(&'a self, delivery: &'a Delivery, provider: &'a Arc<P>) -> DispatchFuture<'a> {
-        let metadata = Metadata::from_lookup(|name| {
-            delivery
-                .metadata
-                .iter()
-                .find(|(key, _)| key.eq_ignore_ascii_case(name))
-                .map(|(_, value)| value.clone())
-        });
+        let metadata = Metadata {
+            deadline: delivery.deadline,
+            ..Metadata::from_lookup(|name| {
+                delivery
+                    .metadata
+                    .iter()
+                    .find(|(key, _)| key.eq_ignore_ascii_case(name))
+                    .map(|(_, value)| value.clone())
+            })
+        };
         let span = tracing::info_span!(
             "handler",
             request_id = metadata.request_id.as_deref(),

@@ -136,7 +136,7 @@ All five are re-exported from the generated module as `pub use runtime::{Hooks, 
 use omnia_core::{Host, HostCtx, Provides, StoreCtx};
 use wasmtime::component::Linker;
 
-/// Host-side service for `wasi:keyvalue`.
+/// Host-side service for `omnia:keyvalue`.
 #[derive(Debug, HostCtx)]
 #[host_ctx(client = KeyValueClient)]
 pub struct WasiKeyValue;
@@ -176,7 +176,7 @@ StoreCtx<Backends>                       one per guest store
 HostView<'_, dyn KeyValueClient>         #[host_ctx(client = KeyValueClient)]: the host's HasData::Data
    |  bindgen Host* impls on the view; Host::add_to_linker(linker, StoreCtx::view::<Self>)
    v
-wasmtime Linker                          wasi:keyvalue/* resolved for the guest
+wasmtime Linker                          omnia:keyvalue/* resolved for the guest
 ```
 
 Nothing in the chain names the host from outside: `runtime!` keys the `Provides` impl by the host type, `StoreCtx::view` reads the host's `HostCtx::Borrow`, and the derive supplies both the borrow and the view.

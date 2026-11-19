@@ -5,19 +5,26 @@ use serde::Serialize;
 
 /// Host-side capabilities for one completion, lent to backends that need them.
 pub trait ToolHost: Debug + Send + Sync {
-    /// Run one declared function tool through the completion's session: the
-    /// guest's tool closure answers. The outer error is a hard host failure
-    /// (undeclared tool, exhausted budget, closed session, oversize result,
-    /// timeout); the inner `Err` is the tool's own model-visible failure
-    /// text, fed back to the model as repairable content.
+    /// Run one of the request's tools through the completion's session.
+    ///
+    /// The guest's tool answers. The inner `Err` is the tool's own failure
+    /// text, which the model reads and may repair from. The outer error is a
+    /// hard host failure, which fails the completion:
+    ///
+    /// - an undeclared tool is `other`;
+    /// - a spent tool-call budget, or no result within the timeout, is
+    ///   `exhausted`;
+    /// - an output or failure text over the size cap, or a session stream
+    ///   the guest closed, is `invalid`.
     fn call_tool(&self, name: String, arguments: String) -> FutureResult<ToolOutcome>;
 
-    /// Ask the guest whether `candidate` is the answer. `Ok(())` finishes
-    /// the completion; `Err(text)` is the correction turn the backend appends
-    /// verbatim. Routed over the session's `calls` stream as the reserved
-    /// tool `check`; `tool_timeout` applies and `max_result_bytes` caps the
-    /// correction, the tool-call budget does not apply. The outer error is a
-    /// hard host failure (closed session, timeout, oversize correction).
+    /// Ask the guest whether `candidate` is the answer.
+    ///
+    /// `Ok(())` finishes the completion, and `Err(text)` is the correction
+    /// turn the backend appends verbatim. It reaches the guest as a `check`
+    /// call on the session's `calls` stream, outside the tool-call budget.
+    /// The timeout and the size cap apply as they do to
+    /// [`ToolHost::call_tool`], and so does its outer error.
     fn check(&self, candidate: String) -> FutureResult<Result<(), String>>;
 
     /// Bounded workspace read via the lent `wasi:filesystem` capability.
@@ -36,7 +43,7 @@ pub trait ToolHost: Debug + Send + Sync {
     }
 }
 
-/// A function tool's model-visible output or failure text.
+/// A tool's model-visible output or failure text.
 pub type ToolOutcome = Result<String, String>;
 
 /// One bounded directory entry returned by `ToolHost::list`; backends

@@ -1,13 +1,13 @@
 //! Prompt-completion (model) capability.
 //!
-//! Target-independent mirrors of the `omnia:model/completion` records. The
+//! Target-independent mirrors of the `omnia:model` records. The
 //! one record that cannot cross off `wasm32` is the `grants.workspace`
 //! descriptor lend — a `wasi:filesystem` resource that only exists on
 //! `wasm32` — so a guest names the directory with the plain
 //! [`Request::workspace`] path and `WasiProvider` resolves it against the
 //! guest's preopens at the call site, by the lend rule every lending
 //! capability shares: the longest preopen whose name prefixes the path becomes
-//! the lent root descriptor and the remainder rides as the grant's subpath.
+//! the lent root descriptor and the remainder rides as the location's subpath.
 //!
 //! Acceptance of an answer is the guest's: a request with [`Request::check`]
 //! set receives each candidate as a tool call named `check` and answers
@@ -26,9 +26,9 @@ pub use self::question::{Findings, Question, ToolFuture, Tools};
 
 /// Prompt completion (Omnia Model).
 ///
-/// `WasiProvider` delegates to `omnia:model/completion` via `omnia-wasi-model`,
-/// opening the completion session and answering the model's tool calls with
-/// the supplied closure.
+/// `WasiProvider` delegates to `omnia:model` via `omnia-wasi-model`, opening
+/// the request's model and answering the session's tool calls with the
+/// supplied closure.
 #[omnia_guest_macros::capability]
 pub trait Model: Send + Sync {
     /// Single-shot completion returning one reply. Any tool call the model
@@ -47,7 +47,7 @@ pub trait Model: Send + Sync {
     /// [`ToolCall`] values answered serially by `handler` (over the caller's
     /// own locals and authority), and each result feeds the same model turn.
     /// Results correlate by id, so parallel handling stays available through
-    /// the raw `omnia_wasi_model::completion` session bindings.
+    /// the raw `omnia_wasi_model::omnia::completion` session bindings.
     fn complete_with<H, F>(
         &self, request: Request, handler: H,
     ) -> impl Future<Output = Result<Reply, Error>> + Send
@@ -62,7 +62,8 @@ pub const CHECK_TOOL: &str = "check";
 /// Complete request for one completion.
 #[derive(Clone, Debug, Default, PartialEq, Eq, bon::Builder)]
 pub struct Request {
-    /// Opaque model id hint; passed through unchanged. Backend may override.
+    /// The model to open, a binding the deployment declares. `None` opens
+    /// `default`.
     #[builder(into)]
     pub model: Option<String>,
     /// System / instructions channel.
@@ -76,9 +77,9 @@ pub struct Request {
     /// against it.
     #[builder(default)]
     pub format: Format,
-    /// Guest-declared functions and MCP grants merged with host-injected
-    /// tools at the backend. The names `read`, `list`, `write`, and `check`
-    /// are reserved.
+    /// Guest-declared functions, offered beside the host-injected tools. The
+    /// names `read`, `list`, `write`, and `check` are reserved, and a name
+    /// given twice is refused.
     #[builder(default)]
     pub tools: Vec<Tool>,
     /// Ask the guest to accept each candidate answer: the candidate arrives
@@ -96,9 +97,8 @@ pub struct Request {
     #[builder(into)]
     pub workspace: Option<String>,
     /// What the worker a backend runs for this completion may reach beyond
-    /// its lend, through `grants.worker`. Requires [`Request::workspace`]:
-    /// a worker reaches beyond a lend it has. `None` grants nothing beyond
-    /// the lend.
+    /// its lend. Requires [`Request::workspace`]: a worker reaches beyond a
+    /// lend it has. `None` grants nothing beyond the lend.
     pub worker: Option<WorkerGrant>,
 }
 
@@ -170,16 +170,33 @@ pub struct Generation {
 impl Eq for Generation {}
 
 /// Reasoning-effort hint for models that expose a thinking budget.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+///
+/// [`Effort::Low`], [`Effort::Medium`], and [`Effort::High`] are portable. A
+/// backend fails a level it does not know with [`Error::InvalidRequest`], and
+/// one with no reasoning control fails any level with [`Error::Unsupported`].
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Effort {
-    /// Least reasoning; lowest latency and cost.
-    Minimal,
     /// Reduced reasoning.
     Low,
     /// Balanced reasoning.
     Medium,
     /// Most reasoning; highest latency and cost.
     High,
+    /// A level by the backend's own name, such as `minimal`.
+    Other(String),
+}
+
+impl Effort {
+    /// The level's name, as the backend receives it.
+    #[must_use]
+    pub const fn as_str(&self) -> &str {
+        match self {
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+            Self::Other(level) => level.as_str(),
+        }
+    }
 }
 
 /// Output shape hint steering the provider.
@@ -224,14 +241,11 @@ fn schema_of<T: JsonSchema>() -> String {
     schemars::schema_for!(T).to_value().to_string()
 }
 
-/// A tool offered to the model: a guest-declared function or an MCP server
-/// grant carrying its own endpoint URL.
+/// A tool offered to the model.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Tool {
     /// Guest-declared function tool.
     Function(Function),
-    /// MCP server grant.
-    Mcp(McpGrant),
 }
 
 /// Guest-declared function tool advertised to the model.
@@ -261,20 +275,6 @@ impl Function {
     }
 }
 
-/// Remote MCP server offered to the model for this completion.
-#[derive(Clone, Debug, PartialEq, Eq, bon::Builder)]
-pub struct McpGrant {
-    /// Logical server name identifying the server (e.g. in `.cursor/mcp.json`).
-    #[builder(into)]
-    pub name: String,
-    /// Tool allowlist; empty exposes every tool the server advertises.
-    #[builder(default)]
-    pub tools: Vec<String>,
-    /// MCP server endpoint URL.
-    #[builder(into)]
-    pub url: String,
-}
-
 /// One completion result.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Reply {
@@ -285,45 +285,79 @@ pub struct Reply {
     pub usage: Option<Usage>,
 }
 
-/// Token accounting for one completion, when the backend reports it.
+/// Token accounting for one completion, counted over every response the model
+/// wrote.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Usage {
-    /// Prompt tokens consumed.
-    pub input_tokens: u32,
-    /// Completion tokens produced.
-    pub output_tokens: u32,
-    /// Reasoning tokens, for models that bill them separately.
-    pub reasoning_tokens: Option<u32>,
+    /// Tokens the model read, cached ones included.
+    pub input_tokens: u64,
+    /// Tokens the model wrote, reasoning included.
+    pub output_tokens: u64,
+    /// The part of `output_tokens` spent on reasoning, when the backend counts
+    /// it.
+    pub reasoning_tokens: Option<u64>,
+    /// The part of `input_tokens` read from a cache, when the backend counts
+    /// it.
+    pub cache_read_tokens: Option<u64>,
+    /// The part of `input_tokens` written to a cache, when the backend counts
+    /// it.
+    pub cache_write_tokens: Option<u64>,
 }
 
-/// Typed completion failure, mirroring the `omnia:model` error variant.
+/// Typed completion failure.
+///
+/// `WasiProvider` maps each `omnia:model` outcome onto the variant that names
+/// it:
+///
+/// - `invalid` is [`Error::InvalidRequest`];
+/// - an `exhausted` completion is [`Error::BudgetExhausted`];
+/// - `other` is [`Error::Backend`];
+/// - every other case is the variant of its name, as `not-found` is
+///   [`Error::NotFound`].
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum Error {
-    /// The request itself is malformed (empty `messages`, reserved tool
-    /// name, schema that is not JSON); retrying without changing it is
-    /// pointless.
+    /// The request, or the guest's side of its session, is malformed: empty
+    /// `messages`, a reserved or repeated tool name, a schema that is not
+    /// JSON, or a result over the host's size cap. Retrying without changing
+    /// it is pointless.
     #[error("invalid request: {0}")]
     InvalidRequest(String),
     /// Iteration, token, or time budget exhausted. When the last round ended
     /// on a rejected `check`, the detail is that correction text.
     #[error("budget exhausted: {0}")]
     BudgetExhausted(String),
-    /// Non-repairable tool error.
-    #[error("tool failed: {0}")]
-    ToolFailed(String),
-    /// Transport, process, or provider failure.
+    /// The deployment declares no model by the name the request opens, or the
+    /// directory the request lends does not exist.
+    #[error("not found: {0}")]
+    NotFound(String),
+    /// The provider refused the caller, or the request lends a directory the
+    /// guest does not hold.
+    #[error("denied: {0}")]
+    Denied(String),
+    /// A valid request the backend cannot serve, such as a generation control
+    /// it lacks.
+    #[error("unsupported: {0}")]
+    Unsupported(String),
+    /// The provider did not answer, or turned the call away for now as a rate
+    /// limit does. A later retry may succeed.
+    #[error("unavailable: {0}")]
+    Unavailable(String),
+    /// Any other failure of the provider or its backend.
     #[error("backend failure: {0}")]
     Backend(String),
 }
 
 impl Error {
-    /// The kebab-case wire discriminant, stable for callers to branch on.
+    /// The kebab-case code, stable for callers to branch on.
     #[must_use]
     pub const fn code(&self) -> &'static str {
         match self {
             Self::InvalidRequest(_) => "invalid-request",
             Self::BudgetExhausted(_) => "budget-exhausted",
-            Self::ToolFailed(_) => "tool-failed",
+            Self::NotFound(_) => "not-found",
+            Self::Denied(_) => "denied",
+            Self::Unsupported(_) => "unsupported",
+            Self::Unavailable(_) => "unavailable",
             Self::Backend(_) => "backend",
         }
     }
@@ -336,7 +370,8 @@ impl From<anyhow::Error> for Error {
 }
 
 // The default taxonomy: the guest's own request, and findings the model could
-// not resolve, are the request's, and a tool or the transport is the gateway's.
+// not resolve, are the request's, a provider that did not answer or failed is
+// the gateway's, and the rest is the host's.
 impl From<Error> for crate::Error {
     fn from(error: Error) -> Self {
         let code = error.code().to_owned();
@@ -345,7 +380,10 @@ impl From<Error> for crate::Error {
             Error::InvalidRequest(_) | Error::BudgetExhausted(_) => {
                 Self::BadRequest { code, description }
             }
-            Error::ToolFailed(_) | Error::Backend(_) => Self::BadGateway { code, description },
+            Error::NotFound(_) | Error::Denied(_) | Error::Unsupported(_) => {
+                Self::ServerError { code, description }
+            }
+            Error::Unavailable(_) | Error::Backend(_) => Self::BadGateway { code, description },
         }
     }
 }

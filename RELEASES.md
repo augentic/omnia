@@ -28,21 +28,269 @@ Unreleased
   guest crate's version and description as `--version` and `--help`.
 - `SecretStore`, the secrets capability over `omnia:vault`. A handle
   addresses one locker, `default` until `named(name)` selects another, and
-  `keys(after)` lists it in key order.
+  `keys(after)` lists it a page at a time, in no particular order.
 - One `Context` accessor per capability: `blobs`, `config`, `docs`, `http`,
   `identity`, `model`, `plugins`, `publisher`, `secrets`, `sql`, `state`,
   `vcs`, and `websockets`. Each borrows the provider as that one trait, so
   a handler bounded on `Config + StateStore` calls `get` without UFCS.
+- `omnia:types@0.1.0`, the types every `omnia:*` package shares, and
+  `omnia-wasi-types`, the crate that holds it:
+  - `error`, why a capability call failed, with one case per capability
+    error code. Each package's docs say what each case means for it.
+  - `timestamp`, an instant in milliseconds since the Unix epoch. Every
+    package gives its instants as one, except `omnia:otel`, which keeps
+    OTLP's nanoseconds.
+  - `json`, a JSON document as UTF-8 text.
+
+  Each package vendors the WIT. On `wasm32`, every `omnia-wasi-*` binding
+  maps it onto `omnia_wasi_types::omnia::types`, so a guest matches one
+  `Error` whichever capability returned it.
 - `omnia:keyvalue`, the Omnia-owned interface `StateStore` calls.
-  `WasiKeyValue` serves it beside the `wasi:keyvalue` draft over one
-  `Bucket`. Each call names its bucket, and `set`, `compare-and-swap`, and
-  `increment` take a TTL in milliseconds.
+  `WasiKeyValue` serves it over one `Bucket`:
+  - `store.open` answers a `bucket` handle, and every call goes through
+    it.
+  - A write names its `lifetime`: `forever`, a TTL in milliseconds, or one
+    of two that leave an existing entry the time it has left.
+  - A write returns the entry's `revision`. `set` takes an `absent` or
+    `matches` precondition, and `delete` a revision. One that fails
+    answers a `conflict` carrying the entry it found.
+  - `increment` takes a TTL in milliseconds, which applies only to a
+    counter it creates.
+  - `get-many`, `set-many`, and `delete-many` take several keys at once.
+  - The optional `keys` interface pages the keys under a prefix.
+  - `WasiKeyValue` answers `unsupported` for nothing.
+- `StateStore::get_entry`, which reads a value with its `Revision`, and
+  `StateStore::set_if`, which writes while a `Precondition` holds. One
+  that does not hold changes nothing and answers the entry it found. An
+  implementor provides both, and `compare_and_swap` is provided over them.
 - `omnia:sql`, the Omnia-owned interface `SqlDb` calls. `WasiSql` serves it
-  beside the `wasi:sql` draft over one `Connection`. Each call names its
-  database, and `batch` runs its statements in one transaction.
+  over one `Connection`:
+  - `store.open` answers a `database` handle, and every statement goes
+    through it.
+  - `query` answers a `result-set`: the `columns` it selects, a `rows`
+    stream, and a `finished` future.
+  - `execute` answers the rows a statement changed, and `batch` runs its
+    statements in one transaction.
+  - A temporal value is text in one ISO 8601 shape per case, and the host
+    fails any other with `invalid`.
+  - The optional `transactions` interface begins a `transaction` on a
+    database. Its statements commit or roll back together, and a failure
+    or a drop rolls it back.
+- `SqlDb::begin`, which starts an `omnia_sdk::sql::Transaction`. Its
+  `query`, `execute`, and `query_as` run in the transaction until `commit`
+  or `rollback` ends it. Dropping it rolls it back, and so does a statement
+  that fails. `omnia_sdk::wasi::sql::Transaction` is the one `WasiProvider`
+  begins.
 - `omnia:blobstore`, the Omnia-owned interface `BlobStore` calls.
-  `WasiBlobStore` serves it over one `BlobStoreClient`. Each call names its
-  container, and `get-range` takes a half-open range.
+  `WasiBlobStore` serves it over one `BlobStoreClient`:
+  - `store.open` answers a `container` handle, and every object call goes
+    through it.
+  - `get` streams an object, or a `byte-range` of it: a half-open span, an
+    offset to the end, or a suffix.
+  - `put` streams an object in, and stores it once the writer commits. A
+    `size`, where the guest gives one, is the stream's length, and a
+    stream of any other length stores nothing.
+  - A write whose precondition fails answers a `conflict` carrying the
+    etag found in its place.
+  - `list` pages the names under a prefix, flat or folded at the next `/`.
+  - The optional `admin` interface manages containers. The unstable
+    `uploads` and `presign` interfaces assemble an object from parts and
+    presign requests, and a guest binds each by enabling the feature of
+    its name.
+  - `WasiBlobStore` answers `unsupported` for a precondition, for object
+    attributes, and for `list-containers`, `uploads`, and `presign`.
+- `omnia:messaging`, the Omnia-owned interface `Publisher` and
+  `messaging::export!` call, in place of the `wasi:messaging` draft.
+  `WasiMessaging` serves it over one `Endpoint`:
+  - A `message` is a record of its payload, `content-type`, ordering
+    `key`, and the caller's own metadata.
+  - The `incoming-handler` export takes a `delivery`: the message, its
+    topic, the `reply-to` address a reply answers, the broker's
+    `position`, `attempt` count, and `published-at` time where it keeps
+    them, and the `deadline` when the host stops waiting.
+  - What `handle` returns settles the delivery. `ok` accepts it. A
+    `settle` rejects it as a message no redelivery handles, or releases it
+    for another delivery, after a delay where the guest asks for one.
+  - The optional `request-reply` awaits one reply within an optional
+    timeout, and `reply` answers a request through the broker a `client`
+    connects to.
+  - The unstable `consumer`, `log`, and `admin` interfaces take messages
+    in batches, read topics as an ordered log, and list and purge topics.
+    A guest binds each by enabling the feature of its name.
+  - A wait or a delay is a `u64` count of milliseconds.
+  - `client.connect` names a broker the deployment declares, and only
+    `default` is declared.
+  - `WasiMessaging` answers `unsupported` for `consumer`, `log`, and
+    `admin`.
+  - On `wasm32`, `omnia_wasi_messaging::omnia` holds the raw bindings,
+    which the crate root held.
+- `omnia:websocket@0.2.0`, rewritten as the interface `WebSockets` calls.
+  `WasiWebSocket` serves it over one `Endpoint`:
+  - The `incoming-handler` export takes an `event` record: the id of the
+    connection that sent it, its route, the message, the metadata the
+    backend keeps for the connection, and the `deadline` when the host
+    stops waiting.
+  - A `message` is text or binary, and travels in a frame of that type.
+  - `connections` sends to the connections it names, closes one with an
+    optional status, and asks whether one is open. A connection that is
+    not open is no error.
+  - The optional `broadcast` sends to every open connection except those
+    the guest names.
+  - `client.connect` names a service the deployment declares, and only
+    `default` is declared.
+  - `Endpoint` gains `broadcast`, `close`, and `exists`, which answer
+    `unsupported` until a backend serves them, and `Event` gains `frame`.
+    `WebSocketDefault` serves every call, and mints each connection a
+    random id.
+  - `WebSocketHandler::handle` returns the guest's own error.
+  - On `wasm32`, `omnia_wasi_websocket::omnia` holds the raw bindings,
+    which the crate root held.
+- `omnia:identity@0.2.0`, rewritten as the interface `Identity` calls.
+  `WasiIdentity` serves it over one `IdentityClient`:
+  - `credentials.open` answers an `identity` handle, and `get-token` goes
+    through it. A name the deployment does not declare fails at `open`
+    with `not-found`.
+  - An `access-token` is an OAuth 2.0 bearer token and the instant it
+    `expires-at`.
+  - An empty `scopes` asks for the identity's default scopes. A portable
+    request names one scope, and a backend may fail any other number with
+    `unsupported`.
+  - `WasiIdentity` answers `unsupported` for nothing.
+  - On `wasm32`, `omnia_wasi_identity::omnia` holds the raw bindings, which
+    the crate root held.
+- `omnia:vault@0.2.0`, rewritten as the interface `SecretStore` calls.
+  `WasiVault` serves it over one `VaultClient`:
+  - `store.open` answers a `locker` handle, and every call goes through
+    it. A name the deployment does not declare fails at `open` with
+    `not-found`.
+  - `list-secrets` pages the secret names under a prefix, in no particular
+    order.
+  - A portable secret name is 1 to 63 lowercase ASCII letters, digits, and
+    `-`. A portable value is not empty and at most 16 kibibytes.
+  - A deleted name may be set again at once.
+  - `WasiVault` answers `unsupported` for nothing.
+  - On `wasm32`, `omnia_wasi_vault::omnia` holds the raw bindings, which
+    `omnia_wasi_vault::vault` held.
+- `omnia:docstore`, rewritten in place as the interface `DocumentDb`
+  calls. `WasiDocStore` serves it over one `DocStoreClient`:
+  - `store.open` answers a `collection` handle, and every call goes
+    through it. A name the deployment does not declare fails with
+    `not-found`.
+  - A body is a JSON object, as `json` text. A write whose body is not one
+    fails with `invalid`.
+  - A write returns the document's `revision`, and a read reports it.
+    `put` takes an `absent` or `matches` precondition, and `delete` a
+    revision. One that fails answers a `conflict` carrying the document it
+    found.
+  - `delete` answers whether it removed a document.
+  - `exists` asks after one id, and `get-many`, `put-many`, and
+    `delete-many` take several at once.
+  - A `filter` is a list of groups, and holds when each group has a
+    condition that holds. A condition tests one field with `eq`, an
+    ordering, `in`, a text test, `array-contains`, or `null`, and may be
+    negated.
+  - `query` answers one `page` of at most 1,000 documents, and the cursor
+    that resumes it.
+  - `WasiDocStore` answers `unsupported` for a `matches` write, a `delete`
+    with a revision, and an `array-contains` test.
+  - On `wasm32`, `omnia_wasi_docstore::omnia` holds the raw bindings,
+    which the crate root held.
+- `omnia:plugins@0.2.0`, rewritten as the interface `Plugins` calls.
+  `WasiPlugins` serves it over the deployment's loader grant:
+  - `types` holds the portable forms: a `source`, a `plugin`, a
+    `conflict`, and the `error`.
+  - `loader.load` takes a `source`: a `declared` name, a `path` beneath a
+    read-only mount, or a `release`, whose `registry` serves a namespace
+    the deployment routes nowhere. A `path` or a `release` takes an
+    optional `pin`, the digest its bytes must hash to.
+  - A load whose bytes miss its `pin`, or whose name is active under other
+    bytes, loads nothing and answers a `conflict`. It carries the digest
+    found and the plugin active under the name.
+  - `WasiPlugins` answers `unsupported` for a runtime with no loader
+    installed and for a release with no registry client.
+- `omnia:otel@0.2.0`, rewritten over OTLP's own records. `WasiOtel`
+  serves it over one `OtelClient`:
+  - `traces.export` and `metrics.export` take the guest's telemetry grouped
+    by instrumentation scope, with OTLP's names and meanings. A time is
+    nanoseconds since the Unix epoch.
+  - The host adds the deployment's resource to each export, and exports
+    spans as the guest gives them.
+  - A value is any of OTLP's: a scalar, bytes, an array of one type, or a
+    map or nested array as JSON text.
+  - `traces.current-span-context` answers the host's span for the call. A
+    guest's root span takes it as its parent, so the guest's spans join the
+    host's trace. With no host span, they form a trace of their own, where
+    the host dropped them.
+  - The host refuses an id that is not portable and a `json-value` that is
+    not JSON with `invalid`.
+  - The unstable `logs` interface exports log records, and a guest binds it
+    by enabling the `logs` feature. `WasiOtel` answers `unsupported` for
+    it.
+  - A `u64` measurement past `i64::MAX` exports as `i64::MAX`, where it
+    exported as a negative number.
+  - A span exports the kind the guest gave it, where the host cast the kind
+    by position and exported each as another.
+  - On `wasm32`, `omnia_wasi_otel::omnia` holds the raw bindings.
+- `omnia:model@0.3.0`, rewritten as the interface `Model` calls.
+  `WasiModel` serves it over one `ModelClient`:
+  - `completion.open` answers a `model` handle, and `complete` goes
+    through it. A name the deployment does not declare fails with
+    `not-found`. The SDK opens `default` for a request that names no
+    model.
+  - A session's calls and results are typed. A tool call and a check are
+    each a case of `call`, and the guest answers each by its `id` with a
+    result of the same kind. A result of the wrong kind fails the
+    completion with `invalid`, and so does closing `results` or dropping
+    `calls` while a call is outstanding.
+  - A completion that spent a budget resolves its reply to `exhausted`,
+    an outcome rather than an error, naming the `budget` and the usage it
+    spent.
+  - `effort` is `low`, `medium`, `high`, or `other`, a level by the
+    backend's own name. The host passes a level through, and a backend
+    fails one it does not know with `invalid`.
+  - A `workspace-grant` lends a `location`, and holds the `worker` grant
+    that reaches beyond it, so a worker grant with no lend cannot be
+    given.
+  - A request that gives a tool name twice is `invalid`.
+  - On `wasm32`, `omnia_wasi_model::omnia` holds the raw bindings, which
+    the crate root held.
+- `omnia:vcs@0.2.0`, rewritten as the interface `Vcs` calls. `WasiVcs`
+  serves it over one `VcsClient`:
+  - `store.open` answers a `workspace` handle for the repository or
+    working copy at a `location`, and every call goes through it. A place
+    that holds none fails with `not-found`.
+  - `store.init` where a workspace already is answers `occupied`, and so
+    do `add` and `clone` onto a directory that holds anything. The place
+    stays as it was.
+  - A lookup that finds nothing is `none`. That covers a revision, a
+    bookmark, a remote's bookmark, and the `head` of a workspace with no
+    commits.
+  - A merge that seals nothing answers `unmerged`: the paths it left in
+    conflict, or the pending changes that stopped it starting.
+  - A push the remote moved past answers `diverged`, carrying the commit
+    the repository last saw the remote's bookmark at.
+  - `log` and `status` answer one page of at most 1,000 entries, and the
+    cursor that resumes it.
+  - `set-bookmark` takes an `absent` or `matches` precondition, and one
+    that fails answers a `conflict` carrying the commit it found.
+  - The optional `workspaces` interface adds and removes a further
+    workspace of a repository. The optional `remotes` interface clones,
+    fetches, reads a remote's bookmark, and pushes.
+  - `WasiVcs` answers `unsupported` for a `log` with no base and a
+    `set-bookmark` with a precondition.
+  - On `wasm32`, `omnia_wasi_vcs::omnia` holds the raw bindings, which the
+    crate root held.
+- `omnia:config`, the Omnia-owned interface `Config` calls, in place of
+  the `wasi:config` draft. `WasiConfig` serves it over one
+  `ConfigClient`:
+  - `store.get` answers the value set for a key, and `none` when it is
+    unset.
+  - A portable key is 1 to 253 bytes of uppercase ASCII letters, digits,
+    and `_`, and does not start with a digit.
+  - The optional `entries` interface pages the entries under a key prefix.
+  - `WasiConfig` answers `unsupported` for nothing.
+  - On `wasm32`, `omnia_wasi_config::omnia` holds the raw bindings, which
+    the crate root held.
 - The codes of a failed capability call. Its `omnia_sdk::Error` names the
   class of failure in its code:
   - `not-found`, `denied`, `invalid`, `unsupported`, or `other` on a
@@ -77,6 +325,18 @@ Unreleased
 - `omnia_wasi_identity::StubOptions`. `IdentityStub` serves the identities
   `IDENTITY_NAMES` lists, comma-separated, and `default` when it is unset.
   Each identity's token is distinct.
+- `omnia_wasi_vault::ConnectOptions`. `VaultDefault` serves the lockers
+  `VAULT_LOCKERS` lists, comma-separated, and `default` when it is unset.
+- `omnia_wasi_docstore::ConnectOptions`. `DocStoreDefault` serves the
+  collections `DOCSTORE_COLLECTIONS` lists, comma-separated, and `default`
+  when it is unset.
+- `omnia_wasi_model::ConnectOptions`. `ModelDefault` serves the models
+  `MODEL_NAMES` lists, comma-separated, and `default` when it is unset.
+- `omnia_wasi_model::Exhausted`. A backend returns one to end a completion
+  `exhausted`, naming the `Budget` that ran out and the usage it spent.
+- `omnia_sdk::model::Effort::Other`, a level by the backend's own name, and
+  `Effort::as_str`, the name a backend receives.
+- `omnia_test::Seen::effort`, the level a recorded request named.
 - Extension traits, blanket-implemented over each capability:
   `ConfigExt::{require, parse}`, `DocumentDbExt::get_as`,
   `HttpClientExt::fetch_json`, `IdentityExt::access_token`,
@@ -87,18 +347,20 @@ Unreleased
   `SortField::compare` in `omnia_sdk::docstore`. `Filter::matches` and
   `SortField::compare` are the reference query semantics, and
   `omnia_test::guest::MemoryDocs` evaluates its queries with them.
-  `Filter::check` holds a filter to `Filter::MAX_DEPTH` and
-  `Filter::MAX_LIST_LEN`.
+  `Filter::check` holds a filter to `Filter::MAX_DEPTH`,
+  `Filter::MAX_LIST_LEN`, and `Filter::MAX_CONDITIONS`.
 - `omnia_sdk::messaging::Message::with_key` and
-  `omnia_sdk::api::messaging::Delivery::key`. A message's key crosses the
-  wire as its `key` metadata entry.
+  `omnia_sdk::api::messaging::Delivery::key`, the key that orders and
+  partitions a message.
 - `omnia_test::guest::{send, deliver}`, which drive a router natively, and
   `omnia_test::guest::ScriptedVcs`, a scripted `Vcs`.
-- `Metadata::deadline` carries the instant the guest timeout expires. Each
-  carrier holds it as decimal milliseconds since the Unix epoch:
-  - The HTTP host stamps the `x-deadline` header.
-  - The messaging host stamps the `deadline` metadata entry.
-  - `Metadata::from_env` reads `<PREFIX>_DEADLINE`.
+- `Metadata::deadline` carries the instant the guest timeout expires:
+  - The HTTP host stamps the `x-deadline` header, as decimal milliseconds
+    since the Unix epoch.
+  - The messaging host sets the delivery's `deadline`, which
+    `Delivery::deadline` holds.
+  - `Metadata::from_env` reads `<PREFIX>_DEADLINE`, as decimal
+    milliseconds since the Unix epoch.
 
   A host's stamp replaces any inbound value. A command runs uncapped and
   carries none.
@@ -120,9 +382,9 @@ Unreleased
 - `Runtime::stop` and `Runtime::stopped`. A trigger server waits on
   `stopped` to stop accepting work and drain. `Runtime::shutdown` stops
   the runtime too.
-- `omnia_plugin::loader`, on `wasm32`: the guest bindings for
-  `omnia:plugins/loader`. `omnia-sdk` serves `Plugins` through them and
-  carries no WIT of its own.
+- `omnia_plugin::omnia`, on `wasm32`: the guest bindings for
+  `omnia:plugins`. `omnia-sdk` serves `Plugins` through them and carries
+  no WIT of its own.
 
 ### Changed
 
@@ -131,8 +393,7 @@ Unreleased
   that imports a WASI 0.2 `wasi:cli`, `wasi:clocks`, `wasi:filesystem`,
   `wasi:http`, `wasi:io`, `wasi:random`, or `wasi:sockets` interface is
   refused by name, with the rebuild it needs, at startup or at its first
-  use. The `wasi:config`, `wasi:keyvalue`, `wasi:messaging`, and
-  `wasi:sql` drafts are served as before.
+  use.
 - `omnia_test::build` compiles a fixture crate's programs for
   `wasm32-wasip3`.
 - A raw export that may wait is an `async func`. On `wasm32-wasip3`,
@@ -192,8 +453,10 @@ Unreleased
     `execute` answers a `u64`, and `batch` runs `Statement`s.
   - `DocumentStore` is `DocumentDb`. `query` takes `&Query`, which was
     `QueryOptions` with `after` for `continuation`, and answers a
-    `Page<Document>`. `insert` answers `Ok(Err(Exists))` for an id already
-    stored, and a `Document` payload is `Bytes`.
+    `Page<Document>`. A query that sets `offset` fails with the code
+    `unsupported`, so a guest pages with `after` and `Page::next`.
+    `insert` answers `Ok(Err(Exists))` for an id already stored, and a
+    `Document` payload is `Bytes`.
   - `BlobStore` answers `None` for a missing object. A call on an object
     in a container that does not exist fails with the code `not-found`,
     and `delete_container` succeeds when the container is absent.
@@ -204,20 +467,33 @@ Unreleased
     provided `exists`, `delete_many`, `copy`, `rename`, and `clear`.
   - `ObjectMetadata`, `ContainerMetadata`, `AccessToken`, `Document`,
     `Message`, `Delivery`, and `Statement` are `#[non_exhaustive]`, so
-    code outside the SDK builds them with `new`. A metadata `created_at`
-    is a `SystemTime`.
-- `SqlDb` calls `omnia:sql`, one host call per method, and `batch` runs its
-  statements in one transaction. A failing statement rolls back the whole
-  batch.
-- `BlobStore` calls `omnia:blobstore`, one host call per method. Its codes
-  come from the error's case, where the SDK read a missing container or
-  object from the message.
+    code outside the SDK builds them with `new`. An
+    `ObjectMetadata::created_at` is a `SystemTime`, and a
+    `ContainerMetadata::created_at` is an `Option<SystemTime>`, `None`
+    where the store records no time.
+- `SqlDb` calls `omnia:sql`, opening a `database` handle for each call, and
+  `batch` runs its statements in one transaction. A failing statement rolls
+  back the whole batch.
+- Every `SqlDb` implementor provides `begin` and its `Transaction` type.
+- `omnia_sdk::sql::Value` mirrors `omnia:sql`, where `DataType` wrapped
+  each case in an `Option`:
+  - `Value::Null` is a `NULL` of any type, and a `NULL` reads back as it.
+  - Every other case holds its value bare, as in `Value::Int64(1)`.
+    `From` builds one from a value, or from an `Option` whose `None` is
+    `Null`.
+  - `Uint32` and `Uint64` are gone. A `u32` converts into an `Int64`, and
+    a `u64` binds once the caller converts it to an `i64`.
+  - `Binary` holds `Bytes`.
+  - A `Timestamp` with a `Z` or an offset travels as a `timestamp-tz`.
+- `BlobStore` calls `omnia:blobstore`, opening a `container` handle for
+  each object call. Its codes come from the error's case, where the SDK
+  read a missing container or object from the message.
 - `SqlDefault` opens only the names it declares, and refuses any other.
   A guest that opened a connection by another name, such as `db`, opens
   `default` or lists the name in `SQL_DATABASES`.
 - `SqlClient::open` fails a name the deployment does not declare with
   `omnia_wasi_sql::Error::NotFound`.
-- `omnia_wasi_sql::Connection` serves `omnia:sql` and the draft alike:
+- `omnia_wasi_sql::Connection` serves `omnia:sql` alone:
   - `query` and `execute`, which was `exec`, take a `Vec<Value>`, and
     `execute` answers a `u64`.
   - `batch` runs a `Vec<Statement>` in one transaction. A `Statement` is
@@ -226,27 +502,143 @@ Unreleased
   - A backend picks a failure's code by returning an
     `omnia_wasi_sql::Error`, whose six cases are the six capability error
     codes.
+  - `select` answers a `ResultSet`, the selected columns beside the rows.
+    Its default body runs `query` and names the first row's columns.
+  - `begin`, `commit`, and `rollback` bound the transaction the host runs
+    on the connection. Their default bodies send `BEGIN`, `COMMIT`, and
+    `ROLLBACK` through `execute`.
+- `WasiSql` fails a statement that starts or ends a transaction or a
+  savepoint, such as `BEGIN`, `COMMIT`, or `SAVEPOINT`, with the code
+  `invalid`. A guest ends a transaction through its handle, and
+  `SET TRANSACTION` still reaches the backend.
+- `SqlDefault` serves transactions. Every handle on a database shares its
+  one `SQLite` connection, so a call made while a transaction is open waits
+  up to 5 s for it and then fails with the code `unavailable`, as a busy or
+  locked database does. A DDL statement answers `0` rows changed.
 - `SqlDefault` stores a `date` or `time` as the text it is given. It stored
   one as `NULL` before.
 - `Row::get` reads a `bool` from an integer `0` or `1` too, which is how
   SQLite returns a `BOOLEAN`.
-- The `omnia:docstore` `error` has one case per capability error code, and
-  `insert` answers `already-exists` for an id already stored. The SDK
-  reads both without matching message text.
+- Collection names are strict. `DocStoreDefault` opens only the
+  collections it declares, any other fails with `not-found`, and a write
+  no longer creates one. A deployment whose guests use a collection other
+  than `default` lists it in `DOCSTORE_COLLECTIONS`.
 - `DocStoreClient::insert` answers `false` for an id already stored, and a
   backend picks a failure's code by returning an
   `omnia_wasi_docstore::Error`.
+- `omnia_wasi_docstore::{Document, ScalarValue, ComparisonOp, SortField,
+  QueryResult}` are the crate's own types, where the WIT generated them.
+  Their names and shapes are unchanged, so a backend builds as before.
+- A `Timestamp` filter value reaches a backend as `ScalarValue::Str`, since
+  `omnia:docstore` carries it as text. `omnia-azure-table` therefore
+  compares it as a string, not as an `Edm.DateTime`.
+- `DocumentDb::query` sends a filter as an `and` of `or`s. It pushes each
+  `not` down to the fields and distributes each `or` over the `and`s inside
+  it.
 - `DocumentDb::query` fails a filter past its limits with the code
-  `invalid` before the query reaches the host, where the guest
-  trapped before. A filter nests at most 5 deep, a list holds 1 to 100
-  values, and an `and` or `or` holds a child. `MemoryDocs` refuses the
-  same filters, and the host's `in-list` and `not-in-list` constructors
-  refuse an empty list.
+  `invalid` before the query reaches the host, where the guest trapped
+  before:
+  - A filter nests at most 5 deep, a list holds 1 to 100 values, and an
+    `and` or `or` holds a child.
+  - A filter holds at most 100 conditions once written as an `and` of
+    `or`s.
+  - A `Binary` value, a `Float64` that is not finite, and an ordering
+    comparison with `null` or a boolean are refused.
+
+  `MemoryDocs` refuses the same filters, and the host refuses a filter past
+  its own limits with `invalid` too.
+- `MemoryDocs` fails a query that sets `offset` with the code
+  `unsupported`, and a write whose body is not a JSON object with
+  `invalid`, as the runtime does.
 - `IdentityStub` refuses an identity `IDENTITY_NAMES` does not list, and
   `IdentityDefault` serves the identity `default` alone. A refused name is
-  `no-such-identity`, which `Identity` reports with the code `not-found`.
-  A backend picks a failure's code by returning an
-  `omnia_wasi_identity::Error`.
+  `not-found`. A backend picks a failure's code by returning an
+  `omnia_wasi_identity::Error`, whose six cases are the six capability
+  error codes.
+- `omnia_wasi_identity::AccessToken` is the crate's own struct, which the
+  host maps onto the `omnia:identity` record. Its `expires_in` is the whole
+  seconds the token has left when the backend answers, and its `Debug`
+  redacts the token. `IdentityDefault` answers a cached token with the time
+  it has left, where it answered the lifetime the token was issued with.
+- Model names are strict. `ModelDefault` opens only the models it
+  declares, and any other fails with `not-found`. A deployment whose guests
+  open a model other than `default` lists it in `MODEL_NAMES`. What an
+  echo cannot honour is `unsupported`: a `format::schema` and a set
+  `generation` field.
+- A model backend picks a failure's code by returning an
+  `omnia_wasi_model::Error`, whose six cases are the six capability error
+  codes. `Error::InvalidRequest` is `Error::Invalid`, and a spent budget is
+  an `omnia_wasi_model::Exhausted`, where it was `Error::BudgetExhausted`.
+  `ToolFailed` and `Backend` give way to the case that names the failure.
+- `omnia_wasi_model::{Request, Generation, Tool, Function, Usage}` are the
+  crate's own types, where the WIT generated them. A backend changes where
+  their shapes do:
+  - `Request::model` is the name the guest opened the model by, `default`
+    included, where it was an optional hint the guest passed through. A
+    backend maps `default` onto its own default model.
+  - `Generation::effort` is an `Effort`, which loses `Minimal` and gains
+    `Other`, a level by the backend's own name. `Effort::as_str` names the
+    level, and a backend fails one it does not know with
+    `Error::Invalid`.
+  - `Function::description` is an `Option`.
+  - `Tool` has the one variant `Function`.
+  - `Usage` counts in `u64`, and adds `cache_read_tokens` and
+    `cache_write_tokens`.
+- `omnia_wasi_model::WorkspaceGrant` holds the lent `Location`, which has
+  the fields the grant had, and the `worker` grant that `Grants` held
+  beside it. `Grants::location` and `Grants::worker` read them.
+- `WasiProvider`'s `Model` maps each `omnia:model` outcome onto the
+  `model::Error` variant that names it:
+  - `invalid` is `InvalidRequest`. A tool result or correction over the
+    host's size cap is one, where it was `ToolFailed`.
+  - `exhausted` is `BudgetExhausted`. Its detail is the last correction
+    when the last candidate was rejected, and the `exhausted` detail
+    otherwise.
+  - `not-found`, `denied`, `unsupported`, and `unavailable` are the new
+    `NotFound`, `Denied`, `Unsupported`, and `Unavailable`.
+  - `other` is `Backend`.
+
+  A declared tool named `check` fails with `InvalidRequest`, because a
+  check reaches the handler under that name.
+- `omnia_sdk::model::Usage` counts in `u64`, and adds `cache_read_tokens`
+  and `cache_write_tokens`.
+- `omnia_sdk::model::Effort` is no longer `Copy`, since `Effort::Other`
+  holds a name.
+- `omnia_wasi_config::ConfigClient` serves `omnia:config`:
+  - `get` answers the value set for one key, or `None` when it is unset.
+    It replaces `get_config`, which lent the whole map as a
+    `WasiConfigVariables`.
+  - `entries` answers every entry a guest may read. Its default body fails
+    with `omnia_wasi_config::Error::Unsupported`.
+  - A backend picks a failure's code by returning an
+    `omnia_wasi_config::Error`, whose six cases are the six capability
+    error codes.
+- `ConfigDefault::connect` skips a variable whose name or value is not
+  Unicode, where it panicked. `Default` builds an empty one, and
+  `FromIterator` builds one from key-value pairs.
+- `omnia::LoadError` has six cases, the six capability error codes, which
+  were `Refused`, `Unavailable`, and `Internal`. `GuestError` and
+  `AcquireError` name the same classes where they had `Refused`:
+  - a `GuestError::Conflict` carries the digest of the bytes it turned
+    away;
+  - a `GuestError` for a missing file is `NotFound`, which was
+    `Unavailable`;
+  - a `GuestError` for a runtime with no registry client is
+    `Unsupported`, which was `Internal`.
+- `omnia::Plugins::load` and `PluginLoader::load` answer
+  `Result<Result<Plugin, LoadConflict>, LoadError>`. An
+  `omnia::LoadConflict` is a load that loaded nothing because its bytes
+  missed its pin or its name is active under other bytes. It carries the
+  digest found and the `Plugin` active under the name.
+- `WasiProvider`'s `Plugins` folds the six cases onto its three codes, and
+  answers a conflict as `refused`. Four loads change code:
+  - a missing component file is `refused`, which was `unavailable`;
+  - a path the filesystem refuses to read, such as a link that leads out
+    of its mount, is `refused`, which was `unavailable`;
+  - a registry digest that is not `sha256` is `internal`, which was
+    `refused`;
+  - a registry's credential, metadata, or content failure is
+    `unavailable`, which was `refused`.
 - `BlobStoreClient` states the container rules every backend keeps:
   - `get_container` fails a container that does not exist with
     `omnia_wasi_blobstore::Error::missing_container`.
@@ -256,22 +648,25 @@ Unreleased
   A backend picks a failure's code by returning an
   `omnia_wasi_blobstore::Error`, whose six cases are the six capability
   error codes.
-- `omnia_wasi_blobstore::Container` takes the `omnia:blobstore` shapes:
+- `omnia_wasi_blobstore::Container` changes shape:
   - `get_data` takes a half-open `Range<u64>`, clamped to the object. An
     inverted range, which a backend refused, reads as empty.
   - `object_info` answers `None` for an absent object.
   - `list_objects(prefix, after)` answers one name-ordered `Page` of
     `ObjectMetadata`.
 
-  `ContainerMetadata`, `ObjectMetadata`, and `Page` are the
-  `omnia:blobstore` records. The host translates the draft's inclusive
-  range and its name stream itself.
-- `StateStore` calls `omnia:keyvalue`, one host call per method:
+  `ContainerMetadata`, `ObjectMetadata`, and `Page` are the crate's own
+  structs, which the host maps onto the `omnia:blobstore` records. The
+  host resolves a `byte-range` to a `Range<u64>`, and folds and limits a
+  listing itself.
+- `StateStore` calls `omnia:keyvalue`, opening a `bucket` handle for each
+  call:
   - `get` answers `Option<Bytes>`.
   - `set` answers `()`, and a TTL is an `Option<Duration>`. A zero TTL
     fails with the code `invalid` and writes nothing.
-  - `cas` is `compare_and_swap`. A mismatch answers `Ok(Err(Conflict))`
-    with the value it found.
+  - `cas` is `compare_and_swap`. It writes under the `absent`
+    precondition, or under the `revision` it read the expected value at.
+    A mismatch answers `Ok(Err(Conflict))` with the value it found.
   - `increment` takes a TTL. Like `compare_and_swap`, it applies the TTL
     only to an entry it creates.
   - `named(name)` selects another bucket the deployment declares.
@@ -285,12 +680,30 @@ Unreleased
   0.37 guest set with a TTL reads back as its JSON `Cacheable` envelope.
   `omnia_test::host::Backends::state` reads the raw bytes.
 - Bucket names are strict. `KeyValueDefault` opens only the buckets it
-  declares, and any other fails with `not-found` on `omnia:keyvalue` and
-  `no-such-store` on the draft. A deployment whose guests open a bucket
-  other than `default` lists it in `KEYVALUE_BUCKETS`.
-- `Bucket::{set, increment}` take a TTL, and `Bucket::compare_and_swap`
-  replaces `swap`. A backend picks a failure's code by returning an
+  declares, and any other fails with `not-found`. A deployment whose guests
+  open a bucket other than `default` lists it in `KEYVALUE_BUCKETS`.
+- Locker names are strict. `VaultDefault` opens only the lockers it
+  declares, and any other fails with `not-found`. A deployment whose guests
+  open a locker other than `default` lists it in `VAULT_LOCKERS`. A backend
+  picks a failure's code by returning an `omnia_wasi_vault::Error`, whose
+  six cases are the six capability error codes.
+- `Bucket` carries the revisions `omnia:keyvalue` speaks:
+  - `get` answers an `Entry`, the stored bytes and their `Revision`.
+  - `set` takes a `Lifetime` and an optional `Precondition`, and answers
+    the revision it wrote. A precondition that does not hold answers the
+    entry found.
+  - `delete` takes an optional revision, and answers the entry found when
+    it does not match.
+  - `increment` takes the TTL of a counter it creates.
+  - `swap` is gone, and a `set` with a precondition replaces it.
+
+  A backend that keeps no revision of its own reports `Revision::of` the
+  stored bytes. A backend picks a failure's code by returning an
   `omnia_wasi_keyvalue::Error`.
+- `KeyValueDefault` and `omnia_test::guest::Memory` store a counter as
+  decimal text, as `omnia:keyvalue` specifies, rather than as eight
+  big-endian bytes. `increment` fails any other value with the code
+  `invalid`.
 - Each `Has<Trait>` names the type it delegates to as `Inner`, and its
   accessor returns `&Self::Inner`, so a capability's associated types
   forward to the field's. A `pub` provider that derives `Provider` needs
@@ -298,9 +711,9 @@ Unreleased
 - `omnia_test::guest::Scripted` is `ScriptedModel`, and
   `omnia_test::guest::Memory` implements `SecretStore`.
 - `omnia_test::guest::Memory` keeps state per bucket and secrets per
-  locker. `Memory::bucket` declares a bucket beside `default`,
-  `Memory::named` addresses another bucket and locker of the same store,
-  and `Memory::snapshot` answers state by bucket.
+  locker. `Memory::bucket` and `Memory::locker` declare a bucket and a
+  locker beside `default`, `Memory::named` addresses another bucket and
+  locker of the same store, and `Memory::snapshot` answers state by bucket.
 - `omnia_test::guest::Memory` fails a call on an object in a container
   nothing created with the code `not-found`, as the runtime does. A test
   creates the container first, or seeds it with `insert_container` or
@@ -311,6 +724,9 @@ Unreleased
   - `ScriptedTables::statements` answers `Executed`, which was
     `Statement`, and its `binding` was `connection`. `on_exec` takes a
     `u64`.
+  - `ScriptedTables::begin` answers a `ScriptedTransaction`, whose
+    statements the same rules answer. `ScriptedTables::transactions` lists
+    each one begun, with its statements and how it `Ended`.
   - `Broadcasted` has no channel `name`.
   - `MapConfig` answers an unknown key as unset.
   - `FixedIdentity` answers a named identity's token as `<token>:<name>`.
@@ -356,8 +772,19 @@ Unreleased
 - The messaging and websocket resource trait `Client` is `Endpoint`, and
   `MessagingClient::endpoint` and `WebSocketClient::endpoint` replace
   `connect`. `ClientProxy` keeps its name.
+- `omnia_wasi_messaging::HandleError` follows how the guest settled the
+  delivery. `Rejected` carries the guest's reason, where it carried an
+  error. `Released` is a delivery the guest gave back, with the least delay
+  it asked for. A backend that redelivers delivers a released message
+  again, and drops or dead-letters a rejected one.
 - The document store's WIT package is `omnia:docstore`, which was
   `wasi:docstore`, so a guest built against `wasi:docstore` is rebuilt.
+- The packages 0.37 shipped are rewritten under a new version, so a 0.37
+  guest that imports one is refused for an import the host does not serve,
+  not for a mismatched type, and is rebuilt:
+  - `omnia:identity`, `omnia:otel`, `omnia:plugins`, `omnia:vault`,
+    `omnia:vcs`, and `omnia:websocket` are `0.2.0`.
+  - `omnia:model` is `0.3.0`.
 - Native builds of `omnia-sdk`, and of `omnia-test` with the `guest`
   feature, link no `wasmtime`. `omnia-wasi-docstore` is a `wasm32`-only
   dependency of the SDK, and `MemoryDocs` keeps its own in-memory store.
@@ -371,8 +798,9 @@ Unreleased
   `code()` names, as a `vcs::Error` or `plugins::Error` does:
   - `invalid-request` and `budget-exhausted` on a `BadRequest`, which were
     `bad_request`.
-  - `tool-failed` and `backend` on a `BadGateway`, which were
+  - `unavailable` and `backend` on a `BadGateway`. A `backend` failure was
     `bad_gateway`.
+  - `not-found`, `denied`, and `unsupported` on a `ServerError`.
 - An `omnia_sdk::Error` under `anyhow` context adds its description, not
   its display, to the context. `bad_request!("no name")` under the
   context `saving` describes itself as `saving: no name`, which was
@@ -391,11 +819,13 @@ Unreleased
   - A handler's error takes the variant and code of the first
     `omnia_sdk::Error`, `vcs::Error`, `plugins::Error`, or `model::Error`
     in its source chain, and is otherwise a `ServerError`. Its description
-    is the whole chain. A broker redelivers it when it is a `BadGateway`.
+    is the whole chain. A broker that redelivers delivers it again unless
+    it is a `BadRequest`.
 
-  Over the draft `wasi:messaging`, every failure still crosses as
-  `error.other` carrying the error's display. A match on a `DeliveryError`
-  variant becomes a match on the code.
+  Over `omnia:messaging`, a failure settles the delivery with the error's
+  display as its reason. A `BadRequest` rejects it, and any other failure
+  releases it. A match on a `DeliveryError` variant becomes a match on the
+  code.
 - A subcommand reads its handler's error by the messaging rule above, so
   `Command::call` takes any handler, where it took one whose error
   converted into `Failure`. `Command::hints` and `Router::hints` consult
@@ -409,10 +839,6 @@ Unreleased
   it appears, so `SET name = $2 WHERE id = $1` no longer binds its values
   swapped. A `?` or `?n` placeholder binds as before, and any other named
   placeholder fails.
-- `omnia:otel` is `0.2.0`. Its timestamps are the WASI 0.3
-  `wasi:clocks/system-clock@0.3.2` `instant`, where `0.1.0` carried the
-  WASI 0.2 `wall-clock` `datetime`. The host reads an instant before the
-  epoch as the epoch.
 
 ### Removed
 
@@ -439,8 +865,25 @@ Unreleased
 - `omnia_wasi_docstore::document_store` and the SDK-typed
   `omnia_wasi_docstore::store` functions. The value types are
   `omnia_sdk::docstore`, a guest reaches the store through
-  `omnia_sdk::DocumentDb`, and `omnia_wasi_docstore::{store, types}` are
-  the raw `omnia:docstore` bindings.
+  `omnia_sdk::DocumentDb`, and `omnia_wasi_docstore::omnia` holds the raw
+  `omnia:docstore` bindings.
+- The `omnia:docstore` `filter` resource, `query-options` record, and
+  `insert` function, and with them the host's `FilterProxy`. A filter is a
+  list of groups, `query` takes its options as arguments, and `put` with
+  `absent` inserts.
+- The `Default` impl of `DocStoreDefault`. `DocStoreDefault::connect_with`
+  takes the `ConnectOptions` that declare its collections.
+- The `Default` impl of `ModelDefault`. `ModelDefault::connect_with` takes
+  the `ConnectOptions` that declare its models.
+- `omnia_wasi_model::Reply`, which the WIT generated.
+- Model Context Protocol grants: `omnia_wasi_model::Mcp`,
+  `Request::mcp_servers`, `omnia_sdk::model::McpGrant`, and `Tool::Mcp` in
+  both crates. A tool the model calls is a function tool the guest runs.
+  `omnia_sdk::mcp`, which serves MCP from a guest, stays.
+- `Effort::Minimal`, in `omnia_wasi_model` and `omnia_sdk::model`.
+  `Effort::Other("minimal")` reaches a backend that knows the level.
+- `omnia_sdk::model::Error::ToolFailed`. A tool's failure text reaches the
+  model, and a result over the host's size cap is `InvalidRequest`.
 - The `sql` and `docstore` features of `omnia-sdk`. `SqlDb` and
   `DocumentDb` are always built.
 - `omnia_test::guest::Namespaced`. A test addresses another bucket or
@@ -453,15 +896,30 @@ Unreleased
   `topic_with` or `command_with` decoder answers `omnia_sdk::Result<I>`, so
   `DecodeError::new(message)` becomes `bad_request!("{message}")`.
 - The host's `omnia_wasi_sql::DataType`, which is `omnia_wasi_sql::Value`,
-  and `omnia_wasi_sql::Error::trace`. The draft's `trace` is the message
-  of the `Error` case a backend returns.
+  and `omnia_wasi_sql::Error::trace`.
 - The `wasi:blobstore@0.2.0-draft` imports, whose values are `wasi:io@0.2`
   streams a WASI 0.3 runtime does not serve. With them go
   `omnia_wasi_blobstore::{blobstore, container, types}` on `wasm32`, and
   the host's `ContainerProxy`, `IncomingValue`, `OutgoingValue`, and
   `StreamObjectNames`. A guest reaches a blob store through
-  `omnia_sdk::BlobStore`, and `omnia_wasi_blobstore::omnia::store` is the
-  raw `omnia:blobstore` binding.
+  `omnia_sdk::BlobStore`, and `omnia_wasi_blobstore::omnia` holds the raw
+  `omnia:blobstore` bindings.
+- The `wasi:keyvalue@0.2.0-draft2` imports. With them go
+  `omnia_wasi_keyvalue::{store, atomics, batch}` on `wasm32`, and the
+  host's `BucketProxy` and `Cas`. A guest reaches a key-value store
+  through `omnia_sdk::StateStore`, and `omnia_wasi_keyvalue::omnia` holds
+  the raw `omnia:keyvalue` bindings.
+- The `wasi:sql@0.2.0-draft` imports. With them go
+  `omnia_wasi_sql::{readwrite, types, DataType, Field, Row}` on `wasm32`,
+  and the host's `ConnectionProxy`, `Prepared`, and `Trace`. A guest
+  reaches a database through `omnia_sdk::SqlDb`, and
+  `omnia_wasi_sql::omnia` holds the raw `omnia:sql` bindings.
+- The `wasi:config@0.2.0-rc.1` imports, which wasmtime's
+  `wasmtime-wasi-config` served. With them go `omnia_wasi_config::store` on
+  `wasm32`, and the host's `wasmtime_wasi_config` re-export and
+  `ConfigDefault::config_vars`. A guest reads configuration through
+  `omnia_sdk::Config`, and `omnia_wasi_config::omnia` holds the raw
+  `omnia:config` bindings.
 
 ---
 

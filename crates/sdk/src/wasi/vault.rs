@@ -3,10 +3,11 @@
 use std::borrow::Cow;
 
 use bytes::Bytes;
-use omnia_wasi_vault::vault;
+use omnia_wasi_vault::omnia::locker::Locker;
+use omnia_wasi_vault::omnia::store;
 
 use crate::vault::DEFAULT;
-use crate::{Error, HasSecretStore, Page, Result, SecretStore, WasiProvider};
+use crate::{HasSecretStore, Page, Result, SecretStore, WasiProvider};
 
 static DEFAULT_HANDLE: Handle = Handle {
     name: Cow::Borrowed(DEFAULT),
@@ -29,13 +30,11 @@ pub struct Handle {
 }
 
 impl Handle {
-    async fn open(&self) -> Result<vault::Locker> {
-        Ok(vault::open(self.name.to_string()).await?)
+    async fn open(&self) -> Result<Locker> {
+        Ok(store::open(self.name.to_string()).await?)
     }
 }
 
-// `omnia:vault` lists a locker in one call, so `keys` answers one page in key
-// order and resumes after the key it is given
 impl SecretStore for Handle {
     type Named = Self;
 
@@ -52,10 +51,9 @@ impl SecretStore for Handle {
     }
 
     async fn keys(&self, after: Option<&str>) -> Result<Page<String>> {
-        let mut keys = self.open().await?.list_ids().await?;
-        keys.retain(|key| after.is_none_or(|after| key.as_str() > after));
-        keys.sort_unstable();
-        Ok(Page::new(keys, None))
+        let locker = self.open().await?;
+        let names = locker.list_secrets(String::new(), after.map(str::to_owned), None).await?;
+        Ok(Page::new(names.secrets, names.next))
     }
 
     fn named(&self, name: &str) -> Self {
@@ -66,15 +64,5 @@ impl SecretStore for Handle {
 
     async fn exists(&self, key: &str) -> Result<bool> {
         Ok(self.open().await?.exists(key.to_owned()).await?)
-    }
-}
-
-impl From<vault::Error> for Error {
-    fn from(err: vault::Error) -> Self {
-        match err {
-            vault::Error::NoSuchStore => Self::server_error("not-found", "no such locker"),
-            vault::Error::AccessDenied => Self::server_error("denied", "access denied"),
-            vault::Error::Other(message) => Self::server_error("other", message),
-        }
     }
 }

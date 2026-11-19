@@ -148,7 +148,7 @@ async fn off_reference_names() {
 
     let error = acquirer.acquire(PACKAGE, None).await.expect_err("nothing stored answers");
     assert!(
-        matches!(&error, AcquireError::Refused(detail) if detail.contains("no registry routes") && detail.contains(STORED)),
+        matches!(&error, AcquireError::NotFound(detail) if detail.contains("no registry routes") && detail.contains(STORED)),
         "the refusal names the file the store would read: {error:?}"
     );
 }
@@ -168,7 +168,7 @@ async fn unrouted_package() {
     let error = acquirer.acquire(PACKAGE, None).await.expect_err("nothing routes the package");
     let root = store.path().display().to_string();
     assert!(
-        matches!(&error, AcquireError::Refused(detail) if detail.contains("no registry routes") && detail.contains("`test` namespace") && detail.contains(&root) && detail.contains(STORED)),
+        matches!(&error, AcquireError::NotFound(detail) if detail.contains("no registry routes") && detail.contains("`test` namespace") && detail.contains(&root) && detail.contains(STORED)),
         "refusal names the namespace, the store, and the file: {error:?}"
     );
     assert!(!store.path().join(STORED).exists(), "nothing was written");
@@ -176,7 +176,7 @@ async fn unrouted_package() {
     let storeless = RegistryClient::new(Config::empty(), NoStore);
     let error = storeless.acquire(PACKAGE, None).await.expect_err("nothing routes the package");
     assert!(
-        matches!(&error, AcquireError::Refused(detail) if detail.contains("no store is attached")),
+        matches!(&error, AcquireError::NotFound(detail) if detail.contains("no store is attached")),
         "refusal says no store could hold it: {error:?}"
     );
 }
@@ -193,7 +193,7 @@ async fn precompiled_release() {
 
     let error = acquirer.acquire(PACKAGE, None).await.expect_err("pre-compiled is refused");
     assert!(
-        matches!(&error, AcquireError::Refused(detail) if detail.contains("pre-compiled")),
+        matches!(&error, AcquireError::Invalid(detail) if detail.contains("pre-compiled")),
         "refusal: {error:?}"
     );
     assert!(!store.path().join(STORED).exists(), "nothing was written");
@@ -333,7 +333,7 @@ async fn named_endpoint() {
         .await
         .expect_err("the named registry routed nothing beyond its load");
     assert!(
-        matches!(&unnamed, AcquireError::Refused(detail) if detail.contains("no registry routes")),
+        matches!(&unnamed, AcquireError::NotFound(detail) if detail.contains("no registry routes")),
         "refusal: {unnamed:?}"
     );
     let routed = acquirer
@@ -341,7 +341,7 @@ async fn named_endpoint() {
         .await
         .expect_err("a routed namespace is not re-routed");
     assert!(
-        matches!(&routed, AcquireError::Refused(detail) if detail.contains("routed to `acme.test`") && detail.contains("`named.test`")),
+        matches!(&routed, AcquireError::Denied(detail) if detail.contains("routed to `acme.test`") && detail.contains("`named.test`")),
         "refusal names both registries: {routed:?}"
     );
     let same = acquirer
@@ -357,7 +357,7 @@ async fn named_endpoint() {
         .await
         .expect_err("a malformed registry name is refused");
     assert!(
-        matches!(&malformed, AcquireError::Refused(detail) if detail.contains("not a valid name")),
+        matches!(&malformed, AcquireError::Invalid(detail) if detail.contains("not a valid name")),
         "refusal: {malformed:?}"
     );
 
@@ -370,7 +370,7 @@ async fn named_endpoint() {
         .await
         .expect_err("a default registry routes every namespace");
     assert!(
-        matches!(&error, AcquireError::Refused(detail) if detail.contains("routed to `registry.test`")),
+        matches!(&error, AcquireError::Denied(detail) if detail.contains("routed to `registry.test`")),
         "refusal: {error:?}"
     );
 }
@@ -384,21 +384,21 @@ async fn unresolvable_packages() {
     let unversioned =
         acquirer.acquire("test:adapter", None).await.expect_err("exact version is mandatory");
     assert!(
-        matches!(&unversioned, AcquireError::Refused(detail) if detail.contains("exact version")),
+        matches!(&unversioned, AcquireError::Invalid(detail) if detail.contains("exact version")),
         "refusal: {unversioned:?}"
     );
 
     let latest =
         acquirer.acquire("test:adapter@latest", None).await.expect_err("nothing resolves latest");
     assert!(
-        matches!(&latest, AcquireError::Refused(detail) if detail.contains("exact semver version")),
+        matches!(&latest, AcquireError::Invalid(detail) if detail.contains("exact semver version")),
         "refusal: {latest:?}"
     );
 
     let absent =
         acquirer.acquire("test:absent@1.0.0", None).await.expect_err("an absent package fails");
     assert!(
-        matches!(absent, AcquireError::Refused(_)),
-        "an authoritative miss refuses: {absent:?}"
+        matches!(absent, AcquireError::NotFound(_)),
+        "an authoritative miss is not found: {absent:?}"
     );
 }

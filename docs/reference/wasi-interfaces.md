@@ -11,13 +11,13 @@ Every capability Omnia exposes to guests, its interface crate, the zero-config d
 | Pub/sub messaging | `wasi-messaging` | `WasiMessaging` † | `MessagingDefault` — in-process broadcast | `omnia-kafka`, `omnia-nats` |
 | Blob storage | `wasi-blobstore` | `WasiBlobStore` | `BlobStoreDefault` — in-memory | `omnia-azure-blob`, `omnia-mongodb`, `omnia-nats` |
 | SQL | `wasi-sql` | `WasiSql` | `SqlDefault` — SQLite, serving `default` (`SQL_DATABASE`, default shared in-memory) and the databases `SQL_DATABASES` declares | `omnia-postgres` |
-| Document store | `wasi-docstore` | `WasiDocStore` | `DocStoreDefault` — in-memory | `omnia-azure-table` |
+| Document store | `wasi-docstore` | `WasiDocStore` | `DocStoreDefault` — in-memory, serving the collections `DOCSTORE_COLLECTIONS` declares (default `default`) | `omnia-azure-table` |
 | Configuration | `wasi-config` | `WasiConfig` | `ConfigDefault` — host process environment snapshot | — |
-| Secrets vault | `wasi-vault` | `WasiVault` | `VaultDefault` — in-memory lockers | `omnia-azure-vault` |
+| Secrets vault | `wasi-vault` | `WasiVault` | `VaultDefault` — in-memory, serving the lockers `VAULT_LOCKERS` declares (default `default`) | `omnia-azure-vault` |
 | Identity/OAuth | `wasi-identity` | `WasiIdentity` | `IdentityDefault` — OAuth2 client flow for the identity `default` (`IDENTITY_CLIENT_ID`, `IDENTITY_CLIENT_SECRET`, `IDENTITY_TOKEN_URL`) | `omnia-azure-id` |
 | Observability | `wasi-otel` | `WasiOtel` | `OtelDefault` — log-only, no export | `omnia-opentelemetry` |
 | WebSockets | `wasi-websocket` | `WasiWebSocket` † | `WebSocketDefault` — tungstenite server (`WEBSOCKET_ADDR`, default `0.0.0.0:80`) | — |
-| Model completions | `wasi-model` | `WasiModel` | `ModelDefault` — deterministic echo (text/json echo the prompt; schema formats error) | `omnia-genai`, `omnia-cursor` |
+| Model completions | `wasi-model` | `WasiModel` | `ModelDefault` — deterministic echo, serving the models `MODEL_NAMES` declares (default `default`); what an echo cannot honour, such as a schema format, is `unsupported` | `omnia-genai`, `omnia-cursor` |
 | Version control | `wasi-vcs` | `WasiVcs` | — none | `omnia-git` |
 
 † Trigger host: runs a server and drives guest instances per inbound request. All other hosts only serve guest-initiated calls.
@@ -25,9 +25,11 @@ Every capability Omnia exposes to guests, its interface crate, the zero-config d
 Notes:
 
 - Package names on crates.io carry the `omnia-` prefix (`omnia-wasi-keyvalue`, and so on); directory names in `crates/` drop it.
-- `wasi-keyvalue` and `wasi-sql` each serve the Omnia-owned interface the SDK calls (`omnia:keyvalue`, `omnia:sql`) beside the WASI draft for guests that bind it directly. A backend implements one client trait and serves both. `wasi-blobstore` serves `omnia:blobstore` alone.
-- Most defaults are genuinely zero-config and in-memory. The exceptions: `HttpDefault` and `WebSocketDefault` bind real TCP ports, and `IdentityDefault` needs OAuth credentials. `ModelDefault` is a zero-config echo — it answers text/json completions with the prompt itself but rejects `format::schema`, so deployments bind a real backend and tests define inline canned backends. `wasi-vcs` ships no default at all: a repository is a tree on disk, so a deployment that links `WasiVcs` names a production backend, and a test scripts a `VcsClient` of its own.
-- `omnia:vcs` operations name a repository or working copy as a `location` — a lent mount-root descriptor plus a relative subpath — and the host resolves it beneath the authorized mount before the backend runs: a descriptor that is not a mount root, a subpath that leaves the mount or starts at `/`, and a mutation beneath a read-only mount are refused with no backend call. The backend works through a `Place`, an open directory handle the host holds for the whole operation, never a path it would walk again.
+- `wasi-keyvalue`, `wasi-blobstore`, `wasi-docstore`, `wasi-messaging`, `wasi-sql`, `wasi-websocket`, `wasi-identity`, `wasi-vault`, `wasi-otel`, and `wasi-config` serve `omnia:keyvalue`, `omnia:blobstore`, `omnia:docstore`, `omnia:messaging`, `omnia:sql`, `omnia:websocket`, `omnia:identity`, `omnia:vault`, `omnia:otel`, and `omnia:config` alone.
+- Every `omnia:*` package takes its `error`, its `timestamp`, and its `json` from `omnia:types`, which `wasi-types` holds. Each interface crate vendors it under `wit/deps`, and every guest binding maps it onto `omnia_wasi_types::omnia::types`, so a guest matches one `Error` whichever interface returned it.
+- An unstable interface binds in a guest only when the guest enables the feature of its name: `consumer`, `log`, and `admin` in `omnia:messaging`, `uploads` and `presign` in `omnia:blobstore`, and `logs` in `omnia:otel`. Every host links them, and answers `unsupported` for each today.
+- Most defaults are genuinely zero-config and in-memory. The exceptions: `HttpDefault` and `WebSocketDefault` bind real TCP ports, and `IdentityDefault` needs OAuth credentials. `ModelDefault` is a zero-config echo — it answers text/json completions with the prompt itself but answers `format::schema` with `unsupported`, so deployments bind a real backend and tests script `ScriptedModel` or define inline scenario backends. `wasi-vcs` ships no default at all: a repository is a tree on disk, so a deployment that links `WasiVcs` names a production backend, and a test scripts a `VcsClient` of its own.
+- `omnia:vcs` opens a `workspace` handle on the repository or working copy at a `location`, a lent mount-root descriptor plus a relative subpath, and every call goes through the handle. The host resolves the location beneath its mount before any backend runs. A root that is not a mount, a subpath that leads out of one, and a change beneath a read-only mount are `denied`. A subpath that is not plainly spelled, such as one that starts at `/`, is `invalid`. None of these reaches the backend. The backend works through a `Place`, an open directory handle the host holds for the whole call, never a path it would walk again.
 - Each interface crate compiles to guest bindings on `wasm32` and the host implementation on native targets, so guests and hosts depend on the same crate name.
 
 ## Crate anatomy
@@ -39,14 +41,15 @@ wasi-keyvalue/
 │   ├── guest.rs        # Guest-side bindings (wasm32)
 │   ├── host.rs         # bindgen!, #[derive(HostCtx)] WasiKeyValue, Host impl
 │   └── host/           # Host-side implementation (native)
-│       ├── omnia_impl.rs     # omnia:keyvalue/store Host* impls: one Bucket call each
-│       ├── store_impl.rs     # wasi:keyvalue/store Host* impls on HostView<'_, dyn KeyValueClient>
-│       ├── atomics_impl.rs   # ... one file per WIT interface
-│       ├── resource.rs       # Bucket, BucketProxy and the other table-held resources
+│       ├── bucket_impl.rs    # omnia:keyvalue/bucket Host* impls on the table-held BucketHandle
+│       ├── store_impl.rs     # omnia:keyvalue/store Host* impls on HostView<'_, dyn KeyValueClient>
+│       ├── keys_impl.rs      # ... one file per WIT interface
+│       ├── resource.rs       # the Bucket trait a backend implements
 │       └── default_impl.rs   # KeyValueDefault backend
 └── wit/
     ├── keyvalue.wit    # omnia:keyvalue, owned and edited here
-    └── deps/           # the wasi:keyvalue draft, fetched with wkg
+    └── deps/
+        └── types.wit   # omnia:types, vendored from wasi-types
 ```
 
 `host.rs` declares the host type and derives `HostCtx` on it with `#[host_ctx(client = KeyValueClient)]`, which emits the `HasData` and `HostCtx` impls that let a `runtime!` bundle serve it; its view is the library `HostView<'_, dyn KeyValueClient>` — `{ client, table }` — the `*_impl.rs` files implement the generated `Host*` traits on. See [Extending Omnia](../Architecture.md#extending-omnia) for the chain from backend to linker.
@@ -58,4 +61,5 @@ wasi-keyvalue/
 | `omnia` | Runtime core: engine, CLI, deployment, registry, dispatch, telemetry |
 | `omnia-sdk` | Guest SDK: `Handler`, `Context`, `Handlers`, the HTTP and messaging routers, the command façade (`parse`, `Command`, `Response`), each transport's `export!` macro, errors with their status/exit map, the capability traits and `WasiProvider`, and MCP. Features: `http` (default), `command` |
 | `omnia-guest-macros` | `#[instrument]`, `#[capability]`, and the `Provider`, `Settings`, and `FromRow` derives |
+| `omnia-wasi-types` | `omnia:types`, the WIT types every interface shares, and their guest bindings |
 | `omnia-host-macros` | `runtime!` macro (use via `omnia::runtime!`) and `#[derive(HostCtx)]` (use via `omnia_core::HostCtx`, or `omnia::HostCtx` with `crate = omnia`) |

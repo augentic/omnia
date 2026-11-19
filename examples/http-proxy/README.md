@@ -44,7 +44,7 @@ origin server.
 use base64ct::{Base64, Encoding};
 
 // PEM bundle: certificate first, then the private key.
-let pem = std::fs::read("client-bundle.pem")?; // or fetch from wasi:vault
+let pem = std::fs::read("client-bundle.pem")?; // or fetch from omnia:vault
 let request = http::Request::builder()
     .method(Method::GET)
     .uri("https://mtls.example.com/resource")
@@ -54,7 +54,7 @@ let request = http::Request::builder()
 let response = omnia_wasi_http::handle(request).await?;
 ```
 
-Keep the private key out of guest source: load it from `wasi:vault` or
+Keep the private key out of guest source: load it from `omnia:vault` or
 configuration at runtime. An invalid or malformed bundle fails the request
 with an internal error before any connection is attempted.
 

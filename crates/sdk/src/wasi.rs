@@ -13,7 +13,7 @@
 //! hand-written export calls too:
 //!
 //! - `http::serve` for `wasi:http`, behind the `http` feature
-//! - `messaging::handle` for `wasi:messaging`
+//! - `messaging::handle` for `omnia:messaging`
 //! - `command::execute` for `wasi:cli/run`
 
 mod blobstore;
@@ -32,8 +32,25 @@ pub mod vault;
 mod vcs;
 mod websockets;
 
+use omnia_wasi_types::omnia::types;
+
+use crate::Error;
+
 /// Zero-sized WASI provider implementing every capability trait on `wasm32`.
 ///
 /// Delegates to the `omnia-wasi-*` guest bindings on `wasm32-wasip3`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct WasiProvider;
+
+impl From<types::Error> for Error {
+    fn from(err: types::Error) -> Self {
+        match err {
+            types::Error::NotFound(message) => Self::server_error("not-found", message),
+            types::Error::Denied(message) => Self::server_error("denied", message),
+            types::Error::Invalid(message) => Self::server_error("invalid", message),
+            types::Error::Unsupported(message) => Self::server_error("unsupported", message),
+            types::Error::Unavailable(message) => Self::bad_gateway("unavailable", message),
+            types::Error::Other(message) => Self::server_error("other", message),
+        }
+    }
+}

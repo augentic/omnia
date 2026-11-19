@@ -13,7 +13,7 @@ use omnia_test::host::{Backends, Deployment, STATE_BUCKET, ScriptedModel, scratc
 use omnia_test::{Exchange, SeenFormat};
 use omnia_wasi_blobstore::BlobStoreClient as _;
 use omnia_wasi_keyvalue::{
-    Bucket, ConnectOptions, FutureResult, KeyValueClient, KeyValueDefault, WasiKeyValue,
+    Bucket, ConnectOptions, FutureResult, KeyValueClient, KeyValueDefault, Lifetime, WasiKeyValue,
 };
 use omnia_wasi_model::WasiModel;
 use omnia_wasi_otel::WasiOtel;
@@ -287,9 +287,10 @@ async fn swapped_keyvalue() {
         inner: KeyValueDefault::connect_with(options).await.expect("in-memory keyvalue"),
         opened: Arc::default(),
     };
-    // The guest's atomics start from a host-seeded counter.
+    // The guest's increments start from a host-seeded counter.
     let bucket = recording.inner.open_bucket("bucket".to_owned()).await.expect("bucket");
-    bucket.set("counter".to_owned(), 37_i64.to_be_bytes().to_vec(), None).await.expect("seed");
+    let seeded = bucket.set("counter".to_owned(), b"37".to_vec(), Lifetime::Replace(None), None);
+    seeded.await.expect("seed").expect("no precondition");
 
     let backends = Backends::defaults().await.keyvalue(recording);
     let status = Deployment::new()
@@ -304,17 +305,16 @@ async fn swapped_keyvalue() {
     let opened = backends.keyvalue.opened.lock().expect("opened buckets").clone();
     assert_eq!(opened, ["bucket"]);
     let bucket = backends.keyvalue.inner.open_bucket("bucket".to_owned()).await.expect("bucket");
-    assert_eq!(
-        bucket.get("counter".to_owned()).await.expect("get"),
-        Some(42_i64.to_be_bytes().to_vec())
-    );
+    let counter = bucket.get("counter".to_owned()).await.expect("get").map(|entry| entry.value);
+    assert_eq!(counter, Some(b"42".to_vec()));
 }
 
 #[tokio::test]
 async fn host_handles() {
     let backends = Backends::defaults().await;
     let bucket = backends.keyvalue.open_bucket(STATE_BUCKET.to_owned()).await.expect("bucket");
-    bucket.set("k".to_owned(), b"v".to_vec(), None).await.expect("set");
+    let set = bucket.set("k".to_owned(), b"v".to_vec(), Lifetime::Replace(None), None);
+    set.await.expect("set").expect("no precondition");
     assert_eq!(backends.state("k").await, Some(b"v".to_vec()));
     assert_eq!(backends.state("missing").await, None);
 

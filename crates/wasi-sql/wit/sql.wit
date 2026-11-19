@@ -1,113 +1,236 @@
 package omnia:sql@0.1.0;
 
-/// Relational databases, one function per `SqlDb` method.
+/// The types the SQL interfaces share.
 ///
-/// `db` names a database the deployment declares. An unnamed SDK handle
-/// passes `default`.
+/// Every backend accepts a portable name, statement, and row, and may reject
+/// any other as `invalid`.
 ///
-/// A statement numbers its parameters `$1`, `$2`, and so on. Each binds the
-/// value at that position in `params`, in any order and as often as it
-/// appears.
+/// - A portable database name is not empty and holds only ASCII letters,
+///   digits, `_`, and `-`. Names that differ only in case may open the same
+///   database.
+/// - A portable statement holds at most 64 KiB of SQL, with no NUL
+///   character, and binds at most 100 parameters.
+/// - A portable row holds at most 1 MiB of values.
+/// - A portable `text` value holds no NUL character, and a portable
+///   `float32` or `float64` is finite.
 ///
-/// `batch` runs its statements in order, in one transaction:
+/// An `error` from a SQL interface means:
 ///
-/// - The call returns each statement's changed-row count.
-/// - A failing statement rolls back the whole batch, and the call fails
-///   with that statement's error.
+/// - `not-found`: the database is not declared by the deployment. A query
+///   that selects no row is not an error.
+/// - `denied`: the caller may not use the database, or lacks a privilege
+///   the statement needs.
+/// - `invalid`: the request was rejected, such as SQL that does not
+///   prepare, a table the database lacks, or a parameter that does not
+///   bind.
+/// - `unsupported`: a valid request this backend cannot serve, such as a
+///   column type it cannot return.
+/// - `unavailable`: the database did not answer, or the call exceeded its
+///   bound. Work the database rolls back to let another transaction
+///   proceed fails this way too.
+/// - `other`: any other failure, such as a write a constraint refuses.
+interface types {
+  use omnia:types/types@0.1.0.{error};
+
+  /// A SQL value, bound as a parameter or read from a column.
+  ///
+  /// Each case names the column type it binds to. Bound to a parameter of
+  /// another type, a value converts without loss or the call fails with
+  /// `invalid`, as it does for a value not in its case's format. A backend
+  /// whose parameters carry no type, such as SQLite, may store a value as
+  /// given.
+  ///
+  /// A column reads back in a case that holds its value, so a portable
+  /// reader takes:
+  ///
+  /// - `int32` or `int64` from an integer column;
+  /// - `float32` or `float64` from a floating-point column;
+  /// - `boolean`, or `int64` 0 or 1, from a `BOOLEAN` column;
+  /// - its own case, or `text` in that case's format, from a temporal column.
+  ///
+  /// Precision finer than a microsecond is not portable. Fractional seconds
+  /// may read back with trailing zeros added or dropped.
+  variant value {
+    /// For a `BOOLEAN` column.
+    boolean(bool),
+    /// For an `INTEGER` column.
+    int32(s32),
+    /// For a `BIGINT` column.
+    int64(s64),
+    /// For a `REAL` column.
+    float32(f32),
+    /// For a `DOUBLE PRECISION` column.
+    float64(f64),
+    /// For a `TEXT` column.
+    text(string),
+    /// For a `BYTEA` column.
+    binary(list<u8>),
+    /// For a `DATE` column, as `YYYY-MM-DD`.
+    date(string),
+    /// For a `TIME` column, as `HH:MM:SS` with optional fractional seconds.
+    time(string),
+    /// For a `TIMESTAMP` column, as `YYYY-MM-DD HH:MM:SS` with optional
+    /// fractional seconds.
+    timestamp(string),
+    /// For a `TIMESTAMPTZ` column, as RFC 3339. A portable one has a
+    /// `+00:00` offset.
+    timestamp-tz(string),
+  }
+
+  /// A row's values, one for each column in select order. `none` is `NULL`.
+  type row = list<option<value>>;
+
+  /// The rows a query selects.
+  ///
+  /// The handle the query ran on may run nothing else until `rows` is read
+  /// to its end or dropped.
+  record result-set {
+    /// The name of each column, in select order.
+    columns: list<string>,
+    /// The rows, each holding one value for every column. Dropping it ends
+    /// the query.
+    rows: stream<row>,
+    /// Whether every row reached `rows`. The host always resolves it.
+    finished: future<result<_, error>>,
+  }
+}
+
+/// Statements run against one database. Every backend serves this interface.
 ///
-/// The host passes any SQL through. A guest that keeps to the portable
+/// A statement is one SQL statement, and text that holds more is `invalid`.
+/// It numbers its parameters `$1`, `$2`, and so on, skipping none, and
+/// `params` holds exactly one value for each. `$n` binds the `n`th value
+/// wherever it appears, and `none` binds `NULL`.
+///
+/// Each call commits before it returns, and `batch` groups its statements in
+/// one transaction. A statement that starts or ends a transaction or a
+/// savepoint, such as `BEGIN`, `COMMIT`, or `SAVEPOINT`, is `invalid`. Whether
+/// session state, such as a temporary table, outlasts a call is the backend's
+/// to decide.
+///
+/// The host passes all other SQL through. A guest that keeps to the portable
 /// dialect runs on every backend:
 ///
 /// - The column types are `INTEGER`, `BIGINT`, `REAL`, `DOUBLE PRECISION`,
 ///   `TEXT`, `BOOLEAN`, `BYTEA`, `DATE`, `TIME`, `TIMESTAMP`, and
 ///   `TIMESTAMPTZ`.
 /// - The caller supplies ids.
-/// - A `RETURNING` clause runs through `query`, and `ON CONFLICT` is
-///   portable.
-/// - A `NULL` binds as its column's case.
-/// - `uint32` and `uint64` are not portable.
+/// - A statement that returns rows, such as one with a `RETURNING` clause,
+///   runs through `query`.
+/// - `INSERT ... ON CONFLICT` is portable.
 interface database {
-  /// Why a call failed.
-  variant error {
-    /// The database is not declared by the deployment.
-    not-found(string),
-    /// The caller may not use the database.
-    denied(string),
-    /// The statement was rejected, such as SQL that does not prepare or
-    /// parameters that do not bind.
-    invalid(string),
-    /// A valid request this backend cannot serve.
-    unsupported(string),
-    /// The database did not answer, or the call exceeded its bound.
-    unavailable(string),
-    /// Any other failure.
-    other(string),
-  }
-
-  /// A statement parameter or a column value, where `none` is a typed `NULL`.
-  variant value {
-    /// A signed 32-bit integer.
-    int32(option<s32>),
-    /// A signed 64-bit integer.
-    int64(option<s64>),
-    /// An unsigned 32-bit integer.
-    uint32(option<u32>),
-    /// An unsigned 64-bit integer.
-    uint64(option<u64>),
-    /// A 32-bit floating-point number.
-    float(option<f32>),
-    /// A 64-bit floating-point number.
-    double(option<f64>),
-    /// A UTF-8 string.
-    str(option<string>),
-    /// A boolean.
-    boolean(option<bool>),
-    /// A `YYYY-MM-DD` date.
-    date(option<string>),
-    /// An `HH:MM:SS` time.
-    time(option<string>),
-    /// A `YYYY-MM-DD HH:MM:SS` timestamp, or RFC 3339 with a `+00:00`
-    /// offset for a `TIMESTAMPTZ` column.
-    timestamp(option<string>),
-    /// Opaque bytes.
-    binary(option<list<u8>>),
-  }
-
-  /// One column of a row.
-  record field {
-    /// The column name.
-    name: string,
-    /// The column value.
-    value: value,
-  }
-
-  /// One row a query selects.
-  record row {
-    /// The columns, in select order.
-    fields: list<field>,
-  }
+  use types.{error, result-set, value};
 
   /// One statement of a batch.
   record statement {
     /// The SQL text.
     sql: string,
-    /// The values its `$n` parameters bind.
-    params: list<value>,
+    /// The values its parameters bind.
+    params: list<option<value>>,
   }
 
-  /// Run `sql` with `params` bound and return the rows it selects.
-  query: async func(db: string, sql: string, params: list<value>) -> result<list<row>, error>;
+  /// An open database.
+  ///
+  /// A handle may hold one of the backend's connections until it is dropped,
+  /// and may run its calls one at a time.
+  resource database {
+    /// Run `sql` with `params` bound and return the rows it selects.
+    ///
+    /// A query that selects no row returns its columns and no rows.
+    query: async func(sql: string, params: list<option<value>>)
+      -> result<result-set, error>;
 
-  /// Run `sql` with `params` bound and return the number of rows it changed.
-  execute: async func(db: string, sql: string, params: list<value>) -> result<u64, error>;
+    /// Run `sql` with `params` bound and return how many rows it changed.
+    ///
+    /// A statement that changes no row, such as DDL, returns zero.
+    execute: async func(sql: string, params: list<option<value>>)
+      -> result<u64, error>;
 
-  /// Run `statements` in one transaction and return each one's changed-row
-  /// count.
-  batch: async func(db: string, statements: list<statement>) -> result<list<u64>, error>;
+    /// Run `statements` in order, in one transaction, and return how many
+    /// rows each changed.
+    ///
+    /// A failing statement rolls back the whole batch, and the call fails
+    /// with that statement's error. An empty batch returns an empty list.
+    batch: async func(statements: list<statement>) -> result<list<u64>, error>;
+  }
 }
 
-/// `omnia:sql/database` beside the `wasi:sql` draft.
-world imports {
+/// The databases a guest may open. Every backend serves this interface.
+interface store {
+  use types.{error};
+  use database.{database};
+
+  /// Open the database `name`, a binding the deployment declares. An unnamed
+  /// SDK handle opens `default`.
+  ///
+  /// An undeclared name fails with `not-found`.
+  open: async func(name: string) -> result<database, error>;
+}
+
+/// Optional: statements that commit or roll back together, over as many
+/// calls as it takes.
+///
+/// A transaction holds one of the backend's connections until it ends, so a
+/// guest ends it as soon as its work is done. Its statements follow the
+/// rules of `database`. It never sees another transaction's uncommitted
+/// changes, and any stronger isolation is the backend's to give.
+///
+/// A call outside the transaction may wait until it ends, so a guest that
+/// waits on one before ending the transaction may never finish.
+///
+/// A backend may roll a transaction back early, when it is left idle or to
+/// let another proceed. The call this interrupts, or the next call, fails
+/// with `unavailable`.
+interface transactions {
+  use types.{error, result-set, value};
+  use database.{database};
+
+  /// A transaction in progress.
+  ///
+  /// Its calls run one at a time, in the order made. A failure rolls the
+  /// transaction back and ends it, as does dropping it. A call on one that
+  /// has ended is `invalid`.
+  resource transaction {
+    /// Run `sql` with `params` bound and return the rows it selects.
+    ///
+    /// A query that selects no row returns its columns and no rows.
+    query: async func(sql: string, params: list<option<value>>)
+      -> result<result-set, error>;
+
+    /// Run `sql` with `params` bound and return how many rows it changed.
+    ///
+    /// A statement that changes no row, such as DDL, returns zero.
+    execute: async func(sql: string, params: list<option<value>>)
+      -> result<u64, error>;
+
+    /// Commit every change the transaction made, and end it.
+    ///
+    /// A commit that fails committed nothing, unless it failed with
+    /// `unavailable`, when the outcome is unknown.
+    commit: async func() -> result<_, error>;
+
+    /// Discard every change the transaction made, and end it. Rolling back
+    /// a transaction that already rolled back succeeds.
+    rollback: async func() -> result<_, error>;
+  }
+
+  /// Begin a transaction on `database`. It stays open after the handle is
+  /// dropped.
+  ///
+  /// A backend with no connection to give fails with `unavailable`.
+  begin: async func(database: borrow<database>) -> result<transaction, error>;
+}
+
+/// What every backend serves.
+world core {
+  import types;
+  import store;
   import database;
-  include wasi:sql/imports@0.2.0-draft;
+}
+
+/// Every interface. A backend answers `unsupported` for what it does not
+/// serve.
+world imports {
+  include core;
+  import transactions;
 }

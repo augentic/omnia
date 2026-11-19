@@ -4,13 +4,29 @@ This crate provides the Config interface for the Omnia runtime.
 
 ## Interface
 
-Implements the `wasi:config` WIT interface.
+Implements `omnia:config`, the interface the SDK's `Config` calls, over one
+`ConfigClient` per backend.
 
-A guest reaches it through `omnia_sdk::Config`. `get` answers `None` for a key the host does not set, and `ConfigExt::require` fails one with the code `not-found`.
+- A guest reads a key through `store.get`. An unset key is `none`, not an
+  error, and a key may be set to the empty string. `ConfigExt::require`
+  fails an unset key with the code `not-found`.
+- Every backend reads a portable key, and may reject any other with
+  `invalid`. A portable key:
+  - is 1 to 253 bytes long;
+  - holds only uppercase ASCII letters, digits, and `_`;
+  - does not start with a digit.
+- A deployment may change a value at any time, so two reads of one key may
+  differ.
+- `entries` is optional, and pages the entries under a key prefix. A
+  backend that does not override `ConfigClient::entries` answers
+  `unsupported`.
+- A backend picks a failure's case by returning an
+  `omnia_wasi_config::Error`, and any other failure is `other`.
+- The host itself answers `unsupported` for nothing.
 
 ## Backend
 
-- **Default**: Wraps `wasmtime-wasi-config` to provide configuration values from the host environment or configuration files.
+- **Default**: Answers from a snapshot of the host process environment, taken when it connects. It skips a variable whose name or value is not Unicode, and lists every variable through `entries`.
 
 ## Usage
 

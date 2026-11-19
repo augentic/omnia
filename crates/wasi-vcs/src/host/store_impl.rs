@@ -1,73 +1,34 @@
 //! The `omnia:vcs/store` host bindings.
 
 use omnia_core::{HostView, StoreCtx};
-use wasmtime::component::Accessor;
+use wasmtime::component::{Accessor, Resource};
 
-use crate::host::generated::omnia::vcs::store::{
-    Entry, Host, HostWithStore, Location, Merged, Rule,
-};
+use crate::host::generated::omnia::vcs::store::{Host, HostWithStore};
+use crate::host::generated::omnia::vcs::types::{Error, Location, Occupied};
 use crate::host::location::Intent;
-use crate::host::{Result, VcsClient, WasiVcs};
+use crate::host::workspace_impl::{WorkspaceHandle, found, laid};
+use crate::host::{VcsClient, WasiVcs};
 
 impl<B: Send + 'static> HostWithStore<StoreCtx<B>> for WasiVcs {
-    async fn resolve(
-        accessor: &Accessor<StoreCtx<B>, Self>, repo: Location, revision: String,
-    ) -> Result<String> {
-        Self::dispatch(accessor, |access| {
-            let repo = Self::locate(access, &repo, Intent::Read)?;
-            Ok(access.get().client.resolve(repo, revision))
-        })
-        .await
+    async fn open(
+        accessor: &Accessor<StoreCtx<B>, Self>, at: Location,
+    ) -> Result<Resource<WorkspaceHandle>, Error> {
+        let workspace = WorkspaceHandle::resolve(accessor, &at, Intent::Open)?;
+
+        // a workspace with no commits has no head, but is still a workspace
+        found(workspace.call(accessor, |client, place| client.head(place)).await)?;
+        workspace.push(accessor)
     }
 
-    async fn descends(
-        accessor: &Accessor<StoreCtx<B>, Self>, repo: Location, ancestor: String,
-        descendant: String,
-    ) -> Result<bool> {
-        Self::dispatch(accessor, |access| {
-            let repo = Self::locate(access, &repo, Intent::Read)?;
-            Ok(access.get().client.descends(repo, ancestor, descendant))
-        })
-        .await
-    }
-
-    async fn head(accessor: &Accessor<StoreCtx<B>, Self>, at: Location) -> Result<String> {
-        Self::dispatch(accessor, |access| {
-            let at = Self::locate(access, &at, Intent::Read)?;
-            Ok(access.get().client.head(at))
-        })
-        .await
-    }
-
-    async fn commit(
-        accessor: &Accessor<StoreCtx<B>, Self>, at: Location, message: String,
-    ) -> Result<Option<String>> {
-        Self::dispatch(accessor, |access| {
-            let at = Self::locate(access, &at, Intent::Mutate)?;
-            Ok(access.get().client.commit(at, message))
-        })
-        .await
-    }
-
-    async fn merge(
-        accessor: &Accessor<StoreCtx<B>, Self>, at: Location, revision: String, message: String,
-        policy: Vec<Rule>,
-    ) -> Result<Merged> {
-        Self::dispatch(accessor, |access| {
-            let at = Self::locate(access, &at, Intent::Mutate)?;
-            Ok(access.get().client.merge(at, revision, message, policy))
-        })
-        .await
-    }
-
-    async fn log(
-        accessor: &Accessor<StoreCtx<B>, Self>, repo: Location, revision: String, base: String,
-    ) -> Result<Vec<Entry>> {
-        Self::dispatch(accessor, |access| {
-            let repo = Self::locate(access, &repo, Intent::Read)?;
-            Ok(access.get().client.log(repo, revision, base))
-        })
-        .await
+    async fn init(
+        accessor: &Accessor<StoreCtx<B>, Self>, at: Location,
+    ) -> Result<Result<Resource<WorkspaceHandle>, Occupied>, Error> {
+        let workspace = WorkspaceHandle::resolve(accessor, &at, Intent::Create)?;
+        let made = workspace.call(accessor, |client, place| client.init(place)).await;
+        match laid(made)? {
+            Ok(()) => Ok(Ok(workspace.push(accessor)?)),
+            Err(occupied) => Ok(Err(occupied)),
+        }
     }
 }
 

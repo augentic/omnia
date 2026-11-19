@@ -1,5 +1,5 @@
-//! A correction over the host's byte cap fails the completion, like an
-//! oversize tool result: the check's text is bound for the model too.
+//! A correction over the host's byte cap fails the completion as `invalid`,
+//! like an oversize tool result: the check's text is bound for the model too.
 
 #![cfg(target_arch = "wasm32")]
 
@@ -15,7 +15,7 @@ async fn scenario() {
         .await
         .expect_err("the correction exceeds the cap");
     assert!(
-        matches!(error, Error::ToolFailed(ref detail) if detail.contains("exceeds the 4-byte cap")),
+        matches!(error, Error::InvalidRequest(ref detail) if detail.contains("exceeds the 4-byte cap")),
         "unexpected: {error:?}"
     );
 }

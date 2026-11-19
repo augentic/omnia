@@ -1,18 +1,17 @@
-use anyhow::Context;
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use omnia_core::HostView;
 use wasmtime::component::{Access, Accessor, Resource};
 
 use crate::host::generated::omnia::identity::credentials::{
-    AccessToken, Host, HostIdentity, HostIdentityWithStore, HostWithStore,
+    Host, HostIdentity, HostIdentityWithStore, HostWithStore,
 };
-use crate::host::generated::omnia::identity::types::Error;
+use crate::host::generated::omnia::identity::types::AccessToken;
 use crate::host::resource::IdentityProxy;
 use crate::host::{IdentityClient, Result, WasiIdentity};
 
 impl<T> HostWithStore<T> for WasiIdentity {
-    async fn get_identity(
-        accessor: &Accessor<T, Self>, name: String,
-    ) -> Result<Resource<IdentityProxy>> {
+    async fn open(accessor: &Accessor<T, Self>, name: String) -> Result<Resource<IdentityProxy>> {
         let identity = accessor.with(|mut store| store.get().client.get_identity(name)).await?;
         let proxy = omnia_core::Proxy(identity);
         Ok(accessor.with(|mut store| store.get().table.push(proxy))?)
@@ -23,11 +22,13 @@ impl<T> HostIdentityWithStore<T> for WasiIdentity {
     async fn get_token(
         accessor: &Accessor<T, Self>, self_: Resource<IdentityProxy>, scopes: Vec<String>,
     ) -> Result<AccessToken> {
-        let identity =
-            omnia_core::get_cloned(accessor, &self_).map_err(|_stale| Error::NoSuchIdentity)?;
+        let identity = omnia_core::get_cloned(accessor, &self_)?;
+        let token = identity.0.get_token(scopes).await?;
 
-        let token = identity.0.get_token(scopes).await.context("issue getting access token")?;
-        Ok(token)
+        Ok(AccessToken {
+            token: token.token,
+            expires_at: from_now(token.expires_in),
+        })
     }
 
     fn drop(
@@ -39,3 +40,11 @@ impl<T> HostIdentityWithStore<T> for WasiIdentity {
 
 impl Host for HostView<'_, dyn IdentityClient> {}
 impl HostIdentity for HostView<'_, dyn IdentityClient> {}
+
+// the instant `seconds` from now on the host's clock, in milliseconds since the
+// Unix epoch
+fn from_now(seconds: u64) -> u64 {
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
+    let now = u64::try_from(now.as_millis()).unwrap_or(u64::MAX);
+    now.saturating_add(seconds.saturating_mul(1000))
+}

@@ -1,9 +1,6 @@
 package omnia:blobstore@0.1.0;
 
-/// Objects in containers, one function per `BlobStore` method.
-///
-/// An absent object is `none`, and a call on an object in a container that
-/// does not exist fails with `not-found`.
+/// The types the blob store interfaces share.
 ///
 /// Every backend stores a portable name, and may reject any other as
 /// `invalid`. A portable container name:
@@ -16,123 +13,375 @@ package omnia:blobstore@0.1.0;
 /// segment is not empty, holds only ASCII letters, digits, `.`, `_`, and
 /// `-`, and is neither `.` nor `..`. A portable container never holds both
 /// an object `a` and an object under `a/`.
-interface store {
-  /// Why a call failed.
-  variant error {
-    /// A container, or the source of a copy, does not exist. An absent
-    /// object is not an error.
-    not-found(string),
-    /// The caller may not use the container.
-    denied(string),
-    /// The request was rejected, such as a name the backend cannot store.
-    invalid(string),
-    /// A valid request this backend cannot serve.
-    unsupported(string),
-    /// The backing store did not answer, or the call exceeded its bound.
-    unavailable(string),
-    /// Any other failure.
-    other(string),
+///
+/// An `error` from a blob store interface means:
+///
+/// - `not-found`: a container, an upload, or the source of a copy does not
+///   exist. An absent object is not an error.
+/// - `invalid`: the request was rejected, such as a name the backend cannot
+///   store.
+/// - `unavailable`: the backing store did not answer, or the call exceeded
+///   its bound.
+interface types {
+  use omnia:types/types@0.1.0.{error, timestamp};
+
+  /// A token for one stored state of an object, compared only for equality.
+  ///
+  /// It changes whenever the object's bytes change.
+  type etag = string;
+
+  /// What a writer stores beside an object's bytes.
+  ///
+  /// A write replaces all of it. A backend stores every entry given or fails
+  /// with `unsupported`.
+  record attributes {
+    content-type: option<string>,
+    content-encoding: option<string>,
+    content-language: option<string>,
+    content-disposition: option<string>,
+    cache-control: option<string>,
+    /// The caller's own entries, each key once.
+    ///
+    /// A portable key matches `[a-z][a-z0-9]*`, and a portable value is
+    /// printable ASCII.
+    metadata: list<tuple<string, string>>,
   }
+
+  /// What a listing knows of an object.
+  record object-entry {
+    name: string,
+    /// The object's size in bytes.
+    size: u64,
+    /// When the object was last written.
+    modified-at: timestamp,
+    etag: etag,
+  }
+
+  /// Everything known of one object.
+  record object-metadata {
+    name: string,
+    /// The object's size in bytes.
+    size: u64,
+    /// When the object was last written.
+    modified-at: timestamp,
+    etag: etag,
+    /// The version this state is kept as, `none` where the container keeps
+    /// no versions.
+    version: option<string>,
+    attributes: attributes,
+  }
+
+  /// What must hold for a write to take effect.
+  ///
+  /// A backend that cannot check it atomically fails with `unsupported`.
+  variant precondition {
+    /// No object is stored under the name.
+    absent,
+    /// The object stored under the name has this etag.
+    matches(etag),
+  }
+
+  /// A write whose precondition did not hold.
+  record conflict {
+    /// The etag of the object found in its place, `none` when the name is
+    /// absent.
+    current: option<etag>,
+  }
+
+  /// What a write stored.
+  record stored {
+    etag: etag,
+    version: option<string>,
+  }
+}
+
+/// Objects in one container. Every backend serves this interface.
+///
+/// An absent object is `none`. A write is atomic, so a reader sees the object
+/// as it was or as it became.
+interface container {
+  use types.{
+    attributes, conflict, error, etag, object-entry, object-metadata, precondition, stored,
+    timestamp,
+  };
 
   /// A container's metadata.
   record container-metadata {
-    /// The container's name.
     name: string,
-    /// When the container was created, in seconds since the Unix epoch.
-    created-at: u64,
+    /// When the container was created, `none` where the store records no
+    /// time.
+    created-at: option<timestamp>,
   }
 
-  /// An object's metadata.
-  record object-metadata {
-    /// The object's name.
-    name: string,
-    /// The container holding the object.
-    container: string,
-    /// When the object was written, in seconds since the Unix epoch.
-    created-at: u64,
-    /// The object's size in bytes.
-    size: u64,
+  /// The bytes a read selects, clamped to the object's length.
+  variant byte-range {
+    /// From the first offset up to the second, half-open. A span that ends
+    /// before it starts reads as empty.
+    span(tuple<u64, u64>),
+    /// From an offset to the end.
+    offset(u64),
+    /// The last bytes, at most this many.
+    suffix(u64),
+  }
+
+  /// An object being read.
+  record content {
+    /// The whole object's metadata, whatever range is read.
+    metadata: object-metadata,
+    /// The selected bytes.
+    data: stream<u8>,
+    /// Whether every selected byte reached `data`. The host always resolves
+    /// it.
+    finished: future<result<_, error>>,
+  }
+
+  /// Which names a listing returns.
+  enum listing {
+    /// Every object whose name starts with the prefix.
+    flat,
+    /// Only names with no `/` after the prefix. Each deeper name folds into
+    /// one entry of `common-prefixes`, which ends at the first `/` after the
+    /// prefix.
+    delimited,
   }
 
   /// One page of a listing.
   record page {
     /// The objects on this page, in name order.
-    objects: list<object-metadata>,
-    /// The cursor that resumes the listing after this page, `none` on the
-    /// last page.
+    objects: list<object-entry>,
+    /// The folded prefixes on this page, in name order.
+    common-prefixes: list<string>,
+    /// The cursor that resumes the listing. Only `none` marks the last page.
     next: option<string>,
   }
 
-  /// Get the object `name`, `none` when absent.
-  get: async func(container: string, name: string) -> result<option<list<u8>>, error>;
+  /// An open container.
+  resource container {
+    /// The container's name.
+    name: func() -> string;
 
-  /// Get the bytes of the object `name` from `start` up to `end`, `none`
-  /// when absent.
-  ///
-  /// The range is half-open and clamped to the object's length, so a range
-  /// past the end, or one that ends before it starts, reads as empty.
-  get-range: async func(container: string, name: string, start: u64, end: u64)
-    -> result<option<list<u8>>, error>;
+    /// The container's metadata.
+    info: async func() -> result<container-metadata, error>;
 
-  /// Store `data` as the object `name`, replacing any object there.
-  put: async func(container: string, name: string, data: list<u8>) -> result<_, error>;
+    /// Read the object `name`, or `range` of it. `none` when absent.
+    get: async func(name: string, range: option<byte-range>)
+      -> result<option<content>, error>;
 
-  /// Delete the object `name`. Deleting an absent object succeeds.
-  delete: async func(container: string, name: string) -> result<_, error>;
+    /// Store the bytes of `data` as the object `name`, replacing any object
+    /// there.
+    ///
+    /// - `finished` commits the write with `ok`. With an error the write
+    ///   stores nothing and the error comes back.
+    /// - `size`, when given, is the length of `data`. A backend may need it
+    ///   to store a large object, and a stream of any other length is
+    ///   `invalid` and stores nothing.
+    /// - `attributes` replaces the object's attributes, and `when` guards
+    ///   the write.
+    put: func(
+      name: string, size: option<u64>, data: stream<u8>, finished: future<result<_, error>>,
+      attributes: attributes, when: option<precondition>,
+    ) -> future<result<result<stored, conflict>, error>>;
 
-  /// The metadata of the object `name`, `none` when absent.
-  stat: async func(container: string, name: string)
-    -> result<option<object-metadata>, error>;
+    /// The metadata of the object `name`, `none` when absent.
+    stat: async func(name: string) -> result<option<object-metadata>, error>;
 
-  /// One page of the objects whose names start with `prefix`.
-  ///
-  /// `after` is the `next` cursor of the previous page, `none` for the
-  /// first page.
-  %list: async func(container: string, prefix: string, after: option<string>)
-    -> result<page, error>;
+    /// Whether the object `name` exists.
+    exists: async func(name: string) -> result<bool, error>;
 
-  /// Create the empty container `container`. Creating one that exists keeps
-  /// its objects.
-  create-container: async func(container: string) -> result<_, error>;
+    /// Delete the object `name`, and with `when` only while it has that
+    /// etag. Deleting an absent object succeeds.
+    delete: async func(name: string, when: option<etag>)
+      -> result<result<_, conflict>, error>;
 
-  /// Delete the container and every object in it. Deleting an absent
-  /// container succeeds.
-  delete-container: async func(container: string) -> result<_, error>;
+    /// Delete each object in `names`. A name already absent is skipped.
+    delete-many: async func(names: list<string>) -> result<_, error>;
 
-  /// Whether the container exists.
-  container-exists: async func(container: string) -> result<bool, error>;
+    /// Delete every object in the container, leaving it empty.
+    clear: async func() -> result<_, error>;
 
-  /// The metadata of the container, `none` when it does not exist.
-  container-info: async func(container: string)
-    -> result<option<container-metadata>, error>;
+    /// One page of the names that start with `prefix`.
+    ///
+    /// A page holds at most `limit` entries, objects and prefixes together,
+    /// and never more than 1,000. A zero `limit` is `invalid`. `after` is the
+    /// `next` of the previous page of the same listing.
+    %list: async func(
+      prefix: string, listing: listing, after: option<string>, limit: option<u32>,
+    ) -> result<page, error>;
 
-  /// Whether the object `name` exists.
-  exists: async func(container: string, name: string) -> result<bool, error>;
+    /// Copy an object with its attributes to `dest-name` in `dest`,
+    /// replacing any object there.
+    ///
+    /// `when` guards the destination. An absent source fails with
+    /// `not-found` and writes nothing.
+    copy: async func(
+      name: string, dest: borrow<container>, dest-name: string,
+      when: option<precondition>,
+    ) -> result<result<stored, conflict>, error>;
 
-  /// Delete each object in `names`. A name already absent is skipped.
-  delete-many: async func(container: string, names: list<string>) -> result<_, error>;
-
-  /// Delete every object in the container, leaving it empty.
-  clear: async func(container: string) -> result<_, error>;
-
-  /// Copy an object to the same or a different container, replacing any
-  /// object at the destination.
-  ///
-  /// An absent source fails with `not-found` and writes nothing.
-  copy: async func(
-    src-container: string, src-name: string, dest-container: string, dest-name: string,
-  ) -> result<_, error>;
-
-  /// Move an object to a new name in the same or a different container.
-  ///
-  /// The move replaces any object at the destination, and fails as `copy`
-  /// does, leaving the source in place. Moving an object onto itself keeps
-  /// it.
-  rename: async func(
-    src-container: string, src-name: string, dest-container: string, dest-name: string,
-  ) -> result<_, error>;
+    /// Move an object to `dest-name` in `dest`, replacing any object there.
+    ///
+    /// - It fails as `copy` does, leaving the source in place.
+    /// - Moving an object onto itself keeps it.
+    /// - A backend with no atomic move copies, then deletes the source, and
+    ///   can fail between the two and leave both.
+    rename: async func(
+      name: string, dest: borrow<container>, dest-name: string,
+      when: option<precondition>,
+    ) -> result<result<stored, conflict>, error>;
+  }
 }
 
-world imports {
+/// The containers a guest may open. Every backend serves this interface.
+interface store {
+  use types.{error};
+  use container.{container};
+
+  /// Open the container `name`.
+  ///
+  /// A missing container fails with `not-found`, here or at the first call
+  /// on the handle.
+  open: async func(name: string) -> result<container, error>;
+
+  /// Whether the container `name` exists.
+  container-exists: async func(name: string) -> result<bool, error>;
+}
+
+/// Optional: creating, deleting, and listing containers.
+interface admin {
+  use types.{error};
+  use container.{container};
+
+  /// One page of container names.
+  record names {
+    /// The containers on this page, in name order.
+    containers: list<string>,
+    /// The cursor that resumes the listing. Only `none` marks the last page.
+    next: option<string>,
+  }
+
+  /// Create the container `name` and open it. Creating one that exists
+  /// keeps its objects.
+  create-container: async func(name: string) -> result<container, error>;
+
+  /// Delete the container `name` and every object in it. Deleting an absent
+  /// container succeeds.
+  delete-container: async func(name: string) -> result<_, error>;
+
+  /// One page of the container names that start with `prefix`.
+  ///
+  /// A page holds at most `limit` names and never more than 1,000. A zero
+  /// `limit` is `invalid`. `after` is the `next` of the previous page.
+  list-containers: async func(prefix: string, after: option<string>, limit: option<u32>)
+    -> result<names, error>;
+}
+
+// wit-parser excludes a gated interface's types only where each carries the
+// interface's gate, so every type and `use` inside one repeats it
+/// Optional: an object assembled from parts, over as many invocations as it
+/// takes.
+///
+/// A portable upload numbers its parts from 1 to 10,000, and every part but
+/// the highest holds at least 5 MiB.
+@unstable(feature = uploads)
+interface uploads {
+  @unstable(feature = uploads)
+  use types.{attributes, conflict, error, precondition, stored};
+  @unstable(feature = uploads)
+  use container.{container};
+
+  /// A part an upload holds.
+  @unstable(feature = uploads)
+  record part {
+    number: u32,
+    /// The part's size in bytes.
+    size: u64,
+  }
+
+  /// An upload in progress.
+  @unstable(feature = uploads)
+  resource upload {
+    /// The token `resume` reopens this upload with. Dropping the handle
+    /// keeps the upload.
+    id: func() -> string;
+
+    /// Store exactly `size` bytes of `data` as part `number`, replacing any
+    /// part with that number. A stream of any other length stores nothing.
+    put-part: func(number: u32, size: u64, data: stream<u8>)
+      -> future<result<_, error>>;
+
+    /// The parts stored so far, in number order.
+    parts: async func() -> result<list<part>, error>;
+
+    /// Store the parts, joined in number order, as the object.
+    ///
+    /// A conflict leaves the upload open. Once a commit stores, the upload
+    /// is `not-found`.
+    commit: async func(when: option<precondition>)
+      -> result<result<stored, conflict>, error>;
+
+    /// Discard the parts. The upload is then `not-found`.
+    abort: async func() -> result<_, error>;
+  }
+
+  /// Begin an upload of the object `name`, to be stored with `attributes`.
+  begin: async func(container: borrow<container>, name: string, attributes: attributes)
+    -> result<upload, error>;
+
+  /// Reopen the upload `id`.
+  resume: async func(container: borrow<container>, id: string) -> result<upload, error>;
+}
+
+/// Optional: requests a client outside the host sends to transfer one object
+/// with the store directly.
+///
+/// A presigned request is a bearer capability the host cannot take back, so a
+/// deployment may refuse every one with `denied`.
+@unstable(feature = presign)
+interface presign {
+  @unstable(feature = presign)
+  use types.{attributes, error, precondition, timestamp};
+  @unstable(feature = presign)
+  use container.{container};
+
+  /// A request a client sends as given, until it expires.
+  @unstable(feature = presign)
+  record presigned-request {
+    url: string,
+    /// The headers the client sends with the request.
+    headers: list<tuple<string, string>>,
+    /// When the request expires. A backend may issue a shorter life than
+    /// asked, never a longer one.
+    expires-at: timestamp,
+  }
+
+  /// A `GET` that reads the object `name`, valid for `ttl-ms` milliseconds.
+  read: async func(container: borrow<container>, name: string, ttl-ms: u64)
+    -> result<presigned-request, error>;
+
+  /// A `PUT` that stores its body as the object `name`, with `attributes`.
+  write: async func(
+    container: borrow<container>, name: string, attributes: attributes,
+    when: option<precondition>, ttl-ms: u64,
+  ) -> result<presigned-request, error>;
+}
+
+/// What every backend serves.
+world core {
+  import types;
   import store;
+  import container;
+}
+
+/// Every interface. A backend answers `unsupported` for what it does not
+/// serve.
+///
+/// `uploads` and `presign` are unstable, and a guest binds them by enabling
+/// the feature of that name. Every host links them.
+world imports {
+  include core;
+  import admin;
+  @unstable(feature = uploads)
+  import uploads;
+  @unstable(feature = presign)
+  import presign;
 }

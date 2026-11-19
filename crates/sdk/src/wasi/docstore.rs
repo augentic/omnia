@@ -1,130 +1,116 @@
 //! [`DocumentDb`] over `omnia:docstore`.
 
 use bytes::Bytes;
-use omnia_wasi_docstore::{store, types};
+use omnia_wasi_docstore::omnia::collection::{self, Collection};
+use omnia_wasi_docstore::omnia::store;
+use omnia_wasi_docstore::omnia::types::{self, Precondition};
 
-use crate::docstore::{ComparisonOp, Document, Exists, Filter, Query, ScalarValue, SortField};
+use crate::docstore::groups::{Condition, Test, Value};
+use crate::docstore::{Document, Exists, Query, SortField};
 use crate::{DocumentDb, Error, Page, Result, WasiProvider};
 
 impl DocumentDb for WasiProvider {
     async fn get(&self, collection: &str, id: &str) -> Result<Option<Document>> {
-        let document = store::get(collection.to_owned(), id.to_owned()).await?;
+        let document = open(collection).await?.get(id.to_owned()).await?;
         Ok(document.map(Into::into))
     }
 
     async fn insert(&self, collection: &str, document: &Document) -> Result<Result<(), Exists>> {
-        let inserted = store::insert(collection.to_owned(), document.into()).await?;
-        Ok(inserted.map_err(|_already_exists| Exists))
+        let (id, data) = (document.id.clone(), json(document)?);
+        let written = open(collection).await?.put(id, data, Some(Precondition::Absent)).await?;
+        Ok(written.map(|_revision| ()).map_err(|_conflict| Exists))
     }
 
     async fn put(&self, collection: &str, document: &Document) -> Result<()> {
-        Ok(store::put(collection.to_owned(), document.into()).await?)
+        let (id, data) = (document.id.clone(), json(document)?);
+        open(collection).await?.put(id, data, None).await??;
+        Ok(())
     }
 
     async fn delete(&self, collection: &str, id: &str) -> Result<bool> {
-        Ok(store::delete(collection.to_owned(), id.to_owned()).await?)
+        Ok(open(collection).await?.delete(id.to_owned(), None).await??)
     }
 
     async fn query(&self, collection: &str, query: &Query) -> Result<Page<Document>> {
-        if let Some(filter) = &query.filter {
-            filter.check()?;
+        if query.offset.is_some() {
+            return Err(Error::server_error("unsupported", "a document query takes no `offset`"));
         }
-        let page = store::query(collection.to_owned(), query.into()).await?;
-        Ok(page.into())
+        let filter = match &query.filter {
+            Some(filter) => filter.groups()?,
+            None => Vec::new(),
+        };
+        let filter = filter.into_iter().map(|group| group.into_iter().map(Into::into).collect());
+        let order_by = query.order_by.iter().map(Into::into).collect();
+
+        let page = open(collection)
+            .await?
+            .query(filter.collect(), order_by, query.after.clone(), query.limit)
+            .await?;
+        Ok(Page::new(page.documents.into_iter().map(Into::into).collect(), page.next))
     }
 }
 
-impl From<types::Error> for Error {
-    fn from(err: types::Error) -> Self {
-        match err {
-            types::Error::NotFound(message) => Self::server_error("not-found", message),
-            types::Error::Denied(message) => Self::server_error("denied", message),
-            types::Error::Invalid(message) => Self::server_error("invalid", message),
-            types::Error::Unsupported(message) => Self::server_error("unsupported", message),
-            types::Error::Unavailable(message) => Self::bad_gateway("unavailable", message),
-            types::Error::Other(message) => Self::server_error("other", message),
-        }
+async fn open(name: &str) -> Result<Collection> {
+    Ok(store::open(name.to_owned()).await?)
+}
+
+fn json(document: &Document) -> Result<String> {
+    let body = str::from_utf8(&document.data).map_err(|err| {
+        Error::server_error("invalid", format!("the body of `{}` is not UTF-8: {err}", document.id))
+    })?;
+    Ok(body.to_owned())
+}
+
+// a write with no precondition has none to fail
+impl From<types::Conflict> for Error {
+    fn from(_: types::Conflict) -> Self {
+        Self::server_error("other", "the host reported a conflict on an unconditional write")
     }
 }
 
-impl From<&Filter> for types::Filter {
-    fn from(filter: &Filter) -> Self {
-        match filter {
-            Filter::Compare { field, op, value } => {
-                Self::compare(field, (*op).into(), &value.clone().into())
-            }
-            Filter::InList { field, values } => Self::in_list(field, &scalars(values)),
-            Filter::NotInList { field, values } => Self::not_in_list(field, &scalars(values)),
-            Filter::IsNull(field) => Self::is_null(field),
-            Filter::IsNotNull(field) => Self::is_not_null(field),
-            Filter::Contains { field, pattern } => Self::contains(field, pattern),
-            Filter::StartsWith { field, pattern } => Self::starts_with(field, pattern),
-            Filter::EndsWith { field, pattern } => Self::ends_with(field, pattern),
-            Filter::And(children) => Self::and(children.iter().map(Into::into).collect()),
-            Filter::Or(children) => Self::or(children.iter().map(Into::into).collect()),
-            Filter::Not(inner) => Self::not((&**inner).into()),
-        }
-    }
-}
-
-fn scalars(values: &[ScalarValue]) -> Vec<types::ScalarValue> {
-    values.iter().cloned().map(Into::into).collect()
-}
-
-impl From<ComparisonOp> for types::ComparisonOp {
-    fn from(op: ComparisonOp) -> Self {
-        match op {
-            ComparisonOp::Eq => Self::Eq,
-            ComparisonOp::Ne => Self::Ne,
-            ComparisonOp::Gt => Self::Gt,
-            ComparisonOp::Gte => Self::Gte,
-            ComparisonOp::Lt => Self::Lt,
-            ComparisonOp::Lte => Self::Lte,
+impl From<Condition> for collection::Condition {
+    fn from(condition: Condition) -> Self {
+        Self {
+            field: condition.field,
+            test: condition.test.into(),
+            negated: condition.negated,
         }
     }
 }
 
-impl From<ScalarValue> for types::ScalarValue {
-    fn from(value: ScalarValue) -> Self {
+impl From<Test> for collection::Test {
+    fn from(test: Test) -> Self {
+        match test {
+            Test::Eq(value) => Self::Eq(value.into()),
+            Test::Lt(value) => Self::Lt(value.into()),
+            Test::Lte(value) => Self::Lte(value.into()),
+            Test::Gt(value) => Self::Gt(value.into()),
+            Test::Gte(value) => Self::Gte(value.into()),
+            Test::In(values) => Self::In(values.into_iter().map(Into::into).collect()),
+            Test::StartsWith(pattern) => Self::StartsWith(pattern),
+            Test::EndsWith(pattern) => Self::EndsWith(pattern),
+            Test::Contains(pattern) => Self::Contains(pattern),
+            Test::Null => Self::Null,
+        }
+    }
+}
+
+impl From<Value> for collection::Value {
+    fn from(value: Value) -> Self {
         match value {
-            ScalarValue::Null => Self::Null,
-            ScalarValue::Bool(b) => Self::Boolean(b),
-            ScalarValue::Int32(i) => Self::Int32(i),
-            ScalarValue::Int64(i) => Self::Int64(i),
-            ScalarValue::Float64(f) => Self::Float64(f),
-            ScalarValue::Str(s) => Self::Str(s),
-            ScalarValue::Binary(b) => Self::Binary(b),
-            ScalarValue::Timestamp(t) => Self::Timestamp(t),
+            Value::Boolean(boolean) => Self::Boolean(boolean),
+            Value::Integer(integer) => Self::Integer(integer),
+            Value::Number(number) => Self::Number(number),
+            Value::Text(text) => Self::Text(text),
         }
     }
 }
 
-impl From<&SortField> for types::SortField {
+impl From<&SortField> for collection::SortField {
     fn from(sort: &SortField) -> Self {
         Self {
             field: sort.field.clone(),
             descending: sort.descending,
-        }
-    }
-}
-
-impl From<&Query> for types::QueryOptions {
-    fn from(query: &Query) -> Self {
-        Self {
-            filter: query.filter.as_ref().map(Into::into),
-            order_by: query.order_by.iter().map(Into::into).collect(),
-            limit: query.limit,
-            offset: query.offset,
-            continuation: query.after.clone(),
-        }
-    }
-}
-
-impl From<&Document> for types::Document {
-    fn from(document: &Document) -> Self {
-        Self {
-            id: document.id.clone(),
-            data: document.data.to_vec(),
         }
     }
 }
@@ -135,11 +121,5 @@ impl From<types::Document> for Document {
             id: document.id,
             data: Bytes::from(document.data),
         }
-    }
-}
-
-impl From<types::QueryResult> for Page<Document> {
-    fn from(result: types::QueryResult) -> Self {
-        Self::new(result.documents.into_iter().map(Into::into).collect(), result.continuation)
     }
 }

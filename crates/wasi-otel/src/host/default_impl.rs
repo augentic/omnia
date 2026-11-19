@@ -1,4 +1,4 @@
-//! Default no-op implementation for wasi-otel
+//! Default no-op implementation for `omnia:otel`
 //!
 //! This is a lightweight implementation for development use only.
 //! It logs telemetry data but doesn't export it anywhere.
@@ -13,7 +13,7 @@ use tracing::instrument;
 
 use crate::host::OtelClient;
 
-/// Default implementation for `wasi:otel`.
+/// Default implementation for `omnia:otel`.
 #[derive(Debug, Clone)]
 pub struct OtelDefault;
 

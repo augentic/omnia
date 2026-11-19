@@ -26,6 +26,7 @@ async fn scenario() {
         state::update_ttl(&store, wait),
         state::swap_expiring(&store),
         state::conflict(&store),
+        state::revision(&store),
         state::counter(&store),
         state::named(&store),
         state::undeclared(&store),

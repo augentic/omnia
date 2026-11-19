@@ -1,9 +1,8 @@
 #![doc = include_str!("../README.md")]
 
-//! # WASI Vault Service
+//! # WASI Vault
 //!
-//! This module implements a runtime service for `wasi:vault`
-//! (<https://github.com/augentic/wasi-vault>).
+//! This module implements a runtime service for `omnia:vault`.
 
 cfg_select! {
     target_arch = "wasm32" => {

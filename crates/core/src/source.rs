@@ -264,13 +264,24 @@ impl Source {
 /// Registry acquisition policy — how a [`SourceSpec::Package`] source is
 /// fetched.
 pub trait RegistrySource: Send + Sync + 'static {
-    /// Produce the raw component bytes for the exact `package` reference —
-    /// from `endpoint` when the load names one and the deployment's routing
-    /// does not claim the package's namespace, else from that routing —
-    /// split by remedy: [`AcquireError::Refused`] for an authoritative "no"
-    /// (nothing routes it, a routed namespace named another registry, the
-    /// registry has no such release), never for a source failure a retry
-    /// might clear ([`AcquireError::Unavailable`]).
+    /// Produce the raw component bytes for the exact `package` reference.
+    ///
+    /// The bytes come from `endpoint` when the load names one and the
+    /// deployment's routing leaves the package's namespace open, and from
+    /// that routing otherwise.
+    ///
+    /// # Errors
+    ///
+    /// - [`AcquireError::NotFound`] when nothing routes the package, or no
+    ///   store or registry holds the release.
+    /// - [`AcquireError::Denied`] when the routing forbids the fetch, such as
+    ///   an `endpoint` other than the registry the namespace is routed to.
+    /// - [`AcquireError::Invalid`] when the reference or the `endpoint` is
+    ///   malformed, or the bytes are not raw wasm.
+    /// - [`AcquireError::Unsupported`] for a valid request this source
+    ///   cannot serve.
+    /// - [`AcquireError::Unavailable`] when the store or the registry did
+    ///   not produce the bytes.
     fn acquire<'a>(
         &'a self, package: &'a str, endpoint: Option<&'a str>,
     ) -> BoxFuture<'a, Result<Vec<u8>, AcquireError>>;
@@ -279,11 +290,21 @@ pub trait RegistrySource: Send + Sync + 'static {
 /// Why a [`RegistrySource`] could not produce a package's bytes.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum AcquireError {
-    /// Nothing routes the package, or the registry has no such release; a
-    /// retry cannot succeed.
-    #[error("refused: {0}")]
-    Refused(String),
-    /// The registry could not produce the bytes; a retry may succeed.
+    /// Nothing routes the package, or no store or registry holds the
+    /// release.
+    #[error("not-found: {0}")]
+    NotFound(String),
+    /// The deployment's routing forbids the fetch.
+    #[error("denied: {0}")]
+    Denied(String),
+    /// The request is malformed, or the bytes are not raw wasm.
+    #[error("invalid: {0}")]
+    Invalid(String),
+    /// A valid request this source cannot serve.
+    #[error("unsupported: {0}")]
+    Unsupported(String),
+    /// The store or the registry did not produce the bytes. A retry may
+    /// succeed.
     #[error("unavailable: {0}")]
     Unavailable(String),
 }

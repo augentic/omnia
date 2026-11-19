@@ -14,7 +14,9 @@ async fn scenario() {
     futures::join!(
         sql::batch(&db),
         sql::batch_rollback(&db),
+        sql::conversions(&db),
         sql::placeholders(&db),
+        sql::transaction(&db),
         sql::values(&db),
     );
 }

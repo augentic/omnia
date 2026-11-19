@@ -2,23 +2,23 @@
 //! swappable for another backend of its host.
 
 use std::collections::BTreeMap;
-use std::sync::Arc;
 
 use omnia::{Connect as _, HostCtx, NoOptions, Provides};
 use omnia_wasi_blobstore::{BlobStoreClient, BlobStoreDefault, WasiBlobStore};
-use omnia_wasi_config::wasmtime_wasi_config::WasiConfigVariables;
 use omnia_wasi_config::{ConfigDefault, WasiConfig};
-use omnia_wasi_docstore::{DocStoreClient, DocStoreDefault, WasiDocStore};
+use omnia_wasi_docstore::{
+    ConnectOptions as DocStoreOptions, DocStoreClient, DocStoreDefault, WasiDocStore,
+};
 use omnia_wasi_http::{ConnectOptions as HttpOptions, HttpDefault, WasiHttp};
 use omnia_wasi_identity::{IdentityClient, IdentityStub, WasiIdentity};
 use omnia_wasi_keyvalue::{
     ConnectOptions as KeyValueOptions, KeyValueClient, KeyValueDefault, WasiKeyValue,
 };
 use omnia_wasi_messaging::{MessagingClient, MessagingDefault, WasiMessaging};
-use omnia_wasi_model::{ModelClient, ModelDefault, WasiModel};
+use omnia_wasi_model::{ConnectOptions as ModelOptions, ModelClient, ModelDefault, WasiModel};
 use omnia_wasi_otel::{OtelClient, OtelDefault, WasiOtel};
 use omnia_wasi_sql::{ConnectOptions as SqlOptions, SqlClient, SqlDefault, WasiSql};
-use omnia_wasi_vault::{VaultClient, VaultDefault, WasiVault};
+use omnia_wasi_vault::{ConnectOptions as VaultOptions, VaultClient, VaultDefault, WasiVault};
 use omnia_wasi_vcs::{VcsClient, WasiVcs};
 use omnia_wasi_websocket::{WasiWebSocket, WebSocketDefault};
 
@@ -42,14 +42,19 @@ pub const STATE_BUCKET: &str = "default";
 /// The bundle is deterministic: [`defaults`](Self::defaults) reads no
 /// environment variable and opens no socket. Config answers from the map
 /// seeded by [`config`](Self::config) alone, the websocket backend serves no
-/// listener, and the HTTP client, keyvalue buckets, `SQLite` databases, and
-/// identities are built from fixed options rather than
-/// `HTTP_CONNECT_TIMEOUT` / `KEYVALUE_BUCKETS` / `SQL_DATABASES` /
-/// `IDENTITY_NAMES`. The keyvalue backend declares [`STATE_BUCKET`] alone,
-/// the `SQLite` backend a private `default` database alone, and the identity
-/// stub the `default` identity alone. A scenario that opens another name
-/// sets its own backend with [`keyvalue`](Self::keyvalue),
-/// [`sql`](Self::sql), or [`identity`](Self::identity).
+/// listener, and the HTTP client, keyvalue buckets, docstore collections,
+/// `SQLite` databases, identities, vault lockers, and echo models are built
+/// from fixed options rather than `HTTP_CONNECT_TIMEOUT` /
+/// `KEYVALUE_BUCKETS` / `DOCSTORE_COLLECTIONS` / `SQL_DATABASES` /
+/// `IDENTITY_NAMES` / `VAULT_LOCKERS` / `MODEL_NAMES`. The keyvalue backend
+/// declares [`STATE_BUCKET`] alone, the docstore backend the `default`
+/// collection alone, the `SQLite` backend a private `default` database
+/// alone, the identity stub the `default` identity alone, the vault backend
+/// the `default` locker alone, and the echo model backend the `default`
+/// model alone. A scenario that opens another name sets its own backend
+/// with [`keyvalue`](Self::keyvalue), [`docstore`](Self::docstore),
+/// [`sql`](Self::sql), [`identity`](Self::identity),
+/// [`vault`](Self::vault), or [`model`](Self::model).
 ///
 /// One type parameter per swappable host, each defaulting to the in-memory
 /// backend, so `Backends` with no arguments is the all-default bundle and a
@@ -73,25 +78,25 @@ pub struct Backends<
 > {
     /// The `omnia:blobstore` backend.
     pub blobstore: B,
-    /// Map-backed `wasi:config`, empty until seeded by [`Backends::config`].
+    /// Map-backed `omnia:config`, empty until seeded by [`Backends::config`].
     pub config: ConfigDefault,
     /// The `omnia:docstore` backend.
     pub docstore: D,
     /// Outbound `wasi:http`.
     pub http: HttpDefault,
-    /// The `wasi:identity` backend.
+    /// The `omnia:identity` backend.
     pub identity: I,
-    /// The `wasi:keyvalue` backend.
+    /// The `omnia:keyvalue` backend.
     pub keyvalue: K,
-    /// The `wasi:messaging` backend.
+    /// The `omnia:messaging` backend.
     pub messaging: G,
     /// The `omnia:model` backend.
     pub model: M,
-    /// The `wasi:otel` backend.
+    /// The `omnia:otel` backend.
     pub otel: O,
-    /// The `omnia:sql` and `wasi:sql` backend.
+    /// The `omnia:sql` backend.
     pub sql: S,
-    /// The `wasi:vault` backend.
+    /// The `omnia:vault` backend.
     pub vault: V,
     /// The `omnia:vcs` backend, [`NoVcs`] until one is set.
     pub vcs: C,
@@ -110,8 +115,10 @@ impl Backends {
             blobstore: BlobStoreDefault::connect_with(NoOptions)
                 .await
                 .expect("in-memory blobstore"),
-            config: config_from(WasiConfigVariables::new()),
-            docstore: DocStoreDefault::connect_with(NoOptions).await.expect("in-memory docstore"),
+            config: ConfigDefault::default(),
+            docstore: DocStoreDefault::connect_with(DocStoreOptions::default())
+                .await
+                .expect("in-memory docstore"),
             http: HttpDefault::connect_with(HttpOptions { connect_timeout: 10 })
                 .await
                 .expect("outbound http client"),
@@ -122,7 +129,7 @@ impl Backends {
             messaging: MessagingDefault::connect_with(NoOptions)
                 .await
                 .expect("in-process messaging"),
-            model: ModelDefault,
+            model: ModelDefault::connect_with(ModelOptions::default()).await.expect("echo model"),
             otel: OtelDefault,
             // a private database per bundle: the crate default is shared process-wide
             sql: SqlDefault::connect_with(SqlOptions {
@@ -131,7 +138,9 @@ impl Backends {
             })
             .await
             .expect("in-memory sqlite"),
-            vault: VaultDefault::connect_with(NoOptions).await.expect("in-memory vault"),
+            vault: VaultDefault::connect_with(VaultOptions::default())
+                .await
+                .expect("in-memory vault"),
             vcs: NoVcs,
             websocket: WebSocketDefault::new(),
         }
@@ -139,15 +148,14 @@ impl Backends {
 }
 
 impl<M, K, B, D, S, V, G, I, O, C> Backends<M, K, B, D, S, V, G, I, O, C> {
-    /// The same bundle answering `wasi:config` lookups from `vars` alone.
+    /// The same bundle answering `omnia:config` lookups from `vars` alone.
     #[must_use]
     pub fn config<Key, Value>(mut self, vars: impl IntoIterator<Item = (Key, Value)>) -> Self
     where
         Key: Into<String>,
         Value: Into<String>,
     {
-        let vars = vars.into_iter().map(|(key, value)| (key.into(), value.into()));
-        self.config = config_from(vars.collect());
+        self.config = vars.into_iter().collect();
         self
     }
 
@@ -172,7 +180,7 @@ impl<M, K, B, D, S, V, G, I, O, C> Backends<M, K, B, D, S, V, G, I, O, C> {
         }
     }
 
-    /// The same bundle serving `wasi:keyvalue` from `keyvalue`.
+    /// The same bundle serving `omnia:keyvalue` from `keyvalue`.
     #[must_use]
     pub fn keyvalue<N: KeyValueClient + Clone>(
         self, keyvalue: N,
@@ -238,7 +246,7 @@ impl<M, K, B, D, S, V, G, I, O, C> Backends<M, K, B, D, S, V, G, I, O, C> {
         }
     }
 
-    /// The same bundle serving `omnia:sql` and `wasi:sql` from `sql`.
+    /// The same bundle serving `omnia:sql` from `sql`.
     #[must_use]
     pub fn sql<N: SqlClient + Clone>(self, sql: N) -> Backends<M, K, B, D, N, V, G, I, O, C> {
         Backends {
@@ -258,7 +266,7 @@ impl<M, K, B, D, S, V, G, I, O, C> Backends<M, K, B, D, S, V, G, I, O, C> {
         }
     }
 
-    /// The same bundle serving `wasi:vault` from `vault`.
+    /// The same bundle serving `omnia:vault` from `vault`.
     #[must_use]
     pub fn vault<N: VaultClient + Clone>(self, vault: N) -> Backends<M, K, B, D, S, N, G, I, O, C> {
         Backends {
@@ -278,7 +286,7 @@ impl<M, K, B, D, S, V, G, I, O, C> Backends<M, K, B, D, S, V, G, I, O, C> {
         }
     }
 
-    /// The same bundle serving `wasi:messaging` from `messaging`.
+    /// The same bundle serving `omnia:messaging` from `messaging`.
     #[must_use]
     pub fn messaging<N: MessagingClient + Clone>(
         self, messaging: N,
@@ -300,7 +308,7 @@ impl<M, K, B, D, S, V, G, I, O, C> Backends<M, K, B, D, S, V, G, I, O, C> {
         }
     }
 
-    /// The same bundle serving `wasi:identity` from `identity`.
+    /// The same bundle serving `omnia:identity` from `identity`.
     #[must_use]
     pub fn identity<N: IdentityClient + Clone>(
         self, identity: N,
@@ -322,7 +330,7 @@ impl<M, K, B, D, S, V, G, I, O, C> Backends<M, K, B, D, S, V, G, I, O, C> {
         }
     }
 
-    /// The same bundle serving `wasi:otel` from `otel`.
+    /// The same bundle serving `omnia:otel` from `otel`.
     #[must_use]
     pub fn otel<N: OtelClient + Clone>(self, otel: N) -> Backends<M, K, B, D, S, V, G, I, N, C> {
         Backends {
@@ -426,12 +434,6 @@ where
 {
     fn borrow(&mut self) -> <WasiVcs as HostCtx>::Borrow<'_> {
         &mut self.vcs
-    }
-}
-
-fn config_from(vars: WasiConfigVariables) -> ConfigDefault {
-    ConfigDefault {
-        config_vars: Arc::new(vars),
     }
 }
 

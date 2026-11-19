@@ -151,16 +151,17 @@ pub struct ContainerMetadata {
     /// The container's name.
     pub name: String,
 
-    /// When the container was created.
-    pub created_at: SystemTime,
+    /// When the container was created, `None` where the store records no
+    /// time.
+    pub created_at: Option<SystemTime>,
 }
 
 impl ContainerMetadata {
     /// Metadata for the container `name`, created at `created_at`.
-    pub fn new(name: impl Into<String>, created_at: SystemTime) -> Self {
+    pub fn new(name: impl Into<String>, created_at: impl Into<Option<SystemTime>>) -> Self {
         Self {
             name: name.into(),
-            created_at,
+            created_at: created_at.into(),
         }
     }
 }

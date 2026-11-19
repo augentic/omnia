@@ -2,8 +2,7 @@
 
 //! # WASI WebSocket Service
 //!
-//! This module implements a runtime service for `wasi:websocket`
-//! (<https://github.com/augentic/wasi-websocket>).
+//! This module implements a runtime service for `omnia:websocket`.
 
 cfg_select! {
     target_arch = "wasm32" => {

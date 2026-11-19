@@ -1,12 +1,5 @@
-//! # WASI Metrics
-
-use anyhow::Result;
 use omnia_core::HostView;
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
-use opentelemetry_proto::tonic::common::v1::any_value::Value;
-use opentelemetry_proto::tonic::common::v1::{
-    AnyValue, ArrayValue, InstrumentationScope, KeyValue,
-};
 use opentelemetry_proto::tonic::metrics::v1::exemplar::Value as ExemplarValue;
 use opentelemetry_proto::tonic::metrics::v1::exponential_histogram_data_point::Buckets;
 use opentelemetry_proto::tonic::metrics::v1::metric::Data as MetricData;
@@ -15,307 +8,209 @@ use opentelemetry_proto::tonic::metrics::v1::{
     AggregationTemporality, Exemplar, ExponentialHistogram, ExponentialHistogramDataPoint, Gauge,
     Histogram, HistogramDataPoint, Metric, NumberDataPoint, ResourceMetrics, ScopeMetrics, Sum,
 };
-use opentelemetry_proto::tonic::resource::v1::Resource;
 use wasmtime::component::Accessor;
 
-use crate::host::generated::omnia::otel::metrics::{self as wasi, HostWithStore};
-use crate::host::types_impl::{decode_id, instant_nanos};
-use crate::host::{OtelClient, WasiOtel};
+use crate::host::generated::omnia::otel::metrics::{self as wasi, Host, HostWithStore};
+use crate::host::{Error, OtelClient, Result, WasiOtel, types_impl};
 
 impl<T> HostWithStore<T> for WasiOtel {
     async fn export(
-        accessor: &Accessor<T, Self>, rm: wasi::ResourceMetrics,
-    ) -> Result<(), wasi::Error> {
-        if omnia_core::telemetry::resource().is_none() {
-            tracing::warn!("otel resource not initialized, skipping metrics export");
+        accessor: &Accessor<T, Self>, scope_metrics: Vec<wasi::ScopeMetrics>,
+    ) -> Result<()> {
+        if scope_metrics.iter().all(|group| group.metrics.is_empty()) {
             return Ok(());
         }
+        let scope_metrics =
+            scope_metrics.into_iter().map(ScopeMetrics::try_from).collect::<Result<Vec<_>>>()?;
+        let Some((resource, schema_url)) = types_impl::resource() else {
+            return Ok(());
+        };
 
-        let request = ExportMetricsServiceRequest::from(rm);
+        let request = ExportMetricsServiceRequest {
+            resource_metrics: vec![ResourceMetrics {
+                resource: Some(resource),
+                scope_metrics,
+                schema_url,
+            }],
+        };
         accessor.with(|mut store| store.get().client.export_metrics(request)).await?;
-
         Ok(())
     }
 }
 
-impl wasi::Host for HostView<'_, dyn OtelClient> {}
+impl Host for HostView<'_, dyn OtelClient> {}
 
-impl From<wasi::ResourceMetrics> for ExportMetricsServiceRequest {
-    fn from(rm: wasi::ResourceMetrics) -> Self {
-        let schema_url = rm.resource.schema_url.clone().unwrap_or_default();
+impl TryFrom<wasi::ScopeMetrics> for ScopeMetrics {
+    type Error = Error;
 
-        Self {
-            resource_metrics: vec![ResourceMetrics {
-                resource: Some(rm.resource.into()),
-                scope_metrics: rm.scope_metrics.into_iter().map(Into::into).collect(),
-                schema_url,
-            }],
-        }
+    fn try_from(group: wasi::ScopeMetrics) -> Result<Self> {
+        Ok(Self {
+            scope: group.scope.map(TryInto::try_into).transpose()?,
+            metrics: try_map(group.metrics)?,
+            schema_url: group.schema_url.unwrap_or_default(),
+        })
     }
 }
 
-impl From<wasi::Resource> for Resource {
-    fn from(resource: wasi::Resource) -> Self {
-        Self {
-            attributes: resource.attributes.into_iter().map(Into::into).collect(),
-            dropped_attributes_count: 0,
-            entity_refs: vec![],
-        }
-    }
-}
+impl TryFrom<wasi::Metric> for Metric {
+    type Error = Error;
 
-impl From<wasi::KeyValue> for KeyValue {
-    fn from(value: wasi::KeyValue) -> Self {
-        Self {
-            key: value.key,
-            value: Some(value.value.into()),
-            ..Self::default()
-        }
-    }
-}
-
-impl From<wasi::Value> for AnyValue {
-    fn from(value: wasi::Value) -> Self {
-        let value = match value {
-            wasi::Value::Bool(v) => Value::BoolValue(v),
-            wasi::Value::S64(v) => Value::IntValue(v),
-            wasi::Value::F64(v) => Value::DoubleValue(v),
-            wasi::Value::String(v) => Value::StringValue(v),
-            wasi::Value::BoolArray(items) => array_value(items, Value::BoolValue),
-            wasi::Value::S64Array(items) => array_value(items, Value::IntValue),
-            wasi::Value::F64Array(items) => array_value(items, Value::DoubleValue),
-            wasi::Value::StringArray(items) => array_value(items, Value::StringValue),
-        };
-        Self { value: Some(value) }
-    }
-}
-
-fn array_value<T>(items: Vec<T>, value: fn(T) -> Value) -> Value {
-    Value::ArrayValue(ArrayValue {
-        values: items
-            .into_iter()
-            .map(|item| AnyValue {
-                value: Some(value(item)),
-            })
-            .collect(),
-    })
-}
-
-impl From<wasi::ScopeMetrics> for ScopeMetrics {
-    fn from(sm: wasi::ScopeMetrics) -> Self {
-        let schema_url = sm.scope.clone().schema_url.unwrap_or_default();
-
-        Self {
-            scope: Some(sm.scope.into()),
-            metrics: sm.metrics.into_iter().map(Into::into).collect(),
-            schema_url,
-        }
-    }
-}
-
-impl From<wasi::InstrumentationScope> for InstrumentationScope {
-    fn from(data: wasi::InstrumentationScope) -> Self {
-        Self {
-            name: data.name,
-            version: data.version.unwrap_or_default(),
-            attributes: data.attributes.into_iter().map(Into::into).collect(),
-            dropped_attributes_count: 0,
-        }
-    }
-}
-
-impl From<wasi::Metric> for Metric {
-    fn from(metric: wasi::Metric) -> Self {
-        Self {
+    fn try_from(metric: wasi::Metric) -> Result<Self> {
+        let data = MetricData::try_from(metric.data)
+            .map_err(|err| err.within(&format!("metric `{}`", metric.name)))?;
+        Ok(Self {
             name: metric.name,
-            description: metric.description,
-            unit: metric.unit,
-            metadata: vec![],
-            data: Some(match metric.data {
-                wasi::AggregatedMetrics::F64(data)
-                | wasi::AggregatedMetrics::U64(data)
-                | wasi::AggregatedMetrics::S64(data) => data.into(),
+            description: metric.description.unwrap_or_default(),
+            unit: metric.unit.unwrap_or_default(),
+            metadata: Vec::new(),
+            data: Some(data),
+        })
+    }
+}
+
+impl TryFrom<wasi::MetricData> for MetricData {
+    type Error = Error;
+
+    fn try_from(data: wasi::MetricData) -> Result<Self> {
+        Ok(match data {
+            wasi::MetricData::Gauge(gauge) => Self::Gauge(Gauge {
+                data_points: try_map(gauge.data_points)?,
             }),
-        }
+            wasi::MetricData::Sum(sum) => Self::Sum(Sum {
+                data_points: try_map(sum.data_points)?,
+                aggregation_temporality: temporality(sum.aggregation_temporality),
+                is_monotonic: sum.is_monotonic,
+            }),
+            wasi::MetricData::Histogram(histogram) => Self::Histogram(Histogram {
+                data_points: try_map(histogram.data_points)?,
+                aggregation_temporality: temporality(histogram.aggregation_temporality),
+            }),
+            wasi::MetricData::ExponentialHistogram(histogram) => {
+                Self::ExponentialHistogram(ExponentialHistogram {
+                    data_points: try_map(histogram.data_points)?,
+                    aggregation_temporality: temporality(histogram.aggregation_temporality),
+                })
+            }
+        })
     }
 }
 
-impl From<wasi::MetricData> for MetricData {
-    fn from(data: wasi::MetricData) -> Self {
-        match data {
-            wasi::MetricData::Gauge(gauge) => Self::Gauge(gauge.into()),
-            wasi::MetricData::Sum(sum) => Self::Sum(sum.into()),
-            wasi::MetricData::Histogram(hist) => Self::Histogram(hist.into()),
-            wasi::MetricData::ExponentialHistogram(hist) => Self::ExponentialHistogram(hist.into()),
-        }
-    }
+fn try_map<T, U: TryFrom<T, Error = Error>>(items: Vec<T>) -> Result<Vec<U>> {
+    items.into_iter().map(U::try_from).collect()
 }
 
-impl From<wasi::Gauge> for Gauge {
-    fn from(gauge: wasi::Gauge) -> Self {
-        let start = gauge.start_time.map_or_default(instant_nanos);
-        let time = instant_nanos(gauge.time);
-        Self {
-            data_points: gauge
-                .data_points
-                .into_iter()
-                .map(|dp| number_dp(dp.attributes, dp.value, dp.exemplars, start, time))
-                .collect(),
-        }
+fn temporality(temporality: wasi::AggregationTemporality) -> i32 {
+    match temporality {
+        wasi::AggregationTemporality::Delta => AggregationTemporality::Delta,
+        wasi::AggregationTemporality::Cumulative => AggregationTemporality::Cumulative,
     }
-}
-
-// shared by the Gauge and Sum conversions
-fn number_dp(
-    attributes: Vec<wasi::KeyValue>, value: wasi::DataValue, exemplars: Vec<wasi::Exemplar>,
-    start_time_unix_nano: u64, time_unix_nano: u64,
-) -> NumberDataPoint {
-    NumberDataPoint {
-        attributes: attributes.into_iter().map(Into::into).collect(),
-        start_time_unix_nano,
-        time_unix_nano,
-        exemplars: exemplars.into_iter().map(Into::into).collect(),
-        flags: DATA_POINT_FLAGS_DO_NOT_USE,
-        value: Some(value.into()),
-    }
+    .into()
 }
 
 // The proto `DataPointFlags` default (`FLAG_NONE` / "do not use").
 const DATA_POINT_FLAGS_DO_NOT_USE: u32 = 0;
 
-impl From<wasi::Sum> for Sum {
-    fn from(sum: wasi::Sum) -> Self {
-        let start = instant_nanos(sum.start_time);
-        let time = instant_nanos(sum.time);
+impl TryFrom<wasi::NumberDataPoint> for NumberDataPoint {
+    type Error = Error;
+
+    fn try_from(point: wasi::NumberDataPoint) -> Result<Self> {
+        Ok(Self {
+            attributes: types_impl::attributes(point.attributes)?,
+            start_time_unix_nano: point.start_time_unix_nano.unwrap_or_default(),
+            time_unix_nano: point.time_unix_nano,
+            exemplars: try_map(point.exemplars)?,
+            flags: DATA_POINT_FLAGS_DO_NOT_USE,
+            value: Some(point.value.into()),
+        })
+    }
+}
+
+impl TryFrom<wasi::HistogramDataPoint> for HistogramDataPoint {
+    type Error = Error;
+
+    fn try_from(point: wasi::HistogramDataPoint) -> Result<Self> {
+        Ok(Self {
+            attributes: types_impl::attributes(point.attributes)?,
+            start_time_unix_nano: point.start_time_unix_nano.unwrap_or_default(),
+            time_unix_nano: point.time_unix_nano,
+            count: point.count,
+            sum: point.sum,
+            bucket_counts: point.bucket_counts,
+            explicit_bounds: point.explicit_bounds,
+            exemplars: try_map(point.exemplars)?,
+            flags: DATA_POINT_FLAGS_DO_NOT_USE,
+            min: point.min,
+            max: point.max,
+        })
+    }
+}
+
+impl TryFrom<wasi::ExponentialHistogramDataPoint> for ExponentialHistogramDataPoint {
+    type Error = Error;
+
+    fn try_from(point: wasi::ExponentialHistogramDataPoint) -> Result<Self> {
+        Ok(Self {
+            attributes: types_impl::attributes(point.attributes)?,
+            start_time_unix_nano: point.start_time_unix_nano.unwrap_or_default(),
+            time_unix_nano: point.time_unix_nano,
+            count: point.count,
+            sum: point.sum,
+            scale: point.scale,
+            zero_count: point.zero_count,
+            positive: Some(point.positive.into()),
+            negative: Some(point.negative.into()),
+            flags: DATA_POINT_FLAGS_DO_NOT_USE,
+            exemplars: try_map(point.exemplars)?,
+            min: point.min,
+            max: point.max,
+            zero_threshold: point.zero_threshold,
+        })
+    }
+}
+
+impl From<wasi::Buckets> for Buckets {
+    fn from(buckets: wasi::Buckets) -> Self {
         Self {
-            data_points: sum
-                .data_points
-                .into_iter()
-                .map(|dp| number_dp(dp.attributes, dp.value, dp.exemplars, start, time))
-                .collect(),
-            aggregation_temporality: sum.temporality.into(),
-            is_monotonic: sum.is_monotonic,
+            offset: buckets.offset,
+            bucket_counts: buckets.bucket_counts,
         }
     }
 }
 
-impl From<wasi::Histogram> for Histogram {
-    fn from(hist: wasi::Histogram) -> Self {
-        Self {
-            data_points: hist
-                .data_points
-                .into_iter()
-                .map(|dp| HistogramDataPoint {
-                    attributes: dp.attributes.into_iter().map(Into::into).collect(),
-                    start_time_unix_nano: instant_nanos(hist.start_time),
-                    time_unix_nano: instant_nanos(hist.time),
-                    count: dp.count,
-                    sum: Some(dp.sum.into()),
-                    bucket_counts: dp.bucket_counts,
-                    explicit_bounds: dp.bounds,
-                    exemplars: dp.exemplars.into_iter().map(Into::into).collect(),
-                    flags: DATA_POINT_FLAGS_DO_NOT_USE,
-                    min: dp.min.map(Into::into),
-                    max: dp.max.map(Into::into),
-                })
-                .collect(),
-            aggregation_temporality: hist.temporality.into(),
+impl TryFrom<wasi::Exemplar> for Exemplar {
+    type Error = Error;
+
+    fn try_from(exemplar: wasi::Exemplar) -> Result<Self> {
+        let span_id =
+            exemplar.span_id.map(|id| types_impl::span_id(&id, "exemplar span id")).transpose()?;
+        let trace_id = exemplar
+            .trace_id
+            .map(|id| types_impl::trace_id(&id, "exemplar trace id"))
+            .transpose()?;
+        Ok(Self {
+            filtered_attributes: types_impl::attributes(exemplar.filtered_attributes)?,
+            time_unix_nano: exemplar.time_unix_nano,
+            span_id: span_id.unwrap_or_default(),
+            trace_id: trace_id.unwrap_or_default(),
+            value: Some(exemplar.value.into()),
+        })
+    }
+}
+
+impl From<wasi::Number> for NumberValue {
+    fn from(number: wasi::Number) -> Self {
+        match number {
+            wasi::Number::AsDouble(v) => Self::AsDouble(v),
+            wasi::Number::AsInt(v) => Self::AsInt(v),
         }
     }
 }
 
-impl From<wasi::ExponentialHistogram> for ExponentialHistogram {
-    fn from(hist: wasi::ExponentialHistogram) -> Self {
-        Self {
-            data_points: hist
-                .data_points
-                .into_iter()
-                .map(|dp| ExponentialHistogramDataPoint {
-                    attributes: dp.attributes.into_iter().map(Into::into).collect(),
-                    start_time_unix_nano: instant_nanos(hist.start_time),
-                    time_unix_nano: instant_nanos(hist.time),
-                    count: dp.count,
-                    sum: Some(dp.sum.into()),
-                    scale: dp.scale.into(),
-                    zero_count: dp.zero_count,
-                    positive: Some(Buckets {
-                        offset: dp.positive_bucket.offset,
-                        bucket_counts: dp.positive_bucket.counts,
-                    }),
-                    negative: Some(Buckets {
-                        offset: dp.negative_bucket.offset,
-                        bucket_counts: dp.negative_bucket.counts,
-                    }),
-                    flags: DATA_POINT_FLAGS_DO_NOT_USE,
-                    exemplars: dp.exemplars.into_iter().map(Into::into).collect(),
-                    min: dp.min.map(Into::into),
-                    max: dp.max.map(Into::into),
-                    zero_threshold: dp.zero_threshold,
-                })
-                .collect(),
-            aggregation_temporality: hist.temporality.into(),
+impl From<wasi::Number> for ExemplarValue {
+    fn from(number: wasi::Number) -> Self {
+        match number {
+            wasi::Number::AsDouble(v) => Self::AsDouble(v),
+            wasi::Number::AsInt(v) => Self::AsInt(v),
         }
     }
 }
-
-impl From<wasi::Exemplar> for Exemplar {
-    fn from(ex: wasi::Exemplar) -> Self {
-        Self {
-            filtered_attributes: ex.filtered_attributes.into_iter().map(Into::into).collect(),
-            time_unix_nano: instant_nanos(ex.time),
-            span_id: decode_id(&ex.span_id),
-            trace_id: decode_id(&ex.trace_id),
-            value: Some(ex.value.into()),
-        }
-    }
-}
-
-// OTLP's integer is `i64`: a `u64` crosses as its raw bits.
-impl From<wasi::DataValue> for NumberValue {
-    fn from(dv: wasi::DataValue) -> Self {
-        match dv {
-            wasi::DataValue::U64(v) => Self::AsInt(v.cast_signed()),
-            wasi::DataValue::S64(v) => Self::AsInt(v),
-            wasi::DataValue::F64(v) => Self::AsDouble(v),
-        }
-    }
-}
-
-// Same shape as a data point's value; one route for the `u64` narrowing.
-impl From<wasi::DataValue> for ExemplarValue {
-    fn from(dv: wasi::DataValue) -> Self {
-        match NumberValue::from(dv) {
-            NumberValue::AsInt(v) => Self::AsInt(v),
-            NumberValue::AsDouble(v) => Self::AsDouble(v),
-        }
-    }
-}
-
-#[expect(clippy::cast_precision_loss, reason = "an OTLP double is `f64` by contract")]
-impl From<wasi::DataValue> for f64 {
-    fn from(dv: wasi::DataValue) -> Self {
-        match dv {
-            wasi::DataValue::U64(v) => v as Self,
-            wasi::DataValue::S64(v) => v as Self,
-            wasi::DataValue::F64(v) => v,
-        }
-    }
-}
-
-impl From<wasi::Temporality> for AggregationTemporality {
-    fn from(temporality: wasi::Temporality) -> Self {
-        match temporality {
-            wasi::Temporality::Cumulative => Self::Cumulative,
-            wasi::Temporality::Delta => Self::Delta,
-            wasi::Temporality::LowMemory => Self::Unspecified,
-        }
-    }
-}
-
-impl From<wasi::Temporality> for i32 {
-    fn from(temporality: wasi::Temporality) -> Self {
-        AggregationTemporality::from(temporality) as Self
-    }
-}
-
-omnia_core::host_error!(wasi::Error, InternalFailure);

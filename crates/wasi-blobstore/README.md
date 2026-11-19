@@ -7,13 +7,26 @@ This crate provides the Blobstore interface for the Omnia runtime.
 Implements `omnia:blobstore`, the interface the SDK's `BlobStore` calls, over
 one `BlobStoreClient` per backend.
 
-- A call on an object in a container that does not exist fails with
-  `not-found`. An absent object is `none`, not an error.
+- A guest opens a container by name and calls it through the handle `open`
+  returns. A container that does not exist fails `open` with `not-found`.
+  An absent object is `none`, not an error.
 - Every backend stores the portable container and object names the SDK's
   `BlobStore` defines. A backend may reject any other name with `invalid`.
-- `get-range` reads a half-open range, clamped to the object's length.
-- `list` answers one page of the objects under a prefix, with the cursor
-  that resumes it.
+- `get` streams an object, or the `byte-range` of it a guest selects,
+  clamped to the object's length.
+- `put` streams an object in, and stores it only once the writer resolves
+  `finished` with `ok`.
+- `list` answers one page of the names under a prefix, flat or folded at
+  the next `/`, with the cursor that resumes it.
+- `admin`, `uploads`, and `presign` are optional. `uploads` and `presign`
+  are unstable, and a guest binds one by enabling the feature of its name.
+- The host answers `unsupported` for what `Container` cannot express yet:
+  - a `put`, `delete`, `copy`, or `rename` with a precondition;
+  - a `put` with attributes;
+  - `list-containers`;
+  - every `uploads` and `presign` call.
+- Until a backend reports one, an `etag` derives from the object's write
+  time and size, so two writes of one size within a second share it.
 
 ## Backend
 

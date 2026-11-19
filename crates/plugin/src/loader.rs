@@ -1,6 +1,7 @@
 //! The `omnia:plugins/loader` load path.
 
 use std::future::Future;
+use std::io;
 use std::sync::Arc;
 
 use anyhow::{Context as _, bail, ensure};
@@ -17,21 +18,23 @@ pub trait PluginLoader {
     /// Ensure the guest `from` names is active and return its handle, held
     /// to `pin` when one is given. Idempotent on (name, digest).
     ///
+    /// A load whose bytes miss `pin`, or whose name is active under other
+    /// bytes, loads nothing and answers a [`LoadConflict`].
+    ///
     /// # Errors
     ///
-    /// `refused` on a location the deployment's grant does not serve, a
-    /// digest mismatch, bytes that are not a loadable component, or a name
-    /// active under other bytes; `unavailable` when the source could not
-    /// produce the bytes; `internal` on registration failure.
+    /// - [`LoadError::Unsupported`] on a runtime with no [`Plugins`]
+    ///   installed.
+    /// - Any other [`LoadError`] as [`Plugins::load`] reports it.
     fn load(
         &self, from: Location, pin: Option<Digest>,
-    ) -> impl Future<Output = Result<Plugin, LoadError>> + Send;
+    ) -> impl Future<Output = Result<Result<Plugin, LoadConflict>, LoadError>> + Send;
 }
 
 impl<B: Backends> PluginLoader for Runtime<B> {
     fn load(
         &self, from: Location, pin: Option<Digest>,
-    ) -> impl Future<Output = Result<Plugin, LoadError>> + Send {
+    ) -> impl Future<Output = Result<Result<Plugin, LoadConflict>, LoadError>> + Send {
         let plugins = self.extensions().get::<Plugins>();
         async move {
             match plugins {
@@ -91,17 +94,29 @@ impl Plugins {
     /// the deployment may declare; a name already active under the same
     /// bytes is attested. Idempotent on (name, digest).
     ///
+    /// A path or package whose bytes miss `pin`, or whose name is active
+    /// under other bytes, loads nothing and answers a [`LoadConflict`].
+    ///
     /// # Errors
     ///
-    /// `refused` on an undeclared name, a declared name with a pin, a path
-    /// or package deriving a name the deployment declares, a path beneath no
-    /// read-only mount, a package nothing routes, a digest mismatch, a
-    /// pre-compiled artifact where raw wasm alone is admitted (a
-    /// caller-named path or package, a declared package, or a declared path
-    /// without a `digest`), bytes that are not a loadable component, or a
-    /// name active under other bytes; `unavailable` when the source could
-    /// not produce the bytes; `internal` on registration failure.
-    pub async fn load(&self, from: Location, pin: Option<Digest>) -> Result<Plugin, LoadError> {
+    /// - [`LoadError::NotFound`] for an undeclared name, a path beneath no
+    ///   mount or with no file, or a package nothing routes or holds.
+    /// - [`LoadError::Denied`] for a path or package deriving a name the
+    ///   deployment declares, a path beneath a writable mount or one the
+    ///   filesystem refuses to read, or a registry named for a package the
+    ///   deployment routes elsewhere.
+    /// - [`LoadError::Invalid`] for a declared name with a pin, a malformed
+    ///   path, package, or registry, or bytes that miss the deployment's
+    ///   pin, are pre-compiled where raw wasm alone is admitted, or are not
+    ///   a loadable component.
+    /// - [`LoadError::Unsupported`] for a package the runtime cannot fetch.
+    /// - [`LoadError::Unavailable`] when the mount, the store, or the
+    ///   registry did not produce the bytes.
+    /// - [`LoadError::Other`] when the registration failed or the runtime
+    ///   has shut down.
+    pub async fn load(
+        &self, from: Location, pin: Option<Digest>,
+    ) -> Result<Result<Plugin, LoadConflict>, LoadError> {
         let id = from.id();
 
         // acquire the bytes the location names, inside the grant; a name the
@@ -109,14 +124,14 @@ impl Plugins {
         let bytes = match &from {
             Location::Declared(name) => {
                 if pin.is_some() {
-                    return Err(LoadError::Refused(format!(
+                    return Err(LoadError::Invalid(format!(
                         "`{name}` is declared by the deployment, which pins it; the load takes \
                          no digest"
                     )));
                 }
                 let plugin = self.admission.guest(&id).await?;
                 tracing::info!(%id, digest = %plugin.digest, "declared guest loaded");
-                return Ok(plugin);
+                return Ok(Ok(plugin));
             }
             Location::Path(path) => {
                 self.admission.admits(&id)?;
@@ -128,9 +143,12 @@ impl Plugins {
             }
         };
 
-        let plugin = self.admission.admit_bytes(id.clone(), bytes, pin).await?;
-        tracing::info!(%id, digest = %plugin.digest, "guest loaded");
-        Ok(plugin)
+        let loaded = self.admission.admit_bytes(id.clone(), bytes, pin).await?;
+        match &loaded {
+            Ok(plugin) => tracing::info!(%id, digest = %plugin.digest, "guest loaded"),
+            Err(conflict) => tracing::debug!(%id, found = %conflict.found, "guest load conflicted"),
+        }
+        Ok(loaded)
     }
 
     // Read the component at `path` through the read-only mount it lies
@@ -138,12 +156,18 @@ impl Plugins {
     async fn read(&self, path: &str) -> Result<Vec<u8>, LoadError> {
         let (dir, subpath) = self.resolve(path)?;
         let read = tokio::task::spawn_blocking(move || {
-            dir.read(&subpath).with_context(|| format!("reading component `{subpath}`"))
+            dir.read(&subpath).map_err(|error| {
+                let detail = format!("reading component `{subpath}`: {error}");
+                match error.kind() {
+                    io::ErrorKind::NotFound => LoadError::NotFound(detail),
+                    io::ErrorKind::PermissionDenied => LoadError::Denied(detail),
+                    _ => LoadError::Unavailable(detail),
+                }
+            })
         });
-        read.await
-            .context("component read task panicked")
-            .and_then(|result| result)
-            .map_err(|error| LoadError::Unavailable(format!("{error:#}")))
+        read.await.unwrap_or_else(|error| {
+            Err(LoadError::Other(format!("the component read task failed: {error}")))
+        })
     }
 
     // The mount `path` lies beneath, as wasi-libc resolves a guest's own opens
@@ -164,12 +188,12 @@ impl Plugins {
             .max_by_key(|(root, _)| root.name.len())
             .or_else(|| self.mounts.iter().find(|root| root.name == ".").map(|root| (root, path)));
         let Some((root, subpath)) = best else {
-            return Err(LoadError::Refused(format!(
+            return Err(LoadError::NotFound(format!(
                 "path `{path}` is beneath no mount of this deployment"
             )));
         };
         if root.writable {
-            return Err(LoadError::Refused(format!(
+            return Err(LoadError::Denied(format!(
                 "path `{path}` is beneath the writable mount `{}`; a component loads from a \
                  read-only mount alone",
                 root.name
@@ -240,7 +264,7 @@ fn check_subpath(path: &str, subpath: &str) -> Result<(), LoadError> {
     let plain = !subpath.contains('\\')
         && subpath.split('/').all(|part| !part.is_empty() && part != "." && part != "..");
     if !plain {
-        return Err(LoadError::Refused(format!(
+        return Err(LoadError::Invalid(format!(
             "component path `{path}` is not a plain relative path within a mount"
         )));
     }
@@ -282,5 +306,33 @@ impl Plugin {
     #[must_use]
     pub fn exports(&self) -> &[String] {
         &self.exports
+    }
+}
+
+/// A load that loaded nothing because its precondition did not hold.
+///
+/// The bytes missed the load's pin, or a guest is active under the name from
+/// other bytes.
+#[derive(Clone, Debug)]
+pub struct LoadConflict {
+    found: Digest,
+    current: Option<Plugin>,
+}
+
+impl LoadConflict {
+    pub(crate) const fn new(found: Digest, current: Option<Plugin>) -> Self {
+        Self { found, current }
+    }
+
+    /// The digest of the bytes the location names.
+    #[must_use]
+    pub const fn found(&self) -> Digest {
+        self.found
+    }
+
+    /// The guest active under the name, `None` when none is.
+    #[must_use]
+    pub const fn current(&self) -> Option<&Plugin> {
+        self.current.as_ref()
     }
 }

@@ -4,17 +4,53 @@ This crate provides the version-control interface for the Omnia runtime: the `om
 
 ## Interface
 
-Implements the `omnia:vcs@0.1.0` WIT package ([`wit/vcs.wit`](wit/vcs.wit)), three interfaces a backend exports what it has of:
+Implements `omnia:vcs` ([`wit/vcs.wit`](wit/vcs.wit)), the interface the
+SDK's `Vcs` calls, over one `VcsClient` per backend.
 
-| Interface | Operations | Purpose |
-| --------- | ---------- | ------- |
-| `store` | `resolve`, `descends`, `head`, `commit`, `merge`, `log` | The commit graph: sealed snapshots, whether one commit is in another's history, the merge under a policy, and the first-parent chain over a base |
-| `workspace` | `init`, `add`, `remove`, `pending` | Working copies laid beneath a mount, and what each holds past its head |
-| `transport` | `clone`, `fetch`, `label`, `labelled`, `fetched`, `push` | Remotes and labels: a label is written and read back in one namespace, a remote's label is read back in the one a fetch writes, and a push never forces |
-
-Every operation names its repository or working copy as a `location`: a borrowed mount-root descriptor plus a plain relative subpath, the `workspace-grant` idiom of `omnia:model`. The host resolves it against the deployment's mount registry before the backend runs, so a backend works only beneath a mount the deployment authorised, and a mutation (`init`, `add`, `remove`, `commit`, `merge`, `clone`, `fetch`, `label`, `push`) beneath a read-only mount is refused as `error.other` before any backend runs. The backend receives a `Place`, an open directory handle beneath the mount that the host created for `init`, `add`, and `clone` where nothing stood and holds for as long as the backend runs, so a guest rearranging its tree meanwhile cannot redirect the operation; it never sees a descriptor, and the guest sees locations and never a path. A subpath that does not exist is `not-a-repository` for every other operation, before any backend runs.
-
-A typed `error` — `not-a-repository`, `exists`, `not-found`, `pending`, `access`, `diverged`, `other` — crosses the boundary as the backend returned it; any other backend failure reaches the guest as `other`.
+- A guest opens the repository or working copy at a `location`, and calls
+  it through the `workspace` handle `open` returns. A place that holds none
+  fails with `not-found`. `init` lays a repository down, and answers
+  `occupied` where one already is.
+- A `location` is a mount root the guest holds and a plain relative
+  subpath, as `omnia:model`'s is. `init`, `add`, and `clone` lay its
+  directory down where nothing stands. The host resolves it before any
+  backend runs, and refuses:
+  - a root that is not a mount, or a subpath that leads out of one, with
+    `denied`;
+  - a subpath that is not plainly spelled, or a name a file or a symlink
+    holds where a directory would be laid down, with `invalid`;
+  - a change beneath a read-only mount with `denied`.
+- A backend works through a `Place`, an open directory handle beneath the
+  mount that the host holds for the whole call. A guest that rearranges its
+  tree meanwhile cannot redirect the call, and the backend never sees a
+  descriptor.
+- A lookup that finds nothing is `none`, not an error. That covers a
+  revision, a bookmark, a remote's bookmark, and the `head` of a workspace
+  with no commits.
+- An outcome a guest acts on is a result of its own, not an `error`:
+  - `init`, `add`, and `clone` into a place already taken answer
+    `occupied`;
+  - a merge that leaves conflicts answers `unmerged` naming their paths,
+    and a merge into pending changes answers `unmerged` naming those,
+    with nothing merged;
+  - a push the remote moved past answers `diverged`, with the commit the
+    repository last saw the remote's bookmark at.
+- `log` and `status` answer a page of at most 1,000 entries, and its
+  `next` cursor resumes the listing.
+- `workspaces` is optional, and adds and removes a further workspace of a
+  repository. `remotes` is optional, and clones, fetches, reads a remote's
+  bookmark, and pushes. `WasiVcs` serves both.
+- A backend picks a failure's case by returning an `omnia_wasi_vcs::Error`:
+  - `NotARepository` and `NotFound` are `not-found`;
+  - `Access` is `unavailable`;
+  - `Exists` is the `occupied` outcome of `init`, `add`, and `clone`;
+  - `Pending` is a merge's `unmerged` outcome;
+  - `Diverged` is a push's `diverged` outcome;
+  - each of those three from any other call, `Other`, and any untyped
+    failure are `other`.
+- The host answers `unsupported` for what `VcsClient` cannot express yet:
+  - a `log` with no base;
+  - a `set-bookmark` with a precondition.
 
 ## Backend
 
@@ -38,7 +74,7 @@ omnia::runtime!({
 });
 ```
 
-A guest reaches the interface through `omnia_sdk::Vcs`, naming every location as a deployment-local path (`"."` the project mount, `"./.cache/repo"` beneath it), or through the raw `omnia_wasi_vcs::{store, workspace, transport}` bindings.
+A guest reaches the interface through `omnia_sdk::Vcs`, naming every location as a deployment-local path (`"."` the project mount, `"./.cache/repo"` beneath it), or through the raw `omnia_wasi_vcs::omnia::{store, workspace, workspaces, remotes}` bindings.
 
 ## License
 

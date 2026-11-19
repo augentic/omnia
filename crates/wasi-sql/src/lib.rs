@@ -2,8 +2,7 @@
 
 //! # WASI SQL Service
 //!
-//! This module implements a runtime service for `omnia:sql` and the
-//! `wasi:sql` draft (<https://github.com/aspect-build/wasi-sql>).
+//! This module implements a runtime service for `omnia:sql`.
 
 cfg_select! {
     target_arch = "wasm32" => {

@@ -1,4 +1,4 @@
-//! The loader's refusal vocabulary, owned here so every module below the WIT
+//! The loader's failure vocabulary, owned here so every module below the WIT
 //! adapter depends downward on plain Rust rather than upward on bindgen
 //! output.
 
@@ -6,41 +6,63 @@ use std::fmt;
 
 use omnia_core::GuestError;
 
-/// Why a load was refused — the host mirror of the `omnia:plugins/loader`
-/// `error` variant.
+/// Why a load failed: the host form of the `omnia:plugins/types` `error`
+/// variant.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum LoadError {
-    /// The request or deployment is wrong and a retry cannot succeed.
-    #[error("refused: {0}")]
-    Refused(String),
-    /// The guest's source could not produce its bytes; a retry may succeed.
+    /// The source names nothing. No guest is declared under the name, no
+    /// file is at the path, or nothing routes the package or holds the
+    /// release.
+    #[error("not-found: {0}")]
+    NotFound(String),
+    /// The deployment does not grant the load, such as a path beneath a
+    /// writable mount or a name the deployment declares.
+    #[error("denied: {0}")]
+    Denied(String),
+    /// The request was rejected, such as a malformed path or digest, or the
+    /// bytes are not a component the deployment can run.
+    #[error("invalid: {0}")]
+    Invalid(String),
+    /// A valid request this runtime cannot serve, such as a load on a
+    /// runtime with no loader installed.
+    #[error("unsupported: {0}")]
+    Unsupported(String),
+    /// The mount, the store, or the registry did not produce the bytes. A
+    /// retry may succeed.
     #[error("unavailable: {0}")]
     Unavailable(String),
-    /// Loader misconfiguration or an internal registration failure.
-    #[error("internal: {0}")]
-    Internal(String),
+    /// Any other failure, such as a registration that failed.
+    #[error("other: {0}")]
+    Other(String),
 }
 
 impl LoadError {
-    /// The refusal for a runtime that linked the loader host but installed no
-    /// `Plugins` extension: one assembled by hand from parts.
+    // A runtime that linked the loader host but installed no `Plugins`
+    // extension: one assembled by hand from parts.
     pub(crate) fn no_plugins(from: impl fmt::Display) -> Self {
-        Self::Internal(format!(
+        Self::Unsupported(format!(
             "this runtime has no guest loader installed; loading `{from}` needs \
              `Plugins::install` on the assembled runtime"
         ))
     }
 }
 
+// The admission lifts a conflict into a `LoadConflict`, so one reaching this
+// conversion is a fault.
 impl From<GuestError> for LoadError {
     fn from(error: GuestError) -> Self {
         match error {
             GuestError::Unregistered(id) => {
-                Self::Refused(format!("no guest `{id}` is declared by this deployment"))
+                Self::NotFound(format!("no guest `{id}` is declared by this deployment"))
             }
-            GuestError::Refused(detail) => Self::Refused(detail),
+            GuestError::NotFound(detail) => Self::NotFound(detail),
+            GuestError::Denied(detail) => Self::Denied(detail),
+            GuestError::Invalid(detail) => Self::Invalid(detail),
+            GuestError::Unsupported(detail) => Self::Unsupported(detail),
             GuestError::Unavailable(detail) => Self::Unavailable(detail),
-            GuestError::Internal(detail) => Self::Internal(detail),
+            GuestError::Conflict { detail, .. } | GuestError::Internal(detail) => {
+                Self::Other(detail)
+            }
         }
     }
 }

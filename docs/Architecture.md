@@ -121,21 +121,21 @@ pub trait Connect: Sized + Sync + Send {
 
 Each interface crate provides guest bindings, a host implementation, and, with one exception, a default backend:
 
-| Crate            | Interface         | Purpose                          | Default backend                           |
-| ---------------- | ----------------- | -------------------------------- | ----------------------------------------- |
-| `wasi-http`      | `wasi:http`       | HTTP client/server (trigger)     | `HttpDefault` — hyper client, axum server |
-| `wasi-keyvalue`  | `omnia:keyvalue`  | Key-value storage (+ wasi draft) | `KeyValueDefault` — in-memory             |
-| `wasi-messaging` | `wasi:messaging`  | Pub/sub messaging (trigger)      | `MessagingDefault` — in-process broadcast |
-| `wasi-blobstore` | `omnia:blobstore` | Blob storage                     | `BlobStoreDefault` — in-memory            |
-| `wasi-sql`       | `omnia:sql`       | Parameterized SQL (+ wasi draft) | `SqlDefault` — SQLite                     |
-| `wasi-docstore`  | `omnia:docstore`  | JSON document store with filters | `DocStoreDefault` — in-memory             |
-| `wasi-config`    | `wasi:config`     | Runtime configuration            | `ConfigDefault` — process environment     |
-| `wasi-vault`     | Custom            | Secrets management               | `VaultDefault` — in-memory                |
-| `wasi-identity`  | Custom            | Identity/OAuth tokens            | `IdentityDefault` — OAuth2 client flow    |
-| `wasi-otel`      | Custom            | Guest OpenTelemetry export       | `OtelDefault` — log-only                  |
-| `wasi-websocket` | Custom            | WebSocket connections (trigger)  | `WebSocketDefault` — tungstenite server   |
-| `wasi-model`     | `omnia:model`     | Model completions with grants    | `ModelDefault` — deterministic echo       |
-| `wasi-vcs`       | `omnia:vcs`       | Version control over lent mounts | none — `omnia-git` in `omnia-backends`    |
+| Crate            | Interface         | Purpose                            | Default backend                           |
+| ---------------- | ----------------- | ---------------------------------- | ----------------------------------------- |
+| `wasi-http`      | `wasi:http`       | HTTP client/server (trigger)       | `HttpDefault` — hyper client, axum server |
+| `wasi-keyvalue`  | `omnia:keyvalue`  | Key-value storage                  | `KeyValueDefault` — in-memory             |
+| `wasi-messaging` | `omnia:messaging` | Pub/sub messaging (trigger)        | `MessagingDefault` — in-process broadcast |
+| `wasi-blobstore` | `omnia:blobstore` | Blob storage                       | `BlobStoreDefault` — in-memory            |
+| `wasi-sql`       | `omnia:sql`       | Parameterized SQL and transactions | `SqlDefault` — SQLite                     |
+| `wasi-docstore`  | `omnia:docstore`  | JSON document store with filters   | `DocStoreDefault` — in-memory             |
+| `wasi-config`    | `omnia:config`    | Runtime configuration              | `ConfigDefault` — process environment     |
+| `wasi-vault`     | `omnia:vault`     | Secrets management                 | `VaultDefault` — in-memory                |
+| `wasi-identity`  | `omnia:identity`  | Identity/OAuth tokens              | `IdentityDefault` — OAuth2 client flow    |
+| `wasi-otel`      | Custom            | Guest OpenTelemetry export         | `OtelDefault` — log-only                  |
+| `wasi-websocket` | `omnia:websocket` | WebSocket connections (trigger)    | `WebSocketDefault` — tungstenite server   |
+| `wasi-model`     | `omnia:model`     | Model completions with grants      | `ModelDefault` — deterministic echo       |
+| `wasi-vcs`       | `omnia:vcs`       | Version control over lent mounts   | none — `omnia-git` in `omnia-backends`    |
 
 Conditional compilation lets one crate serve both sides — guests get bindings on `wasm32`, hosts get the implementation on native:
 
@@ -156,7 +156,7 @@ Each crate's `wit/` directory holds the [WIT](https://component-model.bytecodeal
 
 ### Guest SDK (`crates/sdk`, `crates/guest-macros`)
 
-`omnia-sdk` defines transport-neutral `Handler`, `Context`, and `Handlers` plus three transport adapters under `omnia_sdk::api`: the axum-backed HTTP router (`http`, behind the default `http` feature), the exact-topic messaging router (`messaging`), and the command façade (`command`: `parse` → `Command::call` → `Response`, with `command::export!` binding the `wasi:cli/run` export; clap-backed parts behind the `command` feature). Applications own their WASI exports and call the matching adapter. Failures share one vocabulary across transports: `Error` maps to an HTTP status and to an exit code (1/2/3/4; clap usage errors exit 64), and both HTTP and the command line emit the same `ErrorBody` discriminant. Every transport carrier (`x-request-id` headers, messaging metadata, `Metadata::from_env`) mints a request id from the platform's CSPRNG when none arrives, and the router's dispatch runs the handler in a span carrying it. The HTTP and messaging hosts stamp each invocation's deadline, the instant `GUEST_TIMEOUT_MS` expires, as the `x-deadline` header and the `deadline` metadata entry, so a handler reads its budget as `Metadata::deadline`. The capability traits live in `omnia-sdk` beside the MCP server module (`mcp::McpServer`, `mcp::router`): `BlobStore`, `Config`, `DocumentDb`, `HttpClient`, `Identity`, `Model`, `Plugins`, `Publisher`, `SecretStore`, `SqlDb`, `StateStore`, `Vcs`, and `WebSockets`. Each fails with `omnia_sdk::Error`, coded as the class of failure (or its module's own `Error` on `Model`, `Plugins`, and `Vcs`), and `WasiProvider` implements every one over the WASI bindings on `wasm32`. `guest-macros` provides the `#[instrument]` tracing attribute, the `#[capability]` attribute, and the `Provider`, `Settings`, and `FromRow` derives, which `omnia-sdk` re-exports.
+`omnia-sdk` defines transport-neutral `Handler`, `Context`, and `Handlers` plus three transport adapters under `omnia_sdk::api`: the axum-backed HTTP router (`http`, behind the default `http` feature), the exact-topic messaging router (`messaging`), and the command façade (`command`: `parse` → `Command::call` → `Response`, with `command::export!` binding the `wasi:cli/run` export; clap-backed parts behind the `command` feature). Applications own their WASI exports and call the matching adapter. Failures share one vocabulary across transports: `Error` maps to an HTTP status and to an exit code (1/2/3/4; clap usage errors exit 64), and both HTTP and the command line emit the same `ErrorBody` discriminant. Every transport carrier (`x-request-id` headers, messaging metadata, `Metadata::from_env`) mints a request id from the platform's CSPRNG when none arrives, and the router's dispatch runs the handler in a span carrying it. The HTTP and messaging hosts stamp each invocation's deadline, the instant `GUEST_TIMEOUT_MS` expires, as the `x-deadline` header and the delivery's `deadline`, so a handler reads its budget as `Metadata::deadline`. The capability traits live in `omnia-sdk` beside the MCP server module (`mcp::McpServer`, `mcp::router`): `BlobStore`, `Config`, `DocumentDb`, `HttpClient`, `Identity`, `Model`, `Plugins`, `Publisher`, `SecretStore`, `SqlDb`, `StateStore`, `Vcs`, and `WebSockets`. Each fails with `omnia_sdk::Error`, coded as the class of failure (or its module's own `Error` on `Model`, `Plugins`, and `Vcs`), and `WasiProvider` implements every one over the WASI bindings on `wasm32`. `guest-macros` provides the `#[instrument]` tracing attribute, the `#[capability]` attribute, and the `Provider`, `Settings`, and `FromRow` derives, which `omnia-sdk` re-exports.
 
 ### Host macro (`crates/host-macros`)
 
@@ -262,7 +262,7 @@ StoreCtx<Backends>                       one per guest store
 HostView<'_, dyn KeyValueClient>         #[host_ctx(client = KeyValueClient)]: the host's HasData::Data
    |  bindgen Host* impls on the view; Host::add_to_linker(linker, StoreCtx::view::<Self>)
    v
-wasmtime Linker                          wasi:keyvalue/* resolved for the guest
+wasmtime Linker                          omnia:keyvalue/* resolved for the guest
 ```
 
 A backend implements the `<Name>Client` contract and never sees the view; a host implements the WIT functions on the view and never sees the bundle. `runtime!` supplies the bundle's `Provides` impl per row, `#[derive(HostCtx)]` supplies the host's borrow and view, and `StoreCtx::view` joins them.

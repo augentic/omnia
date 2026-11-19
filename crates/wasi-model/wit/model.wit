@@ -1,210 +1,346 @@
-package omnia:model@0.2.0;
+package omnia:model@0.1.0;
 
-/// Models-API-style prompt completion.
-interface completion {
-    use wasi:filesystem/types@0.3.2.{descriptor};
+/// The types the model interfaces share.
+///
+/// Every backend accepts a portable name and a portable value, and may
+/// reject any other as `invalid`.
+///
+/// - A portable model name is not empty and holds only ASCII letters,
+///   digits, `_`, and `-`.
+/// - A portable tool name is 1 to 64 characters long and holds only ASCII
+///   letters, digits, `_`, and `-`. `read`, `list`, and `write` are
+///   reserved for the host's tools, and a backend may reserve others.
+/// - A portable input schema is a JSON Schema whose root type is `object`.
+/// - A portable effort is any but `other`.
+/// - A portable tool output, tool failure, or correction is at most 1 MiB.
+///
+/// An `error` from a model interface means:
+///
+/// - `not-found`: the model is not declared by the deployment, or the place
+///   lent does not exist.
+/// - `denied`: the provider refused the caller, or the guest lends a place
+///   it does not hold.
+/// - `invalid`: the request was rejected, such as a reserved tool name or a
+///   schema that is not JSON.
+/// - `unavailable`: the provider did not answer, or turned the call away
+///   for now as a rate limit does.
+interface types {
+  use omnia:types/types@0.1.0.{error};
+  use wasi:filesystem/types@0.3.2.{descriptor};
 
-    /// A JSON document.
-    type json = string;
+  /// A JSON document, as text.
+  type json = string;
 
-    /// The text the guest's check accepted — or, without a check, the
-    /// model's final text as the backend received it.
-    type answer = string;
+  /// Who wrote a message.
+  enum role {
+    /// Instructions the model follows.
+    system,
+    /// Whoever the model answers.
+    user,
+    /// The model.
+    assistant,
+  }
 
-    /// Chat turn author.
-    enum role {
-        system,
-        user,
-        assistant,
-    }
+  /// One turn of a conversation.
+  record message {
+    role: role,
+    /// The turn's text.
+    content: string,
+  }
 
-    /// One chat turn.
-    record message {
-        role: role,
-        content: string,
-    }
+  /// The controls on how the model generates.
+  ///
+  /// An absent field takes the backend's default. A backend carries every
+  /// field given or fails with `unsupported`.
+  record generation {
+    /// The sampling temperature.
+    temperature: option<f32>,
+    /// The nucleus sampling threshold.
+    top-p: option<f32>,
+    /// The most tokens the model writes in one response. A completion that
+    /// calls tools takes several responses.
+    max-tokens: option<u32>,
+    /// Texts at which the model stops writing.
+    stop-sequences: list<string>,
+    /// The seed that makes sampling repeatable.
+    seed: option<u64>,
+    /// How much the model reasons before it answers.
+    effort: option<effort>,
+  }
 
-    /// JSON Schema steering output (`response_format.json_schema` in provider APIs).
-    record schema {
-        /// Schema name passed to the provider.
-        name: string,
-        /// JSON Schema document the answer should conform to.
-        schema: json,
-    }
+  /// How much the model reasons before it answers.
+  variant effort {
+    low,
+    medium,
+    high,
+    /// A level by the backend's own name, such as `minimal`. A level the
+    /// backend does not know is `invalid`.
+    other(string),
+  }
 
-    /// Output shape hint steering the provider (`response_format` where the
-    /// provider constrains decoding, instruction prose where it does not).
-    /// Nothing is validated against it; acceptance is the guest's check.
-    variant format {
-        text,
-        /// Steer toward a JSON object.
-        json,
-        /// Steer toward the given JSON Schema.
-        schema(schema),
-    }
+  /// A named JSON Schema.
+  record schema {
+    /// The name the provider knows the schema by, portable as a tool name
+    /// is.
+    name: string,
+    /// The JSON Schema document.
+    schema: json,
+  }
 
-    /// Reasoning-effort hint for models with a thinking budget.
-    enum effort {
-        minimal,
-        low,
-        medium,
-        high,
-    }
+  /// The shape an answer should take.
+  ///
+  /// A backend steers the model toward it and may hold a candidate to it.
+  /// It guarantees nothing about the answer, which only a `check` judges.
+  variant format {
+    /// Plain text.
+    text,
+    /// A JSON object.
+    json,
+    /// JSON that follows the schema.
+    schema(schema),
+  }
 
-    /// Sampling and length controls. Omitted fields defer to backend defaults.
-    record generation {
-        temperature: option<f32>,
-        top-p: option<f32>,
-        max-tokens: option<u32>,
-        stop: list<string>,
-        seed: option<u64>,
-        effort: option<effort>,
-    }
+  /// A tool the guest runs for the model.
+  record tool {
+    name: string,
+    /// What the tool does, for the model to read.
+    description: option<string>,
+    /// The JSON Schema of the tool's arguments.
+    input-schema: json,
+  }
 
-    /// Guest-declared function tool advertised to the model.
-    record function {
-        /// Must not collide with the reserved names (`read`, `list`, `write`, `check`).
-        name: string,
-        /// Natural-language description for the model.
-        description: string,
-        /// JSON Schema for the arguments object.
-        parameters: json,
-    }
+  /// A place beneath an authorised mount.
+  ///
+  /// The host resolves it against the mounts the guest holds, so nothing
+  /// outside a mount is reached.
+  record location {
+    /// A mount root the guest holds. Any other descriptor is `denied`.
+    root: borrow<descriptor>,
+    /// A `/`-separated relative path beneath `root`. No segment is empty,
+    /// `.`, or `..`, and none holds `\`. An empty path names the root
+    /// itself.
+    subpath: string,
+  }
 
-    /// Remote MCP server offered to the model.
-    record mcp {
-        /// Logical server name.
-        name: string,
-        /// Tool allowlist; empty exposes every tool the server advertises.
-        tools: list<string>,
-        url: string,
-    }
+  /// The directory the guest lends a completion.
+  record workspace-grant {
+    /// The directory the completion works in. The model reads it, and
+    /// writes it where the mount and the backend allow.
+    location: location,
+    /// What the backend's worker may reach beyond `location`, `none` to
+    /// grant nothing more.
+    worker: option<worker-grant>,
+  }
 
-    /// A tool offered to the model.
-    variant tool {
-        function(function),
-        mcp(mcp),
-    }
+  /// What a backend's worker may reach beyond the workspace.
+  ///
+  /// A worker is a process the backend runs for the completion, such as a
+  /// command the model asks for. The guest states the grant, because it
+  /// knows the toolchain the completion runs. A grant is a ceiling, so a
+  /// backend that runs no worker honours it. An entry that breaks its
+  /// shape is `invalid`.
+  record worker-grant {
+    /// The host names the worker may connect to. Each is a whole name, or
+    /// `*.suffix` for a domain and every host beneath it. None is an IP
+    /// literal, and none carries a port, a scheme, or a path.
+    egress: list<string>,
+    /// The directories the worker may read beside the workspace. Each is
+    /// `~/<path>` beneath the operator's home, where `<path>` is not empty
+    /// and follows the rule of `location.subpath`. A directory the machine
+    /// lacks grants nothing.
+    read: list<string>,
+    /// The environment variables set for the worker.
+    ///
+    /// A name matches `[A-Za-z_][A-Za-z0-9_]*`. A leading `~/` in a value
+    /// stands for the operator's home.
+    env: list<tuple<string, string>>,
+  }
 
-    /// One lent workspace: an authorized mount root plus a relative subpath
-    /// scoping the lend.
-    record workspace-grant {
-        /// Must be an authorized mount root.
-        root: borrow<descriptor>,
-        /// `/`-separated path beneath `root`; empty lends the root itself.
-        /// Reopened beneath the verified root, so it can never escape the mount.
-        subpath: string,
-    }
+  /// What the guest lends a completion.
+  record grants {
+    /// The directory the completion works in, `none` to lend none.
+    workspace: option<workspace-grant>,
+  }
 
-    /// What the worker a backend runs for this completion may reach beyond
-    /// its lend: the hosts its commands connect to, the trees it reads, and
-    /// the variables it carries. Spelled by the guest that knows the
-    /// toolchain the turn runs, never by the deployment; the host holds each
-    /// entry to its shape, and the backend lays what exists on its machine.
-    record worker-grant {
-        /// Host names the worker's commands may reach through the backend's
-        /// egress proxy: a name whole, or `*.suffix` for a domain and every
-        /// host beneath it. Never an IP literal, a port, a scheme, or a path.
-        egress: list<string>,
-        /// Directories the worker may read beside its lend and the system,
-        /// each `~/<path>` beneath the operator's home. `<path>` is a plain
-        /// relative path: `/`-separated, no segment empty, `.` or `..`, no
-        /// `\`, so never the home itself. One the machine lacks grants
-        /// nothing.
-        read: list<string>,
-        /// Environment variables set for the worker, each a name of the
-        /// shape `[A-Za-z_][A-Za-z0-9_]*` and a value whose leading `~/`
-        /// the backend expands to the operator's home.
-        env: list<tuple<string, string>>,
-    }
+  /// A request to run one of the request's tools.
+  record tool-call {
+    /// Names the call within its session.
+    id: string,
+    /// The name of the tool to run.
+    name: string,
+    /// The arguments, a JSON object. The host does not hold them to the
+    /// tool's `input-schema`.
+    arguments: json,
+  }
 
-    /// Capabilities lent for this completion; drives host-injected tools.
-    record grants {
-        workspace: option<workspace-grant>,
-        /// Requires `workspace`: a worker reaches beyond a lend it has.
-        worker: option<worker-grant>,
-    }
+  /// An answer the model proposes.
+  record candidate {
+    /// Names the call within its session.
+    id: string,
+    /// The text proposed.
+    answer: string,
+  }
 
-    /// One complete request.
-    record request {
-        /// Opaque model id hint; passed through unchanged, backend may override.
-        model: option<string>,
-        system: option<string>,
-        /// Must not be empty.
-        messages: list<message>,
-        generation: option<generation>,
-        format: format,
-        /// Merged with host-injected tools at the backend. The names `read`,
-        /// `list`, `write`, and `check` are reserved.
-        tools: list<tool>,
-        grants: grants,
-        /// Ask the guest to accept each candidate answer before it becomes
-        /// the reply. The candidate arrives on `session.calls` as a tool-call
-        /// named `check` whose arguments are the candidate text; `ok` accepts
-        /// it, `err(text)` is appended to the conversation verbatim as the
-        /// correction turn and the backend goes round again.
-        check: bool,
-    }
+  /// What the host asks of the guest while a completion runs.
+  variant call {
+    /// Run a tool.
+    tool(tool-call),
+    /// Judge a candidate answer.
+    check(candidate),
+  }
 
-    /// Token accounting, when the backend reports it.
-    record usage {
-        input-tokens: u32,
-        output-tokens: u32,
-        /// Reasoning tokens, for models that bill them separately.
-        reasoning-tokens: option<u32>,
-    }
+  /// What a tool call produced.
+  record tool-result {
+    /// The `id` of the call this answers.
+    id: string,
+    /// The tool's output, or why it failed. The model reads either, and a
+    /// failure leaves it free to call again.
+    output: result<string, string>,
+  }
 
-    /// One completion result.
-    record reply {
-        answer: answer,
-        usage: option<usage>,
-    }
+  /// The guest's judgement of a candidate.
+  record verdict {
+    /// The `id` of the call this answers.
+    id: string,
+    /// `ok` accepts the candidate as the answer. An error is the
+    /// correction the model reads before it proposes another.
+    outcome: result<_, string>,
+  }
 
-    /// One tool invocation the model asks the guest to run.
-    record tool-call {
-        /// Correlation id: calls are parallel and results unordered, so
-        /// results answer calls by `id`.
-        id: string,
-        /// A function-tool name declared in `request.tools`, or the reserved
-        /// `check` when `request.check` is set.
-        name: string,
-        /// Arguments object, per the tool's declared parameters schema.
-        arguments: json,
-    }
+  /// The guest's answer to one call.
+  variant call-result {
+    tool(tool-result),
+    check(verdict),
+  }
 
-    /// The guest's answer to one `tool-call`.
-    record tool-result {
-        id: string,
-        /// Tool output, or a model-visible failure the model may repair from.
-        output: result<json, string>,
-    }
+  /// The tokens a completion spent, counted over every response the model
+  /// wrote.
+  record usage {
+    /// The tokens the model read, cached ones included.
+    input-tokens: u64,
+    /// The tokens the model wrote, reasoning included.
+    output-tokens: u64,
+    /// The part of `output-tokens` spent on reasoning. `none` where the
+    /// backend keeps no count.
+    reasoning-tokens: option<u64>,
+    /// The part of `input-tokens` read from a cache. `none` where the
+    /// backend keeps no count.
+    cache-read-tokens: option<u64>,
+    /// The part of `input-tokens` written to a cache. `none` where the
+    /// backend keeps no count.
+    cache-write-tokens: option<u64>,
+  }
 
-    /// Typed completion failure.
-    variant error {
-        /// Malformed request; retrying unchanged is pointless.
-        invalid-request(string),
-        /// Iteration, token, or time budget exhausted. When the last round
-        /// ended on a rejected check, the detail is that `err` text.
-        budget-exhausted(string),
-        /// Non-repairable tool error.
-        tool-failed(string),
-        /// Transport, process, or provider failure.
-        backend(string),
-    }
+  /// A completion's answer.
+  record reply {
+    /// The text the guest's check accepted, or the model's last text where
+    /// the request set no check.
+    answer: string,
+    /// `none` where the backend reports no usage.
+    usage: option<usage>,
+  }
 
-    /// One open completion. The host always resolves `reply` — budget and
-    /// deadline failures arrive as `error` values, never as a dropped writer.
-    record session {
-        /// Closes when the completion finishes or its call budget is exhausted.
-        calls: stream<tool-call>,
-        reply: future<result<reply, error>>,
-    }
+  /// A bound on a completion, which the deployment sets.
+  enum budget {
+    /// The responses the model writes.
+    responses,
+    /// The tokens in those responses.
+    tokens,
+    /// The tool calls a completion makes.
+    tool-calls,
+    /// The time the guest takes to answer a call.
+    call-time,
+    /// The time the completion takes.
+    completion-time,
+  }
 
-    /// Open a completion session. The guest creates the `results` stream,
-    /// keeps the writer, and passes the readable end.
-    create: async func(request: request, results: stream<tool-result>) -> result<session, error>;
+  /// A completion that spent a budget before it had an answer.
+  record exhausted {
+    /// The budget that ran out.
+    budget: budget,
+    /// How it ran out, for a person to read.
+    detail: string,
+    /// `none` where the backend reports no usage.
+    usage: option<usage>,
+  }
 }
 
-world model {
-    import completion;
+/// Completions by the models a deployment declares. Every backend serves
+/// this interface.
+///
+/// A completion runs the model until it has an answer. On the way the model
+/// may call the guest's tools, and the guest may judge each answer it
+/// proposes.
+interface completion {
+  use types.{
+    call, call-result, error, exhausted, format, generation, grants, message, reply, tool,
+  };
+
+  /// What the guest asks of a model.
+  record request {
+    /// Standing instructions, read before `messages`.
+    system: option<string>,
+    /// The conversation so far, oldest first. A request whose messages
+    /// hold no text is `invalid`.
+    messages: list<message>,
+    /// `none` takes the backend's defaults.
+    generation: option<generation>,
+    format: format,
+    /// The tools the guest runs for the model. A name given twice is
+    /// `invalid`.
+    tools: list<tool>,
+    grants: grants,
+    /// Whether the guest judges each candidate answer.
+    ///
+    /// When set, each candidate arrives on the session's `calls` as a
+    /// `check`, and the reply is the first one the guest accepts.
+    check: bool,
+  }
+
+  /// A completion in progress.
+  ///
+  /// - Calls may be outstanding together. The guest answers each by its
+  ///   `id`, in any order.
+  /// - A result that answers no outstanding call is dropped.
+  /// - A result of the wrong kind for its call fails the completion with
+  ///   `invalid`. So does closing `results` or dropping `calls` while a
+  ///   call is outstanding.
+  /// - Dropping `reply` abandons the completion.
+  record session {
+    /// What the host asks of the guest. The stream ends when the
+    /// completion does.
+    calls: stream<call>,
+    /// The answer, or why there is none. The host always resolves it.
+    reply: future<result<result<reply, exhausted>, error>>,
+  }
+
+  /// An open model.
+  resource model {
+    /// Begin a completion of `request`.
+    ///
+    /// The guest keeps the writing end of `results`, and answers each call
+    /// of the session through it. A request the host rejects fails here.
+    /// Any later failure arrives on the session's `reply`.
+    complete: async func(request: request, results: stream<call-result>)
+      -> result<session, error>;
+  }
+
+  /// Open the model `name`, a binding the deployment declares. The SDK
+  /// opens `default` for a request that names no model.
+  ///
+  /// An undeclared name fails with `not-found`, here or on the first
+  /// completion.
+  open: async func(name: string) -> result<model, error>;
+}
+
+/// What every backend serves.
+world core {
+  import types;
+  import completion;
+}
+
+/// Every interface. A backend answers `unsupported` for what it does not
+/// serve.
+world imports {
+  include core;
 }

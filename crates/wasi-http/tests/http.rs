@@ -99,7 +99,7 @@ impl Origin {
 }
 
 async fn run_guest(wasm: &str, backends: Backends) {
-    // linked by hand: the guest reads the origin from `wasi:config`
+    // linked by hand: the guest reads the origin from `omnia:config`
     let status = Deployment::new()
         .guest("guest", wasm)
         .run(backends, |deployment| {

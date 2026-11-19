@@ -14,13 +14,13 @@ use bytes::Bytes;
 use http::{Method, Request, Response};
 use omnia_sdk::docstore::{Document, Filter, Query, SortField};
 use omnia_sdk::messaging::Message;
-use omnia_sdk::sql::{Field, Row, Statement, Value};
+use omnia_sdk::sql::{Field, Row, Statement, Transaction as _, Value};
 use omnia_sdk::{
     BlobStore, DocumentDb, Error, HttpClient, Identity, Publisher, SecretStore, SqlDb, StateStore,
     WebSockets,
 };
 use omnia_test::guest::{
-    Broadcasted, FixedIdentity, MatchedHttp, Memory, MemoryDocs, ScriptedTables, Sink,
+    Broadcasted, Ended, FixedIdentity, MatchedHttp, Memory, MemoryDocs, ScriptedTables, Sink,
 };
 
 // every store double answers without yielding
@@ -105,12 +105,18 @@ fn cas_race() {
 #[test]
 fn increment_text() {
     let memory = Memory::default();
-    memory.insert_state("text", b"nope");
+    memory.insert_state("visits", b"41");
 
-    let error = now(memory.increment("text", 1, None)).expect_err("non-integer bytes fail");
-
-    assert!(matches!(&error, Error::ServerError { code, .. } if code == "invalid"), "{error}");
-    assert!(error.description().contains("8-byte"), "{error}");
+    assert_eq!(now(memory.increment("visits", 1, None)).expect("increment"), 42);
+    assert_eq!(memory.state("visits"), Some(b"42".to_vec()));
+    for text in ["007", "-0", "+7", "nope"] {
+        memory.insert_state("text", text.as_bytes());
+        let Err(error) = now(memory.increment("text", 1, None)) else {
+            panic!("`{text}` counted");
+        };
+        assert!(matches!(&error, Error::ServerError { code, .. } if code == "invalid"), "{error}");
+        assert_eq!(memory.state("text"), Some(text.as_bytes().to_vec()), "`{text}` changed");
+    }
 }
 
 // -- Memory: blobs -----------------------------------------------------------
@@ -158,7 +164,8 @@ fn stat_timestamps() {
     let first = now(memory.stat("c", "first")).expect("stat").expect("first");
     let second = now(memory.stat("c", "second")).expect("stat").expect("second");
 
-    assert!(container.created_at < first.created_at && first.created_at < second.created_at);
+    let created = container.created_at.expect("the double records when it created a container");
+    assert!(created < first.created_at && first.created_at < second.created_at);
     assert_eq!((second.size, second.container.as_str()), (2, "c"));
     assert_eq!(now(memory.stat("c", "missing")).expect("stat"), None);
     assert_eq!(now(memory.container_info("missing")).expect("container info"), None);
@@ -184,7 +191,7 @@ fn secrets() {
 
 #[test]
 fn lockers() {
-    let memory = Memory::default();
+    let memory = Memory::default().locker("other").locker("empty");
     let other = SecretStore::named(&memory, "other");
     now(SecretStore::set(&memory, "k", b"default")).expect("set");
     now(SecretStore::set(&other, "k", b"other")).expect("set");
@@ -193,6 +200,10 @@ fn lockers() {
     assert_eq!(other.secret("k"), Some(b"other".to_vec()));
     let empty = now(SecretStore::named(&memory, "empty").keys(None)).expect("keys");
     assert_eq!(empty.items, Vec::<String>::new());
+
+    let undeclared = SecretStore::named(&memory, "undeclared");
+    let error = now(SecretStore::set(&undeclared, "k", b"v")).expect_err("undeclared locker");
+    assert!(matches!(&error, Error::ServerError { code, .. } if code == "not-found"), "{error}");
 }
 
 // -- Pointer impls -----------------------------------------------------------
@@ -229,6 +240,9 @@ fn documents() {
 
     let error = now(docs.put("people", &doc("2", "not json"))).expect_err("not JSON");
     assert!(matches!(&error, Error::ServerError { code, .. } if code == "invalid"), "{error}");
+    let error = now(docs.insert("people", &doc("3", "[1]"))).expect_err("not an object");
+    assert!(matches!(&error, Error::ServerError { code, .. } if code == "invalid"), "{error}");
+    assert_eq!(now(docs.documents("people")).expect("all"), Vec::<Document>::new());
 }
 
 #[test]
@@ -265,6 +279,13 @@ fn queries() {
     };
     let error = now(docs.query("people", &malformed)).expect_err("malformed cursor");
     assert!(matches!(&error, Error::ServerError { code, .. } if code == "invalid"), "{error}");
+
+    let offset = Query {
+        offset: Some(1),
+        ..Query::default()
+    };
+    let error = now(docs.query("people", &offset)).expect_err("an offset");
+    assert!(matches!(&error, Error::ServerError { code, .. } if code == "unsupported"), "{error}");
 }
 
 #[test]
@@ -368,6 +389,35 @@ fn tables() {
     );
     assert_eq!((statements[1].binding.as_str(), statements[1].sql.as_str()), ("orders", "INSERT"));
     assert_eq!(statements[3].params, [Value::from("z")]);
+
+    let committed = now(tables.named("orders").begin()).expect("begin");
+    assert_eq!(now(committed.query("SELECT 2", &[])).expect("query").len(), 1);
+    assert_eq!(now(committed.execute("INSERT", &[Value::from("a")])).expect("exec"), 1);
+    now(committed.commit()).expect("commit");
+    let rolled_back = now(tables.begin()).expect("begin");
+    now(rolled_back.rollback()).expect("rollback");
+    let dropped = now(tables.begin()).expect("begin");
+    assert_eq!(now(dropped.execute("INSERT", &[Value::from("b")])).expect("exec"), 1);
+    assert_eq!(tables.transactions()[2].ended, None);
+    drop(dropped);
+
+    let transactions = tables.transactions();
+    let ends: Vec<_> = transactions
+        .iter()
+        .map(|transaction| {
+            (transaction.binding.as_str(), transaction.statements.len(), transaction.ended)
+        })
+        .collect();
+    assert_eq!(
+        ends,
+        [
+            ("orders", 2, Some(Ended::Committed)),
+            ("default", 0, Some(Ended::RolledBack)),
+            ("default", 1, Some(Ended::RolledBack)),
+        ]
+    );
+    assert_eq!(transactions[0].statements[1].params, [Value::from("a")]);
+    assert_eq!(tables.statements().len(), 7);
 }
 
 #[test]

@@ -1,19 +1,19 @@
 //! A messaging guest whose `incoming-handler` export sleeps well past the
-//! deployment's guest timeout for every message, so the host side can pin
+//! deployment's guest timeout for every delivery, so the host side can pin
 //! the wall-clock bound on a hung handler.
 
 #![cfg(target_arch = "wasm32")]
 
 use std::time::Duration;
 
-use omnia_wasi_messaging::incoming_handler::Guest;
-use omnia_wasi_messaging::types::{Error, Message};
+use omnia_wasi_messaging::omnia::incoming_handler::Guest;
+use omnia_wasi_messaging::omnia::types::{Delivery, Settle};
 
 struct Messaging;
-omnia_wasi_messaging::export!(Messaging with_types_in omnia_wasi_messaging);
+omnia_wasi_messaging::export!(Messaging);
 
 impl Guest for Messaging {
-    async fn handle(_message: Message) -> Result<(), Error> {
+    async fn handle(_delivery: Delivery) -> Result<(), Settle> {
         // `thread::sleep` waits on WASI 0.3's async `wait-for`, which the
         // async-typed `handle` may block on, so the fiber suspends and the
         // host's timeout lands; a busy loop would not be cancellable without

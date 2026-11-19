@@ -1,150 +1,310 @@
-package wasi:messaging@0.2.0-draft;
+package omnia:messaging@0.1.0;
 
+/// The types the messaging interfaces share.
+///
+/// Every backend carries a portable topic, and may reject any other as
+/// `invalid`. A portable topic is one or more segments joined by `.`. Each
+/// segment is not empty and holds only ASCII letters, digits, `_`, and `-`.
+///
+/// An `error` from a messaging interface means:
+///
+/// - `not-found`: the broker or the subscription is not declared by the
+///   deployment.
+/// - `denied`: the caller may not use the broker or the topic.
+/// - `invalid`: the request was rejected, such as a topic the backend
+///   cannot carry.
+/// - `unavailable`: the broker did not answer, or the call exceeded its
+///   bound.
 interface types {
-  /// A type alias for list<tuple<string, string>> to represent metadata attached to a message
-  type metadata = list<tuple<string, string>>;
+  use omnia:types/types@0.1.0.{error, timestamp};
 
-  /// A type alias for string to represent a message topic
+  /// A topic, which some brokers call a subject or a channel.
   type topic = string;
 
-  /// A connection to a message-exchange service (e.g., buffer, broker, etc.).
+  /// A name for a set of topics.
+  ///
+  /// A pattern is a topic in which a `*` segment stands for any one segment,
+  /// and a last segment of `>` for one or more. A topic is a pattern that
+  /// names only itself.
+  type pattern = string;
+
+  /// The caller's own entries, each name once. No backend interprets them.
+  ///
+  /// A portable name matches `[a-z][a-z0-9-]*`, and a portable value is
+  /// printable ASCII.
+  type metadata = list<tuple<string, string>>;
+
+  /// A broker's token for one stored message, opaque to the guest.
+  type position = string;
+
+  /// A connection to a broker.
   resource client {
+    /// Connect to the broker `name`, a binding the deployment declares. An
+    /// unnamed SDK handle connects to `default`.
     connect: static async func(name: string) -> result<client, error>;
-    disconnect: func() -> result<_, error>;
   }
 
-  /// Errors that can occur when using the messaging interface.
-  variant error {
-    /// The request or operation timed out.
-    timeout,
-    /// An error occurred with the connection. Includes a message for additional context
-    connection(string),
-    /// A permission error occurred. Includes a message for additional context
-    permission-denied(string),
-    /// A catch all for other types of errors
-    other(string),
+  /// A message.
+  ///
+  /// A backend carries every field given or fails with `unsupported`.
+  record message {
+    /// The payload, opaque to the host.
+    data: list<u8>,
+    /// The media type of `data`.
+    content-type: option<string>,
+    /// The ordering key. Where the broker orders by key, messages that
+    /// share one arrive in the order they were sent.
+    key: option<string>,
+    metadata: metadata,
   }
 
-  /// A message with a binary payload and additional information
-  resource message {
-    constructor(data: list<u8>);
-    /// The topic/subject/channel this message was received on, if any
-    topic: func() -> option<topic>;
-    /// An optional content-type describing the format of the data in the message. This is
-    /// sometimes described as the "format" type
-    content-type: func() -> option<string>;
-    /// Set the content-type describing the format of the data in the message. This is
-    /// sometimes described as the "format" type
-    set-content-type: func(content-type: string);
-    /// An opaque blob of data
-    data: func() -> list<u8>;
-    /// Set the opaque blob of data for this message, discarding the old value
-    set-data: func(data: list<u8>);
-    /// Optional metadata (also called headers or attributes in some systems) attached to the
-    /// message. This metadata is simply decoration and should not be interpreted by a host
-    /// to ensure portability across different implementors (e.g., Kafka -> NATS, etc.).
-    metadata: func() -> option<metadata>;
-    /// Add a new key-value pair to the metadata, overwriting any existing value for the same key
-    add-metadata: func(key: string, value: string);
-    /// Set the metadata
-    set-metadata: func(meta: metadata);
-    /// Remove a key-value pair from the metadata
-    remove-metadata: func(key: string);
+  /// A message as a subscriber receives it.
+  record delivery {
+    /// The topic the message was sent to.
+    topic: topic,
+    message: message,
+    /// The address `reply` answers, opaque to the guest. `none` when the
+    /// sender awaits no reply.
+    reply-to: option<string>,
+    /// Where the broker stored the message. A redelivery carries the same
+    /// position. `none` where the broker stores none.
+    position: option<position>,
+    /// How many times the broker has delivered the message, counting this
+    /// one. `none` where the broker keeps no count.
+    attempt: option<u32>,
+    /// When the broker took the message. `none` where the broker records no
+    /// time.
+    published-at: option<timestamp>,
+    /// When the host stops waiting for `handle` to return. `none` on a
+    /// delivery the guest receives or reads itself.
+    deadline: option<timestamp>,
+  }
+
+  /// What becomes of a delivery `handle` did not accept.
+  variant settle {
+    /// The message can never be handled, for the reason given. The broker
+    /// delivers it no more, and the backend drops or dead-letters it.
+    reject(string),
+    /// The failure may pass. A backend that redelivers delivers the message
+    /// again.
+    release(release),
+  }
+
+  /// A delivery `handle` gives back for another attempt.
+  record release {
+    /// Why the delivery failed, for a person to read.
+    reason: string,
+    /// The fewest milliseconds before the next delivery, where the backend
+    /// can delay one. `none` leaves the delay to the backend.
+    delay-ms: option<u64>,
   }
 }
 
-interface incoming-handler {
-  use types.{message, error, topic};
-
-  /// Whenever this guest receives a message in one of the subscribed topics, the message is
-  /// sent to this handler. The guest is responsible for matching on the topic and handling the
-  /// message accordingly. Implementors (such as hosts) calling this interface should make their
-  /// own decisions on how to handle errors returned from this function.
-  handle: async func(message: message) -> result<_, error>;
-}
-
-/// The producer interface is used to send messages to a channel/topic.
+/// Sending messages. Every backend serves this interface.
 interface producer {
   use types.{client, message, error, topic};
 
-  /// Sends the message using the given client.
-  send: async func(c: borrow<client>, topic: topic, message: message) -> result<_, error>;
+  /// Send `message` to `topic`.
+  ///
+  /// `ok` means the backend took the message for delivery, not that a
+  /// subscriber received it.
+  send: async func(client: borrow<client>, topic: topic, message: message) -> result<_, error>;
 }
 
-/// The request-reply interface allows a guest to send a message and await a response. This
-/// interface is considered optional as not all message services support the concept of
-/// request/reply. However, request/reply is a very common pattern in messaging and as such, we have
-/// included it as a core interface.
+/// Optional: a request that awaits one reply.
 interface request-reply {
   use types.{client, message, error, topic};
 
-  /// Options for a request/reply operation. This is a resource to allow for future expansion of
-  /// options.
-  resource request-options {
-    /// Creates a new request options resource with no options set.
-    constructor();
-    /// The maximum amount of time to wait for a response. If the timeout value is not set, then
-    /// the request/reply operation will block until a message is received in response.
-    set-timeout-ms: func(timeout-ms: u32);
-    /// The maximum number of replies to expect before returning.
-    set-expected-replies: func(expected-replies: u32);
+  /// Send `message` to `topic` and return the first reply.
+  ///
+  /// The call waits `timeout-ms` milliseconds, or the backend's bound when
+  /// `none`. A request nothing answers in that time fails with
+  /// `unavailable`. A zero `timeout-ms` is `invalid`.
+  request: async func(
+    client: borrow<client>, topic: topic, message: message, timeout-ms: option<u64>,
+  ) -> result<message, error>;
+
+  /// Answer the request whose delivery carried `reply-to`, through the broker
+  /// `client` connects to.
+  reply: async func(client: borrow<client>, reply-to: string, message: message)
+    -> result<_, error>;
+}
+
+// wit-parser excludes a gated interface's types only where each carries the
+// interface's gate, so every type and `use` inside one repeats it
+/// Optional: taking messages in batches and settling each one.
+@unstable(feature = consumer)
+interface consumer {
+  @unstable(feature = consumer)
+  use types.{client, delivery, error};
+
+  /// One message the guest holds, which the broker delivers to nobody else
+  /// meanwhile.
+  ///
+  /// A lease ends when it is settled, when the subscription's time limit
+  /// passes, or when the handle is dropped. The last two release the
+  /// message. A lease settles once.
+  @unstable(feature = consumer)
+  resource lease {
+    /// The message the lease holds.
+    delivery: func() -> delivery;
+
+    /// The message is handled. The broker delivers it no more.
+    accept: async func() -> result<_, error>;
+
+    /// Give the message back for another delivery, no sooner than
+    /// `delay-ms` milliseconds from now where given. A zero `delay-ms`, like
+    /// `none`, gives it back at once.
+    release: async func(delay-ms: option<u64>) -> result<_, error>;
+
+    /// The message can never be handled. The broker delivers it no more,
+    /// and dead-letters it where the subscription says so.
+    reject: async func() -> result<_, error>;
+
+    /// Start the subscription's time limit again.
+    renew: async func() -> result<_, error>;
   }
 
-  /// Performs a blocking request/reply operation with an optional set of request options.
+  /// Take up to `max` messages from `subscription`, which the deployment
+  /// declares.
   ///
-  /// The behavior of this function is largely dependent on the options given to the function.
-  /// If no options are provided, then the request/reply operation will block until a single
-  /// message is received in response. If a timeout is provided, then the request/reply operation
-  /// will block for the specified amount of time before returning an error if no messages were
-  /// received (or the list of messages that were received). If both a timeout and an expected
-  /// number of replies are provided, the function should return when either condition is met
-  /// (whichever comes first)—e.g., (1) if no replies were received within the timeout return an
-  /// error, (2) if the maximum expected number of replies were received before timeout, return
-  /// the list of messages, or (3) if the timeout is reached before the expected number of replies,
-  /// return the list of messages received up to that point.
-  request: async func(c: borrow<client>, topic: topic, message: borrow<message>, options: option<request-options>) -> result<list<message>, error>;
-
-  /// Replies to the given message with the given response message. The details of which topic
-  /// the message is sent to is up to the implementation. This allows for reply-to details to be
-  /// handled in the best way possible for the underlying messaging system.
-  ///
-  /// Please note that this reply functionality is different than something like HTTP because there
-  /// are several use cases in which a reply might not be required for every message (so this would
-  /// be a noop). There are also cases when you might want to reply and then continue processing.
-  /// Additionally, you might want to reply to a message several times (such as providing an
-  /// update). So this function is allowed to be called multiple times, unlike something like HTTP
-  /// where the reply is sent and the connection is closed.
-  reply: async func(reply-to: borrow<message>, message: message) -> result<_, error>;
+  /// The call returns as soon as a message is ready, and with none once
+  /// `wait-ms` milliseconds pass. A zero `wait-ms` returns at once with what
+  /// is ready. `max` is at most 1,000, and zero is `invalid`.
+  receive: async func(
+    client: borrow<client>, subscription: string, max: u32, wait-ms: u64,
+  ) -> result<list<lease>, error>;
 }
 
-/// The `imports` world defines the interfaces that the component will import from the host.
-/// It includes the `producer` interface for sending messages.
+/// Optional: topics as an ordered log, written under a condition and read
+/// back from a position.
+@unstable(feature = log)
+interface log {
+  @unstable(feature = log)
+  use types.{client, message, delivery, position, pattern, error, timestamp, topic};
+
+  /// What must hold for an append to take effect.
+  ///
+  /// A backend that cannot check it atomically fails with `unsupported`.
+  @unstable(feature = log)
+  variant precondition {
+    /// The topic holds no message.
+    absent,
+    /// The newest message the topic holds is at this position.
+    matches(position),
+  }
+
+  /// An append whose precondition did not hold.
+  @unstable(feature = log)
+  record conflict {
+    /// The position of the newest message found, `none` when the topic
+    /// holds none.
+    current: option<position>,
+  }
+
+  /// Where a read starts.
+  @unstable(feature = log)
+  variant start {
+    /// The oldest message the topics hold.
+    first,
+    /// The message that follows this position.
+    after(position),
+    /// The first message the broker took at or after this instant.
+    since(timestamp),
+  }
+
+  /// Send `message` to `topic` and return where the broker stored it.
+  append: async func(
+    client: borrow<client>, topic: topic, message: message, when: option<precondition>,
+  ) -> result<result<position, conflict>, error>;
+
+  /// The messages of the topics `pattern` names, from `start`, oldest first.
+  ///
+  /// A backend that keeps no one order across those topics fails with
+  /// `unsupported`. The list holds at most `limit` messages and never more
+  /// than 1,000. A zero `limit` is `invalid`. An empty list means the topics
+  /// hold nothing later. A read settles nothing and moves no subscription.
+  read: async func(
+    client: borrow<client>, pattern: pattern, start: start, limit: option<u32>,
+  ) -> result<list<delivery>, error>;
+}
+
+/// Optional: listing and purging the topics a broker holds.
+@unstable(feature = admin)
+interface admin {
+  @unstable(feature = admin)
+  use types.{client, pattern, topic, error};
+
+  /// One page of topic names.
+  @unstable(feature = admin)
+  record names {
+    /// The topics on this page, in no particular order.
+    topics: list<topic>,
+    /// The cursor that resumes the listing. Only `none` marks the last page.
+    next: option<string>,
+  }
+
+  /// One page of the topics `pattern` names that hold a message.
+  ///
+  /// A page holds at most `limit` names and never more than 1,000. A zero
+  /// `limit` is `invalid`. `after` is the `next` of the previous page.
+  list-topics: async func(
+    client: borrow<client>, pattern: pattern, after: option<string>, limit: option<u32>,
+  ) -> result<names, error>;
+
+  /// Delete the messages of every topic `pattern` names, and return how
+  /// many.
+  purge-topics: async func(client: borrow<client>, pattern: pattern) -> result<u64, error>;
+}
+
+/// The messages a deployment routes to the guest, one call for each.
+interface incoming-handler {
+  use types.{delivery, settle};
+
+  /// Handle one delivery, which a broker may make more than once.
+  ///
+  /// The host sets the delivery's `deadline`. `ok` accepts the delivery, and
+  /// the broker delivers the message no more. A `settle` rejects or releases
+  /// it.
+  handle: async func(delivery: delivery) -> result<_, settle>;
+}
+
+/// What every backend serves.
+world core {
+  import types;
+  import producer;
+}
+
+/// Every interface. A backend answers `unsupported` for what it does not
+/// serve.
+///
+/// `consumer`, `log`, and `admin` are unstable, and a guest binds them by
+/// enabling the feature of that name. Every host links them.
 world imports {
-  import types;
-  import producer;
-}
-/// The `imports-request-reply` world extends `imports` by including the `request-reply` interface.
-/// This allows the component to perform request/reply messaging patterns.
-world imports-request-reply {
-  import types;
+  include core;
   import request-reply;
-  import producer;
+  @unstable(feature = consumer)
+  import consumer;
+  @unstable(feature = log)
+  import log;
+  @unstable(feature = admin)
+  import admin;
 }
-/// The `messaging-request-reply` world combines `imports-request-reply` with the `incoming-handler`
-/// export. This setup allows the host to interact with the component for both sending messages and
-/// handling incoming messages with request/reply capabilities.
-world messaging-request-reply {
-  import types;
-  import request-reply;
-  import producer;
 
+/// `core`, and the handler a subscribing guest exports.
+world messaging-core {
+  include core;
   export incoming-handler;
 }
-/// The `messaging-core` world includes the basic `imports` and exports the `incoming-handler`,
-/// enabling the component to handle incoming messages without request/reply capabilities.
-world messaging-core {
-  import types;
-  import producer;
 
+/// `messaging-core`, and request-reply.
+world messaging-request-reply {
+  include messaging-core;
+  import request-reply;
+}
+
+/// `imports`, and the handler: the world a host links.
+world messaging {
+  include imports;
   export incoming-handler;
 }

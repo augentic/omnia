@@ -1,34 +1,28 @@
-//! One `wasi:messaging/request-reply` round trip from a command guest: a
-//! request carrying options returns the default backend's canned
-//! acknowledgement, and replying to a message that names no reply topic is
-//! a no-op.
+//! One `omnia:messaging/request-reply` round trip from a command guest: a
+//! request bounded by a timeout returns the default backend's canned
+//! acknowledgement as its one reply.
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_wasi_messaging::request_reply::{self, RequestOptions};
-use omnia_wasi_messaging::types::{Client, Message};
+use omnia_wasi_messaging::omnia::request_reply;
+use omnia_wasi_messaging::omnia::types::{Client, Message};
 
 omnia_sdk::api::command::export!(scenario);
 
 async fn scenario() {
     let client = Client::connect("default".to_owned()).await.expect("connect");
 
-    let options = RequestOptions::new();
-    options.set_timeout_ms(1_000);
-    options.set_expected_replies(1);
-
-    let request = Message::new(b"ping");
-    request.set_content_type("text/plain");
-    let replies = request_reply::request(&client, "ping".to_owned(), &request, Some(options))
+    let request = Message {
+        data: b"ping".to_vec(),
+        content_type: None,
+        key: None,
+        metadata: Vec::new(),
+    };
+    let reply = request_reply::request(&client, "ping".to_owned(), request, Some(1_000))
         .await
         .expect("request");
 
-    assert_eq!(replies.len(), 1);
-    let reply = &replies[0];
-    assert_eq!(reply.topic().as_deref(), Some("response"));
-    assert_eq!(reply.data(), b"ACK");
-    assert_eq!(reply.metadata(), None);
-
-    // The request was never received, so it names no reply topic.
-    request_reply::reply(&request, Message::new(b"ignored")).await.expect("reply is a no-op");
+    assert_eq!(reply.data, b"ACK");
+    assert_eq!((reply.content_type, reply.key), (None, None));
+    assert!(reply.metadata.is_empty(), "the acknowledgement carries no metadata");
 }

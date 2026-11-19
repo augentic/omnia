@@ -1,3 +1,6 @@
+//! The messaging trigger, whose [`MessagingHandler`] routes each delivery to a
+//! guest by topic.
+
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -9,11 +12,9 @@ use tokio::sync::Semaphore;
 use tracing::{Instrument, info_span, instrument};
 
 use crate::host::WasiMessaging;
-use crate::host::generated::MessagingRequestReplyIndices;
+use crate::host::generated::MessagingIndices;
+use crate::host::generated::omnia::messaging::types::Delivery;
 use crate::host::resource::{Endpoint, HandleError, Handler, Message};
-
-// the metadata entry omnia-sdk's `Metadata` reads a guest's deadline from
-const DEADLINE: &str = "deadline";
 
 #[instrument("messaging-server", skip(state))]
 pub async fn run<B>(state: &Runtime<B>) -> Result<()>
@@ -35,7 +36,7 @@ where
     Err(anyhow!("messaging consumer ended for: {}", state.name()))
 }
 
-/// In-process `wasi:messaging/incoming-handler` dispatcher: routes a message
+/// In-process `omnia:messaging/incoming-handler` dispatcher: routes a message
 /// to a guest by topic, instantiates it, and invokes the export.
 ///
 /// The server hands one to the backend's [`Endpoint::consume`] as the
@@ -72,7 +73,7 @@ where
             runtime.registry(),
             "messaging",
             runtime.registry().routes().messaging().clone(),
-            MessagingRequestReplyIndices::new,
+            MessagingIndices::new,
         )?;
         if routing.is_inert() {
             return Ok(None);
@@ -90,16 +91,16 @@ where
     /// A topic with no route is dropped silently with `Ok`; the message has
     /// no handler in this deployment. Every message is counted, and every
     /// failure logged and counted, before it is returned. The guest receives
-    /// the message with its `deadline` metadata entry set to the instant the
-    /// guest timeout expires, in milliseconds since the Unix epoch, replacing
-    /// any the backend delivered.
+    /// the delivery with its `deadline` set to the instant the guest timeout
+    /// expires, and its metadata as the backend delivered it.
     ///
     /// # Errors
     ///
     /// Returns [`HandleError::Unavailable`] if the guest cannot be loaded at
-    /// its first use or instantiated, [`HandleError::Rejected`] if it returns
-    /// an error, [`HandleError::Trapped`] if it traps, and
-    /// [`HandleError::TimedOut`] if it runs past the guest timeout.
+    /// its first use or instantiated, [`HandleError::Rejected`] or
+    /// [`HandleError::Released`] as the guest settles the message,
+    /// [`HandleError::Trapped`] if it traps, and [`HandleError::TimedOut`] if
+    /// it runs past the guest timeout.
     pub async fn handle(&self, message: Message) -> Result<(), HandleError> {
         tracing::info!(monotonic_counter.message_counter = 1, service = %self.component);
 
@@ -117,7 +118,7 @@ where
         outcome
     }
 
-    async fn deliver(&self, mut message: Message) -> Result<(), HandleError> {
+    async fn deliver(&self, message: Message) -> Result<(), HandleError> {
         // resolve the guest by topic; unmatched is dropped, not an error
         let Some(guest_id) = self.routing.resolve(&message.topic) else {
             tracing::debug!(topic = %message.topic, "no route for topic; dropping message");
@@ -132,24 +133,18 @@ where
         })?;
 
         // a declared guest's export is checked here, at first use
-        let indices = MessagingRequestReplyIndices::new(guest.instance_pre()).map_err(|error| {
+        let indices = MessagingIndices::new(guest.instance_pre()).map_err(|error| {
             HandleError::Unavailable(format!(
                 "routed guest `{guest_id}` does not export the messaging handler: {error:#}"
             ))
         })?;
 
-        // stamp the guest's deadline over any the delivery carried, in any case
-        let deadline = deadline_millis(self.state.options().guest_timeout);
-        let metadata = message.metadata.get_or_insert_default();
-        metadata.retain(|name, _| !name.eq_ignore_ascii_case(DEADLINE));
-        metadata.insert(DEADLINE.to_owned(), deadline.to_string());
+        let delivery = Delivery {
+            deadline: Some(deadline_millis(self.state.options().guest_timeout)),
+            ..Delivery::from(message)
+        };
 
-        let mut store_data = self.state.store();
-        let msg_res =
-            store_data.view::<WasiMessaging>().table.push(message).map_err(|error| {
-                HandleError::Unavailable(format!("pushing the message: {error}"))
-            })?;
-        let mut store = self.state.build_store(store_data);
+        let mut store = self.state.build_store(self.state.store());
         let instance =
             self.state.instantiate(guest.instance_pre(), &mut store).await.map_err(|error| {
                 HandleError::Unavailable(format!("instantiating `{guest_id}`: {error:#}"))
@@ -160,7 +155,7 @@ where
 
         let run = store
             .run_concurrent(async |store| {
-                messaging.wasi_messaging_incoming_handler().call_handle(store, msg_res).await
+                messaging.omnia_messaging_incoming_handler().call_handle(store, delivery).await
             })
             .instrument(info_span!("messaging-handle"));
 
@@ -172,7 +167,7 @@ where
             .map_err(|_elapsed| HandleError::TimedOut(timeout))?;
         let returned =
             called.flatten().map_err(|trap| HandleError::Trapped(format!("{trap:#}")))?;
-        returned.map_err(HandleError::Rejected)
+        returned.map_err(HandleError::from)
     }
 
     async fn client(&self) -> Result<Arc<dyn Endpoint>> {

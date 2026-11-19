@@ -2,8 +2,7 @@
 
 //! # WASI Config Service
 //!
-//! This module implements a runtime service for `wasi:config`
-//! (<https://github.com/WebAssembly/wasi-config>).
+//! This module implements a runtime service for `omnia:config`.
 
 cfg_select! {
     target_arch = "wasm32" => {

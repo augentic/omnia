@@ -22,6 +22,7 @@ dashmap.workspace = true
 futures.workspace = true
 futures-channel.workspace = true
 futures-util.workspace = true
+getrandom.workspace = true
 omnia-core.workspace = true
 tokio = { workspace = true, features = ["sync", "time"] }
 tokio-stream.workspace = true
@@ -32,6 +33,7 @@ wasmtime-wasi.workspace = true
 
 # guest dependencies
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+omnia-wasi-types.workspace = true
 wit-bindgen.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]

@@ -1,12 +1,12 @@
 //! [`Identity`] over `omnia:identity`.
 
 use std::borrow::Cow;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use omnia_wasi_identity::credentials;
+use omnia_wasi_identity::omnia::credentials;
 
 use crate::identity::{AccessToken, DEFAULT};
-use crate::{Error, HasIdentity, Identity, Result, WasiProvider};
+use crate::{HasIdentity, Identity, Result, WasiProvider};
 
 static DEFAULT_HANDLE: Handle = Handle {
     name: Cow::Borrowed(DEFAULT),
@@ -32,10 +32,10 @@ impl Identity for Handle {
     type Named = Self;
 
     async fn token(&self, scopes: &[&str]) -> Result<AccessToken> {
-        let identity = credentials::get_identity(self.name.to_string()).await?;
+        let identity = credentials::open(self.name.to_string()).await?;
         let scopes = scopes.iter().map(|&scope| scope.to_owned()).collect();
         let token = identity.get_token(scopes).await?;
-        Ok(AccessToken::new(token.token, Duration::from_secs(token.expires_in)))
+        Ok(AccessToken::new(token.token, time_left(token.expires_at)))
     }
 
     fn named(&self, name: &str) -> Self {
@@ -45,13 +45,10 @@ impl Identity for Handle {
     }
 }
 
-impl From<credentials::Error> for Error {
-    fn from(err: credentials::Error) -> Self {
-        match err {
-            credentials::Error::NoSuchIdentity => {
-                Self::server_error("not-found", "no such identity")
-            }
-            credentials::Error::InternalFailure(message) => Self::server_error("other", message),
-        }
-    }
+// the time left before `expires_at`, an instant in milliseconds since the Unix
+// epoch, and zero once it has passed
+fn time_left(expires_at: u64) -> Duration {
+    UNIX_EPOCH.checked_add(Duration::from_millis(expires_at)).map_or(Duration::MAX, |expiry| {
+        expiry.duration_since(SystemTime::now()).unwrap_or_default()
+    })
 }

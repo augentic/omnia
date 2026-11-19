@@ -1,7 +1,7 @@
 //! # Model example — session guest
 //!
-//! A `wasi:cli/command` reactor that **imports** `omnia:model/completion` and
-//! drives one completion session when the host calls `wasi:cli/run`.
+//! A `wasi:cli/command` reactor that **imports** `omnia:model` and drives one
+//! completion session when the host calls `wasi:cli/run`.
 //!
 //! The happy path uses the `omnia-sdk` sugar: a tool-less schema completion
 //! whose prompt is assembled with `Sections`, lending the `.` mount through

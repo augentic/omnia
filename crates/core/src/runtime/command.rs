@@ -66,7 +66,7 @@ async fn run_guest<B: Backends>(
     let instance = runtime.instantiate(guest.instance_pre(), &mut store).await?;
     let command = Command::new(&mut store, &instance)?;
 
-    // host anchor for guest spans: `wasi:otel` drops them with no span live at export
+    // the host span a guest's root spans join through `omnia:otel`
     let outcome = store
         .run_concurrent(async move |store| command.wasi_cli_run().call_run(store).await)
         .instrument(tracing::info_span!("cli-run"))

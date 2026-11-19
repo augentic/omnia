@@ -40,8 +40,8 @@ pub use omnia_link::{FirstArgSelector, GuestSelector, InProcessLinks, is_host};
 #[cfg(feature = "loader")]
 #[doc(inline)]
 pub use omnia_plugin::{
-    FsStore, LoadError, Location, NoStore, PackageStore, Plugin, PluginLoader, Plugins, Reference,
-    RegistryClient, WasiPlugins, WasiPluginsView,
+    FsStore, LoadConflict, LoadError, Location, NoStore, PackageStore, Plugin, PluginLoader,
+    Plugins, Reference, RegistryClient, WasiPlugins, WasiPluginsView,
 };
 
 pub use self::deployment::{

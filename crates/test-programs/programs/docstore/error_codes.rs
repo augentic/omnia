@@ -1,7 +1,8 @@
 //! Every `omnia:docstore` error case reaches the guest as its own code: a
 //! `BadGateway` for `unavailable`, and a `ServerError` for the rest. The
-//! default backend fails a body that is not JSON itself. The suite's
-//! faulting backend fails the rest by collection name.
+//! host rejects a body that is not a JSON object itself, and the default
+//! backend an undeclared collection. The suite's faulting backend fails the
+//! rest by collection name.
 
 #![cfg(target_arch = "wasm32")]
 
@@ -15,13 +16,15 @@ omnia_sdk::api::command::export!(scenario);
 async fn scenario() {
     let provider = WasiProvider;
 
-    // the default backend's own case
-    let raw = Document::new("raw", b"not json");
-    expect_code(provider.put("bodies", &raw).await, 500, "invalid");
+    // the host's own rule
+    let raw = Document::new("raw", b"[1]");
+    expect_code(provider.put("default", &raw).await, 500, "invalid");
+
+    // the default backend's own rule
+    expect_code(provider.get("undeclared", "id").await, 500, "not-found");
 
     // the backend's chosen cases
     for (collection, status, code) in [
-        ("missing", 500, "not-found"),
         ("denied", 500, "denied"),
         ("unsupported", 500, "unsupported"),
         ("unavailable", 502, "unavailable"),

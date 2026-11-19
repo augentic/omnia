@@ -2,8 +2,8 @@
 //!
 //! The `opentelemetry` metrics API implemented over the `omnia:otel` records:
 //! synchronous instruments aggregate into a shared registry that [`export`]
-//! collects into one `resource-metrics` record for the host. Observable
-//! (callback) instruments keep the API's no-op defaults.
+//! collects into one `scope-metrics` record per scope for the host.
+//! Observable (callback) instruments keep the API's no-op defaults.
 
 use std::any::Any;
 use std::borrow::Cow;
@@ -20,6 +20,7 @@ use opentelemetry::{InstrumentationScope, KeyValue};
 use crate::guest::aggregate::{
     self, Aggregate, GaugeData, HistogramData, LastValue, Measurement, Sum, SumData,
 };
+use crate::guest::convert::unix_nanos;
 use crate::guest::generated::omnia::otel::metrics as wasi;
 
 /// Provides meters whose synchronous instruments record into a shared
@@ -44,8 +45,9 @@ impl MeterProvider {
                     .filter_map(|instrument| instrument.collect(now))
                     .collect();
                 (!metrics.is_empty()).then(|| wasi::ScopeMetrics {
-                    scope: (&scope.scope).into(),
+                    scope: Some((&scope.scope).into()),
                     metrics,
+                    schema_url: scope.scope.schema_url().map(Into::into),
                 })
             })
             .collect()
@@ -63,17 +65,13 @@ impl opentelemetry::metrics::MeterProvider for MeterProvider {
 
 /// Export all recorded metrics to the host; a collection with no data
 /// points is skipped rather than exported empty.
-pub async fn export(provider: &MeterProvider, resource: &wasi::Resource) {
+pub async fn export(provider: &MeterProvider) {
     let scope_metrics = provider.collect(SystemTime::now());
     if scope_metrics.is_empty() {
         return;
     }
 
-    let metrics = wasi::ResourceMetrics {
-        resource: resource.clone(),
-        scope_metrics,
-    };
-    if let Err(e) = wasi::export(metrics).await {
+    if let Err(e) = wasi::export(scope_metrics).await {
         tracing::error!("failed to export metrics: {e}");
     }
 }
@@ -99,7 +97,7 @@ impl Scope {
     ) -> Arc<Series<A>>
     where
         A: Aggregate,
-        A::Data: Into<wasi::AggregatedMetrics>,
+        A::Data: Into<wasi::MetricData>,
     {
         let existing = self
             .instruments
@@ -110,8 +108,8 @@ impl Scope {
             let series = Arc::new(Series {
                 kind,
                 name,
-                description: description.unwrap_or_default(),
-                unit: unit.unwrap_or_default(),
+                description,
+                unit,
                 state: Mutex::new(aggregate(SystemTime::now())),
             });
             self.instruments.push(Arc::clone(&series) as Arc<dyn Instrument>);
@@ -133,7 +131,7 @@ impl Instruments {
     ) -> Arc<Series<A>>
     where
         A: Aggregate,
-        A::Data: Into<wasi::AggregatedMetrics>,
+        A::Data: Into<wasi::MetricData>,
     {
         let mut scopes = self.registry.scopes.lock().unwrap_or_else(PoisonError::into_inner);
         let index =
@@ -147,7 +145,7 @@ impl Instruments {
         scopes[index].series(kind, name, description, unit, aggregate)
     }
 
-    fn histogram<T: Number>(
+    fn histogram<T: Measurement>(
         &self, kind: Kind, builder: HistogramBuilder<'_, Histogram<T>>,
     ) -> Arc<dyn SyncInstrument<T> + Send + Sync> {
         let bounds = builder.boundaries.unwrap_or_else(|| aggregate::DEFAULT_BOUNDARIES.to_vec());
@@ -276,8 +274,8 @@ trait Instrument: Any + fmt::Debug + Send + Sync {
 struct Series<A> {
     kind: Kind,
     name: Cow<'static, str>,
-    description: Cow<'static, str>,
-    unit: Cow<'static, str>,
+    description: Option<Cow<'static, str>>,
+    unit: Option<Cow<'static, str>>,
     state: Mutex<A>,
 }
 
@@ -292,7 +290,7 @@ impl<A: Aggregate> SyncInstrument<A::Value> for Series<A> {
 impl<A> Instrument for Series<A>
 where
     A: Aggregate,
-    A::Data: Into<wasi::AggregatedMetrics>,
+    A::Data: Into<wasi::MetricData>,
 {
     fn kind(&self) -> Kind {
         self.kind
@@ -306,8 +304,8 @@ where
         let data = self.state.lock().ok()?.collect(now)?;
         Some(wasi::Metric {
             name: self.name.to_string(),
-            description: self.description.to_string(),
-            unit: self.unit.to_string(),
+            description: self.description.as_deref().map(Into::into),
+            unit: self.unit.as_deref().map(Into::into),
             data: data.into(),
         })
     }
@@ -325,70 +323,67 @@ impl<T> SyncInstrument<T> for Noop {
     fn measure(&self, _: T, _: &[KeyValue]) {}
 }
 
-// a value type with its `aggregated-metrics` arm
-trait Number: Measurement + Into<wasi::DataValue> {
-    fn aggregated(data: wasi::MetricData) -> wasi::AggregatedMetrics;
-}
-
-impl Number for u64 {
-    fn aggregated(data: wasi::MetricData) -> wasi::AggregatedMetrics {
-        wasi::AggregatedMetrics::U64(data)
-    }
-}
-
-impl Number for i64 {
-    fn aggregated(data: wasi::MetricData) -> wasi::AggregatedMetrics {
-        wasi::AggregatedMetrics::S64(data)
-    }
-}
-
-impl Number for f64 {
-    fn aggregated(data: wasi::MetricData) -> wasi::AggregatedMetrics {
-        wasi::AggregatedMetrics::F64(data)
-    }
-}
-
-// One impl per source type so every value crosses the boundary as itself —
-// a lossy "narrowest fit" conversion would truncate fractional f64 values.
-impl From<u64> for wasi::DataValue {
+// One impl per source type, so an `f64` keeps its fraction. OTLP's integer
+// is signed, so a `u64` past `i64::MAX` saturates rather than wrapping.
+impl From<u64> for wasi::Number {
     fn from(value: u64) -> Self {
-        Self::U64(value)
+        Self::AsInt(i64::try_from(value).unwrap_or(i64::MAX))
     }
 }
 
-impl From<i64> for wasi::DataValue {
+impl From<i64> for wasi::Number {
     fn from(value: i64) -> Self {
-        Self::S64(value)
+        Self::AsInt(value)
     }
 }
 
-impl From<f64> for wasi::DataValue {
+impl From<f64> for wasi::Number {
     fn from(value: f64) -> Self {
-        Self::F64(value)
+        Self::AsDouble(value)
     }
 }
 
-impl<T: Number> From<SumData<T>> for wasi::AggregatedMetrics {
+impl<T: Measurement + Into<wasi::Number>> From<SumData<T>> for wasi::MetricData {
     fn from(sum: SumData<T>) -> Self {
-        T::aggregated(wasi::MetricData::Sum(wasi::Sum {
+        let (start, time) = (unix_nanos(sum.start_time), unix_nanos(sum.time));
+        Self::Sum(wasi::Sum {
             data_points: sum
                 .points
                 .into_iter()
-                .map(|(attributes, value)| wasi::SumDataPoint {
-                    attributes: convert(attributes),
-                    value: value.into(),
-                    exemplars: Vec::new(),
-                })
+                .map(|(attributes, value)| number_point(attributes, value, start, time))
                 .collect(),
-            start_time: sum.start_time.into(),
-            time: sum.time.into(),
-            temporality: if sum.delta {
-                wasi::Temporality::Delta
+            aggregation_temporality: if sum.delta {
+                wasi::AggregationTemporality::Delta
             } else {
-                wasi::Temporality::Cumulative
+                wasi::AggregationTemporality::Cumulative
             },
             is_monotonic: sum.monotonic,
-        }))
+        })
+    }
+}
+
+impl<T: Measurement + Into<wasi::Number>> From<GaugeData<T>> for wasi::MetricData {
+    fn from(gauge: GaugeData<T>) -> Self {
+        let (start, time) = (unix_nanos(gauge.start_time), unix_nanos(gauge.time));
+        Self::Gauge(wasi::Gauge {
+            data_points: gauge
+                .points
+                .into_iter()
+                .map(|(attributes, value)| number_point(attributes, value, start, time))
+                .collect(),
+        })
+    }
+}
+
+fn number_point(
+    attributes: Vec<KeyValue>, value: impl Into<wasi::Number>, start: u64, time: u64,
+) -> wasi::NumberDataPoint {
+    wasi::NumberDataPoint {
+        attributes: convert(attributes),
+        start_time_unix_nano: Some(start),
+        time_unix_nano: time,
+        value: value.into(),
+        exemplars: Vec::new(),
     }
 }
 
@@ -396,25 +391,7 @@ fn convert(attributes: Vec<KeyValue>) -> Vec<wasi::KeyValue> {
     attributes.into_iter().map(Into::into).collect()
 }
 
-impl<T: Number> From<GaugeData<T>> for wasi::AggregatedMetrics {
-    fn from(gauge: GaugeData<T>) -> Self {
-        T::aggregated(wasi::MetricData::Gauge(wasi::Gauge {
-            data_points: gauge
-                .points
-                .into_iter()
-                .map(|(attributes, value)| wasi::GaugeDataPoint {
-                    attributes: convert(attributes),
-                    value: value.into(),
-                    exemplars: Vec::new(),
-                })
-                .collect(),
-            start_time: Some(gauge.start_time.into()),
-            time: gauge.time.into(),
-        }))
-    }
-}
-
-impl<T: Number> From<HistogramData<T>> for wasi::AggregatedMetrics {
+impl<T: Measurement> From<HistogramData<T>> for wasi::MetricData {
     fn from(histogram: HistogramData<T>) -> Self {
         let HistogramData {
             points,
@@ -422,23 +399,24 @@ impl<T: Number> From<HistogramData<T>> for wasi::AggregatedMetrics {
             start_time,
             time,
         } = histogram;
-        T::aggregated(wasi::MetricData::Histogram(wasi::Histogram {
+        let (start, time) = (unix_nanos(start_time), unix_nanos(time));
+        Self::Histogram(wasi::Histogram {
             data_points: points
                 .into_iter()
                 .map(|point| wasi::HistogramDataPoint {
                     attributes: convert(point.attributes),
+                    start_time_unix_nano: Some(start),
+                    time_unix_nano: time,
                     count: point.count,
-                    bounds: bounds.clone(),
+                    sum: Some(point.sum.as_f64()),
                     bucket_counts: point.bucket_counts,
-                    min: Some(point.min.into()),
-                    max: Some(point.max.into()),
-                    sum: point.sum.into(),
+                    explicit_bounds: bounds.clone(),
                     exemplars: Vec::new(),
+                    min: Some(point.min.as_f64()),
+                    max: Some(point.max.as_f64()),
                 })
                 .collect(),
-            start_time: start_time.into(),
-            time: time.into(),
-            temporality: wasi::Temporality::Delta,
-        }))
+            aggregation_temporality: wasi::AggregationTemporality::Delta,
+        })
     }
 }

@@ -24,7 +24,7 @@ pub trait SecretStore: Send + Sync {
     /// Delete the secret at `key`, succeeding when it is already absent.
     fn delete(&self, key: &str) -> impl Future<Output = Result<()>> + Send;
 
-    /// One page of the keys in this locker.
+    /// One page of the keys in this locker, in no particular order.
     ///
     /// `after` is the [`next`](Page::next) cursor of the previous page, or
     /// `None` for the first page.

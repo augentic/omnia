@@ -1,10 +1,11 @@
-//! Raw bindings: a workspace grant whose subpath is not a plain relative
-//! path beneath the lent root is refused at `create`.
+//! Raw bindings: a workspace location whose subpath is not a plain relative
+//! path beneath the lent root is refused at `complete`.
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_wasi_model::{completion, wit_stream};
-use test_programs::raw_request;
+use omnia_wasi_model::omnia::types;
+use omnia_wasi_model::wit_stream;
+use test_programs::{raw_model, raw_request};
 use wasip3::filesystem::preopens;
 
 omnia_sdk::api::command::export!(scenario);
@@ -17,24 +18,28 @@ async fn scenario() {
         .map(|(dir, _)| dir)
         .expect("host mounts `.`");
 
+    let model = raw_model().await;
     for subpath in
         ["../escape", "/abs", "docs\\guides", "docs//guides", ".", "..", "a/../b", "./a", "a/"]
     {
-        let grants = completion::Grants {
-            workspace: Some(completion::WorkspaceGrant {
-                root,
-                subpath: subpath.to_owned(),
+        let grants = types::Grants {
+            workspace: Some(types::WorkspaceGrant {
+                location: types::Location {
+                    root,
+                    subpath: subpath.to_owned(),
+                },
+                worker: None,
             }),
-            worker: None,
         };
 
         let (results, results_rx) = wit_stream::new();
-        let error = completion::create(raw_request(vec![], grants), results_rx)
+        let error = model
+            .complete(raw_request(vec![], grants), results_rx)
             .await
             .expect_err("subpath refused");
         drop(results);
         assert!(
-            matches!(error, completion::Error::Backend(ref detail) if detail.contains("not a plain relative path")),
+            matches!(error, types::Error::Invalid(ref detail) if detail.contains("not a plain relative path")),
             "`{subpath}`: unexpected: {error:?}"
         );
     }

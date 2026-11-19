@@ -75,20 +75,20 @@ impl<S: PackageStore> RegistryClient<S> {
         let named = endpoint
             .map(|endpoint| {
                 endpoint.parse::<Registry>().map_err(|error| {
-                    AcquireError::Refused(format!(
+                    AcquireError::Invalid(format!(
                         "registry `{endpoint}` is not a valid name: {error}"
                     ))
                 })
             })
             .transpose()?;
         match (self.config.resolve_registry(package), named) {
-            (Some(routed), Some(named)) if *routed != named => Err(AcquireError::Refused(format!(
+            (Some(routed), Some(named)) if *routed != named => Err(AcquireError::Denied(format!(
                 "`{package}` is routed to `{routed}` by the deployment's `registries`; it cannot \
                  be fetched from `{named}`"
             ))),
             (Some(routed), _) => Ok(Origin::Routed(routed.clone())),
             (None, Some(named)) => Ok(Origin::Named(named)),
-            (None, None) => Err(AcquireError::Refused(format!(
+            (None, None) => Err(AcquireError::NotFound(format!(
                 "no registry routes `{reference}`: the load names none, the deployment's \
                  `registries` routes neither the `{}` namespace nor a default, and {}",
                 package.namespace(),
@@ -115,7 +115,7 @@ impl<S: PackageStore> RegistryClient<S> {
     ) -> Result<Vec<u8>, AcquireError> {
         let reference: Reference = package
             .parse()
-            .map_err(|error: anyhow::Error| AcquireError::Refused(format!("{error:#}")))?;
+            .map_err(|error: anyhow::Error| AcquireError::Invalid(format!("{error:#}")))?;
 
         // the store answers first, with no network
         let stored = self
@@ -167,16 +167,12 @@ impl<S: PackageStore> RegistryClient<S> {
     ) -> Result<Vec<u8>, AcquireError> {
         let package = reference.package();
         let client = self.client(package, registry);
-        let release = client.get_release(package, reference.version()).await.map_err(|error| {
-            if is_network_failure(&error) {
-                AcquireError::Unavailable(format!("resolving `{reference}`: {error}"))
-            } else {
-                // an authoritative answer refuses: retrying the same reference cannot succeed
-                AcquireError::Refused(format!("resolving `{reference}`: {error}"))
-            }
-        })?;
+        let release = client
+            .get_release(package, reference.version())
+            .await
+            .map_err(|error| release_error(&error, format!("resolving `{reference}`: {error}")))?;
         let expected: Digest = release.content_digest.to_string().parse().map_err(|error| {
-            AcquireError::Refused(format!(
+            AcquireError::Unsupported(format!(
                 "the registry digest for `{reference}` is unsupported: {error}"
             ))
         })?;
@@ -197,7 +193,7 @@ impl<S: PackageStore> RegistryClient<S> {
             )));
         }
         if Engine::detect_precompiled(&bytes).is_some() {
-            return Err(AcquireError::Refused(format!(
+            return Err(AcquireError::Invalid(format!(
                 "package `{reference}` is pre-compiled, but a package admits raw wasm alone"
             )));
         }
@@ -236,14 +232,28 @@ impl Origin {
     }
 }
 
-// A transport failure, as opposed to an authoritative answer (not found,
-// yanked, malformed input).
-fn is_network_failure(error: &wasm_pkg_client::Error) -> bool {
+// What a registry's answer to a release lookup says: the release is absent,
+// the request is malformed, or the registry failed and a retry may succeed.
+fn release_error(error: &wasm_pkg_client::Error, detail: String) -> AcquireError {
+    use wasm_pkg_client::Error;
+
     match error {
-        wasm_pkg_client::Error::RegistryError(source)
-        | wasm_pkg_client::Error::RegistryMetadataError(source) => !is_not_found(source),
-        wasm_pkg_client::Error::IoError(source) => source.kind() != io::ErrorKind::NotFound,
-        _ => false,
+        Error::PackageNotFound | Error::VersionNotFound(_) | Error::NoRegistryForNamespace(_) => {
+            AcquireError::NotFound(detail)
+        }
+        Error::RegistryError(source) | Error::RegistryMetadataError(source)
+            if is_not_found(source) =>
+        {
+            AcquireError::NotFound(detail)
+        }
+        Error::IoError(source) if source.kind() == io::ErrorKind::NotFound => {
+            AcquireError::NotFound(detail)
+        }
+        Error::InvalidPackageRef(_)
+        | Error::InvalidVersion(_)
+        | Error::InvalidLabel(_)
+        | Error::InvalidRegistry(_) => AcquireError::Invalid(detail),
+        _ => AcquireError::Unavailable(detail),
     }
 }
 

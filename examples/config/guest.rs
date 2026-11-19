@@ -1,14 +1,13 @@
 //! # Config Wasm Guest
 //!
-//! This module demonstrates the WASI Config interface for retrieving
+//! This module demonstrates the `omnia:config` interface for listing
 //! configuration variables.
 
 #![cfg(target_arch = "wasm32")]
 
-use anyhow::anyhow;
 use axum::routing::get;
 use axum::{Json, Router};
-use omnia_wasi_config::store as config;
+use omnia_wasi_config::omnia::entries;
 use serde_json::{Value, json};
 use wasip3::exports::http::handler::Guest;
 use wasip3::http::types::{ErrorCode, Request, Response};
@@ -25,9 +24,9 @@ impl Guest for HttpGuest {
 
 #[omnia_wasi_otel::instrument]
 async fn config_get() -> omnia_sdk::Result<Json<Value>> {
-    let config = config::get_all().map_err(|e| anyhow!("getting config: {e:?}"))?;
+    let page = entries::list(String::new(), None, None).await?;
 
     Ok(Json(json!({
-        "config": config
+        "config": page.entries
     })))
 }

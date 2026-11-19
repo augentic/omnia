@@ -1,25 +1,26 @@
 //! # KeyValue Store Wasm Guest
 //!
-//! This module demonstrates the WASI KeyValue interface. It shows how to:
+//! This module demonstrates the `omnia:keyvalue` interface. It shows how to:
 //! - Open a named bucket (key-value namespace)
 //! - Store and retrieve data by key
+//! - Update an entry only while it holds the revision it was read at
 //! - Combine HTTP handling with storage operations
 //!
 //! ## Backend Flexibility
 //!
-//! This guest code works with any WASI KeyValue backend:
+//! This guest code works with any `omnia:keyvalue` backend:
 //! - In-memory (this example's host)
 //! - Redis (keyvalue-redis example)
 //! - NATS JetStream (keyvalue-nats example)
 
 #![cfg(target_arch = "wasm32")]
 
-use anyhow::Context;
+use anyhow::{Context, anyhow};
 use axum::routing::post;
 use axum::{Json, Router};
 use bytes::Bytes;
-use omnia_wasi_keyvalue::atomics::{self, Cas, CasError};
-use omnia_wasi_keyvalue::store;
+use omnia_wasi_keyvalue::omnia::store;
+use omnia_wasi_keyvalue::omnia::types::{Lifetime, Precondition};
 use serde_json::{Value, json};
 use tracing::Level;
 use wasip3::exports::http::handler::Guest;
@@ -40,30 +41,32 @@ impl Guest for Http {
 async fn handler(body: Bytes) -> omnia_sdk::Result<Json<Value>> {
     let bucket = store::open("omnia_bucket".to_string()).await.context("opening bucket")?;
 
-    bucket.set("my_key".to_string(), body.to_vec()).await.context("storing data")?;
+    let stored = bucket
+        .set("my_key".to_string(), body.to_vec(), Lifetime::Forever, None)
+        .await
+        .context("storing data")?;
+    tracing::debug!("stored at revision: {stored:?}");
 
     let res = bucket.get("my_key".to_string()).await.context("reading data")?;
-    tracing::debug!("found val: {res:?}");
+    tracing::debug!("found entry: {res:?}");
 
-    // CAS happy path: swap against an unchanged snapshot succeeds.
-    bucket.set("cas_key".to_string(), body.to_vec()).await.context("seeding cas_key")?;
-    let cas = Cas::new(&bucket, "cas_key".to_string()).await.context("creating cas")?;
-    atomics::swap(cas, b"swapped".to_vec())
-        .await
-        .map_err(|e| anyhow::anyhow!("swap on a fresh snapshot failed: {e:?}"))?;
-
-    // CAS stale path: invalidate the snapshot, then retry with the fresh
-    // handle the failure carries.
-    let cas = Cas::new(&bucket, "cas_key".to_string()).await.context("creating stale cas")?;
-    bucket.set("cas_key".to_string(), b"interfering".to_vec()).await.context("interfering")?;
-    match atomics::swap(cas, b"lost-race".to_vec()).await {
-        Err(CasError::CasFailed(fresh)) => {
-            atomics::swap(fresh, b"retried".to_vec())
-                .await
-                .map_err(|e| anyhow::anyhow!("retry with the fresh handle failed: {e:?}"))?;
+    // Optimistic update: write only while the entry holds the revision it was
+    // read at. A write that slips in between is a conflict carrying the entry
+    // it left, so the one retry starts from that.
+    let entry = res.context("`my_key` is missing")?;
+    let update = |revision| {
+        bucket.set(
+            "my_key".to_string(),
+            b"updated".to_vec(),
+            Lifetime::Keep,
+            Some(Precondition::Matches(revision)),
+        )
+    };
+    if let Err(conflict) = update(entry.revision).await.context("updating data")? {
+        let current = conflict.current.context("`my_key` was deleted")?;
+        if update(current.revision).await.context("retrying the update")?.is_err() {
+            return Err(anyhow!("the retried update lost its race too").into());
         }
-        Ok(()) => Err(anyhow::anyhow!("stale swap unexpectedly succeeded"))?,
-        Err(other) => Err(anyhow::anyhow!("stale swap failed unexpectedly: {other:?}"))?,
     }
 
     Ok(Json(json!({

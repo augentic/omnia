@@ -16,8 +16,7 @@ use oauth2::{
 use omnia_core::Connect;
 use tracing::instrument;
 
-pub use crate::host::generated::omnia::identity::credentials::AccessToken;
-use crate::host::resource::{FutureResult, Identity};
+use crate::host::resource::{AccessToken, FutureResult, Identity};
 use crate::host::{Error, IdentityClient};
 
 #[derive(Clone, FromEnv)]
@@ -49,10 +48,15 @@ impl omnia_core::FromEnv for ConnectOptions {
     }
 }
 
-/// Default implementation for `wasi:identity`.
+/// The `OAuth` 2.0 client-credentials backend for `omnia:identity`.
 ///
 /// Its one set of client credentials is the identity `default`, and it
-/// refuses every other name.
+/// refuses every other name with [`Error::NotFound`].
+///
+/// - It caches a token per set of scopes, and reports the time a cached token
+///   has left.
+/// - An issuer that states no expiry is taken to issue tokens that last an
+///   hour.
 #[derive(Debug, Clone)]
 pub struct IdentityDefault {
     token_manager: TokenManager,
@@ -73,7 +77,10 @@ impl IdentityClient for IdentityDefault {
         tracing::debug!("getting identity `{name}`");
         let token_manager = self.token_manager.clone();
         async move {
-            anyhow::ensure!(name == "default", Error::NoSuchIdentity);
+            anyhow::ensure!(
+                name == "default",
+                Error::NotFound(format!("identity `{name}` is not declared"))
+            );
             Ok(Arc::new(token_manager) as Arc<dyn Identity>)
         }
         .boxed()
@@ -99,15 +106,12 @@ impl TokenManager {
 
     async fn token(&self, scopes: &[String]) -> Result<AccessToken> {
         let key = cache_key(scopes);
-        let now = Instant::now();
 
         // use cached token if still valid
         {
             let cache = self.cache.lock().await;
-            if let Some(cached) = cache.get(&key)
-                && cached.expires_at > now
-            {
-                return Ok(cached.access_token.clone());
+            if let Some(token) = cache.get(&key).and_then(|cached| cached.at(Instant::now())) {
+                return Ok(token);
             }
         }
 
@@ -125,17 +129,17 @@ impl TokenManager {
 
         let token_resp = token_req.request_async(&http_client).await?;
         let access_token = AccessToken::from(token_resp);
+        let now = Instant::now();
 
         // double-check locking as another task may have refreshed this entry
         let mut cache = self.cache.lock().await;
-        let entry = cache.entry(key).or_insert_with(|| CachedToken::new(access_token.clone()));
-        if entry.expires_at <= now {
-            *entry = CachedToken::new(access_token);
+        if let Some(token) = cache.get(&key).and_then(|cached| cached.at(now)) {
+            return Ok(token);
         }
-        let token = entry.access_token.clone();
+        cache.insert(key, CachedToken::new(&access_token, now));
         drop(cache);
 
-        Ok(token)
+        Ok(access_token)
     }
 }
 
@@ -147,21 +151,29 @@ impl Identity for TokenManager {
     }
 }
 
-#[derive(Debug, Clone)]
 struct CachedToken {
-    access_token: AccessToken,
-    expires_at: Instant,
+    token: String,
+    issued_at: Instant,
+    lifetime: Duration,
 }
 
 impl CachedToken {
-    fn new(access_token: AccessToken) -> Self {
-        let ttl = Duration::from_secs(access_token.expires_in);
-        let expires_at = Instant::now() + ttl;
-
+    fn new(access_token: &AccessToken, issued_at: Instant) -> Self {
         Self {
-            access_token,
-            expires_at,
+            token: access_token.token.clone(),
+            issued_at,
+            lifetime: Duration::from_secs(access_token.expires_in),
         }
+    }
+
+    // the token and the whole seconds it has left at `now`, or `None` once
+    // less than a second is left, since the seam reports nothing finer
+    fn at(&self, now: Instant) -> Option<AccessToken> {
+        let left = self.lifetime.saturating_sub(now.saturating_duration_since(self.issued_at));
+        (left.as_secs() > 0).then(|| AccessToken {
+            token: self.token.clone(),
+            expires_in: left.as_secs(),
+        })
     }
 }
 

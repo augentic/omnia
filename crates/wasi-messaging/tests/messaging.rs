@@ -1,4 +1,4 @@
-//! End-to-end tests for `wasi:messaging`: every scenario runs a real guest
+//! End-to-end tests for `omnia:messaging`: every scenario runs a real guest
 //! component from `crates/test-programs` through the omnia runtime over the
 //! in-memory broker. Command exports are driven through `wasi:cli/run`; the
 //! `incoming-handler` export is driven in-process through
@@ -10,7 +10,7 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use futures::{FutureExt as _, StreamExt as _};
@@ -136,19 +136,27 @@ async fn messaging_produce_handle() {
     let runtime = boot(&sole(test_programs::MESSAGING_PRODUCE_HANDLE), backends).await;
     let handler = handler(&runtime);
 
-    // Producer: the one message the command sent reached the broker with its
-    // topic, payload, and metadata intact.
+    // Producer: the one message the command sent reached the broker on its
+    // topic, its content type and key carried as the metadata entries of
+    // those names, beside the guest's own entry.
     let status = runtime.run_command().await.expect("command runs");
     assert_eq!(status, ExitStatus::SUCCESS);
     let mut sent = next(&mut stream).await;
     assert_eq!(sent.topic, "orders");
     assert_eq!(sent.payload, b"order-1");
-    assert_eq!(metadata(&sent), [("key".to_owned(), "value".to_owned())]);
+    assert_eq!(
+        metadata(&sent),
+        [
+            ("content-type".to_owned(), "text/plain".to_owned()),
+            ("key".to_owned(), "customer-1".to_owned()),
+            ("tenant".to_owned(), "acme".to_owned()),
+        ]
+    );
     assert!(sent.reply.is_none(), "a plain send names no reply topic");
 
     // Incoming handler: the broker's message, now carrying a reply topic,
     // dispatches through the sole-exporter catch-all to the guest, which
-    // asserts its fields and replies on that topic.
+    // asserts its typed fields came back and replies to that address.
     sent.reply = Some(Reply {
         topic: "orders.reply".to_owned(),
     });
@@ -180,25 +188,28 @@ async fn messaging_keyed() {
     );
 
     // Incoming handler: the guest's router finds the key on the delivery, and
-    // the host's deadline replaces one the delivery carried, whatever its case.
+    // reads the host's deadline rather than a `Deadline` entry it carried.
     sent.metadata.get_or_insert_default().insert("Deadline".to_owned(), "1".to_owned());
     handler.handle(sent).await.expect("handled");
 
     runtime.shutdown();
 }
 
-// A guest's returned `Err` comes back as its own outcome, carrying the
-// guest's error, rather than flattened into success or mistaken for a trap.
+// A guest's settlement comes back as its own outcome, carrying the guest's
+// reason and delay, rather than flattened into success or mistaken for a trap.
 #[tokio::test]
 async fn messaging_handle_err() {
     let runtime =
         boot(&sole(test_programs::MESSAGING_HANDLE_ERR), Backends::defaults().await).await;
     let handler = handler(&runtime);
 
-    let error =
-        handler.handle(order("orders")).await.expect_err("the guest's error is the handler's");
+    let error = handler.handle(order("orders")).await.expect_err("the guest releases the order");
     assert!(
-        matches!(&error, HandleError::Rejected(Error::Other(reason)) if reason == "rejected orders"),
+        matches!(
+            &error,
+            HandleError::Released { reason, delay: Some(delay) }
+                if reason == "released orders" && *delay == Duration::from_millis(250)
+        ),
         "unexpected error: {error}"
     );
 
@@ -334,10 +345,13 @@ async fn default_consume() {
     let runtime = boot(&deployment, backends).await;
     let consumer = tokio::spawn(broker.consume(Arc::new(handler(&runtime))));
 
+    // each order is the message the guest's own command publishes
     for _ in 0..ORDERS {
         let mut order = order("orders");
         let mut metadata = Metadata::new();
-        metadata.insert("key".to_owned(), "value".to_owned());
+        metadata.insert("content-type".to_owned(), "text/plain".to_owned());
+        metadata.insert("key".to_owned(), "customer-1".to_owned());
+        metadata.insert("tenant".to_owned(), "acme".to_owned());
         order.metadata = Some(metadata);
         order.reply = Some(Reply {
             topic: "orders.reply".to_owned(),
@@ -367,15 +381,95 @@ async fn messaging_request_reply() {
     // below; a closed broker ends the stream instead of staying quiet.
     run_guest(test_programs::MESSAGING_REQUEST_REPLY, backends.clone()).await;
 
-    // Wire fidelity: the request was published on its topic with the content
-    // type folded into metadata; the reply to a message without a reply
-    // topic never reached the broker.
+    // Wire fidelity: the one request was published on its topic as the guest
+    // sent it, and nothing else reached the broker.
     let request = next(&mut stream).await;
     assert_eq!(request.topic, "ping");
     assert_eq!(request.payload, b"ping");
-    assert_eq!(metadata(&request), [("content-type".to_owned(), "text/plain".to_owned())]);
+    assert!(request.metadata.is_none(), "the request carried no metadata");
     assert!(
         tokio::time::timeout(Duration::from_millis(200), stream.next()).await.is_err(),
         "nothing else reached the broker"
     );
+}
+
+// fails every send with the kind its topic is named for, recording each
+// topic so the run's exchanges are pinned
+#[derive(Clone, Debug, Default)]
+struct Faulting {
+    sent: Arc<Mutex<Vec<String>>>,
+}
+
+impl MessagingClient for Faulting {
+    fn endpoint(&self) -> FutureResult<Arc<dyn Endpoint>> {
+        let endpoint = self.clone();
+        async move { Ok(Arc::new(endpoint) as Arc<dyn Endpoint>) }.boxed()
+    }
+}
+
+impl Endpoint for Faulting {
+    fn consume(&self, _handler: Arc<dyn Handler>) -> FutureResult<()> {
+        unreachable!("a command-only guest leaves the trigger inert")
+    }
+
+    fn send(&self, topic: String, _message: Message) -> FutureResult<()> {
+        self.sent.lock().expect("sent topics").push(topic.clone());
+        let fault = match topic.as_str() {
+            "not-found" => Error::NotFound("not found by the suite".to_owned()).into(),
+            "denied" => Error::Denied("denied by the suite".to_owned()).into(),
+            "invalid" => Error::Invalid("invalid in the suite".to_owned()).into(),
+            "unsupported" => Error::Unsupported("unsupported by the suite".to_owned()).into(),
+            "unavailable" => Error::Unavailable("unavailable in the suite".to_owned()).into(),
+            _ => anyhow::anyhow!("an untyped backend failure"),
+        };
+        async move { Err(fault) }.boxed()
+    }
+
+    fn request(
+        &self, _topic: String, _message: Message, _options: Option<RequestOptions>,
+    ) -> FutureResult<Message> {
+        unreachable!("the host refuses the guest's one request")
+    }
+}
+
+#[tokio::test]
+async fn messaging_error_codes() {
+    let backends = Backends::defaults().await.messaging(Faulting::default());
+
+    let status = Deployment::new()
+        .guest("guest", test_programs::MESSAGING_ERROR_CODES)
+        .run_host::<WasiMessaging, _>(backends.clone())
+        .await
+        .expect("guest runs");
+    assert_eq!(status, ExitStatus::SUCCESS, "guest failed");
+
+    // the host refused every other call before it reached the broker
+    let sent = backends.messaging.sent.lock().expect("sent topics").clone();
+    assert_eq!(sent, ["not-found", "denied", "invalid", "unsupported", "unavailable", "other"]);
+}
+
+// The SDK settles a handler's failure by its class, and the host hands the
+// backend the settlement the guest returned.
+#[tokio::test]
+async fn messaging_outcomes() {
+    let runtime = boot(&sole(test_programs::MESSAGING_OUTCOMES), Backends::defaults().await).await;
+    let handler = handler(&runtime);
+
+    let error = handler.handle(order("orders")).await.expect_err("an undecodable order fails");
+    assert!(
+        matches!(&error, HandleError::Rejected(reason) if reason.contains("undecodable")),
+        "unexpected error: {error}"
+    );
+    let error = handler.handle(order("pricing")).await.expect_err("an unanswered upstream fails");
+    assert!(
+        matches!(&error, HandleError::Released { reason, delay: None } if reason.contains("pricing")),
+        "unexpected error: {error}"
+    );
+    let error = handler.handle(order("ledger")).await.expect_err("a refused entry fails");
+    assert!(
+        matches!(&error, HandleError::Released { reason, delay: None } if reason.contains("ledger")),
+        "unexpected error: {error}"
+    );
+
+    runtime.shutdown();
 }

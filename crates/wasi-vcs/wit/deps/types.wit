@@ -1,0 +1,38 @@
+package omnia:types@0.1.0;
+
+/// The types every `omnia:*` package shares.
+///
+/// Each package's own `types` interface uses `error` from here, and its
+/// docs say what each case means for that capability.
+interface types {
+  /// Why a call failed.
+  ///
+  /// An outcome a caller acts on in particular, such as a write whose
+  /// precondition failed, is not an `error` but a result of its own.
+  variant error {
+    /// Something the call names does not exist.
+    not-found(string),
+    /// The caller may not make the call.
+    denied(string),
+    /// The request was rejected. Making it again fails the same way.
+    invalid(string),
+    /// A valid request this backend cannot serve.
+    unsupported(string),
+    /// The service did not answer, or the call exceeded its bound. Making it
+    /// again may succeed.
+    unavailable(string),
+    /// Any other failure.
+    other(string),
+  }
+
+  /// An instant, in milliseconds since the Unix epoch.
+  type timestamp = u64;
+
+  /// A JSON document, as UTF-8 text.
+  type json = string;
+}
+
+/// Every interface.
+world imports {
+  import types;
+}

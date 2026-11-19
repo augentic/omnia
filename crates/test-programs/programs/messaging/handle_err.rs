@@ -1,17 +1,20 @@
-//! A messaging guest whose `incoming-handler` export returns `Err` for every
-//! message it is handed, naming the topic, so the host side can tell a
-//! guest's returned error from a trap.
+//! A messaging guest whose `incoming-handler` export releases every delivery
+//! it is handed, naming the topic and asking for a delay, so the host side
+//! can tell a guest's settlement from a trap.
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_wasi_messaging::incoming_handler::Guest;
-use omnia_wasi_messaging::types::{Error, Message};
+use omnia_wasi_messaging::omnia::incoming_handler::Guest;
+use omnia_wasi_messaging::omnia::types::{Delivery, Release, Settle};
 
 struct Messaging;
-omnia_wasi_messaging::export!(Messaging with_types_in omnia_wasi_messaging);
+omnia_wasi_messaging::export!(Messaging);
 
 impl Guest for Messaging {
-    async fn handle(message: Message) -> Result<(), Error> {
-        Err(Error::Other(format!("rejected {}", message.topic().unwrap_or_default())))
+    async fn handle(delivery: Delivery) -> Result<(), Settle> {
+        Err(Settle::Release(Release {
+            reason: format!("released {}", delivery.topic),
+            delay_ms: Some(250),
+        }))
     }
 }

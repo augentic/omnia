@@ -1,3 +1,6 @@
+//! The [`Endpoint`] seam a backend implements, and the [`Message`] that
+//! crosses it.
+
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::ops::{Deref, DerefMut};
@@ -11,7 +14,7 @@ use futures::{Stream, StreamExt as _};
 pub use omnia_core::FutureResult;
 use tokio::task::{JoinError, JoinSet};
 
-use crate::host::generated::wasi::messaging::types;
+use crate::host::generated::omnia::messaging::types;
 
 /// Stream of messages.
 pub type Subscriptions = Pin<Box<dyn Stream<Item = Message> + Send>>;
@@ -67,15 +70,36 @@ pub enum HandleError {
     /// No guest ran: the routed guest could not be loaded or instantiated.
     #[error("no guest ran: {0}")]
     Unavailable(String),
-    /// The guest returned `Err`.
-    #[error("guest returned an error: {0}")]
-    Rejected(types::Error),
+    /// The guest rejected the message, which no redelivery handles.
+    #[error("guest rejected the message: {0}")]
+    Rejected(String),
+    /// The guest released the message, as a failure that may pass.
+    #[error("guest released the message: {reason}")]
+    Released {
+        /// Why the guest failed, for a person to read.
+        reason: String,
+        /// The least time before the next delivery, where the guest asks for
+        /// one.
+        delay: Option<Duration>,
+    },
     /// The guest trapped.
     #[error("guest trapped: {0}")]
     Trapped(String),
     /// The guest ran past the deployment's guest timeout.
     #[error("guest ran past {0:?}")]
     TimedOut(Duration),
+}
+
+impl From<types::Settle> for HandleError {
+    fn from(settle: types::Settle) -> Self {
+        match settle {
+            types::Settle::Reject(reason) => Self::Rejected(reason),
+            types::Settle::Release(types::Release { reason, delay_ms }) => Self::Released {
+                reason,
+                delay: delay_ms.map(Duration::from_millis),
+            },
+        }
+    }
 }
 
 /// Deliver a message stream to `handler`, one task per message, until it ends.

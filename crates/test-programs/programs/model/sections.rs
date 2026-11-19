@@ -4,7 +4,7 @@
 
 use omnia_sdk::WasiProvider;
 use omnia_sdk::model::{Model as _, Request};
-use omnia_wasi_model::completion::Role as WireRole;
+use omnia_wasi_model::omnia::types::Role as WireRole;
 use omnia_wasi_model::prompt::{Example, Sections};
 use test_programs::user;
 

@@ -46,7 +46,7 @@ async fn main() -> Result<()> {
 
     println!("nanoseconds per operation, median of {ROUNDS} rounds (fastest round)");
     println!("store, built and dropped   {store}");
-    println!("view of `wasi:keyvalue`    {view}");
+    println!("view of `omnia:keyvalue`   {view}");
 
     runtime.shutdown();
     Ok(())

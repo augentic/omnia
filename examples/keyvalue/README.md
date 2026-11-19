@@ -1,6 +1,6 @@
 # Key-Value Example
 
-Demonstrates `wasi-keyvalue` using the default (in-memory) implementation.
+Demonstrates `omnia:keyvalue` using the default (in-memory) implementation.
 
 The guest opens a bucket named `omnia_bucket`. The in-memory backend serves
 only the buckets `KEYVALUE_BUCKETS` declares (`default` when unset), so the

@@ -1,36 +1,74 @@
 package omnia:identity@0.1.0;
 
+/// The types the identity interfaces share.
+///
+/// Every backend accepts a portable name and a portable scope, and may
+/// reject any other as `invalid`.
+///
+/// - A portable identity name is not empty and holds only ASCII letters,
+///   digits, `_`, and `-`.
+/// - A portable scope is an OAuth 2.0 scope token: one or more printable
+///   ASCII characters other than space, `"`, and `\`.
+///
+/// An `error` from an identity interface means:
+///
+/// - `not-found`: the identity is not declared by the deployment.
+/// - `denied`: the issuer refused the identity a token.
+/// - `invalid`: the request was rejected, such as a scope the issuer does
+///   not know.
+/// - `unavailable`: the issuer did not answer, or the call exceeded its
+///   bound.
 interface types {
-  /// The set of errors which may be raised by functions in this package
-  variant error {
-    /// No identity found with the given ID.
-    no-such-identity,
-    /// Operation failed due to an internal error.
-    internal-failure(string),
+  use omnia:types/types@0.1.0.{error, timestamp};
+
+  /// An OAuth 2.0 bearer token and when it expires.
+  ///
+  /// A caller sends `token` in an `Authorization: Bearer` header.
+  record access-token {
+    /// The token, opaque to the guest.
+    token: string,
+    /// When the token expires.
+    ///
+    /// A backend whose issuer states no expiry reports the lifetime the
+    /// issuer documents.
+    expires-at: timestamp,
   }
 }
 
+/// Tokens for the identities a deployment declares. Every backend serves
+/// this interface.
 interface credentials {
-  use types.{error};
+  use types.{access-token, error};
 
-  /// An OAuth 2.0 access token along with its expiration time.
-  record access-token {
-    /// The OAuth 2.0 access token.
-    token: string,
-    /// The number of seconds until this token expires.
-    expires-in: u64,
-  }
-
+  /// An open identity.
   resource identity {
-    /// Returns an access token scoped to the requested OAuth2 scopes.
+    /// A token for this identity, scoped to `scopes`.
+    ///
+    /// - An empty `scopes` asks for the identity's default scopes.
+    /// - A portable request names one scope. A backend may fail any other
+    ///   number with `unsupported`.
+    /// - A scope the issuer does not know fails with `invalid`, and one the
+    ///   identity may not have with `denied`.
+    /// - The host may answer from a cache, so two calls may return the same
+    ///   token.
     get-token: async func(scopes: list<string>) -> result<access-token, error>;
   }
 
-  /// Returns the requested `identity`.
-  get-identity: async func(name: string) -> result<identity, error>;
+  /// Open the identity `name`, a binding the deployment declares. An unnamed
+  /// SDK handle opens `default`.
+  ///
+  /// An undeclared name fails with `not-found`.
+  open: async func(name: string) -> result<identity, error>;
 }
 
-world imports {
+/// What every backend serves.
+world core {
   import types;
   import credentials;
+}
+
+/// Every interface. A backend answers `unsupported` for what it does not
+/// serve.
+world imports {
+  include core;
 }

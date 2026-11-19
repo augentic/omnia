@@ -90,10 +90,9 @@ tracing-subscriber = { version = "0.3.23", default-features = false, features = 
 trybuild = "1"
 wasip3 = { version = "0.10.0", features = ["http-compat"] }
 wasm-pkg-client = "0.16.2"
-wasmtime = { version = "50.0.1", default-features = false, features = ["anyhow", "component-model-bytes", "parallel-compilation"] }
-wasmtime-wasi = { version = "50.0.1", default-features = false, features = ["p3"] }
-wasmtime-wasi-config = "50.0.1"
-wasmtime-wasi-http = { version = "50.0.1", default-features = false, features = ["p3"] }
+wasmtime = { version = "50.0.2", default-features = false, features = ["anyhow", "component-model-bytes", "parallel-compilation"] }
+wasmtime-wasi = { version = "50.0.2", default-features = false, features = ["p3"] }
+wasmtime-wasi-http = { version = "50.0.2", default-features = false, features = ["p3"] }
 wit-bindgen = { version = "0.63.0", features = ["async-spawn"] }
 x509-cert = { version = "0.3.0", default-features = false, features = ["std"] }
 
@@ -118,6 +117,7 @@ omnia-wasi-messaging = { path = "crates/wasi-messaging", version = "0.38.0" }
 omnia-wasi-model = { path = "crates/wasi-model", version = "0.38.0" }
 omnia-wasi-otel = { path = "crates/wasi-otel", version = "0.38.0" }
 omnia-wasi-sql = { path = "crates/wasi-sql", version = "0.38.0" }
+omnia-wasi-types = { path = "crates/wasi-types", version = "0.38.0" }
 omnia-wasi-vault = { path = "crates/wasi-vault", version = "0.38.0" }
 omnia-wasi-vcs = { path = "crates/wasi-vcs", version = "0.38.0" }
 omnia-wasi-websocket = { path = "crates/wasi-websocket", version = "0.38.0" }

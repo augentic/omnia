@@ -1,14 +1,19 @@
-//! # WASI Vault WIT implementation
+//! # WASI Vault Guest
 
-// Bindings for the `wasi:vault` world.
-// See (<https://github.com/augentic/wasi-vault/>)
+// Bindings for `omnia:vault`.
 mod generated {
     #![allow(missing_docs, clippy::same_length_and_capacity, reason = "wit-bindgen output")]
     wit_bindgen::generate!({
         world: "imports",
         path: "wit",
+        with: {
+            "omnia:types/types@0.1.0": omnia_wasi_types::omnia::types,
+        },
         generate_all,
     });
 }
 
-pub use self::generated::omnia::vault::*;
+/// `omnia:vault`, the interfaces behind the SDK's `SecretStore`.
+pub mod omnia {
+    pub use crate::guest::generated::omnia::vault::*;
+}

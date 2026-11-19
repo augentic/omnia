@@ -27,7 +27,7 @@ where
     /// reads as absent.
     pub async fn state(&self, key: &str) -> Option<Vec<u8>> {
         let bucket = self.keyvalue.open_bucket(STATE_BUCKET.to_owned()).await.ok()?;
-        bucket.get(key.to_owned()).await.ok().flatten()
+        bucket.get(key.to_owned()).await.ok().flatten().map(|entry| entry.value)
     }
 
     /// One committed object, read through the blobstore handle.

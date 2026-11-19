@@ -1,16 +1,19 @@
-//! [`Model`] over `omnia:model/completion`.
+//! [`Model`] over `omnia:model`.
 
 use std::future::Future;
 
-use omnia_wasi_model::{completion, wit_stream};
+use omnia_wasi_model::omnia::{completion, types};
+use omnia_wasi_model::wit_stream;
 use wasip3::filesystem::preopens;
 
 use super::lend::resolve_lend;
 use crate::model::{
-    Effort, Error, Format, Function, Generation, McpGrant, Message, Reply, Request, Role, Tool,
+    CHECK_TOOL, Effort, Error, Format, Function, Generation, Message, Reply, Request, Role, Tool,
     ToolCall, Usage, WorkerGrant,
 };
 use crate::{Model, WasiProvider};
+
+const DEFAULT_MODEL: &str = "default";
 
 impl Model for WasiProvider {
     async fn complete_with<H, F>(&self, request: Request, mut handler: H) -> Result<Reply, Error>
@@ -18,13 +21,20 @@ impl Model for WasiProvider {
         H: FnMut(ToolCall) -> F + Send,
         F: Future<Output = Result<String, String>> + Send,
     {
-        // the lent workspace borrows a descriptor, so the table outlives `create`
+        // a worker grant nests in the lend it reaches beyond
+        if request.worker.is_some() && request.workspace.is_none() {
+            return Err(Error::InvalidRequest(
+                "a worker grant requires a workspace lend".to_owned(),
+            ));
+        }
+
+        // the lent workspace borrows a descriptor, so the table outlives `complete`
         let directories =
             if request.workspace.is_some() { preopens::get_directories() } else { vec![] };
         let workspace = match request.workspace.as_deref() {
             None => None,
             Some(path) => match resolve_lend(&directories, path) {
-                Some((root, subpath)) => Some(completion::WorkspaceGrant {
+                Some((root, subpath)) => Some(types::Location {
                     root,
                     subpath: subpath.to_string(),
                 }),
@@ -36,46 +46,80 @@ impl Model for WasiProvider {
             },
         };
 
+        // the guest's tools, refusing the name a check arrives under
+        let mut tools = Vec::new();
+        for Tool::Function(function) in request.tools {
+            if function.name == CHECK_TOOL {
+                return Err(Error::InvalidRequest(format!("reserved tool name: {CHECK_TOOL}")));
+            }
+            tools.push(function.into());
+        }
+
         let wire = completion::Request {
-            model: request.model,
             system: request.system,
             messages: request.messages.into_iter().map(Into::into).collect(),
             generation: request.generation.map(Into::into),
             format: request.format.into(),
-            tools: request.tools.into_iter().map(Into::into).collect(),
-            grants: completion::Grants {
-                workspace,
-                worker: request.worker.map(Into::into),
+            tools,
+            grants: types::Grants {
+                workspace: workspace.map(|location| types::WorkspaceGrant {
+                    location,
+                    worker: request.worker.map(Into::into),
+                }),
             },
             check: request.check,
         };
 
+        // begin the completion on the model the request names
+        let name = request.model.unwrap_or_else(|| DEFAULT_MODEL.to_owned());
+        let model = completion::open(name).await?;
         let (mut results, results_rx) = wit_stream::new();
-        let session = completion::create(wire, results_rx).await.map_err(Error::from)?;
-        let completion::Session { mut calls, reply } = session;
+        let completion::Session { mut calls, reply } = model.complete(wire, results_rx).await?;
 
         // serial by design: each result feeds the same model turn; a rejected
         // write means the host stopped reading, and the closed stream ends the loop
+        let mut correction = None;
         let calls_loop = async {
             while let Some(call) = calls.next().await {
-                let id = call.id.clone();
-                let output = handler(ToolCall {
-                    id: call.id,
-                    name: call.name,
-                    arguments: call.arguments,
-                })
-                .await;
-                let _ = results.write_one(completion::ToolResult { id, output }).await;
+                let result = match call {
+                    types::Call::Tool(call) => {
+                        correction = None;
+                        let id = call.id.clone();
+                        let output = handler(ToolCall {
+                            id: call.id,
+                            name: call.name,
+                            arguments: call.arguments,
+                        })
+                        .await;
+                        types::CallResult::Tool(types::ToolResult { id, output })
+                    }
+                    types::Call::Check(candidate) => {
+                        let id = candidate.id.clone();
+                        let outcome = handler(ToolCall {
+                            id: candidate.id,
+                            name: CHECK_TOOL.to_owned(),
+                            arguments: candidate.answer,
+                        })
+                        .await
+                        .map(drop);
+                        correction = outcome.clone().err();
+                        types::CallResult::Check(types::Verdict { id, outcome })
+                    }
+                };
+                let _ = results.write_one(result).await;
             }
         };
 
         // the host always resolves the reply, so the join cannot hang
         let ((), outcome) = futures::join!(calls_loop, std::future::IntoFuture::into_future(reply));
-        outcome.map(Into::into).map_err(Into::into)
+        match outcome? {
+            Ok(reply) => Ok(reply.into()),
+            Err(exhausted) => Err(Error::BudgetExhausted(correction.unwrap_or(exhausted.detail))),
+        }
     }
 }
 
-impl From<Message> for completion::Message {
+impl From<Message> for types::Message {
     fn from(message: Message) -> Self {
         Self {
             role: message.role.into(),
@@ -84,7 +128,7 @@ impl From<Message> for completion::Message {
     }
 }
 
-impl From<Role> for completion::Role {
+impl From<Role> for types::Role {
     fn from(role: Role) -> Self {
         match role {
             Role::System => Self::System,
@@ -94,36 +138,36 @@ impl From<Role> for completion::Role {
     }
 }
 
-impl From<Generation> for completion::Generation {
+impl From<Generation> for types::Generation {
     fn from(generation: Generation) -> Self {
         Self {
             temperature: generation.temperature,
             top_p: generation.top_p,
             max_tokens: generation.max_tokens,
-            stop: generation.stop,
+            stop_sequences: generation.stop,
             seed: generation.seed,
             effort: generation.effort.map(Into::into),
         }
     }
 }
 
-impl From<Effort> for completion::Effort {
+impl From<Effort> for types::Effort {
     fn from(effort: Effort) -> Self {
         match effort {
-            Effort::Minimal => Self::Minimal,
             Effort::Low => Self::Low,
             Effort::Medium => Self::Medium,
             Effort::High => Self::High,
+            Effort::Other(level) => Self::Other(level),
         }
     }
 }
 
-impl From<Format> for completion::Format {
+impl From<Format> for types::Format {
     fn from(format: Format) -> Self {
         match format {
             Format::Text => Self::Text,
             Format::Json => Self::Json,
-            Format::Schema(s) => Self::Schema(completion::Schema {
+            Format::Schema(s) => Self::Schema(types::Schema {
                 name: s.name,
                 schema: s.schema,
             }),
@@ -131,26 +175,17 @@ impl From<Format> for completion::Format {
     }
 }
 
-impl From<Tool> for completion::Tool {
-    fn from(tool: Tool) -> Self {
-        match tool {
-            Tool::Function(Function {
-                name,
-                description,
-                parameters,
-            }) => Self::Function(completion::Function {
-                name,
-                description,
-                parameters,
-            }),
-            Tool::Mcp(McpGrant { name, tools, url }) => {
-                Self::Mcp(completion::Mcp { name, tools, url })
-            }
+impl From<Function> for types::Tool {
+    fn from(function: Function) -> Self {
+        Self {
+            name: function.name,
+            description: Some(function.description).filter(|description| !description.is_empty()),
+            input_schema: function.parameters,
         }
     }
 }
 
-impl From<WorkerGrant> for completion::WorkerGrant {
+impl From<WorkerGrant> for types::WorkerGrant {
     fn from(grant: WorkerGrant) -> Self {
         Self {
             egress: grant.egress,
@@ -160,8 +195,8 @@ impl From<WorkerGrant> for completion::WorkerGrant {
     }
 }
 
-impl From<completion::Reply> for Reply {
-    fn from(reply: completion::Reply) -> Self {
+impl From<types::Reply> for Reply {
+    fn from(reply: types::Reply) -> Self {
         Self {
             answer: reply.answer,
             usage: reply.usage.map(Into::into),
@@ -169,23 +204,27 @@ impl From<completion::Reply> for Reply {
     }
 }
 
-impl From<completion::Usage> for Usage {
-    fn from(usage: completion::Usage) -> Self {
+impl From<types::Usage> for Usage {
+    fn from(usage: types::Usage) -> Self {
         Self {
             input_tokens: usage.input_tokens,
             output_tokens: usage.output_tokens,
             reasoning_tokens: usage.reasoning_tokens,
+            cache_read_tokens: usage.cache_read_tokens,
+            cache_write_tokens: usage.cache_write_tokens,
         }
     }
 }
 
-impl From<completion::Error> for Error {
-    fn from(error: completion::Error) -> Self {
+impl From<types::Error> for Error {
+    fn from(error: types::Error) -> Self {
         match error {
-            completion::Error::InvalidRequest(detail) => Self::InvalidRequest(detail),
-            completion::Error::BudgetExhausted(detail) => Self::BudgetExhausted(detail),
-            completion::Error::ToolFailed(detail) => Self::ToolFailed(detail),
-            completion::Error::Backend(detail) => Self::Backend(detail),
+            types::Error::Invalid(detail) => Self::InvalidRequest(detail),
+            types::Error::NotFound(detail) => Self::NotFound(detail),
+            types::Error::Denied(detail) => Self::Denied(detail),
+            types::Error::Unsupported(detail) => Self::Unsupported(detail),
+            types::Error::Unavailable(detail) => Self::Unavailable(detail),
+            types::Error::Other(detail) => Self::Backend(detail),
         }
     }
 }

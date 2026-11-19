@@ -2,8 +2,7 @@
 
 //! # WASI Key-Value
 //!
-//! This module implements a runtime service for `omnia:keyvalue` and the
-//! `wasi:keyvalue` draft (<https://github.com/WebAssembly/wasi-keyvalue>).
+//! This module implements a runtime service for `omnia:keyvalue`.
 
 cfg_select! {
     target_arch = "wasm32" => {

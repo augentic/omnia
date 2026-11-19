@@ -6,8 +6,7 @@ use anyhow::{Context, Result};
 use futures::FutureExt;
 use omnia_core::Connect;
 
-use crate::host::generated::omnia::identity::credentials::AccessToken;
-use crate::host::resource::{FutureResult, Identity};
+use crate::host::resource::{AccessToken, FutureResult, Identity};
 use crate::host::{Error, IdentityClient};
 
 const DEFAULT: &str = "default";
@@ -46,16 +45,16 @@ impl omnia_core::FromEnv for StubOptions {
     }
 }
 
-/// Credential-free `wasi:identity` backend issuing a fixed token per identity.
+/// Credential-free `omnia:identity` backend issuing a fixed token per identity.
 ///
 /// For tests and local development where no identity provider is available;
 /// production deployments use `IdentityDefault` (the `oauth` feature) or a
 /// backend crate.
 ///
 /// It serves the identities its [`StubOptions`] name and refuses every other
-/// name. The `default` identity's token is `stub-token`, and any other
-/// identity's is `stub-token:<name>`, so each identity's token is distinct.
-/// Every token lasts an hour.
+/// name with [`Error::NotFound`]. The `default` identity's token is
+/// `stub-token`, and any other identity's is `stub-token:<name>`, so each
+/// identity's token is distinct. Every token lasts an hour.
 #[derive(Debug, Clone)]
 pub struct IdentityStub {
     names: Arc<BTreeSet<String>>,
@@ -89,7 +88,7 @@ impl IdentityClient for IdentityStub {
     fn get_identity(&self, name: String) -> FutureResult<Arc<dyn Identity>> {
         let served = self.names.contains(&name);
         async move {
-            anyhow::ensure!(served, Error::NoSuchIdentity);
+            anyhow::ensure!(served, Error::NotFound(format!("identity `{name}` is not declared")));
             let token = if name == DEFAULT { TOKEN.to_owned() } else { format!("{TOKEN}:{name}") };
             Ok(Arc::new(StubIdentity { token }) as Arc<dyn Identity>)
         }

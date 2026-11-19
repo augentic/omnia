@@ -1,12 +1,11 @@
 //! Version-control capability over `omnia:vcs`.
 //!
-//! Target-independent mirrors of the `omnia:vcs` records, and the [`Vcs`]
-//! trait over them. The one record that cannot cross off `wasm32` is the
-//! `location` — a borrowed `wasi:filesystem` descriptor plus a subpath — so
-//! a guest names every repository and working copy with a deployment-local
-//! path (`"."` the project mount, `"./.cache/repo"` or `"/mount/sub"` beneath
-//! one) and `WasiProvider` resolves it against the guest's preopens at the
-//! call site, by the lend rule [`Model`] uses for its workspace.
+//! The [`Vcs`] trait and the target-independent types it works in. A guest
+//! names every repository and working copy with a deployment-local path
+//! (`"."` the project mount, `"./.cache/repo"` or `"/mount/sub"` beneath
+//! one). `WasiProvider` lends it to the host as an `omnia:vcs` `location`,
+//! resolved against the guest's preopens by the lend rule [`Model`] uses for
+//! its workspace.
 //!
 //! [`Model`]: crate::Model
 
@@ -18,9 +17,11 @@ use std::future::Future;
 /// preopens on `wasm32`: `"."` names the project mount, `"./sub"` or
 /// `"/mount/sub"` a directory beneath one, which need not exist yet where
 /// the operation creates it. `WasiProvider` delegates to `omnia:vcs` via
-/// `omnia-wasi-vcs`.
+/// `omnia-wasi-vcs`, and opens the workspace at the path for every call but
+/// [`init`](Self::init) and [`clone_repo`](Self::clone_repo). A path that
+/// holds none is [`Error::NotARepository`].
 ///
-/// The transport operation `clone` is [`clone_repo`](Self::clone_repo)
+/// The `omnia:vcs` operation `clone` is [`clone_repo`](Self::clone_repo)
 /// here, since `clone(&self, ..)` would shadow [`Clone::clone`] on every
 /// provider that is `Clone`.
 #[omnia_guest_macros::capability]
@@ -49,6 +50,9 @@ pub trait Vcs: Send + Sync {
 
     /// Merges `revision` into the working copy at `at` under `policy`
     /// and advances its head.
+    ///
+    /// A working copy with pending changes is [`Error::Pending`] naming
+    /// their paths, and nothing changes.
     fn merge(
         &self, at: &str, revision: &str, message: &str, policy: &[Rule],
     ) -> impl Future<Output = Result<Merged, Error>> + Send;
@@ -60,9 +64,15 @@ pub trait Vcs: Send + Sync {
     ) -> impl Future<Output = Result<Vec<Entry>, Error>> + Send;
 
     /// A repository with no history at `at`.
+    ///
+    /// A repository already at `at` is [`Error::Exists`], and stays as it
+    /// was.
     fn init(&self, at: &str) -> impl Future<Output = Result<(), Error>> + Send;
 
     /// A working copy of `repo` at `at`, on `revision` and on no label.
+    ///
+    /// A directory at `at` that holds anything is [`Error::Exists`], and
+    /// stays as it was.
     fn add(
         &self, repo: &str, at: &str, revision: &str,
     ) -> impl Future<Output = Result<(), Error>> + Send;
@@ -74,7 +84,10 @@ pub trait Vcs: Send + Sync {
     /// What the working copy at `at` holds that its head does not.
     fn pending(&self, at: &str) -> impl Future<Output = Result<Vec<Change>, Error>> + Send;
 
-    /// A clone of `url` at `at`, which must hold nothing yet.
+    /// A clone of `url` at `at`.
+    ///
+    /// A directory at `at` that holds anything is [`Error::Exists`], and
+    /// stays as it was.
     fn clone_repo(
         &self, url: &str, at: &str, options: CloneOptions,
     ) -> impl Future<Output = Result<(), Error>> + Send;
@@ -178,13 +191,18 @@ pub struct CloneOptions {
     pub depth: Option<u32>,
 }
 
-/// Typed version-control failure, mirroring the `omnia:vcs` error variant.
+/// Why a version-control call failed.
+///
+/// `WasiProvider` reports a refusal that has no variant here, such as a
+/// change beneath a read-only mount, as [`Error::Other`] led by its
+/// `omnia:vcs` case.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum Error {
     /// The location holds no repository or working copy.
     #[error("not a repository")]
     NotARepository,
-    /// A working copy already exists at the location.
+    /// The location already holds a repository, or files a new working copy
+    /// would overwrite.
     #[error("already exists: {0}")]
     Exists(String),
     /// A revision, remote, or label the repository does not know.

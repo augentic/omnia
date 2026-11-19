@@ -85,7 +85,7 @@ struct PlaceError(#[source] omnia_sdk::Error);
 
 #[derive(Debug, thiserror::Error)]
 #[error("could not review")]
-struct ToolError(#[source] model::Error);
+struct ReviewError(#[source] model::Error);
 
 fn unavailable() -> omnia_sdk::Error {
     omnia_sdk::Error::bad_gateway("unavailable", "store did not answer")
@@ -111,8 +111,8 @@ async fn failing_handler() {
         .topic("plugin", |_: Context<()>, _: EchoInput| {
             ready(Err::<(), _>(plugins::Error::Refused("unsigned".into())))
         })
-        .topic("tool", |_: Context<()>, _: EchoInput| {
-            ready(Err::<(), _>(ToolError(model::Error::ToolFailed("lint".into()))))
+        .topic("review", |_: Context<()>, _: EchoInput| {
+            ready(Err::<(), _>(ReviewError(model::Error::Unavailable("rate limited".into()))))
         })
         .with_state(());
 
@@ -124,7 +124,7 @@ async fn failing_handler() {
         ("format", 500, "server_error", "when formatting"),
         ("revision", 404, "not-found", "not found: v1"),
         ("plugin", 400, "refused", "unsigned"),
-        ("tool", 502, "tool-failed", "could not review"),
+        ("review", 502, "unavailable", "could not review"),
     ] {
         let Err(error) = router.handle(delivery(Some(topic), br#"{"name":"message"}"#)).await
         else {

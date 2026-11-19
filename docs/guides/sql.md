@@ -1,6 +1,6 @@
 # SQL
 
-The `omnia:sql` interface gives guests parameterized SQL access to whatever database the host configures — SQLite in development (`SqlDefault`), PostgreSQL in production (`omnia-postgres`). `omnia-sdk` provides the `SqlDb` capability over it: one trait whose methods each run in one host call, so handlers execute SQL through a provider like any other capability. The [SQL reference](../reference/sql.md) defines the interface, the portable dialect, and how each value binds and reads back on each backend.
+The `omnia:sql` interface gives guests parameterized SQL access to whatever database the host configures — SQLite in development (`SqlDefault`), PostgreSQL in production (`omnia-postgres`). `omnia-sdk` provides the `SqlDb` capability over it, so handlers execute SQL and run transactions through a provider like any other capability. The [SQL reference](../reference/sql.md) defines the interface, the portable dialect, and how each value binds and reads back on each backend.
 
 The [`sql`](../../examples/sql/) example is a minimal CRUD service over a single `agency` table; the snippets below follow its patterns.
 
@@ -11,10 +11,10 @@ The [`sql`](../../examples/sql/) example is a minimal CRUD service over a single
 `omnia_sdk::SqlDb` runs SQL through three methods:
 
 - `query` returns the rows a statement selects.
-- `execute` returns the number of rows it changed. DDL runs through it too.
+- `execute` returns the number of rows it changed. DDL runs through it too, and returns zero.
 - `batch` runs a list of `Statement`s in order, in one transaction, and returns each one's count. A failing statement rolls back the whole batch.
 
-`query` and `execute` take the SQL text and its `$n` parameters as a slice of `Value`s, which convert from Rust scalars and `Option`s of them. A provider's own handle runs statements on the database `default`, and `named(name)` answers a handle on another database the deployment declares. On `wasm32`, `omnia_sdk::WasiProvider` implements `SqlDb` over the WASI bindings:
+Each call commits before it returns, and `begin` starts a transaction for work that spans several calls (see [Transactions](#transactions)). `query` and `execute` take the SQL text and its `$n` parameters as a slice of `Value`s, which convert from Rust scalars and `Option`s of them. A provider's own handle runs statements on the database `default`, and `named(name)` answers a handle on another database the deployment declares. On `wasm32`, `omnia_sdk::WasiProvider` implements `SqlDb` over the WASI bindings:
 
 ```rust,noplayground
 use omnia_sdk::sql::Value;
@@ -64,7 +64,7 @@ events.execute("DELETE FROM event WHERE agency_id = $1", &[Value::from(id)]).awa
 
 The database name is what the backend resolves, and both backends refuse a name they do not declare. `SqlDefault` declares `default` plus the names in `SQL_DATABASES`, and `omnia-postgres` maps `default` to `POSTGRES_URL` and each name in `POSTGRES_POOLS` to `POSTGRES_URL__<NAME>`.
 
-Every method fails with an `omnia_sdk::Error` whose code is the one the backend chose. An undeclared database fails with the code `not-found`, and a statement that does not prepare or bind with the code `invalid`. The [reference](../reference/sql.md#errors) lists every code.
+Every method fails with an `omnia_sdk::Error` whose code is the one the backend chose. An undeclared database fails with the code `not-found`. A statement that does not prepare or bind fails with the code `invalid`, and so does one that starts or ends a transaction, such as `BEGIN` or `COMMIT`. The [reference](../reference/sql.md#errors) lists every code.
 
 ### Mapping rows
 
@@ -99,19 +99,45 @@ let agencies: Vec<Agency> = WasiProvider
     .context("executing query")?;
 ```
 
-Each integer case reads as any integer type its value fits, so a column Postgres returns as `Int32` and SQLite as `Int64` reads as `i32` from both. `Float` and `Double` read as `f64`, and `bool` also reads an integer `0` or `1`, which is how SQLite returns a `BOOLEAN`. The default backend reports NULL as `Str(None)` regardless of column type, which `Option<T>` reads as `None` like any other `NULL`. The [reference](../reference/sql.md#values-and-column-types) lists what each backend returns for each column type.
+Each integer case reads as any integer type its value fits, so a column Postgres returns as `Int32` and SQLite as `Int64` reads as `i32` from both. `Float` and `Double` read as `f64`, and `bool` also reads an integer `0` or `1`, which is how SQLite returns a `BOOLEAN`. A date, time, or timestamp reads as a `String` in its case's format, and SQLite returns it exactly as bound. Every backend reads a `NULL` back as `Value::Null`, whatever its column's type, and `Option<T>` reads it as `None`. The [reference](../reference/sql.md#values-and-column-types) lists what each backend returns for each column type.
 
-Because `SqlDb` is a trait, handlers written against `P: SqlDb` run unchanged natively against `omnia_test::guest::Provider`, which scripts the rows and counts each statement returns and records the database each ran against — see [Testing Omnia-Based Code](testing-omnia-code.md).
+Because `SqlDb` is a trait, handlers written against `P: SqlDb` run unchanged natively against `omnia_test::guest::Provider`. It scripts the rows and counts each statement returns, and records the database each ran against and each transaction's statements and outcome — see [Testing Omnia-Based Code](testing-omnia-code.md).
 
-## The `wasi:sql` draft
+## Transactions
 
-The host also serves the `wasi:sql` draft over the same backend, for a guest that calls its raw bindings. Open a connection by database name, prepare a statement, and execute it:
+`begin` starts a `Transaction` on the handle's database. Its `query`, `execute`, and `query_as` work as on the handle, and `commit` or `rollback` ends it:
 
 ```rust,noplayground
+use omnia_sdk::sql::{Transaction as _, Value};
+
+let transfer = WasiProvider.begin().await?;
+let debit = "UPDATE account SET balance = balance - $1 WHERE id = $2";
+transfer.execute(debit, &[Value::from(amount), Value::from(from)]).await?;
+let credit = "UPDATE account SET balance = balance + $1 WHERE id = $2";
+transfer.execute(credit, &[Value::from(amount), Value::from(to)]).await?;
+transfer.commit().await?;
+```
+
+- Dropping a transaction rolls it back, so an early return through `?` discards its changes.
+- Any failure rolls it back too. After an `Err`, the transaction is over, and `commit` fails with the code `invalid`.
+- A commit that fails committed nothing, unless its code is `unavailable`, when the outcome is unknown.
+- A transaction holds one of the backend's connections until it ends, and a call on the database outside it may wait until then. So a handler awaits no other `SqlDb` call, such as one through `context.sql()`, while a transaction is open. On the default backend, such a call fails with the code `unavailable` after five seconds.
+- `batch` runs a fixed list of statements in one transaction, in one call. Use `begin` when a later statement depends on what an earlier one read.
+- There are no savepoints. `SAVEPOINT`, like `BEGIN` and `COMMIT`, fails with the code `invalid`. `INSERT ... ON CONFLICT` covers the usual reason for one, an insert that may collide with an existing row.
+
+A `SET TRANSACTION ISOLATION LEVEL ...` statement, as a transaction's first, sets its isolation level on a backend that serves it, such as Postgres.
+
+## The raw bindings
+
+`omnia_wasi_sql::omnia` exposes the `omnia:sql` bindings themselves, for a guest that needs what `SqlDb` does not reach, such as a query's columns when it selects no row. Open a database by name, then run statements on the handle `open` returns:
+
+```rust,noplayground
+use omnia_wasi_sql::omnia::store;
+
 async fn ensure_schema() -> Result<()> {
-    let pool = Connection::open(omnia_sdk::sql::DEFAULT.to_owned())
+    let database = store::open(omnia_sdk::sql::DEFAULT.to_owned())
         .await
-        .map_err(|e| anyhow!("opening connection: {}", e.trace()))?;
+        .context("opening the database")?;
 
     let create_agency = "CREATE TABLE IF NOT EXISTS agency (
         agency_id BIGINT PRIMARY KEY,
@@ -121,19 +147,13 @@ async fn ensure_schema() -> Result<()> {
         created_at TEXT NOT NULL
     )";
 
-    let stmt = Statement::prepare(create_agency.to_string(), vec![])
-        .await
-        .map_err(|e| anyhow!("preparing agency table creation: {}", e.trace()))?;
-
-    readwrite::exec(&pool, &stmt)
-        .await
-        .map_err(|e| anyhow!("creating agency table: {}", e.trace()))?;
+    database.execute(create_agency.to_owned(), vec![]).await.context("creating agency table")?;
 
     Ok(())
 }
 ```
 
-`SqlDb` covers everything the draft does, so new code has no need for it: DDL runs through `execute` too. The draft has no `batch`, and its `error` resource carries the message without a code. The [reference](../reference/sql.md#the-wasisql-draft) lists every difference.
+A query returns a `result-set`, whose `rows` stream the guest reads to its end before it awaits `finished`. `SqlDb` covers everything else the bindings do, so most code has no need for them. The [reference](../reference/sql.md#interfaces) describes every function.
 
 > Each request runs in a fresh guest instance, so anything like `ensure_schema` runs per request. Real deployments manage schema migrations host-side or out-of-band; the in-example DDL is a demo convenience.
 
@@ -145,3 +165,5 @@ async fn ensure_schema() -> Result<()> {
 | `omnia-postgres` | PostgreSQL via connection pool(s); `POSTGRES_URL`, `POSTGRES_POOL_SIZE`, named pools via `POSTGRES_POOLS` |
 
 Guest code is identical against both; keep to parameterized statements, the [portable dialect](../reference/sql.md#the-portable-dialect), and the database names both declare, and the swap is configuration only.
+
+The default backend is SQLite, so a test over it proves only what the portable dialect does. SQL outside the dialect, such as a Postgres-only function, is proven only against the production database.

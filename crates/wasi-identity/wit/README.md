@@ -1,11 +1,5 @@
-# WebAssembly Interface Types (WIT) Deps
+# WebAssembly Interface Types (WIT)
 
-## Prerequisites
-
-Install [wkg](https://github.com/bytecodealliance/wasm-pkg-tools).
-
-## Usage
-
-```bash
-wkg get omnia:identity@0.2.0-draft --config .wkg-config.toml --output ./crates/wasi-identity/wit/identity.wit
-```
+`identity.wit` is `omnia:identity`, owned by this crate and edited here.
+Every backend serves `types` and `credentials`, the `core` world. `imports`
+includes `core`, and an optional interface joins it there.

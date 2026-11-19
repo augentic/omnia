@@ -2,8 +2,8 @@
 //! publishes one keyed `Message` through `Publisher`. The incoming handler
 //! routes the delivery through a `Handlers` router and asserts the key arrives
 //! as `Delivery::key` beside the publisher's header. It also asserts its
-//! context carries the host's deadline, still ahead, rather than the one the
-//! delivery arrived with.
+//! context carries the host's deadline, still ahead, rather than the
+//! `Deadline` entry the delivery arrived with, which reaches it as sent.
 
 #![cfg(target_arch = "wasm32")]
 
@@ -33,9 +33,13 @@ async fn received(context: Context<WasiProvider>, delivery: Delivery) -> omnia_s
     assert_eq!(delivery.topic.as_deref(), Some("orders"));
     assert_eq!(&delivery.payload[..], b"order-7");
     assert_eq!(delivery.key.as_deref(), Some("customer-7"));
-    let tenant = delivery.metadata.iter().find(|(name, _)| name == "tenant");
-    assert_eq!(tenant.map(|(_, value)| value.as_str()), Some("acme"));
-    let deadline = context.metadata.deadline.expect("the host stamps every delivery");
+    let entry = |wanted: &str| {
+        let found = delivery.metadata.iter().find(|(name, _)| name == wanted);
+        found.map(|(_, value)| value.clone())
+    };
+    assert_eq!(entry("tenant").as_deref(), Some("acme"));
+    assert_eq!(entry("Deadline").as_deref(), Some("1"), "the delivery's own entry");
+    let deadline = context.metadata.deadline.expect("the host sets every delivery's deadline");
     assert!(deadline > SystemTime::now(), "the deadline is the host's, not the delivery's");
     Ok(())
 }

@@ -229,11 +229,12 @@ pub struct Seen {
     pub messages: Vec<String>,
     /// The requested output shape.
     pub format: SeenFormat,
-    /// Declared tool names — function tools and MCP grants — in declaration
-    /// order.
+    /// Declared function tool names, in declaration order.
     pub tools: Vec<String>,
     /// The sampling temperature, when the request set one.
     pub temperature: Option<f32>,
+    /// The reasoning effort, by the level's name, when the request set one.
+    pub effort: Option<String>,
     /// The workspace lent to the model, if any.
     pub workspace: Option<String>,
     /// What the request granted the backend's worker beyond the lend, if

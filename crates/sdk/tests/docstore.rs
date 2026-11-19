@@ -1,10 +1,11 @@
 //! `Filter::on_date` across calendar edges, observed through
-//! `Filter::matches`, and `Filter::check` at and past each limit.
+//! `Filter::matches`, and `Filter::check` at and past each limit and on each
+//! value it refuses.
 
 use std::iter;
 
 use omnia_sdk::Error;
-use omnia_sdk::docstore::Filter;
+use omnia_sdk::docstore::{ComparisonOp, Filter, ScalarValue};
 use serde_json::json;
 
 fn on(date: &str, timestamp: &str) -> bool {
@@ -84,4 +85,49 @@ fn empty_combinator() {
     refused(&Filter::and([]));
     refused(&Filter::or([]));
     refused(&!Filter::and([Filter::eq("rank", 1), Filter::or([])]));
+}
+
+fn conditions(count: usize) -> Filter {
+    Filter::and(iter::repeat_n(Filter::eq("rank", 1), count))
+}
+
+#[test]
+fn condition_limit() {
+    conditions(Filter::MAX_CONDITIONS).check().expect("a filter at the condition limit");
+    refused(&conditions(Filter::MAX_CONDITIONS + 1));
+
+    // an `or` of two `and`s distributes to a pair per two of their conditions
+    let product = |left, right| Filter::or([conditions(left), conditions(right)]);
+    product(5, 10).check().expect("a filter at the limit once distributed");
+    refused(&product(6, 10));
+
+    // a list that holds `null` counts twice
+    let null_or_one = || Filter::in_list("rank", [ScalarValue::Null, ScalarValue::Int32(1)]);
+    let lists = |count| Filter::and(iter::repeat_with(null_or_one).take(count));
+    lists(Filter::MAX_CONDITIONS / 2).check().expect("lists at the condition limit");
+    refused(&lists(Filter::MAX_CONDITIONS / 2 + 1));
+}
+
+#[test]
+fn binary_value() {
+    refused(&Filter::eq("rank", ScalarValue::Binary(vec![1])));
+    refused(&Filter::in_list("rank", [ScalarValue::Int32(1), ScalarValue::Binary(vec![1])]));
+}
+
+#[test]
+fn not_finite() {
+    for number in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        refused(&Filter::eq("rank", number));
+    }
+}
+
+#[test]
+fn unordered_value() {
+    for value in [ScalarValue::Null, ScalarValue::Bool(true)] {
+        for op in [ComparisonOp::Lt, ComparisonOp::Lte, ComparisonOp::Gt, ComparisonOp::Gte] {
+            refused(&Filter::cmp("rank", op, value.clone()));
+        }
+    }
+    Filter::eq("rank", ScalarValue::Null).check().expect("an equality with `null`");
+    Filter::ne("rank", true).check().expect("an inequality with a boolean");
 }

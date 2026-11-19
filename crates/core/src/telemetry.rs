@@ -113,7 +113,7 @@ impl Telemetry {
     /// `level`; a directive the run's filter already carries for one of them
     /// (`omnia_core=trace`, `omnia=debug`) stands as written. The refinement
     /// is the console layer's: spans, the exporters, and every guest follow
-    /// the run's filter, so the span guest telemetry grafts onto stays live
+    /// the run's filter, so the span a guest's root spans join stays live
     /// whatever the console shows. `None` leaves the console at the run's
     /// filter, as does not calling.
     #[must_use]
@@ -217,8 +217,9 @@ struct Providers {
 }
 
 impl Providers {
-    // Built whatever exports: guest telemetry grafts onto the resource and
-    // tracer, and a provider with no processor or reader drops what it gets.
+    // Built whatever exports: guest telemetry carries the resource, guest
+    // spans join the tracer's, and a provider with no processor or reader
+    // drops what it gets.
     fn build(name: &str, endpoint: Option<&str>, exports: Exports) -> Result<Self> {
         let resource = resource_for(name);
         Ok(Self {

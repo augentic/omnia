@@ -178,10 +178,12 @@ A provider's own handle uses the `default` bucket, and `named(name)` selects ano
 
 - A value set without one stays until deleted.
 - `set` replaces a value's lifetime along with its bytes.
-- `compare_and_swap` and `increment` apply their TTL only to an entry they create.
+- `set_if`, `compare_and_swap`, and `increment` apply their TTL only to an entry they create.
 - A zero TTL fails with the code `invalid`.
 
-Publishing a message (`Publisher` over `wasi:messaging`), with a key that orders and partitions it:
+`get_entry` reads a value with its `Revision`, and `set_if` writes only while a `Precondition` holds: the key is `Absent`, or its entry `Matches` a revision read before. A precondition that does not hold changes nothing and answers the entry found.
+
+Publishing a message (`Publisher` over `omnia:messaging`), with a key that orders and partitions it:
 
 ```rust,noplayground
 let message = Message::new(&payload).with_key("customer-7");
@@ -192,19 +194,19 @@ When writing `wasm32`-only code (as in `examples/`), you can also call the `omni
 
 | Capability | `WasiProvider` trait (`omnia_sdk`) | Raw guest module | Example | Deep dive |
 | ---------- | ---------------------------------- | ---------------- | ------- | --------- |
-| Key-value | `StateStore` | `omnia_wasi_keyvalue::omnia::store`, or the `wasi:keyvalue` draft's `omnia_wasi_keyvalue::store` | `examples/keyvalue` | — |
-| Messaging | `Publisher` | `omnia_wasi_messaging::{producer, request_reply}` | `examples/messaging` | [Messaging](messaging.md) |
-| SQL | `SqlDb` | `omnia_wasi_sql` | `examples/sql` | [SQL](sql.md) |
-| Document store | `DocumentDb` | `omnia_wasi_docstore` | `examples/docstore` | [Document Store](document-store.md) |
-| Blob store | `BlobStore` | `omnia_wasi_blobstore` | `examples/blobstore` | — |
-| Secrets | `SecretStore` | `omnia_wasi_vault` | `examples/vault` | — |
-| Config | `Config` | `omnia_wasi_config` | `examples/config` | — |
-| Identity/OAuth | `Identity` | `omnia_wasi_identity` | `examples/identity` | — |
+| Key-value | `StateStore` | `omnia_wasi_keyvalue::omnia::{store, bucket, keys}` | `examples/keyvalue` | — |
+| Messaging | `Publisher` | `omnia_wasi_messaging::omnia::{producer, request_reply}` | `examples/messaging` | [Messaging](messaging.md) |
+| SQL | `SqlDb` | `omnia_wasi_sql::omnia::{store, database, transactions}` | `examples/sql` | [SQL](sql.md) |
+| Document store | `DocumentDb` | `omnia_wasi_docstore::omnia::{store, collection}` | `examples/docstore` | [Document Store](document-store.md) |
+| Blob store | `BlobStore` | `omnia_wasi_blobstore::omnia::{store, container, admin}` | `examples/blobstore` | — |
+| Secrets | `SecretStore` | `omnia_wasi_vault::omnia::{store, locker}` | `examples/vault` | — |
+| Config | `Config` | `omnia_wasi_config::omnia::{store, entries}` | `examples/config` | — |
+| Identity/OAuth | `Identity` | `omnia_wasi_identity::omnia::credentials` | `examples/identity` | — |
 | Outbound HTTP | `HttpClient` | `omnia_wasi_http` | `examples/http-proxy` | — |
-| Model completions | `Model` | `omnia_wasi_model::completion` | `examples/model` | [Model Completions](model-completions.md) |
-| Version control | `Vcs` | `omnia_wasi_vcs` | — | — |
-| Dynamic plugins | `Plugins` | `omnia_sdk::plugins` | — | — |
-| WebSockets | `WebSockets` | `omnia_wasi_websocket` | `examples/websocket` | [Messaging § WebSockets](messaging.md#websockets) |
+| Model completions | `Model` | `omnia_wasi_model::omnia::{completion, types}` | `examples/model` | [Model Completions](model-completions.md) |
+| Version control | `Vcs` | `omnia_wasi_vcs::omnia::{store, workspace, workspaces, remotes}` | — | — |
+| Dynamic plugins | `Plugins` | `omnia_plugin::omnia::loader` | — | — |
+| WebSockets | `WebSockets` | `omnia_wasi_websocket::omnia::{connections, broadcast}` | `examples/websocket` | [Messaging § WebSockets](messaging.md#websockets) |
 
 ## Handling incoming messages
 
@@ -220,15 +222,17 @@ pub fn messaging_router<P: StateStore + 'static>(provider: P) -> Router<P> {
 messaging::export!(messaging_router);
 ```
 
-For guests that need direct control over the raw `wasi:messaging/incoming-handler` export (for example, `examples/messaging` demonstrating request-reply and fan-out), implement `omnia_wasi_messaging::incoming_handler::Guest` and dispatch via `omnia_sdk::wasi::messaging::handle`, which opens the guest telemetry scope around the delivery:
+For guests that need direct control over the raw `omnia:messaging/incoming-handler` export (for example, `examples/messaging` demonstrating request-reply and fan-out), implement `omnia_wasi_messaging::omnia::incoming_handler::Guest` and dispatch via `omnia_sdk::wasi::messaging::handle`, which opens the guest telemetry scope around the delivery and settles a failure:
 
 ```rust,noplayground
-pub struct Messaging;
-omnia_wasi_messaging::export!(Messaging with_types_in omnia_wasi_messaging);
+use omnia_wasi_messaging::omnia::types::{Delivery, Settle};
 
-impl omnia_wasi_messaging::incoming_handler::Guest for Messaging {
-    async fn handle(message: Message) -> anyhow::Result<(), Error> {
-        omnia_sdk::wasi::messaging::handle(&router(), message).await
+pub struct Messaging;
+omnia_wasi_messaging::export!(Messaging);
+
+impl omnia_wasi_messaging::omnia::incoming_handler::Guest for Messaging {
+    async fn handle(delivery: Delivery) -> Result<(), Settle> {
+        omnia_sdk::wasi::messaging::handle(&router(), delivery).await
     }
 }
 ```
@@ -310,7 +314,7 @@ As text the envelope is `error[<code>]: <message>` followed by `hint: <hint>` wh
 
 ## Tracing
 
-`tracing::debug!` and friends work inside guests, and spans flow to whatever OTel backend the host configures. Each transport's `export!` runs the export inside `omnia_wasi_otel::scope`: it initializes the guest's telemetry on entry and exports every span and metric as it returns. A span opened anywhere beneath it reaches the host.
+`tracing::debug!` and friends work inside guests, and spans flow to whatever OTel backend the host configures. Each transport's `export!` runs the export inside `omnia_wasi_otel::scope`: it initializes the guest's telemetry on entry and exports every span and metric as it returns. A span opened anywhere beneath it reaches the host. A root span takes the host's span for the call as its parent, so the guest's spans join the host's trace.
 
 Annotate stem handlers with `#[tracing::instrument]`. A stem compiles natively, for its handler tests or a native host, and depends on no `omnia-wasi-*` crate. The export's scope already owns the telemetry lifecycle:
 

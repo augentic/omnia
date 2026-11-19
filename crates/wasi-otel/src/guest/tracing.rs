@@ -1,8 +1,8 @@
 //! # Tracing
 //!
 //! The `opentelemetry` tracing API implemented over the `omnia:otel` records:
-//! a span becomes a `span-data` record the moment it ends, and [`export`]
-//! hands the buffered records to the host.
+//! a span becomes a `span` record the moment it ends, and [`export`] hands
+//! the buffered records to the host, one `scope-spans` per scope.
 
 use std::borrow::Cow;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -15,10 +15,11 @@ use opentelemetry::trace::{
 };
 use opentelemetry::{Context, InstrumentationScope, KeyValue};
 
-use crate::guest::generated::omnia::otel::tracing as wasi;
+use crate::guest::convert::unix_nanos;
+use crate::guest::generated::omnia::otel::traces as wasi;
 
 /// Ended spans awaiting export, shared between every span and [`export`].
-pub type SpanBuffer = Arc<Mutex<Vec<wasi::SpanData>>>;
+pub type SpanBuffer = Arc<Mutex<Vec<(Arc<InstrumentationScope>, wasi::Span)>>>;
 
 /// Provides tracers whose spans end into a shared [`SpanBuffer`].
 #[derive(Clone, Debug, Default)]
@@ -57,25 +58,29 @@ impl otel::Tracer for Tracer {
     type Span = Span;
 
     fn build_with_context(&self, builder: SpanBuilder, parent_cx: &Context) -> Span {
-        // a root span opens a new trace; the host grafts it onto its live span at export
+        // a root span joins the host's span, and opens a trace of its own when
+        // the host has none
         let parent_span = parent_cx.span();
-        let parent = parent_span.span_context();
-        let (trace_id, parent_span_id, trace_state) = if parent.is_valid() {
-            (parent.trace_id(), parent.span_id(), parent.trace_state().clone())
-        } else {
-            (TraceId::from_bytes(random()), SpanId::INVALID, TraceState::default())
-        };
-        let span_context = SpanContext::new(
+        let local = parent_span.span_context();
+        let parent = if local.is_valid() { Some(local.clone()) } else { host_span_context() };
+        let (trace_id, trace_flags, trace_state) = parent.as_ref().map_or_else(
+            || (TraceId::from_bytes(random()), TraceFlags::SAMPLED, TraceState::default()),
+            |parent| {
+                let flags = parent.trace_flags().with_sampled(true);
+                (parent.trace_id(), flags, parent.trace_state().clone())
+            },
+        );
+        let context = SpanContext::new(
             trace_id,
             SpanId::from_bytes(random()),
-            TraceFlags::SAMPLED,
+            trace_flags,
             false,
             trace_state,
         );
 
         Span {
-            context: span_context,
-            parent_span_id,
+            context,
+            parent,
             kind: builder.span_kind.unwrap_or(SpanKind::Internal),
             name: builder.name,
             start_time: builder.start_time.unwrap_or_else(SystemTime::now),
@@ -88,6 +93,20 @@ impl otel::Tracer for Tracer {
             ended: false,
         }
     }
+}
+
+// a context the host sends that does not parse is no parent, and a trace
+// state that does not parse is empty
+fn host_span_context() -> Option<SpanContext> {
+    let host = wasi::current_span_context()?;
+    let trace_state = host.trace_state.and_then(|header| header.parse().ok()).unwrap_or_default();
+    Some(SpanContext::new(
+        TraceId::from_hex(&host.trace_id).ok()?,
+        SpanId::from_hex(&host.span_id).ok()?,
+        TraceFlags::new(host.trace_flags),
+        false,
+        trace_state,
+    ))
 }
 
 // a counter stands in should the random source fail, so an id is never the all-zero invalid one
@@ -105,7 +124,7 @@ fn random<const N: usize>() -> [u8; N] {
 #[derive(Debug)]
 pub struct Span {
     context: SpanContext,
-    parent_span_id: SpanId,
+    parent: Option<SpanContext>,
     kind: SpanKind,
     name: Cow<'static, str>,
     start_time: SystemTime,
@@ -125,24 +144,24 @@ impl Span {
         }
         self.ended = true;
 
-        let data = wasi::SpanData {
+        let span = wasi::Span {
             span_context: self.context.clone().into(),
-            parent_span_id: self.parent_span_id.to_string(),
-            span_kind: self.kind.clone().into(),
+            parent_span_id: self.parent.as_ref().map(|parent| parent.span_id().to_string()),
+            parent_is_remote: self.parent.as_ref().map(SpanContext::is_remote),
             name: std::mem::take(&mut self.name).into_owned(),
-            start_time: self.start_time.into(),
-            end_time: end_time.into(),
+            kind: self.kind.clone().into(),
+            start_time_unix_nano: unix_nanos(self.start_time),
+            end_time_unix_nano: unix_nanos(end_time),
             attributes: std::mem::take(&mut self.attributes).into_iter().map(Into::into).collect(),
+            dropped_attributes_count: 0,
             events: std::mem::take(&mut self.events).into_iter().map(Into::into).collect(),
+            dropped_events_count: 0,
             links: std::mem::take(&mut self.links).into_iter().map(Into::into).collect(),
+            dropped_links_count: 0,
             status: std::mem::take(&mut self.status).into(),
-            instrumentation_scope: self.scope.as_ref().into(),
-            dropped_attributes: 0,
-            dropped_events: 0,
-            dropped_links: 0,
         };
         if let Ok(mut spans) = self.spans.lock() {
-            spans.push(data);
+            spans.push((Arc::clone(&self.scope), span));
         }
     }
 }
@@ -213,32 +232,48 @@ pub async fn export(buffer: &SpanBuffer) {
         return;
     }
 
-    if let Err(e) = wasi::export(spans).await {
+    if let Err(e) = wasi::export(group(spans)).await {
         tracing::error!("failed to export spans: {e}");
     }
 }
 
 // A `MutexGuard` binding inside `export` would make its future `!Send`.
-fn take(buffer: &SpanBuffer) -> Vec<wasi::SpanData> {
+fn take(buffer: &SpanBuffer) -> Vec<(Arc<InstrumentationScope>, wasi::Span)> {
     buffer.lock().map_or_default(|mut spans| std::mem::take(&mut *spans))
+}
+
+// one group per scope, in the order the scopes first ended a span; a scan
+// suits the handful of scopes one export carries
+fn group(spans: Vec<(Arc<InstrumentationScope>, wasi::Span)>) -> Vec<wasi::ScopeSpans> {
+    let mut groups: Vec<(Arc<InstrumentationScope>, Vec<wasi::Span>)> = Vec::new();
+    for (scope, span) in spans {
+        match groups.iter_mut().find(|(seen, _)| *seen == scope) {
+            Some((_, spans)) => spans.push(span),
+            None => groups.push((scope, vec![span])),
+        }
+    }
+
+    groups
+        .into_iter()
+        .map(|(scope, spans)| wasi::ScopeSpans {
+            scope: Some(scope.as_ref().into()),
+            spans,
+            schema_url: scope.schema_url().map(Into::into),
+        })
+        .collect()
 }
 
 impl From<SpanContext> for wasi::SpanContext {
     fn from(sc: SpanContext) -> Self {
-        // `Display` zero-pads the ids the host hex-decodes; `LowerHex` would not
+        // `Display` zero-pads the ids to the length the host requires;
+        // `LowerHex` would not
+        let trace_state = sc.trace_state().header();
         Self {
             trace_id: sc.trace_id().to_string(),
             span_id: sc.span_id().to_string(),
-            trace_flags: sc.trace_flags().into(),
-            is_remote: sc.is_remote(),
-            trace_state: crate::trace_state::parse(&sc.trace_state().header()),
+            trace_flags: sc.trace_flags().to_u8(),
+            trace_state: (!trace_state.is_empty()).then_some(trace_state),
         }
-    }
-}
-
-impl From<TraceFlags> for wasi::TraceFlags {
-    fn from(tf: TraceFlags) -> Self {
-        if tf.is_sampled() { Self::SAMPLED } else { Self::empty() }
     }
 }
 
@@ -257,18 +292,22 @@ impl From<SpanKind> for wasi::SpanKind {
 impl From<otel::Event> for wasi::Event {
     fn from(event: otel::Event) -> Self {
         Self {
-            name: event.name.to_string(),
-            time: event.timestamp.into(),
+            time_unix_nano: unix_nanos(event.timestamp),
+            name: event.name.into_owned(),
             attributes: event.attributes.into_iter().map(Into::into).collect(),
+            dropped_attributes_count: event.dropped_attributes_count,
         }
     }
 }
 
 impl From<otel::Link> for wasi::Link {
     fn from(link: otel::Link) -> Self {
+        let is_remote = Some(link.span_context.is_remote());
         Self {
             span_context: link.span_context.into(),
+            is_remote,
             attributes: link.attributes.into_iter().map(Into::into).collect(),
+            dropped_attributes_count: link.dropped_attributes_count,
         }
     }
 }
@@ -277,7 +316,9 @@ impl From<Status> for wasi::Status {
     fn from(status: Status) -> Self {
         match status {
             Status::Unset => Self::Unset,
-            Status::Error { description } => Self::Error(description.to_string()),
+            Status::Error { description } => {
+                Self::Error((!description.is_empty()).then(|| description.into_owned()))
+            }
             Status::Ok => Self::Ok,
         }
     }

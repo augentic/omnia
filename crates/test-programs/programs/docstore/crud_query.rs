@@ -3,6 +3,7 @@
 //! - Inserted bodies read back intact, and an unknown id reads as `None`.
 //! - `put` overwrites an existing id and creates an absent one.
 //! - Queries list in id order, filter, sort with type rank, and paginate.
+//! - A query with an `offset` is `unsupported`.
 //! - `delete` reports whether a document was removed.
 
 #![cfg(target_arch = "wasm32")]
@@ -63,6 +64,14 @@ async fn scenario() {
     let rest = WasiProvider.query(ITEMS, &rest).await.expect("query last page");
     assert_eq!(ids(&rest.items), ["d"]);
     assert_eq!(rest.next, None);
+
+    // an offset is refused, since a backend pages by cursor alone
+    let offset = Query {
+        offset: Some(1),
+        ..Query::default()
+    };
+    let refused = WasiProvider.query(ITEMS, &offset).await.expect_err("an offset was served");
+    assert_eq!(refused.code(), "unsupported", "{refused}");
 
     // delete reports whether a document was removed
     assert!(WasiProvider.delete(ITEMS, "b").await.expect("delete"));
