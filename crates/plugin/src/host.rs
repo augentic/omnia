@@ -1,7 +1,10 @@
-//! Host surface for `omnia:plugins/loader`.
+//! Host surface for `omnia:plugins`.
+
+mod loader_impl;
+mod types_impl;
 
 mod generated {
-    pub use self::omnia::plugins::loader::Error;
+    pub use self::omnia::plugins::types::Error;
 
     wasmtime::component::bindgen!({
         world: "imports",
@@ -10,21 +13,18 @@ mod generated {
             default: store | tracing | trappable,
         },
         trappable_error_type: {
-            "omnia:plugins/loader.error" => Error,
+            "omnia:plugins/types.error" => Error,
         },
     });
 }
 
 use std::sync::Arc;
 
-use omnia_core::{Backends, Digest, Host, StoreCtx};
-use wasmtime::component::{Accessor, HasData, Linker};
+use omnia_core::{Backends, Host, StoreCtx};
+use wasmtime::component::{HasData, Linker};
 
-use self::generated::Error;
-use self::generated::omnia::plugins::loader;
-use crate::error::LoadError;
+use self::generated::omnia::plugins::{loader, types};
 use crate::loader::Plugins;
-use crate::source::Location;
 
 /// Host-side service for `omnia:plugins` — the loader capability this crate
 /// implements over the runtime's admission seam.
@@ -37,65 +37,21 @@ impl HasData for WasiPlugins {
 
 impl<B: Backends> Host<B> for WasiPlugins {
     fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
-        Ok(loader::add_to_linker::<_, Self>(linker, |store| WasiPluginsView {
-            plugins: store.extensions().get::<Plugins>(),
-        })?)
+        types::add_to_linker::<_, Self>(linker, view)?;
+        Ok(loader::add_to_linker::<_, Self>(linker, view)?)
     }
 }
 
-impl<T> loader::HostWithStore<T> for WasiPlugins {
-    async fn load(
-        accessor: &Accessor<T, Self>, from: loader::Location, digest: Option<String>,
-    ) -> Result<loader::Plugin, Error> {
-        let from = Location::from(from);
-        let plugins = accessor
-            .with(|mut store| store.get().plugins)
-            .ok_or_else(|| LoadError::no_plugins(&from))?;
-        let pin = digest
-            .map(|digest| digest.parse::<Digest>())
-            .transpose()
-            .map_err(|error| LoadError::Refused(format!("{error:#}")))?;
-        let plugin = plugins.load(from, pin).await?;
-        Ok(loader::Plugin {
-            id: plugin.id().to_string(),
-            digest: plugin.digest().to_string(),
-            exports: plugin.exports().to_vec(),
-        })
+fn view<B: Backends>(store: &mut StoreCtx<B>) -> WasiPluginsView {
+    WasiPluginsView {
+        plugins: store.extensions().get::<Plugins>(),
     }
 }
 
 /// View over the store's plugin-load capability.
 pub struct WasiPluginsView {
     /// The runtime's plugin-load capability; `None` when the deployment
-    /// installed no [`Plugins`] extension, where every load refuses.
+    /// installed no [`Plugins`] extension, where every load answers
+    /// `unsupported`.
     pub plugins: Option<Arc<Plugins>>,
-}
-
-impl loader::Host for WasiPluginsView {
-    fn convert_error(&mut self, err: Error) -> wasmtime::Result<Error> {
-        tracing::debug!("plugin load refused: {err}");
-        Ok(err)
-    }
-}
-
-impl From<LoadError> for Error {
-    fn from(error: LoadError) -> Self {
-        match error {
-            LoadError::Refused(detail) => Self::Refused(detail),
-            LoadError::Unavailable(detail) => Self::Unavailable(detail),
-            LoadError::Internal(detail) => Self::Internal(detail),
-        }
-    }
-}
-
-impl From<loader::Location> for Location {
-    fn from(location: loader::Location) -> Self {
-        match location {
-            loader::Location::Declared(name) => Self::Declared(name),
-            loader::Location::Path(path) => Self::Path(path),
-            loader::Location::Registry(loader::RegistryRef { package, endpoint }) => {
-                Self::Registry { package, endpoint }
-            }
-        }
-    }
 }

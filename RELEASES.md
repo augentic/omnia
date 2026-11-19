@@ -165,6 +165,20 @@ Unreleased
     with a revision, and an `array-contains` test.
   - On `wasm32`, `omnia_wasi_docstore::omnia` holds the raw bindings,
     which the crate root held.
+- `omnia:plugins`, rewritten in place as the interface `Plugins` calls.
+  `WasiPlugins` serves it over the deployment's loader grant:
+  - `types` holds the portable forms: a `source`, a `plugin`, a
+    `conflict`, and the `error`.
+  - `loader.load` takes a `source` and an optional `when` digest. A source
+    is a `declared` name, a `path` beneath a read-only mount, or a
+    `release`, whose `registry` serves a namespace the deployment routes
+    nowhere.
+  - A load whose bytes miss its `when`, or whose name is active under
+    other bytes, loads nothing and answers a `conflict`. It carries the
+    digest found and the plugin active under the name.
+  - The `error` has one case per capability error code.
+  - `WasiPlugins` answers `unsupported` for a runtime with no loader
+    installed and for a release with no registry client.
 - `omnia:otel`, rewritten in place over OTLP's own records. `WasiOtel`
   serves it over one `OtelClient`:
   - `traces.export` and `metrics.export` take the guest's telemetry grouped
@@ -336,9 +350,9 @@ Unreleased
 - `Runtime::stop` and `Runtime::stopped`. A trigger server waits on
   `stopped` to stop accepting work and drain. `Runtime::shutdown` stops
   the runtime too.
-- `omnia_plugin::loader`, on `wasm32`: the guest bindings for
-  `omnia:plugins/loader`. `omnia-sdk` serves `Plugins` through them and
-  carries no WIT of its own.
+- `omnia_plugin::omnia`, on `wasm32`: the guest bindings for
+  `omnia:plugins`. `omnia-sdk` serves `Plugins` through them and carries
+  no WIT of its own.
 
 ### Changed
 
@@ -557,6 +571,29 @@ Unreleased
 - `ConfigDefault::connect` skips a variable whose name or value is not
   Unicode, where it panicked. `Default` builds an empty one, and
   `FromIterator` builds one from key-value pairs.
+- `omnia::LoadError` has six cases, the six capability error codes, which
+  were `Refused`, `Unavailable`, and `Internal`. `GuestError` and
+  `AcquireError` name the same classes where they had `Refused`:
+  - a `GuestError::Conflict` carries the digest of the bytes it turned
+    away;
+  - a `GuestError` for a missing file is `NotFound`, which was
+    `Unavailable`;
+  - a `GuestError` for a runtime with no registry client is
+    `Unsupported`, which was `Internal`.
+- `omnia::Plugins::load` and `PluginLoader::load` answer
+  `Result<Result<Plugin, LoadConflict>, LoadError>`. An
+  `omnia::LoadConflict` is a load that loaded nothing because its bytes
+  missed its pin or its name is active under other bytes. It carries the
+  digest found and the `Plugin` active under the name.
+- `WasiProvider`'s `Plugins` folds the six cases onto its three codes, and
+  answers a conflict as `refused`. Four loads change code:
+  - a missing component file is `refused`, which was `unavailable`;
+  - a path the filesystem refuses to read, such as a link that leads out
+    of its mount, is `refused`, which was `unavailable`;
+  - a registry digest that is not `sha256` is `internal`, which was
+    `refused`;
+  - a registry's credential, metadata, or content failure is
+    `unavailable`, which was `refused`.
 - `BlobStoreClient` states the container rules every backend keeps:
   - `get_container` fails a container that does not exist with
     `omnia_wasi_blobstore::Error::missing_container`.

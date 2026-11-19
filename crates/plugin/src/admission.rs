@@ -5,7 +5,7 @@ use futures::FutureExt as _;
 use futures::future::BoxFuture;
 use omnia_core::{Backends, Digest, GuestError, GuestId, Policy, SourceSpec, WeakRuntime};
 
-use crate::loader::Plugin;
+use crate::loader::{LoadConflict, Plugin};
 
 /// The runtime's first-use, acquisition, and admission seams — erased of the
 /// deployment's backend type so [`Plugins`](crate::Plugins) can live in the
@@ -27,10 +27,11 @@ pub trait Admission: Send + Sync + 'static {
     ) -> BoxFuture<'static, Result<Vec<u8>, GuestError>>;
 
     /// Admit caller-named `bytes` as `id`, held to `pin`, and return the
-    /// handle of the guest standing under `id` afterwards.
+    /// handle of the guest standing under `id` afterwards, or the conflict
+    /// that kept the bytes out.
     fn admit_bytes(
         &self, id: GuestId, bytes: Vec<u8>, pin: Option<Digest>,
-    ) -> BoxFuture<'static, Result<Plugin, GuestError>>;
+    ) -> BoxFuture<'static, Result<Result<Plugin, LoadConflict>, GuestError>>;
 }
 
 // Weak: a strong handle would cycle through the extension.
@@ -56,12 +57,18 @@ impl<B: Backends> Admission for WeakRuntime<B> {
 
     fn admit_bytes(
         &self, id: GuestId, bytes: Vec<u8>, pin: Option<Digest>,
-    ) -> BoxFuture<'static, Result<Plugin, GuestError>> {
+    ) -> BoxFuture<'static, Result<Result<Plugin, LoadConflict>, GuestError>> {
         let weak = self.clone();
         async move {
             let runtime = live(&weak)?;
-            let guest = runtime.admit_bytes(id, bytes, Policy::CallerNamed { pin }).await?;
-            Ok(Plugin::of(&guest))
+            match runtime.admit_bytes(id.clone(), bytes, Policy::CallerNamed { pin }).await {
+                Ok(guest) => Ok(Ok(Plugin::of(&guest))),
+                Err(GuestError::Conflict { found, .. }) => {
+                    let current = runtime.registry().get(&id).map(|guest| Plugin::of(&guest));
+                    Ok(Err(LoadConflict::new(found, current)))
+                }
+                Err(error) => Err(error),
+            }
         }
         .boxed()
     }

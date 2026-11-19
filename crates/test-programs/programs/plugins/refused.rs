@@ -1,9 +1,9 @@
-//! A typed refusal at the wire: argv names a location, the `error` variant
-//! its load must fail with, a needle the detail must carry, and optionally
-//! the digest the load is pinned to — one program for the whole refusal
-//! matrix. Bound directly to `omnia:plugins/loader`, so the variant is
-//! checked as the host sent it and a malformed digest reaches the host as
-//! written.
+//! A typed failure at the wire: argv names a source, the case its load must
+//! answer, a needle the detail must carry, and optionally the digest the
+//! load is pinned to — one program for the whole failure matrix. Bound
+//! directly to `omnia:plugins`, so the case is checked as the host sent it
+//! and a malformed digest reaches the host as written. A conflict is the
+//! case `conflict`, whose detail reads `found=<digest> current=<digest|none>`.
 
 #![cfg(target_arch = "wasm32")]
 
@@ -13,47 +13,54 @@ wit_bindgen::generate!({
     generate_all,
 });
 
-use omnia::plugins::loader::{self, Error, Location, RegistryRef};
+use omnia::plugins::loader;
+use omnia::plugins::types::{Error, Release, Source};
 
 omnia_sdk::api::command::export!(scenario);
 
-// `declared`, `path`, `registry`, or `registry@<endpoint>` — the last naming
+// `declared`, `path`, `release`, or `release@<registry>` — the last naming
 // the registry the load fetches from.
-fn location(kind: &str, value: &str) -> Location {
+fn source(kind: &str, value: &str) -> Source {
     let value = value.to_owned();
-    let (kind, endpoint) = kind
+    let (kind, registry) = kind
         .split_once('@')
-        .map_or((kind, None), |(kind, endpoint)| (kind, Some(endpoint.to_owned())));
-    match (kind, endpoint) {
-        ("declared", None) => Location::Declared(value),
-        ("path", None) => Location::Path(value),
-        ("registry", endpoint) => Location::Registry(RegistryRef {
-            package: value,
-            endpoint,
+        .map_or((kind, None), |(kind, registry)| (kind, Some(registry.to_owned())));
+    match (kind, registry) {
+        ("declared", None) => Source::Declared(value),
+        ("path", None) => Source::Path(value),
+        ("release", registry) => Source::Release(Release {
+            reference: value,
+            registry,
         }),
-        _ => panic!("expected `declared`, `path`, `registry`, or `registry@<endpoint>`"),
+        _ => panic!("expected `declared`, `path`, `release`, or `release@<registry>`"),
     }
 }
 
 async fn scenario() {
     let arguments = wasip3::cli::environment::get_arguments();
-    let (kind, value, variant, needle, digest) = match arguments.as_slice() {
-        [_, kind, value, variant, needle] => (kind, value, variant, needle, None),
-        [_, kind, value, variant, needle, digest] => {
-            (kind, value, variant, needle, Some(digest.clone()))
-        }
+    let (kind, value, case, needle, when) = match arguments.as_slice() {
+        [_, kind, value, case, needle] => (kind, value, case, needle, None),
+        [_, kind, value, case, needle, when] => (kind, value, case, needle, Some(when.clone())),
         _ => panic!(
-            "expected `<declared|path|registry> <value> <refused|unavailable|internal> <needle> \
-             [digest]`; got {arguments:?}"
+            "expected `<declared|path|release> <value> <not-found|denied|invalid|unsupported|\
+             unavailable|other|conflict> <needle> [when]`; got {arguments:?}"
         ),
     };
 
-    let error = loader::load(location(kind, value), digest).await.expect_err("the load is refused");
-    let (code, detail) = match &error {
-        Error::Refused(detail) => ("refused", detail),
-        Error::Unavailable(detail) => ("unavailable", detail),
-        Error::Internal(detail) => ("internal", detail),
+    let (answered, detail) = match loader::load(source(kind, value), when).await {
+        Ok(Ok(plugin)) => panic!("`{}` loaded, not a `{case}` failure", plugin.name),
+        Ok(Err(conflict)) => {
+            let current =
+                conflict.current.map_or_else(|| "none".to_owned(), |plugin| plugin.digest);
+            ("conflict", format!("found={} current={current}", conflict.found))
+        }
+        Err(Error::NotFound(detail)) => ("not-found", detail),
+        Err(Error::Denied(detail)) => ("denied", detail),
+        Err(Error::Invalid(detail)) => ("invalid", detail),
+        Err(Error::Unsupported(detail)) => ("unsupported", detail),
+        Err(Error::Unavailable(detail)) => ("unavailable", detail),
+        Err(Error::Other(detail)) => ("other", detail),
     };
-    assert_eq!(code, variant, "{error:?}");
+    assert_eq!(answered, case, "{detail}");
     assert!(detail.contains(needle.as_str()), "`{detail}` does not mention `{needle}`");
 }

@@ -88,8 +88,7 @@ const SCHEME: &str = "sha256:";
 const HEX_LEN: usize = 64;
 
 /// Where a load's component bytes come from, and the name the guest
-/// registers under — the requester's mirror of the `omnia:plugins/loader`
-/// `location` variant.
+/// registers under.
 ///
 /// # Examples
 ///
@@ -202,23 +201,36 @@ impl Plugin {
     }
 }
 
-/// Typed load refusal, mirroring the `omnia:plugins/loader` error variant.
+/// Why a load failed, with the host's six `omnia:plugins` cases folded onto
+/// three codes.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum Error {
-    /// The request or deployment is wrong and a retry cannot succeed: the
-    /// deployment declares no guest of that name, the path is beneath no
-    /// read-only mount, no registry routes the package, the bytes miss the
-    /// digest, they are not a loadable component, they are pre-compiled
-    /// where raw wasm alone is admitted (a caller-named path or package, a
-    /// declared package, or a declared path without a `digest`), or the
-    /// name is active under other bytes.
+    /// The request or the deployment is wrong, and a retry cannot succeed.
+    ///
+    /// The host's `not-found`, `denied`, and `invalid` cases fold here, and
+    /// so does a load that conflicted:
+    ///
+    /// - the deployment declares no guest of that name, or no file or
+    ///   release is where the location points;
+    /// - the path is beneath no read-only mount, no registry routes the
+    ///   package, or the location derives a name the deployment declares;
+    /// - the bytes miss the digest, are not a loadable component, or are
+    ///   pre-compiled where raw wasm alone is admitted (a caller-named path
+    ///   or package, a declared package, or a declared path without a
+    ///   `digest`);
+    /// - the name is active under other bytes.
     #[error("refused: {0}")]
     Refused(String),
-    /// The guest's source could not produce its bytes; the source may
-    /// recover, so a retry can succeed.
+    /// The guest's source could not produce its bytes, the host's
+    /// `unavailable` case.
+    ///
+    /// The source may recover, so a retry can succeed.
     #[error("unavailable: {0}")]
     Unavailable(String),
-    /// Loader misconfiguration or an internal registration failure.
+    /// The host cannot serve the load, its `unsupported` and `other` cases.
+    ///
+    /// The runtime has no loader or no registry client, or the registration
+    /// failed.
     #[error("internal: {0}")]
     Internal(String),
 }

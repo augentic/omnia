@@ -2,6 +2,7 @@
 
 mod command;
 
+use std::io;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
 
@@ -161,12 +162,16 @@ impl<B: Backends> Runtime<B> {
     ///
     /// # Errors
     ///
-    /// Returns [`GuestError::Unregistered`] for an identity the deployment
-    /// neither registered nor declares; `Unavailable` when the source could
-    /// not produce its bytes; `Refused` when the bytes miss the pin, are a
-    /// pre-compiled artifact where raw wasm alone is admitted, or do not
-    /// load as a component; `Internal` when a package has no registry to be
-    /// fetched from or the registration failed.
+    /// - [`GuestError::Unregistered`] for an identity the deployment neither
+    ///   registered nor declares.
+    /// - [`GuestError::NotFound`], [`GuestError::Denied`],
+    ///   [`GuestError::Unsupported`], or [`GuestError::Unavailable`] when the
+    ///   source did not produce its bytes, as [`acquire`](Self::acquire)
+    ///   reports.
+    /// - [`GuestError::Invalid`] when the bytes miss the pin, are a
+    ///   pre-compiled artifact where raw wasm alone is admitted, or do not
+    ///   load as a component.
+    /// - [`GuestError::Internal`] when the registration failed.
     pub async fn guest(&self, id: &GuestId) -> Result<Arc<Guest<B>>, GuestError> {
         let registry = self.registry();
         if let Some(guest) = registry.get(id) {
@@ -188,28 +193,41 @@ impl<B: Backends> Runtime<B> {
     ///
     /// # Errors
     ///
-    /// Returns [`GuestError::Unavailable`] when the source could not produce
-    /// its bytes; `Refused` when nothing routes the package or the registry
-    /// has no such release; `Internal` when a package has no registry to be
-    /// fetched from.
+    /// - [`GuestError::NotFound`] when no file is at the path, or nothing
+    ///   routes the package or holds its release.
+    /// - [`GuestError::Denied`] or [`GuestError::Invalid`] when the
+    ///   [`RegistrySource`] refuses the package as its [`AcquireError`]
+    ///   names.
+    /// - [`GuestError::Unsupported`] when the runtime has no registry client
+    ///   to fetch a package, or its client cannot serve the request.
+    /// - [`GuestError::Unavailable`] when the file, the store, or the
+    ///   registry did not produce the bytes.
     pub async fn acquire(
         &self, spec: &SourceSpec, endpoint: Option<&str>,
     ) -> Result<Vec<u8>, GuestError> {
         match spec {
             SourceSpec::Package(package) => {
                 let Some(packages) = &self.inner.packages else {
-                    return Err(GuestError::Internal(format!(
+                    return Err(GuestError::Unsupported(format!(
                         "package `{package}` cannot be fetched: this runtime has no registry \
                          client; build omnia with the `loader` feature"
                     )));
                 };
                 packages.acquire(package, endpoint).await.map_err(|error| match error {
-                    AcquireError::Refused(reason) => GuestError::Refused(reason),
+                    AcquireError::NotFound(reason) => GuestError::NotFound(reason),
+                    AcquireError::Denied(reason) => GuestError::Denied(reason),
+                    AcquireError::Invalid(reason) => GuestError::Invalid(reason),
+                    AcquireError::Unsupported(reason) => GuestError::Unsupported(reason),
                     AcquireError::Unavailable(reason) => GuestError::Unavailable(reason),
                 })
             }
             SourceSpec::Path(path) => tokio::fs::read(path).await.map_err(|error| {
-                GuestError::Unavailable(format!("reading `{}`: {error}", path.display()))
+                let reason = format!("reading `{}`: {error}", path.display());
+                if error.kind() == io::ErrorKind::NotFound {
+                    GuestError::NotFound(reason)
+                } else {
+                    GuestError::Unavailable(reason)
+                }
             }),
             SourceSpec::Bytes(bytes) => Ok(bytes.to_vec()),
         }
@@ -224,9 +242,10 @@ impl<B: Backends> Runtime<B> {
     ///
     /// # Errors
     ///
-    /// Returns [`GuestError::Refused`] for caller-named bytes under a name
-    /// the deployment declares; `Internal` for a declared policy whose entry
-    /// is not the deployment's own for `id`.
+    /// - [`GuestError::Denied`] for caller-named bytes under a name the
+    ///   deployment declares.
+    /// - [`GuestError::Internal`] for a declared policy whose entry is not
+    ///   the deployment's own for `id`.
     pub fn admits(&self, id: &GuestId, policy: &Policy<'_>) -> Result<(), GuestError> {
         match (policy, self.registry().declared(id)) {
             (Policy::Declared(entry), Some(own)) if entry.id() == id && *entry == own => Ok(()),
@@ -234,7 +253,7 @@ impl<B: Backends> Runtime<B> {
                 "guest `{id}` was offered under a declared policy whose entry is not this \
                  deployment's own"
             ))),
-            (Policy::CallerNamed { .. }, Some(_)) => Err(GuestError::Refused(format!(
+            (Policy::CallerNamed { .. }, Some(_)) => Err(GuestError::Denied(format!(
                 "`{id}` is a guest this deployment declares, bound by its entry alone; load it \
                  as the declared guest `{id}`, whose source and pin are the deployment's"
             ))),
@@ -265,23 +284,36 @@ impl<B: Backends> Runtime<B> {
     ///
     /// # Errors
     ///
-    /// Returns [`GuestError::Refused`] when the bytes miss the pin, are a
-    /// pre-compiled artifact where raw wasm alone is admitted, do not load
-    /// as a component, were offered caller-named under a declared name, or
-    /// under a name active with other bytes; `Internal` on a serve or
-    /// publication failure.
+    /// - [`GuestError::Denied`] for caller-named bytes under a name the
+    ///   deployment declares.
+    /// - [`GuestError::Invalid`] when a declared entry's bytes miss its pin,
+    ///   or the bytes are a pre-compiled artifact where raw wasm alone is
+    ///   admitted, or do not load as a component.
+    /// - [`GuestError::Conflict`] when caller-named bytes miss the pin, or
+    ///   the name is active under other bytes.
+    /// - [`GuestError::Internal`] on a serve or publication failure.
     pub async fn admit_bytes(
         &self, id: GuestId, bytes: Vec<u8>, policy: Policy<'_>,
     ) -> Result<Arc<Guest<B>>, GuestError> {
         self.admits(&id, &policy)?;
 
         // verify under the policy
-        let refused = |error: anyhow::Error| GuestError::Refused(format!("{error:#}"));
+        let invalid = |error: anyhow::Error| GuestError::Invalid(format!("{error:#}"));
         let verified = match policy {
-            Policy::Declared(entry) => entry.verified(bytes).map_err(refused)?,
+            Policy::Declared(entry) => entry.verified(bytes).map_err(invalid)?,
             Policy::CallerNamed { pin } => {
-                Digest::checked(&bytes, pin, format_args!("guest `{id}`")).map_err(refused)?;
-                Verified::wasm(bytes).map_err(refused)?
+                let found = Digest::of(&bytes);
+                if let Some(pin) = pin
+                    && pin != found
+                {
+                    return Err(GuestError::Conflict {
+                        found,
+                        detail: format!(
+                            "guest `{id}` resolved to {found}, not its declared digest {pin}"
+                        ),
+                    });
+                }
+                Verified::wasm(bytes).map_err(invalid)?
             }
         };
         let digest = verified.digest();
@@ -299,13 +331,16 @@ impl<B: Backends> Runtime<B> {
                 match policy {
                     Policy::Declared(_) => Ok(standing),
                     Policy::CallerNamed { .. } if standing.digest() == digest => Ok(standing),
-                    Policy::CallerNamed { .. } => Err(GuestError::Refused(format!(
-                        "guest `{id}` is active under other bytes ({}, not {digest})",
-                        standing.digest()
-                    ))),
+                    Policy::CallerNamed { .. } => Err(GuestError::Conflict {
+                        found: digest,
+                        detail: format!(
+                            "guest `{id}` is active under other bytes ({}, not {digest})",
+                            standing.digest()
+                        ),
+                    }),
                 }
             }
-            Err(SeatError::Refused(reason)) => Err(GuestError::Refused(reason)),
+            Err(SeatError::Invalid(reason)) => Err(GuestError::Invalid(reason)),
             Err(SeatError::Internal(reason)) => Err(GuestError::Internal(reason)),
         }
     }
@@ -524,18 +559,22 @@ impl<B: Backends> Runtime<B> {
     ///
     /// # Errors
     ///
-    /// Returns [`GuestError::Refused`] for a name the deployment declares,
-    /// one already registered (an earlier or racing registration), or bytes
-    /// that do not load as a component against the deployment's host set;
-    /// `Internal` on a serve or publication failure.
+    /// - [`GuestError::Denied`] for a name the deployment declares.
+    /// - [`GuestError::Conflict`] for a name already registered, by an
+    ///   earlier or a racing registration.
+    /// - [`GuestError::Invalid`] for bytes that do not load as a component
+    ///   against the deployment's host set.
+    /// - [`GuestError::Internal`] on a serve or publication failure.
     pub async fn admit(&self, id: GuestId, verified: Verified) -> Result<(), GuestError> {
         self.admits(&id, &Policy::CallerNamed { pin: None })?;
+        let found = verified.digest();
         match self.seat(id.clone(), verified).await {
             Ok(_) => Ok(()),
-            Err(SeatError::Occupied) => {
-                Err(GuestError::Refused(format!("guest `{id}` is already registered")))
-            }
-            Err(SeatError::Refused(reason)) => Err(GuestError::Refused(reason)),
+            Err(SeatError::Occupied) => Err(GuestError::Conflict {
+                found,
+                detail: format!("guest `{id}` is already registered"),
+            }),
+            Err(SeatError::Invalid(reason)) => Err(GuestError::Invalid(reason)),
             Err(SeatError::Internal(reason)) => Err(GuestError::Internal(reason)),
         }
     }
@@ -556,10 +595,10 @@ impl<B: Backends> Runtime<B> {
         let digest = verified.digest();
         let component = component(registry.engine(), verified)
             .await
-            .map_err(|error| SeatError::Refused(format!("validating `{id}`: {error:#}")))?;
+            .map_err(|error| SeatError::Invalid(format!("validating `{id}`: {error:#}")))?;
         let instance_pre = registry
             .instantiate_late(&id, &component)
-            .map_err(|error| SeatError::Refused(format!("pre-instantiating `{id}`: {error:#}")))?;
+            .map_err(|error| SeatError::Invalid(format!("pre-instantiating `{id}`: {error:#}")))?;
         let guest = Arc::new(Guest::local(id.clone(), instance_pre, digest));
 
         // serve as a pending endpoint, then publish endpoint and entry as one step
@@ -693,7 +732,7 @@ struct RuntimeInner<B: 'static> {
 enum SeatError {
     // an earlier or racing registration holds the identity
     Occupied,
-    Refused(String),
+    Invalid(String),
     Internal(String),
 }
 
@@ -760,18 +799,37 @@ pub enum GuestError {
     /// The deployment neither registered nor declares the identity.
     #[error("guest `{0}` is not registered")]
     Unregistered(GuestId),
-    /// The source could not produce its bytes; a retry may succeed.
+    /// The source names nothing: no file is at its path, or nothing routes
+    /// its package or holds the release.
+    #[error("{0}")]
+    NotFound(String),
+    /// The deployment does not grant the bytes, such as caller-named bytes
+    /// under a name it declares.
+    #[error("{0}")]
+    Denied(String),
+    /// The request or the bytes are invalid. The bytes miss the
+    /// deployment's pin, are a pre-compiled artifact where raw wasm alone is
+    /// admitted, or do not load as a component against the deployment's
+    /// host set.
+    #[error("{0}")]
+    Invalid(String),
+    /// The runtime cannot serve the request, such as a package with no
+    /// registry client to fetch it.
+    #[error("{0}")]
+    Unsupported(String),
+    /// The source could not produce its bytes. A retry may succeed.
     #[error("{0}")]
     Unavailable(String),
-    /// The bytes were refused: they miss the pin, are a pre-compiled
-    /// artifact where raw wasm alone is admitted, do not load as a
-    /// component against the deployment's host set, were offered under a
-    /// name the deployment declares, or under a name active with other
-    /// bytes.
-    #[error("{0}")]
-    Refused(String),
-    /// The runtime has no registry to fetch a package from, or the
-    /// registration itself failed.
+    /// Caller-named bytes missed their pin, or the name is active under
+    /// other bytes.
+    #[error("{detail}")]
+    Conflict {
+        /// The digest of the bytes offered.
+        found: Digest,
+        /// What did not hold.
+        detail: String,
+    },
+    /// The registration itself failed.
     #[error("{0}")]
     Internal(String),
 }

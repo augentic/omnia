@@ -1,6 +1,5 @@
-//! Where one load's bytes come from — the host mirror of the
-//! `omnia:plugins/loader` `location` variant — and the registry seam that
-//! fetches a package.
+//! Where one load's bytes come from — the host form of the `omnia:plugins`
+//! `source` variant — and the registry seam that fetches a package.
 
 use std::fmt;
 
