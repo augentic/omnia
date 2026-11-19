@@ -129,7 +129,7 @@ Each interface crate provides guest bindings, a host implementation, and, with o
 | `wasi-blobstore` | `omnia:blobstore` | Blob storage                       | `BlobStoreDefault` — in-memory            |
 | `wasi-sql`       | `omnia:sql`       | Parameterized SQL and transactions | `SqlDefault` — SQLite                     |
 | `wasi-docstore`  | `omnia:docstore`  | JSON document store with filters   | `DocStoreDefault` — in-memory             |
-| `wasi-config`    | `wasi:config`     | Runtime configuration              | `ConfigDefault` — process environment     |
+| `wasi-config`    | `omnia:config`    | Runtime configuration              | `ConfigDefault` — process environment     |
 | `wasi-vault`     | `omnia:vault`     | Secrets management                 | `VaultDefault` — in-memory                |
 | `wasi-identity`  | `omnia:identity`  | Identity/OAuth tokens              | `IdentityDefault` — OAuth2 client flow    |
 | `wasi-otel`      | Custom            | Guest OpenTelemetry export         | `OtelDefault` — log-only                  |

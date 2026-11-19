@@ -1,22 +1,24 @@
-//! [`Config`] over `wasi:config`.
+//! [`Config`] over `omnia:config`.
 
-use std::future::Future;
-
-use omnia_wasi_config::store;
+use omnia_wasi_config::omnia::{store, types};
 
 use crate::{Config, Error, Result, WasiProvider};
 
 impl Config for WasiProvider {
-    fn get(&self, key: &str) -> impl Future<Output = Result<Option<String>>> + Send {
-        std::future::ready(store::get(key).map_err(Error::from))
+    async fn get(&self, key: &str) -> Result<Option<String>> {
+        Ok(store::get(key.to_owned()).await?)
     }
 }
 
-impl From<store::Error> for Error {
-    fn from(err: store::Error) -> Self {
+impl From<types::Error> for Error {
+    fn from(err: types::Error) -> Self {
         match err {
-            store::Error::Upstream(message) => Self::bad_gateway("unavailable", message),
-            store::Error::Io(message) => Self::server_error("other", message),
+            types::Error::NotFound(message) => Self::server_error("not-found", message),
+            types::Error::Denied(message) => Self::server_error("denied", message),
+            types::Error::Invalid(message) => Self::server_error("invalid", message),
+            types::Error::Unsupported(message) => Self::server_error("unsupported", message),
+            types::Error::Unavailable(message) => Self::bad_gateway("unavailable", message),
+            types::Error::Other(message) => Self::server_error("other", message),
         }
     }
 }

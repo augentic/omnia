@@ -235,6 +235,18 @@ Unreleased
     anything fail with `Error::Other`. Each failed with `Error::Exists`.
   - On `wasm32`, `omnia_wasi_vcs::omnia` holds the raw bindings, which the
     crate root held.
+- `omnia:config`, the Omnia-owned interface `Config` calls, in place of
+  the `wasi:config` draft. `WasiConfig` serves it over one
+  `ConfigClient`:
+  - `store.get` answers the value set for a key, and `none` when it is
+    unset.
+  - A portable key is 1 to 253 bytes of uppercase ASCII letters, digits,
+    and `_`, and does not start with a digit.
+  - The optional `entries` interface pages the entries under a key prefix.
+  - The `error` has one case per capability error code.
+  - `WasiConfig` answers `unsupported` for nothing.
+  - On `wasm32`, `omnia_wasi_config::omnia` holds the raw bindings, which
+    the crate root held.
 - The codes of a failed capability call. Its `omnia_sdk::Error` names the
   class of failure in its code:
   - `not-found`, `denied`, `invalid`, `unsupported`, or `other` on a
@@ -335,7 +347,7 @@ Unreleased
   that imports a WASI 0.2 `wasi:cli`, `wasi:clocks`, `wasi:filesystem`,
   `wasi:http`, `wasi:io`, `wasi:random`, or `wasi:sockets` interface is
   refused by name, with the rebuild it needs, at startup or at its first
-  use. The `wasi:config` draft is served as before.
+  use.
 - `omnia_test::build` compiles a fixture crate's programs for
   `wasm32-wasip3`.
 - A raw export that may wait is an `async func`. On `wasm32-wasip3`,
@@ -533,6 +545,18 @@ Unreleased
   and `cache_write_tokens`.
 - `omnia_sdk::model::Effort` is no longer `Copy`, since `Effort::Other`
   holds a name.
+- `omnia_wasi_config::ConfigClient` serves `omnia:config`:
+  - `get` answers the value set for one key, or `None` when it is unset.
+    It replaces `get_config`, which lent the whole map as a
+    `WasiConfigVariables`.
+  - `entries` answers every entry a guest may read. Its default body fails
+    with `omnia_wasi_config::Error::Unsupported`.
+  - A backend picks a failure's code by returning an
+    `omnia_wasi_config::Error`, whose six cases are the six capability
+    error codes.
+- `ConfigDefault::connect` skips a variable whose name or value is not
+  Unicode, where it panicked. `Default` builds an empty one, and
+  `FromIterator` builds one from key-value pairs.
 - `BlobStoreClient` states the container rules every backend keeps:
   - `get_container` fails a container that does not exist with
     `omnia_wasi_blobstore::Error::missing_container`.
@@ -788,6 +812,12 @@ Unreleased
   and the host's `ConnectionProxy`, `Prepared`, and `Trace`. A guest
   reaches a database through `omnia_sdk::SqlDb`, and
   `omnia_wasi_sql::omnia` holds the raw `omnia:sql` bindings.
+- The `wasi:config@0.2.0-rc.1` imports, which wasmtime's
+  `wasmtime-wasi-config` served. With them go `omnia_wasi_config::store` on
+  `wasm32`, and the host's `wasmtime_wasi_config` re-export and
+  `ConfigDefault::config_vars`. A guest reads configuration through
+  `omnia_sdk::Config`, and `omnia_wasi_config::omnia` holds the raw
+  `omnia:config` bindings.
 
 ---
 

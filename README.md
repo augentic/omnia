@@ -62,7 +62,7 @@ The [`examples/`](examples/README.md) directory contains a complete working gues
 | [`omnia-guest-macros`](crates/guest-macros)     | `#[instrument]` observability attribute and `#[derive(Provider)]` for guests               |
 | [`omnia-host-macros`](crates/host-macros)       | `runtime!` for host runtime generation and `#[derive(HostCtx)]` for host crates            |
 | [`omnia-wasi-blobstore`](crates/wasi-blobstore) | omnia:blobstore host and guest bindings                                                    |
-| [`omnia-wasi-config`](crates/wasi-config)       | wasi:config host and guest bindings                                                        |
+| [`omnia-wasi-config`](crates/wasi-config)       | omnia:config host and guest bindings                                                       |
 | [`omnia-wasi-docstore`](crates/wasi-docstore)   | Document-store host and guest bindings                                                     |
 | [`omnia-wasi-http`](crates/wasi-http)           | wasi:http host and guest bindings                                                          |
 | [`omnia-wasi-identity`](crates/wasi-identity)   | Identity/OAuth host and guest bindings                                                     |

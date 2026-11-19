@@ -1,20 +1,58 @@
-//! Config lookups answer from the host's seeded map and nothing else: the
-//! seeded key resolves, a variable every test process carries in its
-//! environment reads as unset, and `get-all` enumerates exactly the seeded map.
+//! Config reads and listings answer from the host's seeded map and nothing
+//! else. A seeded key resolves, an empty value is still set, and a variable
+//! every test process carries in its environment reads as unset. A listing
+//! returns exactly the seeded entries, and pages a prefix one entry at a time.
 
 #![cfg(target_arch = "wasm32")]
 
 use omnia_sdk::{Config, WasiProvider};
+use omnia_wasi_config::omnia::entries;
 
 omnia_sdk::api::command::export!(scenario);
 
 async fn scenario() {
+    // reads
     let greeting = WasiProvider.get("GREETING").await.expect("seeded key");
     assert_eq!(greeting.as_deref(), Some("hello"));
+    let empty = WasiProvider.get("EMPTY").await.expect("seeded key");
+    assert_eq!(empty.as_deref(), Some(""), "an empty value is set");
     let path = WasiProvider.get("PATH").await.expect("an unset key is not an error");
     assert_eq!(path, None, "the process environment does not leak");
 
-    // `omnia_sdk::Config` has no `get-all`; go through the raw binding.
-    let all = omnia_wasi_config::store::get_all().expect("get-all");
-    assert_eq!(all, [("GREETING".to_owned(), "hello".to_owned())]);
+    // a full listing, through the raw binding since `Config` has none
+    let all = entries::list(String::new(), None, None).await.expect("list every entry");
+    assert_eq!(all.next, None, "one page holds every entry");
+    assert_eq!(
+        sorted(all.entries),
+        pairs(&[
+            ("EMPTY", ""),
+            ("GREETING", "hello"),
+            ("ORDERS_CURRENCY", "nzd"),
+            ("ORDERS_REGION", "eu"),
+        ])
+    );
+
+    // a prefix, one entry a page
+    let first = entries::list("ORDERS_".to_owned(), None, Some(1)).await.expect("first page");
+    assert_eq!(first.entries.len(), 1);
+    let after = first.next.expect("a second page");
+    let second =
+        entries::list("ORDERS_".to_owned(), Some(after), Some(1)).await.expect("second page");
+    assert_eq!(second.next, None, "the second page is the last");
+    let paged = first.entries.into_iter().chain(second.entries).collect();
+    assert_eq!(sorted(paged), pairs(&[("ORDERS_CURRENCY", "nzd"), ("ORDERS_REGION", "eu")]));
+
+    // a prefix that matches no key
+    let none = entries::list("MISSING_".to_owned(), None, None).await.expect("an empty listing");
+    assert!(none.entries.is_empty(), "no key starts with the prefix");
+    assert_eq!(none.next, None);
+}
+
+fn sorted(mut entries: Vec<(String, String)>) -> Vec<(String, String)> {
+    entries.sort_unstable();
+    entries
+}
+
+fn pairs(entries: &[(&str, &str)]) -> Vec<(String, String)> {
+    entries.iter().map(|&(key, value)| (key.to_owned(), value.to_owned())).collect()
 }

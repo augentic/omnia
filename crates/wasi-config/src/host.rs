@@ -1,45 +1,84 @@
-//! # WASI Config Host
-//!
-//! This module implements a host-side service for `wasi:config`.
+//! # WASI Config Service
 
 mod default_impl;
+mod entries_impl;
+mod store_impl;
+mod types_impl;
+
+mod generated {
+    pub use self::omnia::config::types::Error;
+
+    wasmtime::component::bindgen!({
+        world: "imports",
+        path: "wit",
+        imports: {
+            default: store | tracing | trappable,
+        },
+        trappable_error_type: {
+            "omnia:config/types.error" => Error,
+        },
+    });
+}
 
 use std::fmt::Debug;
 
-pub use default_impl::ConfigDefault;
+use futures::{FutureExt as _, future};
+pub use omnia_core::FutureResult;
 use omnia_core::{Host, HostCtx, Provides, StoreCtx};
-use wasmtime::component::{HasData, Linker, ResourceTable};
-pub use wasmtime_wasi_config;
-use wasmtime_wasi_config::WasiConfigVariables;
+use wasmtime::component::Linker;
 
-/// Host-side service for `wasi:config`.
-#[derive(Debug)]
+pub use self::default_impl::ConfigDefault;
+pub use self::generated::Error;
+use self::generated::omnia::config::{entries, store, types};
+
+/// Result type for configuration operations.
+pub type Result<T> = std::result::Result<T, Error>;
+
+/// Host-side service for `omnia:config`.
+#[derive(Debug, HostCtx)]
+#[host_ctx(client = ConfigClient)]
 pub struct WasiConfig;
-
-impl HasData for WasiConfig {
-    type Data<'a> = wasmtime_wasi_config::WasiConfig<'a>;
-}
-
-// hand-written rather than derived: the view is the one `wasmtime-wasi-config`
-// owns, built from the backend's variables with no resource table involved
-impl HostCtx for WasiConfig {
-    type Borrow<'a> = &'a dyn ConfigClient;
-
-    fn view<'a>(
-        borrow: Self::Borrow<'a>, _table: &'a mut ResourceTable,
-    ) -> wasmtime_wasi_config::WasiConfig<'a> {
-        wasmtime_wasi_config::WasiConfig::from(borrow.get_config())
-    }
-}
 
 impl<B: Provides<Self>> Host<B> for WasiConfig {
     fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> anyhow::Result<()> {
-        Ok(wasmtime_wasi_config::add_to_linker(linker, StoreCtx::view::<Self>)?)
+        types::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
+        store::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?;
+        Ok(entries::add_to_linker::<_, Self>(linker, StoreCtx::view::<Self>)?)
     }
 }
 
-/// Service contract for `wasi:config` backends.
+/// Service contract for `omnia:config` backends.
+///
+/// A backend implements [`get`](Self::get), and overrides
+/// [`entries`](Self::entries) when it can list what it holds.
+///
+/// A backend reads every portable key, and may fail any other with
+/// [`Error::Invalid`]. A portable key:
+///
+/// - is 1 to 253 bytes long;
+/// - holds only uppercase ASCII letters, digits, and `_`;
+/// - does not start with a digit.
+///
+/// A backend picks the kind of a failure by returning an [`Error`], and any
+/// other error reaches the guest as [`Error::Other`].
 pub trait ConfigClient: Debug + Send + Sync + 'static {
-    /// Get the configuration variables.
-    fn get_config(&self) -> &WasiConfigVariables;
+    /// The value set for `key`, or `None` when it is unset.
+    fn get(&self, key: String) -> FutureResult<Option<String>>;
+
+    /// Every entry the guest may read, in any order.
+    ///
+    /// A backend that does not override it fails with
+    /// [`Error::Unsupported`].
+    fn entries(&self) -> FutureResult<Vec<(String, String)>> {
+        let error = Error::Unsupported("this backend cannot list its entries".to_owned());
+        future::ready(Err(error.into())).boxed()
+    }
+}
+
+// a backend picks the kind by returning an `Error`; any other failure is
+// `other`, with its full context chain
+impl From<anyhow::Error> for Error {
+    fn from(err: anyhow::Error) -> Self {
+        err.downcast::<Self>().unwrap_or_else(|err| Self::Other(format!("{err:#}")))
+    }
 }

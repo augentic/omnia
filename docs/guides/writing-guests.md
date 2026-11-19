@@ -198,7 +198,7 @@ When writing `wasm32`-only code (as in `examples/`), you can also call the `omni
 | Document store | `DocumentDb` | `omnia_wasi_docstore::omnia::{store, collection}` | `examples/docstore` | [Document Store](document-store.md) |
 | Blob store | `BlobStore` | `omnia_wasi_blobstore` | `examples/blobstore` | — |
 | Secrets | `SecretStore` | `omnia_wasi_vault::omnia::{store, locker}` | `examples/vault` | — |
-| Config | `Config` | `omnia_wasi_config` | `examples/config` | — |
+| Config | `Config` | `omnia_wasi_config::omnia::{store, entries}` | `examples/config` | — |
 | Identity/OAuth | `Identity` | `omnia_wasi_identity::omnia::credentials` | `examples/identity` | — |
 | Outbound HTTP | `HttpClient` | `omnia_wasi_http` | `examples/http-proxy` | — |
 | Model completions | `Model` | `omnia_wasi_model::omnia::{completion, types}` | `examples/model` | [Model Completions](model-completions.md) |

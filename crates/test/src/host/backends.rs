@@ -2,11 +2,9 @@
 //! swappable for another backend of its host.
 
 use std::collections::BTreeMap;
-use std::sync::Arc;
 
 use omnia::{Connect as _, HostCtx, NoOptions, Provides};
 use omnia_wasi_blobstore::{BlobStoreClient, BlobStoreDefault, WasiBlobStore};
-use omnia_wasi_config::wasmtime_wasi_config::WasiConfigVariables;
 use omnia_wasi_config::{ConfigDefault, WasiConfig};
 use omnia_wasi_docstore::{
     ConnectOptions as DocStoreOptions, DocStoreClient, DocStoreDefault, WasiDocStore,
@@ -80,7 +78,7 @@ pub struct Backends<
 > {
     /// The `omnia:blobstore` backend.
     pub blobstore: B,
-    /// Map-backed `wasi:config`, empty until seeded by [`Backends::config`].
+    /// Map-backed `omnia:config`, empty until seeded by [`Backends::config`].
     pub config: ConfigDefault,
     /// The `omnia:docstore` backend.
     pub docstore: D,
@@ -117,7 +115,7 @@ impl Backends {
             blobstore: BlobStoreDefault::connect_with(NoOptions)
                 .await
                 .expect("in-memory blobstore"),
-            config: config_from(WasiConfigVariables::new()),
+            config: ConfigDefault::default(),
             docstore: DocStoreDefault::connect_with(DocStoreOptions::default())
                 .await
                 .expect("in-memory docstore"),
@@ -150,15 +148,14 @@ impl Backends {
 }
 
 impl<M, K, B, D, S, V, G, I, O, C> Backends<M, K, B, D, S, V, G, I, O, C> {
-    /// The same bundle answering `wasi:config` lookups from `vars` alone.
+    /// The same bundle answering `omnia:config` lookups from `vars` alone.
     #[must_use]
     pub fn config<Key, Value>(mut self, vars: impl IntoIterator<Item = (Key, Value)>) -> Self
     where
         Key: Into<String>,
         Value: Into<String>,
     {
-        let vars = vars.into_iter().map(|(key, value)| (key.into(), value.into()));
-        self.config = config_from(vars.collect());
+        self.config = vars.into_iter().collect();
         self
     }
 
@@ -437,12 +434,6 @@ where
 {
     fn borrow(&mut self) -> <WasiVcs as HostCtx>::Borrow<'_> {
         &mut self.vcs
-    }
-}
-
-fn config_from(vars: WasiConfigVariables) -> ConfigDefault {
-    ConfigDefault {
-        config_vars: Arc::new(vars),
     }
 }
 
