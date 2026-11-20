@@ -1,7 +1,7 @@
 //! `Cache-Control` and `If-None-Match` request header parsing.
 
 use anyhow::{Result, bail};
-use http::HeaderMap;
+use http::{HeaderMap, HeaderValue};
 use http::header::{CACHE_CONTROL, IF_NONE_MATCH};
 
 use crate::Error;
@@ -70,7 +70,7 @@ impl Control {
         let mut control = Self::default();
         let mut max_age = None;
         for line in headers.get_all(CACHE_CONTROL) {
-            for directive in line.to_str()?.split(',') {
+            for directive in field_value(line)?.split(',') {
                 let directive = directive.trim().to_ascii_lowercase();
                 if directive == "no-store" {
                     control.no_store = true;
@@ -111,16 +111,27 @@ impl Control {
             if lines.next().is_some() {
                 bail!("multiple `etag` values in `If-None-Match` header are not supported");
             }
-            let Ok(etag) = etag.to_str() else {
-                bail!(
-                    "`If-None-Match` contains `obs-text` octets, which this cache does not accept"
-                );
-            };
-            control.etag = strong_etag(etag)?.to_string();
+            control.etag = strong_etag(field_value(etag)?)?.to_string();
         }
 
         Ok(Some(control))
     }
+}
+
+// RFC 9110 §5.5 field values may pad with OWS (SP / HTAB). `HeaderValue::to_str`
+// rejects HTAB, so [`field_value`] reads bytes and refuses only `obs-text`.
+fn field_value(value: &HeaderValue) -> Result<&str> {
+    let bytes = value.as_bytes();
+    for &octet in bytes {
+        if octet == b'\t' || (0x20..=0x7E).contains(&octet) {
+            continue;
+        }
+        if octet >= 0x80 {
+            bail!("header value holds `obs-text` octets, which this cache does not accept");
+        }
+        bail!("header value holds invalid octets");
+    }
+    Ok(std::str::from_utf8(bytes)?)
 }
 
 // RFC 9110 §8.8.3 has `opaque-tag = DQUOTE *etagc DQUOTE`, and `etagc`
@@ -152,4 +163,47 @@ fn strong_etag(value: &str) -> Result<&str> {
         bail!("`If-None-Match` entity-tag contains characters outside `etagc`");
     }
     Ok(value)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ows_tab_in_cache_headers() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            CACHE_CONTROL,
+            HeaderValue::from_bytes(b"\tmax-age=60").expect("tab is valid OWS"),
+        );
+        headers.insert(
+            IF_NONE_MATCH,
+            HeaderValue::from_bytes(b"\t\"v1\"\t").expect("tab is valid OWS"),
+        );
+        let control = Control::maybe_from(&headers)
+            .expect("parses")
+            .expect("recognised directive");
+        assert_eq!(control.max_age(), 60);
+        assert_eq!(control.etag(), "\"v1\"");
+    }
+
+    #[test]
+    fn if_none_match_obs_text_not_ows() {
+        let mut headers = HeaderMap::new();
+        headers.insert(CACHE_CONTROL, HeaderValue::from_static("max-age=60"));
+        headers.insert(
+            IF_NONE_MATCH,
+            HeaderValue::from_bytes(b"\xE9").expect("obs-text is a legal field value"),
+        );
+        let err = Control::maybe_from(&headers).expect_err("refuses obs-text");
+        let message = format!("{err:#}");
+        assert!(
+            message.contains("obs-text"),
+            "expected obs-text refusal, got {message}"
+        );
+        assert!(
+            !message.contains("tab"),
+            "OWS is not obs-text: {message}"
+        );
+    }
 }
