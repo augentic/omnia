@@ -26,10 +26,8 @@ Reference for the `omnia:*` WIT packages Omnia publishes to the `omnia.host` was
 | `omnia:vault` | `0.1.0` | [`crates/wasi-vault/wit`](../../crates/wasi-vault/wit/vault.wit) |
 | `omnia:vcs` | `0.1.0` | [`crates/wasi-vcs/wit`](../../crates/wasi-vcs/wit/vcs.wit) |
 | `omnia:websocket` | `0.1.0` | [`crates/wasi-websocket/wit`](../../crates/wasi-websocket/wit/websocket.wit) |
-| `omnia:sdk` | the `omnia-sdk` version | staged by `scripts/wit.sh stage` |
 
 - Every package but `omnia:types` takes its `error` from `omnia:types/types`. `omnia:model` and `omnia:vcs` also use `wasi:filesystem` and `wasi:clocks` 0.3.2, which `wasi.dev` serves.
-- `omnia:sdk` includes every package's `imports` world, and adds the worlds a guest targets: `messaging` and `websocket`, each exporting its `incoming-handler`, and `command`, which adds `wasi:cli/command`. The `omnia-sdk` guest bindings are generated from it.
 - A package carries its unstable interfaces under their `@unstable` gates. A consumer that enables no feature binds the stable interfaces alone, and one that enables a gate (`--features`, or `--all-features` as every host does) binds that interface too. [WASI Interfaces](wasi-interfaces.md) lists the gates.
 - A release's description is the first paragraph of its package docs. Its license, source, homepage, and authors are its crate's.
 
@@ -41,11 +39,12 @@ Reference for the `omnia:*` WIT packages Omnia publishes to the `omnia.host` was
 { "preferredProtocol": "oci", "oci": { "registry": "ghcr.io", "namespacePrefix": "augentic/" } }
 ```
 
-Route the `omnia` namespace in a wasm-pkg configuration, either `~/.config/wasm-pkg/config.toml` or a file passed with `--config`:
+Route the `omnia` namespace in a wasm-pkg configuration, either `~/.config/wasm-pkg/config.toml` or a file passed with `--config`. A file passed with `--config` gets none of wkg's default routes, so it routes `wasi` too, for the `wasi:*` packages `omnia:model` and `omnia:vcs` use:
 
 ```toml
 [namespace_registries]
 omnia = "omnia.host"
+wasi = "wasi.dev"
 ```
 
 Reading a release needs no credentials. `wkg get` fetches one package's WIT:
@@ -54,11 +53,11 @@ Reading a release needs no credentials. `wkg get` fetches one package's WIT:
 wkg get omnia:keyvalue@0.1.0 --format wit --output keyvalue.wit
 ```
 
-A component whose own `wit/` imports an `omnia:*` interface runs `wkg fetch`. It fetches every package the component uses into `wit/deps` and pins each in `wkg.lock`. A guest that targets `omnia:sdk/command` needs `wasi:cli` too, so its configuration also routes `wasi = "wasi.dev"`.
+A component whose own `wit/` imports an `omnia:*` interface runs `wkg fetch`. It fetches every package the component uses into `wit/deps` and pins each in `wkg.lock`.
 
 ## Versions
 
-- A package's version is its own and moves independently of the crate version. The exception is `omnia:sdk`, whose version is the `omnia-sdk` version.
+- A package's version is its own and moves independently of the crate version.
 - A published release is immutable. `mise run wit-verify` fails when the registry holds a package's version with WIT, docs included, that differs from the tree's. CI's `WIT` job runs it on every push. Give a changed package a new version.
 - While a package is on `0.x`, a breaking change bumps its minor version and an additive change its patch version. `wkg publish` refuses a release that is not additive over the releases of its series, such as `0.1.1` over `0.1.0`.
 - A new version changes the package's `package` line, and every `use` or `import` that names the package in another package's WIT. `mise run wit-sync` then rewrites the copies, and `mise run bindgen` the guest bindings. Each host crate's `bindgen!` names an interface without its version, so a new version alone changes no Rust.

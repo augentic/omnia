@@ -114,11 +114,9 @@ Unreleased
   `omnia-http-cache` crate of `omnia-ext`, with the same API, header
   contract, and store keys.
 - The `omnia:*` WIT packages, published to the `omnia.host` wasm-pkg
-  registry by the release workflow, with `omnia:sdk`, which holds the
-  worlds the guest bindings are generated from. Each release's
-  description is the summary of its package docs, and
-  `docs/reference/wit-packages.md` says how to fetch one. The tasks
-  behind it:
+  registry by the release workflow. Each release's description is the
+  summary of its package docs, and `docs/reference/wit-packages.md` says
+  how to fetch one. The tasks behind it:
   - `mise run wit-check` fails on a `wit/deps` copy that differs from
     the package that owns it, or a plain `//` comment, which wit-parser
     reads as docs. It parses every package with and without its
@@ -1053,12 +1051,13 @@ Unreleased
   again, and drops or dead-letters a rejected one.
 - The document store's WIT package is `omnia:docstore`, which was
   `wasi:docstore`, so a guest built against `wasi:docstore` is rebuilt.
-- The packages 0.37 shipped are rewritten under a new version, so a 0.37
-  guest that imports one is refused for an import the host does not serve,
-  not for a mismatched type, and is rebuilt:
+- The packages 0.37 shipped are rewritten, so a 0.37 guest that imports
+  one is rebuilt:
   - `omnia:identity`, `omnia:otel`, `omnia:plugins`, `omnia:vault`,
-    `omnia:vcs`, and `omnia:websocket` are `0.2.0`.
-  - `omnia:model` is `0.3.0`.
+    `omnia:vcs`, and `omnia:websocket` keep `0.1.0`, so the host refuses
+    the guest for a mismatched type.
+  - `omnia:model` is `0.1.0`, where 0.37 shipped `0.2.0`, so the host
+    refuses the guest for an import it does not serve.
 - Native builds of `omnia-sdk`, and of `omnia-test` with the `guest`
   feature, link no `wasmtime`. `omnia-wasi-docstore` is a `wasm32`-only
   dependency of the SDK, and `MemoryDocs` keeps its own in-memory store.

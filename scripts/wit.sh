@@ -22,7 +22,7 @@
 #   jq 1.8, wasm-tools 1.263.0, wkg 0.16.2
 #
 # The published packages are every crates/wasi-*/wit and crates/plugin/wit
-# package, omnia:types first, then omnia:sdk at the omnia-sdk version. A
+# package, omnia:types first. The staged omnia:sdk is not one of them. A
 # copy's owner is the published package of its name, or the WASI package the
 # locked wasip3 ships. Each package is encoded with every `@unstable`
 # feature, since the gates travel with it and a consumer enables its own.
@@ -155,24 +155,19 @@ stage() {
   done
 
   cat >"$stage/sdk.wit" <<EOF
-/// Every omnia:* interface, and the worlds an Omnia guest targets.
 package omnia:sdk@$version;
 
-/// Every omnia:* interface.
 world imports {
 $includes}
 
-/// The handler a guest exports to receive messages.
 world messaging {
   export ${messaging%@*}/incoming-handler@${messaging#*@};
 }
 
-/// The handler a guest exports to receive WebSocket messages.
 world websocket {
   export ${websocket%@*}/incoming-handler@${websocket#*@};
 }
 
-/// A command: every omnia:* interface, and \`wasi:cli/command\`.
 world command {
   include imports;
   include ${cli%@*}/command@${cli#*@};
@@ -185,11 +180,10 @@ EOF
 build() {
   local revision dir
   revision="$(git rev-parse HEAD 2>/dev/null || true)"
-  stage
   rm -rf "$out"
   mkdir -p "$out"
   : >"$out/index"
-  for dir in $(sources) "$stage"; do
+  for dir in $(sources); do
     encode "$dir" "$revision"
   done
 }
@@ -203,9 +197,6 @@ encode() {
     fail "$dir declares no package"
   fi
   crate="${dir%/wit}"
-  if [ "$dir" = "$stage" ]; then
-    crate=crates/sdk
-  fi
   file="$out/${package/:/_}.wasm"
 
   description="$(wasm-tools component wit --json --all-features "$dir" | jq -r --arg package "$package" '
