@@ -88,7 +88,7 @@ anyhow.workspace = true
 bytes.workspace = true
 http.workspace = true
 omnia.workspace = true
-omnia-sdk = { workspace = true, features = ["http-cache"] }
+omnia-sdk = { workspace = true, features = ["http"] }
 omnia-wasi-blobstore.workspace = true
 omnia-wasi-config.workspace = true
 omnia-wasi-keyvalue.workspace = true

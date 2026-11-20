@@ -18,7 +18,7 @@ bytes.workspace = true
 clap.workspace = true
 futures.workspace = true
 http.workspace = true
-omnia-sdk = { workspace = true, features = ["command", "http", "http-cache"] }
+omnia-sdk = { workspace = true, features = ["command", "http"] }
 opentelemetry = { workspace = true, features = ["metrics", "trace"] }
 schemars.workspace = true
 serde.workspace = true

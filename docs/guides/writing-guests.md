@@ -116,7 +116,7 @@ http::export!(router);
 
 The router fn may answer an `axum::Router` instead, for a guest that needs axum's own routing features.
 
-For **outbound** HTTP requests inside a handler, call `omnia_sdk::http::fetch(request).await` with a standard `http::Request<Bytes>`, or `fetch_json` to require a 2xx status and decode a JSON reply. `omnia_sdk::http::send` takes any body and fails with the host's own `ErrorCode`, as `examples/http-proxy` shows. With the `http-cache` feature, `omnia_sdk::http::cache::HttpCache` fetches through an `omnia:keyvalue` bucket. A request carrying `Cache-Control: max-age` and an `If-None-Match` entity-tag is then answered from the bucket while its stored response lives, as `examples/http-cache` shows.
+For **outbound** HTTP requests inside a handler, call `omnia_sdk::http::fetch(request).await` with a standard `http::Request<Bytes>`, or `fetch_json` to require a 2xx status and decode a JSON reply. `omnia_sdk::http::send` takes any body and fails with the host's own `ErrorCode`, as `examples/http-proxy` shows. With the default `http` feature, `omnia_sdk::http::cache::HttpCache` fetches through an `omnia:keyvalue` bucket. A request carrying `Cache-Control: max-age` and an `If-None-Match` entity-tag is then answered from the bucket while its stored response lives, as `examples/http-cache` shows.
 
 > **Advanced: raw WASI HTTP export.** When you need to customize the `wasi:http/handler` export directly (as the standalone `examples/` do to show the low-level binding), implement `wasip3::exports::http::handler::Guest` and hand the request to `omnia_sdk::http::serve`, which opens the telemetry scope and the `handler` span itself:
 >

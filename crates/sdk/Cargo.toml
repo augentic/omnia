@@ -20,17 +20,13 @@ workspace = true
 default = ["http"]
 
 # Enables the axum-backed inbound `http` handlers (`http::export!`, `serve`,
-# `trace`) and the `mcp` server. The outbound `http` helpers and
-# `Error::status()` need no feature.
-http = ["dep:axum", "dep:tower"]
+# `trace`), the `mcp` server, and the outbound response cache `http::cache`.
+# `http::fetch`, `fetch_json`, `send`, and `Error::status()` need no feature.
+http = ["dep:axum", "dep:sha2", "dep:tower"]
 
 # Enables the clap-backed `command` program (argv parsing, `--format`, shell
 # completions).
 command = ["dep:clap", "dep:clap_complete"]
-
-# Enables `http::cache`, an outbound response cache over an `omnia:keyvalue`
-# bucket. Needs neither `http` nor `command`.
-http-cache = ["dep:sha2"]
 
 [dependencies]
 anyhow.workspace = true
