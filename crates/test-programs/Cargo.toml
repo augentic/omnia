@@ -18,7 +18,7 @@ bytes.workspace = true
 clap.workspace = true
 futures.workspace = true
 http.workspace = true
-omnia-sdk = { workspace = true, features = ["command", "http"] }
+omnia-sdk = { workspace = true, features = ["command", "http", "http-cache"] }
 opentelemetry = { workspace = true, features = ["metrics", "trace"] }
 schemars.workspace = true
 serde.workspace = true
@@ -101,6 +101,16 @@ crate-type = ["cdylib"]
 [[example]]
 name = "harness_flow"
 path = "programs/harness/flow.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "http_cache_headers"
+path = "programs/http_cache/headers.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "http_cache_outage"
+path = "programs/http_cache/outage.rs"
 crate-type = ["cdylib"]
 
 [[example]]

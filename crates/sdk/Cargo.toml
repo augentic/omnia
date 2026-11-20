@@ -28,6 +28,10 @@ http = ["dep:axum", "dep:tower"]
 # completions).
 command = ["dep:clap", "dep:clap_complete"]
 
+# Enables `http::cache`, an outbound response cache over an `omnia:keyvalue`
+# bucket. Needs neither `http` nor `command`.
+http-cache = ["dep:sha2"]
+
 [dependencies]
 anyhow.workspace = true
 axum = { workspace = true, features = ["json", "matched-path", "query"], optional = true }
@@ -44,6 +48,7 @@ omnia-guest-macros.workspace = true
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha2 = { workspace = true, optional = true }
 thiserror.workspace = true
 tower = { workspace = true, optional = true }
 tracing.workspace = true

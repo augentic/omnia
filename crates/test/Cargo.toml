@@ -58,12 +58,12 @@ build = []
 # Every dependency is optional so `--no-default-features --features build`
 # resolves to `std` alone on a consumer's build-dependency line.
 [dependencies]
-bytes = { workspace = true, optional = true }
 omnia-sdk = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 anyhow = { workspace = true, optional = true }
+bytes = { workspace = true, optional = true }
 futures = { workspace = true, optional = true }
 http = { workspace = true, optional = true }
 http-body-util = { workspace = true, optional = true }
@@ -88,6 +88,7 @@ anyhow.workspace = true
 bytes.workspace = true
 http.workspace = true
 omnia.workspace = true
+omnia-sdk = { workspace = true, features = ["http-cache"] }
 omnia-wasi-blobstore.workspace = true
 omnia-wasi-config.workspace = true
 omnia-wasi-keyvalue.workspace = true
@@ -116,4 +117,8 @@ required-features = ["host"]
 
 [[test]]
 name = "cli"
+required-features = ["host"]
+
+[[test]]
+name = "http_cache"
 required-features = ["host"]
