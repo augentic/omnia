@@ -34,5 +34,4 @@ jobs:
         with:
           tool: wit-bindgen-cli@0.63.0,wasm-tools@1.263.0
 
-      - run: cargo build --locked -p test-programs --example config_seeded --target wasm32-wasip3
-      - run: scripts/bindings --check target/wasm32-wasip3/debug/examples/config_seeded.wasm
+      - run: scripts/bindings.sh --check

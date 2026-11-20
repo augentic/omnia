@@ -1,11 +1,16 @@
 #!/usr/bin/env bash
 # Regenerates the omnia-sdk guest bindings from the WIT the host crates own.
 #
-#   scripts/bindings                     regenerate crates/sdk/src/bindings
-#   scripts/bindings --check [GUEST]     fail if a regeneration differs from
+#   scripts/bindings.sh                  regenerate crates/sdk/src/bindings
+#   scripts/bindings.sh --check [GUEST]  fail if a regeneration differs from
 #                                        the committed bindings, then check
 #                                        that GUEST (a command component)
-#                                        targets the staged world
+#                                        targets the staged world; with no
+#                                        GUEST, build config_seeded for
+#                                        wasm32-wasip3 and use the default path
+#
+# Tool pins (bump with workspace wit-bindgen and CI install-action):
+#   jq 1.8, wit-bindgen-cli 0.63.0, wasm-tools 1.263.0
 #
 # Every `crates/wasi-*/wit` and `crates/plugin/wit` package is staged once
 # under `target/omnia-sdk-wit`, beside the WASI packages the pinned `wasip3`
@@ -111,7 +116,9 @@ if $check; then
     echo "crates/sdk/src/bindings is stale: run \`mise run bindings\`" >&2
     exit 1
   }
-  if [ -n "$guest" ]; then
-    wasm-tools component targets --all-features "$stage" "$guest" --world omnia:sdk/command
+  if [ -z "$guest" ]; then
+    cargo build --locked -p test-programs --example config_seeded --target wasm32-wasip3
+    guest="${CARGO_TARGET_DIR:-$root/target}/wasm32-wasip3/debug/examples/config_seeded.wasm"
   fi
+  wasm-tools component targets --all-features "$stage" "$guest" --world omnia:sdk/command
 fi
