@@ -56,7 +56,7 @@ The [`examples/`](examples/README.md) directory contains a complete working gues
 | [`omnia`](crates/omnia)                         | Composition root — assembly, lifecycle, optional-crate composition, and `runtime!` |
 | [`omnia-core`](crates/core)               | Live-runtime SDK — wasmtime engine, registry, dispatch, stores, and the tracing subscriber |
 | [`omnia-plugin`](crates/plugin)           | `omnia:plugins/loader` capability — loader host, the deployment's grant (declared guest names, read-only mount roots, registry routing), registry acquisition, and plugin stores; selected by omnia's `loader` feature |
-| [`omnia-cli`](crates/cli)                 | Leaf `run` grammar — clap plus argv-precedence; selected by omnia's `cli` feature |
+| [`omnia-cli`](crates/cli)                 | Leaf `run` grammar — clap plus argv-precedence |
 | [`omnia-compile`](crates/compile)         | Leaf ahead-of-time compiler — `CompileOptions` and `compile`, over wasmtime alone; its Cranelift backend is what omnia's `jit` feature turns on |
 | [`omnia-sdk`](crates/sdk)                 | Guest SDK — the generated bindings and their helpers, `Handler`/`Context`/`Handlers`, HTTP/messaging routers and the command façade, errors, and MCP support |
 | [`omnia-guest-macros`](crates/guest-macros)     | `#[instrument]` observability attribute and the `Settings` and `FromRow` derives for guests |

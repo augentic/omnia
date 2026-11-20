@@ -147,6 +147,11 @@ Unreleased
 - The `omnia_test::contract` rows run in a guest over the bindings, and take
   the bindings' own handles. The `document` rows run over `DocStoreDefault`
   in place of `MemoryDocs`.
+- Every `omnia` build carries the `run` grammar. `omnia::Cli`,
+  `omnia::Command`, and `omnia::Parser` are always exported, and a
+  direct-command binary links `clap`.
+- `omnia::Command::Compile` is a variant in every build, not only with
+  `jit`. The generated `main` refuses it, as before.
 
 ### Removed
 
@@ -172,6 +177,14 @@ Unreleased
   `Provider`, `Memory`, `MemoryDocs`, `MapConfig`, `ScriptedLoader`,
   `ScriptedVcs`, and the native doubles. A handler test boots its component
   over `omnia_test::host`.
+- Six features. A manifest that names one no longer resolves:
+  - `cli`, `mpk`, and `gc` on `omnia`;
+  - `mpk` and `gc` on `omnia-core`;
+  - `jit` on `omnia-cli`.
+- `RuntimeOptions::pool_total_gc_heaps`, `pool_memory_protection_keys`, and
+  `pool_max_memory_protection_keys`. The runtime no longer reads
+  `POOL_TOTAL_GC_HEAPS`, `POOL_MEMORY_PROTECTION_KEYS`, or
+  `POOL_MAX_MEMORY_PROTECTION_KEYS`, and ignores them when set.
 
 ## 0.38.0
 

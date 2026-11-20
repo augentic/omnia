@@ -51,7 +51,6 @@ The defaults (1000 instances/memories/tables/stacks, 100 warm slots) suit modera
 ### 4. Linux-specific options
 
 - `POOL_PAGEMAP_SCAN=auto` — uses the `PAGEMAP_SCAN` ioctl for cheaper memory reset on kernels that support it.
-- `POOL_MEMORY_PROTECTION_KEYS=auto` (requires the `mpk` cargo feature, x86-64) — packs pooled memories with MPK, trading virtual address space for density.
 
 ### 5. Startup latency
 

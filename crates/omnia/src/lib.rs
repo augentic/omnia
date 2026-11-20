@@ -14,7 +14,6 @@ mod entry;
 mod lifecycle;
 pub use anyhow;
 pub use futures;
-#[cfg(feature = "cli")]
 #[doc(inline)]
 pub use omnia_cli::{Cli, Command, Parser};
 #[cfg(feature = "jit")]

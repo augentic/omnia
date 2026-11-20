@@ -1,21 +1,23 @@
-//! Generated `main`: direct-command planning and optional `run` grammar.
+//! Generated `main`: direct-command planning and the `run` grammar.
 
 mod direct;
 mod verbosity;
 
 use std::env;
+use std::ffi::OsString;
 use std::process::ExitCode;
 
+use omnia_cli::{PlanError, RunSource};
+
 pub use self::direct::{MainOptions, ManifestSource};
-use crate::{ConnectAll, DeploymentBuilder, Wiring};
+use crate::{ConnectAll, DeploymentBuilder, Manifest, Mount, Wiring};
 
 /// Entry point for generated `main` functions.
 ///
 /// `options` carries the deployment the `runtime!` macro compiled in: mode
 /// and manifest source. Command mode with a compiled-in deployment is a
-/// direct command: argv passes to the guest verbatim. Every other shape needs
-/// the standard `run [wasm] [--manifest] -- args…` grammar, served when omnia
-/// is built with the `cli` feature.
+/// direct command: argv passes to the guest verbatim. Every other shape
+/// takes the standard `run [wasm] [--manifest] -- args…` grammar.
 #[doc(hidden)]
 pub async fn main<B, H>(options: MainOptions) -> ExitCode
 where
@@ -28,28 +30,21 @@ where
     }
 }
 
-// Core plans direct commands; the `cli` feature adds the `run` grammar for every other shape.
 fn builder(options: MainOptions) -> anyhow::Result<DeploymentBuilder> {
-    #[cfg(feature = "cli")]
-    if !options.is_direct() {
-        return match materialize(options, env::args_os(), env::var_os("OMNIA_MANIFEST")) {
-            Ok(builder) => Ok(builder),
-            Err(omnia_cli::PlanError::Usage(error)) => error.exit(),
-            Err(omnia_cli::PlanError::Fatal(error)) => Err(error),
-        };
+    if options.is_direct() {
+        return Ok(direct::plan_direct(options, env::args_os())?.into_builder());
     }
-    Ok(direct::plan(options, env::args_os())?.into_builder())
+    match materialize(options, env::args_os(), env::var_os("OMNIA_MANIFEST")) {
+        Ok(builder) => Ok(builder),
+        Err(PlanError::Usage(error)) => error.exit(),
+        Err(PlanError::Fatal(error)) => Err(error),
+    }
 }
 
-#[cfg(feature = "cli")]
 fn materialize(
-    options: MainOptions, argv: impl IntoIterator<Item = std::ffi::OsString>,
-    omnia_manifest: Option<std::ffi::OsString>,
-) -> Result<DeploymentBuilder, omnia_cli::PlanError> {
-    use omnia_cli::RunSource;
-
-    use crate::{Manifest, Mount};
-
+    options: MainOptions, argv: impl IntoIterator<Item = OsString>,
+    omnia_manifest: Option<OsString>,
+) -> Result<DeploymentBuilder, PlanError> {
     let (mode, compiled_in, program_name) = options.into_parts();
     let plan = omnia_cli::plan(argv, omnia_manifest, compiled_in.is_some())?;
     let manifest = match plan.source {

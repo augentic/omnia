@@ -15,10 +15,6 @@ version.workspace = true
 [lints]
 workspace = true
 
-[features]
-# Enables the `compile` subcommand alongside `run`.
-jit = []
-
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true

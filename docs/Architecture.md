@@ -80,7 +80,7 @@ Layers 1 and 2 form the **runtime core** — domain-agnostic infrastructure that
 
 - **Deployment pipeline**: `DeploymentBuilder` builds a `Deployment` from a `Manifest` (loaded from `omnia.toml`, synthesized from a single `.wasm`, or constructed programmatically)
 - **Lifecycle**: `Wiring`, `ConnectAll`, `Mode`; `run` / `run_with` take a built `Deployment`, call `Deployment::assemble`, then drive command mode or the trigger servers
-- **Optional-crate composition**: `omnia-link` (guest-to-guest dispatch — every interface a guest imports outside the runtime's own `wasi:`/`omnia:` namespaces is relayed to the guest exporting it — behind the `link` feature; without it such an import fails at boot), `omnia-plugin` (the guest loader, `omnia:plugins/loader`, behind the `loader` feature; `Deployment::assemble` links its host and hands the runtime the registry client its `source.package` guests are acquired with — the `plugins.store` package store first, the `registries` routing after; a deployment declaring `plugins` or a package guest requires it; a loaded guest is raw wasm, or `omnia compile` output where the source admits it, and compiling the former needs `jit`), `omnia-cli` (the `run` grammar, behind the `cli` feature), and the `runtime!` macro. `link` and `loader` are independent: compiled-in guests may call each other; loaded guests may be host-only.
+- **Optional-crate composition**: `omnia-link` (guest-to-guest dispatch — every interface a guest imports outside the runtime's own `wasi:`/`omnia:` namespaces is relayed to the guest exporting it — behind the `link` feature; without it such an import fails at boot), `omnia-plugin` (the guest loader, `omnia:plugins/loader`, behind the `loader` feature; `Deployment::assemble` links its host and hands the runtime the registry client its `source.package` guests are acquired with — the `plugins.store` package store first, the `registries` routing after; a deployment declaring `plugins` or a package guest requires it; a loaded guest is raw wasm, or `omnia compile` output where the source admits it, and compiling the former needs `jit`), and the `runtime!` macro. `link` and `loader` are independent: compiled-in guests may call each other; loaded guests may be host-only.
 
 `omnia-core` is the live-runtime SDK a capability crate targets. Depend on it directly only when building another capability crate. It provides:
 
@@ -232,7 +232,7 @@ omnia/
 │   ├── guest-macros/       # #[instrument] proc macro
 │   ├── host-macros/        # runtime! proc-macro
 │   ├── plugin/       # Plugins capability (loader host + acquisition; re-exported by omnia)
-│   ├── cli/          # Leaf `run` grammar (selected by omnia's `cli` feature)
+│   ├── cli/          # Leaf `run` grammar (re-exported by omnia)
 │   └── wasi-*/             # WASI interface implementations
 │       ├── src/
 │       │   ├── guest.rs    # Guest bindings (wasm32)

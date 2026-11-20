@@ -100,9 +100,6 @@ pub struct RuntimeOptions {
     /// Maximum async stacks held by the pooling allocator (`POOL_TOTAL_STACKS`, default 1000).
     #[env(from = "POOL_TOTAL_STACKS", default = "1000")]
     pub pool_total_stacks: u32,
-    /// Maximum GC heaps held by the pooling allocator; requires the `gc` feature (`POOL_TOTAL_GC_HEAPS`, unset: Wasmtime default).
-    #[env(from = "POOL_TOTAL_GC_HEAPS")]
-    pub pool_total_gc_heaps: Option<u32>,
     /// Max core instances per component (`POOL_MAX_CORE_INSTANCES_PER_COMPONENT`, unset: Wasmtime default).
     #[env(from = "POOL_MAX_CORE_INSTANCES_PER_COMPONENT")]
     pub pool_max_core_instances_per_component: Option<u32>,
@@ -130,12 +127,6 @@ pub struct RuntimeOptions {
     /// Use the Linux `PAGEMAP_SCAN` ioctl for cheaper memory reset (`POOL_PAGEMAP_SCAN`, `auto`/`yes`/`no`, default `no`).
     #[env(from = "POOL_PAGEMAP_SCAN", default = "no", with = parse_enabled)]
     pub pool_pagemap_scan: Enabled,
-    /// Pack linear memories with memory protection keys; requires the `mpk` feature (`POOL_MEMORY_PROTECTION_KEYS`, `auto`/`yes`/`no`, default `no`).
-    #[env(from = "POOL_MEMORY_PROTECTION_KEYS", default = "no", with = parse_enabled)]
-    pub pool_memory_protection_keys: Enabled,
-    /// Upper limit on MPK keys the pool may allocate; requires the `mpk` feature (`POOL_MAX_MEMORY_PROTECTION_KEYS`, unset: Wasmtime default).
-    #[env(from = "POOL_MAX_MEMORY_PROTECTION_KEYS")]
-    pub pool_max_memory_protection_keys: Option<usize>,
     /// Interval between pooling-occupancy metric samples; `0` disables (`POOL_METRICS_INTERVAL_MS`, default 5000ms).
     #[env(from = "POOL_METRICS_INTERVAL_MS", default = "5000", with = parse_millis)]
     pub pool_metrics_interval: Duration,
@@ -179,14 +170,6 @@ impl RuntimeOptions {
     fn validate(&self) -> Result<()> {
         if !self.pooling {
             return Ok(());
-        }
-
-        // fail fast on a feature the build lacks rather than ignore it
-        if !cfg!(feature = "mpk") && self.pool_memory_protection_keys == Enabled::Yes {
-            bail!("POOL_MEMORY_PROTECTION_KEYS=yes requires building omnia with the `mpk` feature");
-        }
-        if !cfg!(feature = "gc") && self.pool_total_gc_heaps.is_some() {
-            bail!("POOL_TOTAL_GC_HEAPS requires building omnia with the `gc` feature");
         }
 
         if let Some(per_module) = self.pool_max_memories_per_module
@@ -255,12 +238,6 @@ impl From<&RuntimeOptions> for Config {
             // linux-only fast memory reset; `Auto` falls back where unsupported
             .pagemap_scan(options.pool_pagemap_scan);
 
-        // gc heaps only when compiled in
-        #[cfg(feature = "gc")]
-        if let Some(count) = options.pool_total_gc_heaps {
-            pool.total_gc_heaps(count);
-        }
-
         // structural limits only when set, so unset keeps the wasmtime default
         if let Some(count) = options.pool_max_core_instances_per_component {
             pool.max_core_instances_per_component(count);
@@ -282,14 +259,6 @@ impl From<&RuntimeOptions> for Config {
         }
         if let Some(size) = options.pool_max_component_instance_size {
             pool.max_component_instance_size(size);
-        }
-
-        #[cfg(feature = "mpk")]
-        {
-            pool.memory_protection_keys(options.pool_memory_protection_keys);
-            if let Some(max) = options.pool_max_memory_protection_keys {
-                pool.max_memory_protection_keys(max);
-            }
         }
 
         config.allocation_strategy(InstanceAllocationStrategy::Pooling(pool));
