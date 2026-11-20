@@ -72,7 +72,7 @@ A component whose own `wit/` imports an `omnia:*` interface runs `wkg fetch`. It
 
 ## Publishing
 
-The **Publish Release** workflow publishes the WIT once the release is tagged. Its `Publish WIT` job checks out the tag, runs `scripts/wit.sh check`, then runs `scripts/wit.sh publish` with the workflow's `GITHUB_TOKEN`. `publish` goes in three steps:
+The **Publish Release** workflow publishes the WIT once the release is tagged. Its `Publish WIT` job checks out the tag, runs `scripts/wasm-pkg.sh check`, then runs `scripts/wasm-pkg.sh publish` with the workflow's `GITHUB_TOKEN`. `publish` goes in three steps:
 
 1. Build every package to `target/wit/<namespace>_<name>@<version>.wasm`, `omnia:types` first.
 2. Read each release the registry holds, and fail before publishing anything if one differs from the tree.

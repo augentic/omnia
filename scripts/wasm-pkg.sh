@@ -2,18 +2,18 @@
 # Packages the omnia:* WIT for the wasm-pkg registry, and keeps the packages
 # a crate copies into its wit/deps in step with the packages that own them.
 #
-#   scripts/wit.sh sync     rewrite every copy under a crate's wit/deps from
+#   scripts/wasm-pkg.sh sync     rewrite every copy under a crate's wit/deps from
 #                           the package of that name
-#   scripts/wit.sh check    fail if a copy is stale, a published package
+#   scripts/wasm-pkg.sh check    fail if a copy is stale, a published package
 #                           holds a plain comment, or a package does not
 #                           parse with and without its features, or build
-#   scripts/wit.sh stage    stage omnia:sdk, the aggregate package bindgen.sh
+#   scripts/wasm-pkg.sh stage    stage omnia:sdk, the aggregate package bindgen.sh
 #                           generates from, under target/omnia-sdk-wit
-#   scripts/wit.sh build    encode every published package, with metadata,
+#   scripts/wasm-pkg.sh build    encode every published package, with metadata,
 #                           to target/wit/<namespace>_<name>@<version>.wasm
-#   scripts/wit.sh verify   fail if a release the registry holds differs
+#   scripts/wasm-pkg.sh verify   fail if a release the registry holds differs
 #                           from the package the tree builds
-#   scripts/wit.sh publish [--overwrite PACKAGE,..]
+#   scripts/wasm-pkg.sh publish [--overwrite PACKAGE,..]
 #                           verify, then publish every release the registry
 #                           lacks; --overwrite republishes the named
 #                           packages' differing releases instead of failing
@@ -334,5 +334,5 @@ case "${1:-}" in
     shift
     publish "$@"
     ;;
-  *) fail "usage: scripts/wit.sh sync|check|stage|build|verify|publish [--overwrite PACKAGE,..]" ;;
+  *) fail "usage: scripts/wasm-pkg.sh sync|check|stage|build|verify|publish [--overwrite PACKAGE,..]" ;;
 esac

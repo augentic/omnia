@@ -52,5 +52,5 @@ jobs:
         with:
           tool: wasm-tools@1.263.0,wkg@0.16.2
 
-      - run: scripts/wit.sh check
-      - run: scripts/wit.sh verify
+      - run: scripts/wasm-pkg.sh check
+      - run: scripts/wasm-pkg.sh verify

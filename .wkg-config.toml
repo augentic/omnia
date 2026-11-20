@@ -1,4 +1,4 @@
-# The wasm-pkg routing `scripts/wit.sh` verifies and publishes the omnia:*
+# The wasm-pkg routing `scripts/wasm-pkg.sh` verifies and publishes the omnia:*
 # WIT packages through, passed to wkg with `--config`.
 #
 # `omnia.host` serves `/.well-known/wasm-pkg/registry.json`, which points

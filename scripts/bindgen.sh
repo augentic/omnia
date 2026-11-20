@@ -12,7 +12,7 @@
 # Tool pins (bump with workspace wit-bindgen and CI install-action):
 #   jq 1.8, wit-bindgen-cli 0.63.0, wasm-tools 1.263.0
 #
-# `scripts/wit.sh stage` stages every `crates/wasi-*/wit` and
+# `scripts/wasm-pkg.sh stage` stages every `crates/wasi-*/wit` and
 # `crates/plugin/wit` package under `target/omnia-sdk-wit`, beside the WASI
 # packages the pinned `wasip3` ships, with one aggregate package, `omnia:sdk`,
 # that includes each package's `imports` world. The output follows
@@ -38,7 +38,7 @@ version="$(jq -r '.packages[] | select(.name == "omnia-sdk") | .version' <<<"$me
 # --- stage ---
 
 stage="target/omnia-sdk-wit"
-scripts/wit.sh stage
+scripts/wasm-pkg.sh stage
 
 version_of() {
   awk '/^package [^ ;{]+;/ { sub(/^package [^@]*@/, ""); sub(/;.*/, ""); print; exit }' "$@"
