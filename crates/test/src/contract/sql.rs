@@ -1,12 +1,11 @@
-//! The [`SqlDb`] rows.
+//! The `omnia:sql` rows, over a [`Database`].
 //!
 //! Each row creates tables of its own, so the rows run in any order, or all
 //! at once, over one database. Every statement keeps to the portable dialect
 //! the [SQL reference](https://github.com/augentic/omnia/blob/main/docs/reference/sql.md#the-portable-dialect)
 //! defines. The database must start without the rows' tables.
 
-use omnia_sdk::SqlDb;
-use omnia_sdk::sql::{FromColumn, Row, Statement, Transaction, Value};
+use omnia_sdk::sql::{Database, FromColumn, Row, Statement, Transaction, Value};
 
 use super::expect_code;
 
@@ -15,24 +14,24 @@ const TIME: &str = "23:59:58";
 const STAMP: &str = "2024-02-29 23:59:58";
 const STAMPTZ: &str = "2024-02-29T23:59:58+00:00";
 
-/// [`batch`](SqlDb::batch) runs its statements in order and returns each
+/// [`batch`](Database::batch) runs its statements in order and returns each
 /// one's changed-row count.
 ///
 /// # Panics
 ///
 /// Panics if the batch fails, a count is wrong, or a statement did not see
 /// the writes before it.
-pub async fn batch(db: &impl SqlDb) {
+pub async fn batch(db: &Database) {
     create(db, "CREATE TABLE batch_items (id BIGINT PRIMARY KEY, name TEXT NOT NULL)").await;
 
     let counts = db
-        .batch(&[
+        .batch(vec![
             Statement::new(
                 "INSERT INTO batch_items (id, name) VALUES ($1, $2), ($3, $4)",
-                [Value::from(1_i64), Value::from("one"), Value::from(2_i64), Value::from("two")],
+                &[Value::from(1_i64), Value::from("one"), Value::from(2_i64), Value::from("two")],
             ),
-            Statement::new("UPDATE batch_items SET name = $1", [Value::from("both")]),
-            Statement::new("DELETE FROM batch_items WHERE id = $1", [Value::from(2_i64)]),
+            Statement::new("UPDATE batch_items SET name = $1", &[Value::from("both")]),
+            Statement::new("DELETE FROM batch_items WHERE id = $1", &[Value::from(2_i64)]),
         ])
         .await;
 
@@ -40,27 +39,27 @@ pub async fn batch(db: &impl SqlDb) {
     assert_eq!(names(db, "batch_items").await, ["both"]);
 }
 
-/// A failing statement fails the whole [`batch`](SqlDb::batch) and rolls
+/// A failing statement fails the whole [`batch`](Database::batch) and rolls
 /// back every statement before it.
 ///
 /// # Panics
 ///
 /// Panics if the batch succeeds, or a write before the failing statement
 /// persists.
-pub async fn batch_rollback(db: &impl SqlDb) {
+pub async fn batch_rollback(db: &Database) {
     create(db, "CREATE TABLE rollback_items (id BIGINT PRIMARY KEY, name TEXT NOT NULL)").await;
     let insert = "INSERT INTO rollback_items (id, name) VALUES ($1, $2)";
-    let seeded = db.execute(insert, &[Value::from(1_i64), Value::from("kept")]).await;
+    let seeded = db.exec(insert, &[Value::from(1_i64), Value::from("kept")]).await;
     assert_eq!(seeded.expect("seed"), 1);
 
     let batch = db
-        .batch(&[
-            Statement::new(insert, [Value::from(2_i64), Value::from("added")]),
+        .batch(vec![
+            Statement::new(insert, &[Value::from(2_i64), Value::from("added")]),
             Statement::new(
                 "UPDATE rollback_items SET name = $1 WHERE id = $2",
-                [Value::from("changed"), Value::from(1_i64)],
+                &[Value::from("changed"), Value::from(1_i64)],
             ),
-            Statement::new(insert, [Value::from(1_i64), Value::from("duplicate")]),
+            Statement::new(insert, &[Value::from(1_i64), Value::from("duplicate")]),
         ])
         .await;
 
@@ -74,7 +73,7 @@ pub async fn batch_rollback(db: &impl SqlDb) {
 /// # Panics
 ///
 /// Panics if a value does not bind, or reads back another value.
-pub async fn conversions(db: &impl SqlDb) {
+pub async fn conversions(db: &Database) {
     create(
         db,
         "CREATE TABLE conversion_items (id BIGINT PRIMARY KEY, c_bigint BIGINT, \
@@ -86,7 +85,7 @@ pub async fn conversions(db: &impl SqlDb) {
                   VALUES ($1, $2, $3, $4)";
     let params =
         [Value::from(1_i64), Value::from(7_i32), Value::from(42_i64), Value::from(0.5_f32)];
-    assert_eq!(db.execute(insert, &params).await.expect("insert"), 1);
+    assert_eq!(db.exec(insert, &params).await.expect("insert"), 1);
 
     let rows = query(db, "SELECT c_bigint, c_integer, c_double FROM conversion_items", &[]).await;
     let [row] = &rows[..] else {
@@ -102,13 +101,13 @@ pub async fn conversions(db: &impl SqlDb) {
 /// # Panics
 ///
 /// Panics if a parameter binds to another placeholder.
-pub async fn placeholders(db: &impl SqlDb) {
+pub async fn placeholders(db: &Database) {
     create(db, "CREATE TABLE placeholder_items (id BIGINT PRIMARY KEY, x TEXT, y TEXT)").await;
     let reordered = "INSERT INTO placeholder_items (y, id, x) VALUES ($3, $1, $2)";
-    let inserted = db.execute(reordered, &[Value::from(1_i64), "x1".into(), "y1".into()]).await;
+    let inserted = db.exec(reordered, &[Value::from(1_i64), "x1".into(), "y1".into()]).await;
     assert_eq!(inserted.expect("insert with reordered placeholders"), 1);
     let repeated = "INSERT INTO placeholder_items (id, x, y) VALUES ($1, $2, $2)";
-    let inserted = db.execute(repeated, &[Value::from(2_i64), "same".into()]).await;
+    let inserted = db.exec(repeated, &[Value::from(2_i64), "same".into()]).await;
     assert_eq!(inserted.expect("insert with a repeated placeholder"), 1);
 
     let rows = query(db, "SELECT x, y FROM placeholder_items ORDER BY id", &[]).await;
@@ -125,7 +124,8 @@ pub async fn placeholders(db: &impl SqlDb) {
 
 /// A [`Transaction`] commits or rolls back its statements together.
 ///
-/// - It reads its own write, which is there after [`commit`](Transaction::commit).
+/// - It reads its own write, which is there after
+///   [`commit`](Transaction::commit).
 /// - A write is gone after [`rollback`](Transaction::rollback).
 /// - A failed statement ends it, so a later call fails with the code
 ///   `invalid`, and nothing it wrote remains.
@@ -138,44 +138,41 @@ pub async fn placeholders(db: &impl SqlDb) {
 ///
 /// Panics if a write outlives a transaction that did not commit, a committed
 /// one is lost, or a call after a failure succeeds.
-pub async fn transaction(db: &impl SqlDb) {
+pub async fn transaction(db: &Database) {
     create(db, "CREATE TABLE transaction_items (id BIGINT PRIMARY KEY, name TEXT NOT NULL)").await;
     let insert = "INSERT INTO transaction_items (id, name) VALUES ($1, $2)";
     let item = |id: i64, name: &str| [Value::from(id), Value::from(name)];
 
     // committed, after reading its own write
     let committed = begin(db).await;
-    assert_eq!(committed.execute(insert, &item(1, "committed")).await.expect("insert"), 1);
+    assert_eq!(committed.exec(insert, &item(1, "committed")).await.expect("insert"), 1);
     let select = "SELECT name FROM transaction_items WHERE id = $1";
-    let rows = committed.query(select, &[Value::from(1_i64)]).await.expect("query");
+    let rows = committed.query_as::<Row>(select, &[Value::from(1_i64)]).await.expect("query");
     let read: Vec<String> = rows.iter().map(|row| column(row, "name")).collect();
     assert_eq!(read, ["committed"], "a transaction did not read its own write");
     committed.commit().await.expect("commit");
 
     // rolled back
     let rolled_back = begin(db).await;
-    assert_eq!(rolled_back.execute(insert, &item(2, "rolled back")).await.expect("insert"), 1);
+    assert_eq!(rolled_back.exec(insert, &item(2, "rolled back")).await.expect("insert"), 1);
     rolled_back.rollback().await.expect("rollback");
 
     // ended by a failure
     let failed = begin(db).await;
-    assert_eq!(failed.execute(insert, &item(3, "failed")).await.expect("insert"), 1);
-    let duplicate = failed.execute(insert, &item(1, "duplicate")).await;
+    assert_eq!(failed.exec(insert, &item(3, "failed")).await.expect("insert"), 1);
+    let duplicate = failed.exec(insert, &item(1, "duplicate")).await;
     assert!(duplicate.is_err(), "a duplicate key returned {duplicate:?}");
-    expect_code(
-        failed.execute(insert, &item(4, "after")).await,
-        "invalid",
-        "execute after a failure",
-    );
+    let after = failed.exec(insert, &item(4, "after")).await;
+    expect_code(after, "invalid", "execute after a failure");
     expect_code(failed.commit().await, "invalid", "commit after a failure");
 
     // dropped
     let dropped = begin(db).await;
-    assert_eq!(dropped.execute(insert, &item(5, "dropped")).await.expect("insert"), 1);
+    assert_eq!(dropped.exec(insert, &item(5, "dropped")).await.expect("insert"), 1);
     drop(dropped);
 
     assert_eq!(names(db, "transaction_items").await, ["committed"], "only the commit persists");
-    let reinserted = db.execute(insert, &item(5, "again")).await;
+    let reinserted = db.exec(insert, &item(5, "again")).await;
     assert_eq!(reinserted.expect("insert the dropped id"), 1);
 }
 
@@ -185,7 +182,7 @@ pub async fn transaction(db: &impl SqlDb) {
 /// # Panics
 ///
 /// Panics if a column reads back another value, or a `NULL` reads as one.
-pub async fn values(db: &impl SqlDb) {
+pub async fn values(db: &Database) {
     create(
         db,
         "CREATE TABLE value_items (id BIGINT PRIMARY KEY, c_int32 INTEGER, c_int64 BIGINT, \
@@ -210,12 +207,12 @@ pub async fn values(db: &impl SqlDb) {
         Value::Date(DATE.to_owned()),
         Value::Time(TIME.to_owned()),
         Value::Timestamp(STAMP.to_owned()),
-        Value::Timestamp(STAMPTZ.to_owned()),
+        Value::TimestampTz(STAMPTZ.to_owned()),
     ];
     let mut null = [const { Value::Null }; 13];
     null[0] = Value::from(2_i64);
     for params in [given, null] {
-        assert_eq!(db.execute(insert, &params).await.expect("insert"), 1);
+        assert_eq!(db.exec(insert, &params).await.expect("insert"), 1);
     }
 
     let rows = query(db, "SELECT * FROM value_items ORDER BY id", &[]).await;
@@ -255,19 +252,19 @@ pub async fn values(db: &impl SqlDb) {
     }
 }
 
-async fn create(db: &impl SqlDb, ddl: &str) {
-    db.execute(ddl, &[]).await.unwrap_or_else(|err| panic!("{ddl}: {err}"));
+async fn create(db: &Database, ddl: &str) {
+    db.exec(ddl, &[]).await.unwrap_or_else(|err| panic!("{ddl}: {err}"));
 }
 
-async fn begin<D: SqlDb>(db: &D) -> D::Transaction {
+async fn begin(db: &Database) -> Transaction {
     db.begin().await.unwrap_or_else(|err| panic!("begin: {err}"))
 }
 
-async fn query(db: &impl SqlDb, sql: &str, params: &[Value]) -> Vec<Row> {
-    db.query(sql, params).await.unwrap_or_else(|err| panic!("{sql}: {err}"))
+async fn query(db: &Database, sql: &str, params: &[Value]) -> Vec<Row> {
+    db.query_as(sql, params).await.unwrap_or_else(|err| panic!("{sql}: {err}"))
 }
 
-async fn names(db: &impl SqlDb, table: &str) -> Vec<String> {
+async fn names(db: &Database, table: &str) -> Vec<String> {
     let rows = query(db, &format!("SELECT name FROM {table} ORDER BY id"), &[]).await;
     rows.iter().map(|row| column(row, "name")).collect()
 }

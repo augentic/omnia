@@ -1,11 +1,11 @@
-//! Happy path through the omnia-sdk plugin requester: argv names where the
-//! guest loads from — a declared name, a mounted path, or a package — and,
-//! optionally, the digest its bytes must hash to. Two loads race for the
-//! first admission and both succeed with one identity and one digest; the
-//! handle's identity routes host-mediated dispatch to the loaded exporter; a
-//! later load is idempotent — pinned to the resolved digest where the
-//! location takes a pin. The loader import arrives through the SDK's own
-//! bindings; this world only imports `ops`.
+//! Happy path through the omnia-sdk plugin requester: argv names the source
+//! the guest loads from — a declared name, a mounted path, or a release —
+//! and, optionally, the digest its bytes must hash to. Two loads race for
+//! the first admission and both succeed with one name and one digest; the
+//! plugin's name routes host-mediated dispatch to the loaded exporter; a
+//! later load is idempotent — pinned to the resolved digest where the source
+//! takes a pin. The loader import arrives through the SDK's own bindings;
+//! this world only imports `ops`.
 
 #![cfg(target_arch = "wasm32")]
 
@@ -15,73 +15,71 @@ wit_bindgen::generate!({
     generate_all,
 });
 
-use omnia_sdk::WasiProvider;
-use omnia_sdk::plugins::{Digest, Location, Plugins as _};
+use omnia_sdk::plugins::{self, File, Release, Source};
 
 use crate::omnia_test::link::ops;
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
-// `declared`, `path`, `registry`, or `registry@<endpoint>` — the last naming
+// `declared`, `path`, `release`, or `release@<registry>` — the last naming
 // the registry the load fetches from.
-fn location(kind: &str, value: &str) -> Location {
+fn source(kind: &str, value: &str, pin: Option<String>) -> Source {
     let value = value.to_owned();
-    let (kind, endpoint) = kind
+    let (kind, registry) = kind
         .split_once('@')
-        .map_or((kind, None), |(kind, endpoint)| (kind, Some(endpoint.to_owned())));
-    match (kind, endpoint) {
-        ("declared", None) => Location::Declared(value),
-        ("path", None) => Location::Path(value),
-        ("registry", endpoint) => Location::Registry {
-            package: value,
-            endpoint,
-        },
-        _ => panic!("expected `declared`, `path`, `registry`, or `registry@<endpoint>`"),
+        .map_or((kind, None), |(kind, registry)| (kind, Some(registry.to_owned())));
+    match (kind, registry) {
+        ("declared", None) => Source::Declared(value),
+        ("path", None) => Source::Path(File { path: value, pin }),
+        ("release", registry) => Source::Release(Release {
+            reference: value,
+            registry,
+            pin,
+        }),
+        _ => panic!("expected `declared`, `path`, `release`, or `release@<registry>`"),
     }
 }
 
 async fn scenario() {
     let arguments = wasip3::cli::environment::get_arguments();
-    let (from, expected) = match arguments.as_slice() {
-        [_, kind, value] => (location(kind, value), None),
-        [_, kind, value, digest] => {
-            (location(kind, value), Some(digest.parse::<Digest>().expect("the expected digest")))
-        }
-        _ => panic!("expected `<declared|path|registry> <value> [digest]`; got {arguments:?}"),
+    let (kind, value, expected) = match arguments.as_slice() {
+        [_, kind, value] => (kind, value, None),
+        [_, kind, value, digest] => (kind, value, Some(digest)),
+        _ => panic!("expected `<declared|path|release> <value> [digest]`; got {arguments:?}"),
     };
-    let name = from.name();
+    let from = source(kind, value, None);
+    let name = from.name().to_owned();
 
-    // Two requests for one location: whichever admits first, the other
+    // Two requests for one source: whichever admits first, the other
     // attests the same registration.
-    let (first, second) =
-        futures::join!(WasiProvider.load(&from, None), WasiProvider.load(&from, None));
-    let first = first.expect("the first load succeeds");
-    let second = second.expect("the racing load succeeds");
-    assert_eq!(first.id(), name, "a guest registers under its location's name");
-    assert_eq!(second.id(), name);
-    let digest = first.digest();
-    assert_eq!(second.digest(), digest, "both handles attest one registration");
-    if let Some(expected) = &expected {
-        assert_eq!(digest, expected, "the reported digest is the expected one");
+    let (first, second) = futures::join!(plugins::load(from.clone()), plugins::load(from.clone()));
+    let first = first.expect("the first load runs").expect("the first load succeeds");
+    let second = second.expect("the racing load runs").expect("the racing load succeeds");
+    assert_eq!(first.name, name, "a guest registers under its source's name");
+    assert_eq!(second.name, name);
+    assert_eq!(second.digest, first.digest, "both plugins attest one registration");
+    if let Some(expected) = expected {
+        assert_eq!(&first.digest, expected, "the reported digest is the expected one");
     }
 
-    // The handle lists what the component exports, so a caller can hold it
+    // The plugin lists what the component exports, so a caller can hold it
     // to the contract it expects before dispatching.
     assert!(
-        first.exports().iter().any(|export| export == "omnia-test:link/ops"),
-        "the handle lists the exported interface: {:?}",
-        first.exports()
+        first.exports.iter().any(|export| export == "omnia-test:link/ops"),
+        "the plugin lists the exported interface: {:?}",
+        first.exports
     );
-    assert_eq!(second.exports(), first.exports());
+    assert_eq!(second.exports, first.exports);
 
-    // The handle's identity routes host-mediated dispatch to the exporter.
-    let answer = ops::ping(first.id(), "hi");
+    // The plugin's name routes host-mediated dispatch to the exporter.
+    let answer = ops::ping(&first.name, "hi");
     assert_eq!(answer, format!("{name} pong: hi"));
 
-    // A declared entry carries its own pin; a path or a package takes the
+    // A declared entry carries its own pin; a path or a release takes the
     // digest the first load reported.
-    let pin = (!matches!(from, Location::Declared(_))).then_some(digest);
-    let again = WasiProvider.load(&from, pin).await.expect("a later load attests");
-    assert_eq!(again.id(), name);
-    assert_eq!(again.digest(), digest);
+    let pin = (!matches!(from, Source::Declared(_))).then(|| first.digest.clone());
+    let again = plugins::load(source(kind, value, pin)).await;
+    let again = again.expect("a later load runs").expect("a later load attests");
+    assert_eq!(again.name, name);
+    assert_eq!(again.digest, first.digest);
 }

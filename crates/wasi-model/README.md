@@ -1,10 +1,10 @@
 # Omnia WASI Model
 
-This crate provides the Model interface for the Omnia runtime, and the guest-side `Sections` prompt builder.
+This crate provides the Model interface for the Omnia runtime. The guest-side `Sections` prompt builder is `omnia_sdk::model::prompt`.
 
 ## Interface
 
-Implements `omnia:model`, the interface the SDK's `Model` calls, over one
+Implements `omnia:model`, the interface the SDK's `model` module binds, over one
 `ModelClient` per backend.
 
 - A guest opens a model by name and begins completions through the handle
@@ -12,8 +12,9 @@ Implements `omnia:model`, the interface the SDK's `Model` calls, over one
   `not-found`. The SDK opens `default` for a request that names no model,
   and a backend receives the name as `Request::model`.
 - A completion is a session. On its `calls` the host asks the guest to run
-  a tool, or to judge a candidate answer when the request sets `check`. The
-  guest answers each call by its `id` on `results`, in any order.
+  a tool, or to judge a candidate answer when the request sets `check`, as
+  the SDK's `Request::complete_checked` does. The guest answers each call
+  by its `id` on `results`, in any order.
 - The session's `reply` is the answer, `exhausted` when a budget ran out
   first, or an error.
 - The host holds every session to the backend's `Limits`, by default:

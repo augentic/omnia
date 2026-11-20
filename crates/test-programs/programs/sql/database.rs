@@ -12,11 +12,11 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_wasi_sql::omnia::database::Database;
-use omnia_wasi_sql::omnia::store;
-use omnia_wasi_sql::omnia::types::{Error, ResultSet, Row, Value};
+use omnia_sdk::sql::database::Database;
+use omnia_sdk::sql::store;
+use omnia_sdk::sql::types::{Error, ResultSet, Row, Value};
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 const DATE: &str = "2024-02-29";
 const TIME: &str = "23:59:58.5";

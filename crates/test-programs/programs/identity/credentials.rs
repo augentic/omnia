@@ -7,9 +7,9 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use omnia_wasi_identity::omnia::{credentials, types};
+use omnia_sdk::identity::{credentials, types};
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 async fn scenario() {
     let identity = credentials::open("default".to_owned()).await.expect("open");

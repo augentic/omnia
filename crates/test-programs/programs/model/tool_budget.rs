@@ -1,28 +1,27 @@
-//! The host's tool-call budget fails the completion, not the guest handler.
+//! The host's tool-call budget ends the completion as `exhausted`, not the
+//! guest handler.
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_sdk::WasiProvider;
-use omnia_sdk::model::{Error, Model as _, Request};
+use omnia_sdk::model::{Budget, Request};
 use test_programs::{lookup, user};
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 async fn scenario() {
     let request = Request::builder().messages(vec![user("hi")]).tools(vec![lookup()]).build();
 
     let mut seen = 0_u32;
-    let error = WasiProvider
-        .complete_with(request, |_call| {
+    let exhausted = request
+        .complete_with(|_call| {
             seen += 1;
             async { Ok::<_, String>("42".to_owned()) }
         })
         .await
+        .expect("the completion runs")
         .expect_err("the second call exceeds the budget");
 
-    assert!(
-        matches!(error, Error::BudgetExhausted(ref detail) if detail.contains("budget of 1 exhausted")),
-        "unexpected: {error:?}"
-    );
+    assert_eq!(exhausted.budget, Budget::ToolCalls, "unexpected: {exhausted:?}");
+    assert!(exhausted.detail.contains("budget of 1 exhausted"), "unexpected: {exhausted:?}");
     assert_eq!(seen, 1, "only the budgeted call reaches the guest");
 }

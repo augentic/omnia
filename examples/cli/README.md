@@ -3,7 +3,7 @@
 Demonstrates a `wasi:cli/command` guest on the one router: `Handlers::command`
 registers each subcommand over its `clap::Args` input, `Router::run`
 dispatches argv (decode → handler → encode) onto a `Response`, and
-`command::export!(command_router, ..)` binds `command_router` as the
+`command::export!(command_router)` binds `command_router` as the
 `wasi:cli/run` export. The input types' doc comments are the `--help` text,
 and `--version` answers the crate version the export stamps.
 

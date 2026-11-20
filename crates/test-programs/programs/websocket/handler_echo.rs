@@ -7,12 +7,12 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use omnia_wasi_websocket::omnia::incoming_handler::Guest;
-use omnia_wasi_websocket::omnia::types::{Client, Error, Event, Message};
-use omnia_wasi_websocket::omnia::{broadcast, connections};
+use omnia_sdk::exports::websocket::incoming_handler::Guest;
+use omnia_sdk::websocket::types::{Client, Error, Event, Message};
+use omnia_sdk::websocket::{broadcast, connections};
 
 struct WebSocket;
-omnia_wasi_websocket::export!(WebSocket);
+omnia_sdk::exports::websocket::export!(WebSocket);
 
 impl Guest for WebSocket {
     async fn handle(event: Event) -> Result<(), Error> {

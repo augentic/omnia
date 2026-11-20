@@ -335,7 +335,7 @@ async fn plugins_plant() {
     let manifest = requester(test_programs::PLUGINS_PLANT)
         .guest(GuestEntry::new("plugin", planted.clone()))
         .mounts([scratch.mount(true)]);
-    let runtime = boot(manifest, &["payload.bin", "plugin.bin", "refused", "unpinned"])
+    let runtime = boot(manifest, &["payload.bin", "plugin.bin", "invalid", "unpinned"])
         .await
         .expect("assembling runtime");
     let status = runtime.run_command().await.expect("deployment runs");
@@ -551,7 +551,7 @@ async fn named_package() {
     stage_package(scratch.path(), ECHOER_PACKAGE, test_programs::LINK_ECHOER);
     let manifest = requester(test_programs::PLUGINS_LOAD)
         .registries(RegistryConfig::contents(local_registry_toml(scratch.path())));
-    let runtime = boot(manifest, &["registry", ECHOER_PACKAGE]).await.expect("assembling runtime");
+    let runtime = boot(manifest, &["release", ECHOER_PACKAGE]).await.expect("assembling runtime");
     let status = runtime.run_command().await.expect("deployment runs");
     assert_eq!(status, ExitStatus::SUCCESS, "the requester's assertions all held");
     assert_eq!(
@@ -797,7 +797,7 @@ async fn endpoint_unrouted() {
     let manifest = requester(test_programs::PLUGINS_LOAD)
         .registries(RegistryConfig::contents(local_backend_toml(scratch.path())));
     let status =
-        run(manifest, &["registry@registry.test", ECHOER_PACKAGE]).await.expect("deployment runs");
+        run(manifest, &["release@registry.test", ECHOER_PACKAGE]).await.expect("deployment runs");
     assert_eq!(status, ExitStatus::SUCCESS, "the requester's assertions all held");
 }
 
@@ -1096,7 +1096,7 @@ async fn second_start() {
         .store(&store)
         .registries(RegistryConfig::contents(local_registry_toml(scratch.path())));
     assert!(!store.exists(), "the store is created on first use");
-    let status = run(manifest, &["registry", ECHOER_PACKAGE]).await.expect("deployment runs");
+    let status = run(manifest, &["release", ECHOER_PACKAGE]).await.expect("deployment runs");
     assert_eq!(status, ExitStatus::SUCCESS, "the requester's assertions all held");
     assert_eq!(
         Digest::of(&std::fs::read(store.join(ECHOER_STORED)).expect("the release was written")),
@@ -1106,7 +1106,7 @@ async fn second_start() {
 
     // nothing routes the package now; the store alone answers
     let manifest = requester(test_programs::PLUGINS_LOAD).store(&store);
-    let status = run(manifest, &["registry", ECHOER_PACKAGE]).await.expect("deployment runs");
+    let status = run(manifest, &["release", ECHOER_PACKAGE]).await.expect("deployment runs");
     assert_eq!(status, ExitStatus::SUCCESS, "the stored release loaded");
 }
 
@@ -1125,7 +1125,7 @@ async fn stored_release() {
 
     let manifest = requester(test_programs::PLUGINS_LOAD).store(&store);
     let status =
-        run(manifest, &["registry", ECHOER_PACKAGE, &digest]).await.expect("deployment runs");
+        run(manifest, &["release", ECHOER_PACKAGE, &digest]).await.expect("deployment runs");
     assert_eq!(status, ExitStatus::SUCCESS, "the copied release loaded, pinned");
 
     let other = Digest::of(b"other bytes").to_string();
@@ -1186,7 +1186,7 @@ async fn endpoint_with_store() {
         .store(&store)
         .registries(RegistryConfig::contents(local_backend_toml(scratch.path())));
     let status =
-        run(manifest, &["registry@registry.test", ECHOER_PACKAGE]).await.expect("deployment runs");
+        run(manifest, &["release@registry.test", ECHOER_PACKAGE]).await.expect("deployment runs");
     assert_eq!(status, ExitStatus::SUCCESS, "the load was served from the registry it named");
     assert!(!store.join(ECHOER_STORED).exists(), "the named registry's release was not stored");
 
@@ -1316,7 +1316,7 @@ async fn home_relative_store() {
     assert_eq!(manifest.mounts[0].path, PathBuf::from("~/work"), "left for the home to expand");
     assert_eq!(manifest.store_root(), Some(Path::new("~/store")), "left for the home to expand");
     let deployment =
-        deployment(manifest, &["registry", ECHOER_PACKAGE]).await.expect("building deployment");
+        deployment(manifest, &["release", ECHOER_PACKAGE]).await.expect("building deployment");
     let mounts = deployment.mounts();
     let work = mounts.entries().iter().find(|mount| mount.name == "work").expect("the mount");
     assert_eq!(
@@ -1361,9 +1361,9 @@ async fn custom_registry_trait() {
     runtime.shutdown();
 }
 
-// Each case a registry source reports reaches an SDK requester as the code
-// it folds onto, and a release that misses the load's pin as a refusal
-// naming the bytes found.
+// Each case a registry source reports reaches an SDK requester under its
+// own name, and a release that misses the load's pin as the conflict naming
+// the bytes found.
 #[tokio::test]
 async fn plugins_error_codes() {
     let echoer = digest_of(test_programs::LINK_ECHOER).to_string();

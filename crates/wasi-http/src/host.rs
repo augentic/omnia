@@ -12,10 +12,15 @@ use omnia_core::{Host, HostCtx, Provides, Runtime, StoreCtx};
 pub use server::{HttpHandler, OutgoingBody};
 use wasmtime::component::{HasData, Linker, ResourceTable};
 use wasmtime_wasi_http::p3::bindings::http::{client, types};
-pub use wasmtime_wasi_http::{WasiHttpCtx, WasiHttpCtxView};
+pub use wasmtime_wasi_http::{
+    Error as ErrorCode, RequestOptions, WasiBody, WasiHttpCtx, WasiHttpCtxView, WasiHttpHooks,
+};
 
 /// The `wasi:http` slot of a backend bundle: split borrows on the backend's
 /// hooks and context into the linker-facing view.
+///
+/// A backend other than [`HttpDefault`] answers outbound requests through
+/// its own [`WasiHttpHooks`].
 pub trait HttpBorrow: Send {
     /// Borrow the `wasi:http` context as the linker-facing view, threading in
     /// the store's [`ResourceTable`].

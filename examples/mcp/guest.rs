@@ -2,7 +2,7 @@
 //!
 //! Serves a few compiled-in documents to agent backends as a stateless MCP
 //! server: it implements [`omnia_sdk::mcp::McpServer`] and calls
-//! [`omnia_wasi_http::serve`] with [`omnia_sdk::mcp::router`] from its
+//! [`omnia_sdk::http::serve`] with [`omnia_sdk::mcp::router`] from its
 //! `wasi:http` handler. `omnia.toml` routes `/mcp/docs` here.
 
 #![cfg(target_arch = "wasm32")]
@@ -20,7 +20,7 @@ wasip3::http::service::export!(HttpGuest);
 
 impl Guest for HttpGuest {
     async fn handle(request: Request) -> Result<Response, ErrorCode> {
-        omnia_wasi_http::serve(mcp::router(Docs), request).await
+        omnia_sdk::http::serve(mcp::router(Docs), request).await
     }
 }
 

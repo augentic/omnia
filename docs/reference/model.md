@@ -29,12 +29,13 @@ resource model {
 
 The `core` world holds `types` and `completion`, which every backend serves. The `imports` world includes `core`, and an optional interface joins it there.
 
-Guests normally reach these through the `omnia_sdk::Model` trait, which `omnia_sdk::WasiProvider` implements on `wasm32` over the raw bindings at `omnia_wasi_model::omnia::{completion, types}`. `Model::complete` and `Model::complete_with` run the session and hand each tool call to a closure (see the [guide](../guides/model-completions.md)). Each maps to the WIT as follows:
+Guests normally reach these through `omnia_sdk::model`, which re-exports the bindings as `completion` and `types` and their records at the module root. `Request::complete`, `complete_with`, and `complete_checked` run the session (see the [guide](../guides/model-completions.md)). Each maps to the WIT as follows:
 
-- It opens `Request::model`, or `default` when that is `None`.
-- A `Tool::Function` is a `tool`, and an empty description is `none`.
-- An `Effort` is its level's name: `low`, `medium`, `high`, or an `Effort::Other` level as written.
-- A check reaches the handler as a `ToolCall` named `check` (`model::CHECK_TOOL`) whose `arguments` are the candidate, and its answer goes back as a `verdict`. So a declared tool named `check` fails with `InvalidRequest`.
+- It opens `Request::model`, or `model::DEFAULT` when that is `None`.
+- The request's `system`, `messages`, `generation`, `format`, and `tools` are the WIT records as given.
+- `Request::workspace` is a deployment-local path, which the SDK lends as the `location` of the preopen it names. `Request::worker` is that lend's `worker` grant.
+- `complete_with` hands each `tool-call` to a closure, and writes its answer back as a `tool-result`.
+- `complete_checked` also sets `check`, hands each `candidate` to a second closure, and writes its answer back as a `verdict`.
 
 ## The session
 
@@ -111,7 +112,7 @@ When `check` is set, the backend does not finish on the model's final text. It o
 | `ok` | The candidate is the reply, and the completion ends. |
 | `err(text)` | The model reads `text` as a correction, and proposes another candidate. |
 
-A backend that runs out of candidates on a rejection ends the completion `exhausted`. Guests using `omnia-sdk` reach this through `Request::check` and a `complete_with` handler matching `call.name == model::CHECK_TOOL`. Or they use `model::Question<T>`, which derives the steering schema from `T`, deserializes each candidate, runs the guest's closure, and returns the accepted `T`.
+A backend that runs out of candidates on a rejection ends the completion `exhausted`. Guests using `omnia-sdk` reach this through `Request::complete_checked`. Or they use `model::Question<T>`, which derives the steering schema from `T`, deserializes each candidate, runs the guest's closure, and returns the accepted `T`.
 
 ### `tool`
 
@@ -203,14 +204,10 @@ A completion that spent a budget before it had an answer resolves `reply` to `ok
 
 A backend picks a failure's case by returning an `omnia_wasi_model::Error`, and a spent budget by returning an `omnia_wasi_model::Exhausted`. Any other failure is `other`.
 
-The SDK reports these as an `omnia_sdk::model::Error`:
+The SDK's `Request::complete` and its siblings return `Result<Result<Reply, Exhausted>>`:
 
-- `invalid` is `InvalidRequest`.
-- `exhausted` is `BudgetExhausted`. Its detail is the last correction when the last candidate was rejected, and the `exhausted` detail otherwise.
-- `other` is `Backend`.
-- Every other case is the variant of its name: `NotFound`, `Denied`, `Unsupported`, or `Unavailable`.
-
-Each converts to an `omnia_sdk::Error` coded as `model::Error::code` names it: a `BadRequest` for `InvalidRequest` and `BudgetExhausted`, a `BadGateway` for `Unavailable` and `Backend`, and a `ServerError` for the rest.
+- Each case is an `omnia_sdk::Error` coded by its name, a `BadGateway` for `unavailable` and a `ServerError` for the rest.
+- `exhausted` is the inner `Err`, the WIT `exhausted` record as the host sent it. `?` on it gives a `BadRequest` coded `exhausted`.
 
 ## Backends implementing this interface
 

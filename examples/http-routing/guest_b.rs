@@ -15,7 +15,7 @@ wasip3::http::service::export!(GuestB);
 impl Guest for GuestB {
     async fn handle(request: Request) -> Result<Response, ErrorCode> {
         let router = Router::new().fallback(respond);
-        omnia_wasi_http::serve(router, request).await
+        omnia_sdk::http::serve(router, request).await
     }
 }
 

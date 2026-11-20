@@ -25,11 +25,6 @@ parking_lot.workspace = true
 tracing.workspace = true
 wasmtime = { workspace = true, features = ["component-model-async"] }
 
-# guest dependencies
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-omnia-wasi-types.workspace = true
-wit-bindgen.workspace = true
-
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 # Path-only, not `workspace = true`: the workspace entries carry a `version`,
 # which cargo keeps in the published manifest, and these crates depend back

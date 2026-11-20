@@ -16,7 +16,7 @@ wit_bindgen::generate!({
 use omnia::plugins::loader;
 use omnia::plugins::types::{Error, File, Release, Source};
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 // `declared`, `path`, `release`, or `release@<registry>` — the last naming
 // the registry the load fetches from. A declared source carries no pin.

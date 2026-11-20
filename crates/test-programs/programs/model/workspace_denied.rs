@@ -2,19 +2,17 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_sdk::WasiProvider;
-use omnia_sdk::model::{Error, Model as _, Request};
-use test_programs::user;
+use omnia_sdk::model::Request;
+use test_programs::{fails_with, user};
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 async fn scenario() {
-    let error = WasiProvider
-        .complete(Request::builder().messages(vec![user("hi")]).build())
+    let error = Request::builder()
+        .messages(vec![user("hi")])
+        .build()
+        .complete()
         .await
         .expect_err("workspace tools require a grant");
-    assert!(
-        matches!(error, Error::Backend(ref detail) if detail.contains("requires grants.workspace")),
-        "unexpected: {error:?}"
-    );
+    fails_with(&error, "other", "requires grants.workspace");
 }

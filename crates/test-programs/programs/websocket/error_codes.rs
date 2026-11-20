@@ -10,11 +10,10 @@
 
 use std::fmt::Debug;
 
-use omnia_sdk::{WasiProvider, WebSockets as _};
-use omnia_wasi_websocket::omnia::types::{Client, CloseFrame, Error, Message};
-use omnia_wasi_websocket::omnia::{broadcast, connections};
+use omnia_sdk::websocket::types::{Client, CloseFrame, Error, Message};
+use omnia_sdk::websocket::{DEFAULT, broadcast, connections};
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 async fn scenario() {
     // the backend's chosen cases, through the SDK
@@ -26,10 +25,9 @@ async fn scenario() {
         ("unavailable", 502, "unavailable"),
         ("other", 500, "other"),
     ] {
-        expect_code(WasiProvider.send_to(&[connection], b"ping").await, status, code);
+        expect_code(send_to(&[connection]).await, status, code);
     }
-    let both = WasiProvider.send_to(&["unavailable", "other"], b"ping").await;
-    expect_code(both, 502, "unavailable");
+    expect_code(send_to(&["unavailable", "other"]).await, 502, "unavailable");
 
     // the host's own rules
     assert_eq!(case(Client::connect("undeclared".to_owned()).await), "not-found");
@@ -53,6 +51,13 @@ async fn scenario() {
     let ping = Message::Text("ping".to_owned());
     let sent = broadcast::send(&client, ping, vec!["peer".to_owned()]).await;
     assert_eq!(case(sent), "unsupported");
+}
+
+async fn send_to(sockets: &[&str]) -> omnia_sdk::Result<()> {
+    let client = Client::connect(DEFAULT.to_owned()).await?;
+    let sockets = sockets.iter().map(|&socket| socket.to_owned()).collect();
+    connections::send(&client, sockets, Message::Binary(b"ping".to_vec())).await?;
+    Ok(())
 }
 
 fn expect_code<T: Debug>(result: omnia_sdk::Result<T>, status: u16, code: &str) {

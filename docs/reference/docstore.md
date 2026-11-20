@@ -52,13 +52,13 @@ The host answers `unsupported` for the calls a backend cannot express yet:
 - a `delete` with a revision;
 - an `array-contains` test.
 
-Guests normally call these through the `omnia_sdk::DocumentDb` trait, which `omnia_sdk::WasiProvider` implements on `wasm32` over the raw bindings at `omnia_wasi_docstore::omnia::{store, collection, types}`. Each trait call opens the collection it names, and maps to the WIT as follows:
+Guests call these through `omnia_sdk::docstore`, which re-exports the bindings as `store`, `collection`, and `types`. `docstore::open(name)` opens a `Collection`, whose generated methods are the WIT's own. Its helpers map to the WIT as follows:
 
-- `get` is `get`.
+- `get_as` is `get`, with the body decoded as `T`. `Document::decode` decodes a document `get` returned.
 - `insert` is `put` with `absent`. A conflict is `Ok(Err(Exists))`, an outcome rather than an error.
-- `put` is `put` with no precondition.
-- `delete` is `delete` with no revision, and answers whether it removed a document.
-- `query` sends the `Filter` tree as groups (see [Filters](#filters)). `Query::after` is the WIT `after`, and `Page::next` is the page's `next`. A `Query::offset` fails with `unsupported`.
+- `upsert` is `put` with no precondition.
+- `remove` is `delete` with no revision, and answers whether a document was removed.
+- `find` is `query`, sending the `Filter` tree as groups (see [Filters](#filters)). `Query::after` is the WIT `after`, and the page's `next` is the cursor for the next page.
 
 ## Types
 
@@ -111,7 +111,7 @@ A body reads back as the JSON value that was stored, except that:
 
 ## Query contract
 
-`Filter::matches` and `SortField::compare` define what a query selects and how it orders the matches (see [Reference semantics](#reference-semantics)). Every backend serves a portable query, and serves any other query as written or fails it with `unsupported`. It never ignores part of a query and returns a page the full query would not. A portable query:
+The [filter rules](#filters) define what a query selects. Its matches order by the first field of `order-by` as `lt` orders its values, then by each next field, with `false` before `true`. Where a document lacks an `order-by` field, or the field's values differ in type, the backend decides the order. Every backend serves a portable query, and serves any other query as written or fails it with `unsupported`. It never ignores part of a query and returns a page the full query would not. A portable query:
 
 - names only top-level fields, each of which every document stores with one type of value;
 - uses only `eq`, `lt`, `lte`, `gt`, `gte`, and `in`, negated or not;
@@ -153,7 +153,7 @@ A `value` is a `boolean`, an `integer` (`s64`), a `number` (any finite `f64`), o
 
 ### Guest SDK filters
 
-On the guest side, build a filter with the `Filter` constructors from `omnia_sdk::docstore` (defined in [`crates/sdk/src/capabilities/docstore.rs`](../../crates/sdk/src/capabilities/docstore.rs)):
+On the guest side, build a filter with the `Filter` constructors from `omnia_sdk::docstore` (defined in [`crates/sdk/src/docstore.rs`](../../crates/sdk/src/docstore.rs)):
 
 | Constructor | Predicate |
 | ----------- | --------- |
@@ -161,11 +161,12 @@ On the guest side, build a filter with the `Filter` constructors from `omnia_sdk
 | `Filter::in_list(field, values)` / `not_in_list` | Set membership. Portable. |
 | `Filter::is_null(field)` / `is_not_null(field)` | Null/missing checks. Optional. |
 | `Filter::contains(field, pattern)` / `starts_with` / `ends_with` | String matching. Optional. |
+| `Filter::array_contains(field, value)` | Array membership: the field is an array holding the value. Optional. |
 | `Filter::and(filters)` / `Filter::or(filters)` | Boolean composition; **must have at least one child**. Portable. |
 | `Filter::negate(filter)` (also the `!` operator) | Logical NOT of any sub-tree. Portable. |
 | `Filter::on_date(field, "YYYY-MM-DD")` | Convenience: expands to a `gte`/`lt` timestamp range covering the UTC day. **Fallible** — returns an error for an invalid date. |
 
-`DocumentDb::query` writes the tree as groups before it reaches the host:
+`Collection::find` writes the tree as groups before it reaches the host:
 
 - each `not` is pushed down to the fields by De Morgan's laws;
 - `ne`, `not_in_list`, and `is_not_null` become negated `eq`, `in`, and `null` tests;
@@ -176,13 +177,13 @@ So any nesting of `and`, `or`, and `not` reaches every backend as the same group
 
 ### Scalar values
 
-Comparison values are flat scalars (`ScalarValue`): `Null`, `Bool`, `Int32`, `Int64`, `Float64`, `Str`, `Binary`, `Timestamp` (an ISO-8601 string; use the `Timestamp` newtype to distinguish it from a plain string). `From` impls exist for `&str`, `String`, `i32`, `i64`, `f64`, and `bool`, so `Filter::eq("status", "active")` works without explicit wrapping.
+Comparison values are flat scalars (`ScalarValue`): `Null`, `Bool`, `Int32`, `Int64`, `Float64`, `Str`, `Timestamp` (an ISO-8601 string; use the `Timestamp` newtype to distinguish it from a plain string). `From` impls exist for `&str`, `String`, `i32`, `i64`, `f64`, and `bool`, so `Filter::eq("status", "active")` works without explicit wrapping.
 
-The SDK sends `Bool` as `boolean`, `Int32` and `Int64` as `integer`, `Float64` as `number`, and `Str` and `Timestamp` as `text`. A `Timestamp` therefore compares as text, which orders ISO-8601 instants in the same zone correctly. A `Binary` value is refused, since JSON holds no bytes.
+The SDK sends `Bool` as `boolean`, `Int32` and `Int64` as `integer`, `Float64` as `number`, and `Str` and `Timestamp` as `text`. A `Timestamp` therefore compares as text, which orders ISO-8601 instants in the same zone correctly.
 
 ### Reference semantics
 
-`Filter::matches` and `SortField::compare` in `omnia_sdk::docstore` define how a filter selects a JSON document and how a sort field orders two. Their rustdoc states the rules: dotted field paths, a missing field reading as `null`, ordering only between comparable types, and a fixed type rank for sorting. The default backend evaluates queries by the same rules, and `omnia_test::guest::MemoryDocs` calls the two functions directly. A provider that evaluates queries itself calls them too, rather than writing its own evaluator.
+`Filter::matches` and `SortField::compare` in `omnia_sdk::docstore` apply a filter and a sort field to JSON documents a guest already holds. Their rustdoc states the rules: dotted field paths, a missing field reading as `null`, ordering only between comparable types, and a fixed type rank for sorting. They follow the [filter rules](#filters), and settle what those leave to the backend in one fixed way. The default backend evaluates queries by the same rules with an evaluator of its own.
 
 ### Host-enforced limits
 
@@ -201,7 +202,7 @@ It also rejects an ordering test given a boolean, and a number that is not finit
 - a tree nests at most `Filter::MAX_DEPTH` deep, which is 5;
 - an `and` or `or` has at least one child.
 
-It also refuses a `Binary` value, and an ordering comparison with `null` or a boolean. `DocumentDb::query` calls it, so through the SDK every limit fails the query with `invalid` before the query reaches the host. `omnia_test::guest::MemoryDocs` refuses the same filters.
+It also refuses an ordering comparison with `null` or a boolean. `Collection::find` calls it, so through the SDK every limit fails the query with `invalid` before the query reaches the host.
 
 ## Sorting and pagination
 
@@ -223,7 +224,7 @@ It also refuses a `Binary` value, and an ordering comparison with `null` or a bo
 | `unavailable` | The backing store did not answer, or the call exceeded its bound. |
 | `other` | Any other failure. |
 
-The SDK reports each case as an `omnia_sdk::Error` coded with the case's name: a `BadGateway` for `unavailable`, and a `ServerError` for the rest. Its `delete` answers `false` for an absent document.
+The SDK reports each case as an `omnia_sdk::Error` coded with the case's name: a `BadGateway` for `unavailable`, and a `ServerError` for the rest. `Collection::remove` answers `false` for an absent document.
 
 ## Backends implementing this interface
 

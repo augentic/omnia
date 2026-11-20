@@ -39,8 +39,8 @@ interface types {
 
   /// A connection to a broker.
   resource client {
-    /// Connect to the broker `name`, a binding the deployment declares. An
-    /// unnamed SDK handle connects to `default`.
+    /// Connect to the broker `name`, a binding the deployment declares. The
+    /// SDK's `DEFAULT` names the broker `default`.
     connect: static async func(name: string) -> result<client, error>;
   }
 

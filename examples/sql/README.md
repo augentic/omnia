@@ -1,9 +1,9 @@
 # SQL Example
 
-Demonstrates `wasi-sql` using the default (in-memory) implementation: the
-raw `omnia:sql` bindings for schema creation, then CRUD over a single
-`agency` table with hand-written parameterized SQL executed through the
-`SqlDb` capability, mapping result `Row`s back into a Rust struct.
+Demonstrates `omnia:sql` using the default (in-memory) implementation:
+schema creation on the `default` database, then CRUD over a single `agency`
+table with hand-written parameterized SQL executed through the `Database`
+helpers, mapping result `Row`s back into a Rust struct.
 
 ## Quick Start
 
@@ -38,10 +38,10 @@ curl -X DELETE http://localhost:8080/agencies/1
 
 ## Features Demonstrated
 
-- **Raw bindings** — schema creation via `store::open` + `database.execute` on the `default` database
-- **`SqlDb`** — `WasiProvider` implementing the capability, executing SQL with `query_as` / `execute`
+- **Opening a database** — `sql::open` on the `default` database, then schema creation with `exec`
+- **`Database` helpers** — executing SQL with `query_as` / `exec`
 - **Parameterized filters** — `$1`, `$2`, ... placeholders bound from `Value`s
 - **Row mapping** — decoding each `Row` into a `Serialize` struct with `FromRow`
 
-See the [SQL guide](../../docs/guides/sql.md) for the raw `omnia:sql`
-bindings, the `SqlDb` capability, and backend selection.
+See the [SQL guide](../../docs/guides/sql.md) for the `omnia:sql`
+bindings, their helpers, and backend selection.

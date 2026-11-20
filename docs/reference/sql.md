@@ -49,7 +49,7 @@ The `core` world holds `types`, `store`, and `database`, which every backend ser
 - `execute` returns how many rows a statement changed. A statement that changes no row, such as DDL, returns zero.
 - `batch` runs its statements in order, in one transaction, and returns each one's changed-row count. A failing statement rolls back the whole batch, and the call fails with that statement's error. An empty batch returns an empty list.
 
-A `database` handle holds the connection `open` returned until its first call. Every later call opens a connection for that call alone. Guests reach these interfaces through the `omnia_sdk::SqlDb` trait, which opens a database for each call and each transaction. The provider's own handle opens `default`, and `named(name)` opens `name`.
+A `database` handle holds the connection `open` returned until its first call. Every later call opens a connection for that call alone. Guests reach these interfaces through `omnia_sdk::sql`, which re-exports the bindings with helpers on the `database` and `transaction` handles (see the [guide](../guides/sql.md)).
 
 ## Statements and placeholders
 
@@ -148,19 +148,14 @@ The SDK reports each case as an `omnia_sdk::Error` coded with the case's name: a
 
 ## The SDK's value mapping
 
-`omnia_sdk::sql::Value` mirrors the WIT's cases, with `Null` for `none`. The SDK binds them as follows:
-
-- `Null` binds `none`, which is `NULL`.
-- `Int32`, `Int64`, `Boolean`, `Date`, and `Time` bind their own case, `Str` binds `text`, and `Binary` binds `binary`.
-- `Float` binds `float32`, and `Double` binds `float64`.
-- `Timestamp` binds `timestamp-tz` when it carries a `Z` or an offset after its date, and `timestamp` otherwise.
+`omnia_sdk::sql::Value` is the WIT's cases under their own names, with `Null` for `none`. Each case binds the WIT case of its name, and `Null` binds `none`, which is `NULL`. A timestamp with a zone is a `TimestampTz`, and one without is a `Timestamp`, whatever its text holds.
 
 `Value::from` builds the case a Rust value maps to, and builds `Null` from a `None`. A `u32` builds an `Int64`, and a `u64` binds once the caller converts it to an `i64`.
 
-It reads each case back into the one it binds from. Both `timestamp` and `timestamp-tz` read as `Timestamp`, and `none` reads as `Null`, whatever its column's type. `Row::get` then decodes a column as a Rust type, whichever backend returned it:
+It reads each case back into the case of its name, and `none` reads as `Null`, whatever its column's type. `Row::get` then decodes a column as a Rust type, whichever backend returned it:
 
 - `i32` and `i64` from either integer case, in range;
-- `f64` from `float32` or `float64`;
+- `f64` from `float32` or `float64`, and `f32` from `float32`;
 - `bool` from `boolean`, or from an integer `0` or `1`;
 - `String` from `text` or any temporal case;
 - `Vec<u8>` or `Bytes` from `binary`;

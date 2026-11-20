@@ -8,11 +8,10 @@
 
 use std::fmt::Debug;
 
-use omnia_sdk::{Publisher as _, WasiProvider, messaging};
-use omnia_wasi_messaging::omnia::request_reply;
-use omnia_wasi_messaging::omnia::types::{Client, Error, Message};
+use omnia_sdk::messaging::types::{Client, Error, Message};
+use omnia_sdk::messaging::{DEFAULT, producer, request_reply};
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 async fn scenario() {
     // the backend's chosen cases, through the SDK
@@ -24,8 +23,7 @@ async fn scenario() {
         ("unavailable", 502, "unavailable"),
         ("other", 500, "other"),
     ] {
-        let message = messaging::Message::new(b"order");
-        expect_code(WasiProvider.publish(topic, &message).await, status, code);
+        expect_code(publish(topic).await, status, code);
     }
 
     // the host's own rules
@@ -36,13 +34,14 @@ async fn scenario() {
     assert_eq!(case(request_reply::reply(&client, String::new(), order()).await), "invalid");
 }
 
+async fn publish(topic: &str) -> omnia_sdk::Result<()> {
+    let client = Client::connect(DEFAULT.to_owned()).await?;
+    producer::send(&client, topic.to_owned(), order()).await?;
+    Ok(())
+}
+
 fn order() -> Message {
-    Message {
-        data: b"order".to_vec(),
-        content_type: None,
-        key: None,
-        metadata: Vec::new(),
-    }
+    Message::new(b"order")
 }
 
 fn expect_code<T: Debug>(result: omnia_sdk::Result<T>, status: u16, code: &str) {

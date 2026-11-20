@@ -13,7 +13,7 @@
 
 use opentelemetry::{KeyValue, global};
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 async fn scenario() {
     let meter = global::meter("guest");
@@ -51,7 +51,7 @@ async fn scenario() {
     queue_depth.record(7, &[]);
     queue_depth.record(9, &[]);
 
-    omnia_wasi_otel::flush().await;
+    omnia_sdk::otel::flush().await;
 
     // A second build of an instrument shares its series.
     let again = meter.u64_counter("requests").build();

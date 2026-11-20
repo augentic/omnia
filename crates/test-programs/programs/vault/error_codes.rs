@@ -7,9 +7,10 @@
 
 use std::fmt::Debug;
 
-use omnia_sdk::{Result, SecretStore as _, WasiProvider};
+use omnia_sdk::Result;
+use omnia_sdk::vault::store;
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 async fn scenario() {
     for (name, status, code) in [
@@ -20,8 +21,12 @@ async fn scenario() {
         ("unavailable", 502, "unavailable"),
         ("other", 500, "other"),
     ] {
-        expect_code(WasiProvider.named(name).get("token").await, status, code);
+        expect_code(get(name).await, status, code);
     }
+}
+
+async fn get(locker: &str) -> Result<Option<Vec<u8>>> {
+    Ok(store::open(locker.to_owned()).await?.get("token".to_owned()).await?)
 }
 
 fn expect_code<T: Debug>(result: Result<T>, status: u16, code: &str) {

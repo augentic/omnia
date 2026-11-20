@@ -2,7 +2,10 @@
 
 use proc_macro2::TokenStream;
 use quote::quote;
-use syn::{Attribute, Data, DeriveInput, Error, Field, Fields, LitStr, Result};
+use syn::{
+    Attribute, Data, DeriveInput, Error, Field, Fields, GenericArgument, LitStr, PathArguments,
+    Result, Type, TypePath,
+};
 
 pub fn expand(input: &DeriveInput) -> Result<TokenStream> {
     let Data::Struct(data) = &input.data else {
@@ -29,9 +32,11 @@ pub fn expand(input: &DeriveInput) -> Result<TokenStream> {
         let key = field_key(field, prefix.as_deref())?;
         let ty = &field.ty;
         keys.push(key.clone());
-        loads.push(quote! {
-            #ident: ::omnia_sdk::ConfigExt::require::<#ty>(config, #key).await?,
-        });
+        let load = optional(ty).map_or_else(
+            || quote! { ::omnia_sdk::config::require::<#ty>(#key).await? },
+            |inner| quote! { ::omnia_sdk::config::parse::<#inner>(#key).await? },
+        );
+        loads.push(quote! { #ident: #load, });
     }
 
     let struct_ident = &input.ident;
@@ -42,17 +47,18 @@ pub fn expand(input: &DeriveInput) -> Result<TokenStream> {
             /// The configuration keys [`Self::load`] reads, one per field.
             pub const KEYS: &'static [&'static str] = &[ #(#keys),* ];
 
-            /// Load every field from its key in `config`.
+            /// Load every field from its key in the deployment's configuration.
+            ///
+            /// An `Option` field whose key is unset loads as `None`.
             ///
             /// # Errors
             ///
-            /// - [`ServerError`](::omnia_sdk::Error::ServerError) when a key is
-            ///   unset or its value does not parse as the field's type.
+            /// - [`ServerError`](::omnia_sdk::Error::ServerError) when the key
+            ///   of a field that is not an `Option` is unset, or a value does not
+            ///   parse as its field's type.
             /// - [`BadGateway`](::omnia_sdk::Error::BadGateway) when the
             ///   configuration source does not answer.
-            pub async fn load<__C: ::omnia_sdk::Config + ?Sized>(
-                config: &__C,
-            ) -> ::omnia_sdk::Result<Self> {
+            pub async fn load() -> ::omnia_sdk::Result<Self> {
                 ::core::result::Result::Ok(Self {
                     #(#loads)*
                 })
@@ -104,4 +110,23 @@ fn field_key(field: &Field, prefix: Option<&str>) -> Result<String> {
     }
     let base = field.ident.as_ref().expect("named field").to_string().to_ascii_uppercase();
     Ok(prefix.map_or_else(|| base.clone(), |prefix| format!("{prefix}{base}")))
+}
+
+// the `T` of a field typed `Option<T>`, which reads its key as optional; a
+// derive sees only tokens, so an alias of `Option` reads as required
+fn optional(ty: &Type) -> Option<&Type> {
+    let Type::Path(TypePath {
+        qself: None, path, ..
+    }) = ty
+    else {
+        return None;
+    };
+    let segment = path.segments.last().filter(|segment| segment.ident == "Option")?;
+    let PathArguments::AngleBracketed(arguments) = &segment.arguments else {
+        return None;
+    };
+    match arguments.args.first() {
+        Some(GenericArgument::Type(inner)) if arguments.args.len() == 1 => Some(inner),
+        _ => None,
+    }
 }

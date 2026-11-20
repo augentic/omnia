@@ -75,8 +75,8 @@ interface store {
   use types.{error};
   use locker.{locker};
 
-  /// Open the locker `name`, a binding the deployment declares. An unnamed
-  /// SDK handle opens `default`.
+  /// Open the locker `name`, a binding the deployment declares. The SDK's
+  /// `DEFAULT` names the locker `default`.
   ///
   /// An undeclared name fails with `not-found`.
   open: async func(name: string) -> result<locker, error>;

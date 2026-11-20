@@ -1,7 +1,7 @@
 # Blobstore Example
 
-Demonstrates `omnia:blobstore`, through `BlobStore` over `WasiProvider`, using
-the default (in-memory) implementation.
+Demonstrates `omnia:blobstore`, through the `omnia_sdk::blobstore` bindings and
+their `Container` helpers, using the default (in-memory) implementation.
 
 ## Quick Start
 

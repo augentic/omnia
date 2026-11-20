@@ -6,34 +6,38 @@ The [`docstore`](../../examples/docstore/) example is a minimal GTFS-flavoured s
 
 > **Host prerequisite.** The runtime serving your guest must link this interface: add `WasiDocStore: DocStoreDefault` (from `omnia_wasi_docstore`) to the `runtime!` `hosts:` map — see [Composing a Runtime](composing-a-runtime.md) — and declare the collections the guest uses in `DOCSTORE_COLLECTIONS`. Everything below is guest code.
 
-## The provider
+## Opening a collection
 
-Guest access goes through the `DocumentDb` trait from `omnia-sdk` — call its methods on `WasiProvider` (or through a generic provider `P: DocumentDb`):
+`omnia_sdk::docstore` carries the interface's bindings and the helpers over them. `docstore::open(name)` opens a `Collection` the deployment declares:
 
 ```rust,noplayground
-use omnia_sdk::docstore::{Document, Exists, Filter, Query, ScalarValue, SortField};
-use omnia_sdk::{DocumentDb, DocumentDbExt as _, WasiProvider, bad_request};
+use omnia_sdk::docstore::{
+    self, Collection, Document, Exists, Filter, Query, ScalarValue, SortField,
+};
+use omnia_sdk::{bad_request, not_found};
+
+async fn stops() -> omnia_sdk::Result<Collection> {
+    docstore::open("stops").await
+}
 ```
+
+The deployment declares its collections, and a write never creates one. The default backend serves the names `DOCSTORE_COLLECTIONS` lists (comma-separated, default `default`), and opening any other name fails with the code `not-found`. The example runs as `DOCSTORE_COLLECTIONS=stops make example docstore`.
 
 ## CRUD
 
-A `Document` is an id plus raw JSON bytes. `Document::json` serializes your own type into `data`, `Document::decode` reads it back, and `get_as` (from `DocumentDbExt`, blanket-implemented for every `DocumentDb`) fetches and decodes in one call. A body that is not the JSON of the type fails with the code `invalid`:
+A `Document` is an id, its JSON body, and a revision. A collection's helpers store your own type as the body and read it back. A body that is not the JSON of the type fails with the code `invalid`:
 
 ```rust,noplayground
 async fn create_stop(Json(req): Json<CreateStopRequest>) -> omnia_sdk::Result<Json<Value>> {
-    let doc = Document::json(req.id.clone(), &req.stop).context("serializing stop")?;
-    if let Err(Exists) = WasiProvider.insert("stops", &doc).await.context("inserting stop")? {
+    if let Err(Exists) = stops().await?.insert(&req.id, &req.stop).await? {
         return Err(bad_request!("stop {} already exists", req.id));
     }
     Ok(Json(json!({ "stop": req.stop, "id": req.id })))
 }
 
 async fn get_stop(Path(id): Path<String>) -> omnia_sdk::Result<Json<Stop>> {
-    let stop: Stop = WasiProvider
-        .get_as("stops", &id)
-        .await
-        .context("reading stop")?
-        .ok_or_else(|| not_found!("stop {id} not found"))?;
+    let stop: Stop =
+        stops().await?.get_as(&id).await?.ok_or_else(|| not_found!("stop {id} not found"))?;
     Ok(Json(stop))
 }
 ```
@@ -42,14 +46,12 @@ The four operations:
 
 | Method | Semantics |
 | ------ | --------- |
-| `insert(collection, &doc)` | Create; answers `Ok(Err(Exists))` and leaves the stored document untouched if the id exists |
-| `get(collection, id)` | Fetch by id → `Option<Document>` |
-| `put(collection, &doc)` | Upsert (create or replace) |
-| `delete(collection, id)` | Remove → `bool` (whether anything was deleted) |
+| `insert(id, &value)` | Create; answers `Ok(Err(Exists))` and leaves the stored document untouched if the id exists |
+| `get_as::<T>(id)` | Fetch by id, decoded → `Option<T>` |
+| `upsert(id, &value)` | Create or replace |
+| `remove(id)` | Remove → `bool` (whether anything was removed) |
 
-`get_as::<T>(collection, id)` is `get` with the body decoded into `T`. A body is a JSON object, and any other body fails with the code `invalid`. Every method fails with an `omnia_sdk::Error`, coded as the [reference](../reference/docstore.md#errors) lists.
-
-The deployment declares its collections, and a write never creates one. The default backend serves the names `DOCSTORE_COLLECTIONS` lists (comma-separated, default `default`), and a call on any other name fails with the code `not-found`. The example runs as `DOCSTORE_COLLECTIONS=stops make example docstore`.
+The generated `get(id)` answers the stored `Option<Document>`, and `Document::decode` decodes its body. A body is a JSON object, and any other body fails with the code `invalid`. The generated `delete(id, revision)` removes the document only while it holds that revision, and answers a `Conflict` otherwise. Every call fails with the shared `types::Error`, which `?` converts into an `omnia_sdk::Error` under the code the [reference](../reference/docstore.md#errors) lists.
 
 ## Filters
 
@@ -62,6 +64,7 @@ Filters reference fields *inside* the document JSON and compose into trees. Avai
 | `Filter::contains(field, text)` | Substring match |
 | `Filter::in_list(field, values)` | Membership in a `Vec<ScalarValue>` |
 | `Filter::is_null(field)` / `is_not_null(field)` | Presence checks |
+| `Filter::array_contains(field, value)` | An array field holding the value |
 | `Filter::on_date(field, "YYYY-MM-DD")` | Date-day match on a timestamp field (fallible — validates the date) |
 | `Filter::and(filters)` / `Filter::or(filters)` | Boolean composition |
 | `Filter::negate(filter)` | Logical NOT of any sub-tree |
@@ -152,30 +155,26 @@ The backend translates the filter to its native query language (direct JSON eval
 - no `order_by`;
 - `limit`, with the `next` cursor.
 
-The rest is optional: the string predicates, the null predicates, a comparison with `null`, a list that holds `null`, a dotted field path, and `order_by`. A backend serves each optional feature or fails it with the code `unsupported`, and never ignores one. A query that keeps to the portable query runs alike locally and in production.
+The rest is optional: the string predicates, the null predicates, a comparison with `null`, a list that holds `null`, a dotted field path, `array_contains`, and `order_by`. A backend serves each optional feature or fails it with the code `unsupported`, and never ignores one. A query that keeps to the portable query runs alike locally and in production.
 
 ## Queries, sorting, and pagination
 
-`query(collection, &Query)` combines the filter with sorting and cursor pagination:
+`find(&Query)` combines the filter with sorting and cursor pagination:
 
 ```rust,noplayground
 let query = Query {
     filter,
-    order_by: vec![SortField {
-        field: "stop_name".into(),
-        descending: false,
-    }],
+    order_by: vec![SortField::asc("stop_name")],
     limit: p.limit,
     after: p.after,
-    ..Default::default()
 };
-let page = WasiProvider.query("stops", &query).await.context("querying stops")?;
+let page = stops().await?.find(&query).await?;
 
-let stops: Vec<Stop> = page.items.iter().map(Document::decode).collect::<Result<_, _>>()?;
+let stops: Vec<Stop> = page.documents.iter().map(Document::decode).collect::<Result<_, _>>()?;
 Ok(Json(json!({ "stops": stops, "next": page.next })))
 ```
 
-The result is a `Page<Document>`: the page's `items`, plus an opaque `next` cursor when more pages exist. Hand the cursor back as the next query's `after` to resume. Treat it as opaque — its format is backend-specific. A page holds at most 1,000 documents. The cursor is the only way to page, and a query that sets `offset` fails with the code `unsupported`.
+`SortField` is the interface's own record, and `SortField::asc` and `desc` build one. The result is a `collection::Page`: the page's `documents`, plus an opaque `next` cursor when more pages exist. Hand the cursor back as the next query's `after` to resume. Treat it as opaque — its format is backend-specific. A page holds at most 1,000 documents, and the cursor is the only way to page.
 
 ## Backends
 

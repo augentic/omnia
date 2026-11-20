@@ -17,10 +17,10 @@
 #![cfg(target_arch = "wasm32")]
 
 use http::{Method, Request, StatusCode};
-use omnia_sdk::{ConfigExt as _, WasiProvider};
+use omnia_sdk::config;
 use wasip3::http::types::ErrorCode;
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 const ACCEPTED: [(&str, &str); 3] = [
     ("CLIENT_CERT_OK", "/mtls"),
@@ -41,11 +41,11 @@ const REFUSED: [(&str, &str, &str); 5] = [
 ];
 
 async fn scenario() {
-    let origin: String = WasiProvider.require("ORIGIN").await.expect("ORIGIN seeded");
+    let origin: String = config::require("ORIGIN").await.expect("ORIGIN seeded");
 
     for (key, path) in ACCEPTED {
         let request = request(&origin, path, key).await;
-        let response = omnia_wasi_http::handle(request)
+        let response = omnia_sdk::http::send(request)
             .await
             .unwrap_or_else(|error| panic!("{key} refused: {error:?}"));
         assert_eq!(response.status(), StatusCode::OK, "{key}");
@@ -54,7 +54,7 @@ async fn scenario() {
 
     for (key, path, reason) in REFUSED {
         let request = request(&origin, path, key).await;
-        let error = omnia_wasi_http::handle(request).await.expect_err(key);
+        let error = omnia_sdk::http::send(request).await.expect_err(key);
         let code = error.downcast_ref::<ErrorCode>().expect("a wasi:http error code");
         assert!(
             matches!(code, ErrorCode::InternalError(Some(message)) if message.contains(reason)),
@@ -64,7 +64,7 @@ async fn scenario() {
 }
 
 async fn request(origin: &str, path: &str, key: &str) -> Request<String> {
-    let bundle: String = WasiProvider.require(key).await.unwrap_or_else(|_| panic!("{key} seeded"));
+    let bundle: String = config::require(key).await.unwrap_or_else(|_| panic!("{key} seeded"));
     Request::builder()
         .method(Method::GET)
         .uri(format!("{origin}{path}"))

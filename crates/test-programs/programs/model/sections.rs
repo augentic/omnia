@@ -2,13 +2,10 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_sdk::WasiProvider;
-use omnia_sdk::model::{Model as _, Request};
-use omnia_wasi_model::omnia::types::Role as WireRole;
-use omnia_wasi_model::prompt::{Example, Sections};
-use test_programs::user;
+use omnia_sdk::model::prompt::{Example, Sections};
+use omnia_sdk::model::{Message, Request, Role};
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 async fn scenario() {
     let sections = Sections {
@@ -43,13 +40,19 @@ async fn scenario() {
 
     let (no_system, messages) = blank.channels(None);
     assert!(no_system.is_none());
-    assert_eq!(messages.len(), 1);
-    assert_eq!(messages[0].role, WireRole::User);
-    assert_eq!(messages[0].content, "do it");
+    assert!(
+        matches!(messages.as_slice(), [Message { role: Role::User, content }] if content == "do it"),
+        "unexpected: {messages:?}"
+    );
 
-    let reply = WasiProvider
-        .complete(Request::builder().maybe_system(system).messages(vec![user(&user_turn)]).build())
+    let (system, messages) = sections.channels(Some("prefer {language}"));
+    let reply = Request::builder()
+        .maybe_system(system)
+        .messages(messages)
+        .build()
+        .complete()
         .await
+        .expect("the completion runs")
         .expect("echo answers");
     assert_eq!(reply.answer, user_turn);
 }

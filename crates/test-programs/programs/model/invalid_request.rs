@@ -1,25 +1,17 @@
 //! The host refuses malformed requests before the backend runs, and the SDK
-//! refuses one the WIT cannot carry.
+//! refuses one the WIT cannot carry. Each refusal is `invalid`.
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_sdk::WasiProvider;
-use omnia_sdk::model::{
-    Error, Format, Function, Model as _, Request, SchemaFormat, Tool, WorkerGrant,
-};
-use test_programs::{lookup, user};
+use omnia_sdk::model::{Request, Tool, WorkerGrant};
+use test_programs::{lookup, user, verdict_format};
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 async fn refused(request: Request) -> String {
-    match WasiProvider.complete(request).await {
-        Err(Error::InvalidRequest(detail)) => detail,
-        other => panic!("expected invalid-request, got {other:?}"),
-    }
-}
-
-fn verdict(schema: &str) -> Format {
-    Format::Schema(SchemaFormat::builder().name("verdict").schema(schema).build())
+    let error = request.complete().await.expect_err("the request is refused");
+    assert_eq!(error.code(), "invalid", "unexpected: {error:?}");
+    error.description().to_owned()
 }
 
 // a worker grant over the lent `.`, so the host's shape rules are what refuse it
@@ -29,11 +21,25 @@ async fn worker_refused(grant: WorkerGrant) -> String {
 }
 
 fn egress(entry: &str) -> WorkerGrant {
-    WorkerGrant::builder().egress(vec![entry.to_owned()]).build()
+    WorkerGrant {
+        egress: vec![entry.to_owned()],
+        ..WorkerGrant::default()
+    }
 }
 
 fn read(entry: &str) -> WorkerGrant {
-    WorkerGrant::builder().read(vec![entry.to_owned()]).build()
+    WorkerGrant {
+        read: vec![entry.to_owned()],
+        ..WorkerGrant::default()
+    }
+}
+
+fn tool(name: &str, input_schema: &str) -> Tool {
+    Tool {
+        name: name.to_owned(),
+        description: Some("a test tool".to_owned()),
+        input_schema: input_schema.to_owned(),
+    }
 }
 
 async fn scenario() {
@@ -43,48 +49,22 @@ async fn scenario() {
     let blank = Request::builder().messages(vec![user("   ")]).build();
     assert_eq!(refused(blank).await, "empty request");
 
-    let reserved = Request::builder()
-        .messages(vec![user("hi")])
-        .tools(vec![Tool::Function(
-            Function::builder()
-                .name("read")
-                .description("shadow a host-injected tool")
-                .parameters("{}")
-                .build(),
-        )])
-        .build();
+    let reserved =
+        Request::builder().messages(vec![user("hi")]).tools(vec![tool("read", "{}")]).build();
     assert!(refused(reserved).await.contains("reserved tool name"));
-
-    let check = Request::builder()
-        .messages(vec![user("hi")])
-        .tools(vec![Tool::Function(
-            Function::builder()
-                .name("check")
-                .description("shadow the check callback")
-                .parameters("{}")
-                .build(),
-        )])
-        .build();
-    assert!(refused(check).await.contains("reserved tool name"));
 
     let repeated =
         Request::builder().messages(vec![user("hi")]).tools(vec![lookup(), lookup()]).build();
     assert!(refused(repeated).await.contains("duplicate tool name: lookup"));
 
-    let bad_parameters = Request::builder()
+    let bad_schema = Request::builder()
         .messages(vec![user("hi")])
-        .tools(vec![Tool::Function(
-            Function::builder()
-                .name("lookup")
-                .description("look something up")
-                .parameters("not json")
-                .build(),
-        )])
+        .tools(vec![tool("lookup", "not json")])
         .build();
-    assert!(refused(bad_parameters).await.contains("`lookup`"));
+    assert!(refused(bad_schema).await.contains("`lookup`"));
 
     let unparseable_schema =
-        Request::builder().messages(vec![user("hi")]).format(verdict("not json")).build();
+        Request::builder().messages(vec![user("hi")]).format(verdict_format("not json")).build();
     assert!(refused(unparseable_schema).await.contains("not valid JSON"));
 
     // a worker grant nests in its lend, so the SDK refuses one without
@@ -126,7 +106,10 @@ async fn scenario() {
     }
 
     for name in ["1ST", "A=B", "", "RUST-LOG"] {
-        let grant = WorkerGrant::builder().env(vec![(name.to_owned(), "x".to_owned())]).build();
+        let grant = WorkerGrant {
+            env: vec![(name.to_owned(), "x".to_owned())],
+            ..WorkerGrant::default()
+        };
         let detail = worker_refused(grant).await;
         assert!(detail.contains("is not an environment variable name"), "env `{name}`: {detail}");
     }

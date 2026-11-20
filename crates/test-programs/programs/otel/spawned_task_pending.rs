@@ -15,7 +15,7 @@ struct CliGuest;
 
 wasip3::cli::command::export!(CliGuest);
 
-// not `omnia_sdk::api::command::export!`: its telemetry scope would own the lifecycle, so
+// not `omnia_sdk::command::export!`: its telemetry scope would own the lifecycle, so
 // `traced` could not flush while the receiver is pending
 impl wasip3::exports::cli::run::Guest for CliGuest {
     async fn run() -> Result<(), ()> {
@@ -38,5 +38,5 @@ async fn scenario() {
 
 // ERROR-level: the span must pass the guest's default `EnvFilter` (the test
 // environment sets no `RUST_LOG`).
-#[omnia_wasi_otel::instrument(level = Level::ERROR)]
+#[omnia_sdk::otel::instrument(level = Level::ERROR)]
 async fn traced() {}

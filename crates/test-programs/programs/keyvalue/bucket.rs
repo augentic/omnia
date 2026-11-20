@@ -14,11 +14,11 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_wasi_keyvalue::omnia::bucket::Bucket;
-use omnia_wasi_keyvalue::omnia::types::{Conflict, Error, Lifetime, Precondition, Revision};
-use omnia_wasi_keyvalue::omnia::{keys, store};
+use omnia_sdk::keyvalue::bucket::Bucket;
+use omnia_sdk::keyvalue::types::{Conflict, Error, Lifetime, Precondition, Revision};
+use omnia_sdk::keyvalue::{keys, store};
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 const HOUR_MS: u64 = 3_600_000;
 

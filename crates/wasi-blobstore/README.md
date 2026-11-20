@@ -4,14 +4,14 @@ This crate provides the Blobstore interface for the Omnia runtime.
 
 ## Interface
 
-Implements `omnia:blobstore`, the interface the SDK's `BlobStore` calls, over
+Implements `omnia:blobstore`, the interface the SDK's `blobstore` module binds, over
 one `BlobStoreClient` per backend.
 
 - A guest opens a container by name and calls it through the handle `open`
   returns. A container that does not exist fails `open` with `not-found`.
   An absent object is `none`, not an error.
 - Every backend stores the portable container and object names the SDK's
-  `BlobStore` defines. A backend may reject any other name with `invalid`.
+  `blobstore` module defines. A backend may reject any other name with `invalid`.
 - `get` streams an object, or the `byte-range` of it a guest selects,
   clamped to the object's length.
 - `put` streams an object in, and stores it only once the writer resolves
@@ -19,7 +19,8 @@ one `BlobStoreClient` per backend.
 - `list` answers one page of the names under a prefix, flat or folded at
   the next `/`, with the cursor that resumes it.
 - `admin`, `uploads`, and `presign` are optional. `uploads` and `presign`
-  are unstable, and a guest binds one by enabling the feature of its name.
+  are unstable. `omnia-sdk` carries their bindings raw, and a guest that
+  generates its own enables the feature of each name.
 - The host answers `unsupported` for what `Container` cannot express yet:
   - a `put`, `delete`, `copy`, or `rename` with a precondition;
   - a `put` with attributes;

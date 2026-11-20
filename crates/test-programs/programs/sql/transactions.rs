@@ -12,11 +12,11 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_wasi_sql::omnia::database::Database;
-use omnia_wasi_sql::omnia::types::{Error, ResultSet, Value};
-use omnia_wasi_sql::omnia::{store, transactions};
+use omnia_sdk::sql::database::Database;
+use omnia_sdk::sql::types::{Error, ResultSet, Value};
+use omnia_sdk::sql::{store, transactions};
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 const INSERT: &str = "INSERT INTO items (id, name) VALUES ($1, $2)";
 

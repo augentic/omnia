@@ -4,7 +4,7 @@ This crate provides the SQL database interface for the Omnia runtime.
 
 ## Interface
 
-Implements `omnia:sql`, the interface the SDK's `SqlDb` calls, over one
+Implements `omnia:sql`, the interface the SDK's `sql` module binds, over one
 `Connection` per backend.
 
 - A guest opens a database by name through `store`, and runs statements on

@@ -6,11 +6,11 @@
 
 use std::time::Duration;
 
-use omnia_wasi_messaging::omnia::incoming_handler::Guest;
-use omnia_wasi_messaging::omnia::types::{Delivery, Settle};
+use omnia_sdk::exports::messaging::incoming_handler::Guest;
+use omnia_sdk::messaging::types::{Delivery, Settle};
 
 struct Messaging;
-omnia_wasi_messaging::export!(Messaging);
+omnia_sdk::exports::messaging::export!(Messaging);
 
 impl Guest for Messaging {
     async fn handle(_delivery: Delivery) -> Result<(), Settle> {

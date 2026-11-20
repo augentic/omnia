@@ -9,11 +9,11 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use omnia_wasi_messaging::omnia::incoming_handler::Guest;
-use omnia_wasi_messaging::omnia::types::{Client, Delivery, Message, Settle};
-use omnia_wasi_messaging::omnia::{producer, request_reply};
+use omnia_sdk::exports::messaging::incoming_handler::Guest;
+use omnia_sdk::messaging::types::{Client, Delivery, Message, Settle};
+use omnia_sdk::messaging::{producer, request_reply};
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 async fn scenario() {
     let client = Client::connect("default".to_owned()).await.expect("connect");
@@ -28,7 +28,7 @@ async fn scenario() {
 }
 
 struct Messaging;
-omnia_wasi_messaging::export!(Messaging);
+omnia_sdk::exports::messaging::export!(Messaging);
 
 impl Guest for Messaging {
     async fn handle(delivery: Delivery) -> Result<(), Settle> {

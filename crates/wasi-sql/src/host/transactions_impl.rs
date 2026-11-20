@@ -153,8 +153,10 @@ impl Task {
         }
 
         // the handle and every pending call are gone
-        if let Some(connection) = task.end(Ended::RolledBack) {
-            roll_back(&*connection).await;
+        if let Ok(connection) = task.state.as_ref().map(Arc::clone)
+            && roll_back(&*connection).await.is_ok()
+        {
+            drop(task.end(Ended::RolledBack));
         }
     }
 
@@ -183,14 +185,14 @@ impl Task {
     async fn commit(&mut self) -> Result<()> {
         let connection = self.connection()?;
         let committed = connection.commit().await.map_err(Error::from);
-        let ended = match &committed {
-            Ok(()) => Ended::Committed,
-            Err(Error::Unavailable(_)) => Ended::Unknown,
-            Err(_) => Ended::RolledBack,
-        };
-        drop(self.end(ended));
-        if committed.is_err() {
-            roll_back(&*connection).await;
+        match &committed {
+            Ok(()) => drop(self.end(Ended::Committed)),
+            Err(Error::Unavailable(_)) => drop(self.end(Ended::Unknown)),
+            Err(_) => {
+                if roll_back(&*connection).await.is_ok() {
+                    drop(self.end(Ended::RolledBack));
+                }
+            }
         }
         committed
     }
@@ -200,8 +202,9 @@ impl Task {
             return Ok(());
         }
         let connection = self.connection()?;
+        connection.rollback().await?;
         drop(self.end(Ended::RolledBack));
-        Ok(connection.rollback().await?)
+        Ok(())
     }
 
     fn connection(&self) -> Result<Arc<dyn Connection>> {
@@ -211,9 +214,10 @@ impl Task {
     // a failed call rolls the transaction back and ends it
     async fn settle<R>(&mut self, outcome: Result<R>) -> Result<R> {
         if outcome.is_err()
-            && let Some(connection) = self.end(Ended::RolledBack)
+            && let Ok(connection) = self.connection()
+            && roll_back(&*connection).await.is_ok()
         {
-            roll_back(&*connection).await;
+            drop(self.end(Ended::RolledBack));
         }
         outcome
     }
@@ -242,9 +246,13 @@ impl From<Ended> for Error {
 
 // The guest sees the failure that ended the transaction, so a rollback's own
 // failure is only logged.
-async fn roll_back(connection: &dyn Connection) {
-    if let Err(err) = connection.rollback().await {
-        tracing::warn!("failed to roll back a transaction: {err:#}");
+async fn roll_back(connection: &dyn Connection) -> Result<()> {
+    match connection.rollback().await {
+        Ok(()) => Ok(()),
+        Err(err) => {
+            tracing::warn!("failed to roll back a transaction: {err:#}");
+            Err(err.into())
+        }
     }
 }
 

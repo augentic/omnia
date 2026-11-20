@@ -8,11 +8,11 @@ This page covers the guest API, the grants model, the available backends, and ho
 
 ## Requesting a completion from a guest
 
-A model guest is typically a command-mode guest (see [Writing Guests](writing-guests.md#command-mode-guests)). It builds a `Request` and calls `Model::complete` on `WasiProvider`:
+A model guest is typically a command-mode guest (see [Writing Guests](writing-guests.md#command-mode-guests)). It builds a `Request` and calls `Request::complete`:
 
 ```rust,noplayground
-use omnia_sdk::WasiProvider;
-use omnia_sdk::model::{Format, Message, Model as _, Request, Role, SchemaFormat};
+use omnia_sdk::model::prompt::Sections;
+use omnia_sdk::model::{Format, Message, Request, Schema};
 
 let (system, user) = Sections {
     role: Some("a terse code reviewer".to_string()),
@@ -24,15 +24,16 @@ let (system, user) = Sections {
 
 let request = Request::builder()
     .maybe_system(system)
-    .messages(vec![Message { role: Role::User, content: user }])
-    .format(Format::Schema(
-        SchemaFormat::builder().name("verdict").schema("{\"type\":\"object\"}").build(),
-    ))
+    .messages(vec![Message::user(user)])
+    .format(Format::Schema(Schema {
+        name: "verdict".to_owned(),
+        schema: r#"{"type":"object"}"#.to_owned(),
+    }))
     .build();
 
-let answer = match WasiProvider.complete(request).await {
+let answer = match request.complete().await? {
     Ok(reply) => reply.answer,
-    Err(error) => format!("error: {error:?}"),
+    Err(exhausted) => format!("no answer: {exhausted}"),
 };
 ```
 
@@ -40,17 +41,19 @@ The pieces:
 
 - **`Sections`** — a guest-side builder that assembles the `system` and `messages` channels from structured fields (role, task, context, ...), so prompts stay consistent across guests.
 - **`model`** — unset here, so the completion opens the model `default`. A model is a binding the deployment declares, and a name it does not declare fails with `not-found`.
-- **`format`** — `Text`, `Json`, or `Schema` with a JSON Schema. A steering hint for the provider (`response_format` where it constrains decoding, instruction prose where it does not); nothing validates the answer against it. To judge answers, ask for a check (below).
-- **`tools`** — functions the guest itself declares for the model to call, each name given once.
-- **`grants`** — capabilities the guest lends to the completion.
+- **`format`** — `Text`, `Json`, or `Schema` with a JSON Schema, which `Format::schema_of::<T>` derives from a type. A steering hint for the provider (`response_format` where it constrains decoding, instruction prose where it does not); nothing validates the answer against it. To judge answers, ask for a check (below).
+- **`tools`** — functions the guest itself declares for the model to call, each name given once. `Tool::of::<T>` derives one's input schema from its argument type.
+- **`workspace`** and **`worker`** — the directory the guest lends the completion, and what the backend's worker may reach beyond it (see [Grants](#grants-and-host-injected-tools)).
+
+The request's fields are the `omnia:model` records themselves, re-exported from `omnia_sdk::model`. `complete` returns a nested result. The outer `Err` is a failure, coded by its WIT case name. The inner `Err` is an `Exhausted`, a completion that spent a budget before it had an answer.
 
 ### Answering tool calls
 
-A request that declares function tools uses `Model::complete_with`, which runs the completion **session**: the model's tool calls stream back to the guest, a closure answers each one over guest state, and the future resolves with the reply once the model finishes:
+A request that declares function tools uses `Request::complete_with`, which runs the completion **session**: the model's tool calls stream back to the guest, a closure answers each one over guest state, and the future resolves with the reply once the model finishes:
 
 ```rust,noplayground
-let outcome = WasiProvider
-    .complete_with(request, |call: ToolCall| async move {
+let outcome = request
+    .complete_with(|call: ToolCall| async move {
         SHELF
             .iter()
             .find(|(key, _)| *key == call.arguments)
@@ -60,16 +63,15 @@ let outcome = WasiProvider
     .await;
 ```
 
-The closure's `Err` is model-visible failure text the model may repair from. Hard failures arrive on the reply instead: a spent budget or a timeout as `exhausted`, and an oversized result as `invalid`. Under the hood this is the `omnia:model` session — `complete` on the open model returns a `calls` stream and a `reply` future, and the guest answers each call on a `results` stream (see the [reference](../reference/model.md)); the sugar runs that dance so most guests never touch it. The host bounds every session: a tool-call budget, a per-result size cap, and a per-call timeout, all backend-configurable.
+The closure's `Err` is model-visible failure text the model may repair from. Hard failures arrive on the reply instead: a spent budget or a timeout as the inner `Exhausted`, and an oversized result as an `invalid` error. Under the hood this is the `omnia:model` session — `complete` on the open model returns a `calls` stream and a `reply` future, and the guest answers each call on a `results` stream (see the [reference](../reference/model.md)); the sugar runs that dance so most guests never touch it. The host bounds every session: a tool-call budget, a per-result size cap, and a per-call timeout, all backend-configurable.
 
 ### Judging the answer: `check` and `Question<T>`
 
-The type a guest wants back cannot cross the WIT boundary, but a callback can. A request built with `.check(true)` asks the backend to offer every candidate answer to the guest before finishing: the candidate arrives at the `complete_with` handler as a `ToolCall` named `check` whose `arguments` are the candidate text. Returning `Ok` accepts it as the reply; returning `Err(text)` sends `text` back as the correction turn and the backend goes round again (bounded by its own round budget — a final rejection surfaces as `Error::BudgetExhausted` carrying the guest's last correction). The check needs no declaration in `tools` and does not count against the tool-call budget.
+The type a guest wants back cannot cross the WIT boundary, but a callback can. `Request::complete_checked` asks the backend to offer every candidate answer to the guest before finishing. Each arrives at its second closure as a `Candidate`, whose `answer` is the candidate text. Returning `Ok(())` accepts it as the reply. Returning `Err(text)` sends `text` back as the correction turn, and the backend goes round again, bounded by its own round budget. A backend that runs out on a rejection answers the inner `Exhausted`, naming the budget that ran out. The check needs no declaration in `tools` and does not count against the tool-call budget.
 
 `omnia_sdk::model::Question<T>` runs that exchange for a typed answer. `T` derives `Deserialize` and `JsonSchema` (the guest depends on `schemars` 1.x, the version `omnia-sdk` builds against); the question steers the provider with `T`'s schema, deserializes each candidate, hands it to the guest's closure, and returns the accepted `T`:
 
 ```rust,noplayground
-use omnia_sdk::WasiProvider;
 use omnia_sdk::model::Question;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -82,17 +84,17 @@ struct Verdict {
 
 let verdict = Question::<Verdict>::new("verdict")
     .system("a terse code reviewer")
-    .ask(&WasiProvider, "decide whether the change is acceptable", None, |verdict| {
+    .ask("decide whether the change is acceptable", None, |verdict| {
         if verdict.verdict == "pass" || !verdict.findings.is_empty() {
             Ok(())
         } else {
             Err(vec!["a `fail` verdict must list its findings".to_owned()])
         }
     })
-    .await?;
+    .await??;
 ```
 
-The closure's `Err(findings)` becomes the correction turn (one `## Previous answer (rejected)` / `## Findings` template by default; `Question::correction(|previous, findings| ..)` renders it differently for one question); a candidate that does not deserialize as `T` is corrected the same way, and a completion that ends without an accepted answer after such a mismatch is `Error::InvalidRequest` — the schema and the type disagree, which more rounds would not fix. `Question::tools(..)` declares function tools and `ask`'s `tools` argument handles them; `Question::schema(|schema| ..)` post-processes the steering schema (enums, counts, patterns) without touching `T`.
+The second `?` passes an `Exhausted` on as a `400` coded `exhausted`; a guest that retries or falls back matches the inner `Err` instead. The closure's `Err(findings)` becomes the correction turn (one `## Previous answer (rejected)` / `## Findings` template by default; `Question::correction(|previous, findings| ..)` renders it differently for one question); a candidate that does not deserialize as `T` is corrected the same way, and a completion that ends without an accepted answer after such a mismatch is an `invalid` error — the schema and the type disagree, which more rounds would not fix. `Question::tools(..)` declares function tools and `ask`'s `tools` argument handles them; `Question::schema(|schema| ..)` post-processes the steering schema (enums, counts, patterns) without touching `T`.
 
 ## Grants and host-injected tools
 
@@ -100,13 +102,13 @@ Grants are the security boundary. Rather than giving the model backend ambient a
 
 - **`workspace`** — a directory descriptor from the guest's own preopen table (populated by the host's `[[mount]]`; see [Multi-Guest Deployments](multi-guest-deployments.md#mounts-giving-guests-a-workspace)). The model can only see a tree the host mounted *and* the guest chose to lend.
 
-This grant is what drives the host-injected tools. The names `read`, `list`, and `write` are reserved — guests must not redeclare them in `tools`, nor `check`, the answer callback's name — and the host serves them through the per-completion `ToolHost`, bounded to the lent tree. When a workspace is lent, the genai backend advertises `read` and `list` to the model and executes them host-side, never through the session; `write` stays reserved but is not yet advertised. The cursor backend skips them entirely — its agent inspects the workspace natively. Guest-declared function tools also execute through the `ToolHost` (`call_tool`), so every invocation passes through the host's declared-tool check and session limits.
+This grant is what drives the host-injected tools. The names `read`, `list`, and `write` are reserved — guests must not redeclare them in `tools` — and the host serves them through the per-completion `ToolHost`, bounded to the lent tree. When a workspace is lent, the genai backend advertises `read` and `list` to the model and executes them host-side, never through the session; `write` stays reserved but is not yet advertised. The cursor backend skips them entirely — its agent inspects the workspace natively. Guest-declared function tools also execute through the `ToolHost` (`call_tool`), so every invocation passes through the host's declared-tool check and session limits.
 
 ## Backends
 
 ### `ModelDefault` — deterministic echo (in-tree)
 
-The default backend answers every completion with its own prompt: the last message echoed as a string for `format::text`, wrapped as `{"echo": ...}` for `format::json`. That makes guest wiring and prompt assembly smoke-testable with no live model. It serves the models `MODEL_NAMES` lists, comma-separated, and `default` alone when it is unset; any other name is `not-found`. What an echo cannot honour is `unsupported`: a `format::schema` (no echo can conform to an arbitrary guest schema) and a set `generation` field. So bind a real backend for typed answers. A `check` request gets its one candidate offered once, and a rejection is `exhausted`, which the SDK reports as `Error::BudgetExhausted`.
+The default backend answers every completion with its own prompt: the last message echoed as a string for `format::text`, wrapped as `{"echo": ...}` for `format::json`. That makes guest wiring and prompt assembly smoke-testable with no live model. It serves the models `MODEL_NAMES` lists, comma-separated, and `default` alone when it is unset; any other name is `not-found`. What an echo cannot honour is `unsupported`: a `format::schema` (no echo can conform to an arbitrary guest schema) and a set `generation` field. So bind a real backend for typed answers. A `check` request gets its one candidate offered once, and a rejection is `exhausted`, which the SDK returns as the inner `Exhausted`.
 
 For tests, CI, and local development of model guests, define an inline `ModelClient` impl that returns a fixed answer — no network, no credentials, fully deterministic, and (unlike an echo) able to satisfy `format::schema` (see the recipe in [Testing Policy](testing-policy.md#scenario-backends)). The [`model` example](../../examples/model/) serves its fixed schema answer that way:
 
@@ -156,7 +158,7 @@ wasip3::http::service::export!(HttpGuest);
 
 impl Guest for HttpGuest {
     async fn handle(request: Request) -> Result<Response, ErrorCode> {
-        omnia_wasi_http::serve(mcp::router(Docs), request).await
+        omnia_sdk::http::serve(mcp::router(Docs), request).await
     }
 }
 ```

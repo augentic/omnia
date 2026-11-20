@@ -1,4 +1,5 @@
 #![doc = include_str!("../README.md")]
+#![cfg(not(target_arch = "wasm32"))]
 
 //! # WASI Model
 //!
@@ -7,15 +8,5 @@
 //! prompt completed. It receives an answer it may have judged itself, without
 //! ever seeing which backend produced it.
 
-pub mod prompt;
-
-cfg_select! {
-    target_arch = "wasm32" => {
-        mod guest;
-        pub use guest::*;
-    }
-    _ => {
-        mod host;
-        pub use host::*;
-    }
-}
+mod host;
+pub use host::*;

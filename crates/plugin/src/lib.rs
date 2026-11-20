@@ -37,25 +37,19 @@
 //! or on `omnia-core` directly; those are dependencies for building another
 //! capability crate.
 
-cfg_select! {
-    target_arch = "wasm32" => {
-        mod guest;
-        pub use guest::*;
-    }
-    _ => {
-        mod admission;
-        mod error;
-        mod host;
-        mod loader;
-        mod registry;
-        mod source;
-        mod store;
+#![cfg(not(target_arch = "wasm32"))]
 
-        pub use self::error::LoadError;
-        pub use self::host::{WasiPlugins, WasiPluginsView};
-        pub use self::loader::{LoadConflict, Plugin, PluginLoader, Plugins};
-        pub use self::registry::RegistryClient;
-        pub use self::source::{Location, RegistrySource};
-        pub use self::store::{FsStore, NoStore, PackageStore, Reference};
-    }
-}
+mod admission;
+mod error;
+mod host;
+mod loader;
+mod registry;
+mod source;
+mod store;
+
+pub use self::error::LoadError;
+pub use self::host::{WasiPlugins, WasiPluginsView};
+pub use self::loader::{LoadConflict, Plugin, PluginLoader, Plugins};
+pub use self::registry::RegistryClient;
+pub use self::source::{Location, RegistrySource};
+pub use self::store::{FsStore, NoStore, PackageStore, Reference};

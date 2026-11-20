@@ -35,6 +35,7 @@ pub struct Program {
 pub struct Components {
     root: PathBuf,
     package: Option<String>,
+    features: Vec<String>,
     sources: Vec<Source>,
     extras: Vec<String>,
     sync: Option<PathBuf>,
@@ -49,6 +50,7 @@ impl Components {
         Self {
             root: root.as_ref().to_path_buf(),
             package: None,
+            features: Vec::new(),
             sources: Vec::new(),
             extras: Vec::new(),
             sync: None,
@@ -61,6 +63,17 @@ impl Components {
     #[must_use]
     pub fn package(mut self, name: impl Into<String>) -> Self {
         self.package = Some(name.into());
+        self
+    }
+
+    /// Cargo features enabled on the package whose examples are built.
+    ///
+    /// A feature-gated handler reaches its suite only when the guest is
+    /// built with the feature, so a `build.rs` passes the ones its own
+    /// package was built with.
+    #[must_use]
+    pub fn features<S: Into<String>>(mut self, names: impl IntoIterator<Item = S>) -> Self {
+        self.features.extend(names.into_iter().map(Into::into));
         self
     }
 
@@ -229,8 +242,8 @@ impl Components {
                 .unwrap_or_else(|err| panic!("spawning the {WASM_TARGET} fixture build: {err}"));
             assert!(
                 status.success(),
-                "the fixture components could not be built; install the target with `rustup \
-                 target add {WASM_TARGET}` and retry"
+                "the {WASM_TARGET} fixture build failed ({status}), and its compiler errors are \
+                 above. A missing target installs with `rustup target add {WASM_TARGET}`."
             );
         }
 
@@ -294,6 +307,9 @@ impl Components {
             let mut command = env::nested_build(root, target_dir);
             if let Some(package) = &self.package {
                 command.arg(format!("--package={package}"));
+            }
+            if !self.features.is_empty() {
+                command.arg(format!("--features={}", self.features.join(",")));
             }
             command.args(targets);
             commands.push(command);
@@ -601,5 +617,35 @@ mod tests {
                 },
             ]
         );
+    }
+
+    // The features ride the example build of the named package alone; a
+    // build of `cdylib` packages names no features.
+    #[test]
+    fn example_features() {
+        let components = Components::in_workspace(".")
+            .package("gtfs-adapter")
+            .features(["god-mode", "trace"])
+            .examples(["gtfs-adapter-guest"]);
+        let packages = package_programs("source", vec!["typescript".to_owned()]);
+
+        let commands = components.nested_builds(Path::new("."), Path::new("target"), &packages);
+
+        let args: Vec<Vec<String>> = commands
+            .iter()
+            .map(|command| {
+                command.get_args().map(|arg| arg.to_string_lossy().into_owned()).collect()
+            })
+            .collect();
+        let [examples, packages] = args.as_slice() else {
+            panic!("expected an example build and a package build, got {args:?}");
+        };
+        assert!(examples.ends_with(&[
+            "--package=gtfs-adapter".to_owned(),
+            "--features=god-mode,trace".to_owned(),
+            "--example".to_owned(),
+            "gtfs-adapter-guest".to_owned(),
+        ]));
+        assert!(!packages.iter().any(|arg| arg.starts_with("--features")), "{packages:?}");
     }
 }

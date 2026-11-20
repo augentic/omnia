@@ -9,9 +9,8 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_sdk::WasiProvider;
-use omnia_sdk::model::{Format, Message, Model as _, Request, Role, SchemaFormat};
-use omnia_wasi_model::prompt::Sections;
+use omnia_sdk::model::prompt::Sections;
+use omnia_sdk::model::{Exhausted, Format, Message, Reply, Request, Schema};
 use wasip3::exports::cli::run::Guest;
 use wasip3::filesystem::preopens;
 
@@ -26,9 +25,10 @@ impl Guest for CliGuest {
     }
 }
 
-fn render(outcome: Result<omnia_sdk::model::Reply, omnia_sdk::model::Error>) -> String {
+fn render(outcome: omnia_sdk::Result<Result<Reply, Exhausted>>) -> String {
     match outcome {
-        Ok(reply) => reply.answer,
+        Ok(Ok(reply)) => reply.answer,
+        Ok(Err(exhausted)) => format!("no answer: {exhausted}"),
         Err(error) => format!("error: {error:?}"),
     }
 }
@@ -48,15 +48,13 @@ async fn default_completion() -> String {
 
     let request = Request::builder()
         .maybe_system(system)
-        .messages(vec![Message {
-            role: Role::User,
-            content: user,
-        }])
-        .format(Format::Schema(
-            SchemaFormat::builder().name("verdict").schema("{\"type\":\"object\"}").build(),
-        ))
+        .messages(vec![Message::user(user)])
+        .format(Format::Schema(Schema {
+            name: "verdict".to_owned(),
+            schema: r#"{"type":"object"}"#.to_owned(),
+        }))
         .maybe_workspace(workspace)
         .build();
 
-    render(WasiProvider.complete(request).await)
+    render(request.complete().await)
 }

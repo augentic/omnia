@@ -6,7 +6,7 @@
 
 use tracing::Level;
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 async fn scenario() {
     traced().await;
@@ -14,5 +14,5 @@ async fn scenario() {
 
 // ERROR-level: the span must pass the guest's default `EnvFilter` (the test
 // environment sets no `RUST_LOG`).
-#[omnia_wasi_otel::instrument(level = Level::ERROR)]
+#[omnia_sdk::otel::instrument(level = Level::ERROR)]
 async fn traced() {}

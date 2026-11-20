@@ -4,8 +4,8 @@ This crate provides the Messaging interface for the Omnia runtime.
 
 ## Interface
 
-Implements `omnia:messaging`, the interface the SDK's `Publisher` and
-`messaging::export!` call, over one `Endpoint` per backend.
+Implements `omnia:messaging`, the interface the SDK's `messaging` module
+and `messaging::export!` bind, over one `Endpoint` per backend.
 
 - A guest connects to a broker by name. The deployment declares one,
   `default`, and any other name fails with `not-found`.
@@ -26,9 +26,10 @@ Implements `omnia:messaging`, the interface the SDK's `Publisher` and
   settlement yet.
 - `request-reply` is optional, and awaits one reply. A zero timeout is
   `invalid`, and so is a reply to an empty address.
-- `consumer`, `log`, and `admin` are unstable, and a guest binds one by
-  enabling the feature of its name. The host answers every call of them
-  with `unsupported`, since `Endpoint` cannot carry them yet.
+- `consumer`, `log`, and `admin` are unstable. `omnia-sdk` carries their
+  bindings raw, and a guest that generates its own enables the feature of
+  each name. The host answers every call of them with `unsupported`, since
+  `Endpoint` cannot carry them yet.
 - A delivery carries no `position`, `attempt`, or `published-at` yet.
 
 ## Backend

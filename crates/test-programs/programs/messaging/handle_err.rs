@@ -4,11 +4,11 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_wasi_messaging::omnia::incoming_handler::Guest;
-use omnia_wasi_messaging::omnia::types::{Delivery, Release, Settle};
+use omnia_sdk::exports::messaging::incoming_handler::Guest;
+use omnia_sdk::messaging::types::{Delivery, Release, Settle};
 
 struct Messaging;
-omnia_wasi_messaging::export!(Messaging);
+omnia_sdk::exports::messaging::export!(Messaging);
 
 impl Guest for Messaging {
     async fn handle(delivery: Delivery) -> Result<(), Settle> {

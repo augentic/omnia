@@ -1,0 +1,213 @@
+//! The inbound side of `wasi:http`: axum routes on a [`Router`], served
+//! inside the `handler` span [`trace`] opens.
+
+use std::convert::Infallible;
+use std::future::{Future, ready};
+
+use axum::Json;
+use axum::extract::{FromRequestParts, MatchedPath, Request};
+use axum::middleware::Next;
+use axum::response::{IntoResponse, Response};
+use axum::routing::MethodRouter;
+use http::HeaderMap;
+use http::request::Parts;
+use tracing::Instrument as _;
+
+use crate::{Context, ErrorBody, Handlers, Metadata, Router};
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __export_http {
+    ($router:path $(,)?) => {
+        #[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
+        const _: () = {
+            struct HttpGuest;
+
+            $crate::wasip3::http::service::export!(HttpGuest);
+
+            impl $crate::wasip3::exports::http::handler::Guest for HttpGuest {
+                async fn handle(
+                    request: $crate::wasip3::http::types::Request,
+                ) -> ::core::result::Result<
+                    $crate::wasip3::http::types::Response,
+                    $crate::wasip3::http::types::ErrorCode,
+                > {
+                    $crate::http::serve($router(), request).await
+                }
+            }
+        };
+
+        // naming the fn keeps a private one from reading as dead code
+        #[cfg(not(all(target_arch = "wasm32", target_os = "wasi")))]
+        const _: () = {
+            let _ = $router;
+        };
+    };
+}
+
+/// Serve one `wasi:http` request through `router`.
+///
+/// The request runs inside the guest telemetry scope and the `handler` span
+/// [`trace`] opens, so a router served here does not layer `trace` itself.
+/// [`export!`](crate::http::export!) expands to this call, and a hand-written
+/// `wasi:http` export calls it directly.
+///
+/// # Errors
+///
+/// Returns the WASI error code when the request or the router's response
+/// does not convert.
+#[cfg(target_arch = "wasm32")]
+#[crate::otel::instrument(name = "http_guest_handle")]
+pub async fn serve(
+    router: impl Into<axum::Router>, request: wasip3::http::types::Request,
+) -> Result<wasip3::http::types::Response, wasip3::http::types::ErrorCode> {
+    use wasip3::http::types::ErrorCode;
+    use wasip3::http_compat::{http_from_wasi_request, http_into_wasi_response};
+
+    let router = router.into().layer(axum::middleware::from_fn(trace));
+    let request = http_from_wasi_request(request)?;
+    tracing::trace!("serving request: {:?}", request.headers());
+
+    let response = tower::ServiceExt::oneshot(router, request)
+        .await
+        .map_err(|e| ErrorCode::InternalError(Some(format!("issue processing request: {e}"))))?;
+    tracing::trace!("guest response: {response:?}");
+    http_into_wasi_response(response)
+}
+
+/// Serve a request inside a `handler` span carrying its request and
+/// correlation ids, its method, and its route.
+///
+/// Apply with `axum::middleware::from_fn(trace)` on a native host or in a
+/// test. In a guest, [`export!`](crate::http::export!) and `serve` apply it
+/// to the router they serve. The ids the span carries are the ones the
+/// [`Metadata`] and [`Context`] extractors hand the handler, a minted request
+/// id included. The `route` is the template the router matched, such as
+/// `/items/{id}`; a request no route matched carries none.
+pub async fn trace(mut request: Request, next: Next) -> Response {
+    let metadata = Metadata::from_headers(request.headers());
+    let span = tracing::info_span!(
+        "handler",
+        request_id = metadata.request_id.as_deref(),
+        correlation_id = metadata.correlation_id.as_deref(),
+        method = request.method().as_str(),
+        route = request.extensions().get::<MatchedPath>().map(MatchedPath::as_str),
+    );
+    request.extensions_mut().insert(metadata);
+    next.run(request).instrument(span).await
+}
+
+impl Metadata {
+    /// Build metadata from HTTP request headers: `x-request-id`,
+    /// `x-correlation-id`, `x-causation-id`, `x-tenant`, and `x-deadline`.
+    ///
+    /// HTTP's carrier for the values the command line reads from the
+    /// environment; a missing request id is minted as on every transport.
+    ///
+    /// # Panics
+    ///
+    /// Panics as [`Metadata::from_lookup`] does.
+    #[must_use]
+    pub fn from_headers(headers: &HeaderMap) -> Self {
+        Self::from_lookup(|name| {
+            headers
+                .get(format!("x-{name}"))
+                .and_then(|value| value.to_str().ok())
+                .map(str::to_owned)
+        })
+    }
+}
+
+// Reads the metadata `trace` stored, so a request id minted there is minted once.
+impl<S: Send + Sync> FromRequestParts<S> for Metadata {
+    type Rejection = Infallible;
+
+    fn from_request_parts(
+        parts: &mut Parts, _state: &S,
+    ) -> impl Future<Output = Result<Self, Self::Rejection>> + Send {
+        ready(Ok(parts
+            .extensions
+            .get::<Self>()
+            .cloned()
+            .unwrap_or_else(|| Self::from_headers(&parts.headers))))
+    }
+}
+
+impl<S: Send + Sync> FromRequestParts<S> for Context {
+    type Rejection = Infallible;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let metadata = Metadata::from_request_parts(parts, state).await?;
+        Ok(Self { metadata })
+    }
+}
+
+impl Handlers {
+    /// Register a [`MethodRouter`] at `path`.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `path` overlaps an existing route for the same method.
+    pub fn route(mut self, path: &str, method_router: MethodRouter) -> Self {
+        self.http = self.http.route(path, method_router);
+        self
+    }
+}
+
+impl From<Handlers> for axum::Router {
+    fn from(handlers: Handlers) -> Self {
+        handlers.http
+    }
+}
+
+impl Router {
+    /// Apply a [`tower::Layer`] to every HTTP route on this router.
+    pub fn layer<L>(mut self, layer: L) -> Self
+    where
+        L: tower::Layer<axum::routing::Route> + Clone + Send + Sync + 'static,
+        L::Service:
+            tower::Service<::http::Request<axum::body::Body>> + Clone + Send + Sync + 'static,
+        <L::Service as tower::Service<::http::Request<axum::body::Body>>>::Response:
+            axum::response::IntoResponse + 'static,
+        <L::Service as tower::Service<::http::Request<axum::body::Body>>>::Error:
+            Into<std::convert::Infallible> + 'static,
+        <L::Service as tower::Service<::http::Request<axum::body::Body>>>::Future: Send + 'static,
+    {
+        self.http = self.http.layer(layer);
+        self
+    }
+}
+
+impl From<Router> for axum::Router {
+    fn from(router: Router) -> Self {
+        router.http
+    }
+}
+
+impl<B> tower::Service<::http::Request<B>> for Router
+where
+    B: http_body::Body<Data = bytes::Bytes> + Send + 'static,
+    B::Error: Into<axum::BoxError>,
+{
+    type Error = std::convert::Infallible;
+    type Future = axum::routing::future::RouteFuture<std::convert::Infallible>;
+    type Response = axum::response::Response;
+
+    fn poll_ready(
+        &mut self, cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        <axum::Router as tower::Service<::http::Request<B>>>::poll_ready(&mut self.http, cx)
+    }
+
+    fn call(&mut self, req: ::http::Request<B>) -> Self::Future {
+        self.http.call(req)
+    }
+}
+
+// Carries the same `error` discriminant every transport emits, so a client
+// classifies failures identically over HTTP and the command line.
+impl IntoResponse for crate::Error {
+    fn into_response(self) -> Response {
+        (self.status(), Json(ErrorBody::from(&self))).into_response()
+    }
+}

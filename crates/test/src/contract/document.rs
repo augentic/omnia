@@ -1,6 +1,6 @@
-//! The [`DocumentDb`] rows.
+//! The `omnia:docstore` rows.
 //!
-//! Each row uses a collection of its own, so the rows run in any order, or
+//! Each row opens a collection of its own, so the rows run in any order, or
 //! all at once, over one store. Every collection name, id, body, and field
 //! the rows use is portable, as the
 //! [document store reference](https://github.com/augentic/omnia/blob/main/docs/reference/docstore.md#portable-names-and-bodies)
@@ -10,8 +10,8 @@
 
 use std::iter;
 
-use omnia_sdk::docstore::{Document, Exists, Filter, Query, ScalarValue, SortField};
-use omnia_sdk::{DocumentDb, Result};
+use omnia_sdk::Result;
+use omnia_sdk::docstore::{self, Collection, Exists, Filter, Query, ScalarValue, SortField};
 use serde_json::{Value, json};
 
 use super::{expect_code, is_code};
@@ -24,22 +24,22 @@ const OPTIONAL: &str = "optionalquery";
 // a cursor still running after this many pages never ends
 const MAX_PAGES: usize = 32;
 
-/// [`insert`](DocumentDb::insert) on an id already stored returns [`Exists`]
+/// [`insert`](Collection::insert) on an id already stored returns [`Exists`]
 /// and leaves the stored body unchanged.
 ///
 /// # Panics
 ///
 /// Panics if the second insert fails, succeeds, or replaces the body.
-pub async fn insert_exists(db: &impl DocumentDb) {
-    let first = db.insert(EXISTS, &document("dup", &json!({"v": 1}))).await;
+pub async fn insert_exists() {
+    let collection = open(EXISTS).await;
+    let first = collection.insert("dup", &json!({"v": 1})).await;
     assert_eq!(first.expect("insert a fresh id"), Ok(()), "a fresh id was refused");
 
-    let second = db.insert(EXISTS, &document("dup", &json!({"v": 2}))).await;
+    let second = collection.insert("dup", &json!({"v": 2})).await;
 
     assert_eq!(second.expect("insert a stored id"), Err(Exists));
-    let stored = db.get(EXISTS, "dup").await.expect("get").expect("the first body is stored");
-    let body: Value = stored.decode().expect("a JSON body");
-    assert_eq!(body, json!({"v": 1}), "a refused insert replaced the body");
+    let stored = collection.get_as::<Value>("dup").await.expect("get_as");
+    assert_eq!(stored, Some(json!({"v": 1})), "a refused insert replaced the body");
 }
 
 /// Every portable filter selects what [`Filter::matches`] selects, a small
@@ -51,7 +51,8 @@ pub async fn insert_exists(db: &impl DocumentDb) {
 /// Panics if a filter selects other documents, a page holds more than its
 /// `limit`, the cursor repeats or skips a match, or a zero `limit` does not
 /// fail with the code `invalid`.
-pub async fn portable_query(db: &impl DocumentDb) {
+pub async fn portable_query() {
+    let collection = open(PORTABLE).await;
     let stored = [
         ("a", json!({"kind": "fruit", "rank": 3, "weight": 0.5, "fresh": true})),
         ("b", json!({"kind": "veg", "rank": 1, "weight": 2.5, "fresh": false})),
@@ -59,7 +60,7 @@ pub async fn portable_query(db: &impl DocumentDb) {
         ("d", json!({"kind": "grain", "rank": 5, "weight": 4.0, "fresh": true})),
         ("e", json!({"kind": "veg", "rank": 4, "weight": 1.5, "fresh": true})),
     ];
-    seed(db, PORTABLE, &stored).await;
+    seed(&collection, &stored).await;
 
     for filter in [
         Filter::eq("kind", "fruit"),
@@ -81,7 +82,7 @@ pub async fn portable_query(db: &impl DocumentDb) {
         !Filter::or([Filter::eq("kind", "veg"), Filter::gt("rank", 4)]),
         !Filter::and([Filter::eq("fresh", true), Filter::lt("rank", 4)]),
     ] {
-        let selected = walk(db, PORTABLE, &filtered(&filter)).await;
+        let selected = walk(&collection, &filtered(&filter)).await;
         let selected = selected.unwrap_or_else(|err| panic!("{filter:?} failed with `{err}`"));
         assert_eq!(sorted(selected), matching(&stored, &filter), "{filter:?} selected others");
     }
@@ -90,7 +91,7 @@ pub async fn portable_query(db: &impl DocumentDb) {
         limit: Some(2),
         ..filtered(&Filter::gte("rank", 2))
     };
-    let walked = walk(db, PORTABLE, &paged).await.expect("page through the matches");
+    let walked = walk(&collection, &paged).await.expect("page through the matches");
     let expected = matching(&stored, &Filter::gte("rank", 2));
     assert_eq!(sorted(walked), expected, "the pages did not hold each match once");
 
@@ -98,7 +99,7 @@ pub async fn portable_query(db: &impl DocumentDb) {
         limit: Some(0),
         ..Query::default()
     };
-    expect_code(db.query(PORTABLE, &zero).await, "invalid", "a query with a zero limit");
+    expect_code(collection.find(&zero).await, "invalid", "a query with a zero limit");
 }
 
 /// A filter past a limit [`Filter::check`] enforces fails the query with the
@@ -111,14 +112,15 @@ pub async fn portable_query(db: &impl DocumentDb) {
 /// - an empty list;
 /// - an empty `and`, and an empty `or`;
 /// - one condition more than [`Filter::MAX_CONDITIONS`];
-/// - a [`Binary`](ScalarValue::Binary) value, and a number that is not finite;
+/// - a number that is not finite;
 /// - an ordering comparison with `null`, and one with a boolean.
 ///
 /// # Panics
 ///
 /// Panics if a query with one of those filters is served, or fails with
 /// another code.
-pub async fn filter_limits(db: &impl DocumentDb) {
+pub async fn filter_limits() {
+    let collection = open(LIMITS).await;
     let deep = (0..Filter::MAX_DEPTH).fold(Filter::eq("rank", 1), |inner, _| !inner);
     let long = Filter::in_list("rank", iter::repeat_n(1, Filter::MAX_LIST_LEN + 1));
     let many = Filter::and(iter::repeat_n(Filter::eq("rank", 1), Filter::MAX_CONDITIONS + 1));
@@ -130,12 +132,11 @@ pub async fn filter_limits(db: &impl DocumentDb) {
         (Filter::and([]), "an empty `and`"),
         (Filter::or([]), "an empty `or`"),
         (many, "a filter past the condition limit"),
-        (Filter::eq("rank", ScalarValue::Binary(vec![1])), "a binary value"),
         (Filter::gt("rank", f64::NAN), "a number that is not finite"),
         (Filter::gt("rank", ScalarValue::Null), "an ordering comparison with `null`"),
         (Filter::lt("rank", true), "an ordering comparison with a boolean"),
     ] {
-        expect_code(db.query(LIMITS, &filtered(&filter)).await, "invalid", refused);
+        expect_code(collection.find(&filtered(&filter)).await, "invalid", refused);
     }
 }
 
@@ -148,21 +149,25 @@ pub async fn filter_limits(db: &impl DocumentDb) {
 /// - the null predicates, a comparison with `null`, and a list that holds
 ///   `null`;
 /// - a dotted field path;
-/// - `order_by`;
-/// - `offset`.
+/// - an array test;
+/// - `order_by`.
 ///
 /// # Panics
 ///
 /// Panics if a feature selects or orders other documents, or fails with
 /// another code.
-pub async fn optional_query(db: &impl DocumentDb) {
+pub async fn optional_query() {
+    let collection = open(OPTIONAL).await;
     let stored = [
-        ("a", json!({"name": "apple", "rank": 3, "tag": "x", "meta": {"level": 1}})),
-        ("b", json!({"name": "banana", "rank": 1, "tag": null, "meta": {"level": 2}})),
-        ("c", json!({"name": "cherry", "rank": 2, "meta": {"level": 1}})),
-        ("d", json!({"name": "date", "rank": 2, "tag": "y", "meta": {"level": 3}})),
+        ("a", json!({"name": "apple", "rank": 3, "tag": "x", "tags": ["x"], "meta": {"level": 1}})),
+        ("b", json!({"name": "banana", "rank": 1, "tag": null, "tags": [], "meta": {"level": 2}})),
+        ("c", json!({"name": "cherry", "rank": 2, "tags": "x", "meta": {"level": 1}})),
+        (
+            "d",
+            json!({"name": "date", "rank": 2, "tag": "y", "tags": ["y", "x"], "meta": {"level": 3}}),
+        ),
     ];
-    seed(db, OPTIONAL, &stored).await;
+    seed(&collection, &stored).await;
 
     for filter in [
         Filter::contains("name", "an"),
@@ -174,16 +179,13 @@ pub async fn optional_query(db: &impl DocumentDb) {
         Filter::ne("tag", ScalarValue::Null),
         Filter::in_list("tag", [ScalarValue::Null, ScalarValue::from("x")]),
         Filter::eq("meta.level", 1),
+        Filter::array_contains("tags", "x"),
     ] {
-        let selected = walk(db, OPTIONAL, &filtered(&filter)).await.map(sorted);
+        let selected = walk(&collection, &filtered(&filter)).await.map(sorted);
         served(selected, &matching(&stored, &filter), &format!("{filter:?}"));
     }
 
-    for descending in [false, true] {
-        let sort = SortField {
-            field: "rank".to_owned(),
-            descending,
-        };
+    for sort in [SortField::asc("rank"), SortField::desc("rank")] {
         let mut expected: Vec<_> = stored.iter().collect();
         expected.sort_by(|(a_id, a), (b_id, b)| sort.compare(a, b).then_with(|| a_id.cmp(b_id)));
         let expected: Vec<String> = expected.into_iter().map(|(id, _)| (*id).to_owned()).collect();
@@ -191,15 +193,8 @@ pub async fn optional_query(db: &impl DocumentDb) {
             order_by: vec![sort.clone()],
             ..Query::default()
         };
-        served(walk(db, OPTIONAL, &query).await, &expected, &format!("{sort:?}"));
+        served(walk(&collection, &query).await, &expected, &format!("{sort:?}"));
     }
-
-    let unpaged = walk(db, OPTIONAL, &Query::default()).await.expect("query every document");
-    let offset = Query {
-        offset: Some(1),
-        ..Query::default()
-    };
-    served(walk(db, OPTIONAL, &offset).await, &unpaged[1..], "an offset of 1");
 }
 
 // an optional feature is served as the reference defines it, or refused
@@ -211,25 +206,27 @@ fn served(selected: Result<Vec<String>>, expected: &[String], feature: &str) {
     }
 }
 
-async fn seed(db: &impl DocumentDb, collection: &str, stored: &[(&str, Value)]) {
+async fn open(name: &str) -> Collection {
+    docstore::open(name).await.unwrap_or_else(|err| panic!("open `{name}`: {err}"))
+}
+
+async fn seed(collection: &Collection, stored: &[(&str, Value)]) {
     for (id, body) in stored {
-        db.put(collection, &document(id, body))
-            .await
-            .unwrap_or_else(|err| panic!("put {id}: {err}"));
+        collection.upsert(id, body).await.unwrap_or_else(|err| panic!("upsert {id}: {err}"));
     }
 }
 
 // the ids `query` selects, page by page, in the order the pages hold them
-async fn walk(db: &impl DocumentDb, collection: &str, query: &Query) -> Result<Vec<String>> {
+async fn walk(collection: &Collection, query: &Query) -> Result<Vec<String>> {
     let mut query = query.clone();
     let mut ids = Vec::new();
     for _ in 0..MAX_PAGES {
-        let page = db.query(collection, &query).await?;
+        let page = collection.find(&query).await?;
         if let Some(limit) = query.limit {
-            let held = u32::try_from(page.items.len()).unwrap_or(u32::MAX);
+            let held = u32::try_from(page.documents.len()).unwrap_or(u32::MAX);
             assert!(held <= limit, "a page held {held} documents over a limit of {limit}");
         }
-        ids.extend(page.items.into_iter().map(|document| document.id));
+        ids.extend(page.documents.into_iter().map(|document| document.id));
         match page.next {
             Some(next) => query.after = Some(next),
             None => return Ok(ids),
@@ -253,8 +250,4 @@ fn filtered(filter: &Filter) -> Query {
         filter: Some(filter.clone()),
         ..Query::default()
     }
-}
-
-fn document(id: &str, body: &Value) -> Document {
-    Document::json(id, body).expect("a JSON body")
 }

@@ -6,9 +6,8 @@ use std::fmt;
 use std::future::{Ready, ready};
 use std::sync::{Arc, Mutex};
 
-use omnia_sdk::api::messaging::Delivery;
-use omnia_sdk::api::{Context, Handlers};
-use omnia_sdk::{bad_gateway, bad_request, model, plugins, vcs};
+use omnia_sdk::messaging::Delivery;
+use omnia_sdk::{Context, Handlers, bad_gateway, bad_request, model, plugins, vcs};
 use serde::{Deserialize, Serialize};
 
 use self::support::{Spans, fields};
@@ -31,9 +30,7 @@ struct RawText {
     text: String,
 }
 
-fn echo<P: Send + Sync + 'static>(
-    context: Context<P>, input: EchoInput,
-) -> Ready<Result<EchoOutput, omnia_sdk::Error>> {
+fn echo(context: Context, input: EchoInput) -> Ready<Result<EchoOutput, omnia_sdk::Error>> {
     ready(Ok(EchoOutput {
         name: input.name,
         count: input.count.unwrap_or(1),
@@ -52,7 +49,7 @@ fn delivery(topic: Option<&str>, payload: &[u8]) -> Delivery {
 
 #[tokio::test]
 async fn exact_topic() {
-    let router = Handlers::new().topic("events.created", echo).with_state(());
+    let router = Handlers::new().topic("events.created", echo).into_router();
 
     router
         .handle(delivery(Some("events.created"), br#"{"name":"message","count":2}"#))
@@ -66,7 +63,7 @@ async fn exact_topic() {
 
 #[tokio::test]
 async fn malformed_delivery() {
-    let router = Handlers::new().topic("events", echo).with_state(());
+    let router = Handlers::new().topic("events", echo).into_router();
 
     assert_eq!(
         router.handle(delivery(None, br#"{"name":"message"}"#)).await,
@@ -85,7 +82,7 @@ struct PlaceError(#[source] omnia_sdk::Error);
 
 #[derive(Debug, thiserror::Error)]
 #[error("could not review")]
-struct ReviewError(#[source] model::Error);
+struct ReviewError(#[source] model::Exhausted);
 
 fn unavailable() -> omnia_sdk::Error {
     omnia_sdk::Error::bad_gateway("unavailable", "store did not answer")
@@ -94,27 +91,32 @@ fn unavailable() -> omnia_sdk::Error {
 #[tokio::test]
 async fn failing_handler() {
     let router = Handlers::new()
-        .topic("gateway", |_: Context<()>, _: EchoInput| {
+        .topic("gateway", |_: Context, _: EchoInput| {
             ready(Err::<(), _>(bad_gateway!("upstream did not answer")))
         })
-        .topic("store", |_: Context<()>, _: EchoInput| ready(Err::<(), _>(unavailable())))
-        .topic("order", |_: Context<()>, _: EchoInput| {
-            ready(Err::<(), _>(PlaceError(unavailable())))
+        .topic("store", |_: Context, _: EchoInput| ready(Err::<(), _>(unavailable())))
+        .topic("order", |_: Context, _: EchoInput| ready(Err::<(), _>(PlaceError(unavailable()))))
+        .topic("request", |_: Context, _: EchoInput| ready(Err::<(), _>(bad_request!("no name"))))
+        .topic("format", |_: Context, _: EchoInput| ready(Err::<(), _>(fmt::Error)))
+        .topic("revision", |_: Context, _: EchoInput| {
+            ready(Err::<(), _>(vcs::types::Error::NotFound("no revision `v1`".into())))
         })
-        .topic("request", |_: Context<()>, _: EchoInput| {
-            ready(Err::<(), _>(bad_request!("no name")))
+        .topic("plugin", |_: Context, _: EchoInput| {
+            let conflict = plugins::Conflict {
+                found: "sha256:ab".into(),
+                current: None,
+            };
+            ready(Err::<(), _>(conflict))
         })
-        .topic("format", |_: Context<()>, _: EchoInput| ready(Err::<(), _>(fmt::Error)))
-        .topic("revision", |_: Context<()>, _: EchoInput| {
-            ready(Err::<(), _>(vcs::Error::NotFound("v1".into())))
+        .topic("review", |_: Context, _: EchoInput| {
+            let exhausted = model::Exhausted {
+                budget: model::Budget::Tokens,
+                detail: "4096 tokens".into(),
+                usage: None,
+            };
+            ready(Err::<(), _>(ReviewError(exhausted)))
         })
-        .topic("plugin", |_: Context<()>, _: EchoInput| {
-            ready(Err::<(), _>(plugins::Error::Refused("unsigned".into())))
-        })
-        .topic("review", |_: Context<()>, _: EchoInput| {
-            ready(Err::<(), _>(ReviewError(model::Error::Unavailable("rate limited".into()))))
-        })
-        .with_state(());
+        .into_router();
 
     for (topic, status, code, text) in [
         ("gateway", 502, "bad_gateway", "upstream did not answer"),
@@ -122,9 +124,9 @@ async fn failing_handler() {
         ("order", 502, "unavailable", "could not place the order: store did not answer"),
         ("request", 400, "bad_request", "no name"),
         ("format", 500, "server_error", "when formatting"),
-        ("revision", 404, "not-found", "not found: v1"),
-        ("plugin", 400, "refused", "unsigned"),
-        ("review", 502, "unavailable", "could not review"),
+        ("revision", 500, "not-found", "no revision `v1`"),
+        ("plugin", 400, "conflict", "not the pinned digest"),
+        ("review", 400, "exhausted", "could not review: the tokens budget is exhausted"),
     ] {
         let Err(error) = router.handle(delivery(Some(topic), br#"{"name":"message"}"#)).await
         else {
@@ -139,7 +141,7 @@ async fn failing_handler() {
 #[tokio::test]
 async fn topic_span() {
     let (spans, _guard) = Spans::install();
-    let router = Handlers::new().topic("events.created", echo).with_state(());
+    let router = Handlers::new().topic("events.created", echo).into_router();
     let delivery = Delivery::new("events.created", br#"{"name":"message"}"#)
         .with_metadata("request-id", "req-1")
         .with_metadata("correlation-id", "corr-1");
@@ -159,7 +161,7 @@ async fn topic_span() {
 #[tokio::test]
 async fn invalid_payload_span() {
     let (spans, _guard) = Spans::install();
-    let router = Handlers::new().topic("events.created", echo).with_state(());
+    let router = Handlers::new().topic("events.created", echo).into_router();
     let delivery = Delivery::new("events.created", b"not-json")
         .with_metadata("request-id", "req-1")
         .with_metadata("correlation-id", "corr-1");
@@ -181,7 +183,7 @@ async fn invalid_payload_span() {
 #[test]
 #[should_panic(expected = "duplicate messaging topic")]
 fn duplicate_topic() {
-    let _handlers = Handlers::<()>::new().topic("events", echo).topic("events", echo);
+    let _handlers = Handlers::new().topic("events", echo).topic("events", echo);
 }
 
 #[tokio::test]
@@ -189,7 +191,7 @@ async fn merged_routes() {
     let created = Handlers::new().topic("events.created", echo);
     let deleted = Handlers::new().topic("events.deleted", echo);
     let updated = Handlers::new().topic("events.updated", echo);
-    let router = Handlers::from([created, deleted, updated]).with_state(());
+    let router = Handlers::from([created, deleted, updated]).into_router();
 
     for topic in ["events.created", "events.deleted", "events.updated"] {
         router
@@ -211,12 +213,10 @@ async fn merged_routes() {
 #[should_panic(expected = "duplicate messaging topic `events`")]
 fn duplicate_topic_merged() {
     let _handlers =
-        Handlers::<()>::new().topic("events", echo).merge(Handlers::new().topic("events", echo));
+        Handlers::new().topic("events", echo).merge(Handlers::new().topic("events", echo));
 }
 
-fn raw_text<P: Send + Sync + 'static>(
-    _context: Context<P>, input: RawText,
-) -> Ready<Result<String, omnia_sdk::Error>> {
+fn raw_text(_context: Context, input: RawText) -> Ready<Result<String, omnia_sdk::Error>> {
     ready(Ok(input.text))
 }
 
@@ -230,7 +230,7 @@ async fn topic_with_raw_payload() {
                 })
                 .map_err(|error| bad_request!("payload is not utf-8: {error}"))
         })
-        .with_state(());
+        .into_router();
 
     router
         .handle(delivery(Some("events.raw"), b"not-json"))
@@ -248,16 +248,41 @@ async fn topic_with_raw_payload() {
 }
 
 #[tokio::test]
+async fn topic_with_reply_to() {
+    let seen = Arc::new(Mutex::new(None));
+    let record = {
+        let seen = Arc::clone(&seen);
+        move |_: Context, input: (Option<String>, Option<u32>)| {
+            *seen.lock().expect("record") = Some(input);
+            ready(Ok::<(), omnia_sdk::Error>(()))
+        }
+    };
+    let router = Handlers::new()
+        .topic_with("quotes", record, |delivery: &Delivery| {
+            Ok((delivery.reply_to.clone(), delivery.attempt))
+        })
+        .into_router();
+
+    router
+        .handle(delivery(Some("quotes"), b"{}").with_reply_to("quotes.reply").with_attempt(2))
+        .await
+        .expect("the route handles the delivery");
+
+    let seen = seen.lock().expect("seen").clone();
+    assert_eq!(seen, Some((Some("quotes.reply".to_owned()), Some(2))));
+}
+
+#[tokio::test]
 async fn tenant_metadata() {
     let seen = Arc::new(Mutex::new(None));
     let record = {
         let seen = Arc::clone(&seen);
-        move |context: Context<()>, _input: EchoInput| {
+        move |context: Context, _input: EchoInput| {
             *seen.lock().expect("record") = context.metadata.tenant;
             ready(Ok::<(), omnia_sdk::Error>(()))
         }
     };
-    let router = Handlers::new().topic("events", record).with_state(());
+    let router = Handlers::new().topic("events", record).into_router();
 
     router
         .handle(delivery(Some("events"), br#"{"name":"message"}"#))

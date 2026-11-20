@@ -11,11 +11,11 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_wasi_vault::omnia::locker::Locker;
-use omnia_wasi_vault::omnia::store;
-use omnia_wasi_vault::omnia::types::Error;
+use omnia_sdk::vault::locker::Locker;
+use omnia_sdk::vault::store;
+use omnia_sdk::vault::types::Error;
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 async fn scenario() {
     let undeclared = store::open("undeclared".to_owned()).await;

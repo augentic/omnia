@@ -19,10 +19,8 @@ use anyhow::{Context, anyhow};
 use axum::routing::post;
 use axum::{Json, Router};
 use bytes::Bytes;
-use omnia_wasi_keyvalue::omnia::store;
-use omnia_wasi_keyvalue::omnia::types::{Lifetime, Precondition};
+use omnia_sdk::keyvalue::{self, Lifetime, Precondition};
 use serde_json::{Value, json};
-use tracing::Level;
 use wasip3::exports::http::handler::Guest;
 use wasip3::http::types::{ErrorCode, Request, Response};
 
@@ -30,22 +28,17 @@ struct Http;
 wasip3::http::service::export!(Http);
 
 impl Guest for Http {
-    #[omnia_wasi_otel::instrument(name = "http_guest_handle", level = Level::INFO)]
     async fn handle(request: Request) -> Result<Response, ErrorCode> {
         let router = Router::new().route("/", post(handler));
-        omnia_wasi_http::serve(router, request).await
+        omnia_sdk::http::serve(router, request).await
     }
 }
 
-#[omnia_wasi_otel::instrument]
+#[omnia_sdk::otel::instrument]
 async fn handler(body: Bytes) -> omnia_sdk::Result<Json<Value>> {
-    let bucket = store::open("omnia_bucket".to_string()).await.context("opening bucket")?;
+    let bucket = keyvalue::open("omnia_bucket").await.context("opening bucket")?;
 
-    let stored = bucket
-        .set("my_key".to_string(), body.to_vec(), Lifetime::Forever, None)
-        .await
-        .context("storing data")?;
-    tracing::debug!("stored at revision: {stored:?}");
+    bucket.write("my_key", &body, None).await.context("storing data")?;
 
     let res = bucket.get("my_key".to_string()).await.context("reading data")?;
     tracing::debug!("found entry: {res:?}");

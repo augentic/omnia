@@ -187,9 +187,13 @@ async fn messaging_keyed() {
         [("key".to_owned(), "customer-7".to_owned()), ("tenant".to_owned(), "acme".to_owned())]
     );
 
-    // Incoming handler: the guest's router finds the key on the delivery, and
-    // reads the host's deadline rather than a `Deadline` entry it carried.
+    // Incoming handler: the guest's router finds the key and the reply topic
+    // on the delivery, and reads the host's deadline rather than a
+    // `Deadline` entry it carried.
     sent.metadata.get_or_insert_default().insert("Deadline".to_owned(), "1".to_owned());
+    sent.reply = Some(Reply {
+        topic: "orders.reply".to_owned(),
+    });
     handler.handle(sent).await.expect("handled");
 
     runtime.shutdown();
@@ -446,6 +450,11 @@ async fn messaging_error_codes() {
     // the host refused every other call before it reached the broker
     let sent = backends.messaging.sent.lock().expect("sent topics").clone();
     assert_eq!(sent, ["not-found", "denied", "invalid", "unsupported", "unavailable", "other"]);
+}
+
+#[tokio::test]
+async fn messaging_unstable() {
+    run_guest(test_programs::MESSAGING_UNSTABLE, Backends::defaults().await).await;
 }
 
 // The SDK settles a handler's failure by its class, and the host hands the

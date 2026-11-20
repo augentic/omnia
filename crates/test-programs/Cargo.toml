@@ -19,19 +19,6 @@ clap.workspace = true
 futures.workspace = true
 http.workspace = true
 omnia-sdk = { workspace = true, features = ["command", "http"] }
-omnia-wasi-blobstore.workspace = true
-omnia-wasi-config.workspace = true
-omnia-wasi-docstore.workspace = true
-omnia-wasi-http.workspace = true
-omnia-wasi-identity.workspace = true
-omnia-wasi-keyvalue.workspace = true
-omnia-wasi-messaging.workspace = true
-omnia-wasi-model.workspace = true
-omnia-wasi-otel.workspace = true
-omnia-wasi-sql.workspace = true
-omnia-wasi-vault.workspace = true
-omnia-wasi-vcs.workspace = true
-omnia-wasi-websocket.workspace = true
 opentelemetry = { workspace = true, features = ["metrics", "trace"] }
 schemars.workspace = true
 serde.workspace = true
@@ -62,6 +49,11 @@ path = "programs/blobstore/container.rs"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "blobstore_unstable"
+path = "programs/blobstore/unstable.rs"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "cli_rust_log"
 path = "programs/cli/rust_log.rs"
 crate-type = ["cdylib"]
@@ -82,6 +74,11 @@ path = "programs/config/seeded.rs"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "config_settings"
+path = "programs/config/settings.rs"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "docstore_collection"
 path = "programs/docstore/collection.rs"
 crate-type = ["cdylib"]
@@ -99,6 +96,11 @@ crate-type = ["cdylib"]
 [[example]]
 name = "docstore_error_codes"
 path = "programs/docstore/error_codes.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "harness_flow"
+path = "programs/harness/flow.rs"
 crate-type = ["cdylib"]
 
 [[example]]
@@ -227,6 +229,11 @@ path = "programs/messaging/request_reply.rs"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "messaging_unstable"
+path = "programs/messaging/unstable.rs"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "model_calls_dropped"
 path = "programs/model/calls_dropped.rs"
 crate-type = ["cdylib"]
@@ -259,6 +266,21 @@ crate-type = ["cdylib"]
 [[example]]
 name = "model_check_plain"
 path = "programs/model/check_plain.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "model_check_recovered"
+path = "programs/model/check_recovered.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "model_check_tools"
+path = "programs/model/check_tools.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "model_check_unheeded"
+path = "programs/model/check_unheeded.rs"
 crate-type = ["cdylib"]
 
 [[example]]

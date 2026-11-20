@@ -51,7 +51,7 @@ let request = http::Request::builder()
     .header("Client-Cert", Base64::encode_string(&pem))
     .body(Empty::<Bytes>::new())?;
 
-let response = omnia_wasi_http::handle(request).await?;
+let response = omnia_sdk::http::send(request).await?;
 ```
 
 Keep the private key out of guest source: load it from `omnia:vault` or

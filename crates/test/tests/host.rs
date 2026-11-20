@@ -7,16 +7,31 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Context as _, Result, bail};
+use bytes::Bytes;
+use http::header::CONTENT_TYPE;
+use http::{Method, Request, Response, StatusCode};
 use omnia::wasmtime::component::{ResourceTable, Val};
 use omnia::{Connect as _, Digest, ExitStatus, GuestEntry, GuestId, HostCtx, Runtime};
-use omnia_test::host::{Backends, Deployment, STATE_BUCKET, ScriptedModel, scratch};
+use omnia_test::host::sql::{Field, Row, Value};
+use omnia_test::host::{
+    Asked, Backends, Deployment, Ended, FixedIdentity, HandleError, MatchedHttp, STATE_BUCKET,
+    ScriptedModel, ScriptedTables, Sink, deliver, precompiled, scratch, send,
+};
 use omnia_test::{Exchange, SeenFormat};
 use omnia_wasi_blobstore::BlobStoreClient as _;
+use omnia_wasi_http::WasiHttp;
+use omnia_wasi_identity::WasiIdentity;
 use omnia_wasi_keyvalue::{
     Bucket, ConnectOptions, FutureResult, KeyValueClient, KeyValueDefault, Lifetime, WasiKeyValue,
 };
+use omnia_wasi_messaging::WasiMessaging;
 use omnia_wasi_model::WasiModel;
 use omnia_wasi_otel::WasiOtel;
+use omnia_wasi_sql::WasiSql;
+use omnia_wasi_websocket::WasiWebSocket;
+use serde_json::json;
+
+test_programs::foreach_harness!();
 
 // A production `runtime!` as an embedder would write it: the compiled-in
 // hosts, connected from the environment under `main`. The macro embeds a
@@ -359,6 +374,106 @@ fn scratch_mounts() {
     assert_eq!((mount.name.as_str(), mount.writable), (".", true));
     assert_eq!(scratch.mount_as("project", false).name, "project");
     assert_eq!(mount.path, scratch.path());
+}
+
+#[tokio::test]
+async fn harness_flow() {
+    let tables = ScriptedTables::default()
+        .on_query(
+            |sql, params| sql.starts_with("SELECT name") && params == [Value::Int64(Some(7))],
+            vec![Row {
+                fields: vec![Field {
+                    name: "name".to_owned(),
+                    value: Value::Str(Some("widget".to_owned())),
+                }],
+            }],
+        )
+        .on_exec(|sql, _| sql.starts_with("UPDATE items"), 1);
+    let price = Response::new(Bytes::from_static(br#"{"price":12}"#));
+    let http = MatchedHttp::default().on(Method::GET, "https://prices.test/items/7", price);
+    let sink = Sink::default();
+    let identity = FixedIdentity::new("secret");
+    let backends = Backends::defaults()
+        .await
+        .sql(tables.clone())
+        .http(http.clone())
+        .messaging(sink.clone())
+        .websocket(sink.clone())
+        .identity(identity.clone());
+    let cache = backends.keyvalue.open_bucket(STATE_BUCKET.to_owned()).await.expect("bucket");
+    let cached = cache.set("names.7".to_owned(), b"widget".to_vec(), Lifetime::Replace(None), None);
+    cached.await.expect("set").expect("no precondition");
+    let flow = precompiled(test_programs::HARNESS_FLOW).expect("flow precompiles");
+    let runtime = Deployment::new()
+        .guest("flow", flow)
+        .boot(backends.clone(), |deployment| {
+            deployment.host::<WasiHttp>()?;
+            deployment.host::<WasiIdentity>()?;
+            deployment.host::<WasiKeyValue>()?;
+            deployment.host::<WasiMessaging>()?;
+            deployment.host::<WasiOtel>()?;
+            deployment.host::<WasiSql>()?;
+            deployment.host::<WasiWebSocket>()?;
+            Ok(())
+        })
+        .await
+        .expect("runtime boots");
+
+    // a rename reaches every backend
+    let response = send(&runtime, rename(7)).await.expect("rename served");
+    assert_eq!(response.status(), StatusCode::CREATED, "{:?}", response.body());
+    let reply: serde_json::Value = serde_json::from_slice(response.body()).expect("json reply");
+    assert_eq!(reply, json!({"previous": "widget", "price": 12, "token": "secret"}));
+
+    let transactions = tables.transactions();
+    let [transaction] = transactions.as_slice() else {
+        panic!("one transaction, not {transactions:?}");
+    };
+    assert_eq!(transaction.ended, Some(Ended::Committed));
+    let updated: Vec<_> = transaction.statements.iter().map(|executed| &executed.params).collect();
+    assert_eq!(updated, [&[Value::Str(Some("gadget".to_owned())), Value::Int64(Some(7))]]);
+    let [priced] = http.requests().try_into().expect("one upstream request");
+    assert_eq!(priced.headers["authorization"], "Bearer secret");
+    let asked = Asked {
+        identity: "default".to_owned(),
+        scopes: vec!["prices.read".to_owned()],
+    };
+    assert_eq!(identity.asked(), [asked]);
+    assert_eq!(backends.state("prices.7").await, Some(b"12".to_vec()));
+    assert_eq!(backends.state("names.7").await, None);
+    let [renamed] = sink.sent().try_into().expect("one message sent");
+    assert_eq!(
+        (renamed.topic.as_str(), renamed.payload.as_slice()),
+        ("items.renamed", &b"gadget"[..])
+    );
+    assert_eq!(renamed.metadata.expect("metadata").inner["key"], "7");
+    let [announced] = sink.broadcasts().try_into().expect("one broadcast");
+    assert_eq!((announced.data, announced.sockets), (b"gadget".to_vec(), None));
+
+    // an unscripted statement fails in the reply
+    let response = send(&runtime, rename(8)).await.expect("rename served");
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    let reply = String::from_utf8_lossy(response.body());
+    assert!(reply.contains("no rule matches `SELECT name FROM items WHERE id = $1`"), "{reply}");
+
+    // one delivery handled, and one rejected
+    deliver(&runtime, "items.refresh", "7").await.expect("refresh handled");
+    let refreshed = sink.sent().pop().expect("a message sent");
+    assert_eq!(
+        (refreshed.topic.as_str(), refreshed.payload.as_slice()),
+        ("items.refreshed", &b"7"[..])
+    );
+    let rejected = deliver(&runtime, "items.refresh", "").await.expect_err("empty refresh");
+    assert!(matches!(&rejected, HandleError::Rejected(reason) if reason == "an empty refresh"));
+
+    runtime.shutdown();
+}
+
+fn rename(id: i64) -> Request<Bytes> {
+    Request::post(format!("/items/{id}"))
+        .header(CONTENT_TYPE, "application/json")
+        .body(Bytes::from_static(br#"{"name":"gadget"}"#))
+        .expect("a valid request")
 }
 
 async fn call<B: omnia::Backends>(

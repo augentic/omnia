@@ -2367,7 +2367,6 @@ dependencies = [
  "omnia-core",
  "omnia-test",
  "omnia-wasi-otel",
- "omnia-wasi-types",
  "serde",
  "tempfile",
  "test-programs",
@@ -2376,7 +2375,6 @@ dependencies = [
  "tracing",
  "wasm-pkg-client",
  "wasmtime",
- "wit-bindgen 0.63.0",
 ]
 
 [[package]]
@@ -2395,22 +2393,7 @@ dependencies = [
  "http-body",
  "http-body-util",
  "omnia-guest-macros",
- "omnia-plugin",
- "omnia-test",
- "omnia-wasi-blobstore",
- "omnia-wasi-config",
- "omnia-wasi-docstore",
- "omnia-wasi-http",
- "omnia-wasi-identity",
- "omnia-wasi-keyvalue",
- "omnia-wasi-messaging",
- "omnia-wasi-model",
- "omnia-wasi-otel",
- "omnia-wasi-sql",
- "omnia-wasi-types",
- "omnia-wasi-vault",
- "omnia-wasi-vcs",
- "omnia-wasi-websocket",
+ "opentelemetry",
  "schemars",
  "serde",
  "serde_json",
@@ -2418,8 +2401,8 @@ dependencies = [
  "tokio",
  "tower",
  "tracing",
+ "tracing-opentelemetry",
  "tracing-subscriber",
- "trybuild",
  "wasip3",
 ]
 
@@ -2428,11 +2411,9 @@ name = "omnia-test"
 version = "0.38.0"
 dependencies = [
  "anyhow",
- "axum",
  "bytes",
  "futures",
  "http",
- "http-body",
  "http-body-util",
  "omnia",
  "omnia-sdk",
@@ -2453,7 +2434,6 @@ dependencies = [
  "tempfile",
  "test-programs",
  "tokio",
- "tower",
 ]
 
 [[package]]
@@ -2466,13 +2446,11 @@ dependencies = [
  "omnia",
  "omnia-core",
  "omnia-test",
- "omnia-wasi-types",
  "parking_lot 0.13.0",
  "test-programs",
  "tokio",
  "tracing",
  "wasmtime",
- "wit-bindgen 0.63.0",
 ]
 
 [[package]]
@@ -2485,12 +2463,10 @@ dependencies = [
  "omnia-core",
  "omnia-test",
  "omnia-wasi-otel",
- "omnia-wasi-types",
  "test-programs",
  "tokio",
  "tracing",
  "wasmtime",
- "wit-bindgen 0.63.0",
 ]
 
 [[package]]
@@ -2503,14 +2479,12 @@ dependencies = [
  "omnia",
  "omnia-core",
  "omnia-test",
- "omnia-wasi-types",
  "serde_json",
  "test-programs",
  "tokio",
  "tracing",
  "wasmtime",
  "wasmtime-wasi",
- "wit-bindgen 0.63.0",
 ]
 
 [[package]]
@@ -2518,7 +2492,6 @@ name = "omnia-wasi-http"
 version = "0.38.0"
 dependencies = [
  "anyhow",
- "axum",
  "base64ct",
  "bytes",
  "fromenv",
@@ -2539,9 +2512,7 @@ dependencies = [
  "serde_json",
  "test-programs",
  "tokio",
- "tower",
  "tracing",
- "wasip3",
  "wasmtime",
  "wasmtime-wasi-http",
  "x509-cert",
@@ -2559,14 +2530,12 @@ dependencies = [
  "omnia-core",
  "omnia-test",
  "omnia-wasi-otel",
- "omnia-wasi-types",
  "serde",
  "test-programs",
  "tokio",
  "tracing",
  "wasmtime",
  "wasmtime-wasi",
- "wit-bindgen 0.63.0",
 ]
 
 [[package]]
@@ -2580,13 +2549,11 @@ dependencies = [
  "omnia",
  "omnia-core",
  "omnia-test",
- "omnia-wasi-types",
  "test-programs",
  "tokio",
  "tracing",
  "wasmtime",
  "wasmtime-wasi",
- "wit-bindgen 0.63.0",
 ]
 
 [[package]]
@@ -2599,7 +2566,6 @@ dependencies = [
  "omnia-core",
  "omnia-test",
  "omnia-wasi-otel",
- "omnia-wasi-types",
  "test-programs",
  "thiserror 2.0.21",
  "tokio",
@@ -2607,7 +2573,6 @@ dependencies = [
  "tracing",
  "wasmtime",
  "wasmtime-wasi",
- "wit-bindgen 0.63.0",
 ]
 
 [[package]]
@@ -2621,16 +2586,13 @@ dependencies = [
  "omnia",
  "omnia-core",
  "omnia-test",
- "omnia-wasi-types",
  "serde",
  "serde_json",
  "test-programs",
  "tokio",
  "tracing",
- "wasip3",
  "wasmtime",
  "wasmtime-wasi",
- "wit-bindgen 0.63.0",
 ]
 
 [[package]]
@@ -2639,13 +2601,10 @@ version = "0.38.0"
 dependencies = [
  "anyhow",
  "futures",
- "getrandom 0.4.3",
  "hex",
  "omnia",
  "omnia-core",
- "omnia-guest-macros",
  "omnia-test",
- "omnia-wasi-types",
  "opentelemetry",
  "opentelemetry-proto",
  "opentelemetry_sdk",
@@ -2654,9 +2613,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-opentelemetry",
- "tracing-subscriber",
  "wasmtime",
- "wit-bindgen 0.63.0",
 ]
 
 [[package]]
@@ -2669,7 +2626,6 @@ dependencies = [
  "omnia",
  "omnia-core",
  "omnia-test",
- "omnia-wasi-types",
  "parking_lot 0.13.0",
  "rusqlite",
  "test-programs",
@@ -2677,15 +2633,11 @@ dependencies = [
  "tracing",
  "wasmtime",
  "wasmtime-wasi",
- "wit-bindgen 0.63.0",
 ]
 
 [[package]]
 name = "omnia-wasi-types"
 version = "0.38.0"
-dependencies = [
- "wit-bindgen 0.63.0",
-]
 
 [[package]]
 name = "omnia-wasi-vault"
@@ -2697,14 +2649,12 @@ dependencies = [
  "omnia",
  "omnia-core",
  "omnia-test",
- "omnia-wasi-types",
  "parking_lot 0.13.0",
  "test-programs",
  "tokio",
  "tracing",
  "wasmtime",
  "wasmtime-wasi",
- "wit-bindgen 0.63.0",
 ]
 
 [[package]]
@@ -2717,16 +2667,13 @@ dependencies = [
  "omnia",
  "omnia-core",
  "omnia-test",
- "omnia-wasi-types",
  "parking_lot 0.13.0",
  "test-programs",
  "thiserror 2.0.21",
  "tokio",
  "tracing",
- "wasip3",
  "wasmtime",
  "wasmtime-wasi",
- "wit-bindgen 0.63.0",
 ]
 
 [[package]]
@@ -2743,7 +2690,6 @@ dependencies = [
  "omnia-core",
  "omnia-test",
  "omnia-wasi-otel",
- "omnia-wasi-types",
  "test-programs",
  "tokio",
  "tokio-stream",
@@ -2751,7 +2697,6 @@ dependencies = [
  "tracing",
  "wasmtime",
  "wasmtime-wasi",
- "wit-bindgen 0.63.0",
 ]
 
 [[package]]
@@ -4085,19 +4030,6 @@ dependencies = [
  "http",
  "omnia-sdk",
  "omnia-test",
- "omnia-wasi-blobstore",
- "omnia-wasi-config",
- "omnia-wasi-docstore",
- "omnia-wasi-http",
- "omnia-wasi-identity",
- "omnia-wasi-keyvalue",
- "omnia-wasi-messaging",
- "omnia-wasi-model",
- "omnia-wasi-otel",
- "omnia-wasi-sql",
- "omnia-wasi-vault",
- "omnia-wasi-vcs",
- "omnia-wasi-websocket",
  "opentelemetry",
  "schemars",
  "serde",

@@ -5,8 +5,6 @@
 mod support;
 
 use std::future::{Ready, ready};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, UNIX_EPOCH};
 
 use axum::Json;
@@ -14,13 +12,15 @@ use axum::body::Body;
 use axum::extract::{Path, Query};
 use axum::middleware::from_fn;
 use axum::routing::get;
+use bytes::Bytes;
 use http::header::CONTENT_TYPE;
-use http::{Request, StatusCode};
-use omnia_sdk::api::http::trace;
-use omnia_sdk::api::{Context, Handlers, Metadata, Router};
-use omnia_sdk::{Config, ErrorBody, StateStore, not_found};
-use omnia_test::guest::{self, MapConfig, Provider};
+use http::{Request, Response, StatusCode};
+use http_body_util::BodyExt as _;
+use omnia_sdk::http::trace;
+use omnia_sdk::messaging::Delivery;
+use omnia_sdk::{Context, ErrorBody, Handlers, Metadata, Router, not_found};
 use serde::{Deserialize, Serialize};
+use tower::ServiceExt as _;
 
 use self::support::{Spans, fields};
 
@@ -46,19 +46,7 @@ struct Ids {
     context: Option<String>,
 }
 
-struct StatefulProvider {
-    calls: AtomicUsize,
-}
-
-#[derive(Serialize)]
-struct ProviderObservation {
-    address: usize,
-    call: usize,
-}
-
-fn echo<P: Send + Sync>(
-    context: Context<P>, input: EchoInput,
-) -> Ready<Result<EchoOutput, omnia_sdk::Error>> {
+fn echo(context: Context, input: EchoInput) -> Ready<Result<EchoOutput, omnia_sdk::Error>> {
     ready(Ok(EchoOutput {
         name: input.name,
         count: input.count.unwrap_or(1),
@@ -69,24 +57,41 @@ fn echo<P: Send + Sync>(
     }))
 }
 
-async fn echo_route<P: Send + Sync>(
-    context: Context<P>, Query(input): Query<EchoInput>,
+async fn echo_route(
+    context: Context, Query(input): Query<EchoInput>,
 ) -> Result<Json<EchoOutput>, omnia_sdk::Error> {
     echo(context, input).await.map(Json)
 }
 
-fn handlers<P: Send + Sync + 'static>() -> Handlers<P> {
+fn handlers() -> Handlers {
     Handlers::from([Handlers::new().route("/echo", get(echo_route)).topic("echo", echo)])
 }
 
 fn router() -> Router {
-    handlers().with_state(()).layer(from_fn(trace))
+    handlers().into_router().layer(from_fn(trace))
+}
+
+// named only by the `export!` macros, so a native build that drops the name
+// fails `-D warnings` with `dead_code`
+fn exported() -> Router {
+    handlers().into_router()
+}
+
+omnia_sdk::http::export!(exported);
+omnia_sdk::messaging::export!(exported);
+omnia_sdk::command::export!(exported);
+
+async fn respond(router: impl Into<axum::Router>, request: Request<Body>) -> Response<Bytes> {
+    let response = router.into().oneshot(request).await.expect("an axum router is infallible");
+    let (parts, body) = response.into_parts();
+    let body = body.collect().await.expect("the response body is whole").to_bytes();
+    Response::from_parts(parts, body)
 }
 
 async fn send(
     router: impl Into<axum::Router>, request: Request<Body>,
 ) -> (StatusCode, serde_json::Value) {
-    let response = guest::send(&router.into(), request).await;
+    let response = respond(router, request).await;
     let value = serde_json::from_slice(response.body()).unwrap_or(serde_json::Value::Null);
     (response.status(), value)
 }
@@ -94,7 +99,7 @@ async fn send(
 async fn send_raw(
     router: axum::Router, request: Request<Body>,
 ) -> (StatusCode, Option<String>, String) {
-    let response = guest::send(&router, request).await;
+    let response = respond(router, request).await;
     let content_type =
         response.headers().get(CONTENT_TYPE).map(|value| value.to_str().unwrap().to_owned());
     let body = String::from_utf8(response.body().to_vec()).expect("utf-8 body");
@@ -106,7 +111,7 @@ async fn invoke_direct() {
     let mut metadata = Metadata::default();
     metadata.correlation_id = Some("call-1".to_string());
     metadata.tenant = Some("acme".to_string());
-    let context = Context::new((), metadata);
+    let context = Context::new(metadata);
 
     let output = echo(
         context,
@@ -122,28 +127,6 @@ async fn invoke_direct() {
     assert_eq!(output.count, 2);
     assert_eq!(output.correlation_id.as_deref(), Some("call-1"));
     assert_eq!(output.tenant.as_deref(), Some("acme"));
-}
-
-// `Config` and `StateStore` both define `get`; the accessors pick one
-// without UFCS
-#[tokio::test]
-async fn context_accessors() {
-    async fn lookup<P: Config + StateStore>(
-        context: Context<P>, key: String,
-    ) -> Result<(Option<String>, Option<bytes::Bytes>), omnia_sdk::Error> {
-        let setting = context.config().get(&key).await?;
-        let state = context.state().get(&key).await?;
-        Ok((setting, state))
-    }
-
-    let provider = Provider::default().config(MapConfig::default().with([("region", "eu")]));
-    provider.storage.insert_state("region", b"eu-west");
-    let context = Context::new(provider, Metadata::default());
-
-    let (setting, state) = lookup(context, "region".to_string()).await.expect("lookup");
-
-    assert_eq!(setting.as_deref(), Some("eu"));
-    assert_eq!(state.as_deref(), Some(b"eu-west".as_slice()));
 }
 
 #[tokio::test]
@@ -169,7 +152,7 @@ async fn context_extractor() {
 // The extractor stands alone: without the `trace` layer it reads the headers itself.
 #[tokio::test]
 async fn extractor_no_trace() {
-    let router = axum::Router::new().route("/echo", get(echo_route)).with_state(Arc::new(()));
+    let router = axum::Router::new().route("/echo", get(echo_route));
     let request = Request::get("/echo?name=plan")
         .header("x-request-id", "req-1")
         .body(Body::empty())
@@ -185,7 +168,7 @@ fn is_minted_id(id: &str) -> bool {
     id.len() == 32 && id.bytes().all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
 }
 
-async fn ids(metadata: Metadata, context: Context<()>) -> Json<Ids> {
+async fn ids(metadata: Metadata, context: Context) -> Json<Ids> {
     Json(Ids {
         metadata: metadata.request_id,
         context: context.metadata.request_id,
@@ -196,8 +179,7 @@ async fn ids(metadata: Metadata, context: Context<()>) -> Json<Ids> {
 // extractor, and the `Context` extractor all carry.
 #[tokio::test]
 async fn missing_request_id() {
-    let router =
-        axum::Router::new().route("/ids", get(ids)).layer(from_fn(trace)).with_state(Arc::new(()));
+    let router = axum::Router::new().route("/ids", get(ids)).layer(from_fn(trace));
     let request = Request::get("/ids").body(Body::empty()).expect("build request");
     let (status, value) = send(router, request).await;
 
@@ -233,10 +215,7 @@ async fn trace_span() {
 #[tokio::test]
 async fn trace_route_template() {
     let (spans, _guard) = Spans::install();
-    let router = axum::Router::new()
-        .route("/items/{id}", get(lookup))
-        .layer(from_fn(trace))
-        .with_state(Arc::new(()));
+    let router = axum::Router::new().route("/items/{id}", get(lookup)).layer(from_fn(trace));
     let request = Request::get("/items/42").body(Body::empty()).expect("build request");
 
     let (status, _) = send(router, request).await;
@@ -263,40 +242,13 @@ async fn trace_unmatched_path() {
     );
 }
 
-async fn observe(context: Context<StatefulProvider>) -> Json<ProviderObservation> {
-    Json(ProviderObservation {
-        address: std::ptr::from_ref(context.provider()).addr(),
-        call: context.provider().calls.fetch_add(1, Ordering::SeqCst) + 1,
-    })
-}
-
-#[tokio::test]
-async fn shared_provider() {
-    let router = axum::Router::new()
-        .route("/first", get(observe))
-        .route("/second", get(observe))
-        .with_state(Arc::new(StatefulProvider {
-            calls: AtomicUsize::new(0),
-        }));
-
-    let (_, first) =
-        send(router.clone(), Request::get("/first").body(Body::empty()).expect("build request"))
-            .await;
-    let (_, second) =
-        send(router, Request::get("/second").body(Body::empty()).expect("build request")).await;
-
-    assert_eq!(first["address"], second["address"]);
-    assert_eq!(first["call"], 1);
-    assert_eq!(second["call"], 2);
-}
-
 async fn lookup(Path(id): Path<String>) -> Result<Json<String>, omnia_sdk::Error> {
     Err(not_found!("no item {id}"))
 }
 
 #[tokio::test]
 async fn error_body_json() {
-    let router = axum::Router::new().route("/items/{id}", get(lookup)).with_state(Arc::new(()));
+    let router = axum::Router::new().route("/items/{id}", get(lookup));
     let request = Request::get("/items/42").body(Body::empty()).expect("build request");
     let (status, content_type, body) = send_raw(router, request).await;
 
@@ -315,7 +267,7 @@ async fn save() -> Result<Json<serde_json::Value>, omnia_sdk::Error> {
 
 #[tokio::test]
 async fn anyhow_error_body() {
-    let router = axum::Router::new().route("/save", get(save)).with_state(Arc::new(()));
+    let router = axum::Router::new().route("/save", get(save));
     let request = Request::get("/save").body(Body::empty()).expect("build request");
     let (status, content_type, body) = send_raw(router, request).await;
 
@@ -377,76 +329,113 @@ async fn route_and_topic() {
     let router = router();
     let request = Request::get("/echo?name=both").body(Body::empty()).expect("build request");
 
-    let response = guest::send(&router, request).await;
+    let response = respond(router.clone(), request).await;
     assert_eq!(response.status(), StatusCode::OK);
 
-    guest::deliver(&router, "echo", br#"{"name":"both"}"#)
+    router
+        .handle(Delivery::new("echo", br#"{"name":"both"}"#))
         .await
         .expect("router dispatches delivery");
 }
 
+// Every interface shares the one `omnia:types` error, so one table covers
+// every capability's failures. A typed outcome is the caller's to act on.
 #[tokio::test]
 async fn capability_errors() {
-    use omnia_sdk::{model, plugins, vcs};
+    use omnia_sdk::keyvalue::types::Error as Wire;
+    use omnia_sdk::model::{Budget, Exhausted};
+    use omnia_sdk::plugins::Conflict;
+    use omnia_sdk::vcs::{Diverged, Occupied, Unmerged};
 
     async fn route(Path(kind): Path<String>) -> Result<Json<()>, omnia_sdk::Error> {
+        let occupied = || Occupied {
+            detail: "work".into(),
+        };
         match kind.as_str() {
-            "vcs-not-a-repository" => Err(vcs::Error::NotARepository)?,
-            "vcs-exists" => Err(vcs::Error::Exists("x".into()))?,
-            "vcs-diverged" => Err(vcs::Error::Diverged("emery/x".into()))?,
-            "vcs-missing" => Err(vcs::Error::NotFound("v1".into()))?,
-            "vcs-access" => Err(vcs::Error::Access("denied".into()))?,
-            "vcs-pending" => Err(vcs::Error::Pending(vec!["a.rs".into(), "b.md".into()]))?,
-            "vcs-other" => Err(vcs::Error::Other("boom".into()))?,
-            "plugin-refused" => Err(plugins::Error::Refused("r".into()))?,
-            "plugin-unavailable" => Err(plugins::Error::Unavailable("u".into()))?,
-            "plugin-internal" => Err(plugins::Error::Internal("x".into()))?,
-            "model-invalid" => Err(model::Error::InvalidRequest("no messages".into()))?,
-            "model-budget" => Err(model::Error::BudgetExhausted("3 rounds".into()))?,
-            "model-missing" => Err(model::Error::NotFound("slow".into()))?,
-            "model-denied" => Err(model::Error::Denied("no key".into()))?,
-            "model-unsupported" => Err(model::Error::Unsupported("no effort".into()))?,
-            "model-unavailable" => Err(model::Error::Unavailable("rate limited".into()))?,
-            "model-backend" => Err(model::Error::Backend("bridge gone".into()))?,
-            "vcs-access-context" => {
-                Err(anyhow::Error::from(vcs::Error::Access("denied".into())).context("push"))?
+            "not-found" => Err(Wire::NotFound("no model `slow`".into()))?,
+            "denied" => Err(Wire::Denied("no key".into()))?,
+            "invalid" => Err(Wire::Invalid("no messages".into()))?,
+            "unsupported" => Err(Wire::Unsupported("no effort".into()))?,
+            "unavailable" => Err(Wire::Unavailable("rate limited".into()))?,
+            "other" => Err(Wire::Other("bridge gone".into()))?,
+            "exhausted" => Err(Exhausted {
+                budget: Budget::Responses,
+                detail: "3 rounds".into(),
+                usage: None,
+            })?,
+            "conflict" => Err(Conflict {
+                found: "sha256:ab".into(),
+                current: None,
+            })?,
+            "occupied" => Err(occupied())?,
+            "diverged" => Err(Diverged {
+                current: Some("abc".into()),
+            })?,
+            "conflicts" => Err(Unmerged::Conflicts(vec!["Cargo.lock".into()]))?,
+            "pending" => Err(Unmerged::Pending(vec!["a.rs".into(), "b.md".into()]))?,
+            "wire-context" => {
+                Err(anyhow::Error::from(Wire::Unavailable("store down".into())).context("read"))?
             }
+            "outcome-context" => Err(anyhow::Error::from(occupied()).context("add"))?,
             _ => Ok(Json(())),
         }
     }
 
-    let router = axum::Router::new().route("/err/{kind}", get(route)).with_state(Arc::new(()));
+    let router = axum::Router::new().route("/err/{kind}", get(route));
 
-    for (path, expected_status, expected_code) in [
-        ("/err/vcs-not-a-repository", StatusCode::BAD_REQUEST, "not-a-repository"),
-        ("/err/vcs-exists", StatusCode::BAD_REQUEST, "exists"),
-        ("/err/vcs-diverged", StatusCode::BAD_REQUEST, "diverged"),
-        ("/err/vcs-missing", StatusCode::NOT_FOUND, "not-found"),
-        ("/err/vcs-access", StatusCode::BAD_GATEWAY, "access"),
-        ("/err/vcs-pending", StatusCode::BAD_REQUEST, "pending"),
-        ("/err/vcs-other", StatusCode::INTERNAL_SERVER_ERROR, "other"),
-        ("/err/plugin-refused", StatusCode::BAD_REQUEST, "refused"),
-        ("/err/plugin-unavailable", StatusCode::BAD_GATEWAY, "unavailable"),
-        ("/err/plugin-internal", StatusCode::INTERNAL_SERVER_ERROR, "internal"),
-        ("/err/model-invalid", StatusCode::BAD_REQUEST, "invalid-request"),
-        ("/err/model-budget", StatusCode::BAD_REQUEST, "budget-exhausted"),
-        ("/err/model-missing", StatusCode::INTERNAL_SERVER_ERROR, "not-found"),
-        ("/err/model-denied", StatusCode::INTERNAL_SERVER_ERROR, "denied"),
-        ("/err/model-unsupported", StatusCode::INTERNAL_SERVER_ERROR, "unsupported"),
-        ("/err/model-unavailable", StatusCode::BAD_GATEWAY, "unavailable"),
-        ("/err/model-backend", StatusCode::BAD_GATEWAY, "backend"),
-        ("/err/vcs-access-context", StatusCode::BAD_GATEWAY, "access"),
+    for (case, expected_status, expected_code, expected_message) in [
+        ("not-found", StatusCode::INTERNAL_SERVER_ERROR, "not-found", "no model `slow`"),
+        ("denied", StatusCode::INTERNAL_SERVER_ERROR, "denied", "no key"),
+        ("invalid", StatusCode::INTERNAL_SERVER_ERROR, "invalid", "no messages"),
+        ("unsupported", StatusCode::INTERNAL_SERVER_ERROR, "unsupported", "no effort"),
+        ("unavailable", StatusCode::BAD_GATEWAY, "unavailable", "rate limited"),
+        ("other", StatusCode::INTERNAL_SERVER_ERROR, "other", "bridge gone"),
+        (
+            "exhausted",
+            StatusCode::BAD_REQUEST,
+            "exhausted",
+            "the responses budget is exhausted: 3 rounds",
+        ),
+        (
+            "conflict",
+            StatusCode::BAD_REQUEST,
+            "conflict",
+            "the bytes hash to sha256:ab, not the pinned digest",
+        ),
+        ("occupied", StatusCode::BAD_REQUEST, "occupied", "the place is occupied: work"),
+        (
+            "diverged",
+            StatusCode::BAD_REQUEST,
+            "diverged",
+            "the remote's bookmark holds commits the push does not, last seen at abc",
+        ),
+        (
+            "conflicts",
+            StatusCode::BAD_REQUEST,
+            "conflicts",
+            "the merge left conflicts in Cargo.lock",
+        ),
+        (
+            "pending",
+            StatusCode::BAD_REQUEST,
+            "pending",
+            "the working copy holds pending changes in a.rs, b.md",
+        ),
+        ("wire-context", StatusCode::BAD_GATEWAY, "unavailable", "read: store down"),
+        (
+            "outcome-context",
+            StatusCode::BAD_REQUEST,
+            "occupied",
+            "add: the place is occupied: work",
+        ),
     ] {
-        let request = Request::get(path).body(Body::empty()).expect("build request");
+        let request =
+            Request::get(format!("/err/{case}")).body(Body::empty()).expect("build request");
         let (status, _, body) = send_raw(router.clone(), request).await;
-        assert_eq!(status, expected_status, "{path}");
+        assert_eq!(status, expected_status, "{case}");
         let body: ErrorBody = serde_json::from_str(&body).expect("decode error body");
-        assert_eq!(body.error, expected_code, "{path}");
-        match path {
-            "/err/vcs-pending" => assert_eq!(body.message, "pending changes: a.rs, b.md"),
-            "/err/vcs-access-context" => assert_eq!(body.message, "push: access: denied"),
-            _ => {}
-        }
+        assert_eq!(body.error, expected_code, "{case}");
+        assert_eq!(body.message, expected_message, "{case}");
     }
 }
 

@@ -27,11 +27,6 @@ tracing.workspace = true
 wasm-pkg-client.workspace = true
 wasmtime = { workspace = true, features = ["runtime"] }
 
-# guest dependencies
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-omnia-wasi-types.workspace = true
-wit-bindgen.workspace = true
-
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 omnia = { workspace = true, features = ["loader", "link"] }
 omnia-test = { workspace = true, default-features = false, features = ["host"] }

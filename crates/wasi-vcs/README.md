@@ -5,7 +5,7 @@ This crate provides the version-control interface for the Omnia runtime: the `om
 ## Interface
 
 Implements `omnia:vcs` ([`wit/vcs.wit`](wit/vcs.wit)), the interface the
-SDK's `Vcs` calls, over one `VcsClient` per backend.
+SDK's `vcs` module binds, over one `VcsClient` per backend.
 
 - A guest opens the repository or working copy at a `location`, and calls
   it through the `workspace` handle `open` returns. A place that holds none
@@ -42,7 +42,8 @@ SDK's `Vcs` calls, over one `VcsClient` per backend.
   bookmark, and pushes. `WasiVcs` serves both.
 - A backend picks a failure's case by returning an `omnia_wasi_vcs::Error`:
   - `NotARepository` and `NotFound` are `not-found`;
-  - `Access` is `unavailable`;
+  - `Denied` is `denied`, for a remote that refuses the caller;
+  - `Access` is `unavailable`, for a remote that cannot be reached;
   - `Exists` is the `occupied` outcome of `init`, `add`, and `clone`;
   - `Pending` is a merge's `unmerged` outcome;
   - `Diverged` is a push's `diverged` outcome;
@@ -74,7 +75,7 @@ omnia::runtime!({
 });
 ```
 
-A guest reaches the interface through `omnia_sdk::Vcs`, naming every location as a deployment-local path (`"."` the project mount, `"./.cache/repo"` beneath it), or through the raw `omnia_wasi_vcs::omnia::{store, workspace, workspaces, remotes}` bindings.
+A guest opens a workspace with `omnia_sdk::vcs::open`, `init`, or `clone`, naming its location as a deployment-local path (`"."` the project mount, `"./.cache/repo"` beneath it), and calls the generated `Workspace` methods. The raw `omnia_sdk::vcs::{store, workspace, workspaces, remotes}` bindings take a lent `location` instead.
 
 ## License
 

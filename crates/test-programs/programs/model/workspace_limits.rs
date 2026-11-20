@@ -3,12 +3,11 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_sdk::WasiProvider;
-use omnia_sdk::model::{Error, Model as _, Request};
-use test_programs::user;
+use omnia_sdk::model::Request;
+use test_programs::{fails_with, user};
 use wasip3::filesystem::preopens;
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 async fn scenario() {
     assert!(preopens::get_directories().iter().any(|(_, name)| name == "."), "host must mount `.`");
@@ -16,13 +15,13 @@ async fn scenario() {
     for needle in
         ["exceeds workspace read limit", "write limit exceeded", "directory exceeds listing limit"]
     {
-        let error = WasiProvider
-            .complete(Request::builder().messages(vec![user("workspace")]).workspace(".").build())
+        let error = Request::builder()
+            .messages(vec![user("workspace")])
+            .workspace(".")
+            .build()
+            .complete()
             .await
             .expect_err("a capped workspace step fails the completion");
-        assert!(
-            matches!(error, Error::Backend(ref detail) if detail.contains(needle)),
-            "`{needle}`: unexpected: {error:?}"
-        );
+        fails_with(&error, "other", needle);
     }
 }

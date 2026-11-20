@@ -62,7 +62,7 @@ Omnia's off-by-default `loader` cargo feature: the [guest loader](#guest-loader)
 
 ### Guest loader
 
-The `omnia:plugins` host capability: a guest names a source — `declared(name)`, one of the deployment's guests; `path(p)`, a component beneath one of its read-only [mounts](#mount); `release(reference, registry?)`, an exact package release — and the host acquires the bytes inside the deployment's grant (its guest list, its mounts, its package store, its `registries` routing) and admits them through the runtime's one admission body (`Runtime::admit_bytes`), which verifies them against the digest and seats them under the name the source derives (the declared name, the file stem, the reference without its version), returning a typed handle carrying the name, the content digest, and the names the component exports. A `declared` name is one more first use of the runtime's guest seam, so a [first-use guest](#first-use-guest) loads there exactly as a route would load it; a name already active under the same bytes is attested. A failed load answers one case: `not-found` for an undeclared name, a missing file, or a release nothing routes or holds; `denied` for a path beneath a writable mount or a name the deployment declares; `invalid` for a malformed request or bytes that miss the deployment's pin; `unsupported`, `unavailable`, or `other`. Bytes that miss the load's own digest, or a name active under other bytes, answer a `conflict` instead. Component bytes never cross the interface, and the requester gains no lifecycle authority. Ships behind omnia's `loader` feature; linked at assembly for every deployment alike, reachable only from worlds that import it. The requester surface — the `Plugins` capability trait and the `Location`/`Plugin`/`Digest`/`Error` types — ships in `omnia-sdk`'s `plugins` module.
+The `omnia:plugins` host capability: a guest names a source — `declared(name)`, one of the deployment's guests; `path(p)`, a component beneath one of its read-only [mounts](#mount); `release(reference, registry?)`, an exact package release — and the host acquires the bytes inside the deployment's grant (its guest list, its mounts, its package store, its `registries` routing) and admits them through the runtime's one admission body (`Runtime::admit_bytes`), which verifies them against the digest and seats them under the name the source derives (the declared name, the file stem, the reference without its version), returning a typed handle carrying the name, the content digest, and the names the component exports. A `declared` name is one more first use of the runtime's guest seam, so a [first-use guest](#first-use-guest) loads there exactly as a route would load it; a name already active under the same bytes is attested. A failed load answers one case: `not-found` for an undeclared name, a missing file, or a release nothing routes or holds; `denied` for a path beneath a writable mount or a name the deployment declares; `invalid` for a malformed request or bytes that miss the deployment's pin; `unsupported`, `unavailable`, or `other`. Bytes that miss the load's own digest, or a name active under other bytes, answer a `conflict` instead. Component bytes never cross the interface, and the requester gains no lifecycle authority. Ships behind omnia's `loader` feature; linked at assembly for every deployment alike, reachable only from worlds that import it. The requester surface, `plugins::load` over the generated `Source`, `Plugin`, and `Conflict` records, ships in `omnia-sdk`'s `plugins` module.
 
 ### Package store
 
@@ -74,17 +74,21 @@ A [guest entry](#guest-entry) whose component is not compiled into the runtime �
 
 ## Guest SDK (`omnia-sdk`)
 
+### Bindings
+
+The guest side of each `omnia:*` interface: the Rust `wit-bindgen` generates from its WIT, committed under `crates/sdk/src/bindings` and re-exported by the `omnia-sdk` interface modules (`keyvalue`, `sql`, ...) with typed helpers beside the generated methods. `mise run bindings` regenerates them, and CI fails when the committed bindings drift from the WIT.
+
 ### Handler contract
 
-The transport-neutral unit of guest application logic: an `async fn(Context<P>, I) -> Result<O, E>`, registered on a `Handlers<P>` and invoked by the closed `Router`'s dispatch over the provider it owns. The messaging router and the command façade are adapters that decode a transport event into `I` and encode the result back; an HTTP route is a plain axum handler that takes the same `Context<P>` as an extractor over that provider. A unit test calls the fn directly with `Context::new(provider, metadata)`. See [Writing Guests](guides/writing-guests.md#the-handler-contract).
+The transport-neutral unit of guest application logic: an `async fn(Context, I) -> Result<O, E>`, registered on a `Handlers` and invoked by the closed `Router`'s dispatch. The messaging router and the command façade are adapters that decode a transport event into `I` and encode the result back; an HTTP route is a plain axum handler that takes the same `Context` as an extractor. A handler reaches the host through the [bindings](#bindings), and a test runs it as the compiled component. See [Writing Guests](guides/writing-guests.md#the-handler-contract).
 
 ### Provider
 
-The one value a guest's handlers run against: it implements the capability traits their bounds name, and the `Router` that `Handlers::with_state(provider)` builds owns it. `WasiProvider` serves every capability through the WASI host on `wasm32`, `omnia_test::guest::Provider` serves them natively with in-memory doubles, and a native provider written outside omnia serves them over real services. Omnia ships no native provider. What any provider, and the host serving it, owes the application is the [Provider Contract](reference/provider-contract.md).
+What serves one `omnia:*` interface to a guest: the [WASI host](#host) for the interface and the [backend](#backend) it runs over. A guest never names one; the deployment decides what backs each interface. What any provider owes the application is the [Provider Contract](reference/provider-contract.md).
 
 ### Command façade
 
-`omnia_sdk::api::command`, the command-line adapter over the handler contract: `Handlers::command(name, handler)` registers a subcommand beside a module's paths and topics, the closed `Router` `run`s argv (clap decode → handler → encode in the selected `command::Format`, the output's `command::Render` form as text) onto a `Response { stdout, stderr, exit }`, and `command::export!(command_router)` binds the router fn as the `wasi:cli/run` export, writing the channels at that boundary. `parse` and `Command::call` are the same pieces for a hand-written clap grammar. The clap-backed parts ship behind the `command` cargo feature. Distinct from the host-side **`omnia-cli`** crate, which is the `run` grammar of a host binary.
+`omnia_sdk::command`, the command-line adapter over the handler contract: `Handlers::command(name, handler)` registers a subcommand beside a module's paths and topics, the closed `Router` `run`s argv (clap decode → handler → encode in the selected `command::Format`, the output's `command::Render` form as text) onto a `Response { stdout, stderr, exit }`, and `command::export!(command_router)` binds the router fn as the `wasi:cli/run` export, writing the channels at that boundary. `parse` and `Command::call` are the same pieces for a hand-written clap grammar. The clap-backed parts ship behind the `command` cargo feature. Distinct from the host-side **`omnia-cli`** crate, which is the `run` grammar of a host binary.
 
 ### Failure envelope
 
@@ -122,11 +126,11 @@ Work done inside Omnia host crates (validation, dispatch, workspace resolution) 
 
 ### Guest check
 
-The `omnia:model` request flag (`check`) under which the backend offers each candidate answer to the guest before finishing, as a `check` call over the session. The guest's `ok` ends the completion; its `err(text)` is appended verbatim as the correction turn and the backend goes round again. The host validates nothing about the answer — `format` only steers the provider — so acceptance lives with the guest that knows the type (`omnia_sdk::model::Question<T>` runs the exchange for a typed answer).
+The `omnia:model` request flag (`check`) under which the backend offers each candidate answer to the guest before finishing, as a `check` call over the session. The guest's `ok` ends the completion; its `err(text)` is appended verbatim as the correction turn and the backend goes round again. The host validates nothing about the answer — `format` only steers the provider — so acceptance lives with the guest that knows the type. `omnia_sdk::model::Request::complete_checked` sets the flag and answers each call, and `Question<T>` runs the exchange for a typed answer.
 
 ### Host-injected tools
 
-Workspace tools the host serves from `grants.workspace` under reserved names (`read`, `list`, `write`). Guests must not redeclare these names in `prompt.tools`. Backends that advertise them (genai: `read`/`list`) execute them host-side through the `ToolHost`, never through the session.
+Workspace tools the host serves from `grants.workspace` under reserved names (`read`, `list`, `write`). Guests must not redeclare these names in a request's `tools`. Backends that advertise them (genai: `read`/`list`) execute them host-side through the `ToolHost`, never through the session.
 
 ## Other uses of “floor” (not the runtime platform)
 

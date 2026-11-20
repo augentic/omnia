@@ -10,8 +10,8 @@
 
 use axum::routing::post;
 use axum::{Json, Router};
-use omnia_wasi_websocket::omnia::broadcast;
-use omnia_wasi_websocket::omnia::types::{Client, Error, Event, Message};
+use omnia_sdk::websocket::types::Error;
+use omnia_sdk::websocket::{self, Event, Message};
 use serde_json::{Value, json};
 use wasip3::exports::http;
 use wasip3::http::types::{ErrorCode, Request, Response};
@@ -22,14 +22,14 @@ wasip3::http::service::export!(HttpGuest);
 impl http::handler::Guest for HttpGuest {
     async fn handle(request: Request) -> Result<Response, ErrorCode> {
         let router = Router::new().route("/", post(send_message));
-        omnia_wasi_http::serve(router, request).await
+        omnia_sdk::http::serve(router, request).await
     }
 }
 
 #[axum::debug_handler]
 async fn send_message(message: String) -> omnia_sdk::Result<Json<Value>> {
-    let client = Client::connect("default".to_string()).await?;
-    broadcast::send(&client, Message::Text(message), Vec::new()).await?;
+    let client = websocket::connect(websocket::DEFAULT).await?;
+    client.broadcast(Message::Text(message), &[]).await?;
 
     Ok(Json(json!({
     "message": "event sent"
@@ -37,9 +37,9 @@ async fn send_message(message: String) -> omnia_sdk::Result<Json<Value>> {
 }
 
 struct WebSocket;
-omnia_wasi_websocket::export!(WebSocket);
+omnia_sdk::exports::websocket::export!(WebSocket);
 
-impl omnia_wasi_websocket::omnia::incoming_handler::Guest for WebSocket {
+impl omnia_sdk::exports::websocket::incoming_handler::Guest for WebSocket {
     async fn handle(event: Event) -> Result<(), Error> {
         println!("received event: {event:?}");
         Ok(())

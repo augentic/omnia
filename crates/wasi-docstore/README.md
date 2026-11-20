@@ -4,7 +4,7 @@ This crate provides the JSON document store interface for the Omnia runtime.
 
 ## Interface
 
-Implements `omnia:docstore`, the interface the SDK's `DocumentDb` calls, over
+Implements `omnia:docstore`, the interface the SDK's `docstore` module binds, over
 one `DocStoreClient` per backend.
 
 - A guest opens a collection by name and calls it through the handle `open`

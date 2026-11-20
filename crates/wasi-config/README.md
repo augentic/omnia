@@ -4,11 +4,11 @@ This crate provides the Config interface for the Omnia runtime.
 
 ## Interface
 
-Implements `omnia:config`, the interface the SDK's `Config` calls, over one
+Implements `omnia:config`, the interface the SDK's `config` module binds, over one
 `ConfigClient` per backend.
 
 - A guest reads a key through `store.get`. An unset key is `none`, not an
-  error, and a key may be set to the empty string. `ConfigExt::require`
+  error, and a key may be set to the empty string. `config::require`
   fails an unset key with the code `not-found`.
 - Every backend reads a portable key, and may reject any other with
   `invalid`. A portable key:

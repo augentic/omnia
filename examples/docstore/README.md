@@ -1,6 +1,6 @@
 # DocStore Example
 
-Demonstrates `omnia:docstore` through the `DocumentDb` capability, using the
+Demonstrates `omnia:docstore` through the `Collection` helpers, using the
 default in-memory backend: CRUD on a single `stops` collection plus one query
 endpoint with filters, sorting, limits, and cursor pagination.
 

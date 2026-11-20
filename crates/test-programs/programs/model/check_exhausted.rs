@@ -1,23 +1,23 @@
 //! Every candidate is rejected: the backend's round budget ends the
-//! completion as `exhausted`, which the SDK reports as `BudgetExhausted`
-//! carrying the guest's own correction.
+//! completion as `exhausted`, the outcome the question answers with.
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_sdk::WasiProvider;
-use omnia_sdk::model::{Error, Question};
+use omnia_sdk::model::{Budget, Question};
 use test_programs::Verdict;
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 async fn scenario() {
-    let error = Question::<Verdict>::new("verdict")
-        .ask(&WasiProvider, "judge this", None, Verdict::passing)
+    let exhausted = Question::<Verdict>::new("verdict")
+        .ask("judge this", None, Verdict::passing)
         .await
+        .expect("the question runs")
         .expect_err("no candidate passes the check");
-    let Error::BudgetExhausted(correction) = error else {
-        panic!("expected budget-exhausted, got {error:?}");
-    };
-    assert!(correction.contains("## Previous answer (rejected)"), "unexpected: {correction}");
-    assert!(correction.contains("verdict must be `pass`"), "unexpected: {correction}");
+    assert_eq!(exhausted.budget, Budget::Responses, "unexpected: {exhausted:?}");
+
+    // the scripted backend's detail is the last correction the check sent
+    let detail = &exhausted.detail;
+    assert!(detail.contains("## Previous answer (rejected)"), "unexpected: {detail}");
+    assert!(detail.contains("verdict must be `pass`"), "unexpected: {detail}");
 }

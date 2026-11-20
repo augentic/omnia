@@ -7,13 +7,13 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_wasi_otel::omnia::metrics::{
+use omnia_sdk::otel::metrics::{
     self, Exemplar, Gauge, Metric, MetricData, Number, NumberDataPoint, ScopeMetrics,
 };
-use omnia_wasi_otel::omnia::traces::{self, ScopeSpans, Span, SpanContext, SpanKind, Status};
-use omnia_wasi_otel::omnia::types::{AnyValue, Error, KeyValue};
+use omnia_sdk::otel::traces::{self, ScopeSpans, Span, SpanContext, SpanKind, Status};
+use omnia_sdk::otel::types::{AnyValue, Error, KeyValue};
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 async fn scenario() {
     // the host's refusals

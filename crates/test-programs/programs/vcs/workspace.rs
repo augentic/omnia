@@ -18,13 +18,13 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_wasi_vcs::omnia::types::{Error, Location, Precondition};
-use omnia_wasi_vcs::omnia::workspace::{ChangeKind, LogEntry, Rule, Strategy, Unmerged};
-use omnia_wasi_vcs::omnia::{remotes, store, workspaces};
+use omnia_sdk::vcs::types::{Error, Location, Precondition};
+use omnia_sdk::vcs::workspace::{ChangeKind, LogEntry, Rule, Strategy, Unmerged};
+use omnia_sdk::vcs::{remotes, store, workspaces};
 use wasip3::filesystem::preopens;
 use wasip3::filesystem::types::Descriptor;
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 const BASE: &str = "sha:base";
 const URL: &str = "https://example.test/repo.git";

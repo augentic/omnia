@@ -5,13 +5,13 @@
 #![cfg(target_arch = "wasm32")]
 
 use http::{Method, Request};
-use omnia_sdk::{ConfigExt as _, WasiProvider};
+use omnia_sdk::config;
 use wasip3::http::types::ErrorCode;
 
-omnia_sdk::api::command::export!(scenario);
+omnia_sdk::command::export!(scenario);
 
 async fn scenario() {
-    let origin: String = WasiProvider.require("ORIGIN").await.expect("ORIGIN seeded");
+    let origin: String = config::require("ORIGIN").await.expect("ORIGIN seeded");
 
     let request = Request::builder()
         .method(Method::GET)
@@ -19,7 +19,7 @@ async fn scenario() {
         .body(String::new())
         .expect("request");
     let error =
-        omnia_wasi_http::handle(request).await.expect_err("untrusted certificate must be refused");
+        omnia_sdk::http::send(request).await.expect_err("untrusted certificate must be refused");
     let code = error.downcast_ref::<ErrorCode>().expect("a wasi:http error code");
     assert!(matches!(code, ErrorCode::TlsCertificateError), "got {code:?}");
 }

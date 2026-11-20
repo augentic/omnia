@@ -16,3 +16,23 @@ jobs:
     secrets: inherit
     with:
       targets: wasm32-wasip3
+
+  # Mirrors `bindings-check` in mise.toml.
+  bindings:
+    name: Bindings
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip3
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wit-bindgen-cli@0.63.0,wasm-tools@1.263.0
+
+      - run: cargo build --locked -p test-programs --example config_seeded --target wasm32-wasip3
+      - run: scripts/bindings --check target/wasm32-wasip3/debug/examples/config_seeded.wasm

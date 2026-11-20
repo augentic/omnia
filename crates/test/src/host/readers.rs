@@ -5,7 +5,7 @@ use omnia_wasi_keyvalue::KeyValueClient;
 
 use super::{Backends, STATE_BUCKET};
 
-impl<M, K, B, D, S, V, G, I, O, C> Backends<M, K, B, D, S, V, G, I, O, C>
+impl<M, K, B, D, S, V, G, I, O, C, H, W> Backends<M, K, B, D, S, V, G, I, O, C, H, W>
 where
     K: KeyValueClient,
     B: BlobStoreClient,
@@ -19,9 +19,11 @@ where
     I: Sync,
     O: Sync,
     C: Sync,
+    H: Sync,
+    W: Sync,
 {
-    /// One entry of the bucket the guest's `StateStore` writes, as the guest
-    /// reads it through the keyvalue handle.
+    /// One entry of the [`STATE_BUCKET`] bucket, as a guest reads it through
+    /// the keyvalue handle.
     ///
     /// The bytes are the guest's own, and an entry whose TTL has passed
     /// reads as absent.

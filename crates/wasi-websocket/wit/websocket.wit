@@ -58,9 +58,9 @@ interface types {
   /// A guest's handle on a WebSocket service, the server or gateway its
   /// peers connect to.
   resource client {
-    /// Connect to the service `name`, a binding the deployment declares. An
-    /// unnamed SDK handle connects to `default`. A name the deployment does
-    /// not declare fails with `not-found`.
+    /// Connect to the service `name`, a binding the deployment declares. The
+    /// SDK's `DEFAULT` names the service `default`. A name the deployment
+    /// does not declare fails with `not-found`.
     connect: static async func(name: string) -> result<client, error>;
   }
 

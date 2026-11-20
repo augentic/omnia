@@ -8,15 +8,13 @@ mod support;
 use std::borrow::Cow;
 use std::fmt;
 use std::future::{Ready, ready};
-use std::sync::Arc;
 
 use clap::{Args, Parser, Subcommand};
-use omnia_sdk::api::command::{
+use omnia_sdk::command::{
     Command, Failure, Format, IntoExit, Parsed, Render, Response, Shell, USAGE_EXIT, Verbosity,
     completions, parse,
 };
-use omnia_sdk::api::{Context, Handlers, Metadata};
-use omnia_sdk::{bad_request, not_found, vcs};
+use omnia_sdk::{Context, Handlers, Metadata, bad_request, not_found, vcs};
 use serde::{Deserialize, Serialize};
 
 use self::support::{Spans, fields};
@@ -238,23 +236,23 @@ fn from_env_mints() {
     assert_ne!(Metadata::from_env("FROM_ENV_MINTS").request_id, metadata.request_id);
 }
 
-fn greet(_context: Context<()>, input: Greet) -> Ready<Result<Greeting, omnia_sdk::Error>> {
+fn greet(_context: Context, input: Greet) -> Ready<Result<Greeting, omnia_sdk::Error>> {
     let Greet { name } = input;
     ready(Ok(Greeting {
         text: format!("hello, {name}"),
     }))
 }
 
-fn lookup(_context: Context<()>, input: Lookup) -> Ready<Result<Greeting, omnia_sdk::Error>> {
+fn lookup(_context: Context, input: Lookup) -> Ready<Result<Greeting, omnia_sdk::Error>> {
     let Lookup { id } = input;
     ready(Err(not_found!("no item {id}")))
 }
 
-fn reject(_context: Context<()>, _input: Greet) -> Ready<Result<Greeting, omnia_sdk::Error>> {
+fn reject(_context: Context, _input: Greet) -> Ready<Result<Greeting, omnia_sdk::Error>> {
     ready(Err(bad_request!("name is required")))
 }
 
-fn ping(_context: Context<()>, (): ()) -> Ready<Result<Greeting, omnia_sdk::Error>> {
+fn ping(_context: Context, (): ()) -> Ready<Result<Greeting, omnia_sdk::Error>> {
     ready(Ok(Greeting {
         text: "pong".to_string(),
     }))
@@ -276,9 +274,8 @@ fn stderr_json(response: &Response) -> serde_json::Value {
 
 #[tokio::test]
 async fn call_text() {
-    let provider = Arc::new(());
     let metadata = Metadata::default();
-    let response = Command::new(&provider, &metadata, Format::Text).call(greet, ada()).await;
+    let response = Command::new(&metadata, Format::Text).call(greet, ada()).await;
 
     assert_eq!(response.exit, 0);
     assert_eq!(response.stderr, b"");
@@ -287,9 +284,8 @@ async fn call_text() {
 
 #[tokio::test]
 async fn call_json() {
-    let provider = Arc::new(());
     let metadata = Metadata::default();
-    let response = Command::new(&provider, &metadata, Format::Json).call(greet, ada()).await;
+    let response = Command::new(&metadata, Format::Json).call(greet, ada()).await;
 
     assert_eq!(response.exit, 0);
     let stdout = String::from_utf8(response.stdout).expect("json is utf-8");
@@ -303,9 +299,8 @@ async fn call_json() {
 
 #[tokio::test]
 async fn call_handler_error() {
-    let provider = Arc::new(());
     let metadata = Metadata::default();
-    let command = Command::new(&provider, &metadata, Format::Json);
+    let command = Command::new(&metadata, Format::Json);
 
     let response = command.call(lookup, item("42")).await;
 
@@ -316,16 +311,15 @@ async fn call_handler_error() {
         serde_json::json!({ "error": "not_found", "message": "no item 42", "exit-code": 2 })
     );
 
-    let text = Command::new(&provider, &metadata, Format::Text).call(lookup, item("42")).await;
+    let text = Command::new(&metadata, Format::Text).call(lookup, item("42")).await;
     assert_eq!(text.exit, 2);
     assert_eq!(text.stderr, b"error[not_found]: no item 42\n");
 }
 
 #[tokio::test]
 async fn hints_by_error() {
-    let provider = Arc::new(());
     let metadata = Metadata::default();
-    let command = Command::new(&provider, &metadata, Format::Text).hints(|error| {
+    let command = Command::new(&metadata, Format::Text).hints(|error| {
         (error.code() == "not_found").then_some(Cow::Borrowed("run `app list` to see the items"))
     });
 
@@ -347,7 +341,7 @@ async fn merged_commands() {
     let looking = Handlers::new().command("lookup", lookup);
     let pinging = Handlers::new().command("ping", ping);
     let router = Handlers::from([greeting, looking, pinging])
-        .with_state(())
+        .into_router()
         .name("app")
         .version("1.2.3")
         .about("Greets people")
@@ -390,7 +384,7 @@ async fn merged_commands() {
 #[tokio::test]
 async fn command_span() {
     let (spans, _guard) = Spans::install();
-    let router = Handlers::new().command("greet", greet).with_state(()).name("app");
+    let router = Handlers::new().command("greet", greet).into_router().name("app");
     let mut metadata = Metadata::default();
     metadata.request_id = Some("req-1".to_string());
     metadata.correlation_id = Some("corr-1".to_string());
@@ -409,7 +403,7 @@ async fn command_span() {
 #[tokio::test]
 async fn help_from_docs() {
     let router =
-        Handlers::new().command("greet", greet).with_state(()).name("app").about("Greets people");
+        Handlers::new().command("greet", greet).into_router().name("app").about("Greets people");
 
     let help = router.run(["app", "--help"]).await;
     assert_eq!(help.exit, 0);
@@ -443,7 +437,7 @@ async fn command_with_decoder() {
                 }
             },
         )
-        .with_state(());
+        .into_router();
 
     let decoded = router.run(["app", "lookup", "42"]).await;
     assert_eq!(decoded.exit, 2);
@@ -469,17 +463,17 @@ struct LookupError(#[source] omnia_sdk::Error);
 #[tokio::test]
 async fn typed_handler_error() {
     let router = Handlers::new()
-        .command("revision", |_: Context<()>, (): ()| {
-            ready(Err::<(), _>(vcs::Error::NotFound("v1".into())))
+        .command("revision", |_: Context, (): ()| {
+            ready(Err::<(), _>(vcs::types::Error::NotFound("no revision `v1`".into())))
         })
-        .command("lookup", |_: Context<()>, (): ()| {
+        .command("lookup", |_: Context, (): ()| {
             ready(Err::<(), _>(LookupError(not_found!("no item 42"))))
         })
-        .command("format", |_: Context<()>, (): ()| ready(Err::<(), _>(fmt::Error)))
-        .with_state(());
+        .command("format", |_: Context, (): ()| ready(Err::<(), _>(fmt::Error)))
+        .into_router();
 
     for (verb, exit, code, text) in [
-        ("revision", 2, "not-found", "not found: v1"),
+        ("revision", 3, "not-found", "no revision `v1`"),
         ("lookup", 2, "not_found", "could not look up the item: no item 42"),
         ("format", 3, "server_error", "when formatting"),
     ] {
@@ -495,7 +489,7 @@ async fn typed_handler_error() {
 #[test]
 #[should_panic(expected = "duplicate command `greet`")]
 fn duplicate_command() {
-    let _handlers = Handlers::<()>::new().command("greet", greet).command("greet", greet);
+    let _handlers = Handlers::new().command("greet", greet).command("greet", greet);
 }
 
 #[cfg(feature = "http")]
@@ -511,7 +505,7 @@ mod http_parity {
     use super::*;
 
     async fn lookup_route(
-        context: Context<()>, Query(input): Query<Lookup>,
+        context: Context, Query(input): Query<Lookup>,
     ) -> Result<Json<Greeting>, omnia_sdk::Error> {
         lookup(context, input).await.map(Json)
     }
@@ -523,7 +517,7 @@ mod http_parity {
         let router = Handlers::new()
             .route("/items", get(lookup_route))
             .command("lookup", lookup)
-            .with_state(());
+            .into_router();
 
         let response = router.run(["app", "--format", "json", "lookup", "42"]).await;
         let command_body: ErrorBody =
