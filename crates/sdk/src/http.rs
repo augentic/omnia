@@ -3,6 +3,8 @@
 //! - [`fetch`] sends a request whose body is [`Bytes`], and [`fetch_json`]
 //!   reads its JSON reply.
 //! - [`send`] takes any body, and fails with the host's own error.
+//! - With the `http` feature, [`cache::HttpCache`] fetches through a
+//!   keyvalue bucket where a request's `Cache-Control` asks.
 //!
 //! With the `http` feature, a route is an ordinary axum handler on a
 //! [`Handlers`](crate::Handlers). It reads the call's
@@ -15,6 +17,8 @@
 //! guest's `wasi:http` handler, and `serve` answers each request inside the
 //! `handler` span [`trace`] opens.
 
+#[cfg(feature = "http")]
+pub mod cache;
 #[cfg(feature = "http")]
 mod server;
 

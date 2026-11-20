@@ -78,6 +78,11 @@ Unreleased
 - `omnia_test::host::{send, deliver}`, which drive one request or one
   delivery through a booted runtime, and `precompiled`, which compiles a
   component once for every boot after the first.
+- `omnia_sdk::http::cache`, behind the `http` feature. `HttpCache`
+  answers an outbound request from an `omnia:keyvalue` bucket as its
+  `Cache-Control` and `If-None-Match` ask. It replaces the
+  `omnia-http-cache` crate of `omnia-ext`, with the same API, header
+  contract, and store keys.
 
 ### Changed
 

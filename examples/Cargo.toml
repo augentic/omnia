@@ -120,6 +120,15 @@ name = "http"
 path = "http/runtime.rs"
 
 [[example]]
+name = "http-cache-wasm"
+path = "http-cache/guest.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "http-cache"
+path = "http-cache/runtime.rs"
+
+[[example]]
 name = "http-proxy-wasm"
 path = "http-proxy/guest.rs"
 crate-type = ["cdylib"]

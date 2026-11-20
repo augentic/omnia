@@ -104,6 +104,16 @@ path = "programs/harness/flow.rs"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "http_cache_headers"
+path = "programs/http_cache/headers.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "http_cache_outage"
+path = "programs/http_cache/outage.rs"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "http_incoming_echo"
 path = "programs/http/incoming_echo.rs"
 crate-type = ["cdylib"]

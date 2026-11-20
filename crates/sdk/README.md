@@ -49,7 +49,7 @@ Absence is `Ok(None)`, not an error, and `?` converts a binding's error into an 
 | `blobstore` | `open`, `admin::create_container` | Whole-object `Container::read`, `read_range`, and `write`. |
 | `config` | `get` | Typed `require` and `parse`, and `#[derive(Settings)]`. |
 | `docstore` | `open` | Typed `Collection::get_as`, `insert`, `upsert`, and `remove`, and `find` over a `Query`. |
-| `http` | `fetch`, `send` | `fetch_json` for a JSON reply. |
+| `http` | `fetch`, `send` | `fetch_json` for a JSON reply, and `cache::HttpCache` for responses cached in a keyvalue bucket, behind the `http` feature. |
 | `identity` | `open` | `Identity::token`, an `AccessToken` with the instant it expires. |
 | `keyvalue` | `open` | `Bucket::read`, `write`, `remove`, and `keys`, JSON `get_json` and `set_json`, and `compare_and_swap`. |
 | `messaging` | `connect` | `Client::send`, `request`, and `reply`, over a `Message::new` or `Message::json`. |
@@ -204,10 +204,10 @@ A guest's host calls panic off `wasm32`, so a handler that reaches the host is t
 
 ## Cargo features
 
-- `http` *(default)*: the axum-backed inbound handlers (`http::export!`, `serve`, and `trace`), `Error: IntoResponse`, and the `mcp` server. Outbound `http::fetch` needs no feature.
+- `http` *(default)*: the axum-backed inbound handlers (`http::export!`, `serve`, and `trace`), `Error: IntoResponse`, the `mcp` server, and `http::cache`, an outbound response cache over a keyvalue bucket driven by each request's `Cache-Control` and `If-None-Match`. Outbound `http::fetch` needs no feature.
 - `command`: the clap-backed `command` program, with `Handlers::command`, `Router::run`, and shell completions. `command::export!` and the `Response` and `Failure` types need no feature.
 
-Every interface is always built. A guest that serves no inbound HTTP can disable the default features to shrink its build. A command-only guest is `default-features = false, features = ["command"]`.
+Every interface is always built. A guest that serves no inbound HTTP and uses no `http::cache` can disable the default features to shrink its build. A command-only guest is `default-features = false, features = ["command"]`.
 
 ## License
 
