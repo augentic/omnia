@@ -24,8 +24,10 @@ async fn scenario() {
         })
     });
     let verdict = question.ask("judge this", Some(tools), Verdict::passing).await;
-    assert_eq!(verdict.expect("the handled call leaves a verdict").verdict, "pass");
+    let verdict = verdict.expect("the question runs").expect("the handled call leaves a verdict");
+    assert_eq!(verdict.verdict, "pass");
 
     let verdict = question.ask("judge this", None, Verdict::passing).await;
-    assert_eq!(verdict.expect("the refused call leaves a verdict").verdict, "pass");
+    let verdict = verdict.expect("the question runs").expect("the refused call leaves a verdict");
+    assert_eq!(verdict.verdict, "pass");
 }

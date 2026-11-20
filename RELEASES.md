@@ -12,35 +12,54 @@ Unreleased
 - One `omnia_sdk` module per interface, each in the same shape:
   - one opener, `open` or `connect`, taking a binding name as `&str`;
   - a `DEFAULT` where the interface has a default binding;
-  - the types a guest holds re-exported at the module root;
-  - helpers as methods that take `&str` and `&[u8]` and return a flat
-    `Result`;
+  - the generated types a guest holds re-exported at the module root;
+  - helpers as methods that take `&str` and `&[u8]` and return a
+    `Result`, with an outcome the WIT names as the inner `Err` of a
+    `Result<Result<T, Outcome>>`;
   - the generated interfaces as public submodules.
 - The helpers, by module:
   - `keyvalue`: `Bucket::read`, `write`, `remove`, `keys`, `get_json`,
     `set_json`, and `compare_and_swap`, and `Lifetime: From<Duration>`.
   - `docstore`: `Collection::get_as`, `insert`, `upsert`, `remove`, and
-    `find`, `Document::decode`, and `SortField::asc` and `desc`.
+    `find`, `Document::decode`, `SortField::asc`, `desc`, and `compare`,
+    and `Filter::array_contains`.
   - `blobstore`: `Container::read`, `read_range`, and `write`, and
     `Content::read`.
   - `sql`: `Database::begin`, `query_as`, `query_opt`, and `exec` on a
-    `Database` and a `Transaction`, `ResultSet::read`, and `Statement::new`.
+    `Database` and a `Transaction`, `ResultSet::read`, and `Statement::new`,
+    over a `Value` whose cases take the WIT's names.
   - `config`: `get`, `require`, and `parse`.
-  - `identity`: `Identity::token`, which answers an `AccessToken`, and
-    `Identity::access_token`.
+  - `identity`: `Identity::token`, which answers an `AccessToken` with its
+    `expires_at` instant and `expires_in`, and `Identity::access_token`.
   - `messaging`: `Client::send`, `request`, and `reply`, and `Message::new`
     and `Message::json`, with `with_key`, `with_content_type`, and
     `with_metadata`.
-  - `model`: `Request::complete` and `Request::complete_with`, and
-    `Message::user`, `assistant`, and `system`.
-  - `plugins`: `Location::load`.
-  - `vcs`: one fn per operation.
+  - `model`: `open`, and `Request::complete`, `complete_with`, and
+    `complete_checked`, each answering `Result<Result<Reply, Exhausted>>`.
+    On the generated records, `Message::user`, `assistant`, and `system`,
+    `Format::schema_of`, `Tool::of`, `ToolCall::arguments`, and `Default`
+    for `Generation`, `Format`, and `WorkerGrant`.
+  - `plugins`: `load`, which answers `Result<Result<Plugin, Conflict>>`,
+    and `Source::name`.
+  - `vcs`: `open`, `init`, and `clone`, which answer a `Workspace`, and
+    `Workspace::add`, `remove`, `fetch`, `remote_bookmark`, `push`,
+    `log_all`, and `status_all`.
   - `vault`: the opener alone.
   - `websocket`: `Client::broadcast`, `send`, `close`, and `exists`.
+- The unstable interfaces as raw bindings, with no helpers:
+  `blobstore::uploads` and `presign`, `messaging::consumer`, `log`, and
+  `admin`, and `otel::logs`.
 - `From<types::Error> for omnia_sdk::Error`, so `?` on a binding call keeps
   the error's case as the code: a `BadGateway` for `unavailable`, and a
   `ServerError` for every other. An `anyhow` context around the call keeps
-  the code too.
+  the code too. Every interface's error converts by this one table.
+- `From<Outcome> for omnia_sdk::Error` for `model::Exhausted`,
+  `plugins::Conflict`, `vcs::Occupied`, `vcs::Diverged`, and
+  `vcs::Unmerged`, each a `BadRequest` under the outcome's name, and read
+  from a topic or subcommand handler's source chain.
+- `messaging::Delivery::reply_to`, `position`, `attempt`, and
+  `published_at`, from the WIT delivery.
+- `omnia_wasi_vcs::Error::Denied`, for a remote that refuses the caller.
 - `omnia_sdk::exports::messaging` and `omnia_sdk::exports::websocket`. Each
   holds an `incoming-handler` `Guest` trait beside the `export!` that binds a
   hand-written implementation of it.
@@ -77,8 +96,37 @@ Unreleased
 - `http::export!`, `messaging::export!`, and `command::export!` take the
   router fn alone. On a native target each binds nothing and still uses the
   fn, so a private router fn raises no `dead_code`.
-- `model::prompt::Sections::channels` returns the SDK's `Message`.
-- `Question::ask` takes no model.
+- `model::prompt::Sections::channels` returns the generated `Message`.
+- `Question::ask` takes no model, and answers `Result<Result<T, Exhausted>>`.
+  An `Exhausted` carries the backend's own detail.
+- The `model`, `vcs`, and `plugins` failures a guest sees are the binding
+  error's case names:
+  - model: `invalid` is a `500` `invalid`, no longer a `400`
+    `invalid-request`, and `other` a `500` `other`, no longer a `502`
+    `backend`. A spent budget is the `Exhausted` outcome.
+  - vcs: a missing revision is `None`, no longer a `404`. A place with no
+    workspace is a `500` `not-found`, no longer a `400`
+    `not-a-repository`. An unreachable remote is `unavailable`, no longer
+    `access`, and a place already taken is the `Occupied` outcome.
+  - plugins: a refusal answers the host's case name at `500`, no longer
+    `refused` or `internal`, and a missed pin is the `Conflict` outcome.
+- A `check` reaches the guest as a `Candidate`, through
+  `Request::complete_checked`, rather than as a tool call named `check`.
+- `model`, `vcs`, `plugins`, and `docstore` re-export the generated records
+  in place of the SDK's own, in the WIT's shape:
+  - `model::Tool` is the WIT `tool` record, and `Format::Schema` holds a
+    `Schema`, so `model::Function` and `SchemaFormat` go.
+    `Generation::stop` is `stop_sequences`.
+  - `vcs::Entry` is `LogEntry`, and `Rule::paths` is `pattern`. `Merged`
+    and `CloneOptions` go, since `merge` and `clone` take and answer the
+    WIT's own.
+  - `plugins::Location` is `Source`, and `Plugin` is the WIT record, so
+    `Digest` goes.
+  - `docstore::SortField` is the WIT record, built by the same `asc` and
+    `desc`.
+- `sql::Value::Float`, `Double`, and `Str` are `Float32`, `Float64`, and
+  `Text`. A zoned timestamp is a `TimestampTz`, so `Timestamp` binds
+  `timestamp` whatever its text holds.
 - `#[derive(Settings)]` reads through `omnia_sdk::config`, so `load()`
   takes no argument.
 - The `omnia-wasi-*` crates and `omnia-plugin` are host-only, and empty on
@@ -102,6 +150,11 @@ Unreleased
   `StateStore`, `Vcs`, and `WebSockets`, with their `*Ext` and `Has*`
   traits and `omnia_sdk::Page`. A guest calls the bindings.
 - `omnia_sdk::WasiProvider` and `omnia_sdk::wasi`.
+- `model::Error`, `vcs::Error`, and `plugins::Error`. A call fails with the
+  binding error, or answers a typed outcome.
+- `model::CHECK_TOOL` and `model::Request::check`.
+- The per-path `vcs` fns, such as `resolve`, `head`, `commit`, and
+  `labelled`. A guest calls the generated `Workspace` methods.
 - `docstore::Query::offset` and `docstore::ScalarValue::Binary`. The wire
   carries neither.
 - `#[derive(Provider)]` and `#[omnia_sdk::capability]`.

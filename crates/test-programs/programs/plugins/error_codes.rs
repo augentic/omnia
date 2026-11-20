@@ -1,16 +1,15 @@
-//! Every case a registry source reports reaches an SDK requester as the code
-//! it folds onto, and a conflict as a refusal naming the bytes found. Argv
-//! carries the echoer's digest.
+//! Every case a registry source reports reaches an SDK requester as an
+//! `omnia_sdk::Error` under the case's name, and a missed pin as the
+//! conflict the load answers with, naming the bytes found. Argv carries the
+//! echoer's digest.
 //!
 //! - The suite's faulting source fails `fault:<case>@1.0.0` with that case.
 //! - It serves the echoer as `test:echoer@1.0.0`, which the pin here misses.
-//! - A declared name with a pin is refused before it reaches the host.
 
 #![cfg(target_arch = "wasm32")]
 
-use std::fmt::Debug;
-
-use omnia_sdk::plugins::{Digest, Error, Location};
+use omnia_sdk::plugins::{self, Release, Source};
+use test_programs::fails_with;
 
 omnia_sdk::command::export!(scenario);
 
@@ -23,41 +22,23 @@ async fn scenario() {
     };
 
     // the source's chosen cases
-    for (case, status, code) in [
-        ("not-found", 400, "refused"),
-        ("denied", 400, "refused"),
-        ("invalid", 400, "refused"),
-        ("unsupported", 500, "internal"),
-        ("unavailable", 502, "unavailable"),
-    ] {
-        let from = release(&format!("fault:{case}@1.0.0"));
-        expect_code(from.load(None).await, (status, code), case);
+    for case in ["not-found", "denied", "invalid", "unsupported", "unavailable"] {
+        let source = release(&format!("fault:{case}@1.0.0"), None);
+        let error = plugins::load(source).await.expect_err("the source fails the load");
+        fails_with(&error, case, case);
     }
 
     // a release whose bytes miss the pin
-    let pin: Digest = MISSED.parse().expect("a well-formed digest");
-    let conflict = release("test:echoer@1.0.0").load(Some(&pin)).await;
-    expect_code(conflict, (400, "refused"), echoer);
-
-    // a declared name the call pins, which the SDK refuses unsent
-    let declared = Location::Declared("echoer".to_owned()).load(Some(&pin)).await;
-    expect_code(declared, (400, "refused"), "takes no digest");
+    let loaded = plugins::load(release("test:echoer@1.0.0", Some(MISSED))).await;
+    let conflict = loaded.expect("the load runs").expect_err("the bytes miss the pin");
+    assert_eq!(&conflict.found, echoer, "the conflict names the bytes found");
+    assert!(conflict.current.is_none(), "no guest is loaded under the name");
 }
 
-fn release(reference: &str) -> Location {
-    Location::Registry {
-        package: reference.to_owned(),
-        endpoint: None,
-    }
-}
-
-fn expect_code<T: Debug>(result: Result<T, Error>, expected: (u16, &str), needle: &str) {
-    match result {
-        Ok(value) => panic!("returned {value:?}, not a `{}` failure", expected.1),
-        Err(err) => {
-            let err = omnia_sdk::Error::from(err);
-            assert_eq!((err.status().as_u16(), err.code()), expected, "{err}");
-            assert!(err.description().contains(needle), "`{err}` does not mention `{needle}`");
-        }
-    }
+fn release(reference: &str, pin: Option<&str>) -> Source {
+    Source::Release(Release {
+        reference: reference.to_owned(),
+        registry: None,
+        pin: pin.map(str::to_owned),
+    })
 }

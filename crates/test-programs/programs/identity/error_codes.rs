@@ -8,7 +8,7 @@
 use std::fmt::Debug;
 
 use omnia_sdk::Result;
-use omnia_sdk::identity::{AccessToken, credentials};
+use omnia_sdk::identity::{self, AccessToken};
 
 omnia_sdk::command::export!(scenario);
 
@@ -26,7 +26,7 @@ async fn scenario() {
 }
 
 async fn token(name: &str) -> Result<AccessToken> {
-    credentials::open(name.to_owned()).await?.token(&["read"]).await
+    identity::open(name).await?.token(&["read"]).await
 }
 
 fn expect_code<T: Debug>(result: Result<T>, status: u16, code: &str) {

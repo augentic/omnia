@@ -4,14 +4,14 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_sdk::plugins::Location;
+use omnia_sdk::plugins::{self, Source};
 
 omnia_sdk::command::export!(scenario);
 
 async fn scenario() {
-    let plugin = Location::Declared("plugin".to_owned())
-        .load(None)
+    let plugin = plugins::load(Source::Declared("plugin".to_owned()))
         .await
+        .expect("the load runs")
         .expect("a host-only handler loads without a linked import");
-    assert_eq!(plugin.id(), "plugin");
+    assert_eq!(plugin.name, "plugin");
 }

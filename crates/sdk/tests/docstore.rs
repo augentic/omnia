@@ -1,6 +1,6 @@
-//! `Filter::on_date` across calendar edges, observed through
-//! `Filter::matches`, and `Filter::check` at and past each limit and on each
-//! value it refuses.
+//! `Filter::on_date` across calendar edges and `Filter::array_contains`,
+//! observed through `Filter::matches`, and `Filter::check` at and past each
+//! limit and on each value it refuses.
 
 use std::iter;
 
@@ -124,4 +124,16 @@ fn unordered_value() {
     }
     Filter::eq("rank", ScalarValue::Null).check().expect("an equality with `null`");
     Filter::ne("rank", true).check().expect("an inequality with a boolean");
+}
+
+#[test]
+fn array_contains() {
+    let tagged = Filter::array_contains("tags", "x");
+
+    assert!(tagged.matches(&json!({ "tags": ["y", "x"] })));
+    assert!(!tagged.matches(&json!({ "tags": [] })));
+    assert!(!tagged.matches(&json!({ "tags": "x" })), "a string field is not an array");
+    assert!(!tagged.matches(&json!({})));
+    tagged.check().expect("an array test with a string");
+    refused(&Filter::array_contains("tags", ScalarValue::Null));
 }

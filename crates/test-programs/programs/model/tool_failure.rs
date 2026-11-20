@@ -13,6 +13,7 @@ async fn scenario() {
     let reply = request
         .complete_with(|_call| async { Err::<String, _>("no data".to_owned()) })
         .await
+        .expect("the completion runs")
         .expect("the model turns the failure into an answer");
     assert_eq!(reply.answer, "tool failed: no data");
 }

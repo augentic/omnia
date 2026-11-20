@@ -1,10 +1,10 @@
 //! The candidate never deserializes as `T`: the schema and the type
-//! disagree, which the guest sees as `invalid-request`, not more rounds.
+//! disagree, which the guest sees as `invalid`, not more rounds.
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_sdk::model::{Error, Question};
-use test_programs::Verdict;
+use omnia_sdk::model::Question;
+use test_programs::{Verdict, fails_with};
 
 omnia_sdk::command::export!(scenario);
 
@@ -15,8 +15,5 @@ async fn scenario() {
         })
         .await
         .expect_err("the candidate does not deserialize");
-    let Error::InvalidRequest(detail) = error else {
-        panic!("expected invalid-request, got {error:?}");
-    };
-    assert!(detail.contains("schema and answer type disagree"), "unexpected: {detail}");
+    fails_with(&error, "invalid", "schema and answer type disagree");
 }

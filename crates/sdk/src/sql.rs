@@ -192,6 +192,7 @@ fn first<T: FromRow>(rows: &[Row]) -> Result<Option<T>> {
 
 /// A SQL scalar: a statement parameter or a column value.
 ///
+/// Each case but [`Null`](Self::Null) is the `omnia:sql` value of its name.
 /// The `From` impls build the case a Rust value maps to, and `Option` of one
 /// maps `None` to [`Null`](Self::Null). A `u32` binds as an
 /// [`Int64`](Self::Int64), and a `u64` binds only once converted to an `i64`.
@@ -199,28 +200,30 @@ fn first<T: FromRow>(rows: &[Row]) -> Result<Option<T>> {
 pub enum Value {
     /// `NULL`, in a column of any type.
     Null,
-    /// Signed 32-bit integer.
-    Int32(i32),
-    /// Signed 64-bit integer.
-    Int64(i64),
-    /// 32-bit floating-point number.
-    Float(f32),
-    /// 64-bit floating-point number.
-    Double(f64),
-    /// UTF-8 string.
-    Str(String),
-    /// Boolean value.
+    /// For a `BOOLEAN` column.
     Boolean(bool),
-    /// A `YYYY-MM-DD` date.
-    Date(String),
-    /// An `HH:MM:SS` time, with optional fractional seconds.
-    Time(String),
-    /// A `YYYY-MM-DD HH:MM:SS` timestamp, with optional fractional seconds.
-    ///
-    /// One in RFC 3339 form, with a `Z` or an offset, is a `TIMESTAMPTZ`.
-    Timestamp(String),
-    /// Opaque binary bytes.
+    /// For an `INTEGER` column.
+    Int32(i32),
+    /// For a `BIGINT` column.
+    Int64(i64),
+    /// For a `REAL` column.
+    Float32(f32),
+    /// For a `DOUBLE PRECISION` column.
+    Float64(f64),
+    /// For a `TEXT` column.
+    Text(String),
+    /// For a `BYTEA` column.
     Binary(Bytes),
+    /// For a `DATE` column, as `YYYY-MM-DD`.
+    Date(String),
+    /// For a `TIME` column, as `HH:MM:SS` with optional fractional seconds.
+    Time(String),
+    /// For a `TIMESTAMP` column, as `YYYY-MM-DD HH:MM:SS` with optional
+    /// fractional seconds.
+    Timestamp(String),
+    /// For a `TIMESTAMPTZ` column, as RFC 3339. A portable one has a
+    /// `+00:00` offset.
+    TimestampTz(String),
 }
 
 impl Value {
@@ -244,11 +247,11 @@ macro_rules! value_from {
 }
 
 value_from! {
-    String => Str,
+    String => Text,
     i32 => Int32,
     i64 => Int64,
-    f32 => Float,
-    f64 => Double,
+    f32 => Float32,
+    f64 => Float64,
     bool => Boolean,
     Bytes => Binary,
 }
@@ -261,7 +264,7 @@ impl From<u32> for Value {
 
 impl From<&str> for Value {
     fn from(value: &str) -> Self {
-        Self::Str(value.to_owned())
+        Self::Text(value.to_owned())
     }
 }
 
@@ -283,45 +286,37 @@ impl From<types::Value> for Value {
             types::Value::Boolean(v) => Self::Boolean(v),
             types::Value::Int32(v) => Self::Int32(v),
             types::Value::Int64(v) => Self::Int64(v),
-            types::Value::Float32(v) => Self::Float(v),
-            types::Value::Float64(v) => Self::Double(v),
-            types::Value::Text(v) => Self::Str(v),
+            types::Value::Float32(v) => Self::Float32(v),
+            types::Value::Float64(v) => Self::Float64(v),
+            types::Value::Text(v) => Self::Text(v),
             types::Value::Binary(v) => Self::Binary(Bytes::from(v)),
             types::Value::Date(v) => Self::Date(v),
             types::Value::Time(v) => Self::Time(v),
-            types::Value::Timestamp(v) | types::Value::TimestampTz(v) => Self::Timestamp(v),
+            types::Value::Timestamp(v) => Self::Timestamp(v),
+            types::Value::TimestampTz(v) => Self::TimestampTz(v),
         }
     }
 }
 
 /// The wire value a [`Value`] binds as, `None` for [`Null`](Value::Null).
-///
-/// A [`Timestamp`](Value::Timestamp) with an RFC 3339 offset binds as a
-/// `timestamp-tz`.
 impl From<Value> for Option<types::Value> {
     fn from(value: Value) -> Self {
         let value = match value {
             Value::Null => return None,
+            Value::Boolean(v) => types::Value::Boolean(v),
             Value::Int32(v) => types::Value::Int32(v),
             Value::Int64(v) => types::Value::Int64(v),
-            Value::Float(v) => types::Value::Float32(v),
-            Value::Double(v) => types::Value::Float64(v),
-            Value::Str(v) => types::Value::Text(v),
-            Value::Boolean(v) => types::Value::Boolean(v),
+            Value::Float32(v) => types::Value::Float32(v),
+            Value::Float64(v) => types::Value::Float64(v),
+            Value::Text(v) => types::Value::Text(v),
+            Value::Binary(v) => types::Value::Binary(v.to_vec()),
             Value::Date(v) => types::Value::Date(v),
             Value::Time(v) => types::Value::Time(v),
-            Value::Timestamp(v) if has_offset(&v) => types::Value::TimestampTz(v),
             Value::Timestamp(v) => types::Value::Timestamp(v),
-            Value::Binary(v) => types::Value::Binary(v.to_vec()),
+            Value::TimestampTz(v) => types::Value::TimestampTz(v),
         };
         Some(value)
     }
-}
-
-// an RFC 3339 offset follows the time, past the `YYYY-MM-DD` date
-fn has_offset(timestamp: &str) -> bool {
-    let time = timestamp.get(10..).unwrap_or_default();
-    time.ends_with(['Z', 'z']) || time.contains(['+', '-'])
 }
 
 /// One named column in a result [`Row`].
@@ -384,11 +379,12 @@ fn column_overflow(column: &str, target: &str, err: impl fmt::Display) -> crate:
 /// Decode a Rust value from one SQL column's [`Value`].
 ///
 /// - Every integer case reads as any integer type its value fits.
-/// - `Float` and `Double` read as `f64`, and only `Float` reads as `f32`.
+/// - `Float32` and `Float64` read as `f64`, and only `Float32` reads as
+///   `f32`.
 /// - `Boolean` reads as `bool`, and so does an integer `0` or `1`, which is
 ///   how `SQLite` returns a `BOOLEAN` column.
-/// - Every string-shaped case (`Str`, `Date`, `Time`, `Timestamp`) reads as
-///   a string.
+/// - Every string-shaped case (`Text`, `Date`, `Time`, `Timestamp`,
+///   `TimestampTz`) reads as a string.
 /// - `Option<T>` reads `NULL` as `None`.
 pub trait FromColumn<'a>: Sized {
     /// Decode `Self` from `value`, the content of `column`.
@@ -442,8 +438,8 @@ impl FromColumn<'_> for u32 {
 impl FromColumn<'_> for f64 {
     fn from_column(column: &str, value: &Value) -> Result<Self> {
         match value {
-            Value::Double(v) => Ok(*v),
-            Value::Float(v) => Ok(Self::from(*v)),
+            Value::Float64(v) => Ok(*v),
+            Value::Float32(v) => Ok(Self::from(*v)),
             Value::Null => Err(column_null(column)),
             other => Err(column_mismatch(column, "a float", other)),
         }
@@ -453,7 +449,7 @@ impl FromColumn<'_> for f64 {
 impl FromColumn<'_> for f32 {
     fn from_column(column: &str, value: &Value) -> Result<Self> {
         match value {
-            Value::Float(v) => Ok(*v),
+            Value::Float32(v) => Ok(*v),
             Value::Null => Err(column_null(column)),
             other => Err(column_mismatch(column, "a 32-bit float", other)),
         }
@@ -475,7 +471,11 @@ impl FromColumn<'_> for bool {
 impl<'a> FromColumn<'a> for &'a str {
     fn from_column(column: &str, value: &'a Value) -> Result<Self> {
         match value {
-            Value::Str(v) | Value::Date(v) | Value::Time(v) | Value::Timestamp(v) => Ok(v.as_str()),
+            Value::Text(v)
+            | Value::Date(v)
+            | Value::Time(v)
+            | Value::Timestamp(v)
+            | Value::TimestampTz(v) => Ok(v.as_str()),
             Value::Null => Err(column_null(column)),
             other => Err(column_mismatch(column, "a string", other)),
         }

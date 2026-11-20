@@ -12,7 +12,8 @@
 # ships, and one aggregate package, `omnia:sdk`, includes each package's
 # `imports` world. The output follows `wasi-rs`'s `ci/regenerate.sh`: one
 # `imports.rs` for every import, and one file per export world whose import
-# types point back at it.
+# types point back at it. Every `@unstable` feature is enabled, since every
+# host links the gated interfaces.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -78,7 +79,7 @@ fi
 mkdir -p "$out"
 
 generate() {
-  wit-bindgen rust "$stage" --out-dir "$out" --format \
+  wit-bindgen rust "$stage" --out-dir "$out" --format --all-features \
     --runtime-path wasip3::wit_bindgen::rt "$@"
 }
 
@@ -111,6 +112,6 @@ if $check; then
     exit 1
   }
   if [ -n "$guest" ]; then
-    wasm-tools component targets "$stage" "$guest" --world omnia:sdk/command
+    wasm-tools component targets --all-features "$stage" "$guest" --world omnia:sdk/command
   fi
 fi

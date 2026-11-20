@@ -1,11 +1,10 @@
 //! `Question<T>`: a completion whose answer is one `T`.
 //!
-//! The request's `format` is `T`'s JSON Schema — a steering hint for the
-//! provider — and acceptance is the request's `check`, answered here: each
-//! candidate is deserialized into `T` and handed to the caller's closure;
-//! a miss becomes the correction turn (one default template, replaceable
-//! per question), a hit is captured and returned. The reply text is never
-//! re-parsed.
+//! The request's `format` is `T`'s JSON Schema, a steering hint for the
+//! provider, and the question judges each candidate itself. A candidate is
+//! deserialized into `T` and handed to the caller's closure. A miss becomes
+//! the correction turn (one default template, replaceable per question), and
+//! a hit is captured and returned. The reply text is never re-parsed.
 
 use std::fmt;
 use std::future::{Future, ready};
@@ -17,9 +16,8 @@ use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
-use super::{
-    CHECK_TOOL, Error, Format, Message, Request, Role, SchemaFormat, Tool, ToolCall, WorkerGrant,
-};
+use super::{Candidate, Exhausted, Format, Message, Request, Tool, ToolCall, WorkerGrant, types};
+use crate::Result;
 
 /// What a check found wrong with a candidate, one finding per line of the
 /// correction turn.
@@ -28,8 +26,7 @@ pub type Findings = Vec<String>;
 /// The future a tool handler returns.
 pub type ToolFuture = Pin<Box<dyn Future<Output = Result<String, String>> + Send + 'static>>;
 
-/// The caller's handler for the request's declared function tools;
-/// [`Question::ask`] answers the reserved `check` in front of it.
+/// The caller's handler for the request's tools.
 pub type Tools = Box<dyn FnMut(ToolCall) -> ToolFuture + Send>;
 
 /// Renders the correction turn for a rejected candidate from the previous
@@ -44,13 +41,12 @@ pub struct Question<T> {
 }
 
 impl<T: JsonSchema + DeserializeOwned + Send> Question<T> {
-    /// A question steered by `T`'s schema under `name`, with `check` set.
+    /// A question steered by `T`'s schema under `name`.
     #[must_use]
     pub fn new(name: &str) -> Self {
         Self {
             request: Request {
-                format: Format::Schema(SchemaFormat::of::<T>(name)),
-                check: true,
+                format: Format::schema_of::<T>(name),
                 ..Request::default()
             },
             correction: Arc::new(default_correction),
@@ -58,35 +54,35 @@ impl<T: JsonSchema + DeserializeOwned + Send> Question<T> {
         }
     }
 
-    /// The system / instructions channel.
+    /// The standing instructions, read before the messages.
     #[must_use]
     pub fn system(mut self, prose: impl Into<String>) -> Self {
         self.request.system = Some(prose.into());
         self
     }
 
-    /// Opaque model id hint.
+    /// The model to open; see [`Request::model`].
     #[must_use]
     pub fn model(mut self, model: impl Into<String>) -> Self {
         self.request.model = Some(model.into());
         self
     }
 
-    /// Chat turns preceding the one [`Self::ask`] adds.
+    /// The messages preceding the one [`Self::ask`] adds.
     #[must_use]
     pub fn messages(mut self, turns: Vec<Message>) -> Self {
         self.request.messages = turns;
         self
     }
 
-    /// Function tools offered to the model.
+    /// The tools the guest runs for the model.
     #[must_use]
     pub fn tools(mut self, tools: Vec<Tool>) -> Self {
         self.request.tools = tools;
         self
     }
 
-    /// The directory lent through `grants.workspace`; see [`Request::workspace`].
+    /// The directory the completion works in; see [`Request::workspace`].
     #[must_use]
     pub fn workspace(mut self, lend: impl Into<String>) -> Self {
         self.request.workspace = Some(lend.into());
@@ -101,8 +97,8 @@ impl<T: JsonSchema + DeserializeOwned + Send> Question<T> {
         self
     }
 
-    /// Post-process the steering schema — subject enums, exact counts, id
-    /// patterns. Hints for the provider, never the gate.
+    /// Post-process the steering schema, such as subject enums, exact counts,
+    /// or id patterns. Hints for the provider, never the gate.
     #[must_use]
     pub fn schema(mut self, edit: impl FnOnce(&mut Value)) -> Self {
         if let Format::Schema(spec) = &mut self.request.format
@@ -114,11 +110,12 @@ impl<T: JsonSchema + DeserializeOwned + Send> Question<T> {
         self
     }
 
-    /// Replace the correction turn's template: `render(previous, findings)`
-    /// is the user message a rejected candidate earns, `previous` being the
-    /// candidate text and `findings` what the check held against it (or the
-    /// one deserialization failure). The default is a `## Previous answer
-    /// (rejected)` / `## Findings` template.
+    /// Replace the correction turn's template.
+    ///
+    /// `render(previous, findings)` is the user message a rejected candidate
+    /// earns, `previous` being the candidate text and `findings` what the
+    /// check held against it, or the one deserialization failure. The default
+    /// is a `## Previous answer (rejected)` / `## Findings` template.
     #[must_use]
     pub fn correction(
         mut self, render: impl Fn(&str, &[String]) -> String + Send + Sync + 'static,
@@ -133,78 +130,82 @@ impl<T: JsonSchema + DeserializeOwned + Send> Question<T> {
         &self.request
     }
 
-    /// One completion, `turn` appended as the user message. Each candidate
-    /// the backend proposes is deserialized into `T` and judged by `check`:
-    /// a deserialization failure or `Err(findings)` is the correction turn,
-    /// `Ok` captures the `T` this returns.
+    /// Run one completion with `turn` appended as the user message, and
+    /// return the first candidate `check` accepts.
+    ///
+    /// Each candidate the backend proposes is deserialized into `T` and
+    /// judged by `check`. A deserialization failure or `Err(findings)` is the
+    /// correction turn, and `Ok` accepts the candidate.
     ///
     /// # Errors
     ///
-    /// - `InvalidRequest` when the completion ended with no accepted answer
-    ///   after a candidate failed to deserialize: the schema and `T`
-    ///   disagree, which more rounds will not fix.
-    /// - `BudgetExhausted(correction)` when the backend ran out of rounds on
-    ///   a rejected candidate.
-    /// - `Backend` when the backend finished with no accepted answer: it
-    ///   never ran the check, or returned after a rejection.
-    /// - Any other host error, unchanged.
+    /// Returns an [`Error`](crate::Error) when:
+    ///
+    /// - a candidate failed to deserialize and no other was accepted, as
+    ///   `invalid`, since the schema and `T` disagree;
+    /// - the backend finished with no accepted answer, as `other`;
+    /// - the completion fails as [`Request::complete_with`] does.
+    ///
+    /// An [`Exhausted`] is the inner `Err`: the backend spent a budget on
+    /// rejected candidates.
     pub async fn ask(
         &self, turn: impl Into<String>, tools: Option<Tools>,
         mut check: impl FnMut(&T) -> Result<(), Findings> + Send,
-    ) -> Result<T, Error> {
+    ) -> Result<Result<T, Exhausted>> {
         let mut request = self.request.clone();
-        request.messages.push(Message {
-            role: Role::User,
-            content: turn.into(),
-        });
+        request.messages.push(Message::user(turn));
+
+        let mut tools = tools;
+        let tool_handler = |call: ToolCall| -> ToolFuture {
+            match tools.as_mut() {
+                Some(tools) => tools(call),
+                None => Box::pin(ready(Err(format!(
+                    "tool `{}` has no handler: pass one to Question::ask",
+                    call.name
+                )))),
+            }
+        };
 
         let mut accepted: Option<T> = None;
         let mut mismatch: Option<String> = None;
         let mut candidates = 0_usize;
-        let mut tools = tools;
         let correction = &self.correction;
-        let handler = |call: ToolCall| -> ToolFuture {
-            if call.name != CHECK_TOOL {
-                return match tools.as_mut() {
-                    Some(tools) => tools(call),
-                    None => Box::pin(ready(Err(format!(
-                        "tool `{}` has no handler: pass one to Question::ask",
-                        call.name
-                    )))),
-                };
-            }
+        let check_handler = |candidate: Candidate| {
             candidates += 1;
-            let result = match serde_json::from_str::<T>(&call.arguments) {
+            let verdict = match serde_json::from_str::<T>(&candidate.answer) {
                 Err(error) => {
                     let finding = format!("the answer does not match the expected shape: {error}");
                     mismatch = Some(finding.clone());
-                    Err(correction(&call.arguments, &[finding]))
+                    Err(correction(&candidate.answer, &[finding]))
                 }
-                Ok(candidate) => match check(&candidate) {
+                Ok(answer) => match check(&answer) {
                     Ok(()) => {
-                        accepted = Some(candidate);
-                        Ok(String::new())
+                        accepted = Some(answer);
+                        Ok(())
                     }
-                    Err(findings) => Err(correction(&call.arguments, &findings)),
+                    Err(findings) => Err(correction(&candidate.answer, &findings)),
                 },
             };
-            Box::pin(ready(result))
+            ready(verdict)
         };
 
-        let outcome = request.complete_with(handler).await;
+        let outcome = request.complete_checked(tool_handler, check_handler).await?;
         match (outcome, accepted, mismatch) {
-            (Ok(_), Some(answer), _) => Ok(answer),
+            (Ok(_), Some(answer), _) => Ok(Ok(answer)),
             (Ok(_), None, _) if candidates == 0 => {
-                Err(Error::Backend("the backend finished without running the check".to_owned()))
+                let detail = "the backend finished without running the check".to_owned();
+                Err(types::Error::Other(detail).into())
             }
-            (Ok(_), None, _) => Err(Error::Backend(
-                "the backend finished on a candidate the check rejected".to_owned(),
-            )),
+            (Ok(_), None, _) => {
+                let detail = "the backend finished on a candidate the check rejected".to_owned();
+                Err(types::Error::Other(detail).into())
+            }
             // the schema and `T` disagree: a guest bug more rounds would not fix
-            (Err(Error::BudgetExhausted(_)), None, Some(mismatch)) => {
-                Err(Error::InvalidRequest(format!("schema and answer type disagree: {mismatch}")))
+            (Err(_), None, Some(mismatch)) => {
+                let detail = format!("schema and answer type disagree: {mismatch}");
+                Err(types::Error::Invalid(detail).into())
             }
-            (Err(error), _, _) => Err(error),
+            (Err(exhausted), _, _) => Ok(Err(exhausted)),
         }
     }
 }

@@ -17,6 +17,7 @@ async fn scenario() {
             async { Ok::<_, String>("42".to_owned()) }
         })
         .await
+        .expect("the completion runs")
         .expect("tool loop answers");
 
     assert_eq!(reply.answer, "42");

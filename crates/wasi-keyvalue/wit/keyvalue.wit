@@ -137,8 +137,8 @@ interface store {
   use types.{error};
   use bucket.{bucket};
 
-  /// Open the bucket `name`, a binding the deployment declares. An unnamed
-  /// SDK handle opens `default`.
+  /// Open the bucket `name`, a binding the deployment declares. The SDK's
+  /// `DEFAULT` names the bucket `default`.
   open: async func(name: string) -> result<bucket, error>;
 }
 

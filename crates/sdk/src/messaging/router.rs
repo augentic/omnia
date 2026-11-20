@@ -62,6 +62,22 @@ pub struct Delivery {
     /// Transport metadata in delivery order.
     pub metadata: Vec<(String, String)>,
 
+    /// The address [`Client::reply`](crate::messaging::Client::reply)
+    /// answers, `None` when the sender awaits no reply.
+    pub reply_to: Option<String>,
+
+    /// Where the broker stored the message, `None` where it stores none.
+    ///
+    /// A redelivery carries the same position.
+    pub position: Option<String>,
+
+    /// How many times the broker has delivered the message, counting this
+    /// one. `None` where the broker keeps no count.
+    pub attempt: Option<u32>,
+
+    /// When the broker took the message, `None` where it records no time.
+    pub published_at: Option<SystemTime>,
+
     /// When the host stops waiting for the handler, which the handler reads
     /// as [`Metadata::deadline`].
     pub deadline: Option<SystemTime>,
@@ -99,6 +115,34 @@ impl Delivery {
         self
     }
 
+    /// Set the address a reply answers.
+    #[must_use]
+    pub fn with_reply_to(mut self, reply_to: impl Into<String>) -> Self {
+        self.reply_to = Some(reply_to.into());
+        self
+    }
+
+    /// Set where the broker stored the message.
+    #[must_use]
+    pub fn with_position(mut self, position: impl Into<String>) -> Self {
+        self.position = Some(position.into());
+        self
+    }
+
+    /// Set how many times the broker has delivered the message.
+    #[must_use]
+    pub const fn with_attempt(mut self, attempt: u32) -> Self {
+        self.attempt = Some(attempt);
+        self
+    }
+
+    /// Set when the broker took the message.
+    #[must_use]
+    pub const fn with_published_at(mut self, published_at: SystemTime) -> Self {
+        self.published_at = Some(published_at);
+        self
+    }
+
     /// Set when the host stops waiting for the handler.
     #[must_use]
     pub const fn with_deadline(mut self, deadline: SystemTime) -> Self {
@@ -117,7 +161,11 @@ impl Delivery {
 ///
 /// - A [`BadRequest`](crate::Error::BadRequest) rejects the delivery, as a
 ///   message no redelivery handles.
-/// - Any other failure releases it, as a failure that may pass.
+/// - Any other failure releases it, as a failure that may pass, and leaves
+///   the delay to the backend.
+///
+/// A guest that sets a release delay implements
+/// [`exports::messaging`](crate::exports::messaging) instead.
 ///
 /// # Errors
 ///
@@ -131,11 +179,15 @@ pub async fn handle(
 
     use crate::messaging::types::{Release, Settle};
 
+    let instant = |millis| UNIX_EPOCH.checked_add(Duration::from_millis(millis));
     let crate::messaging::types::Delivery {
         topic,
         message,
+        reply_to,
+        position,
+        attempt,
+        published_at,
         deadline,
-        ..
     } = delivery;
     let delivery = Delivery {
         topic: (!topic.is_empty()).then_some(topic),
@@ -143,7 +195,11 @@ pub async fn handle(
         key: message.key,
         content_type: message.content_type,
         metadata: message.metadata,
-        deadline: deadline.and_then(|millis| UNIX_EPOCH.checked_add(Duration::from_millis(millis))),
+        reply_to,
+        position,
+        attempt,
+        published_at: published_at.and_then(instant),
+        deadline: deadline.and_then(instant),
     };
     router.handle(delivery).await.map_err(|error| {
         let reason = error.to_string();

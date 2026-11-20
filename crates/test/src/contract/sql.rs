@@ -207,7 +207,7 @@ pub async fn values(db: &Database) {
         Value::Date(DATE.to_owned()),
         Value::Time(TIME.to_owned()),
         Value::Timestamp(STAMP.to_owned()),
-        Value::Timestamp(STAMPTZ.to_owned()),
+        Value::TimestampTz(STAMPTZ.to_owned()),
     ];
     let mut null = [const { Value::Null }; 13];
     null[0] = Value::from(2_i64);

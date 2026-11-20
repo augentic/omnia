@@ -86,7 +86,10 @@ pub enum Error {
     /// A working copy holds pending changes where none may.
     #[error("pending changes: {}", .0.join(", "))]
     Pending(Vec<String>),
-    /// The remote refused, could not be reached, or wants credentials.
+    /// The remote refused the caller, or wants credentials it was not given.
+    #[error("denied: {0}")]
+    Denied(String),
+    /// The remote could not be reached, or did not answer.
     #[error("access: {0}")]
     Access(String),
     /// The remote's bookmark holds commits the pushed one does not.

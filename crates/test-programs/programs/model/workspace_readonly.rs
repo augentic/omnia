@@ -2,8 +2,8 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_sdk::model::{Error, Request};
-use test_programs::user;
+use omnia_sdk::model::Request;
+use test_programs::{fails_with, user};
 use wasip3::filesystem::preopens;
 
 omnia_sdk::command::export!(scenario);
@@ -18,8 +18,5 @@ async fn scenario() {
         .complete()
         .await
         .expect_err("write against a read-only mount fails");
-    assert!(
-        matches!(error, Error::Backend(ref detail) if detail.contains("read-only")),
-        "unexpected: {error:?}"
-    );
+    fails_with(&error, "other", "read-only");
 }

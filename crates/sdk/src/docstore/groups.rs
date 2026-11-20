@@ -23,6 +23,7 @@ pub enum Test {
     StartsWith(String),
     EndsWith(String),
     Contains(String),
+    ArrayContains(Value),
     Null,
 }
 
@@ -56,6 +57,7 @@ impl From<Test> for collection::Test {
             Test::StartsWith(pattern) => Self::StartsWith(pattern),
             Test::EndsWith(pattern) => Self::EndsWith(pattern),
             Test::Contains(pattern) => Self::Contains(pattern),
+            Test::ArrayContains(value) => Self::ArrayContains(value.into()),
             Test::Null => Self::Null,
         }
     }
@@ -123,6 +125,9 @@ impl Tree {
             }
             Filter::EndsWith { field, pattern } => {
                 Ok(Self::leaf(field, Test::EndsWith(pattern.clone()), negated))
+            }
+            Filter::ArrayContains { field, value } => {
+                Ok(Self::leaf(field, Test::ArrayContains(Value::of(field, value)?), negated))
             }
         }
     }

@@ -14,6 +14,7 @@ async fn scenario() {
         .build()
         .complete()
         .await
+        .expect("the completion runs")
         .expect("echo answers json");
     assert_eq!(reply.answer, r#"{"echo":"hi"}"#);
 }

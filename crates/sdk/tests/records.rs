@@ -5,7 +5,7 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use std::collections::BTreeMap;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use omnia_sdk::docstore::Document;
 use omnia_sdk::identity::AccessToken;
@@ -68,7 +68,7 @@ fn statement_binding() {
         Value::from("text"),
         Value::Timestamp("2024-01-02 03:04:05".to_owned()),
         Value::Timestamp("2024-01-02T03:04:05Z".to_owned()),
-        Value::Timestamp("2024-01-02T03:04:05-05:00".to_owned()),
+        Value::TimestampTz("2024-01-02T03:04:05-05:00".to_owned()),
     ];
 
     let statement = Statement::new("INSERT INTO t VALUES ($1, $2, $3, $4, $5, $6)", &params);
@@ -82,7 +82,7 @@ fn statement_binding() {
                 Some(Wire::Int64(7)),
                 Some(Wire::Text(_)),
                 Some(Wire::Timestamp(_)),
-                Some(Wire::TimestampTz(_)),
+                Some(Wire::Timestamp(_)),
                 Some(Wire::TimestampTz(_)),
             ]
         ),
@@ -94,10 +94,12 @@ fn statement_binding() {
 #[test]
 fn wire_value() {
     assert_eq!(Value::from(None::<Wire>), Value::Null);
-    assert_eq!(Value::from(Wire::Float32(1.5)), Value::Float(1.5));
+    assert_eq!(Value::from(Wire::Float32(1.5)), Value::Float32(1.5));
+    assert_eq!(Value::from(Wire::Float64(1.5)), Value::from(1.5_f64));
+    assert_eq!(Value::from(Wire::Text("a".to_owned())), Value::from("a"));
     assert_eq!(Value::from(Wire::Binary(vec![1, 2])), Value::from(vec![1_u8, 2]));
     let zoned = Value::from(Wire::TimestampTz("2024-01-02T03:04:05Z".to_owned()));
-    assert_eq!(zoned, Value::Timestamp("2024-01-02T03:04:05Z".to_owned()));
+    assert_eq!(zoned, Value::TimestampTz("2024-01-02T03:04:05Z".to_owned()));
 }
 
 #[test]
@@ -169,10 +171,19 @@ fn item(note: Option<&str>) -> Row {
 
 #[test]
 fn access_token_debug() {
-    let token = AccessToken::new("secret", Duration::from_secs(60));
+    let token = AccessToken::new("secret", SystemTime::now() + Duration::from_secs(60));
 
     let debug = format!("{token:?}");
 
     assert!(!debug.contains("secret"), "{debug}");
     assert!(debug.contains("<redacted>"), "{debug}");
+}
+
+#[test]
+fn access_token_expiry() {
+    let live = AccessToken::new("live", SystemTime::now() + Duration::from_secs(60));
+    let lapsed = AccessToken::new("lapsed", UNIX_EPOCH);
+
+    assert!((Duration::from_secs(59)..=Duration::from_secs(60)).contains(&live.expires_in()));
+    assert_eq!(lapsed.expires_in(), Duration::ZERO);
 }

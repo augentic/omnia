@@ -82,7 +82,7 @@ struct PlaceError(#[source] omnia_sdk::Error);
 
 #[derive(Debug, thiserror::Error)]
 #[error("could not review")]
-struct ReviewError(#[source] model::Error);
+struct ReviewError(#[source] model::Exhausted);
 
 fn unavailable() -> omnia_sdk::Error {
     omnia_sdk::Error::bad_gateway("unavailable", "store did not answer")
@@ -99,13 +99,22 @@ async fn failing_handler() {
         .topic("request", |_: Context, _: EchoInput| ready(Err::<(), _>(bad_request!("no name"))))
         .topic("format", |_: Context, _: EchoInput| ready(Err::<(), _>(fmt::Error)))
         .topic("revision", |_: Context, _: EchoInput| {
-            ready(Err::<(), _>(vcs::Error::NotFound("v1".into())))
+            ready(Err::<(), _>(vcs::types::Error::NotFound("no revision `v1`".into())))
         })
         .topic("plugin", |_: Context, _: EchoInput| {
-            ready(Err::<(), _>(plugins::Error::Refused("unsigned".into())))
+            let conflict = plugins::Conflict {
+                found: "sha256:ab".into(),
+                current: None,
+            };
+            ready(Err::<(), _>(conflict))
         })
         .topic("review", |_: Context, _: EchoInput| {
-            ready(Err::<(), _>(ReviewError(model::Error::Unavailable("rate limited".into()))))
+            let exhausted = model::Exhausted {
+                budget: model::Budget::Tokens,
+                detail: "4096 tokens".into(),
+                usage: None,
+            };
+            ready(Err::<(), _>(ReviewError(exhausted)))
         })
         .into_router();
 
@@ -115,9 +124,9 @@ async fn failing_handler() {
         ("order", 502, "unavailable", "could not place the order: store did not answer"),
         ("request", 400, "bad_request", "no name"),
         ("format", 500, "server_error", "when formatting"),
-        ("revision", 404, "not-found", "not found: v1"),
-        ("plugin", 400, "refused", "unsigned"),
-        ("review", 502, "unavailable", "could not review"),
+        ("revision", 500, "not-found", "no revision `v1`"),
+        ("plugin", 400, "conflict", "not the pinned digest"),
+        ("review", 400, "exhausted", "could not review: the tokens budget is exhausted"),
     ] {
         let Err(error) = router.handle(delivery(Some(topic), br#"{"name":"message"}"#)).await
         else {
@@ -236,6 +245,31 @@ async fn topic_with_raw_payload() {
         ),
         "{refused:?}"
     );
+}
+
+#[tokio::test]
+async fn topic_with_reply_to() {
+    let seen = Arc::new(Mutex::new(None));
+    let record = {
+        let seen = Arc::clone(&seen);
+        move |_: Context, input: (Option<String>, Option<u32>)| {
+            *seen.lock().expect("record") = Some(input);
+            ready(Ok::<(), omnia_sdk::Error>(()))
+        }
+    };
+    let router = Handlers::new()
+        .topic_with("quotes", record, |delivery: &Delivery| {
+            Ok((delivery.reply_to.clone(), delivery.attempt))
+        })
+        .into_router();
+
+    router
+        .handle(delivery(Some("quotes"), b"{}").with_reply_to("quotes.reply").with_attempt(2))
+        .await
+        .expect("the route handles the delivery");
+
+    let seen = seen.lock().expect("seen").clone();
+    assert_eq!(seen, Some((Some("quotes.reply".to_owned()), Some(2))));
 }
 
 #[tokio::test]

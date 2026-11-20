@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::bindings::imports::omnia::types::types;
+use crate::{model, plugins, vcs};
 
 /// Result type used across the crate.
 pub type Result<T, E = Error> = std::result::Result<T, E>;
@@ -27,6 +28,15 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 ///
 /// A call the upstream did not answer, or one that exceeded its time bound,
 /// is a [`BadGateway`](Self::BadGateway) with the code `unavailable`.
+///
+/// A typed outcome a call answers with instead of its result is a
+/// [`BadRequest`](Self::BadRequest) under the outcome's name:
+///
+/// - `exhausted`: a completion spent a budget, [`model::Exhausted`].
+/// - `conflict`: a load's precondition did not hold, [`plugins::Conflict`].
+/// - `occupied`: a place already holds something, [`vcs::Occupied`].
+/// - `diverged`: a remote moved past a push, [`vcs::Diverged`].
+/// - `conflicts` or `pending`: a merge sealed nothing, [`vcs::Unmerged`].
 #[derive(Error, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Error {
     /// Request payload is invalid or missing required fields.
@@ -181,8 +191,8 @@ impl Error {
         link.to_string()
     }
 
-    // The `Error` a domain error maps to: this type, or a wire, `vcs`,
-    // `plugins`, or `model` error through its own conversion.
+    // The `Error` a domain error maps to: this type, or a wire error or a
+    // typed outcome through its own conversion.
     fn from_domain(error: &(dyn StdError + 'static)) -> Option<Self> {
         if let Some(error) = error.downcast_ref::<Self>() {
             return Some(error.clone());
@@ -190,13 +200,19 @@ impl Error {
         if let Some(error) = error.downcast_ref::<types::Error>() {
             return Some(error.clone().into());
         }
-        if let Some(error) = error.downcast_ref::<crate::vcs::Error>() {
-            return Some(error.clone().into());
+        if let Some(outcome) = error.downcast_ref::<model::Exhausted>() {
+            return Some(outcome.clone().into());
         }
-        if let Some(error) = error.downcast_ref::<crate::plugins::Error>() {
-            return Some(error.clone().into());
+        if let Some(outcome) = error.downcast_ref::<plugins::Conflict>() {
+            return Some(outcome.clone().into());
         }
-        error.downcast_ref::<crate::model::Error>().map(|error| error.clone().into())
+        if let Some(outcome) = error.downcast_ref::<vcs::Occupied>() {
+            return Some(outcome.clone().into());
+        }
+        if let Some(outcome) = error.downcast_ref::<vcs::Diverged>() {
+            return Some(outcome.clone().into());
+        }
+        error.downcast_ref::<vcs::Unmerged>().map(|outcome| outcome.clone().into())
     }
 
     fn with_description(self, description: String) -> Self {
@@ -231,6 +247,40 @@ impl From<types::Error> for Error {
             types::Error::Unavailable(message) => Self::bad_gateway("unavailable", message),
             types::Error::Other(message) => Self::server_error("other", message),
         }
+    }
+}
+
+impl From<model::Exhausted> for Error {
+    fn from(exhausted: model::Exhausted) -> Self {
+        Self::bad_request("exhausted", exhausted.to_string())
+    }
+}
+
+impl From<plugins::Conflict> for Error {
+    fn from(conflict: plugins::Conflict) -> Self {
+        Self::bad_request("conflict", conflict.to_string())
+    }
+}
+
+impl From<vcs::Occupied> for Error {
+    fn from(occupied: vcs::Occupied) -> Self {
+        Self::bad_request("occupied", occupied.to_string())
+    }
+}
+
+impl From<vcs::Diverged> for Error {
+    fn from(diverged: vcs::Diverged) -> Self {
+        Self::bad_request("diverged", diverged.to_string())
+    }
+}
+
+impl From<vcs::Unmerged> for Error {
+    fn from(unmerged: vcs::Unmerged) -> Self {
+        let code = match &unmerged {
+            vcs::Unmerged::Conflicts(_) => "conflicts",
+            vcs::Unmerged::Pending(_) => "pending",
+        };
+        Self::bad_request(code, unmerged.to_string())
     }
 }
 

@@ -47,3 +47,13 @@ async fn blobstore_container() {
     assert_eq!(backends.object("objects", "abandoned").await, None);
     assert_eq!(backends.object("objects", "short").await, None);
 }
+
+#[tokio::test]
+async fn blobstore_unstable() {
+    let backends = Backends::defaults().await;
+    backends.blobstore.create_container("objects".to_owned()).await.expect("objects");
+
+    run_guest(test_programs::BLOBSTORE_UNSTABLE, backends.clone()).await;
+
+    assert_eq!(backends.object("objects", "big").await, None, "a refused call stored nothing");
+}

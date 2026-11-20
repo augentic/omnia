@@ -13,12 +13,14 @@ async fn scenario() {
         .correction(|previous, findings| format!("REJECTED {previous}: {}", findings.join("; ")))
         .ask("judge this", None, Verdict::passing)
         .await
+        .expect("the question runs")
         .expect("the corrected candidate passes the check");
     assert_eq!(verdict.verdict, "pass");
 
     let verdict = Question::<Verdict>::new("verdict")
         .ask("judge this", None, Verdict::passing)
         .await
+        .expect("the question runs")
         .expect("the candidate after the mismatch passes the check");
     assert_eq!(verdict.verdict, "pass");
 }

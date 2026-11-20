@@ -18,6 +18,7 @@ async fn scenario() {
         .build()
         .complete()
         .await
+        .expect("the completion runs")
         .expect("workspace tools answer");
     // seed.txt content, then the sorted root listing after the backend's write.
     assert_eq!(reply.answer, "hello:docs,out.txt,seed.txt");

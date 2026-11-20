@@ -1,476 +1,220 @@
 //! `omnia:vcs`, the repositories and working copies a guest lends the host.
 //!
-//! A guest names every repository and working copy with a deployment-local
-//! path: `"."` the project mount, `"./.cache/repo"` or `"/mount/sub"`
-//! beneath one, which need not exist yet where the operation creates it.
-//! Each fn here lends the path to the host as an `omnia:vcs` `location`,
-//! resolved against the guest's preopens by the lend rule
-//! [`Request::workspace`](crate::model::Request::workspace) follows.
+//! A guest names every workspace with a deployment-local path: `"."` the
+//! project mount, `"./.cache/repo"` or `"/mount/sub"` beneath one, which need
+//! not exist yet where the call creates it. [`open`], [`init`], [`clone`], and
+//! [`Workspace::add`] lend the path to the host as an `omnia:vcs`
+//! [`Location`](types::Location), resolved against the guest's preopens by
+//! the lend rule [`Request::workspace`](crate::model::Request::workspace)
+//! follows. A path no preopen answers is `denied` before the host is called.
 //!
-//! Every fn but [`init`] and [`clone`] opens the workspace at its path, and a
-//! path that holds none is [`Error::NotARepository`]. A fn that walks pages,
-//! [`log`] and [`pending`], returns them whole. The raw interfaces are
-//! [`store`], [`workspace`], [`workspaces`], and [`remotes`].
+//! An open [`Workspace`] answers the calls of the `omnia:vcs` workspace
+//! itself, such as [`Workspace::resolve`] and [`Workspace::merge`]. This
+//! module adds the optional [`workspaces`] and [`remotes`] calls as its
+//! methods, and [`Workspace::log_all`] and [`Workspace::status_all`], which
+//! walk every page.
+
+use std::fmt;
 
 use wasip3::filesystem::preopens;
 use wasip3::filesystem::types::Descriptor;
 
+use crate::Result;
+pub use crate::bindings::imports::omnia::vcs::remotes::Diverged;
+pub use crate::bindings::imports::omnia::vcs::types::{CommitId, Occupied};
+pub use crate::bindings::imports::omnia::vcs::workspace::{
+    Change, ChangeKind, LogEntry, Rule, Strategy, Unmerged, Workspace,
+};
 pub use crate::bindings::imports::omnia::vcs::{remotes, store, types, workspace, workspaces};
 use crate::lend::resolve_lend;
-use crate::vcs::workspace::{Unmerged, Workspace};
 
-/// The commit `revision` names in the repository at `repo`: a label, a tag,
-/// or a commit id, whole or a unique prefix.
+/// Open the workspace at `path`.
 ///
 /// # Errors
 ///
-/// [`Error::NotFound`] for a revision the repository does not know, or the
-/// [`Error`] the host reports.
-pub async fn resolve(repo: &str, revision: &str) -> Result<String, Error> {
-    let found = open(repo).await?.resolve(revision.to_owned()).await?;
-    found.ok_or_else(|| Error::NotFound(revision.to_owned()))
+/// Returns an [`Error`](crate::Error) when no workspace is at `path`, or the
+/// host fails the call.
+pub async fn open(path: &str) -> Result<Workspace> {
+    let directories = preopens::get_directories();
+    Ok(store::open(lend(&directories, path)?).await?)
 }
 
-/// Whether `ancestor` is in `descendant`'s history, itself included, in the
-/// repository at `repo`.
+/// Create a repository with no commits at `path` and open its workspace.
+///
+/// The files already at `path` are pending, and a missing directory is
+/// created.
 ///
 /// # Errors
 ///
-/// The [`Error`] the host reports.
-pub async fn descends(repo: &str, ancestor: &str, descendant: &str) -> Result<bool, Error> {
-    let workspace = open(repo).await?;
-    Ok(workspace.is_ancestor(ancestor.to_owned(), descendant.to_owned()).await?)
+/// Returns an [`Error`](crate::Error) when the host fails the call. An
+/// [`Occupied`] is the inner `Err`: a workspace is already at `path`, and it
+/// stays as it was.
+pub async fn init(path: &str) -> Result<Result<Workspace, Occupied>> {
+    let directories = preopens::get_directories();
+    Ok(store::init(lend(&directories, path)?).await?)
 }
 
-/// The sealed commit the working copy at `at` sits on.
+/// Clone the repository at `url` into `path` and open its workspace.
+///
+/// The clone knows `url` as the remote `origin`. `depth` keeps that many
+/// commits of each bookmark's history, and `None` keeps all of it.
 ///
 /// # Errors
 ///
-/// [`Error::NotFound`] for a working copy with no commit yet, or the
-/// [`Error`] the host reports.
-pub async fn head(at: &str) -> Result<String, Error> {
-    let head = open(at).await?.head().await?;
-    head.ok_or_else(|| Error::NotFound("HEAD".to_owned()))
+/// Returns an [`Error`](crate::Error) when `url` holds no repository, or the
+/// host fails the call. An [`Occupied`] is the inner `Err`: the directory at
+/// `path` holds anything, and it stays as it was.
+pub async fn clone(
+    url: &str, path: &str, depth: Option<u32>,
+) -> Result<Result<Workspace, Occupied>> {
+    let directories = preopens::get_directories();
+    Ok(remotes::clone(url.to_owned(), lend(&directories, path)?, depth).await?)
 }
 
-/// Seal every pending change at `at` as one commit, `None` when there is
-/// nothing to seal.
-///
-/// # Errors
-///
-/// The [`Error`] the host reports.
-pub async fn commit(at: &str, message: &str) -> Result<Option<String>, Error> {
-    Ok(open(at).await?.commit(message.to_owned()).await?)
-}
-
-/// Merge `revision` into the working copy at `at` under `policy`, and
-/// advance its head.
-///
-/// A conflict no rule resolves is data: the [`Merged`] names its paths, and
-/// the working copy is back on its head.
-///
-/// # Errors
-///
-/// [`Error::Pending`] naming the paths of a working copy with pending
-/// changes, which changes nothing, or the [`Error`] the host reports.
-pub async fn merge(
-    at: &str, revision: &str, message: &str, policy: &[Rule],
-) -> Result<Merged, Error> {
-    let policy = policy.iter().cloned().map(Into::into).collect();
-    let workspace = open(at).await?;
-    let merged = workspace.merge(revision.to_owned(), message.to_owned(), policy).await?;
-    match merged {
-        Ok(commit) => Ok(Merged {
-            commit: Some(commit),
-            conflicts: Vec::new(),
-        }),
-        Err(Unmerged::Conflicts(paths)) => Ok(Merged {
-            commit: None,
-            conflicts: paths,
-        }),
-        Err(Unmerged::Pending(paths)) => Err(Error::Pending(paths)),
+impl Workspace {
+    /// Add a workspace of the same repository at `path`, on the commit
+    /// `revision` names, and open it.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`Error`](crate::Error) when `revision` names no commit, or
+    /// the host fails the call. An [`Occupied`] is the inner `Err`: the
+    /// directory at `path` holds anything, and it stays as it was.
+    pub async fn add(&self, path: &str, revision: &str) -> Result<Result<Self, Occupied>> {
+        let directories = preopens::get_directories();
+        Ok(workspaces::add(self, lend(&directories, path)?, revision.to_owned()).await?)
     }
-}
 
-/// The first-parent chain from `revision` back to `base` in the repository
-/// at `repo`, newest first, `base` left out.
-///
-/// # Errors
-///
-/// The [`Error`] the host reports.
-pub async fn log(repo: &str, revision: &str, base: &str) -> Result<Vec<Entry>, Error> {
-    let workspace = open(repo).await?;
-    let mut entries = Vec::new();
-    let mut after = None;
-    loop {
-        let page = workspace.log(revision.to_owned(), Some(base.to_owned()), after, None).await?;
-        entries.extend(page.entries.into_iter().map(Into::into));
-        match page.next {
-            Some(next) => after = Some(next),
-            None => return Ok(entries),
+    /// Remove this workspace and the files of its working copy, pending
+    /// changes included.
+    ///
+    /// The handle then fails every call with `not-found`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`Error`](crate::Error) when this is the workspace [`init`]
+    /// or [`clone`] made, or the host fails the call.
+    pub async fn remove(&self) -> Result<()> {
+        Ok(workspaces::remove(self).await?)
+    }
+
+    /// Bring the commits and bookmarks of `remote` into the repository.
+    ///
+    /// No bookmark of the repository moves.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`Error`](crate::Error) when the repository does not know
+    /// `remote`, the remote refuses or does not answer, or the host fails the
+    /// call.
+    pub async fn fetch(&self, remote: &str) -> Result<()> {
+        Ok(remotes::fetch(self, remote.to_owned()).await?)
+    }
+
+    /// The commit the bookmark `name` of `remote` pointed at when the
+    /// repository last saw it, `None` when it has seen no such bookmark.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`Error`](crate::Error) when the repository does not know
+    /// `remote`, or the host fails the call.
+    pub async fn remote_bookmark(&self, remote: &str, name: &str) -> Result<Option<CommitId>> {
+        Ok(remotes::bookmark(self, remote.to_owned(), name.to_owned()).await?)
+    }
+
+    /// Send the bookmark `name` and the commits it reaches to `remote`, and
+    /// move the remote's bookmark of that name forward to the same commit.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`Error`](crate::Error) when the repository does not know
+    /// `remote` or `name`, the remote refuses or does not answer, or the host
+    /// fails the call. A [`Diverged`] is the inner `Err`: the remote's
+    /// bookmark holds commits the pushed one does not, and nothing changed.
+    pub async fn push(&self, remote: &str, name: &str) -> Result<Result<(), Diverged>> {
+        Ok(remotes::push(self, remote.to_owned(), name.to_owned()).await?)
+    }
+
+    /// Every entry of the log from `revision` back to `base`, newest first.
+    ///
+    /// [`Workspace::log`] sets out the log one page at a time.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`Error`](crate::Error) when `revision` names no commit, or
+    /// the host fails a page.
+    pub async fn log_all(&self, revision: &str, base: Option<&str>) -> Result<Vec<LogEntry>> {
+        let mut entries = Vec::new();
+        let mut after = None;
+        loop {
+            let page =
+                self.log(revision.to_owned(), base.map(ToOwned::to_owned), after, None).await?;
+            entries.extend(page.entries);
+            match page.next {
+                Some(next) => after = Some(next),
+                None => return Ok(entries),
+            }
         }
     }
-}
 
-/// Create a repository with no history at `at`.
-///
-/// # Errors
-///
-/// [`Error::Exists`] when a repository is already at `at`, which stays as
-/// it was, or the [`Error`] the host reports.
-pub async fn init(at: &str) -> Result<(), Error> {
-    let directories = preopens::get_directories();
-    store::init(lend(&directories, at)?).await??;
-    Ok(())
-}
-
-/// Lay a working copy of `repo` at `at`, on `revision` and on no label.
-///
-/// # Errors
-///
-/// [`Error::Exists`] when a directory at `at` holds anything, which stays as
-/// it was, or the [`Error`] the host reports.
-pub async fn add(repo: &str, at: &str, revision: &str) -> Result<(), Error> {
-    let workspace = open(repo).await?;
-    let directories = preopens::get_directories();
-    workspaces::add(&workspace, lend(&directories, at)?, revision.to_owned()).await??;
-    Ok(())
-}
-
-/// Remove the working copy at `at` and its files, pending changes included.
-///
-/// # Errors
-///
-/// The [`Error`] the host reports.
-pub async fn remove(at: &str) -> Result<(), Error> {
-    let workspace = open(at).await?;
-    Ok(workspaces::remove(&workspace).await?)
-}
-
-/// What the working copy at `at` holds that its head does not.
-///
-/// # Errors
-///
-/// The [`Error`] the host reports.
-pub async fn pending(at: &str) -> Result<Vec<Change>, Error> {
-    let workspace = open(at).await?;
-    let mut changes = Vec::new();
-    let mut after = None;
-    loop {
-        let page = workspace.status(after, None).await?;
-        changes.extend(page.changes.into_iter().map(Into::into));
-        match page.next {
-            Some(next) => after = Some(next),
-            None => return Ok(changes),
+    /// Every pending change in the working copy, in path order.
+    ///
+    /// [`Workspace::status`] sets out the changes one page at a time.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`Error`](crate::Error) when the host fails a page.
+    pub async fn status_all(&self) -> Result<Vec<Change>> {
+        let mut changes = Vec::new();
+        let mut after = None;
+        loop {
+            let page = self.status(after, None).await?;
+            changes.extend(page.changes);
+            match page.next {
+                Some(next) => after = Some(next),
+                None => return Ok(changes),
+            }
         }
     }
-}
-
-/// Clone `url` at `at`.
-///
-/// # Errors
-///
-/// [`Error::Exists`] when a directory at `at` holds anything, which stays as
-/// it was, or the [`Error`] the host reports.
-pub async fn clone(url: &str, at: &str, options: CloneOptions) -> Result<(), Error> {
-    let directories = preopens::get_directories();
-    remotes::clone(url.to_owned(), lend(&directories, at)?, options.depth).await??;
-    Ok(())
-}
-
-/// Bring `remote`'s commits and labels into the repository at `repo`.
-///
-/// # Errors
-///
-/// [`Error::Access`] when the remote refuses or cannot be reached, or the
-/// [`Error`] the host reports.
-pub async fn fetch(repo: &str, remote: &str) -> Result<(), Error> {
-    let workspace = open(repo).await?;
-    Ok(remotes::fetch(&workspace, remote.to_owned()).await?)
-}
-
-/// Point the label `name` at `revision` in the repository at `repo`,
-/// creating or moving it.
-///
-/// # Errors
-///
-/// The [`Error`] the host reports.
-pub async fn label(repo: &str, name: &str, revision: &str) -> Result<(), Error> {
-    let workspace = open(repo).await?;
-    workspace.set_bookmark(name.to_owned(), revision.to_owned(), None).await??;
-    Ok(())
-}
-
-/// The commit the label `name` points at in the repository at `repo`, in the
-/// namespace [`label`] writes alone.
-///
-/// # Errors
-///
-/// [`Error::NotFound`] for a label the repository does not hold, or the
-/// [`Error`] the host reports.
-pub async fn labelled(repo: &str, name: &str) -> Result<String, Error> {
-    let found = open(repo).await?.bookmark(name.to_owned()).await?;
-    found.ok_or_else(|| Error::NotFound(name.to_owned()))
-}
-
-/// The commit `remote`'s label `name` pointed at when the repository at
-/// `repo` last fetched from it, in the namespace [`fetch`] and [`clone`]
-/// write alone.
-///
-/// # Errors
-///
-/// [`Error::NotFound`] for a label the remote did not hold, or the
-/// [`Error`] the host reports.
-pub async fn fetched(repo: &str, remote: &str, name: &str) -> Result<String, Error> {
-    let workspace = open(repo).await?;
-    let found = remotes::bookmark(&workspace, remote.to_owned(), name.to_owned()).await?;
-    found.ok_or_else(|| Error::NotFound(name.to_owned()))
-}
-
-/// Send `label` and the commits it reaches to `remote`, forcing nothing.
-///
-/// # Errors
-///
-/// [`Error::Diverged`] when the remote's label holds commits the pushed one
-/// does not, or the [`Error`] the host reports.
-pub async fn push(repo: &str, remote: &str, label: &str) -> Result<(), Error> {
-    let workspace = open(repo).await?;
-    let pushed = remotes::push(&workspace, remote.to_owned(), label.to_owned()).await?;
-    pushed.map_err(|_diverged| Error::Diverged(label.to_owned()))
-}
-
-// a path that holds no workspace is not a repository
-async fn open(path: &str) -> Result<Workspace, Error> {
-    let directories = preopens::get_directories();
-    store::open(lend(&directories, path)?).await.map_err(|err| match err {
-        types::Error::NotFound(_) => Error::NotARepository,
-        err => err.into(),
-    })
 }
 
 // the lent root borrows a descriptor, so the preopens outlive the call
-fn lend<'a>(
-    directories: &'a [(Descriptor, String)], path: &str,
-) -> Result<types::Location<'a>, Error> {
-    let (root, subpath) = resolve_lend(directories, path)
-        .ok_or_else(|| Error::Other(format!("location `{path}` matches no preopen")))?;
+fn lend<'a>(directories: &'a [(Descriptor, String)], path: &str) -> Result<types::Location<'a>> {
+    let Some((root, subpath)) = resolve_lend(directories, path) else {
+        return Err(types::Error::Denied(format!("location `{path}` matches no preopen")).into());
+    };
     Ok(types::Location {
         root,
         subpath: subpath.to_owned(),
     })
 }
 
-/// How a merge resolves a conflict at a path a [`Rule`] matches, before the
-/// conflict is reported.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Strategy {
-    /// Both sides' lines kept, each once: declaration and import lists.
-    Union,
-    /// The working copy's side kept whole, for the caller to regenerate:
-    /// lockfiles.
-    Ours,
-    /// The merged-in side kept whole.
-    Theirs,
+impl fmt::Display for Occupied {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "the place is occupied: {}", self.detail)
+    }
 }
 
-/// One merge rule: a glob over root-relative paths and the strategy for
-/// the paths it matches. The first rule that matches applies.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Rule {
-    /// The glob, over paths relative to the working copy's root.
-    pub paths: String,
-    /// How a conflict at a matching path is resolved.
-    pub strategy: Strategy,
+impl std::error::Error for Occupied {}
+
+impl fmt::Display for Diverged {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("the remote's bookmark holds commits the push does not")?;
+        self.current.as_ref().map_or(Ok(()), |current| write!(f, ", last seen at {current}"))
+    }
 }
 
-/// The outcome of a merge: data, not an error.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Merged {
-    /// The merge commit, when the merge completed.
-    pub commit: Option<String>,
-    /// The paths in conflict no rule resolved, when it did not; the
-    /// working copy is back on its head.
-    pub conflicts: Vec<String>,
-}
+impl std::error::Error for Diverged {}
 
-/// One entry of a [`log`]: a sealed commit's id and its whole message.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Entry {
-    /// The commit's id.
-    pub id: String,
-    /// The whole message, the trailers a caller wrote into it included.
-    pub message: String,
-}
-
-/// What a working copy did to a path its head does not hold that way.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ChangeKind {
-    /// The path is new.
-    Added,
-    /// The path's content differs.
-    Modified,
-    /// The path is gone.
-    Deleted,
-}
-
-/// One pending change in a working copy.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Change {
-    /// The path, relative to the working copy's root.
-    pub path: String,
-    /// What the working copy did to it.
-    pub kind: ChangeKind,
-}
-
-/// Options for a clone.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct CloneOptions {
-    /// Clone only this many commits of history; `None` clones it whole.
-    pub depth: Option<u32>,
-}
-
-/// Why a version-control call failed.
-///
-/// A refusal that has no variant here, such as a change beneath a read-only
-/// mount, is [`Error::Other`] led by its `omnia:vcs` case.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-pub enum Error {
-    /// The location holds no repository or working copy.
-    #[error("not a repository")]
-    NotARepository,
-    /// The location already holds a repository, or files a new working copy
-    /// would overwrite.
-    #[error("already exists: {0}")]
-    Exists(String),
-    /// A revision, remote, or label the repository does not know.
-    #[error("not found: {0}")]
-    NotFound(String),
-    /// A working copy holds pending changes where none may.
-    #[error("pending changes: {}", .0.join(", "))]
-    Pending(Vec<String>),
-    /// The remote refused, could not be reached, or wants credentials.
-    #[error("access: {0}")]
-    Access(String),
-    /// The remote's label holds commits the pushed one does not; nothing
-    /// was forced.
-    #[error("diverged: {0}")]
-    Diverged(String),
-    /// Any other failure, with the backend's detail.
-    #[error("{0}")]
-    Other(String),
-}
-
-impl Error {
-    /// The kebab-case wire discriminant, stable for callers to branch on.
-    #[must_use]
-    pub const fn code(&self) -> &'static str {
+impl fmt::Display for Unmerged {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::NotARepository => "not-a-repository",
-            Self::Exists(_) => "exists",
-            Self::NotFound(_) => "not-found",
-            Self::Pending(_) => "pending",
-            Self::Access(_) => "access",
-            Self::Diverged(_) => "diverged",
-            Self::Other(_) => "other",
-        }
-    }
-}
-
-impl From<anyhow::Error> for Error {
-    fn from(error: anyhow::Error) -> Self {
-        error.downcast().unwrap_or_else(|other| Self::Other(format!("{other:#}")))
-    }
-}
-
-// The default taxonomy: what the repository lacks is `not_found`, a remote
-// that cannot be reached is the gateway's, a location, working copy, or
-// label in the wrong state is the request's, and the rest is the host's.
-impl From<Error> for crate::Error {
-    fn from(error: Error) -> Self {
-        let code = error.code().to_owned();
-        let description = error.to_string();
-        match error {
-            Error::NotFound(_) => Self::NotFound { code, description },
-            Error::Access(_) => Self::BadGateway { code, description },
-            Error::Other(_) => Self::ServerError { code, description },
-            Error::NotARepository | Error::Exists(_) | Error::Pending(_) | Error::Diverged(_) => {
-                Self::BadRequest { code, description }
+            Self::Conflicts(paths) => write!(f, "the merge left conflicts in {}", paths.join(", ")),
+            Self::Pending(paths) => {
+                write!(f, "the working copy holds pending changes in {}", paths.join(", "))
             }
         }
     }
 }
 
-impl From<Rule> for workspace::Rule {
-    fn from(rule: Rule) -> Self {
-        Self {
-            pattern: rule.paths,
-            strategy: rule.strategy.into(),
-        }
-    }
-}
-
-impl From<Strategy> for workspace::Strategy {
-    fn from(strategy: Strategy) -> Self {
-        match strategy {
-            Strategy::Union => Self::Union,
-            Strategy::Ours => Self::Ours,
-            Strategy::Theirs => Self::Theirs,
-        }
-    }
-}
-
-impl From<workspace::LogEntry> for Entry {
-    fn from(entry: workspace::LogEntry) -> Self {
-        Self {
-            id: entry.id,
-            message: entry.message,
-        }
-    }
-}
-
-impl From<workspace::Change> for Change {
-    fn from(change: workspace::Change) -> Self {
-        Self {
-            path: change.path,
-            kind: change.kind.into(),
-        }
-    }
-}
-
-impl From<workspace::ChangeKind> for ChangeKind {
-    fn from(kind: workspace::ChangeKind) -> Self {
-        match kind {
-            workspace::ChangeKind::Added => Self::Added,
-            workspace::ChangeKind::Modified => Self::Modified,
-            workspace::ChangeKind::Deleted => Self::Deleted,
-        }
-    }
-}
-
-// `denied`, `invalid`, and `unsupported` have no variant of their own, so
-// their case leads the detail
-impl From<types::Error> for Error {
-    fn from(err: types::Error) -> Self {
-        match err {
-            types::Error::NotFound(detail) => Self::NotFound(detail),
-            types::Error::Denied(detail) => Self::Other(format!("denied: {detail}")),
-            types::Error::Invalid(detail) => Self::Other(format!("invalid: {detail}")),
-            types::Error::Unsupported(detail) => Self::Other(format!("unsupported: {detail}")),
-            types::Error::Unavailable(detail) => Self::Access(detail),
-            types::Error::Other(detail) => Self::Other(detail),
-        }
-    }
-}
-
-// a move with no precondition has none to fail
-impl From<types::Conflict> for Error {
-    fn from(_: types::Conflict) -> Self {
-        Self::Other("the host reported a conflict on an unconditional bookmark move".to_owned())
-    }
-}
-
-impl From<types::Occupied> for Error {
-    fn from(occupied: types::Occupied) -> Self {
-        Self::Exists(occupied.detail)
-    }
-}
+impl std::error::Error for Unmerged {}

@@ -120,6 +120,7 @@ fn fault(name: &str) -> Option<anyhow::Error> {
         "exists" => Error::Exists("held".to_owned()),
         "not-found" => Error::NotFound("not-found".to_owned()),
         "pending" => Error::Pending(vec!["a.rs".to_owned(), "b.rs".to_owned()]),
+        "denied" => Error::Denied("refused".to_owned()),
         "access" => Error::Access("refused".to_owned()),
         "diverged" => Error::Diverged("main".to_owned()),
         "other" => Error::Other("broken".to_owned()),
@@ -338,7 +339,7 @@ impl VcsClient for Recorder {
 #[tokio::test]
 async fn vcs_flow() {
     let project = scratch();
-    for dir in ["work", "dirty", "unborn", "big"] {
+    for dir in ["dirty", "big"] {
         fs::create_dir(project.path().join(dir)).expect("creating a working copy");
     }
     let workspaces = scratch();
@@ -356,69 +357,32 @@ async fn vcs_flow() {
     )
     .await;
 
-    // Every call opened its workspace with a `head` first, but `init` and
-    // `clone_repo`, which lay their place down. A diverged push read back
-    // the remote bookmark it reports. A path no preopen answers reached
-    // nothing.
+    // Each `open` checked its workspace with a `head`, and each listing
+    // read a page per backend call. A diverged push read back the remote
+    // bookmark it reports. A path no preopen answers reached nothing.
     for created in ["fresh", ".cache/work", "clone"] {
         assert!(project.path().join(created).is_dir(), "host created `{created}`");
     }
     let root = shown(project.path());
-    let [work, dirty, unborn, big, fresh, cache, clone] =
-        ["work", "dirty", "unborn", "big", "fresh", ".cache/work", "clone"]
-            .map(|subpath| shown(&project.path().join(subpath)));
+    let [dirty, big, fresh, cache, clone] = ["dirty", "big", "fresh", ".cache/work", "clone"]
+        .map(|subpath| shown(&project.path().join(subpath)));
     let (ws, sub) = (shown(&workspaces.path().join("repo")), shown(&nested.path().join("repo")));
     assert_eq!(
         recorder.calls(),
         [
             format!("head {root}"),
-            format!("resolve {root} main"),
-            format!("head {root}"),
-            format!("descends {root} sha:base sha:main"),
-            format!("head {root}"),
-            format!("descends {root} unrelated sha:main"),
-            format!("head {root}"),
             format!("log {root} emery/rev sha:base"),
-            format!("head {work}"),
-            format!("head {work}"),
-            format!("head {work}"),
-            format!("commit {work} \"seal it\""),
-            format!("head {work}"),
-            format!("pending {work}"),
-            format!("merge {work} feature \"merge it\" [*.lock=Ours]"),
-            format!("head {work}"),
-            format!("pending {work}"),
-            format!("merge {work} conflicting \"merge it\" []"),
             format!("head {dirty}"),
             format!("pending {dirty}"),
-            format!("head {unborn}"),
-            format!("head {unborn}"),
             format!("init {fresh}"),
-            format!("head {root}"),
             format!("add {root} {cache} sha:main"),
-            format!("head {cache}"),
             format!("remove {cache}"),
             format!("clone https://example.test/repo.git {clone} depth=Some(1)"),
-            format!("head {clone}"),
             format!("fetch {clone} origin"),
-            format!("head {clone}"),
-            format!("label {clone} emery/rev sha:main"),
-            format!("head {clone}"),
-            format!("labelled {clone} emery/rev"),
-            format!("head {clone}"),
             format!("fetched {clone} origin emery/rev"),
-            format!("head {clone}"),
             format!("push {clone} origin emery/rev"),
-            format!("head {clone}"),
             format!("push {clone} moved emery/rev"),
             format!("fetched {clone} moved emery/rev"),
-            format!("head {root}"),
-            format!("resolve {root} missing"),
-            format!("head {clone}"),
-            format!("labelled {clone} missing"),
-            format!("head {clone}"),
-            format!("fetched {clone} origin missing"),
-            format!("head {root}"),
             format!("log {root} long-0 sha:base"),
             format!("log {root} long-1000 sha:base"),
             format!("head {big}"),
@@ -550,21 +514,12 @@ async fn vcs_locations() {
 async fn vcs_error_codes() {
     let project = scratch();
     fs::create_dir(project.path().join("plain")).expect("creating a directory with no workspace");
-    fs::create_dir(project.path().join("dirty")).expect("creating a working copy");
-    let readonly = scratch();
 
-    let recorder = run_guest(
-        test_programs::VCS_ERROR_CODES,
-        vec![project.mount(true), readonly.mount_as("ro", false)],
-    )
-    .await;
+    let recorder = run_guest(test_programs::VCS_ERROR_CODES, vec![project.mount(true)]).await;
 
-    // The commit beneath `ro` reached the backend only as the `head` that
-    // opened its workspace.
     let root = shown(project.path());
-    let (ro, plain) = (shown(readonly.path()), shown(&project.path().join("plain")));
-    let [existing, dirty] =
-        ["existing", "dirty"].map(|subpath| shown(&project.path().join(subpath)));
+    let [plain, existing] =
+        ["plain", "existing"].map(|subpath| shown(&project.path().join(subpath)));
     assert_eq!(
         recorder.calls(),
         [
@@ -573,26 +528,15 @@ async fn vcs_error_codes() {
             format!("descends {root} exists sha:main"),
             format!("descends {root} not-found sha:main"),
             format!("descends {root} pending sha:main"),
+            format!("descends {root} denied sha:main"),
             format!("descends {root} access sha:main"),
             format!("descends {root} diverged sha:main"),
             format!("descends {root} other sha:main"),
             format!("descends {root} untyped sha:main"),
-            format!("head {root}"),
-            format!("descends {root} not-found sha:main"),
-            format!("head {root}"),
-            format!("descends {root} exists sha:main"),
-            format!("head {root}"),
-            format!("descends {root} access sha:main"),
-            format!("head {root}"),
-            format!("descends {root} other sha:main"),
-            format!("head {ro}"),
             format!("head {plain}"),
-            format!("head {root}"),
+            format!("init {existing}"),
             format!("push {root} moved main"),
             format!("fetched {root} moved main"),
-            format!("init {existing}"),
-            format!("head {dirty}"),
-            format!("pending {dirty}"),
         ]
     );
 }

@@ -149,6 +149,7 @@ pub async fn filter_limits() {
 /// - the null predicates, a comparison with `null`, and a list that holds
 ///   `null`;
 /// - a dotted field path;
+/// - an array test;
 /// - `order_by`.
 ///
 /// # Panics
@@ -158,10 +159,13 @@ pub async fn filter_limits() {
 pub async fn optional_query() {
     let collection = open(OPTIONAL).await;
     let stored = [
-        ("a", json!({"name": "apple", "rank": 3, "tag": "x", "meta": {"level": 1}})),
-        ("b", json!({"name": "banana", "rank": 1, "tag": null, "meta": {"level": 2}})),
-        ("c", json!({"name": "cherry", "rank": 2, "meta": {"level": 1}})),
-        ("d", json!({"name": "date", "rank": 2, "tag": "y", "meta": {"level": 3}})),
+        ("a", json!({"name": "apple", "rank": 3, "tag": "x", "tags": ["x"], "meta": {"level": 1}})),
+        ("b", json!({"name": "banana", "rank": 1, "tag": null, "tags": [], "meta": {"level": 2}})),
+        ("c", json!({"name": "cherry", "rank": 2, "tags": "x", "meta": {"level": 1}})),
+        (
+            "d",
+            json!({"name": "date", "rank": 2, "tag": "y", "tags": ["y", "x"], "meta": {"level": 3}}),
+        ),
     ];
     seed(&collection, &stored).await;
 
@@ -175,6 +179,7 @@ pub async fn optional_query() {
         Filter::ne("tag", ScalarValue::Null),
         Filter::in_list("tag", [ScalarValue::Null, ScalarValue::from("x")]),
         Filter::eq("meta.level", 1),
+        Filter::array_contains("tags", "x"),
     ] {
         let selected = walk(&collection, &filtered(&filter)).await.map(sorted);
         served(selected, &matching(&stored, &filter), &format!("{filter:?}"));

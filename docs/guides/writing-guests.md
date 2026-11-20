@@ -134,9 +134,9 @@ For **outbound** HTTP requests inside a handler, call `omnia_sdk::http::fetch(re
 
 ## Using host interfaces
 
-Each `omnia:*` interface is a module of `omnia-sdk`, and a module over resources the deployment declares has the same shape. A handler opens a resource with the module's one opener, `open` or `connect`, naming a binding the deployment declares. The types it holds sit at the module root, and their helpers take `&str` and `&[u8]` and return a flat `Result`. The bindings `wit-bindgen` generates stay public under the module, such as `keyvalue::store` and `keyvalue::types`, for the raw calls and the conditional writes. The guest never names a backend implementation — the host decides what backs each interface.
+Each `omnia:*` interface is a module of `omnia-sdk`, and a module over resources the deployment declares has the same shape. A handler opens a resource with the module's one opener, `open` or `connect`, naming a binding the deployment declares. The types it holds are the generated ones, at the module root, and their helpers take `&str` and `&[u8]` and return a `Result`. The bindings `wit-bindgen` generates stay public under the module, such as `keyvalue::store` and `keyvalue::types`, for the raw calls. The guest never names a backend implementation — the host decides what backs each interface.
 
-A binding fails with the shared `types::Error`, whose variant names the class of failure, such as `not-found`, `invalid`, or `unavailable`. `?` converts it into an `omnia_sdk::Error` under that code. `vcs`, `plugins`, and `model` fail with their module's typed `Error` instead (`vcs::Error`, `plugins::Error`, `model::Error`), which a caller matches by variant and `?` converts into an `omnia_sdk::Error` under the same code. The [provider contract](../reference/provider-contract.md#enforce-the-argument-rules) says which interfaces carry each code exactly. Absence is `None` rather than an error. A module whose bindings a deployment names, such as `keyvalue` or `sql`, has a `DEFAULT` for the one a guest opens when it names no other.
+A binding fails with the shared `types::Error`, whose variant names the class of failure, such as `not-found`, `invalid`, or `unavailable`. `?` converts it into an `omnia_sdk::Error` under that code, every interface alike. The [provider contract](../reference/provider-contract.md#enforce-the-argument-rules) says which interfaces carry each code exactly. Absence is `None` rather than an error. An outcome the interface names for the caller to act on is the inner `Err` of a nested `Result<Result<T, Outcome>>`, such as a `keyvalue::Conflict` or a `model::Exhausted`, and `?` on one gives a `BadRequest` under the outcome's name. A module whose bindings a deployment names, such as `keyvalue` or `sql`, has a `DEFAULT` for the one a guest opens when it names no other.
 
 Key-value (`omnia:keyvalue`):
 
@@ -188,9 +188,9 @@ Every interface has a module, an example, and where it needs one a deep dive:
 | Config | `config` | `get`, `require` | `examples/config` | — |
 | Identity/OAuth | `identity` | `open` | `examples/identity` | — |
 | Outbound HTTP | `http` | `fetch` | `examples/http-proxy` | — |
-| Model completions | `model` | `Request::complete` | `examples/model` | [Model Completions](model-completions.md) |
-| Version control | `vcs` | `resolve` | — | — |
-| Dynamic plugins | `plugins` | `Location::load` | — | — |
+| Model completions | `model` | `open`, `Request::complete` | `examples/model` | [Model Completions](model-completions.md) |
+| Version control | `vcs` | `open`, `init`, `clone` | — | — |
+| Dynamic plugins | `plugins` | `load` | — | — |
 | WebSockets | `websocket` | `connect` | `examples/websocket` | [Messaging § WebSockets](messaging.md#websockets) |
 
 ## Handling incoming messages
@@ -207,7 +207,9 @@ fn messaging_router() -> Router {
 messaging::export!(messaging_router);
 ```
 
-For guests that need direct control over the raw `omnia:messaging/incoming-handler` export (for example, `examples/messaging` demonstrating request-reply and fan-out), implement `omnia_sdk::exports::messaging::incoming_handler::Guest`, bind it with `omnia_sdk::exports::messaging::export!`, and dispatch through `omnia_sdk::messaging::handle`, which opens the guest telemetry scope around the delivery and settles a failure:
+A handler that answers a request registers with `topic_with`, so its decoder can pass the delivery's `reply_to` into the input (see [Messaging § Request-reply](messaging.md#request-reply)).
+
+For guests that need direct control over the raw `omnia:messaging/incoming-handler` export (for example, `examples/messaging` demonstrating request-reply and fan-out, or a guest that sets a release delay), implement `omnia_sdk::exports::messaging::incoming_handler::Guest`, bind it with `omnia_sdk::exports::messaging::export!`, and dispatch through `omnia_sdk::messaging::handle`, which opens the guest telemetry scope around the delivery and settles a failure:
 
 ```rust,noplayground
 use omnia_sdk::messaging::types::{Delivery, Settle};
@@ -278,7 +280,7 @@ The pieces, in the order argv flows through them:
 
 ### Failures and the exit map
 
-A decode or handler error becomes a `Failure` envelope on stderr, in the same `Format` as a success body. A handler's error takes its class and code from the first `omnia_sdk::Error`, `vcs::Error`, `plugins::Error`, or `model::Error` in its source chain, as on a topic, and anything else is a `ServerError`. The process exits with `Error::exit_code()`:
+A decode or handler error becomes a `Failure` envelope on stderr, in the same `Format` as a success body. A handler's error takes its class and code from the first `omnia_sdk::Error`, binding error, or typed outcome in its source chain, as on a topic, and anything else is a `ServerError`. The process exits with `Error::exit_code()`:
 
 | Error class | `error` (the macros' default code) | Exit | HTTP status |
 | ----------- | ---------------------------------- | ---- | ----------- |

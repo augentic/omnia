@@ -338,74 +338,104 @@ async fn route_and_topic() {
         .expect("router dispatches delivery");
 }
 
+// Every interface shares the one `omnia:types` error, so one table covers
+// every capability's failures. A typed outcome is the caller's to act on.
 #[tokio::test]
 async fn capability_errors() {
-    use omnia_sdk::{keyvalue, model, plugins, vcs};
+    use omnia_sdk::keyvalue::types::Error as Wire;
+    use omnia_sdk::model::{Budget, Exhausted};
+    use omnia_sdk::plugins::Conflict;
+    use omnia_sdk::vcs::{Diverged, Occupied, Unmerged};
 
     async fn route(Path(kind): Path<String>) -> Result<Json<()>, omnia_sdk::Error> {
+        let occupied = || Occupied {
+            detail: "work".into(),
+        };
         match kind.as_str() {
-            "vcs-not-a-repository" => Err(vcs::Error::NotARepository)?,
-            "vcs-exists" => Err(vcs::Error::Exists("x".into()))?,
-            "vcs-diverged" => Err(vcs::Error::Diverged("emery/x".into()))?,
-            "vcs-missing" => Err(vcs::Error::NotFound("v1".into()))?,
-            "vcs-access" => Err(vcs::Error::Access("denied".into()))?,
-            "vcs-pending" => Err(vcs::Error::Pending(vec!["a.rs".into(), "b.md".into()]))?,
-            "vcs-other" => Err(vcs::Error::Other("boom".into()))?,
-            "plugin-refused" => Err(plugins::Error::Refused("r".into()))?,
-            "plugin-unavailable" => Err(plugins::Error::Unavailable("u".into()))?,
-            "plugin-internal" => Err(plugins::Error::Internal("x".into()))?,
-            "model-invalid" => Err(model::Error::InvalidRequest("no messages".into()))?,
-            "model-budget" => Err(model::Error::BudgetExhausted("3 rounds".into()))?,
-            "model-missing" => Err(model::Error::NotFound("slow".into()))?,
-            "model-denied" => Err(model::Error::Denied("no key".into()))?,
-            "model-unsupported" => Err(model::Error::Unsupported("no effort".into()))?,
-            "model-unavailable" => Err(model::Error::Unavailable("rate limited".into()))?,
-            "model-backend" => Err(model::Error::Backend("bridge gone".into()))?,
-            "vcs-access-context" => {
-                Err(anyhow::Error::from(vcs::Error::Access("denied".into())).context("push"))?
-            }
+            "not-found" => Err(Wire::NotFound("no model `slow`".into()))?,
+            "denied" => Err(Wire::Denied("no key".into()))?,
+            "invalid" => Err(Wire::Invalid("no messages".into()))?,
+            "unsupported" => Err(Wire::Unsupported("no effort".into()))?,
+            "unavailable" => Err(Wire::Unavailable("rate limited".into()))?,
+            "other" => Err(Wire::Other("bridge gone".into()))?,
+            "exhausted" => Err(Exhausted {
+                budget: Budget::Responses,
+                detail: "3 rounds".into(),
+                usage: None,
+            })?,
+            "conflict" => Err(Conflict {
+                found: "sha256:ab".into(),
+                current: None,
+            })?,
+            "occupied" => Err(occupied())?,
+            "diverged" => Err(Diverged {
+                current: Some("abc".into()),
+            })?,
+            "conflicts" => Err(Unmerged::Conflicts(vec!["Cargo.lock".into()]))?,
+            "pending" => Err(Unmerged::Pending(vec!["a.rs".into(), "b.md".into()]))?,
             "wire-context" => {
-                let unavailable = keyvalue::types::Error::Unavailable("store down".into());
-                Err(anyhow::Error::from(unavailable).context("read"))?
+                Err(anyhow::Error::from(Wire::Unavailable("store down".into())).context("read"))?
             }
+            "outcome-context" => Err(anyhow::Error::from(occupied()).context("add"))?,
             _ => Ok(Json(())),
         }
     }
 
     let router = axum::Router::new().route("/err/{kind}", get(route));
 
-    for (path, expected_status, expected_code) in [
-        ("/err/vcs-not-a-repository", StatusCode::BAD_REQUEST, "not-a-repository"),
-        ("/err/vcs-exists", StatusCode::BAD_REQUEST, "exists"),
-        ("/err/vcs-diverged", StatusCode::BAD_REQUEST, "diverged"),
-        ("/err/vcs-missing", StatusCode::NOT_FOUND, "not-found"),
-        ("/err/vcs-access", StatusCode::BAD_GATEWAY, "access"),
-        ("/err/vcs-pending", StatusCode::BAD_REQUEST, "pending"),
-        ("/err/vcs-other", StatusCode::INTERNAL_SERVER_ERROR, "other"),
-        ("/err/plugin-refused", StatusCode::BAD_REQUEST, "refused"),
-        ("/err/plugin-unavailable", StatusCode::BAD_GATEWAY, "unavailable"),
-        ("/err/plugin-internal", StatusCode::INTERNAL_SERVER_ERROR, "internal"),
-        ("/err/model-invalid", StatusCode::BAD_REQUEST, "invalid-request"),
-        ("/err/model-budget", StatusCode::BAD_REQUEST, "budget-exhausted"),
-        ("/err/model-missing", StatusCode::INTERNAL_SERVER_ERROR, "not-found"),
-        ("/err/model-denied", StatusCode::INTERNAL_SERVER_ERROR, "denied"),
-        ("/err/model-unsupported", StatusCode::INTERNAL_SERVER_ERROR, "unsupported"),
-        ("/err/model-unavailable", StatusCode::BAD_GATEWAY, "unavailable"),
-        ("/err/model-backend", StatusCode::BAD_GATEWAY, "backend"),
-        ("/err/vcs-access-context", StatusCode::BAD_GATEWAY, "access"),
-        ("/err/wire-context", StatusCode::BAD_GATEWAY, "unavailable"),
+    for (case, expected_status, expected_code, expected_message) in [
+        ("not-found", StatusCode::INTERNAL_SERVER_ERROR, "not-found", "no model `slow`"),
+        ("denied", StatusCode::INTERNAL_SERVER_ERROR, "denied", "no key"),
+        ("invalid", StatusCode::INTERNAL_SERVER_ERROR, "invalid", "no messages"),
+        ("unsupported", StatusCode::INTERNAL_SERVER_ERROR, "unsupported", "no effort"),
+        ("unavailable", StatusCode::BAD_GATEWAY, "unavailable", "rate limited"),
+        ("other", StatusCode::INTERNAL_SERVER_ERROR, "other", "bridge gone"),
+        (
+            "exhausted",
+            StatusCode::BAD_REQUEST,
+            "exhausted",
+            "the responses budget is exhausted: 3 rounds",
+        ),
+        (
+            "conflict",
+            StatusCode::BAD_REQUEST,
+            "conflict",
+            "the bytes hash to sha256:ab, not the pinned digest",
+        ),
+        ("occupied", StatusCode::BAD_REQUEST, "occupied", "the place is occupied: work"),
+        (
+            "diverged",
+            StatusCode::BAD_REQUEST,
+            "diverged",
+            "the remote's bookmark holds commits the push does not, last seen at abc",
+        ),
+        (
+            "conflicts",
+            StatusCode::BAD_REQUEST,
+            "conflicts",
+            "the merge left conflicts in Cargo.lock",
+        ),
+        (
+            "pending",
+            StatusCode::BAD_REQUEST,
+            "pending",
+            "the working copy holds pending changes in a.rs, b.md",
+        ),
+        ("wire-context", StatusCode::BAD_GATEWAY, "unavailable", "read: store down"),
+        (
+            "outcome-context",
+            StatusCode::BAD_REQUEST,
+            "occupied",
+            "add: the place is occupied: work",
+        ),
     ] {
-        let request = Request::get(path).body(Body::empty()).expect("build request");
+        let request =
+            Request::get(format!("/err/{case}")).body(Body::empty()).expect("build request");
         let (status, _, body) = send_raw(router.clone(), request).await;
-        assert_eq!(status, expected_status, "{path}");
+        assert_eq!(status, expected_status, "{case}");
         let body: ErrorBody = serde_json::from_str(&body).expect("decode error body");
-        assert_eq!(body.error, expected_code, "{path}");
-        match path {
-            "/err/vcs-pending" => assert_eq!(body.message, "pending changes: a.rs, b.md"),
-            "/err/vcs-access-context" => assert_eq!(body.message, "push: access: denied"),
-            "/err/wire-context" => assert_eq!(body.message, "read: store down"),
-            _ => {}
-        }
+        assert_eq!(body.error, expected_code, "{case}");
+        assert_eq!(body.message, expected_message, "{case}");
     }
 }
 

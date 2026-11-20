@@ -111,7 +111,7 @@ A body reads back as the JSON value that was stored, except that:
 
 ## Query contract
 
-`Filter::matches` and `SortField::compare` define what a query selects and how it orders the matches (see [Reference semantics](#reference-semantics)). Every backend serves a portable query, and serves any other query as written or fails it with `unsupported`. It never ignores part of a query and returns a page the full query would not. A portable query:
+The [filter rules](#filters) define what a query selects. Its matches order by the first field of `order-by` as `lt` orders its values, then by each next field, with `false` before `true`. Where a document lacks an `order-by` field, or the field's values differ in type, the backend decides the order. Every backend serves a portable query, and serves any other query as written or fails it with `unsupported`. It never ignores part of a query and returns a page the full query would not. A portable query:
 
 - names only top-level fields, each of which every document stores with one type of value;
 - uses only `eq`, `lt`, `lte`, `gt`, `gte`, and `in`, negated or not;
@@ -161,6 +161,7 @@ On the guest side, build a filter with the `Filter` constructors from `omnia_sdk
 | `Filter::in_list(field, values)` / `not_in_list` | Set membership. Portable. |
 | `Filter::is_null(field)` / `is_not_null(field)` | Null/missing checks. Optional. |
 | `Filter::contains(field, pattern)` / `starts_with` / `ends_with` | String matching. Optional. |
+| `Filter::array_contains(field, value)` | Array membership: the field is an array holding the value. Optional. |
 | `Filter::and(filters)` / `Filter::or(filters)` | Boolean composition; **must have at least one child**. Portable. |
 | `Filter::negate(filter)` (also the `!` operator) | Logical NOT of any sub-tree. Portable. |
 | `Filter::on_date(field, "YYYY-MM-DD")` | Convenience: expands to a `gte`/`lt` timestamp range covering the UTC day. **Fallible** — returns an error for an invalid date. |
@@ -182,7 +183,7 @@ The SDK sends `Bool` as `boolean`, `Int32` and `Int64` as `integer`, `Float64` a
 
 ### Reference semantics
 
-`Filter::matches` and `SortField::compare` in `omnia_sdk::docstore` define how a filter selects a JSON document and how a sort field orders two. Their rustdoc states the rules: dotted field paths, a missing field reading as `null`, ordering only between comparable types, and a fixed type rank for sorting. The default backend evaluates queries by the same rules. A provider that evaluates queries itself calls the two functions, rather than writing its own evaluator.
+`Filter::matches` and `SortField::compare` in `omnia_sdk::docstore` apply a filter and a sort field to JSON documents a guest already holds. Their rustdoc states the rules: dotted field paths, a missing field reading as `null`, ordering only between comparable types, and a fixed type rank for sorting. They follow the [filter rules](#filters), and settle what those leave to the backend in one fixed way. The default backend evaluates queries by the same rules with an evaluator of its own.
 
 ### Host-enforced limits
 

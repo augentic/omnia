@@ -16,6 +16,7 @@ async fn scenario() {
             verdict.passing()
         })
         .await
+        .expect("the question runs")
         .expect("the second candidate passes the check");
     assert_eq!(verdict.verdict, "pass");
     assert_eq!(candidates, 2, "both candidates reached the guest's check");

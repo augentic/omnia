@@ -2,7 +2,7 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_sdk::model::{Request, Usage};
+use omnia_sdk::model::Request;
 use test_programs::user;
 
 omnia_sdk::command::export!(scenario);
@@ -13,16 +13,19 @@ async fn scenario() {
         .build()
         .complete()
         .await
+        .expect("the completion runs")
         .expect("canned answer carries usage");
     assert_eq!(reply.answer, "hi");
+
+    let usage = reply.usage.expect("the backend reports usage");
     assert_eq!(
-        reply.usage,
-        Some(Usage {
-            input_tokens: 3,
-            output_tokens: 5,
-            reasoning_tokens: Some(1),
-            cache_read_tokens: Some(2),
-            cache_write_tokens: None,
-        })
+        (
+            usage.input_tokens,
+            usage.output_tokens,
+            usage.reasoning_tokens,
+            usage.cache_read_tokens,
+            usage.cache_write_tokens,
+        ),
+        (3, 5, Some(1), Some(2), None)
     );
 }

@@ -150,9 +150,9 @@ One filter governs the host console and every guest: its bare level is a `-v`/`-
 
 The runtime is serving `wasi-model` with the echo `ModelDefault`, which answers text/json completions with the prompt itself and answers `unsupported` for what an echo cannot honour: a `format::schema` (it cannot fabricate a value conforming to a guest-supplied JSON Schema) or a set `generation` field. Bind a real backend (`omnia-genai`, `omnia-cursor`) in `runtime!`, or define an inline canned `ModelClient` in tests (see [Testing Policy](guides/testing-policy.md#scenario-backends)).
 
-### `invalid-request` errors
+### `invalid` errors
 
-The host rejected the request, or the guest's side of its session: messages with no text, a guest tool named after a reserved name (`read`, `list`, `write`, or the SDK's `check`), a tool name given twice, function-tool `parameters` that are not valid JSON, a `format` schema that is not JSON, or a tool result or check correction over the host's per-result size cap. The message names the violation. A `Question<T>` also reports `InvalidRequest` when a candidate never deserialized as `T` and nothing was accepted — the steering schema and the type disagree.
+The host rejected the request, or the guest's side of its session: messages with no text, a guest tool named after a reserved name (`read`, `list`, or `write`), a tool name given twice, a tool `input-schema` that is not valid JSON, a `format` schema that is not JSON, or a tool result or check correction over the host's per-result size cap. The message names the violation. A `Question<T>` also reports `invalid` when a candidate never deserialized as `T` and nothing was accepted — the steering schema and the type disagree.
 
 ### `no local tree on this node` (cursor backend)
 

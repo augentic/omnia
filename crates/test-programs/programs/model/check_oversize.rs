@@ -3,8 +3,8 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_sdk::model::{Error, Question};
-use test_programs::Verdict;
+use omnia_sdk::model::Question;
+use test_programs::{Verdict, fails_with};
 
 omnia_sdk::command::export!(scenario);
 
@@ -13,8 +13,5 @@ async fn scenario() {
         .ask("judge this", None, Verdict::passing)
         .await
         .expect_err("the correction exceeds the cap");
-    assert!(
-        matches!(error, Error::InvalidRequest(ref detail) if detail.contains("exceeds the 4-byte cap")),
-        "unexpected: {error:?}"
-    );
+    fails_with(&error, "invalid", "exceeds the 4-byte cap");
 }

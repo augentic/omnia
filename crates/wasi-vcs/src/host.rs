@@ -97,6 +97,7 @@ impl<B: Provides<Self>> Host<B> for WasiVcs {
 ///   outcome;
 /// - [`Error::Diverged`] from [`push`](Self::push) as its `diverged`
 ///   outcome;
+/// - [`Error::Denied`] as `denied`;
 /// - [`Error::Access`] as `unavailable`;
 /// - any other failure as `other`, with its full context chain.
 ///
@@ -255,6 +256,7 @@ impl From<Error> for generated::Error {
         match err {
             Error::NotARepository => Self::NotFound(err.to_string()),
             Error::NotFound(name) => Self::NotFound(name),
+            Error::Denied(detail) => Self::Denied(detail),
             Error::Access(detail) => Self::Unavailable(detail),
             Error::Exists(_) | Error::Pending(_) | Error::Diverged(_) => {
                 Self::Other(err.to_string())

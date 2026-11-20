@@ -22,12 +22,17 @@
 //! is not empty, holds only ASCII letters, digits, `.`, `_`, and `-`, and is
 //! neither `.` nor `..`. A portable container never holds both an object `a`
 //! and an object under `a/`.
+//!
+//! The unstable [`uploads`] and [`presign`] interfaces are the raw bindings.
+//! Every host links them, and answers `unsupported` today.
 
 use std::ops::Range;
 
 use bytes::Bytes;
 
-pub use crate::bindings::imports::omnia::blobstore::{admin, container, store, types};
+pub use crate::bindings::imports::omnia::blobstore::{
+    admin, container, presign, store, types, uploads,
+};
 use crate::blobstore::container::ByteRange;
 pub use crate::blobstore::container::{Container, Content};
 pub use crate::blobstore::types::Attributes;

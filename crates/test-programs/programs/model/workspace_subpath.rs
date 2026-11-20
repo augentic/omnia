@@ -14,6 +14,7 @@ async fn scenario() {
     // the `./` prefix, so `.` is the preopen rather than a stray character of `nested`
     let request =
         Request::builder().messages(vec![user("workspace")]).workspace("./nested").build();
-    let reply = request.complete().await.expect("subpath tools answer");
+    let reply =
+        request.complete().await.expect("the completion runs").expect("subpath tools answer");
     assert_eq!(reply.answer, "hello:out.txt,seed.txt");
 }

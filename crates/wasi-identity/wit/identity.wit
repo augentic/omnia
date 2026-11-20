@@ -54,8 +54,8 @@ interface credentials {
     get-token: async func(scopes: list<string>) -> result<access-token, error>;
   }
 
-  /// Open the identity `name`, a binding the deployment declares. An unnamed
-  /// SDK handle opens `default`.
+  /// Open the identity `name`, a binding the deployment declares. The SDK's
+  /// `DEFAULT` names the identity `default`.
   ///
   /// An undeclared name fails with `not-found`.
   open: async func(name: string) -> result<identity, error>;

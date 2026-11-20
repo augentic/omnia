@@ -38,11 +38,11 @@ http::export!(router);
 Each `omnia:*` interface is one module. A module over resources the deployment declares, such as `keyvalue`, `sql`, or `messaging`, has the same shape:
 
 - One opener, `open` or `connect`, takes the name of a binding the deployment declares. A module with a default binding, such as `keyvalue` or `sql`, has a `DEFAULT` naming it.
-- The types a guest holds sit at the module root, such as `keyvalue::Bucket` and `sql::Database`.
-- Helpers are methods on those types. They take `&str` and `&[u8]` and return a flat `Result`.
-- The bindings `wit-bindgen` generates stay public as submodules, such as `keyvalue::store` and `keyvalue::types`, for the raw calls and the conditional writes.
+- The types a guest holds are the generated ones, at the module root, such as `keyvalue::Bucket` and `sql::Database`.
+- Helpers are methods on those types. They take `&str` and `&[u8]` and return a `Result`.
+- The bindings `wit-bindgen` generates stay public as submodules, such as `keyvalue::store` and `keyvalue::types`, for the raw calls.
 
-Absence is `Ok(None)`, not an error, and `?` converts a binding's error into an `Error` under its code.
+Absence is `Ok(None)`, not an error, and `?` converts a binding's error into an `Error` under its code. An outcome the interface names for the caller to act on, such as a `compare_and_swap` that lost its race, is the inner `Err` of a nested `Result<Result<T, Outcome>>`.
 
 | Module | Opener | Helpers |
 | ------ | ------ | ------- |
@@ -50,17 +50,17 @@ Absence is `Ok(None)`, not an error, and `?` converts a binding's error into an 
 | `config` | `get` | Typed `require` and `parse`, and `#[derive(Settings)]`. |
 | `docstore` | `open` | Typed `Collection::get_as`, `insert`, `upsert`, and `remove`, and `find` over a `Query`. |
 | `http` | `fetch`, `send` | `fetch_json` for a JSON reply. |
-| `identity` | `open` | `Identity::token`, an `AccessToken` with the time it has left. |
+| `identity` | `open` | `Identity::token`, an `AccessToken` with the instant it expires. |
 | `keyvalue` | `open` | `Bucket::read`, `write`, `remove`, and `keys`, JSON `get_json` and `set_json`, and `compare_and_swap`. |
 | `messaging` | `connect` | `Client::send`, `request`, and `reply`, over a `Message::new` or `Message::json`. |
-| `model` | `Request::complete` | `complete_with` for tool calls, `Message::user` and its siblings, and `Question` for a typed answer. |
-| `plugins` | `Location::load` | A validated `Digest`, and the `Plugin` handle a load returns. |
+| `model` | `open`, `Request::complete` | `complete_with` for tool calls, `complete_checked` for a checked answer, `Message::user` and its siblings, and `Question` for a typed answer. |
+| `plugins` | `load` | `Source::name`, over the generated `Source` and `Plugin`. |
 | `sql` | `open` | `query_as` and `query_opt` through `FromRow`, `exec`, and `Database::begin` for a transaction. |
 | `vault` | `open` | None: a locker's generated methods. |
-| `vcs` | `resolve`, `head`, `commit`, and the rest | One fn per operation over a deployment-local path. |
+| `vcs` | `open`, `init`, `clone` | `Workspace::add`, `fetch`, `push`, and `remote_bookmark`, and `log_all` and `status_all` over every page. |
 | `websocket` | `connect` | `Client::broadcast`, `send`, `close`, and `exists`. |
 
-`otel` holds the guest's telemetry library, and `#[omnia_sdk::otel::instrument]` opens a span around a fn. `mcp` serves the Model Context Protocol from a guest, behind the `http` feature.
+The unstable `blobstore::uploads` and `presign`, `messaging::consumer`, `log`, and `admin`, and `otel::logs` are raw bindings with no helpers. `otel` holds the guest's telemetry library, and `#[omnia_sdk::otel::instrument]` opens a span around a fn. `mcp` serves the Model Context Protocol from a guest, behind the `http` feature.
 
 ## Transports
 
@@ -99,10 +99,10 @@ pub fn handlers() -> Handlers {
 A messaging handler is any `async fn(Context, I) -> Result<O, E>`, the context first as in an HTTP handler. A `Clone` closure of that shape is one too, so a closure can carry configuration. The `messaging` module documents the rest.
 
 - `Handlers::topic(topic, handler)` decodes the payload as JSON.
-- `Handlers::topic_with(topic, handler, decode)` takes a decoder over the whole `Delivery`, for any other wire format.
+- `Handlers::topic_with(topic, handler, decode)` takes a decoder over the whole `Delivery`, for any other wire format. A handler that answers a request registers here, so its decoder can pass the delivery's `reply_to` to `Client::reply`.
 - A topic matches exactly, with no wildcards.
 - `messaging::export!` binds the `omnia:messaging` handler.
-- A guest that settles every delivery itself implements `exports::messaging` in place of a router.
+- A guest that settles every delivery itself, or sets a release delay, implements `exports::messaging` in place of a router.
 
 ```rust,ignore
 use omnia_sdk::{Context, Handlers, Router, keyvalue, messaging};
@@ -176,7 +176,7 @@ Each transport reports an `Error` by its code and description:
 - A command writes the same body to stderr, as text or JSON, at the variant's exit code. A clap usage error exits 64, so exit 2 always means `NotFound`.
 - A failed delivery returns the error to the messaging host.
 
-An HTTP handler's error is anything `IntoResponse`, so a domain error with a wire shape of its own implements it. A topic or subcommand handler fails with any error type. The first `Error` in its source chain sets the variant and code, and any other error is a `ServerError` with the code `server_error`.
+An HTTP handler's error is anything `IntoResponse`, so a domain error with a wire shape of its own implements it. A topic or subcommand handler fails with any error type. The first `Error`, binding error, or typed outcome in its source chain sets the variant and code, and any other error is a `ServerError` with the code `server_error`.
 
 A binding's error converts into an `Error` whose code names the class of failure:
 
@@ -185,11 +185,12 @@ A binding's error converts into an `Error` whose code names the class of failure
 
 The [provider contract](https://github.com/augentic/omnia/blob/main/docs/reference/provider-contract.md#enforce-the-argument-rules) says which interfaces carry each code exactly. An error keeps its variant and code through any `anyhow` context around it.
 
-Three interfaces fail with a typed error of their own. `?` converts it into an `Error` under the typed error's code, and a topic or subcommand reads it from the source chain as it reads an `Error`:
+A typed outcome converts into a `BadRequest` under its own name, for a handler that passes it on rather than acting on it:
 
-- `vcs` with `vcs::Error`
-- `plugins` with `plugins::Error`
-- `model` with `model::Error`
+- `model::Exhausted` as `exhausted`;
+- `plugins::Conflict` as `conflict`;
+- `vcs::Occupied` as `occupied`, and `vcs::Diverged` as `diverged`;
+- `vcs::Unmerged` as `conflicts` or `pending`.
 
 ## Testing
 

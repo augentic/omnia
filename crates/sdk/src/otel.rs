@@ -3,8 +3,11 @@
 //! On `wasm32`, `scope` installs a `tracing` subscriber whose spans and
 //! metrics reach the host through [`traces`] and [`metrics`], and
 //! [`instrument`] runs an `async fn` inside that scope.
+//!
+//! The unstable [`logs`] interface is the raw binding. Every host links it,
+//! and answers `unsupported` today.
 
-pub use crate::bindings::imports::omnia::otel::{metrics, traces, types};
+pub use crate::bindings::imports::omnia::otel::{logs, metrics, traces, types};
 
 cfg_select! {
     target_arch = "wasm32" => {

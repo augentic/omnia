@@ -9,6 +9,9 @@
 //! [`Delivery`] reaches the handler registered for its topic. A guest that
 //! settles every delivery itself implements
 //! [`exports::messaging`](crate::exports::messaging) instead.
+//!
+//! The unstable [`consumer`], [`log`], and [`admin`] interfaces are the raw
+//! bindings. Every host links them, and answers `unsupported` today.
 
 mod router;
 
@@ -20,7 +23,9 @@ pub use self::router::Delivery;
 pub(crate) use self::router::Topics;
 #[cfg(target_arch = "wasm32")]
 pub use self::router::handle;
-pub use crate::bindings::imports::omnia::messaging::{producer, request_reply, types};
+pub use crate::bindings::imports::omnia::messaging::{
+    admin, consumer, log, producer, request_reply, types,
+};
 pub use crate::messaging::types::{Client, Message};
 use crate::{Error, Result};
 

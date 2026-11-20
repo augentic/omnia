@@ -1,6 +1,6 @@
 # Messaging
 
-The `omnia:messaging` interface gives guests topic-based publish/subscribe, request-reply, and an inbound message trigger. The in-memory default (`MessagingDefault`, a broadcast channel) makes all three patterns runnable with zero infrastructure; Kafka (`omnia-kafka`) and NATS (`omnia-nats`) are drop-in production backends. The interface also declares `consumer`, `log`, and `admin` for batched consumption, ordered logs, and topic administration. All three are unstable: a guest binds one only by enabling the feature of its name, and the host answers `unsupported` for all three today.
+The `omnia:messaging` interface gives guests topic-based publish/subscribe, request-reply, and an inbound message trigger. The in-memory default (`MessagingDefault`, a broadcast channel) makes all three patterns runnable with zero infrastructure; Kafka (`omnia-kafka`) and NATS (`omnia-nats`) are drop-in production backends. The interface also declares `consumer`, `log`, and `admin` for batched consumption, ordered logs, and topic administration. All three are unstable. The SDK re-exports them raw as `messaging::consumer`, `log`, and `admin`, with no helpers, and every host answers `unsupported` for all three today.
 
 The [`messaging`](../../examples/messaging/) example demonstrates every pattern below with the default backend.
 
@@ -40,29 +40,37 @@ messaging::export!(router);
 
 A guest that writes the raw export implements `omnia_sdk::exports::messaging::incoming_handler::Guest`, binds it with `omnia_sdk::exports::messaging::export!`, and dispatches through `omnia_sdk::messaging::handle` (see [Writing Guests](writing-guests.md#handling-incoming-messages)).
 
-The guest router matches registered topics exactly; broker subscription patterns remain host configuration (`KAFKA_TOPICS`, `NATS_TOPICS`). `topic` decodes JSON and returns `Ok(())` for successful handler output. `Router::handle` reports a failure as an `omnia_sdk::Error`, whose code names it. A payload that does not decode is a `BadRequest` with the code `undecodable`. A delivery with no topic is a `BadRequest` with the code `missing-topic`, and one no route takes is a `NotFound` with the code `unhandled-topic`. A handler's failure takes its class and code from the first `omnia_sdk::Error`, `vcs::Error`, `plugins::Error`, or `model::Error` in its source chain, and anything else is a `ServerError`.
+The guest router matches registered topics exactly; broker subscription patterns remain host configuration (`KAFKA_TOPICS`, `NATS_TOPICS`). `topic` decodes JSON and returns `Ok(())` for successful handler output. `Router::handle` reports a failure as an `omnia_sdk::Error`, whose code names it. A payload that does not decode is a `BadRequest` with the code `undecodable`. A delivery with no topic is a `BadRequest` with the code `missing-topic`, and one no route takes is a `NotFound` with the code `unhandled-topic`. A handler's failure takes its class and code from the first `omnia_sdk::Error`, binding error, or typed outcome such as `model::Exhausted` in its source chain, and anything else is a `ServerError`.
 
 What the handler returns settles the delivery. `Ok` accepts it, and a failure crosses as a `Settle` carrying its text as the reason:
 
 - A `BadRequest` rejects the delivery, as a message no redelivery handles. The backend drops or dead-letters it.
 - Any other failure releases it, as a failure that may pass. A backend that redelivers delivers the message again.
 
+The router leaves a release's delay to the backend. A guest that sets one writes the raw export and returns the `Settle` itself.
+
 The host sets the delivery's `deadline` to when it stops waiting, and the router hands it to the handler as `Metadata::deadline`. The host logs and counts a settlement, a trap, and a timeout alike. No backend reads the settlement yet: the in-memory default and NATS are finished with a failed message, while Kafka ends its consumer so the process restarts and the record is redelivered (see the [`omnia-kafka` README](https://github.com/augentic/omnia-backends/tree/main/crates/kafka)). In multi-guest deployments, each guest's `routes.messaging` patterns select it by NATS-style topic match — see [Multi-Guest Deployments](multi-guest-deployments.md#routing-inbound-traffic).
 
-For non-JSON payloads, register the route with `topic_with(topic, handler, decode)` instead: the decoder `Fn(&Delivery) -> omnia_sdk::Result<I>` sees the whole delivery (payload, `key`, `content_type`, metadata) and refuses with an `omnia_sdk::Error`, usually `bad_request!`. Whatever it returns, the router reports a refusal as a `BadRequest` with the code `undecodable` and keeps its description, just as it does malformed JSON under `topic`.
+For non-JSON payloads, register the route with `topic_with(topic, handler, decode)` instead: the decoder `Fn(&Delivery) -> omnia_sdk::Result<I>` sees the whole delivery (payload, `key`, `content_type`, metadata, `reply_to`, and the broker's `attempt`, `position`, and `published_at` where it reports them) and refuses with an `omnia_sdk::Error`, usually `bad_request!`. Whatever it returns, the router reports a refusal as a `BadRequest` with the code `undecodable` and keeps its description, just as it does malformed JSON under `topic`.
 
 ## Request-reply
 
-The requester sends and awaits one reply on the same call; the handler answers the address the delivery carried, through a client of the broker the request came from:
+The requester sends and awaits one reply on the same call; the handler answers the address the delivery carried, through a client of the broker the request came from. A handler that answers registers with `topic_with`, so its decoder can pass the delivery's `reply_to` into the input:
 
 ```rust
 // Requester
 let reply = client.request("quotes", message, None).await?;
 
-// Handler (inside incoming_handler::Guest::handle)
-if let Some(reply_to) = delivery.reply_to {
-    client.reply(&reply_to, response).await?;
+// Handler
+async fn quote(_: Context, (request, reply_to): (QuoteRequest, Option<String>)) -> omnia_sdk::Result<()> {
+    let Some(reply_to) = reply_to else { return Ok(()) };
+    let client = messaging::connect(messaging::DEFAULT).await?;
+    client.reply(&reply_to, Message::json(&price(&request))?).await
 }
+
+Handlers::new().topic_with("quotes", quote, |delivery: &Delivery| {
+    Ok((serde_json::from_slice(&delivery.payload)?, delivery.reply_to.clone()))
+})
 ```
 
 The final `request` argument is an optional `Duration`; `None` defers to the backend's bound, and a zero timeout is `invalid`. A delivery's `reply_to` is `None` when the sender awaits no reply.

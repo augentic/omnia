@@ -73,7 +73,7 @@ Omnia enforces each rule in the layer this table names, so a backend owes only t
 | An uncreated container is `not-found` | Each blob backend. |
 | An unserved request is `unsupported` | Each backend. |
 
-The code a backend picks reaches the guest exactly over `omnia:keyvalue`, `omnia:blobstore`, `omnia:sql`, `omnia:docstore`, `omnia:identity`, and `omnia:vault`, which carry one error case per code. Elsewhere a code is best effort: the other `wasi:*` interfaces have fewer error cases than there are codes, and the SDK maps each case to one code.
+The code a backend picks reaches the guest exactly over every `omnia:*` interface, since each carries the one `omnia:types` error, with one case per code. Elsewhere a code is best effort: the `wasi:*` interfaces have fewer error cases than there are codes, and the SDK maps each case to one code.
 
 ### Bound every call
 

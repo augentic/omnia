@@ -42,7 +42,8 @@ SDK's `vcs` module binds, over one `VcsClient` per backend.
   bookmark, and pushes. `WasiVcs` serves both.
 - A backend picks a failure's case by returning an `omnia_wasi_vcs::Error`:
   - `NotARepository` and `NotFound` are `not-found`;
-  - `Access` is `unavailable`;
+  - `Denied` is `denied`, for a remote that refuses the caller;
+  - `Access` is `unavailable`, for a remote that cannot be reached;
   - `Exists` is the `occupied` outcome of `init`, `add`, and `clone`;
   - `Pending` is a merge's `unmerged` outcome;
   - `Diverged` is a push's `diverged` outcome;
@@ -74,7 +75,7 @@ omnia::runtime!({
 });
 ```
 
-A guest reaches the interface through `omnia_sdk::vcs`, one fn per operation, naming every location as a deployment-local path (`"."` the project mount, `"./.cache/repo"` beneath it), or through the raw `omnia_sdk::vcs::{store, workspace, workspaces, remotes}` bindings.
+A guest opens a workspace with `omnia_sdk::vcs::open`, `init`, or `clone`, naming its location as a deployment-local path (`"."` the project mount, `"./.cache/repo"` beneath it), and calls the generated `Workspace` methods. The raw `omnia_sdk::vcs::{store, workspace, workspaces, remotes}` bindings take a lent `location` instead.
 
 ## License
 

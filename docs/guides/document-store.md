@@ -64,6 +64,7 @@ Filters reference fields *inside* the document JSON and compose into trees. Avai
 | `Filter::contains(field, text)` | Substring match |
 | `Filter::in_list(field, values)` | Membership in a `Vec<ScalarValue>` |
 | `Filter::is_null(field)` / `is_not_null(field)` | Presence checks |
+| `Filter::array_contains(field, value)` | An array field holding the value |
 | `Filter::on_date(field, "YYYY-MM-DD")` | Date-day match on a timestamp field (fallible — validates the date) |
 | `Filter::and(filters)` / `Filter::or(filters)` | Boolean composition |
 | `Filter::negate(filter)` | Logical NOT of any sub-tree |
@@ -154,7 +155,7 @@ The backend translates the filter to its native query language (direct JSON eval
 - no `order_by`;
 - `limit`, with the `next` cursor.
 
-The rest is optional: the string predicates, the null predicates, a comparison with `null`, a list that holds `null`, a dotted field path, and `order_by`. A backend serves each optional feature or fails it with the code `unsupported`, and never ignores one. A query that keeps to the portable query runs alike locally and in production.
+The rest is optional: the string predicates, the null predicates, a comparison with `null`, a list that holds `null`, a dotted field path, `array_contains`, and `order_by`. A backend serves each optional feature or fails it with the code `unsupported`, and never ignores one. A query that keeps to the portable query runs alike locally and in production.
 
 ## Queries, sorting, and pagination
 
@@ -173,7 +174,7 @@ let stops: Vec<Stop> = page.documents.iter().map(Document::decode).collect::<Res
 Ok(Json(json!({ "stops": stops, "next": page.next })))
 ```
 
-The result is a `collection::Page`: the page's `documents`, plus an opaque `next` cursor when more pages exist. Hand the cursor back as the next query's `after` to resume. Treat it as opaque — its format is backend-specific. A page holds at most 1,000 documents, and the cursor is the only way to page.
+`SortField` is the interface's own record, and `SortField::asc` and `desc` build one. The result is a `collection::Page`: the page's `documents`, plus an opaque `next` cursor when more pages exist. Hand the cursor back as the next query's `after` to resume. Treat it as opaque — its format is backend-specific. A page holds at most 1,000 documents, and the cursor is the only way to page.
 
 ## Backends
 

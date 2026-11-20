@@ -3,7 +3,7 @@
 #![cfg(target_arch = "wasm32")]
 
 use omnia_sdk::model::prompt::{Example, Sections};
-use omnia_sdk::model::{Message, Request};
+use omnia_sdk::model::{Message, Request, Role};
 
 omnia_sdk::command::export!(scenario);
 
@@ -40,7 +40,10 @@ async fn scenario() {
 
     let (no_system, messages) = blank.channels(None);
     assert!(no_system.is_none());
-    assert_eq!(messages, [Message::user("do it")]);
+    assert!(
+        matches!(messages.as_slice(), [Message { role: Role::User, content }] if content == "do it"),
+        "unexpected: {messages:?}"
+    );
 
     let (system, messages) = sections.channels(Some("prefer {language}"));
     let reply = Request::builder()
@@ -49,6 +52,7 @@ async fn scenario() {
         .build()
         .complete()
         .await
+        .expect("the completion runs")
         .expect("echo answers");
     assert_eq!(reply.answer, user_turn);
 }

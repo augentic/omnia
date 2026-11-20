@@ -118,10 +118,8 @@ pub trait Handler<I>: Clone + Send + Sync + 'static {
     ///
     /// - The first domain error in its source chain sets the variant and
     ///   code. That is an [`Error`](crate::Error), a host's
-    ///   [`types::Error`](crate::keyvalue::types::Error), a
-    ///   [`vcs::Error`](crate::vcs::Error), a
-    ///   [`plugins::Error`](crate::plugins::Error), or a
-    ///   [`model::Error`](crate::model::Error).
+    ///   [`types::Error`](crate::keyvalue::types::Error), or a typed outcome
+    ///   the [`Error`](crate::Error) docs list.
     /// - Any other error is a [`ServerError`](crate::Error::ServerError) with
     ///   the code `server_error`.
     /// - The description is the whole chain.
@@ -220,6 +218,10 @@ impl Handlers {
     /// A decoder's refusal fails the delivery as a
     /// [`BadRequest`](crate::Error::BadRequest) with the code `undecodable`,
     /// whatever its own variant and code, and keeps its description.
+    ///
+    /// A handler that answers a request registers here, so its decoder can
+    /// pass the delivery's [`reply_to`](crate::messaging::Delivery::reply_to)
+    /// into the input.
     ///
     /// # Panics
     ///

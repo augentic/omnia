@@ -40,7 +40,11 @@ async fn handler() -> omnia_sdk::Result<Json<Value>> {
     let access_token = credentials.token(&[SCOPE]).await.context("getting access token")?;
 
     // Never print the token itself; report only enough to confirm success.
-    println!("access token acquired ({} chars)", access_token.token.len());
+    println!(
+        "access token acquired ({} chars, expires in {}s)",
+        access_token.token.len(),
+        access_token.expires_in().as_secs()
+    );
 
     Ok(Json(json!({
         "message": "Hello, World!"

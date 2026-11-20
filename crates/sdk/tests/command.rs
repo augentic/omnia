@@ -464,7 +464,7 @@ struct LookupError(#[source] omnia_sdk::Error);
 async fn typed_handler_error() {
     let router = Handlers::new()
         .command("revision", |_: Context, (): ()| {
-            ready(Err::<(), _>(vcs::Error::NotFound("v1".into())))
+            ready(Err::<(), _>(vcs::types::Error::NotFound("no revision `v1`".into())))
         })
         .command("lookup", |_: Context, (): ()| {
             ready(Err::<(), _>(LookupError(not_found!("no item 42"))))
@@ -473,7 +473,7 @@ async fn typed_handler_error() {
         .into_router();
 
     for (verb, exit, code, text) in [
-        ("revision", 2, "not-found", "not found: v1"),
+        ("revision", 3, "not-found", "no revision `v1`"),
         ("lookup", 2, "not_found", "could not look up the item: no item 42"),
         ("format", 3, "server_error", "when formatting"),
     ] {

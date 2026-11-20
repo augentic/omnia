@@ -10,21 +10,25 @@ wit_bindgen::generate!({
     generate_all,
 });
 
-use omnia_sdk::plugins::Location;
+use omnia_sdk::plugins::{self, Source};
 
 use crate::omnia_test::link::ops;
 
 omnia_sdk::command::export!(scenario);
 
 async fn scenario() {
-    let echoer = Location::Declared("echoer".to_owned());
-    let target = echoer.load(None).await.expect("a link target loads");
-    assert_eq!(target.id(), "echoer");
+    let target = plugins::load(Source::Declared("echoer".to_owned()))
+        .await
+        .expect("the load runs")
+        .expect("a link target loads");
+    assert_eq!(target.name, "echoer");
 
-    let answer = ops::ping(target.id(), "hi");
+    let answer = ops::ping(&target.name, "hi");
     assert_eq!(answer, "echoer pong: hi");
 
-    let handler = Location::Declared("handler".to_owned());
-    let handler = handler.load(None).await.expect("a host-only handler loads");
-    assert_eq!(handler.id(), "handler");
+    let handler = plugins::load(Source::Declared("handler".to_owned()))
+        .await
+        .expect("the load runs")
+        .expect("a host-only handler loads");
+    assert_eq!(handler.name, "handler");
 }

@@ -38,7 +38,7 @@ impl Identity {
     pub async fn token(&self, scopes: &[&str]) -> Result<AccessToken> {
         let scopes = scopes.iter().map(|&scope| scope.to_owned()).collect();
         let token = self.get_token(scopes).await?;
-        Ok(AccessToken::new(token.token, time_left(token.expires_at)))
+        Ok(AccessToken::new(token.token, instant(token.expires_at)))
     }
 
     /// The token string for this identity's default scopes.
@@ -52,35 +52,38 @@ impl Identity {
     }
 }
 
-// the time left before `expires_at`, an instant in milliseconds since the Unix
-// epoch, and zero once it has passed
-fn time_left(expires_at: u64) -> Duration {
-    UNIX_EPOCH.checked_add(Duration::from_millis(expires_at)).map_or(Duration::MAX, |expiry| {
-        expiry.duration_since(SystemTime::now()).unwrap_or_default()
-    })
+// `millis` since the Unix epoch, held below the latest instant every
+// platform's `SystemTime` can represent
+fn instant(millis: u64) -> SystemTime {
+    UNIX_EPOCH + Duration::from_millis(millis).min(Duration::from_secs(u64::from(u32::MAX)))
 }
 
-/// An `OAuth` 2.0 access token and how long it stays valid.
+/// An `OAuth` 2.0 bearer token and when it expires.
 ///
 /// Its [`Debug`] form redacts the token.
 #[derive(Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct AccessToken {
-    /// The `OAuth` 2.0 access token.
+    /// The token, which a caller sends in an `Authorization: Bearer` header.
     pub token: String,
 
-    /// How long the token stays valid, counted from when
-    /// [`token`](Identity::token) returned it.
-    pub expires_in: Duration,
+    /// When the token expires.
+    pub expires_at: SystemTime,
 }
 
 impl AccessToken {
-    /// A token `token` that stays valid for `expires_in`.
-    pub fn new(token: impl Into<String>, expires_in: Duration) -> Self {
+    /// A token `token` that expires at `expires_at`.
+    pub fn new(token: impl Into<String>, expires_at: SystemTime) -> Self {
         Self {
             token: token.into(),
-            expires_in,
+            expires_at,
         }
+    }
+
+    /// How long the token stays valid from now, zero once it has expired.
+    #[must_use]
+    pub fn expires_in(&self) -> Duration {
+        self.expires_at.duration_since(SystemTime::now()).unwrap_or_default()
     }
 }
 
@@ -88,7 +91,7 @@ impl fmt::Debug for AccessToken {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("AccessToken")
             .field("token", &"<redacted>")
-            .field("expires_in", &self.expires_in)
+            .field("expires_at", &self.expires_at)
             .finish()
     }
 }

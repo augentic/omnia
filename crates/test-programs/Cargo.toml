@@ -49,6 +49,11 @@ path = "programs/blobstore/container.rs"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "blobstore_unstable"
+path = "programs/blobstore/unstable.rs"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "cli_rust_log"
 path = "programs/cli/rust_log.rs"
 crate-type = ["cdylib"]
@@ -221,6 +226,11 @@ crate-type = ["cdylib"]
 [[example]]
 name = "messaging_request_reply"
 path = "programs/messaging/request_reply.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "messaging_unstable"
+path = "programs/messaging/unstable.rs"
 crate-type = ["cdylib"]
 
 [[example]]

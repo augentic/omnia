@@ -5,9 +5,8 @@
 //! [`remove`](Collection::remove)s one unconditionally, and
 //! [`find`](Collection::find) runs a [`Query`].
 //!
-//! [`Filter::matches`] and [`SortField::compare`] define how a query selects
-//! and orders JSON documents. A backend that evaluates queries itself calls
-//! them rather than writing its own evaluator.
+//! [`Filter::matches`] tests a JSON document against a filter, and
+//! [`SortField::compare`] orders two by a field.
 //!
 //! Every backend serves a portable query:
 //!
@@ -34,7 +33,7 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 pub use crate::bindings::imports::omnia::docstore::{collection, store, types};
-pub use crate::docstore::collection::{Collection, Page};
+pub use crate::docstore::collection::{Collection, Page, SortField};
 pub use crate::docstore::types::Document;
 use crate::{Error, Result};
 
@@ -116,7 +115,7 @@ impl Collection {
             None => Vec::new(),
         };
         let filter = filter.into_iter().map(|group| group.into_iter().map(Into::into).collect());
-        let order_by = query.order_by.iter().map(Into::into).collect();
+        let order_by = query.order_by.clone();
         Ok(self.query(filter.collect(), order_by, query.after.clone(), query.limit).await?)
     }
 }
@@ -279,6 +278,13 @@ pub enum Filter {
         /// Suffix pattern.
         pattern: String,
     },
+    /// Field is an array, and one of its elements equals `value`.
+    ArrayContains {
+        /// Field path.
+        field: String,
+        /// The element to find.
+        value: ScalarValue,
+    },
     /// Logical AND of child filters.
     And(Vec<Self>),
     /// Logical OR of child filters.
@@ -405,6 +411,15 @@ impl Filter {
         }
     }
 
+    /// Field is an array holding an element equal to `val`.
+    #[must_use]
+    pub fn array_contains(field: &str, val: impl Into<ScalarValue>) -> Self {
+        Self::ArrayContains {
+            field: field.to_string(),
+            value: val.into(),
+        }
+    }
+
     /// Logical AND.
     #[must_use]
     pub fn and(filters: impl IntoIterator<Item = Self>) -> Self {
@@ -464,15 +479,15 @@ impl Filter {
     /// - the filter holds more than [`MAX_CONDITIONS`](Self::MAX_CONDITIONS) conditions;
     /// - a value is a [`Float64`](ScalarValue::Float64) that is not finite;
     /// - an ordering comparison is given [`Null`](ScalarValue::Null) or a
-    ///   [`Bool`](ScalarValue::Bool).
+    ///   [`Bool`](ScalarValue::Bool);
+    /// - an [`ArrayContains`](Self::ArrayContains) is given
+    ///   [`Null`](ScalarValue::Null).
     pub fn check(&self) -> Result<()> {
         self.groups()?;
         Ok(())
     }
 
     /// Whether the JSON document body `doc` satisfies this filter.
-    ///
-    /// These are the semantics every document store provider follows:
     ///
     /// - A field path is dotted: `"a.b"` descends into nested objects.
     /// - A missing field reads as `null`, so [`Filter::IsNull`] matches an
@@ -483,6 +498,8 @@ impl Filter {
     ///   unequal.
     /// - [`Filter::Contains`], [`Filter::StartsWith`], and
     ///   [`Filter::EndsWith`] match only string fields.
+    /// - [`Filter::ArrayContains`] matches only array fields, comparing each
+    ///   element as equality does.
     #[must_use]
     pub fn matches(&self, doc: &Value) -> bool {
         match self {
@@ -517,6 +534,13 @@ impl Filter {
             }
             Self::EndsWith { field, pattern } => {
                 lookup(doc, field).as_str().is_some_and(|s| s.ends_with(pattern))
+            }
+            Self::ArrayContains { field, value } => {
+                lookup(doc, field).as_array().is_some_and(|elements| {
+                    elements
+                        .iter()
+                        .any(|element| scalar_cmp(element, value) == Some(Ordering::Equal))
+                })
             }
             Self::And(children) => children.iter().all(|child| child.matches(doc)),
             Self::Or(children) => children.iter().any(|child| child.matches(doc)),
@@ -608,15 +632,6 @@ fn scalar_cmp(stored: &Value, target: &ScalarValue) -> Option<Ordering> {
     }
 }
 
-/// Sort field for queries.
-#[derive(Debug, Clone, Default)]
-pub struct SortField {
-    /// Field path.
-    pub field: String,
-    /// When `true`, sort descending.
-    pub descending: bool,
-}
-
 impl SortField {
     /// Sort by `field` from its least value to its greatest.
     #[must_use]
@@ -638,27 +653,15 @@ impl SortField {
 
     /// Order two JSON document bodies by this field.
     ///
-    /// The field path reads as in [`Filter::matches`]. Values of different
-    /// JSON types order by type, `null` < bool < number < string < array <
-    /// object, so the order is total. Two arrays, or two objects, are equal.
-    /// A descending field reverses the order.
-    ///
-    /// A query sorts by its first field, then by each next field with
-    /// [`Ordering::then_with`], and breaks the remaining ties on the document
-    /// id so its pages are stable.
+    /// - The field path reads as in [`Filter::matches`].
+    /// - Values of different JSON types order by type, `null` < bool < number
+    ///   < string < array < object, so the order is total.
+    /// - Two arrays, or two objects, are equal.
+    /// - A descending field reverses the order.
     #[must_use]
     pub fn compare(&self, a: &Value, b: &Value) -> Ordering {
         let ordering = json_cmp(lookup(a, &self.field), lookup(b, &self.field));
         if self.descending { ordering.reverse() } else { ordering }
-    }
-}
-
-impl From<&SortField> for collection::SortField {
-    fn from(sort: &SortField) -> Self {
-        Self {
-            field: sort.field.clone(),
-            descending: sort.descending,
-        }
     }
 }
 
