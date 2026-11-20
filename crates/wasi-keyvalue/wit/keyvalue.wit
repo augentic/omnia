@@ -1,3 +1,5 @@
+/// Key-value buckets a deployment declares, read and written by key, with
+/// conditional writes and expiry.
 package omnia:keyvalue@0.1.0;
 
 /// The types the key-value interfaces share.

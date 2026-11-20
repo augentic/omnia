@@ -152,7 +152,7 @@ cfg_select! {
 }
 ```
 
-Each crate's `wit/` directory holds the [WIT](https://component-model.bytecodealliance.org/design/wit.html) interface definitions, with standard WASI dependencies vendored under `wit/deps/`.
+Each crate's `wit/` directory holds the [WIT](https://component-model.bytecodealliance.org/design/wit.html) interface definitions, with a copy of each package they use under `wit/deps/` that `mise run wit-sync` keeps in step with its owner. Every `omnia:*` package is also published to the `omnia.host` wasm-pkg registry, as the [WIT Packages](reference/wit-packages.md) reference describes.
 
 ### Guest SDK (`crates/sdk`, `crates/guest-macros`)
 
@@ -269,6 +269,7 @@ A backend implements the `<Name>Client` contract and never sees the view; a host
 
 **Adding a WASI interface**: create `crates/wasi-<name>/` with the standard layout and define the WIT world in `wit/`. Then, in the crate:
 
+- `wit/<name>.wit` opens with package docs, whose summary sentence is the published release's description. `wit/deps/types.wit` is a copy of `crates/wasi-types/wit/types.wit`, which `mise run wit-sync` keeps in step once it exists. The package joins the published packages and the `omnia:sdk` `imports` world by its place under `crates/wasi-*/wit`, with no list to edit.
 - `src/lib.rs` binds the world with `wasmtime::component::bindgen!`, mapping `omnia:types/types` onto `omnia_wasi_types::types` with `with` and its `error` onto the shared `omnia_wasi_types::Error` with `trappable_error_type`. It defines the `<Name>Client` trait (plus any resource traits), declares `#[derive(Debug, HostCtx)] #[host_ctx(client = <Name>Client)] pub struct Wasi<Name>;`, and implements `Host<B>` as `impl<B: Provides<Self>>` to call each generated `add_to_linker(linker, StoreCtx::view::<Self>)` (a trigger host also overrides `run`).
 - `src/*_impl.rs` implement the generated `Host*` traits on `HostView<'_, dyn <Name>Client>`, reaching the backend through `.client` and WIT resources through `.table`.
 - `src/default_impl.rs` is `<Name>Default`, the in-tree backend. The guest bindings are generated into `omnia-sdk` by `mise run bindgen`.

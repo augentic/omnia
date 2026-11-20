@@ -1,3 +1,4 @@
+/// The `error`, `timestamp`, and `json` types every `omnia:*` package shares.
 package omnia:types@0.1.0;
 
 /// The types every `omnia:*` package shares.

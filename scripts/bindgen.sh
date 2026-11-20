@@ -12,13 +12,14 @@
 # Tool pins (bump with workspace wit-bindgen and CI install-action):
 #   jq 1.8, wit-bindgen-cli 0.63.0, wasm-tools 1.263.0
 #
-# Every `crates/wasi-*/wit` and `crates/plugin/wit` package is staged once
-# under `target/omnia-sdk-wit`, beside the WASI packages the pinned `wasip3`
-# ships, and one aggregate package, `omnia:sdk`, includes each package's
-# `imports` world. The output follows `wasi-rs`'s `ci/regenerate.sh`: one
-# `imports.rs` for every import, and one file per export world whose import
-# types point back at it. Every `@unstable` feature is enabled, since every
-# host links the gated interfaces.
+# `scripts/wit.sh stage` stages every `crates/wasi-*/wit` and
+# `crates/plugin/wit` package under `target/omnia-sdk-wit`, beside the WASI
+# packages the pinned `wasip3` ships, with one aggregate package, `omnia:sdk`,
+# that includes each package's `imports` world. The output follows
+# `wasi-rs`'s `ci/regenerate.sh`: one `imports.rs` for every import, and one
+# file per export world whose import types point back at it. Every
+# `@unstable` feature is enabled, since every host links the gated
+# interfaces.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -33,46 +34,15 @@ fi
 
 metadata="$(cargo metadata --format-version 1 --locked)"
 version="$(jq -r '.packages[] | select(.name == "omnia-sdk") | .version' <<<"$metadata")"
-wasip3="$(jq -r '.packages[] | select(.name == "wasip3") | .manifest_path' <<<"$metadata")"
-wasip3="$(dirname "$wasip3")"
 
 # --- stage ---
 
 stage="target/omnia-sdk-wit"
-rm -rf "$stage"
-mkdir -p "$stage/deps"
-cp "$wasip3"/wit/deps/*.wit "$stage/deps/"
+scripts/wit.sh stage
 
-includes=""
-for file in crates/wasi-*/wit/*.wit crates/plugin/wit/*.wit; do
-  package="$(sed -n 's/^package \(.*\);$/\1/p' "$file")"
-  name="${package%@*}"
-  mkdir -p "$stage/deps/${name/:/-}"
-  cp "$file" "$stage/deps/${name/:/-}/"
-  if grep -q '^world imports ' "$file"; then
-    includes="$includes  include $name/imports@${package#*@};"$'\n'
-  fi
-done
-
-cat >"$stage/sdk.wit" <<EOF
-package omnia:sdk@$version;
-
-world imports {
-$includes}
-
-world messaging {
-  export omnia:messaging/incoming-handler@0.1.0;
+version_of() {
+  awk '/^package [^ ;{]+;/ { sub(/^package [^@]*@/, ""); sub(/;.*/, ""); print; exit }' "$@"
 }
-
-world websocket {
-  export omnia:websocket/incoming-handler@0.1.0;
-}
-
-world command {
-  include imports;
-  include wasi:cli/command@0.3.2;
-}
-EOF
 
 # --- generate ---
 
@@ -88,18 +58,22 @@ generate() {
     --runtime-path wasip3::wit_bindgen::rt "$@"
 }
 
-wasi="wasi:filesystem/types@0.3.2=wasip3::filesystem::types"
-wasi="$wasi,wasi:clocks/system-clock@0.3.2=wasip3::clocks::system_clock"
-wasi="$wasi,wasi:clocks/types@0.3.2=wasip3::clocks::types"
+filesystem="$(version_of "$stage/deps/filesystem.wit")"
+clocks="$(version_of "$stage/deps/clocks.wit")"
+wasi="wasi:filesystem/types@$filesystem=wasip3::filesystem::types"
+wasi="$wasi,wasi:clocks/system-clock@$clocks=wasip3::clocks::system_clock"
+wasi="$wasi,wasi:clocks/types@$clocks=wasip3::clocks::types"
 generate \
   --world omnia:sdk/imports \
   --generate-all \
   --with "$wasi" \
   --type-section-suffix "rust-omnia-sdk-$version"
 
+types="$(version_of crates/wasi-types/wit/*.wit)"
 for world in messaging websocket; do
-  with="omnia:types/types@0.1.0=crate::bindings::imports::omnia::types::types"
-  with="$with,omnia:$world/types@0.1.0=crate::bindings::imports::omnia::$world::types"
+  with="omnia:types/types@$types=crate::bindings::imports::omnia::types::types"
+  with="$with,omnia:$world/types@$(version_of "crates/wasi-$world/wit/"*.wit)"
+  with="$with=crate::bindings::imports::omnia::$world::types"
   generate \
     --world "omnia:sdk/$world" \
     --with "$with" \

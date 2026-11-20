@@ -1,6 +1,6 @@
 # Model Interface Reference
 
-Reference for the `omnia:model` package (version `0.3.0`): its interfaces, the session and its calls, the request, the checks the host enforces, the reply and `exhausted`, the errors, and the backend matrix. The walk-through is in [Model Completions and MCP](../guides/model-completions.md), and the authoritative WIT is [`crates/wasi-model/wit/model.wit`](../../crates/wasi-model/wit/model.wit).
+Reference for the `omnia:model` package (version `0.1.0`): its interfaces, the session and its calls, the request, the checks the host enforces, the reply and `exhausted`, the errors, and the backend matrix. The walk-through is in [Model Completions and MCP](../guides/model-completions.md), and the authoritative WIT is [`crates/wasi-model/wit/model.wit`](../../crates/wasi-model/wit/model.wit).
 
 - [Interfaces](#interfaces)
 - [The session](#the-session)

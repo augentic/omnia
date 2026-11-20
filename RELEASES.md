@@ -113,6 +113,19 @@ Unreleased
   `Cache-Control` and `If-None-Match` ask. It replaces the
   `omnia-http-cache` crate of `omnia-ext`, with the same API, header
   contract, and store keys.
+- The `omnia:*` WIT packages, published to the `omnia.host` wasm-pkg
+  registry by the release workflow, with `omnia:sdk`, which holds the
+  worlds the guest bindings are generated from. Each release's
+  description is the summary of its package docs, and
+  `docs/reference/wit-packages.md` says how to fetch one. The tasks
+  behind it:
+  - `mise run wit-check` fails on a `wit/deps` copy that differs from
+    the package that owns it, or a plain `//` comment, which wit-parser
+    reads as docs. It parses every package with and without its
+    `@unstable` features, and builds every release.
+  - `mise run wit-verify` fails when a release the registry holds differs
+    from the tree. CI's `WIT` job runs it beside `wit-check`.
+  - `mise run wit-sync` rewrites every copy from the package that owns it.
 
 ### Changed
 
@@ -385,7 +398,7 @@ Unreleased
     `admin`.
   - On `wasm32`, `omnia_wasi_messaging::omnia` holds the raw bindings,
     which the crate root held.
-- `omnia:websocket@0.2.0`, rewritten as the interface `WebSockets` calls.
+- `omnia:websocket@0.1.0`, rewritten as the interface `WebSockets` calls.
   `WasiWebSocket` serves it over one `Endpoint`:
   - The `incoming-handler` export takes an `event` record: the id of the
     connection that sent it, its route, the message, the metadata the
@@ -406,7 +419,7 @@ Unreleased
   - `WebSocketHandler::handle` returns the guest's own error.
   - On `wasm32`, `omnia_wasi_websocket::omnia` holds the raw bindings,
     which the crate root held.
-- `omnia:identity@0.2.0`, rewritten as the interface `Identity` calls.
+- `omnia:identity@0.1.0`, rewritten as the interface `Identity` calls.
   `WasiIdentity` serves it over one `IdentityClient`:
   - `credentials.open` answers an `identity` handle, and `get-token` goes
     through it. A name the deployment does not declare fails at `open`
@@ -419,7 +432,7 @@ Unreleased
   - `WasiIdentity` answers `unsupported` for nothing.
   - On `wasm32`, `omnia_wasi_identity::omnia` holds the raw bindings, which
     the crate root held.
-- `omnia:vault@0.2.0`, rewritten as the interface `SecretStore` calls.
+- `omnia:vault@0.1.0`, rewritten as the interface `SecretStore` calls.
   `WasiVault` serves it over one `VaultClient`:
   - `store.open` answers a `locker` handle, and every call goes through
     it. A name the deployment does not declare fails at `open` with
@@ -456,7 +469,7 @@ Unreleased
     with a revision, and an `array-contains` test.
   - On `wasm32`, `omnia_wasi_docstore::omnia` holds the raw bindings,
     which the crate root held.
-- `omnia:plugins@0.2.0`, rewritten as the interface `Plugins` calls.
+- `omnia:plugins@0.1.0`, rewritten as the interface `Plugins` calls.
   `WasiPlugins` serves it over the deployment's loader grant:
   - `types` holds the portable forms: a `source`, a `plugin`, a
     `conflict`, and the `error`.
@@ -469,7 +482,7 @@ Unreleased
     found and the plugin active under the name.
   - `WasiPlugins` answers `unsupported` for a runtime with no loader
     installed and for a release with no registry client.
-- `omnia:otel@0.2.0`, rewritten over OTLP's own records. `WasiOtel`
+- `omnia:otel@0.1.0`, rewritten over OTLP's own records. `WasiOtel`
   serves it over one `OtelClient`:
   - `traces.export` and `metrics.export` take the guest's telemetry grouped
     by instrumentation scope, with OTLP's names and meanings. A time is
@@ -492,7 +505,7 @@ Unreleased
   - A span exports the kind the guest gave it, where the host cast the kind
     by position and exported each as another.
   - On `wasm32`, `omnia_wasi_otel::omnia` holds the raw bindings.
-- `omnia:model@0.3.0`, rewritten as the interface `Model` calls.
+- `omnia:model@0.1.0`, rewritten as the interface `Model` calls.
   `WasiModel` serves it over one `ModelClient`:
   - `completion.open` answers a `model` handle, and `complete` goes
     through it. A name the deployment does not declare fails with
@@ -515,7 +528,7 @@ Unreleased
   - A request that gives a tool name twice is `invalid`.
   - On `wasm32`, `omnia_wasi_model::omnia` holds the raw bindings, which
     the crate root held.
-- `omnia:vcs@0.2.0`, rewritten as the interface `Vcs` calls. `WasiVcs`
+- `omnia:vcs@0.1.0`, rewritten as the interface `Vcs` calls. `WasiVcs`
   serves it over one `VcsClient`:
   - `store.open` answers a `workspace` handle for the repository or
     working copy at a `location`, and every call goes through it. A place

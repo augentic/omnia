@@ -1,3 +1,5 @@
+/// Loading guests into a running deployment, by declared name, mounted path,
+/// or registry release.
 package omnia:plugins@0.1.0;
 
 /// The types the plugin interfaces share.

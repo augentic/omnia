@@ -1,3 +1,5 @@
+/// A guest's own traces, metrics, and logs, exported as OpenTelemetry
+/// Protocol (OTLP) records.
 package omnia:otel@0.1.0;
 
 /// The types the telemetry interfaces share.
@@ -333,8 +335,6 @@ interface metrics {
   %export: async func(scope-metrics: list<scope-metrics>) -> result<_, error>;
 }
 
-// wit-parser excludes a gated interface's types only where each carries the
-// interface's gate, so every type and `use` inside one repeats it
 /// Optional: log records.
 @unstable(feature = logs)
 interface logs {

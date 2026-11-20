@@ -36,3 +36,21 @@ jobs:
           tool: wit-bindgen-cli@0.63.0,wasm-tools@1.263.0
 
       - run: scripts/bindgen.sh --check
+
+  # Mirrors `wit-check` and `wit-verify` in mise.toml.
+  wit:
+    name: WIT
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-tools@1.263.0,wkg@0.16.2
+
+      - run: scripts/wit.sh check
+      - run: scripts/wit.sh verify

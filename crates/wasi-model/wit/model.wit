@@ -1,3 +1,5 @@
+/// Model completions that may call the guest's tools, and let the guest
+/// judge each answer.
 package omnia:model@0.1.0;
 
 /// The types the model interfaces share.

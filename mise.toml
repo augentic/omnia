@@ -26,6 +26,32 @@ tools = { jq = "1.8", "cargo:wit-bindgen-cli" = "0.63.0", "cargo:wasm-tools" = "
 run = "scripts/bindgen.sh --check"
 
 # -------------------------------------
+# WIT packages (project-specific; `wit-check` and `wit-verify` are mirrored
+# by the `wit` job in `.github/workflows/ci.yaml`, `wit-publish` by the `wit`
+# job in `publish.yaml`; tool pins live in `scripts/wit.sh`)
+# -------------------------------------
+
+[tasks.wit-sync]
+description = "Rewrite every package a crate copies into wit/deps from the package that owns it"
+tools = { jq = "1.8" }
+run = "scripts/wit.sh sync"
+
+[tasks.wit-check]
+description = "Fail if a wit/deps copy is stale, or a WIT package holds a plain comment, fails to parse, or fails to build"
+tools = { jq = "1.8", "cargo:wasm-tools" = "1.263.0" }
+run = "scripts/wit.sh check"
+
+[tasks.wit-verify]
+description = "Fail if a WIT release the registry holds differs from the package the tree builds"
+tools = { jq = "1.8", "cargo:wasm-tools" = "1.263.0", "cargo:wkg" = "0.16.2" }
+run = "scripts/wit.sh verify"
+
+[tasks.wit-publish]
+description = "Publish every WIT release the registry lacks: mise run wit-publish [-- --overwrite PACKAGE,..]"
+tools = { jq = "1.8", "cargo:wasm-tools" = "1.263.0", "cargo:wkg" = "0.16.2" }
+run = "scripts/wit.sh publish"
+
+# -------------------------------------
 # Examples (project-specific; the generic Rust tasks live in the include)
 # -------------------------------------
 

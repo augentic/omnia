@@ -1,3 +1,4 @@
+/// OAuth 2.0 access tokens for the identities a deployment declares.
 package omnia:identity@0.1.0;
 
 /// The types the identity interfaces share.

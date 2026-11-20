@@ -1,3 +1,5 @@
+/// Messages a guest sends on topics, and the handler a deployment routes
+/// messages to.
 package omnia:messaging@0.1.0;
 
 /// The types the messaging interfaces share.
@@ -130,8 +132,6 @@ interface request-reply {
     -> result<_, error>;
 }
 
-// wit-parser excludes a gated interface's types only where each carries the
-// interface's gate, so every type and `use` inside one repeats it
 /// Optional: taking messages in batches and settling each one.
 @unstable(feature = consumer)
 interface consumer {

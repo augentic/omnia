@@ -5450,8 +5450,6 @@ pub mod omnia {
                 }
             }
         }
-        /// wit-parser excludes a gated interface's types only where each carries the
-        /// interface's gate, so every type and `use` inside one repeats it
         /// Optional: an object assembled from parts, over as many invocations as it
         /// takes.
         ///
@@ -20066,8 +20064,6 @@ pub mod omnia {
                 }
             }
         }
-        /// wit-parser excludes a gated interface's types only where each carries the
-        /// interface's gate, so every type and `use` inside one repeats it
         /// Optional: taking messages in batches and settling each one.
         #[allow(dead_code, async_fn_in_trait, unused_imports, clippy::all)]
         pub mod consumer {
@@ -26599,8 +26595,6 @@ pub mod omnia {
                 }
             }
         }
-        /// wit-parser excludes a gated interface's types only where each carries the
-        /// interface's gate, so every type and `use` inside one repeats it
         /// Optional: log records.
         #[allow(dead_code, async_fn_in_trait, unused_imports, clippy::all)]
         pub mod logs {
@@ -39089,7 +39083,7 @@ pub mod omnia {
                             _results: *mut u8,
                         ) -> u32 {
                             #[cfg(target_arch = "wasm32")]
-                            #[link(wasm_import_module = "omnia:plugins/loader@0.2.0")]
+                            #[link(wasm_import_module = "omnia:plugins/loader@0.1.0")]
                             unsafe extern "C" {
                                 #[link_name = "[async-lower]load"]
                                 fn call(_: *mut u8, _: *mut u8) -> i32;
@@ -57348,12 +57342,12 @@ s\x04\0\x06digest\x03\0\x02\x01ks\x01k\x03\x01r\x03\x09references\x08registry\x0
 e\x03\0\x08\x01q\x03\x08declared\x01s\0\x04path\x01\x09\0\x07release\x01\x07\0\x04\
 \0\x06source\x03\0\x0a\x01ps\x01r\x03\x04names\x06digest\x03\x07exports\x0c\x04\0\
 \x06plugin\x03\0\x0d\x01k\x0e\x01r\x02\x05found\x03\x07current\x0f\x04\0\x08conf\
-lict\x03\0\x10\x03\0\x19omnia:plugins/types@0.2.0\x05}\x02\x03\01\x08conflict\x02\
+lict\x03\0\x10\x03\0\x19omnia:plugins/types@0.1.0\x05}\x02\x03\01\x08conflict\x02\
 \x03\01\x05error\x02\x03\01\x06plugin\x02\x03\01\x06source\x01B\x0c\x02\x03\x02\x01\
 ~\x04\0\x08conflict\x03\0\0\x02\x03\x02\x01\x7f\x04\0\x05error\x03\0\x02\x02\x03\
 \x02\x01\x80\x01\x04\0\x06plugin\x03\0\x04\x02\x03\x02\x01\x81\x01\x04\0\x06sour\
 ce\x03\0\x06\x01j\x01\x05\x01\x01\x01j\x01\x08\x01\x03\x01C\x01\x06source\x07\0\x09\
-\x04\0\x04load\x01\x0a\x03\0\x1aomnia:plugins/loader@0.2.0\x05\x82\x01\x04\0\x18\
+\x04\0\x04load\x01\x0a\x03\0\x1aomnia:plugins/loader@0.1.0\x05\x82\x01\x04\0\x18\
 omnia:sdk/imports@0.38.0\x04\0\x0b\x0d\x01\0\x07imports\x03\0\0\0G\x09producers\x01\
 \x0cprocessed-by\x02\x0dwit-component\x070.262.0\x10wit-bindgen-rust\x060.63.0";
 #[inline(never)]
