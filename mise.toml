@@ -8,16 +8,16 @@ OUTDATED_IGNORE = "cap-fs-ext,cap-std,cap-primitives,thiserror"
 
 # -------------------------------------
 # Guest bindings (project-specific; mirrored by the `bindings` job in
-# `.github/workflows/ci.yaml`; tool pins live in `scripts/bindings.sh`)
+# `.github/workflows/ci.yaml`; tool pins live in `scripts/bindgen.sh`)
 # -------------------------------------
 
-[tasks.bindings]
+[tasks.bindgen]
 tools = { jq = "1.8", "cargo:wit-bindgen-cli" = "0.63.0" }
-run = "scripts/bindings.sh"
+run = "scripts/bindgen.sh"
 
-[tasks.bindings-check]
+[tasks.bindgen-check]
 tools = { jq = "1.8", "cargo:wit-bindgen-cli" = "0.63.0", "cargo:wasm-tools" = "1.263.0" }
-run = "scripts/bindings.sh --check"
+run = "scripts/bindgen.sh --check"
 
 # -------------------------------------
 # Examples (project-specific; the generic Rust tasks live in the include)

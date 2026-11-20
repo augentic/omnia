@@ -76,7 +76,7 @@ A [guest entry](#guest-entry) whose component is not compiled into the runtime â
 
 ### Bindings
 
-The guest side of each `omnia:*` interface: the Rust `wit-bindgen` generates from its WIT, committed under `crates/sdk/src/bindings` and re-exported by the `omnia-sdk` interface modules (`keyvalue`, `sql`, ...) with typed helpers beside the generated methods. `mise run bindings` regenerates them, and CI fails when the committed bindings drift from the WIT.
+The guest side of each `omnia:*` interface: the Rust `wit-bindgen` generates from its WIT, committed under `crates/sdk/src/bindings` and re-exported by the `omnia-sdk` interface modules (`keyvalue`, `sql`, ...) with typed helpers beside the generated methods. `mise run bindgen` regenerates them, and CI fails when the committed bindings drift from the WIT.
 
 ### Handler contract
 

@@ -8,7 +8,7 @@
 //! [`exports::websocket::export!`]: crate::exports::websocket::export!
 
 use crate::Result;
-pub use crate::bindings::imports::omnia::websocket::{broadcast, connections, types};
+pub use crate::bindings::imports::omnia::websocket::*;
 pub use crate::websocket::types::{Client, CloseFrame, ConnectionId, Event, Message};
 
 /// The service a guest's own [`Client`] connects to.

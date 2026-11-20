@@ -40,7 +40,7 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
-pub use crate::bindings::imports::omnia::docstore::{collection, store, types};
+pub use crate::bindings::imports::omnia::docstore::*;
 pub use crate::docstore::collection::{Collection, Page, SortField};
 pub use crate::docstore::types::Document;
 use crate::error::unconditional;

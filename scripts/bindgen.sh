@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Regenerates the omnia-sdk guest bindings from the WIT the host crates own.
 #
-#   scripts/bindings.sh                  regenerate crates/sdk/src/bindings
-#   scripts/bindings.sh --check [GUEST]  fail if a regeneration differs from
-#                                        the committed bindings, then check
-#                                        that GUEST (a command component)
-#                                        targets the staged world; with no
-#                                        GUEST, build config_seeded for
-#                                        wasm32-wasip3 and use the default path
+#   scripts/bindgen.sh                  regenerate crates/sdk/src/bindings
+#   scripts/bindgen.sh --check [GUEST]  fail if a regeneration differs from
+#                                       the committed bindings, then check
+#                                       that GUEST (a command component)
+#                                       targets the staged world; with no
+#                                       GUEST, build config_seeded for
+#                                       wasm32-wasip3 and use the default path
 #
 # Tool pins (bump with workspace wit-bindgen and CI install-action):
 #   jq 1.8, wit-bindgen-cli 0.63.0, wasm-tools 1.263.0
@@ -113,7 +113,7 @@ done
 
 if $check; then
   diff -ru crates/sdk/src/bindings "$out" || {
-    echo "crates/sdk/src/bindings is stale: run \`mise run bindings\`" >&2
+    echo "crates/sdk/src/bindings is stale: run \`mise run bindgen\`" >&2
     exit 1
   }
   if [ -z "$guest" ]; then

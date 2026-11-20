@@ -36,7 +36,7 @@ use bytes::Bytes;
 pub use omnia_guest_macros::FromRow;
 
 use crate::Result;
-pub use crate::bindings::imports::omnia::sql::{database, store, transactions, types};
+pub use crate::bindings::imports::omnia::sql::*;
 pub use crate::sql::database::{Database, Statement};
 pub use crate::sql::transactions::Transaction;
 pub use crate::sql::types::ResultSet;

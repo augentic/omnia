@@ -45,7 +45,7 @@ use std::time::Duration;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
-pub use crate::bindings::imports::omnia::keyvalue::{bucket, keys, store, types};
+pub use crate::bindings::imports::omnia::keyvalue::*;
 use crate::error::unconditional;
 pub use crate::keyvalue::bucket::Bucket;
 pub use crate::keyvalue::keys::Page;

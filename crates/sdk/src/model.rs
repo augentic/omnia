@@ -33,7 +33,7 @@ pub use crate::bindings::imports::omnia::model::types::{
     Budget, Candidate, Effort, Exhausted, Format, Generation, Message, Reply, Role, Schema, Tool,
     ToolCall, Usage, WorkerGrant,
 };
-pub use crate::bindings::imports::omnia::model::{completion, types};
+pub use crate::bindings::imports::omnia::model::*;
 use crate::lend::resolve_lend;
 use crate::{Result, wit_stream};
 

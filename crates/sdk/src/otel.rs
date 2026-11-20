@@ -7,7 +7,7 @@
 //! The unstable [`logs`] interface is the raw binding. Every host links it,
 //! and answers `unsupported` today.
 
-pub use crate::bindings::imports::omnia::otel::{logs, metrics, traces, types};
+pub use crate::bindings::imports::omnia::otel::*;
 
 cfg_select! {
     target_arch = "wasm32" => {

@@ -36,9 +36,7 @@ use std::ops::Range;
 
 use bytes::Bytes;
 
-pub use crate::bindings::imports::omnia::blobstore::{
-    admin, container, presign, store, types, uploads,
-};
+pub use crate::bindings::imports::omnia::blobstore::*;
 use crate::blobstore::container::ByteRange;
 pub use crate::blobstore::container::{Container, Content};
 pub use crate::blobstore::types::{Attributes, ObjectMetadata};

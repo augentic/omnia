@@ -9,7 +9,7 @@ use std::fmt;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::Result;
-pub use crate::bindings::imports::omnia::identity::{credentials, types};
+pub use crate::bindings::imports::omnia::identity::*;
 pub use crate::identity::credentials::Identity;
 
 /// The identity a guest opens when the deployment names no other.

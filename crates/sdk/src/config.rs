@@ -7,7 +7,7 @@
 use std::fmt;
 use std::str::FromStr;
 
-pub use crate::bindings::imports::omnia::config::{entries, store, types};
+pub use crate::bindings::imports::omnia::config::*;
 use crate::{Error, Result};
 
 /// The value set for `key`, or `None` when it is unset.

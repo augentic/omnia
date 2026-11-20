@@ -13,7 +13,7 @@
 use std::collections::BTreeSet;
 
 use crate::Result;
-pub use crate::bindings::imports::omnia::vault::{locker, store, types};
+pub use crate::bindings::imports::omnia::vault::*;
 pub use crate::vault::locker::Locker;
 
 /// The locker a guest opens when the deployment names no other.
