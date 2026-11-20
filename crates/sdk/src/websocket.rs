@@ -1,7 +1,7 @@
 //! `omnia:websocket`, the events a guest exchanges with WebSocket clients.
 //!
-//! A guest [`connect`]s a [`Client`] to a service, [`DEFAULT`] unless the
-//! deployment names another, and sends a [`Message`] through it to the
+//! A guest [`connect`]s a [`Client`] to a service, or to the [`DEFAULT`]
+//! service with [`default`], and sends a [`Message`] through it to the
 //! connections it names or to every open one. It receives an [`Event`]
 //! through the handler [`exports::websocket::export!`] binds.
 //!
@@ -22,6 +22,15 @@ pub const DEFAULT: &str = "default";
 /// deployment does not declare.
 pub async fn connect(name: &str) -> Result<Client> {
     Ok(Client::connect(name.to_owned()).await?)
+}
+
+/// Connect to the [`DEFAULT`] service.
+///
+/// # Errors
+///
+/// As [`connect`].
+pub async fn default() -> Result<Client> {
+    connect(DEFAULT).await
 }
 
 impl Client {

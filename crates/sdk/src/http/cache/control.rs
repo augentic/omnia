@@ -24,7 +24,7 @@ impl Control {
     ///
     /// # Errors
     ///
-    /// [`ServerError`](Error::ServerError) with the code `invalid` when the
+    /// [`ServerError`](crate::ErrorKind::ServerError) with the code `invalid` when the
     /// caching headers are malformed or conflict.
     pub fn maybe_from(headers: &HeaderMap) -> crate::Result<Option<Self>> {
         if headers.get(CACHE_CONTROL).is_none() {

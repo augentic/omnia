@@ -12,6 +12,8 @@ mod protocol;
 mod router;
 mod types;
 
+use std::future::{self, Future};
+
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
@@ -38,12 +40,17 @@ pub trait McpServer: Send + Sync + 'static {
 
     /// Invoke the tool named `name` with its `arguments` object.
     ///
+    /// An `async fn` implements it, so a tool may await the guest's
+    /// capabilities.
+    ///
     /// # Errors
     ///
     /// Returns [`McpError`] for a protocol-level failure such as an unknown tool
     /// or malformed arguments. A tool that runs but fails should instead return
     /// `Ok(CallToolResult::error(..))` so the model sees the failure.
-    fn call_tool(&self, name: &str, arguments: &Value) -> Result<CallToolResult, McpError>;
+    fn call_tool(
+        &self, name: &str, arguments: &Value,
+    ) -> impl Future<Output = Result<CallToolResult, McpError>> + Send;
 
     /// The resources advertised through `resources/list`. Defaults to none.
     fn resources(&self) -> Vec<Resource> {
@@ -52,11 +59,15 @@ pub trait McpServer: Send + Sync + 'static {
 
     /// Read the resource identified by `uri`.
     ///
+    /// Like [`call_tool`](Self::call_tool), an `async fn` implements it.
+    ///
     /// # Errors
     ///
     /// Returns [`McpError`] when `uri` names no resource this server serves.
-    fn read_resource(&self, uri: &str) -> Result<ResourceContents, McpError> {
-        Err(McpError::resource_not_found(uri))
+    fn read_resource(
+        &self, uri: &str,
+    ) -> impl Future<Output = Result<ResourceContents, McpError>> + Send {
+        future::ready(Err(McpError::resource_not_found(uri)))
     }
 }
 

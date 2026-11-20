@@ -4,6 +4,7 @@
 
 mod support;
 
+use std::collections::BTreeMap;
 use std::future::{Ready, ready};
 use std::time::{Duration, UNIX_EPOCH};
 
@@ -260,6 +261,34 @@ async fn error_body_json() {
     );
 }
 
+#[test]
+fn error_kinds() {
+    use omnia_sdk::{Error, ErrorKind, bad_gateway, bad_request, conflict, server_error};
+
+    for (error, kind, status, exit, code) in [
+        (bad_request!("no name"), ErrorKind::BadRequest, StatusCode::BAD_REQUEST, 1, "bad_request"),
+        (not_found!("no item"), ErrorKind::NotFound, StatusCode::NOT_FOUND, 2, "not_found"),
+        (conflict!("taken"), ErrorKind::Conflict, StatusCode::CONFLICT, 5, "conflict"),
+        (
+            server_error!("full"),
+            ErrorKind::ServerError,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            3,
+            "server_error",
+        ),
+        (bad_gateway!("silent"), ErrorKind::BadGateway, StatusCode::BAD_GATEWAY, 4, "bad_gateway"),
+    ] {
+        assert_eq!(error.kind(), kind, "{error}");
+        assert_eq!(error.status(), status, "{error}");
+        assert_eq!(error.exit_code(), exit, "{error}");
+        assert_eq!(error.code(), code, "{error}");
+    }
+
+    let quota = Error::new(ErrorKind::Conflict, "quota", "3 of 3 spent");
+    assert_eq!(quota, Error::conflict("quota", format!("{} of {} spent", 3, 3)));
+    assert_eq!(quota.to_string(), "code: quota, description: 3 of 3 spent");
+}
+
 async fn save() -> Result<Json<serde_json::Value>, omnia_sdk::Error> {
     Err(anyhow::anyhow!("disk full").context("could not save"))?;
     Ok(Json(serde_json::json!({ "saved": true })))
@@ -398,36 +427,26 @@ async fn capability_errors() {
         ),
         (
             "conflict",
-            StatusCode::BAD_REQUEST,
+            StatusCode::CONFLICT,
             "conflict",
             "the bytes hash to sha256:ab, not the pinned digest",
         ),
-        ("occupied", StatusCode::BAD_REQUEST, "occupied", "the place is occupied: work"),
+        ("occupied", StatusCode::CONFLICT, "occupied", "the place is occupied: work"),
         (
             "diverged",
-            StatusCode::BAD_REQUEST,
+            StatusCode::CONFLICT,
             "diverged",
             "the remote's bookmark holds commits the push does not, last seen at abc",
         ),
-        (
-            "conflicts",
-            StatusCode::BAD_REQUEST,
-            "conflicts",
-            "the merge left conflicts in Cargo.lock",
-        ),
+        ("conflicts", StatusCode::CONFLICT, "conflicts", "the merge left conflicts in Cargo.lock"),
         (
             "pending",
-            StatusCode::BAD_REQUEST,
+            StatusCode::CONFLICT,
             "pending",
             "the working copy holds pending changes in a.rs, b.md",
         ),
         ("wire-context", StatusCode::BAD_GATEWAY, "unavailable", "read: store down"),
-        (
-            "outcome-context",
-            StatusCode::BAD_REQUEST,
-            "occupied",
-            "add: the place is occupied: work",
-        ),
+        ("outcome-context", StatusCode::CONFLICT, "occupied", "add: the place is occupied: work"),
     ] {
         let request =
             Request::get(format!("/err/{case}")).body(Body::empty()).expect("build request");
@@ -439,7 +458,46 @@ async fn capability_errors() {
     }
 }
 
-#[derive(Deserialize)]
+// The wire form of a built request is asserted from a guest in the
+// `wasi-http` suite. These are the parts no wire shows.
+#[test]
+fn bearer_token() {
+    let request = omnia_sdk::http::get("https://origin.example/")
+        .bearer("t0ken")
+        .build()
+        .expect("a valid request");
+
+    let logged = format!("{:?}", request.headers());
+    assert!(!logged.contains("t0ken"), "{logged}");
+}
+
+#[test]
+fn explicit_content_type() {
+    let request = omnia_sdk::http::patch("https://origin.example/orders/1")
+        .header(CONTENT_TYPE, "application/merge-patch+json")
+        .json(&serde_json::json!({ "quantity": 3 }))
+        .build()
+        .expect("a valid request");
+
+    assert_eq!(request.headers()[CONTENT_TYPE], "application/merge-patch+json");
+}
+
+#[test]
+fn unparseable_parts() {
+    let origin = "https://origin.example/";
+    for (case, builder) in [
+        ("uri", omnia_sdk::http::get("not a uri")),
+        ("header", omnia_sdk::http::get(origin).header("x-probe", "line\nbreak")),
+        ("bearer", omnia_sdk::http::get(origin).bearer("line\nbreak")),
+        ("json", omnia_sdk::http::post(origin).json(&BTreeMap::from([((1, 2), 3)]))),
+    ] {
+        let err = builder.build().expect_err(case);
+        assert_eq!(err.status(), StatusCode::INTERNAL_SERVER_ERROR, "{case}");
+        assert_eq!(err.code(), "invalid", "{case}");
+    }
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
 struct ReadDoc {
     name: String,
 }
@@ -456,25 +514,25 @@ impl omnia_sdk::mcp::McpServer for Docs {
     }
 
     fn tools(&self) -> Vec<omnia_sdk::mcp::Tool> {
-        vec![omnia_sdk::mcp::Tool::new(
-            "read_doc",
-            "read a document",
-            serde_json::json!({ "type": "object" }),
-        )]
+        vec![omnia_sdk::mcp::Tool::of::<ReadDoc>("read_doc", "read a document")]
     }
 
     fn call_tool(
         &self, name: &str, arguments: &serde_json::Value,
-    ) -> Result<omnia_sdk::mcp::CallToolResult, omnia_sdk::mcp::McpError> {
-        if name != "read_doc" {
-            return Err(omnia_sdk::mcp::McpError::unknown_tool(name));
-        }
-        let ReadDoc { name } = omnia_sdk::mcp::arguments(arguments)?;
-        if name == "guide" {
-            Ok(omnia_sdk::mcp::CallToolResult::text("the guide body"))
+    ) -> impl Future<Output = Result<omnia_sdk::mcp::CallToolResult, omnia_sdk::mcp::McpError>> + Send
+    {
+        let result = if name == "read_doc" {
+            omnia_sdk::mcp::arguments(arguments).map(|ReadDoc { name }| {
+                if name == "guide" {
+                    omnia_sdk::mcp::CallToolResult::text("the guide body")
+                } else {
+                    omnia_sdk::mcp::CallToolResult::error(format!("no such doc `{name}`"))
+                }
+            })
         } else {
-            Ok(omnia_sdk::mcp::CallToolResult::error(format!("no such doc `{name}`")))
-        }
+            Err(omnia_sdk::mcp::McpError::unknown_tool(name))
+        };
+        ready(result)
     }
 
     fn resources(&self) -> Vec<omnia_sdk::mcp::Resource> {
@@ -483,12 +541,13 @@ impl omnia_sdk::mcp::McpServer for Docs {
 
     fn read_resource(
         &self, uri: &str,
-    ) -> Result<omnia_sdk::mcp::ResourceContents, omnia_sdk::mcp::McpError> {
-        if uri == "doc://guide" {
+    ) -> impl Future<Output = Result<omnia_sdk::mcp::ResourceContents, omnia_sdk::mcp::McpError>> + Send
+    {
+        ready(if uri == "doc://guide" {
             Ok(omnia_sdk::mcp::ResourceContents::text(uri, "text/markdown", "the guide body"))
         } else {
             Err(omnia_sdk::mcp::McpError::resource_not_found(uri))
-        }
+        })
     }
 }
 
@@ -522,7 +581,10 @@ async fn mcp_router() {
     // tools/list and tools/call (valid, tool error, invalid params, unknown tool)
     let (_, list) =
         post(serde_json::json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" })).await;
-    assert_eq!(list["result"]["tools"][0]["name"], "read_doc");
+    let tool = &list["result"]["tools"][0];
+    assert_eq!(tool["name"], "read_doc");
+    assert_eq!(tool["inputSchema"]["properties"]["name"]["type"], "string");
+    assert_eq!(tool["inputSchema"]["required"], serde_json::json!(["name"]));
 
     let (_, call) = post(serde_json::json!({
         "jsonrpc": "2.0", "id": 3, "method": "tools/call",

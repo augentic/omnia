@@ -10,6 +10,7 @@
 use omnia_sdk::mcp::{
     self, CallToolResult, Implementation, McpError, McpServer, Resource, ResourceContents, Tool,
 };
+use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use wasip3::exports::http::handler::Guest;
@@ -24,8 +25,9 @@ impl Guest for HttpGuest {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, JsonSchema)]
 struct ReadDocArgs {
+    /// The document name, e.g. `overview`.
     name: String,
 }
 
@@ -56,24 +58,14 @@ impl McpServer for Docs {
                 "List the name and title of every available document.",
                 json!({ "type": "object", "properties": {} }),
             ),
-            Tool::new(
+            Tool::of::<ReadDocArgs>(
                 "read_doc",
                 "Read one document in full by its `name` (as returned by `list_docs`).",
-                json!({
-                    "type": "object",
-                    "properties": {
-                        "name": {
-                            "type": "string",
-                            "description": "the document name, e.g. `overview`",
-                        }
-                    },
-                    "required": ["name"],
-                }),
             ),
         ]
     }
 
-    fn call_tool(&self, name: &str, arguments: &Value) -> Result<CallToolResult, McpError> {
+    async fn call_tool(&self, name: &str, arguments: &Value) -> Result<CallToolResult, McpError> {
         match name {
             "list_docs" => {
                 let listing =
@@ -102,7 +94,7 @@ impl McpServer for Docs {
         })
     }
 
-    fn read_resource(&self, uri: &str) -> Result<ResourceContents, McpError> {
+    async fn read_resource(&self, uri: &str) -> Result<ResourceContents, McpError> {
         let name = uri.trim_prefix("doc://");
         Docs::find_doc(name).map_or_else(
             || Err(McpError::resource_not_found(uri)),

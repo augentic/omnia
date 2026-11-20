@@ -8,12 +8,12 @@ The [`messaging`](../../examples/messaging/) example demonstrates every pattern 
 
 ## Publishing
 
-Connect a client by name, build a `Message`, and send it to a topic:
+Connect a client, build a `Message`, and send it to a topic. `messaging::default()` connects to the `default` broker, and `connect` takes a name:
 
 ```rust,noplayground
 use omnia_sdk::messaging::{self, Message};
 
-let client = messaging::connect(messaging::DEFAULT).await?;
+let client = messaging::default().await?;
 let message = Message::json(&order)?.with_key(&order.customer_id).with_metadata("tenant", "acme");
 client.send("orders.created", message).await?;
 ```
@@ -25,9 +25,9 @@ client.send("orders.created", message).await?;
 Messaging is a **trigger**: the host (`WasiMessaging`) subscribes to topics and delivers each message to the guest's exported handler, instantiating a fresh guest instance per message:
 
 ```rust,noplayground
-use omnia_sdk::{Context, Handlers, Router, messaging};
+use omnia_sdk::{Handlers, Router, messaging};
 
-async fn create_order(context: Context, input: CreateOrder) -> Result<(), omnia_sdk::Error> {
+async fn create_order(input: CreateOrder) -> Result<(), omnia_sdk::Error> {
     // ...
 }
 
@@ -38,13 +38,13 @@ fn router() -> Router {
 messaging::export!(router);
 ```
 
-A guest that writes the raw export implements `omnia_sdk::exports::messaging::incoming_handler::Guest`, binds it with `omnia_sdk::exports::messaging::export!`, and dispatches through `omnia_sdk::messaging::handle` (see [Writing Guests](writing-guests.md#handling-incoming-messages)).
+A handler that reads the delivery's metadata takes a `Context` first, as `async fn(Context, I)`. A guest that writes the raw export implements `omnia_sdk::exports::messaging::incoming_handler::Guest`, binds it with `omnia_sdk::exports::messaging::export!`, and dispatches through `omnia_sdk::messaging::handle` (see [Writing Guests](writing-guests.md#handling-incoming-messages)).
 
-The guest router matches registered topics exactly; broker subscription patterns remain host configuration (`KAFKA_TOPICS`, `NATS_TOPICS`). `topic` decodes JSON and returns `Ok(())` for successful handler output. `Router::handle` reports a failure as an `omnia_sdk::Error`, whose code names it. A payload that does not decode is a `BadRequest` with the code `undecodable`. A delivery with no topic is a `BadRequest` with the code `missing-topic`, and one no route takes is a `NotFound` with the code `unhandled-topic`. A handler's failure takes its class and code from the first `omnia_sdk::Error`, binding error, or typed outcome such as `model::Exhausted` in its source chain, and anything else is a `ServerError`.
+The guest router matches registered topics exactly; broker subscription patterns remain host configuration (`KAFKA_TOPICS`, `NATS_TOPICS`). `topic` decodes JSON and drops the handler's output. `Router::handle` answers a request route's reply, and reports a failure as an `omnia_sdk::Error`, whose code names it. A payload that does not decode is a `BadRequest` with the code `undecodable`. A delivery with no topic is a `BadRequest` with the code `missing-topic`, and one no route takes is a `NotFound` with the code `unhandled-topic`. A handler's failure takes its class and code from the first `omnia_sdk::Error`, binding error, or typed outcome such as `model::Exhausted` in its source chain, and anything else is a `ServerError`.
 
 What the handler returns settles the delivery. `Ok` accepts it, and a failure crosses as a `Settle` carrying its text as the reason:
 
-- A `BadRequest` rejects the delivery, as a message no redelivery handles. The backend drops or dead-letters it.
+- A `BadRequest` or a `Conflict` rejects the delivery, as a message no redelivery handles. The backend drops or dead-letters it.
 - Any other failure releases it, as a failure that may pass. A backend that redelivers delivers the message again.
 
 The router leaves a release's delay to the backend. A guest that sets one writes the raw export and returns the `Settle` itself.
@@ -55,25 +55,23 @@ For non-JSON payloads, register the route with `topic_with(topic, handler, decod
 
 ## Request-reply
 
-The requester sends and awaits one reply on the same call; the handler answers the address the delivery carried, through a client of the broker the request came from. A handler that answers registers with `topic_with`, so its decoder can pass the delivery's `reply_to` into the input:
+The requester sends and awaits one reply on the same call. A handler that answers registers with `request`, and the router sends its output as JSON to the address the delivery carried, through the `default` broker:
 
 ```rust
 // Requester
 let reply = client.request("quotes", message, None).await?;
 
 // Handler
-async fn quote(_: Context, (request, reply_to): (QuoteRequest, Option<String>)) -> omnia_sdk::Result<()> {
-    let Some(reply_to) = reply_to else { return Ok(()) };
-    let client = messaging::connect(messaging::DEFAULT).await?;
-    client.reply(&reply_to, Message::json(&price(&request))?).await
+async fn quote(request: QuoteRequest) -> omnia_sdk::Result<Quote> {
+    Ok(price(&request))
 }
 
-Handlers::new().topic_with("quotes", quote, |delivery: &Delivery| {
-    Ok((serde_json::from_slice(&delivery.payload)?, delivery.reply_to.clone()))
-})
+Handlers::new().request("quotes", quote)
 ```
 
-The final `request` argument is an optional `Duration`; `None` defers to the backend's bound, and a zero timeout is `invalid`. A delivery's `reply_to` is `None` when the sender awaits no reply.
+The final `request` argument is an optional `Duration`; `None` defers to the backend's bound, and a zero timeout is `invalid`. A delivery's `reply_to` is `None` when the sender awaits no reply, and the handler then runs with nothing sent.
+
+`request_with(topic, handler, decode)` takes a decoder as `topic_with` does, and its handler returns the reply `Message`, for a reply with its own content type or key. A reply that does not encode is a `ServerError` with the code `invalid`, and it releases the delivery, as a failed send does.
 
 ## Fan-out and async work
 
@@ -82,7 +80,7 @@ Handlers can publish further messages, including many at once. Use `wit_bindgen:
 ```rust
 for i in 0..1000 {
     wit_bindgen::spawn_local(async move {
-        let client = messaging::connect(messaging::DEFAULT).await?;
+        let client = messaging::default().await?;
         client.send("downstream", make_message(i)).await
     });
 }
@@ -113,7 +111,7 @@ use omnia_sdk::websocket::types::{Client, Error};
 use omnia_sdk::websocket::{self, Event, Message, connections};
 
 // Push text to every connected client
-let ws = websocket::connect(websocket::DEFAULT).await?;
+let ws = websocket::default().await?;
 ws.broadcast(Message::Text(payload), &[]).await?;
 
 // Receive inbound messages

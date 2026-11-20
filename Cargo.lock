@@ -1128,6 +1128,7 @@ dependencies = [
  "omnia-wasi-vault",
  "omnia-wasi-websocket",
  "opentelemetry",
+ "schemars",
  "serde",
  "serde_json",
  "tokio",

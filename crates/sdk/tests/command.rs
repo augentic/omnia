@@ -236,25 +236,32 @@ fn from_env_mints() {
     assert_ne!(Metadata::from_env("FROM_ENV_MINTS").request_id, metadata.request_id);
 }
 
-fn greet(_context: Context, input: Greet) -> Ready<Result<Greeting, omnia_sdk::Error>> {
+fn greet(input: Greet) -> Ready<Result<Greeting, omnia_sdk::Error>> {
     let Greet { name } = input;
     ready(Ok(Greeting {
         text: format!("hello, {name}"),
     }))
 }
 
-fn lookup(_context: Context, input: Lookup) -> Ready<Result<Greeting, omnia_sdk::Error>> {
+fn lookup(input: Lookup) -> Ready<Result<Greeting, omnia_sdk::Error>> {
     let Lookup { id } = input;
     ready(Err(not_found!("no item {id}")))
 }
 
-fn reject(_context: Context, _input: Greet) -> Ready<Result<Greeting, omnia_sdk::Error>> {
+fn reject(_input: Greet) -> Ready<Result<Greeting, omnia_sdk::Error>> {
     ready(Err(bad_request!("name is required")))
 }
 
-fn ping(_context: Context, (): ()) -> Ready<Result<Greeting, omnia_sdk::Error>> {
+fn ping((): ()) -> Ready<Result<Greeting, omnia_sdk::Error>> {
     ready(Ok(Greeting {
         text: "pong".to_string(),
+    }))
+}
+
+fn whoami(context: Context, (): ()) -> Ready<Result<Greeting, omnia_sdk::Error>> {
+    let request_id = context.metadata.request_id.unwrap_or_default();
+    ready(Ok(Greeting {
+        text: format!("request {request_id}"),
     }))
 }
 
@@ -398,6 +405,18 @@ async fn command_span() {
     );
 }
 
+#[tokio::test]
+async fn request_metadata() {
+    let router = Handlers::new().command("whoami", whoami).into_router().name("app");
+    let mut metadata = Metadata::default();
+    metadata.request_id = Some("req-1".to_string());
+
+    let response = router.run_with(["app", "whoami"], &metadata).await;
+
+    assert_eq!(response.exit, 0);
+    assert_eq!(response.stdout, b"request req-1\n");
+}
+
 // The input type's doc comments are the help text: the struct's for the
 // subcommand's `about`, each field's for its argument.
 #[tokio::test]
@@ -463,13 +482,11 @@ struct LookupError(#[source] omnia_sdk::Error);
 #[tokio::test]
 async fn typed_handler_error() {
     let router = Handlers::new()
-        .command("revision", |_: Context, (): ()| {
+        .command("revision", |(): ()| {
             ready(Err::<(), _>(vcs::types::Error::NotFound("no revision `v1`".into())))
         })
-        .command("lookup", |_: Context, (): ()| {
-            ready(Err::<(), _>(LookupError(not_found!("no item 42"))))
-        })
-        .command("format", |_: Context, (): ()| ready(Err::<(), _>(fmt::Error)))
+        .command("lookup", |(): ()| ready(Err::<(), _>(LookupError(not_found!("no item 42")))))
+        .command("format", |(): ()| ready(Err::<(), _>(fmt::Error)))
         .into_router();
 
     for (verb, exit, code, text) in [
@@ -504,10 +521,8 @@ mod http_parity {
 
     use super::*;
 
-    async fn lookup_route(
-        context: Context, Query(input): Query<Lookup>,
-    ) -> Result<Json<Greeting>, omnia_sdk::Error> {
-        lookup(context, input).await.map(Json)
+    async fn lookup_route(Query(input): Query<Lookup>) -> Result<Json<Greeting>, omnia_sdk::Error> {
+        lookup(input).await.map(Json)
     }
 
     // One `Handlers` carries the path and the subcommand, and the one router

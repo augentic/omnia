@@ -29,7 +29,7 @@ fn router() -> Router {
 omnia_sdk::http::export!(router);
 ```
 
-A handler takes the call's metadata through the `omnia_sdk::Context` extractor; `get`, `post`, and the input extractors are axum's own. On `wasm32`, `http::export!` expands to the raw WASI `wasip3::http::service::export!` implementation, calls `router()`, and serves each request through `omnia_sdk::http::serve` inside an `http_guest_handle` OpenTelemetry span (the standalone `examples/http/guest.rs` writes that expansion out explicitly so you can see the underlying WASI boundary).
+A handler that reads the call's metadata takes the `omnia_sdk::Context` extractor; `get`, `post`, and the input extractors are axum's own. On `wasm32`, `http::export!` expands to the raw WASI `wasip3::http::service::export!` implementation, calls `router()`, and serves each request through `omnia_sdk::http::serve` inside an `http_guest_handle` OpenTelemetry span (the standalone `examples/http/guest.rs` writes that expansion out explicitly so you can see the underlying WASI boundary).
 
 ## Step 2: Run it in a host
 
@@ -73,10 +73,8 @@ A handler reaches host state through an interface module of `omnia_sdk`, such as
 ```rust,noplayground
 use omnia_sdk::keyvalue;
 
-async fn store_item(
-    _context: Context, Json(input): Json<ItemInput>,
-) -> Result<Json<ItemReply>, Error> {
-    let bucket = keyvalue::open(keyvalue::DEFAULT).await?;
+async fn store_item(Json(input): Json<ItemInput>) -> Result<Json<ItemReply>, Error> {
+    let bucket = keyvalue::default().await?;
     bucket.set_json("my_key", &input.body, None).await?;
     let res: Option<String> = bucket.get_json("my_key").await?;
     tracing::debug!("found val: {res:?}");
@@ -84,7 +82,7 @@ async fn store_item(
 }
 ```
 
-`set_json` and `get_json` are helpers over the generated `set` and `get`, which move raw bytes under a lifetime and an optional precondition. The standalone `keyvalue` example (`examples/keyvalue/guest.rs`) writes raw bytes with `write`, then reads the entry with the generated `get` to update it conditionally:
+`set_json` and `get_json` are helpers over the generated `set` and `get`, which move raw bytes under a lifetime and an optional precondition. The standalone `keyvalue` example (`examples/keyvalue/guest.rs`) writes raw bytes with `write`, then reads the entry with the generated `get` and updates it with `compare_and_swap` while it holds the revision read:
 
 ```rust,noplayground
 async fn handler(body: Bytes) -> omnia_sdk::Result<Json<Value>> {

@@ -1,7 +1,7 @@
 //! `omnia:messaging`, the topics a deployment's broker serves.
 //!
-//! A guest [`connect`]s a [`Client`] to a broker, [`DEFAULT`] unless the
-//! deployment declares another. The client [`send`](Client::send)s a
+//! A guest [`connect`]s a [`Client`] to a broker, or to the [`DEFAULT`]
+//! broker with [`default`]. The client [`send`](Client::send)s a
 //! [`Message`], or [`request`](Client::request)s a reply to one.
 //!
 //! A guest receives through its [`Router`](crate::Router). [`export!`] binds
@@ -26,6 +26,7 @@ pub use self::router::handle;
 pub use crate::bindings::imports::omnia::messaging::{
     admin, consumer, log, producer, request_reply, types,
 };
+use crate::keyvalue::ttl_ms;
 pub use crate::messaging::types::{Client, Message};
 use crate::{Error, Result};
 
@@ -40,6 +41,15 @@ pub const DEFAULT: &str = "default";
 /// deployment does not declare.
 pub async fn connect(name: &str) -> Result<Client> {
     Ok(Client::connect(name.to_owned()).await?)
+}
+
+/// Connect to the [`DEFAULT`] broker.
+///
+/// # Errors
+///
+/// As [`connect`].
+pub async fn default() -> Result<Client> {
+    connect(DEFAULT).await
 }
 
 impl Client {
@@ -68,7 +78,7 @@ impl Client {
     pub async fn request(
         &self, topic: &str, message: Message, timeout: Option<Duration>,
     ) -> Result<Message> {
-        let timeout_ms = timeout.map(millis);
+        let timeout_ms = timeout.map(ttl_ms);
         Ok(request_reply::request(self, topic.to_owned(), message, timeout_ms).await?)
     }
 
@@ -80,11 +90,6 @@ impl Client {
     pub async fn reply(&self, reply_to: &str, message: Message) -> Result<()> {
         Ok(request_reply::reply(self, reply_to.to_owned(), message).await?)
     }
-}
-
-// rounded up, so only a zero timeout is zero
-fn millis(timeout: Duration) -> u64 {
-    u64::try_from(timeout.as_nanos().div_ceil(1_000_000)).unwrap_or(u64::MAX)
 }
 
 impl Message {
@@ -103,7 +108,7 @@ impl Message {
     ///
     /// # Errors
     ///
-    /// [`ServerError`](Error::ServerError) with the code `invalid` when
+    /// [`ServerError`](crate::ErrorKind::ServerError) with the code `invalid` when
     /// `value` does not serialize.
     pub fn json<T: Serialize + ?Sized>(value: &T) -> Result<Self> {
         Ok(Self::new(encode(value)?).with_content_type(JSON))

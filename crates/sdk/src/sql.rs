@@ -1,15 +1,17 @@
 //! `omnia:sql`, parameterized SQL against the databases a deployment declares.
 //!
-//! A guest opens a [`Database`] with [`open`], [`DEFAULT`] unless the
-//! deployment declares another. Beside the generated methods, a database and
-//! a [`Transaction`] bind [`Value`] parameters:
+//! A guest opens a [`Database`] with [`open`], or the [`DEFAULT`] database
+//! with [`default`]. Beside the generated methods, a database and
+//! a [`Transaction`] bind [`Value`] parameters, which [`params!`] lists:
 //!
 //! - [`query_as`](Database::query_as) decodes each selected row as a
-//!   [`FromRow`], a [`Row`] included.
+//!   [`FromRow`]: a derived record, a tuple, or a [`Row`].
 //! - [`query_opt`](Database::query_opt) decodes the first selected row.
 //! - [`exec`](Database::exec) returns the number of rows a statement changed.
 //!
-//! [`ResultSet::read`] collects the rows of a raw query.
+//! The [`Executor`] trait carries the same three, so a fn over
+//! `&impl Executor` runs on either. [`ResultSet::read`] collects the rows of
+//! a raw query.
 //!
 //! A statement numbers its parameters `$1`, `$2`, and so on. Each binds the
 //! value at that position, in any order and as often as it appears. The
@@ -18,7 +20,8 @@
 //!
 //! Each call on a database commits before it returns, and a statement that
 //! starts or ends a transaction or a savepoint, such as `BEGIN`, fails with
-//! the code `invalid`. [`Database::begin`] starts a transaction instead:
+//! the code `invalid`. [`Database::transaction`] runs a closure in a
+//! transaction instead, and [`Database::begin`] starts one by hand:
 //!
 //! - Its statements commit or roll back together, and dropping it rolls back.
 //! - After a statement in it fails, the transaction is over and its changes
@@ -27,6 +30,7 @@
 //!   it, so a guest ends the transaction before it awaits one.
 
 use std::fmt;
+use std::future::Future;
 
 use bytes::Bytes;
 pub use omnia_guest_macros::FromRow;
@@ -50,6 +54,15 @@ pub async fn open(name: &str) -> Result<Database> {
     Ok(store::open(name.to_owned()).await?)
 }
 
+/// Open the [`DEFAULT`] database.
+///
+/// # Errors
+///
+/// As [`open`].
+pub async fn default() -> Result<Database> {
+    open(DEFAULT).await
+}
+
 impl Database {
     /// Start a [`Transaction`] on this database.
     ///
@@ -60,11 +73,51 @@ impl Database {
         Ok(transactions::begin(self).await?)
     }
 
+    /// Run `work` in a [`Transaction`], committing it when `work` returns
+    /// `Ok` and rolling it back when `work` returns `Err`.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// use omnia_sdk::sql::{self, Database};
+    ///
+    /// # async fn transfer(db: &Database) -> omnia_sdk::Result<()> {
+    /// let debit = "UPDATE accounts SET balance = balance - $2 WHERE id = $1";
+    /// let credit = "UPDATE accounts SET balance = balance + $2 WHERE id = $1";
+    /// db.transaction(async |tx| {
+    ///     tx.exec(debit, sql::params!["alice", 10_i64]).await?;
+    ///     tx.exec(credit, sql::params!["bob", 10_i64]).await?;
+    ///     Ok(())
+    /// })
+    /// .await
+    /// # }
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// - `work`'s error, once the transaction is rolled back.
+    /// - The host's failure to begin or commit, under its code.
+    pub async fn transaction<T>(
+        &self, work: impl AsyncFnOnce(&Transaction) -> Result<T>,
+    ) -> Result<T> {
+        let tx = self.begin().await?;
+        match work(&tx).await {
+            Ok(value) => {
+                tx.commit().await?;
+                Ok(value)
+            }
+            Err(err) => {
+                let _ = tx.rollback().await;
+                Err(err)
+            }
+        }
+    }
+
     /// Run `sql` with `params` bound and decode each row it selects as `T`.
     ///
     /// # Errors
     ///
-    /// - [`ServerError`](crate::Error::ServerError) with the code `invalid`
+    /// - [`ServerError`](crate::ErrorKind::ServerError) with the code `invalid`
     ///   when a row does not decode as `T`.
     /// - The host's failure, under its code.
     pub async fn query_as<T: FromRow>(&self, sql: &str, params: &[Value]) -> Result<Vec<T>> {
@@ -77,7 +130,7 @@ impl Database {
     ///
     /// # Errors
     ///
-    /// - [`ServerError`](crate::Error::ServerError) with the code `invalid`
+    /// - [`ServerError`](crate::ErrorKind::ServerError) with the code `invalid`
     ///   when the row does not decode as `T`.
     /// - The host's failure, under its code.
     pub async fn query_opt<T: FromRow>(&self, sql: &str, params: &[Value]) -> Result<Option<T>> {
@@ -102,7 +155,7 @@ impl Transaction {
     ///
     /// # Errors
     ///
-    /// - [`ServerError`](crate::Error::ServerError) with the code `invalid`
+    /// - [`ServerError`](crate::ErrorKind::ServerError) with the code `invalid`
     ///   when a row does not decode as `T`.
     /// - The host's failure, under its code.
     pub async fn query_as<T: FromRow>(&self, sql: &str, params: &[Value]) -> Result<Vec<T>> {
@@ -117,7 +170,7 @@ impl Transaction {
     ///
     /// # Errors
     ///
-    /// - [`ServerError`](crate::Error::ServerError) with the code `invalid`
+    /// - [`ServerError`](crate::ErrorKind::ServerError) with the code `invalid`
     ///   when the row does not decode as `T`.
     /// - The host's failure, under its code.
     pub async fn query_opt<T: FromRow>(&self, sql: &str, params: &[Value]) -> Result<Option<T>> {
@@ -132,6 +185,80 @@ impl Transaction {
     /// The host's failure, under its code.
     pub async fn exec(&self, sql: &str, params: &[Value]) -> Result<u64> {
         Ok(self.execute(sql.to_owned(), bind(params)).await?)
+    }
+}
+
+/// What runs a statement: a [`Database`] or a [`Transaction`].
+///
+/// A fn over `&impl Executor` runs its statements wherever its caller does,
+/// on the database or inside a transaction. Both types carry these methods
+/// inherently too, so calling one needs no import of this trait.
+///
+/// An executor is `Sync`, so an `async fn` over `&impl Executor` returns a
+/// `Send` future, as an axum handler needs.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// use omnia_sdk::sql::{self, Executor};
+///
+/// async fn count(db: &impl Executor, table: &str) -> omnia_sdk::Result<i64> {
+///     let sql = format!("SELECT COUNT(*) FROM {table}");
+///     let counted: Option<(i64,)> = db.query_opt(&sql, sql::params![]).await?;
+///     Ok(counted.map_or(0, |(count,)| count))
+/// }
+/// ```
+pub trait Executor: Sync {
+    /// Run `sql` with `params` bound and decode each row it selects as `T`,
+    /// as [`Database::query_as`] does.
+    fn query_as<T: FromRow>(
+        &self, sql: &str, params: &[Value],
+    ) -> impl Future<Output = Result<Vec<T>>> + Send;
+
+    /// Run `sql` with `params` bound and decode the first row it selects as
+    /// `T`, as [`Database::query_opt`] does.
+    fn query_opt<T: FromRow>(
+        &self, sql: &str, params: &[Value],
+    ) -> impl Future<Output = Result<Option<T>>> + Send;
+
+    /// Run `sql` with `params` bound and return the number of rows it
+    /// changed, as [`Database::exec`] does.
+    fn exec(&self, sql: &str, params: &[Value]) -> impl Future<Output = Result<u64>> + Send;
+}
+
+impl Executor for Database {
+    fn query_as<T: FromRow>(
+        &self, sql: &str, params: &[Value],
+    ) -> impl Future<Output = Result<Vec<T>>> + Send {
+        Self::query_as(self, sql, params)
+    }
+
+    fn query_opt<T: FromRow>(
+        &self, sql: &str, params: &[Value],
+    ) -> impl Future<Output = Result<Option<T>>> + Send {
+        Self::query_opt(self, sql, params)
+    }
+
+    fn exec(&self, sql: &str, params: &[Value]) -> impl Future<Output = Result<u64>> + Send {
+        Self::exec(self, sql, params)
+    }
+}
+
+impl Executor for Transaction {
+    fn query_as<T: FromRow>(
+        &self, sql: &str, params: &[Value],
+    ) -> impl Future<Output = Result<Vec<T>>> + Send {
+        Self::query_as(self, sql, params)
+    }
+
+    fn query_opt<T: FromRow>(
+        &self, sql: &str, params: &[Value],
+    ) -> impl Future<Output = Result<Option<T>>> + Send {
+        Self::query_opt(self, sql, params)
+    }
+
+    fn exec(&self, sql: &str, params: &[Value]) -> impl Future<Output = Result<u64>> + Send {
+        Self::exec(self, sql, params)
     }
 }
 
@@ -233,6 +360,27 @@ impl Value {
         matches!(self, Self::Null)
     }
 }
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __sql_params {
+    ($($value:expr),* $(,)?) => {
+        &[$($crate::sql::Value::from($value)),*] as &[$crate::sql::Value]
+    };
+}
+
+/// List a statement's parameters as `&[Value]`, each through [`Value::from`].
+///
+/// # Examples
+///
+/// ```rust
+/// use omnia_sdk::sql::{self, Value};
+///
+/// let params = sql::params![7_i64, "Ōtautahi", None::<String>];
+/// assert_eq!(params, [Value::Int64(7), Value::from("Ōtautahi"), Value::Null]);
+/// ```
+#[doc(inline)]
+pub use crate::__sql_params as params;
 
 macro_rules! value_from {
     ($($ty:ty => $case:ident),* $(,)?) => {
@@ -343,7 +491,7 @@ impl Row {
     ///
     /// # Errors
     ///
-    /// A [`ServerError`](crate::Error::ServerError) with the code `invalid`
+    /// A [`ServerError`](crate::ErrorKind::ServerError) with the code `invalid`
     /// when `column` is absent from the row, holds `NULL` for a non-`Option`
     /// `T`, or has an incompatible [`Value`].
     pub fn get<'a, T: FromColumn<'a>>(&'a self, column: &str) -> Result<T> {
@@ -354,6 +502,13 @@ impl Row {
             .map(|field| &field.value)
             .ok_or_else(|| column_missing(column))?;
         T::from_column(column, value)
+    }
+
+    fn at<'a, T: FromColumn<'a>>(&'a self, index: usize) -> Result<T> {
+        let field = self.fields.get(index).ok_or_else(|| {
+            crate::Error::server_error("invalid", format!("row lacks a column at index {index}"))
+        })?;
+        T::from_column(&field.name, &field.value)
     }
 }
 
@@ -391,7 +546,7 @@ pub trait FromColumn<'a>: Sized {
     ///
     /// # Errors
     ///
-    /// A [`ServerError`](crate::Error::ServerError) with the code `invalid`
+    /// A [`ServerError`](crate::ErrorKind::ServerError) with the code `invalid`
     /// when `value` is `NULL` for a non-`Option` `Self` or has an
     /// incompatible [`Value`].
     fn from_column(column: &str, value: &'a Value) -> Result<Self>;
@@ -517,13 +672,15 @@ impl FromColumn<'_> for Bytes {
 /// Decode a domain record from a SQL [`Row`].
 ///
 /// Guest code usually derives this through `omnia_sdk::sql::FromRow`; a
-/// hand-written impl reads each column through [`Row::get`].
+/// hand-written impl reads each column through [`Row::get`]. A tuple of up to
+/// twelve owned [`FromColumn`] types decodes its row by position, the first
+/// column into the first element, and ignores any columns past its own.
 pub trait FromRow: Sized {
     /// Decode `Self` from `row`.
     ///
     /// # Errors
     ///
-    /// A [`ServerError`](crate::Error::ServerError) with the code `invalid`
+    /// A [`ServerError`](crate::ErrorKind::ServerError) with the code `invalid`
     /// when a required column is missing, `NULL`, or of an incompatible
     /// [`Value`].
     fn from_row(row: &Row) -> Result<Self>;
@@ -534,3 +691,29 @@ impl FromRow for Row {
         Ok(row.clone())
     }
 }
+
+macro_rules! tuple_from_row {
+    ($($ty:ident $index:tt),+) => {
+        impl<$($ty),+> FromRow for ($($ty,)+)
+        where
+            $($ty: for<'a> FromColumn<'a>,)+
+        {
+            fn from_row(row: &Row) -> Result<Self> {
+                Ok(($(row.at::<$ty>($index)?,)+))
+            }
+        }
+    };
+}
+
+tuple_from_row!(A 0);
+tuple_from_row!(A 0, B 1);
+tuple_from_row!(A 0, B 1, C 2);
+tuple_from_row!(A 0, B 1, C 2, D 3);
+tuple_from_row!(A 0, B 1, C 2, D 3, E 4);
+tuple_from_row!(A 0, B 1, C 2, D 3, E 4, F 5);
+tuple_from_row!(A 0, B 1, C 2, D 3, E 4, F 5, G 6);
+tuple_from_row!(A 0, B 1, C 2, D 3, E 4, F 5, G 6, H 7);
+tuple_from_row!(A 0, B 1, C 2, D 3, E 4, F 5, G 6, H 7, I 8);
+tuple_from_row!(A 0, B 1, C 2, D 3, E 4, F 5, G 6, H 7, I 8, J 9);
+tuple_from_row!(A 0, B 1, C 2, D 3, E 4, F 5, G 6, H 7, I 8, J 9, K 10);
+tuple_from_row!(A 0, B 1, C 2, D 3, E 4, F 5, G 6, H 7, I 8, J 9, K 10, L 11);

@@ -11,23 +11,40 @@ Unreleased
   targets the world they were generated from.
 - One `omnia_sdk` module per interface, each in the same shape:
   - one opener, `open` or `connect`, taking a binding name as `&str`;
-  - a `DEFAULT` where the interface has a default binding;
+  - a `DEFAULT` where the interface has a default binding, and a
+    `default()` that opens it;
   - the generated types a guest holds re-exported at the module root;
   - helpers as methods that take `&str` and `&[u8]` and return a
     `Result`, with an outcome the WIT names as the inner `Err` of a
     `Result<Result<T, Outcome>>`;
+  - a short verb over borrowed arguments as the everyday form, beside the
+    generated full-control name, and `_json` ending every helper that
+    encodes or decodes JSON;
   - the generated interfaces as public submodules.
 - The helpers, by module:
-  - `keyvalue`: `Bucket::read`, `write`, `remove`, `keys`, `get_json`,
-    `set_json`, and `compare_and_swap`, and `Lifetime: From<Duration>`.
-  - `docstore`: `Collection::get_as`, `insert`, `upsert`, `remove`, and
-    `find`, `Document::decode`, `SortField::asc`, `desc`, and `compare`,
-    and `Filter::array_contains`.
-  - `blobstore`: `Container::read`, `read_range`, and `write`, and
-    `Content::read`.
-  - `sql`: `Database::begin`, `query_as`, `query_opt`, and `exec` on a
-    `Database` and a `Transaction`, `ResultSet::read`, and `Statement::new`,
-    over a `Value` whose cases take the WIT's names.
+  - `keyvalue`: `Bucket::read`, `write`, `remove`, `contains`, `add`,
+    `keys`, `get_json`, and `set_json`, and `Lifetime: From<Duration>`.
+    The conditional writes go by the `Revision` an entry was read at:
+    `compare_and_swap` for bytes, `get_json_entry` and `set_json_if` for
+    JSON, and `update_json`, which retries its closure until a write lands.
+  - `docstore`: `Collection::get_json`, `read`, `contains`, `insert`,
+    `upsert`, `remove`, `find`, and `find_all`, `Document::decode`,
+    `Query::builder`, `Filter::all` and `array_contains`, and
+    `SortField::asc`, `desc`, and `compare`.
+  - `blobstore`: `create` and `exists` for a container,
+    `Container::read`, `read_range`, `write`, `write_with` for attributes,
+    `metadata`, `contains`, and `remove`, and `Content::read`.
+  - `sql`: `Database::begin` and `transaction`, which commits on `Ok` and
+    rolls back on `Err`, and `query_as`, `query_opt`, and `exec` on a
+    `Database` and a `Transaction` through the `Executor` trait, which is
+    `Sync`, so a fn over `&impl Executor` stays `Send`. `params!`
+    builds a statement's parameters, `FromRow` decodes a tuple, and
+    `ResultSet::read` and `Statement::new` work over a `Value` whose cases
+    take the WIT's names.
+  - `http`: a `RequestBuilder` from `get`, `post`, `put`, `patch`, and
+    `delete`, with `header`, `bearer`, `json`, `body`, and `timeout`, that
+    ends in `build`, `fetch`, or `fetch_json`. `HttpCache::fetch_json`
+    decodes a cached JSON reply.
   - `config`: `get`, `require`, and `parse`.
   - `identity`: `Identity::token`, which answers an `AccessToken` with its
     `expires_at` instant and `expires_in`, and `Identity::access_token`.
@@ -44,7 +61,8 @@ Unreleased
   - `vcs`: `open`, `init`, and `clone`, which answer a `Workspace`, and
     `Workspace::add`, `remove`, `fetch`, `remote_bookmark`, `push`,
     `log_all`, and `status_all`.
-  - `vault`: the opener alone.
+  - `vault`: `Locker::read`, `write`, `remove`, and `contains`, and
+    `names`, which walks every page and answers each name once.
   - `websocket`: `Client::broadcast`, `send`, `close`, and `exists`.
 - The unstable interfaces as raw bindings, with no helpers:
   `blobstore::uploads` and `presign`, `messaging::consumer`, `log`, and
@@ -53,10 +71,19 @@ Unreleased
   the error's case as the code: a `BadGateway` for `unavailable`, and a
   `ServerError` for every other. An `anyhow` context around the call keeps
   the code too. Every interface's error converts by this one table.
-- `From<Outcome> for omnia_sdk::Error` for `model::Exhausted`,
-  `plugins::Conflict`, `vcs::Occupied`, `vcs::Diverged`, and
-  `vcs::Unmerged`, each a `BadRequest` under the outcome's name, and read
-  from a topic or subcommand handler's source chain.
+- `From<Outcome> for omnia_sdk::Error` under the outcome's name, read from a
+  topic or subcommand handler's source chain too. `model::Exhausted` is a
+  `BadRequest`, and `plugins::Conflict`, `vcs::Occupied`, `vcs::Diverged`,
+  and `vcs::Unmerged` are each a `Conflict`.
+- `ErrorKind::Conflict`, a `409` that exits 5 and rejects a delivery, with
+  `Error::conflict` and `conflict!`. `From<http::Error> for
+  omnia_sdk::Error`, as a `ServerError` with the code `invalid`.
+- Handlers that leave out the `Context`. A topic or subcommand handler is an
+  `async fn(I)` or an `async fn(Context, I)`, and a closure of either shape.
+- `Handlers::request` and `request_with`, which answer a request delivery.
+  The reply is the handler's output as JSON, or the `Message` it returns,
+  and goes to the delivery's `reply_to` through the `default` broker.
+- `mcp::Tool::of`, a tool whose arguments are a `JsonSchema` type.
 - `messaging::Delivery::reply_to`, `position`, `attempt`, and
   `published_at`, from the WIT delivery.
 - `omnia_wasi_vcs::Error::Denied`, for a remote that refuses the caller.
@@ -75,6 +102,9 @@ Unreleased
     `Backends::messaging` and the new `Backends::websocket`.
   - `FixedIdentity` answers a fixed token for every identity, through
     `Backends::identity`.
+- The `omnia_test::contract` rows `state::json_revision`,
+  `state::update_json`, and `blob::attributes`. A backend's guest program
+  calls them beside the other rows.
 - `omnia_test::host::{send, deliver}`, which drive one request or one
   delivery through a booted runtime, and `precompiled`, which compiles a
   component once for every boot after the first.
@@ -94,10 +124,20 @@ Unreleased
   - `api::messaging` into `omnia_sdk::messaging`, whose `export!` binds a
     router fn;
   - `api::command` to `omnia_sdk::command`.
-- The handler types take no provider. `Context`, `Handler<I>`, `Handlers`,
-  and `Router` lose their type parameter, `Context` carries the call's
-  `metadata` alone, and `Handlers::into_router()` replaces
-  `with_state(provider)`.
+- The handler types take no provider. `Context`, `Handlers`, and `Router`
+  lose their type parameter, `Handler<I, M>` takes the fn's argument list
+  as `M` in place of a provider, `Context` carries the call's `metadata`
+  alone, and `Handlers::into_router()` replaces `with_state(provider)`.
+- `omnia_sdk::Error` is a struct of an `ErrorKind`, a code, and a
+  description, in place of an enum of four variants. A match on a variant
+  reads `error.kind()` instead, and the constructors and macros keep their
+  names. `Error` no longer implements `Serialize` or `Deserialize`, since
+  `ErrorBody` is its wire form.
+- `Router::handle` answers `Result<Option<Message>>`, a request route's
+  reply, in place of `Result<()>`.
+- `McpServer::call_tool` and `read_resource` are async, so a tool may await
+  a capability. `mcp::router` and `handle_message` are generic over the
+  server, and `handle_message` is async.
 - `http::export!`, `messaging::export!`, and `command::export!` take the
   router fn alone. On a native target each binds nothing and still uses the
   fn, so a private router fn raises no `dead_code`.

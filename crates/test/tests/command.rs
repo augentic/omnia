@@ -27,6 +27,7 @@ async fn command_exit_map() {
     assert_eq!(exit_of(&["bad"]).await, 1);
     assert_eq!(exit_of(&["missing"]).await, 2);
     assert_eq!(exit_of(&["upstream"]).await, 4);
+    assert_eq!(exit_of(&["taken"]).await, 5);
     assert_eq!(exit_of(&["bogus"]).await, 64, "an unknown verb is a usage error");
     assert_eq!(exit_of(&["--format", "json", "missing"]).await, 2, "the exit ignores the format");
 }

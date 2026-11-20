@@ -80,7 +80,7 @@ The guest side of each `omnia:*` interface: the Rust `wit-bindgen` generates fro
 
 ### Handler contract
 
-The transport-neutral unit of guest application logic: an `async fn(Context, I) -> Result<O, E>`, registered on a `Handlers` and invoked by the closed `Router`'s dispatch. The messaging router and the command façade are adapters that decode a transport event into `I` and encode the result back; an HTTP route is a plain axum handler that takes the same `Context` as an extractor. A handler reaches the host through the [bindings](#bindings), and a test runs it as the compiled component. See [Writing Guests](guides/writing-guests.md#the-handler-contract).
+The transport-neutral unit of guest application logic: an `async fn(I) -> Result<O, E>`, or an `async fn(Context, I) -> Result<O, E>` when it reads the invocation's metadata, registered on a `Handlers` and invoked by the closed `Router`'s dispatch. The messaging router and the command façade are adapters that decode a transport event into `I` and encode the result back, as a request's reply on a request route; an HTTP route is a plain axum handler that may take the same `Context` as an extractor. A handler reaches the host through the [bindings](#bindings), and a test runs it as the compiled component. See [Writing Guests](guides/writing-guests.md#the-handler-contract).
 
 ### Provider
 
@@ -96,7 +96,7 @@ What a command reports on stderr when a verb fails: the `Failure` type wrapping 
 
 ### Exit map
 
-The fixed mapping from an `omnia_sdk::Error` variant to a process exit status, `Error::exit_code()`: `BadRequest` 1, `NotFound` 2, `ServerError` 3, `BadGateway` 4 — the exit-code twin of `Error::status()` (400 / 404 / 500 / 502). A clap usage error exits `USAGE_EXIT` (64, `EX_USAGE`) rather than clap's default 2, so exit 2 always means a `NotFound` envelope. A guest never chooses an exit code; the error class does.
+The fixed mapping from an `omnia_sdk::Error`'s `ErrorKind` to a process exit status, `Error::exit_code()`: `BadRequest` 1, `NotFound` 2, `ServerError` 3, `BadGateway` 4, `Conflict` 5 — the exit-code twin of `Error::status()` (400 / 404 / 500 / 502 / 409). A clap usage error exits `USAGE_EXIT` (64, `EX_USAGE`) rather than clap's default 2, so exit 2 always means a `NotFound` envelope. A guest never chooses an exit code; the error class does.
 
 ## Runtime platform
 

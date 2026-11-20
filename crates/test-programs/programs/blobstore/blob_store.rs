@@ -24,6 +24,7 @@ async fn scenario() {
     futures::join!(
         blob::objects(SCOPE),
         blob::absent(SCOPE),
+        blob::attributes(SCOPE),
         blob::delete_absent(SCOPE),
         blob::uncreated(SCOPE),
         blob::containers(SCOPE),

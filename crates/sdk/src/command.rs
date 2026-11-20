@@ -26,7 +26,7 @@
 //!
 //! use clap::Args;
 //! use omnia_sdk::command::{self, Render};
-//! use omnia_sdk::{Context, Handlers, Router};
+//! use omnia_sdk::{Handlers, Router};
 //! use serde::Serialize;
 //!
 //! /// Greet someone by name.
@@ -46,7 +46,7 @@
 //!     }
 //! }
 //!
-//! async fn greet(_context: Context, input: Greet) -> omnia_sdk::Result<Greeting> {
+//! async fn greet(input: Greet) -> omnia_sdk::Result<Greeting> {
 //!     Ok(Greeting { text: format!("hello, {}", input.name) })
 //! }
 //!
@@ -475,9 +475,9 @@ impl<'a> Command<'a> {
     ///
     /// A failure is the [`Failure`] envelope over the [`Error`](crate::Error)
     /// that [`Handler::Error`] describes.
-    pub async fn call<F, I>(&self, handler: F, input: I) -> Response
+    pub async fn call<F, I, M>(&self, handler: F, input: I) -> Response
     where
-        F: Handler<I>,
+        F: Handler<I, M>,
         F::Output: Serialize + Render,
     {
         match handler.call(Context::new(self.metadata.clone()), input).await {

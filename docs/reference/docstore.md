@@ -54,11 +54,13 @@ The host answers `unsupported` for the calls a backend cannot express yet:
 
 Guests call these through `omnia_sdk::docstore`, which re-exports the bindings as `store`, `collection`, and `types`. `docstore::open(name)` opens a `Collection`, whose generated methods are the WIT's own. Its helpers map to the WIT as follows:
 
-- `get_as` is `get`, with the body decoded as `T`. `Document::decode` decodes a document `get` returned.
+- `get_json` is `get`, with the body decoded as `T`. `read` is `get` with a borrowed id, and `Document::decode` decodes a document either returned.
+- `contains` is `exists`.
 - `insert` is `put` with `absent`. A conflict is `Ok(Err(Exists))`, an outcome rather than an error.
 - `upsert` is `put` with no precondition.
 - `remove` is `delete` with no revision, and answers whether a document was removed.
 - `find` is `query`, sending the `Filter` tree as groups (see [Filters](#filters)). `Query::after` is the WIT `after`, and the page's `next` is the cursor for the next page.
+- `find_all` is `query` repeated, following each page's `next` until the last.
 
 ## Types
 
@@ -163,6 +165,7 @@ On the guest side, build a filter with the `Filter` constructors from `omnia_sdk
 | `Filter::contains(field, pattern)` / `starts_with` / `ends_with` | String matching. Optional. |
 | `Filter::array_contains(field, value)` | Array membership: the field is an array holding the value. Optional. |
 | `Filter::and(filters)` / `Filter::or(filters)` | Boolean composition; **must have at least one child**. Portable. |
+| `Filter::all(filters)` | `None` for no filters, the filter itself for one, and their `and` otherwise. Portable. |
 | `Filter::negate(filter)` (also the `!` operator) | Logical NOT of any sub-tree. Portable. |
 | `Filter::on_date(field, "YYYY-MM-DD")` | Convenience: expands to a `gte`/`lt` timestamp range covering the UTC day. **Fallible** — returns an error for an invalid date. |
 

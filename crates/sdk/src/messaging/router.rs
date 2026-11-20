@@ -10,9 +10,11 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use bytes::Bytes;
+use serde::Serialize;
 use serde::de::DeserializeOwned;
 use tracing::Instrument as _;
 
+use crate::messaging::Message;
 use crate::{Context, Handler, Metadata};
 
 #[doc(hidden)]
@@ -155,14 +157,23 @@ impl Delivery {
 ///
 /// The delivery runs inside the guest telemetry scope.
 /// [`export!`](crate::messaging::export!) expands to this call, and a
-/// hand-written `omnia:messaging` export calls it directly. What `handle`
-/// returns settles the delivery, and
-/// a failure carries its [`Error`](crate::Error)'s text as the reason:
+/// hand-written `omnia:messaging` export calls it directly.
 ///
-/// - A [`BadRequest`](crate::Error::BadRequest) rejects the delivery, as a
+/// A [`request`](crate::Handlers::request) route's reply goes to the
+/// delivery's [`reply_to`](Delivery::reply_to) through the
+/// [`DEFAULT`](crate::messaging::DEFAULT) broker, and a delivery that awaits
+/// no reply drops it.
+///
+/// What `handle` returns settles the delivery, and a failure carries its
+/// [`Error`](crate::Error)'s text as the reason:
+///
+/// - A [`BadRequest`](crate::ErrorKind::BadRequest) or a
+///   [`Conflict`](crate::ErrorKind::Conflict) rejects the delivery, as a
 ///   message no redelivery handles.
 /// - Any other failure releases it, as a failure that may pass, and leaves
 ///   the delay to the backend.
+///
+/// A reply the broker does not take fails the delivery the same way.
 ///
 /// A guest that sets a release delay implements
 /// [`exports::messaging`](crate::exports::messaging) instead.
@@ -177,6 +188,7 @@ pub async fn handle(
 ) -> Result<(), crate::messaging::types::Settle> {
     use std::time::{Duration, UNIX_EPOCH};
 
+    use crate::ErrorKind;
     use crate::messaging::types::{Release, Settle};
 
     let instant = |millis| UNIX_EPOCH.checked_add(Duration::from_millis(millis));
@@ -201,16 +213,24 @@ pub async fn handle(
         published_at: published_at.and_then(instant),
         deadline: deadline.and_then(instant),
     };
-    router.handle(delivery).await.map_err(|error| {
+    let settle = |error: crate::Error| {
         let reason = error.to_string();
-        match error {
-            crate::Error::BadRequest { .. } => Settle::Reject(reason),
+        match error.kind() {
+            ErrorKind::BadRequest | ErrorKind::Conflict => Settle::Reject(reason),
             _ => Settle::Release(Release {
                 reason,
                 delay_ms: None,
             }),
         }
-    })
+    };
+    let reply_to = delivery.reply_to.clone();
+    let reply = router.handle(delivery).await.map_err(settle)?;
+
+    if let (Some(reply), Some(reply_to)) = (reply, reply_to) {
+        let client = crate::messaging::default().await.map_err(settle)?;
+        client.reply(&reply_to, reply).await.map_err(settle)?;
+    }
+    Ok(())
 }
 
 #[derive(Clone, Default)]
@@ -219,29 +239,43 @@ pub struct Topics {
 }
 
 impl Topics {
-    pub fn route<F, I>(self, topic: impl Into<String>, handler: F) -> Self
+    pub fn route<F, I, M>(self, topic: impl Into<String>, handler: F) -> Self
     where
-        F: Handler<I>,
+        F: Handler<I, M>,
         I: DeserializeOwned + Send + 'static,
+        M: 'static,
     {
-        self.route_with(topic, handler, |delivery: &Delivery| {
-            serde_json::from_slice(&delivery.payload)
-                .map_err(|error| crate::bad_request!("malformed JSON payload: {error}"))
-        })
+        self.route_with(topic, handler, json)
     }
 
-    pub fn route_with<F, I, D>(self, topic: impl Into<String>, handler: F, decode: D) -> Self
+    pub fn route_with<F, I, M, D>(self, topic: impl Into<String>, handler: F, decode: D) -> Self
     where
-        F: Handler<I>,
+        F: Handler<I, M>,
         I: Send + 'static,
+        M: 'static,
         D: Fn(&Delivery) -> crate::Result<I> + Send + Sync + 'static,
     {
-        let route = Route::<F, I, D> {
-            handler,
-            decode,
-            marker: PhantomData,
-        };
-        self.insert(topic.into(), Arc::new(route))
+        self.register(topic, handler, decode, |_output| Ok(None))
+    }
+
+    pub fn request<F, I, M>(self, topic: impl Into<String>, handler: F) -> Self
+    where
+        F: Handler<I, M>,
+        F::Output: Serialize,
+        I: DeserializeOwned + Send + 'static,
+        M: 'static,
+    {
+        self.register(topic, handler, json, |output| Message::json(&output).map(Some))
+    }
+
+    pub fn request_with<F, I, M, D>(self, topic: impl Into<String>, handler: F, decode: D) -> Self
+    where
+        F: Handler<I, M, Output = Message>,
+        I: Send + 'static,
+        M: 'static,
+        D: Fn(&Delivery) -> crate::Result<I> + Send + Sync + 'static,
+    {
+        self.register(topic, handler, decode, |reply| Ok(Some(reply)))
     }
 
     pub fn merge(self, other: Self) -> Self {
@@ -252,7 +286,7 @@ impl Topics {
         self.routes.keys().map(String::as_str)
     }
 
-    pub async fn handle(&self, delivery: Delivery) -> crate::Result<()> {
+    pub async fn handle(&self, delivery: Delivery) -> crate::Result<Option<Message>> {
         let topic = delivery.topic.as_deref().ok_or_else(|| {
             crate::Error::bad_request("missing-topic", "the delivery has no topic")
         })?;
@@ -260,6 +294,25 @@ impl Topics {
             crate::Error::not_found("unhandled-topic", format!("no route for topic `{topic}`"))
         })?;
         route.dispatch(&delivery).await
+    }
+
+    fn register<F, I, M, D, R>(
+        self, topic: impl Into<String>, handler: F, decode: D, reply: R,
+    ) -> Self
+    where
+        F: Handler<I, M>,
+        I: Send + 'static,
+        M: 'static,
+        D: Fn(&Delivery) -> crate::Result<I> + Send + Sync + 'static,
+        R: Fn(F::Output) -> crate::Result<Option<Message>> + Send + Sync + 'static,
+    {
+        let route = Route::<F, I, M, D, R> {
+            handler,
+            decode,
+            reply,
+            marker: PhantomData,
+        };
+        self.insert(topic.into(), Arc::new(route))
     }
 
     fn insert(mut self, topic: String, route: Arc<dyn ErasedRoute>) -> Self {
@@ -276,23 +329,31 @@ impl fmt::Debug for Topics {
     }
 }
 
-type DispatchFuture<'a> = Pin<Box<dyn Future<Output = crate::Result<()>> + Send + 'a>>;
+fn json<I: DeserializeOwned>(delivery: &Delivery) -> crate::Result<I> {
+    serde_json::from_slice(&delivery.payload)
+        .map_err(|error| crate::bad_request!("malformed JSON payload: {error}"))
+}
+
+type DispatchFuture<'a> = Pin<Box<dyn Future<Output = crate::Result<Option<Message>>> + Send + 'a>>;
 
 trait ErasedRoute: Send + Sync {
     fn dispatch<'a>(&'a self, delivery: &'a Delivery) -> DispatchFuture<'a>;
 }
 
-struct Route<F, I, D> {
+struct Route<F, I, M, D, R> {
     handler: F,
     decode: D,
-    marker: PhantomData<fn() -> I>,
+    reply: R,
+    marker: PhantomData<fn() -> (I, M)>,
 }
 
-impl<F, I, D> ErasedRoute for Route<F, I, D>
+impl<F, I, M, D, R> ErasedRoute for Route<F, I, M, D, R>
 where
-    F: Handler<I>,
+    F: Handler<I, M>,
     I: Send + 'static,
+    M: 'static,
     D: Fn(&Delivery) -> crate::Result<I> + Send + Sync + 'static,
+    R: Fn(F::Output) -> crate::Result<Option<Message>> + Send + Sync + 'static,
 {
     fn dispatch<'a>(&'a self, delivery: &'a Delivery) -> DispatchFuture<'a> {
         let metadata = Metadata {
@@ -316,12 +377,13 @@ where
                 let input = (self.decode)(delivery).map_err(|error| {
                     crate::Error::bad_request("undecodable", error.description())
                 })?;
-                self.handler
+                let output = self
+                    .handler
                     .clone()
                     .call(Context::new(metadata), input)
                     .await
-                    .map(|_| ())
-                    .map_err(|error| crate::Error::from_chain(&error))
+                    .map_err(|error| crate::Error::from_chain(&error))?;
+                (self.reply)(output)
             }
             .instrument(span),
         )

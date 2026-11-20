@@ -2,12 +2,13 @@
 
 mod support;
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::future::{Ready, ready};
 use std::sync::{Arc, Mutex};
 
-use omnia_sdk::messaging::Delivery;
-use omnia_sdk::{Context, Handlers, bad_gateway, bad_request, model, plugins, vcs};
+use omnia_sdk::messaging::{Delivery, Message};
+use omnia_sdk::{Context, ErrorKind, Handlers, bad_gateway, bad_request, model, plugins, vcs};
 use serde::{Deserialize, Serialize};
 
 use self::support::{Spans, fields};
@@ -51,13 +52,14 @@ fn delivery(topic: Option<&str>, payload: &[u8]) -> Delivery {
 async fn exact_topic() {
     let router = Handlers::new().topic("events.created", echo).into_router();
 
-    router
+    let reply = router
         .handle(delivery(Some("events.created"), br#"{"name":"message","count":2}"#))
         .await
         .expect("exact route handles delivery");
+    assert!(reply.is_none(), "a topic route replied: {reply:?}");
     assert_eq!(
-        router.handle(delivery(Some("events.*"), br#"{"name":"message"}"#)).await,
-        Err(omnia_sdk::Error::not_found("unhandled-topic", "no route for topic `events.*`"))
+        router.handle(delivery(Some("events.*"), br#"{"name":"message"}"#)).await.expect_err("*"),
+        omnia_sdk::Error::not_found("unhandled-topic", "no route for topic `events.*`")
     );
 }
 
@@ -66,14 +68,12 @@ async fn malformed_delivery() {
     let router = Handlers::new().topic("events", echo).into_router();
 
     assert_eq!(
-        router.handle(delivery(None, br#"{"name":"message"}"#)).await,
-        Err(omnia_sdk::Error::bad_request("missing-topic", "the delivery has no topic"))
+        router.handle(delivery(None, br#"{"name":"message"}"#)).await.expect_err("no topic"),
+        omnia_sdk::Error::bad_request("missing-topic", "the delivery has no topic")
     );
-    let undecodable = router.handle(delivery(Some("events"), b"not-json")).await;
-    assert!(
-        matches!(&undecodable, Err(omnia_sdk::Error::BadRequest { code, .. }) if code == "undecodable"),
-        "{undecodable:?}"
-    );
+    let undecodable =
+        router.handle(delivery(Some("events"), b"not-json")).await.expect_err("not JSON");
+    assert_eq!((undecodable.kind(), undecodable.code()), (ErrorKind::BadRequest, "undecodable"));
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -91,24 +91,24 @@ fn unavailable() -> omnia_sdk::Error {
 #[tokio::test]
 async fn failing_handler() {
     let router = Handlers::new()
-        .topic("gateway", |_: Context, _: EchoInput| {
+        .topic("gateway", |_: EchoInput| {
             ready(Err::<(), _>(bad_gateway!("upstream did not answer")))
         })
-        .topic("store", |_: Context, _: EchoInput| ready(Err::<(), _>(unavailable())))
-        .topic("order", |_: Context, _: EchoInput| ready(Err::<(), _>(PlaceError(unavailable()))))
-        .topic("request", |_: Context, _: EchoInput| ready(Err::<(), _>(bad_request!("no name"))))
-        .topic("format", |_: Context, _: EchoInput| ready(Err::<(), _>(fmt::Error)))
-        .topic("revision", |_: Context, _: EchoInput| {
+        .topic("store", |_: EchoInput| ready(Err::<(), _>(unavailable())))
+        .topic("order", |_: EchoInput| ready(Err::<(), _>(PlaceError(unavailable()))))
+        .topic("request", |_: EchoInput| ready(Err::<(), _>(bad_request!("no name"))))
+        .topic("format", |_: EchoInput| ready(Err::<(), _>(fmt::Error)))
+        .topic("revision", |_: EchoInput| {
             ready(Err::<(), _>(vcs::types::Error::NotFound("no revision `v1`".into())))
         })
-        .topic("plugin", |_: Context, _: EchoInput| {
+        .topic("plugin", |_: EchoInput| {
             let conflict = plugins::Conflict {
                 found: "sha256:ab".into(),
                 current: None,
             };
             ready(Err::<(), _>(conflict))
         })
-        .topic("review", |_: Context, _: EchoInput| {
+        .topic("review", |_: EchoInput| {
             let exhausted = model::Exhausted {
                 budget: model::Budget::Tokens,
                 detail: "4096 tokens".into(),
@@ -125,7 +125,7 @@ async fn failing_handler() {
         ("request", 400, "bad_request", "no name"),
         ("format", 500, "server_error", "when formatting"),
         ("revision", 500, "not-found", "no revision `v1`"),
-        ("plugin", 400, "conflict", "not the pinned digest"),
+        ("plugin", 409, "conflict", "not the pinned digest"),
         ("review", 400, "exhausted", "could not review: the tokens budget is exhausted"),
     ] {
         let Err(error) = router.handle(delivery(Some(topic), br#"{"name":"message"}"#)).await
@@ -166,10 +166,8 @@ async fn invalid_payload_span() {
         .with_metadata("request-id", "req-1")
         .with_metadata("correlation-id", "corr-1");
 
-    assert!(matches!(
-        router.handle(delivery).await,
-        Err(omnia_sdk::Error::BadRequest { code, .. }) if code == "undecodable"
-    ));
+    let undecodable = router.handle(delivery).await.expect_err("not JSON");
+    assert_eq!((undecodable.kind(), undecodable.code()), (ErrorKind::BadRequest, "undecodable"));
     assert_eq!(
         spans.handler(),
         fields([
@@ -204,8 +202,11 @@ async fn merged_routes() {
         ["events.created", "events.deleted", "events.updated"]
     );
     assert_eq!(
-        router.handle(delivery(Some("events"), br#"{"name":"message"}"#)).await,
-        Err(omnia_sdk::Error::not_found("unhandled-topic", "no route for topic `events`"))
+        router
+            .handle(delivery(Some("events"), br#"{"name":"message"}"#))
+            .await
+            .expect_err("events"),
+        omnia_sdk::Error::not_found("unhandled-topic", "no route for topic `events`")
     );
 }
 
@@ -216,7 +217,7 @@ fn duplicate_topic_merged() {
         Handlers::new().topic("events", echo).merge(Handlers::new().topic("events", echo));
 }
 
-fn raw_text(_context: Context, input: RawText) -> Ready<Result<String, omnia_sdk::Error>> {
+fn raw_text(input: RawText) -> Ready<Result<String, omnia_sdk::Error>> {
     ready(Ok(input.text))
 }
 
@@ -236,15 +237,10 @@ async fn topic_with_raw_payload() {
         .handle(delivery(Some("events.raw"), b"not-json"))
         .await
         .expect("the raw decoder handles a payload the JSON route rejects");
-    let refused = router.handle(delivery(Some("events.raw"), b"\xff")).await;
-    assert!(
-        matches!(
-            &refused,
-            Err(omnia_sdk::Error::BadRequest { code, description })
-                if code == "undecodable" && description.starts_with("payload is not utf-8")
-        ),
-        "{refused:?}"
-    );
+    let refused =
+        router.handle(delivery(Some("events.raw"), b"\xff")).await.expect_err("not utf-8");
+    assert_eq!((refused.kind(), refused.code()), (ErrorKind::BadRequest, "undecodable"));
+    assert!(refused.description().starts_with("payload is not utf-8"), "{refused}");
 }
 
 #[tokio::test]
@@ -252,7 +248,7 @@ async fn topic_with_reply_to() {
     let seen = Arc::new(Mutex::new(None));
     let record = {
         let seen = Arc::clone(&seen);
-        move |_: Context, input: (Option<String>, Option<u32>)| {
+        move |input: (Option<String>, Option<u32>)| {
             *seen.lock().expect("record") = Some(input);
             ready(Ok::<(), omnia_sdk::Error>(()))
         }
@@ -290,4 +286,71 @@ async fn tenant_metadata() {
         .expect("the route handles the delivery");
 
     assert_eq!(seen.lock().expect("seen").as_deref(), Some("acme"));
+}
+
+#[derive(Debug, Deserialize)]
+struct QuoteRequest {
+    sku: String,
+    quantity: u32,
+}
+
+#[derive(Debug, Serialize)]
+struct Quote {
+    sku: String,
+    total_cents: u32,
+}
+
+fn quote(input: QuoteRequest) -> Ready<Result<Quote, omnia_sdk::Error>> {
+    ready(Ok(Quote {
+        sku: input.sku,
+        total_cents: input.quantity * 125,
+    }))
+}
+
+#[tokio::test]
+async fn request_reply() {
+    let router = Handlers::new().request("quotes", quote).into_router();
+
+    let reply = router
+        .handle(delivery(Some("quotes"), br#"{"sku":"apple","quantity":3}"#))
+        .await
+        .expect("the route handles the request")
+        .expect("a request route replies");
+
+    assert_eq!(reply.data, br#"{"sku":"apple","total_cents":375}"#);
+    assert_eq!(reply.content_type.as_deref(), Some("application/json"));
+}
+
+#[tokio::test]
+async fn request_with_message() {
+    let echo = |text: String| {
+        ready(Ok::<_, omnia_sdk::Error>(Message::new(text).with_content_type("text/plain")))
+    };
+    let router = Handlers::new()
+        .request_with("echo", echo, |delivery: &Delivery| {
+            Ok(String::from_utf8_lossy(&delivery.payload).into_owned())
+        })
+        .into_router();
+
+    let reply = router
+        .handle(delivery(Some("echo"), b"ping"))
+        .await
+        .expect("the route handles the request")
+        .expect("a request route replies");
+
+    assert_eq!(reply.data, b"ping");
+    assert_eq!(reply.content_type.as_deref(), Some("text/plain"));
+}
+
+#[tokio::test]
+async fn unencodable_reply() {
+    let pairs = |_: EchoInput| ready(Ok::<_, omnia_sdk::Error>(BTreeMap::from([((1, 2), 3)])));
+    let router = Handlers::new().request("pairs", pairs).into_router();
+
+    let error = router
+        .handle(delivery(Some("pairs"), br#"{"name":"message"}"#))
+        .await
+        .expect_err("a tuple key has no JSON form");
+
+    assert_eq!((error.kind(), error.code()), (ErrorKind::ServerError, "invalid"));
 }

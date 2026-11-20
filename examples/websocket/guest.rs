@@ -28,7 +28,7 @@ impl http::handler::Guest for HttpGuest {
 
 #[axum::debug_handler]
 async fn send_message(message: String) -> omnia_sdk::Result<Json<Value>> {
-    let client = websocket::connect(websocket::DEFAULT).await?;
+    let client = websocket::default().await?;
     client.broadcast(Message::Text(message), &[]).await?;
 
     Ok(Json(json!({

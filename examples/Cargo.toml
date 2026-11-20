@@ -38,6 +38,7 @@ http.workspace = true
 http-body-util.workspace = true
 omnia-sdk = { workspace = true, features = ["http", "command"] }
 opentelemetry = { workspace = true, features = ["metrics", "trace"] }
+schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tower-http = { version = "0.7.1", features = ["cors", "trace"] }

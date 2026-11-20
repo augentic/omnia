@@ -42,11 +42,11 @@ impl Guest for Http {
 
 #[omnia_sdk::otel::instrument]
 async fn handler(body: Bytes) -> omnia_sdk::Result<Json<Value>> {
-    let locker = vault::open(vault::DEFAULT).await.context("failed to open vault locker")?;
+    let locker = vault::default().await.context("failed to open vault locker")?;
 
-    locker.set("greeting".to_string(), body.to_vec()).await.context("issue setting secret")?;
+    locker.write("greeting", &body).await.context("issue setting secret")?;
 
-    let secret = locker.get("greeting".to_string()).await.context("issue retrieving secret")?;
+    let secret = locker.read("greeting").await.context("issue retrieving secret")?;
     assert_eq!(secret.unwrap(), body);
 
     let response = serde_json::from_slice::<Value>(&body).context("deserializing data")?;

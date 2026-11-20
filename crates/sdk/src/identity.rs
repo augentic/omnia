@@ -1,7 +1,7 @@
 //! `omnia:identity`, access tokens for the identities a deployment declares.
 //!
-//! A guest opens an [`Identity`] with [`open`], [`DEFAULT`] unless the
-//! deployment declares another. Beside the generated `get_token`, an
+//! A guest opens an [`Identity`] with [`open`], or the [`DEFAULT`] identity
+//! with [`default`]. Beside the generated `get_token`, an
 //! identity returns an [`AccessToken`] whose [`Debug`] form redacts the
 //! token.
 
@@ -23,6 +23,15 @@ pub const DEFAULT: &str = "default";
 /// deployment does not declare.
 pub async fn open(name: &str) -> Result<Identity> {
     Ok(credentials::open(name.to_owned()).await?)
+}
+
+/// Open the [`DEFAULT`] identity.
+///
+/// # Errors
+///
+/// As [`open`].
+pub async fn default() -> Result<Identity> {
+    open(DEFAULT).await
 }
 
 impl Identity {

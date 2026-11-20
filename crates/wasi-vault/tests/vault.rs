@@ -64,6 +64,20 @@ async fn vault_lockers() {
     assert_eq!(locker.get("api-key".to_owned()).await.expect("get"), Some(b"default-key".to_vec()));
 }
 
+#[tokio::test]
+async fn vault_default_locker() {
+    let backends = Backends::defaults().await.vault(declaring(&["default"]).await);
+    let locker = backends.vault.open_locker("default".to_owned()).await.expect("locker");
+    for n in 0..=1_000 {
+        locker.set(format!("bulk-{n:04}"), b"x".to_vec()).await.expect("seed");
+    }
+
+    run_guest(test_programs::VAULT_DEFAULT_LOCKER, backends.clone()).await;
+
+    // Persisted state: the secret the guest left.
+    assert_eq!(locker.get("kept".to_owned()).await.expect("get"), Some(b"v".to_vec()));
+}
+
 // fails `get` with the kind a locker is named for, delegating any other
 // name, and records each name so the run's exchanges are pinned
 #[derive(Clone, Debug)]

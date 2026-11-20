@@ -16,7 +16,7 @@
 use std::ops::Range;
 
 use omnia_sdk::blobstore::container::Listing;
-use omnia_sdk::blobstore::{self, Container, admin};
+use omnia_sdk::blobstore::{self, Attributes, Container, ObjectMetadata, admin};
 
 use super::expect_code;
 
@@ -36,8 +36,8 @@ const YEAR_2100: u64 = 4_102_444_800_000;
 /// # Panics
 ///
 /// Panics if an object reads back other bytes, keeps part of an earlier
-/// write, or [`stat`](Container::stat) describes another object or dates it
-/// after 2100.
+/// write, or [`metadata`](Container::metadata) describes another object or
+/// dates it after 2100.
 pub async fn objects(scope: &str) {
     let container = create(scope, "objects").await;
     write(&container, "doc", BINARY).await;
@@ -47,12 +47,11 @@ pub async fn objects(scope: &str) {
 
     let stored = read(&container, "doc").await;
     assert_eq!(stored, Some(b"second".to_vec()), "a write kept part of the old object");
-    let stat = container.stat("doc".to_owned()).await.expect("stat");
-    let stat = stat.expect("the object is stored");
-    assert_eq!((stat.name.as_str(), stat.size), ("doc", 6), "stat described another object");
-    assert!(stat.modified_at < YEAR_2100, "stat dated the write after 2100");
-    let exists = container.exists("doc".to_owned()).await.expect("exists");
-    assert!(exists, "a stored object is absent");
+    let stored = metadata(&container, "doc").await.expect("the object is stored");
+    let described = (stored.name.as_str(), stored.size);
+    assert_eq!(described, ("doc", 6), "metadata described another object");
+    assert!(stored.modified_at < YEAR_2100, "metadata dated the write after 2100");
+    assert!(contains(&container, "doc").await, "a stored object is absent");
     remove(&container).await;
 }
 
@@ -68,14 +67,53 @@ pub async fn absent(scope: &str) {
     let get = container.read("missing").await;
     let range = container.read_range("missing", 0..1).await;
     let empty = container.read_range("missing", 0..0).await;
-    let stat = container.stat("missing".to_owned()).await;
-    let exists = container.exists("missing".to_owned()).await;
+    let described = container.metadata("missing").await;
+    let exists = container.contains("missing").await;
 
     assert_eq!(get.expect("read"), None, "read found a missing object");
     assert_eq!(range.expect("read_range"), None, "read_range found a missing object");
     assert_eq!(empty.expect("read_range"), None, "an empty range found a missing object");
-    assert!(stat.expect("stat").is_none(), "stat found a missing object");
-    assert!(!exists.expect("exists"), "a missing object exists");
+    assert!(described.expect("metadata").is_none(), "metadata found a missing object");
+    assert!(!exists.expect("contains"), "a missing object exists");
+    remove(&container).await;
+}
+
+/// [`write_with`](Container::write_with) stores every attribute it is
+/// given, or fails with the code `unsupported` and stores nothing.
+///
+/// # Panics
+///
+/// Panics if a write stores other attributes, or a refused write stores the
+/// object.
+pub async fn attributes(scope: &str) {
+    let container = create(scope, "attributes").await;
+    let attributes = Attributes {
+        content_type: Some("text/plain".to_owned()),
+        cache_control: Some("max-age=60".to_owned()),
+        metadata: vec![("owner".to_owned(), "ann".to_owned())],
+        ..Attributes::default()
+    };
+
+    let written = container.write_with("doc", b"x", &attributes).await;
+
+    match written {
+        Ok(()) => {
+            let stored = metadata(&container, "doc").await.expect("the object is stored");
+            let Attributes {
+                content_type,
+                cache_control,
+                metadata,
+                ..
+            } = stored.attributes;
+            let stored = (content_type, cache_control, metadata);
+            let given = (attributes.content_type, attributes.cache_control, attributes.metadata);
+            assert_eq!(stored, given, "a write stored other attributes");
+        }
+        Err(err) => {
+            expect_code::<(), _>(Err(err), "unsupported", "write_with attributes");
+            assert!(!contains(&container, "doc").await, "a refused write stored the object");
+        }
+    }
     remove(&container).await;
 }
 
@@ -169,7 +207,7 @@ pub async fn uncreated(scope: &str) {
 pub async fn containers(scope: &str) {
     let container = create(scope, "containers").await;
     write(&container, "doc", b"x").await;
-    let again = admin::create_container(container.name()).await;
+    let again = blobstore::create(&container.name()).await;
     let again = again.expect("create the container again");
 
     let kept = read(&again, "doc").await;
@@ -306,7 +344,7 @@ fn scoped(scope: &str, suffix: &str) -> String {
 
 async fn create(scope: &str, suffix: &str) -> Container {
     let name = scoped(scope, suffix);
-    let created = admin::create_container(name.clone()).await;
+    let created = blobstore::create(&name).await;
     created.unwrap_or_else(|err| panic!("create `{name}`: {err}"))
 }
 
@@ -321,10 +359,19 @@ async fn read(container: &Container, name: &str) -> Option<Vec<u8>> {
     read.map(Vec::from)
 }
 
+async fn metadata(container: &Container, name: &str) -> Option<ObjectMetadata> {
+    let stored = container.metadata(name).await;
+    stored.unwrap_or_else(|err| panic!("metadata of `{name}` in `{}`: {err}", container.name()))
+}
+
+async fn contains(container: &Container, name: &str) -> bool {
+    let stored = container.contains(name).await;
+    stored.unwrap_or_else(|err| panic!("contains `{name}` in `{}`: {err}", container.name()))
+}
+
 async fn delete(container: &Container, name: &str) {
-    let deleted = container.delete(name.to_owned(), None).await;
-    let deleted = deleted.unwrap_or_else(|err| panic!("delete `{name}`: {err}"));
-    deleted.unwrap_or_else(|conflict| panic!("an unconditional delete conflicted: {conflict:?}"));
+    let deleted = container.remove(name).await;
+    deleted.unwrap_or_else(|err| panic!("delete `{name}`: {err}"));
 }
 
 async fn copy(source: &Container, name: &str, dest: &Container, dest_name: &str) {
@@ -340,8 +387,8 @@ async fn rename(source: &Container, name: &str, dest: &Container, dest_name: &st
 }
 
 async fn container_exists(name: &str) -> bool {
-    let exists = blobstore::store::container_exists(name.to_owned()).await;
-    exists.unwrap_or_else(|err| panic!("container_exists `{name}`: {err}"))
+    let exists = blobstore::exists(name).await;
+    exists.unwrap_or_else(|err| panic!("exists `{name}`: {err}"))
 }
 
 async fn remove(container: &Container) {

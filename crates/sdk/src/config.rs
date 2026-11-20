@@ -24,7 +24,7 @@ pub async fn get(key: &str) -> Result<Option<String>> {
 ///
 /// # Errors
 ///
-/// - [`ServerError`](Error::ServerError) with the code `not-found` when `key`
+/// - [`ServerError`](crate::ErrorKind::ServerError) with the code `not-found` when `key`
 ///   is unset, or `invalid` when its value does not parse as `T`.
 /// - The host's failure, under its code, when the configuration source does
 ///   not answer.
@@ -40,7 +40,7 @@ where
 ///
 /// # Errors
 ///
-/// - [`ServerError`](Error::ServerError) with the code `invalid` when the
+/// - [`ServerError`](crate::ErrorKind::ServerError) with the code `invalid` when the
 ///   value does not parse as `T`.
 /// - The host's failure, under its code, when the configuration source does
 ///   not answer.

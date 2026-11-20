@@ -20,7 +20,7 @@ use anyhow::{Context, anyhow};
 use axum::routing::post;
 use axum::{Json, Router};
 use bytes::Bytes;
-use omnia_sdk::blobstore::admin;
+use omnia_sdk::blobstore;
 use serde_json::Value;
 use wasip3::exports::http::handler::Guest;
 use wasip3::http::types::{ErrorCode, Request, Response};
@@ -38,8 +38,7 @@ impl Guest for Http {
 #[omnia_sdk::otel::instrument]
 async fn handler(body: Bytes) -> omnia_sdk::Result<Json<Value>> {
     // store the request body as an object
-    let container =
-        admin::create_container("container".to_owned()).await.context("creating container")?;
+    let container = blobstore::create("container").await.context("creating container")?;
     container.write("request", &body).await.context("writing data")?;
 
     // read the object back

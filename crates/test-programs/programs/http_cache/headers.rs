@@ -1,4 +1,5 @@
-//! The `HttpCache` header contract over the `default` bucket.
+//! The `HttpCache` header contract over the `default` bucket, and
+//! `fetch_json` over a miss and a hit.
 //!
 //! The guest asserts each response and refusal it sees. Every scenario
 //! fetches its own path and sends its own etag, so the suite counts the
@@ -11,6 +12,7 @@ use http::header::{CACHE_CONTROL, CONTENT_DISPOSITION, CONTENT_TYPE, ETAG, IF_NO
 use http::{HeaderName, HeaderValue, Request, Response, StatusCode};
 use omnia_sdk::http::cache::{HttpCache, store_key};
 use omnia_sdk::keyvalue::{self, Bucket};
+use serde_json::{Value, json};
 
 const ORIGIN_ETAG: &str = "\"origin\"";
 const PAYLOAD: &[u8] = b"payload";
@@ -34,6 +36,7 @@ async fn scenario() {
     absent_cache_control(&client).await;
     unknown_directives(&client).await;
     bad_directives(&client).await;
+    json_body(&client).await;
 }
 
 async fn miss_then_hit(client: &Client) {
@@ -172,6 +175,19 @@ async fn bad_directives(client: &Client) {
         vec![(CACHE_CONTROL, "max-age=60"), (IF_NONE_MATCH, "unquoted")],
     ] {
         client.refuse("bad", &headers).await;
+    }
+}
+
+async fn json_body(client: &Client) {
+    // the miss decodes the origin's body and the hit the stored copy
+    let headers = [(CACHE_CONTROL, "max-age=60"), (IF_NONE_MATCH, "\"json\"")];
+    for _ in 1..=2 {
+        let value: Value = client
+            .cache
+            .fetch_json(request("json", &headers))
+            .await
+            .unwrap_or_else(|err| panic!("fetching `json` as JSON: {err}"));
+        assert_eq!(value, json!({ "payload": true }));
     }
 }
 

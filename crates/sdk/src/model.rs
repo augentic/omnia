@@ -53,6 +53,15 @@ pub async fn open(name: &str) -> Result<Model> {
     Ok(completion::open(name.to_owned()).await?)
 }
 
+/// Open the [`DEFAULT`] model.
+///
+/// # Errors
+///
+/// As [`open`].
+pub async fn default() -> Result<Model> {
+    open(DEFAULT).await
+}
+
 /// What the guest asks of a model in one completion.
 #[derive(Clone, Debug, Default, bon::Builder)]
 pub struct Request {
