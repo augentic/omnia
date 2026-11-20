@@ -1,9 +1,9 @@
 use omnia_core::HostView;
 use wasmtime::component::{Access, Accessor, Resource};
 
-use crate::host::generated::omnia::vault::locker::{Host, HostLocker, HostLockerWithStore, Names};
-use crate::host::resource::LockerProxy;
-use crate::host::{Error, Result, VaultClient, WasiVault};
+use crate::generated::omnia::vault::locker::{Host, HostLocker, HostLockerWithStore, Names};
+use crate::resource::LockerProxy;
+use crate::{Error, Result, VaultClient, WasiVault};
 
 const PAGE_LIMIT: u32 = 1_000;
 

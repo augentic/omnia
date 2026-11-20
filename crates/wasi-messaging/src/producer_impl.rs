@@ -3,11 +3,11 @@
 use omnia_core::HostView;
 use wasmtime::component::{Accessor, Resource};
 
-use crate::host::generated::omnia::messaging::producer::{Host, HostWithStore};
-use crate::host::generated::omnia::messaging::types::{self, Topic};
-use crate::host::resource::{ClientProxy, Message};
-use crate::host::types_impl::get_client;
-use crate::host::{MessagingClient, Result, WasiMessaging};
+use crate::generated::omnia::messaging::producer::{Host, HostWithStore};
+use crate::generated::omnia::messaging::types::{self, Topic};
+use crate::resource::{ClientProxy, Message};
+use crate::types_impl::get_client;
+use crate::{MessagingClient, Result, WasiMessaging};
 
 impl<T> HostWithStore<T> for WasiMessaging {
     async fn send(

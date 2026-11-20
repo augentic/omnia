@@ -4,12 +4,11 @@
 use omnia_core::HostView;
 use wasmtime::component::{Access, Accessor, Resource};
 
-use crate::host::generated::omnia::messaging::types::{
+use crate::generated::omnia::messaging::types::{
     self, Delivery, Host, HostClient, HostClientWithStore,
 };
-use crate::host::generated::omnia::types::types as omnia_types;
-use crate::host::resource::{ClientProxy, Message, Metadata};
-use crate::host::{Error, MessagingClient, Result, WasiMessaging};
+use crate::resource::{ClientProxy, Message, Metadata};
+use crate::{Error, MessagingClient, Result, WasiMessaging};
 
 // the one broker the endpoint seam reaches
 const DEFAULT: &str = "default";
@@ -40,12 +39,6 @@ impl<T> HostClientWithStore<T> for WasiMessaging {
 }
 
 impl Host for HostView<'_, dyn MessagingClient> {}
-
-impl omnia_types::Host for HostView<'_, dyn MessagingClient> {
-    fn convert_error(&mut self, err: Error) -> wasmtime::Result<Error> {
-        Ok(err)
-    }
-}
 
 impl HostClient for HostView<'_, dyn MessagingClient> {}
 

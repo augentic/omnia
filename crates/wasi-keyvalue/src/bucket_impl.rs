@@ -5,9 +5,9 @@ use std::time::Duration;
 use omnia_core::HostView;
 use wasmtime::component::{Access, Accessor, Resource};
 
-use crate::host::generated::omnia::keyvalue::bucket::{Host, HostBucket, HostBucketWithStore};
-use crate::host::generated::omnia::keyvalue::types;
-use crate::host::{
+use crate::generated::omnia::keyvalue::bucket::{Host, HostBucket, HostBucketWithStore};
+use crate::generated::omnia::keyvalue::types;
+use crate::{
     Bucket, Entry, Error, KeyValueClient, Lifetime, Precondition, Result, Revision, WasiKeyValue,
 };
 

@@ -5,25 +5,16 @@ use opentelemetry_proto::tonic::common::v1::{
 };
 use opentelemetry_proto::tonic::resource::v1::Resource;
 
-use crate::host::generated::omnia::otel::types;
-use crate::host::generated::omnia::types::types as omnia_types;
-use crate::host::{Error, OtelClient, Result};
+use crate::generated::omnia::otel::types;
+use crate::{Error, OtelClient, Result};
 
 impl types::Host for HostView<'_, dyn OtelClient> {}
 
-impl omnia_types::Host for HostView<'_, dyn OtelClient> {
-    fn convert_error(&mut self, err: Error) -> wasmtime::Result<Error> {
-        Ok(err)
-    }
-}
-
-impl Error {
-    // the item an `invalid` message is about, in front of it
-    pub(crate) fn within(self, item: &str) -> Self {
-        match self {
-            Self::Invalid(message) => Self::Invalid(format!("{item}: {message}")),
-            err => err,
-        }
+// the item an `invalid` message is about, in front of it
+pub fn within(err: Error, item: &str) -> Error {
+    match err {
+        Error::Invalid(message) => Error::Invalid(format!("{item}: {message}")),
+        err => err,
     }
 }
 
@@ -69,7 +60,7 @@ impl TryFrom<types::KeyValue> for KeyValue {
 
     fn try_from(attribute: types::KeyValue) -> Result<Self> {
         let value = AnyValue::try_from(attribute.value)
-            .map_err(|err| err.within(&format!("attribute `{}`", attribute.key)))?;
+            .map_err(|err| within(err, &format!("attribute `{}`", attribute.key)))?;
         Ok(Self {
             key: attribute.key,
             value: Some(value),
@@ -146,7 +137,7 @@ impl TryFrom<types::InstrumentationScope> for InstrumentationScope {
 
     fn try_from(scope: types::InstrumentationScope) -> Result<Self> {
         let attributes = attributes(scope.attributes)
-            .map_err(|err| err.within(&format!("scope `{}`", scope.name)))?;
+            .map_err(|err| within(err, &format!("scope `{}`", scope.name)))?;
         Ok(Self {
             name: scope.name,
             version: scope.version.unwrap_or_default(),

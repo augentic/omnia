@@ -2368,6 +2368,7 @@ dependencies = [
  "omnia-core",
  "omnia-test",
  "omnia-wasi-otel",
+ "omnia-wasi-types",
  "serde",
  "tempfile",
  "test-programs",
@@ -2448,6 +2449,7 @@ dependencies = [
  "omnia",
  "omnia-core",
  "omnia-test",
+ "omnia-wasi-types",
  "parking_lot 0.13.0",
  "test-programs",
  "tokio",
@@ -2465,6 +2467,7 @@ dependencies = [
  "omnia-core",
  "omnia-test",
  "omnia-wasi-otel",
+ "omnia-wasi-types",
  "test-programs",
  "tokio",
  "tracing",
@@ -2481,12 +2484,12 @@ dependencies = [
  "omnia",
  "omnia-core",
  "omnia-test",
+ "omnia-wasi-types",
  "serde_json",
  "test-programs",
  "tokio",
  "tracing",
  "wasmtime",
- "wasmtime-wasi",
 ]
 
 [[package]]
@@ -2532,12 +2535,11 @@ dependencies = [
  "omnia-core",
  "omnia-test",
  "omnia-wasi-otel",
- "serde",
+ "omnia-wasi-types",
  "test-programs",
  "tokio",
  "tracing",
  "wasmtime",
- "wasmtime-wasi",
 ]
 
 [[package]]
@@ -2551,11 +2553,11 @@ dependencies = [
  "omnia",
  "omnia-core",
  "omnia-test",
+ "omnia-wasi-types",
  "test-programs",
  "tokio",
  "tracing",
  "wasmtime",
- "wasmtime-wasi",
 ]
 
 [[package]]
@@ -2568,13 +2570,13 @@ dependencies = [
  "omnia-core",
  "omnia-test",
  "omnia-wasi-otel",
+ "omnia-wasi-types",
  "test-programs",
  "thiserror 2.0.21",
  "tokio",
  "tokio-stream",
  "tracing",
  "wasmtime",
- "wasmtime-wasi",
 ]
 
 [[package]]
@@ -2588,6 +2590,7 @@ dependencies = [
  "omnia",
  "omnia-core",
  "omnia-test",
+ "omnia-wasi-types",
  "serde",
  "serde_json",
  "test-programs",
@@ -2607,9 +2610,9 @@ dependencies = [
  "omnia",
  "omnia-core",
  "omnia-test",
+ "omnia-wasi-types",
  "opentelemetry",
  "opentelemetry-proto",
- "opentelemetry_sdk",
  "serde_json",
  "test-programs",
  "tokio",
@@ -2628,18 +2631,23 @@ dependencies = [
  "omnia",
  "omnia-core",
  "omnia-test",
+ "omnia-wasi-types",
  "parking_lot 0.13.0",
  "rusqlite",
  "test-programs",
  "tokio",
  "tracing",
  "wasmtime",
- "wasmtime-wasi",
 ]
 
 [[package]]
 name = "omnia-wasi-types"
 version = "0.38.0"
+dependencies = [
+ "anyhow",
+ "omnia-core",
+ "wasmtime",
+]
 
 [[package]]
 name = "omnia-wasi-vault"
@@ -2651,12 +2659,12 @@ dependencies = [
  "omnia",
  "omnia-core",
  "omnia-test",
+ "omnia-wasi-types",
  "parking_lot 0.13.0",
  "test-programs",
  "tokio",
  "tracing",
  "wasmtime",
- "wasmtime-wasi",
 ]
 
 [[package]]
@@ -2669,6 +2677,7 @@ dependencies = [
  "omnia",
  "omnia-core",
  "omnia-test",
+ "omnia-wasi-types",
  "parking_lot 0.13.0",
  "test-programs",
  "thiserror 2.0.21",
@@ -2692,13 +2701,13 @@ dependencies = [
  "omnia-core",
  "omnia-test",
  "omnia-wasi-otel",
+ "omnia-wasi-types",
  "test-programs",
  "tokio",
  "tokio-stream",
  "tokio-tungstenite",
  "tracing",
  "wasmtime",
- "wasmtime-wasi",
 ]
 
 [[package]]

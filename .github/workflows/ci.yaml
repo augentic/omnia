@@ -16,6 +16,7 @@ jobs:
     secrets: inherit
     with:
       targets: wasm32-wasip3
+      wasm-packages: omnia-sdk omnia-guest-macros omnia-test test-programs examples
 
   # Mirrors `bindgen-check` in mise.toml.
   bindings:

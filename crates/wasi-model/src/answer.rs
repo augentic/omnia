@@ -7,8 +7,8 @@ use std::fmt;
 
 use serde_json::Value;
 
-use crate::host::generated::omnia::model::types;
-use crate::host::{Budget, Format};
+use crate::generated::omnia::model::types;
+use crate::{Budget, Format};
 
 /// A backend's result: the answer text, optional usage, and transcript.
 ///

@@ -3,12 +3,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use omnia_core::HostView;
 use wasmtime::component::{Access, Accessor, Resource};
 
-use crate::host::generated::omnia::identity::credentials::{
+use crate::generated::omnia::identity::credentials::{
     Host, HostIdentity, HostIdentityWithStore, HostWithStore,
 };
-use crate::host::generated::omnia::identity::types::AccessToken;
-use crate::host::resource::IdentityProxy;
-use crate::host::{IdentityClient, Result, WasiIdentity};
+use crate::generated::omnia::identity::types::AccessToken;
+use crate::resource::IdentityProxy;
+use crate::{IdentityClient, Result, WasiIdentity};
 
 impl<T> HostWithStore<T> for WasiIdentity {
     async fn open(accessor: &Accessor<T, Self>, name: String) -> Result<Resource<IdentityProxy>> {

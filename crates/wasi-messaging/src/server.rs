@@ -11,10 +11,10 @@ use omnia_core::{PatternRoutes, Provides, Runtime, TriggerRouter};
 use tokio::sync::Semaphore;
 use tracing::{Instrument, info_span, instrument};
 
-use crate::host::WasiMessaging;
-use crate::host::generated::MessagingIndices;
-use crate::host::generated::omnia::messaging::types::Delivery;
-use crate::host::resource::{Endpoint, HandleError, Handler, Message};
+use crate::WasiMessaging;
+use crate::generated::MessagingIndices;
+use crate::generated::omnia::messaging::types::Delivery;
+use crate::resource::{Endpoint, HandleError, Handler, Message};
 
 #[instrument("messaging-server", skip(state))]
 pub async fn run<B>(state: &Runtime<B>) -> Result<()>

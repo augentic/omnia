@@ -5,8 +5,8 @@ use std::collections::HashSet;
 use std::fmt;
 use std::net::IpAddr;
 
-use crate::host::generated::omnia::model::{completion, types};
-use crate::host::{Effort, Error, Format, Grants, Location, Message, Role, WorkerGrant};
+use crate::generated::omnia::model::{completion, types};
+use crate::{Effort, Error, Format, Grants, Location, Message, Role, WorkerGrant};
 
 const RESERVED_TOOLS: &[&str] = &["read", "list", "write"];
 

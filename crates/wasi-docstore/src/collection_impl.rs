@@ -6,12 +6,13 @@ use omnia_core::{Digest, HostView};
 use serde_json::Value;
 use wasmtime::component::{Access, Accessor, Resource};
 
-use crate::host::generated::omnia::docstore::collection::{
-    self, Host, HostCollection, HostCollectionWithStore, Page,
+use crate::generated::omnia::docstore::collection::{
+    Host, HostCollection, HostCollectionWithStore, Page,
 };
-use crate::host::generated::omnia::docstore::types::{self, Conflict, Precondition, Revision};
-use crate::host::{
-    DocStoreClient, Document, Error, FutureResult, QueryOpts, Result, SortField, WasiDocStore,
+use crate::generated::omnia::docstore::types::{self, Conflict, Precondition, Revision};
+use crate::{
+    DocStoreClient, Document, Error, Filter, FutureResult, QueryOpts, Result, SortField,
+    WasiDocStore,
 };
 
 // The most documents a page holds, whatever `limit` asks for.
@@ -155,31 +156,23 @@ impl<T> HostCollectionWithStore<T> for WasiDocStore {
     }
 
     async fn query(
-        accessor: &Accessor<T, Self>, self_: Resource<CollectionHandle>,
-        filter: collection::Filter, order_by: Vec<collection::SortField>, after: Option<String>,
-        limit: Option<u32>,
+        accessor: &Accessor<T, Self>, self_: Resource<CollectionHandle>, filter: Filter,
+        order_by: Vec<SortField>, after: Option<String>, limit: Option<u32>,
     ) -> Result<Page> {
         let collection = CollectionHandle::lookup(accessor, &self_)?;
         let limit = match limit {
             Some(0) => return Err(Error::Invalid("a query `limit` must be at least 1".to_owned())),
             limit => limit.map_or(MAX_PAGE_SIZE, |limit| limit.min(MAX_PAGE_SIZE)),
         };
-        let tree = filter::tree(&collection, filter)?;
+        filter::check(&filter)?;
         let options = QueryOpts {
-            order_by: order_by
-                .into_iter()
-                .map(|sort| SortField {
-                    field: sort.field,
-                    descending: sort.descending,
-                })
-                .collect(),
-            limit: Some(limit),
-            offset: None,
+            order_by,
+            limit,
             continuation: after,
         };
 
         let result =
-            collection.call(accessor, |client, name| client.query(name, tree, options)).await?;
+            collection.call(accessor, |client, name| client.query(name, filter, options)).await?;
         let documents = result.documents.into_iter().map(types::Document::try_from);
         Ok(Page {
             documents: documents.collect::<Result<_>>()?,

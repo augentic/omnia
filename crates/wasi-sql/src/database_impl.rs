@@ -5,11 +5,11 @@ use std::sync::Arc;
 use omnia_core::HostView;
 use wasmtime::component::{Access, Accessor, FutureReader, Resource, StreamReader};
 
-use crate::host::generated::omnia::sql::database::{
+use crate::generated::omnia::sql::database::{
     self as wit, Host, HostDatabase, HostDatabaseWithStore,
 };
-use crate::host::generated::omnia::sql::types::{self, Value};
-use crate::host::{Connection, Error, Result, ResultSet, SqlClient, Statement, WasiSql};
+use crate::generated::omnia::sql::types::{self, Value};
+use crate::{Connection, Error, Result, ResultSet, SqlClient, Statement, WasiSql};
 
 // The first keywords of a statement that starts or ends a transaction or a
 // savepoint, which only `transactions` may do. `PREPARE` is refused only

@@ -4,12 +4,9 @@
 use omnia_core::HostView;
 use wasmtime::component::{Access, Accessor, Resource};
 
-use crate::host::generated::omnia::types::types as omnia_types;
-use crate::host::generated::omnia::websocket::types::{
-    self, Host, HostClient, HostClientWithStore,
-};
-use crate::host::resource::{ClientProxy, CloseFrame, Event, Frame};
-use crate::host::{Error, Result, WasiWebSocket, WebSocketClient};
+use crate::generated::omnia::websocket::types::{self, Host, HostClient, HostClientWithStore};
+use crate::resource::{ClientProxy, CloseFrame, Event, Frame};
+use crate::{Error, Result, WasiWebSocket, WebSocketClient};
 
 // the one service the endpoint seam reaches
 const DEFAULT: &str = "default";
@@ -41,12 +38,6 @@ impl<T> HostClientWithStore<T> for WasiWebSocket {
 }
 
 impl Host for HostView<'_, dyn WebSocketClient> {}
-
-impl omnia_types::Host for HostView<'_, dyn WebSocketClient> {
-    fn convert_error(&mut self, err: Error) -> wasmtime::Result<Error> {
-        Ok(err)
-    }
-}
 
 impl HostClient for HostView<'_, dyn WebSocketClient> {}
 

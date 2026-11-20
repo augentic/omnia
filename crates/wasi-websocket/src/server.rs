@@ -9,10 +9,10 @@ use futures::StreamExt;
 use omnia_core::{PatternRoutes, Provides, Runtime, TriggerRouter};
 use tracing::{Instrument, info_span, instrument};
 
-use crate::host::WasiWebSocket;
-use crate::host::generated::WebsocketIndices;
-use crate::host::generated::omnia::websocket::types;
-use crate::host::resource::{Event, Events};
+use crate::WasiWebSocket;
+use crate::generated::WebsocketIndices;
+use crate::generated::omnia::websocket::types;
+use crate::resource::{Event, Events};
 
 #[instrument("websocket-server", skip(state))]
 pub async fn run<B>(state: &Runtime<B>) -> Result<()>

@@ -1,8 +1,8 @@
 //! `Cache-Control` and `If-None-Match` request header parsing.
 
 use anyhow::{Result, bail};
-use http::{HeaderMap, HeaderValue};
 use http::header::{CACHE_CONTROL, IF_NONE_MATCH};
+use http::{HeaderMap, HeaderValue};
 
 use crate::Error;
 
@@ -180,9 +180,7 @@ mod tests {
             IF_NONE_MATCH,
             HeaderValue::from_bytes(b"\t\"v1\"\t").expect("tab is valid OWS"),
         );
-        let control = Control::maybe_from(&headers)
-            .expect("parses")
-            .expect("recognised directive");
+        let control = Control::maybe_from(&headers).expect("parses").expect("recognised directive");
         assert_eq!(control.max_age(), 60);
         assert_eq!(control.etag(), "\"v1\"");
     }
@@ -197,13 +195,7 @@ mod tests {
         );
         let err = Control::maybe_from(&headers).expect_err("refuses obs-text");
         let message = format!("{err:#}");
-        assert!(
-            message.contains("obs-text"),
-            "expected obs-text refusal, got {message}"
-        );
-        assert!(
-            !message.contains("tab"),
-            "OWS is not obs-text: {message}"
-        );
+        assert!(message.contains("obs-text"), "expected obs-text refusal, got {message}");
+        assert!(!message.contains("tab"), "OWS is not obs-text: {message}");
     }
 }

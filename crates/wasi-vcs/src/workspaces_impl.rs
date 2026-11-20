@@ -3,11 +3,11 @@
 use omnia_core::{HostView, StoreCtx};
 use wasmtime::component::{Accessor, Resource};
 
-use crate::host::generated::omnia::vcs::types::{Error, Location, Occupied};
-use crate::host::generated::omnia::vcs::workspaces::{Host, HostWithStore};
-use crate::host::location::Intent;
-use crate::host::workspace_impl::{WorkspaceHandle, laid};
-use crate::host::{VcsClient, WasiVcs};
+use crate::generated::omnia::vcs::types::{Error, Location, Occupied};
+use crate::generated::omnia::vcs::workspaces::{Host, HostWithStore};
+use crate::location::Intent;
+use crate::workspace_impl::{WorkspaceHandle, laid};
+use crate::{VcsClient, WasiVcs};
 
 impl<B: Send + 'static> HostWithStore<StoreCtx<B>> for WasiVcs {
     async fn add(

@@ -25,8 +25,8 @@ use tokio::sync::{mpsc, oneshot};
 use wasmtime::StoreContextMut;
 use wasmtime::component::{Destination, Source, StreamConsumer, StreamProducer, StreamResult};
 
-use crate::host::generated::omnia::model::types::{self, Call, CallResult, Candidate, ToolCall};
-use crate::host::{Budget, Error, FutureResult, ToolOutcome};
+use crate::generated::omnia::model::types::{self, Call, CallResult, Candidate, ToolCall};
+use crate::{Budget, Error, FutureResult, ToolOutcome};
 
 const CALL_QUEUE: usize = 8;
 

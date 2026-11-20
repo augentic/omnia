@@ -11,7 +11,7 @@ use futures::{FutureExt as _, future};
 use omnia_core::Connect;
 use tracing::instrument;
 
-use crate::host::{ConfigClient, FutureResult};
+use crate::{ConfigClient, FutureResult};
 
 /// The default `omnia:config` backend, answering from a map fixed when it is built.
 ///

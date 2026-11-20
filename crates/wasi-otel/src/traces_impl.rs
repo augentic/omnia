@@ -7,8 +7,8 @@ use opentelemetry_proto::tonic::trace::v1::{ResourceSpans, ScopeSpans, Span, Spa
 use tracing_opentelemetry::OpenTelemetrySpanExt as _;
 use wasmtime::component::{Access, Accessor};
 
-use crate::host::generated::omnia::otel::traces::{self as wasi, Host, HostWithStore};
-use crate::host::{Error, OtelClient, Result, WasiOtel, types_impl};
+use crate::generated::omnia::otel::traces::{self as wasi, Host, HostWithStore};
+use crate::{Error, OtelClient, Result, WasiOtel, types_impl};
 
 impl<T> HostWithStore<T> for WasiOtel {
     fn current_span_context(_: Access<'_, T, Self>) -> wasmtime::Result<Option<wasi::SpanContext>> {
@@ -86,7 +86,7 @@ impl TryFrom<wasi::Span> for Span {
             dropped_links_count,
             status,
         } = span;
-        let within = |err: Error| err.within(&format!("span `{name}`"));
+        let within = |err: Error| types_impl::within(err, &format!("span `{name}`"));
 
         let trace_id = types_impl::trace_id(&context.trace_id, "trace id").map_err(within)?;
         let span_id = types_impl::span_id(&context.span_id, "span id").map_err(within)?;
@@ -150,7 +150,7 @@ impl TryFrom<wasi::Event> for Event {
 
     fn try_from(event: wasi::Event) -> Result<Self> {
         let event_attributes = types_impl::attributes(event.attributes)
-            .map_err(|err| err.within(&format!("event `{}`", event.name)))?;
+            .map_err(|err| types_impl::within(err, &format!("event `{}`", event.name)))?;
         Ok(Self {
             time_unix_nano: event.time_unix_nano,
             name: event.name,
@@ -170,7 +170,7 @@ impl TryFrom<wasi::Link> for Link {
             span_id: types_impl::span_id(&context.span_id, "link span id")?,
             trace_state: context.trace_state.unwrap_or_default(),
             attributes: types_impl::attributes(link.attributes)
-                .map_err(|err| err.within("link"))?,
+                .map_err(|err| types_impl::within(err, "link"))?,
             dropped_attributes_count: link.dropped_attributes_count,
             flags: flags(context.trace_flags, link.is_remote),
         })

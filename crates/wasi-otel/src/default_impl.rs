@@ -11,7 +11,7 @@ use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequ
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
 use tracing::instrument;
 
-use crate::host::OtelClient;
+use crate::OtelClient;
 
 /// Default implementation for `omnia:otel`.
 #[derive(Debug, Clone)]

@@ -18,7 +18,7 @@ Terminology (**runtime core**, **host-side**, **host-injected tools**, etc.) is 
 | Format fix   | `cargo +nightly fmt --all`                                                                                      |
 | Test a crate | `cargo nextest run -p <crate> --all-features` (the local verification step)                                     |
 | Test (full)  | `mise run test` (`cargo nextest run --workspace --all-features`; CI's job)                                      |
-| Lint (full)  | `mise run lint` (clippy natively, then `--target wasm32-wasip3` over lib, bins and examples; CI's job)          |
+| Lint (full)  | `mise run lint` (clippy natively, then `--target wasm32-wasip3` over the `WASM32_PACKAGES` members; CI's job)   |
 | Doc tests    | `cargo test --doc --all-features --workspace`                                                                   |
 | Bindings     | `mise run bindgen` (regenerate `crates/sdk/src/bindings` from the WIT); `mise run bindgen-check` is CI's job     |
 | Task runner  | `mise run <task>` (`mise tasks` lists them; `mise.toml` includes the shared Rust tasks from `augentic/toolkit`) |
@@ -107,7 +107,7 @@ All from the repository root through `make` ([`Makefile`](Makefile) → mise). T
 make ci # exactly the CI jobs: fmt-check + lint + test + test-docs + docs + vet + deny  — run before handing over
 make check # local advisories: audit + fmt (rewrites) + lint + outdated + deps
 make test # cargo nextest run --locked --workspace --all-features, under -Dwarnings
-make lint # lint-host (cargo clippy --workspace --all-targets --all-features, then cargo hack --each-feature), then lint-wasm (the same over every lib, bin and example for wasm32-wasip3 — never tests)
+make lint # lint-host (cargo clippy --workspace --all-targets --all-features, then cargo hack --each-feature), then lint-wasm (the same over every lib, bin and example of the WASM32_PACKAGES members for wasm32-wasip3 — never tests)
 make fmt # cargo +nightly fmt --all
 make vet-regen # regenerate cargo-vet imports/exemptions/unpublished, then vet
 make cov # cargo llvm-cov nextest --workspace --all-features --summary-only

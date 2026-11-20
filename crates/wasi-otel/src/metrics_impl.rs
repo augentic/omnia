@@ -10,8 +10,8 @@ use opentelemetry_proto::tonic::metrics::v1::{
 };
 use wasmtime::component::Accessor;
 
-use crate::host::generated::omnia::otel::metrics::{self as wasi, Host, HostWithStore};
-use crate::host::{Error, OtelClient, Result, WasiOtel, types_impl};
+use crate::generated::omnia::otel::metrics::{self as wasi, Host, HostWithStore};
+use crate::{Error, OtelClient, Result, WasiOtel, types_impl};
 
 impl<T> HostWithStore<T> for WasiOtel {
     async fn export(
@@ -57,7 +57,7 @@ impl TryFrom<wasi::Metric> for Metric {
 
     fn try_from(metric: wasi::Metric) -> Result<Self> {
         let data = MetricData::try_from(metric.data)
-            .map_err(|err| err.within(&format!("metric `{}`", metric.name)))?;
+            .map_err(|err| types_impl::within(err, &format!("metric `{}`", metric.name)))?;
         Ok(Self {
             name: metric.name,
             description: metric.description.unwrap_or_default(),

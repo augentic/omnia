@@ -27,7 +27,7 @@ pub use omnia_core::{
     NoOptions, PatternRoutes, Policy, Provides, Proxy, Registry, RegistryParts, RegistrySource,
     ResolvedPreopen, Routes, Runtime, RuntimeOptions, RuntimeParts, Source, SourceSpec, Stdio,
     StoreBase, StoreConfig, StoreCtx, StoreFactory, Telemetry, TriggerRouter, Verified,
-    WeakRuntime, get_cloned, host_error, telemetry,
+    WeakRuntime, get_cloned, telemetry,
 };
 #[doc(hidden)]
 pub use omnia_core::{tokio, wasmtime, wasmtime_wasi};

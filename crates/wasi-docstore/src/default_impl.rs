@@ -1,4 +1,4 @@
-//! Default in-memory implementation of [`DocStoreClient`](crate::host::DocStoreClient).
+//! Default in-memory implementation of [`DocStoreClient`](crate::DocStoreClient).
 //!
 //! Documents live in a clone-shared map of collections; state is process-local
 //! and lost on exit, matching the other in-memory defaults. Filters are
@@ -17,10 +17,9 @@ use omnia_core::Connect;
 use serde_json::Value;
 use tracing::instrument;
 
-use crate::host::resource::{FilterTree, SortField};
-use crate::host::{DocStoreClient, Document, Error, FutureResult, QueryOpts, QueryResult};
-
-const MAX_PAGE_SIZE: u64 = 1000;
+use crate::{
+    DocStoreClient, Document, Error, Filter, FutureResult, QueryOpts, QueryResult, SortField,
+};
 
 #[expect(missing_docs, reason = "`FromEnv` has no docs")]
 mod config {
@@ -66,8 +65,10 @@ impl omnia_core::FromEnv for ConnectOptions {
 /// Default in-memory [`DocStoreClient`].
 ///
 /// It serves the collections its [`ConnectOptions`] declares, and refuses
-/// every other name with [`Error::NotFound`]. Clones share the same store, so
-/// a probe handle kept by a test observes the guest's writes.
+/// every other name with [`Error::NotFound`]. It fails a query that holds a
+/// [`Test::ArrayContains`](crate::Test::ArrayContains) with
+/// [`Error::Unsupported`]. Clones share the same store, so a probe handle
+/// kept by a test observes the guest's writes.
 #[derive(Clone)]
 pub struct DocStoreDefault {
     collections: Arc<RwLock<Collections>>,
@@ -145,17 +146,16 @@ impl DocStoreClient for DocStoreDefault {
     }
 
     fn query(
-        &self, collection: String, filter: Option<FilterTree>, options: QueryOpts,
+        &self, collection: String, filter: Filter, options: QueryOpts,
     ) -> FutureResult<QueryResult> {
         let store = self.clone();
         async move {
-            // clamp the guest-supplied page size to the host maximum
-            let limit = options.limit.map_or(MAX_PAGE_SIZE, u64::from).min(MAX_PAGE_SIZE);
-            if limit == 0 {
-                return Err(Error::Invalid("query limit must be at least 1".to_owned()).into());
+            if let Some(field) = filter::array_test(&filter) {
+                let message =
+                    format!("the in-memory docstore cannot test the elements of `{field}`");
+                return Err(Error::Unsupported(message).into());
             }
-            let page_size = usize::try_from(limit).unwrap_or(usize::MAX);
-            let offset = usize::try_from(options.offset.unwrap_or(0)).unwrap_or(usize::MAX);
+            let page_size = usize::try_from(options.limit).unwrap_or(usize::MAX);
             let order_by = &options.order_by;
             let after = options.continuation.as_deref().map(|cursor| Row::decode(cursor, order_by));
             let after = after.transpose()?;
@@ -166,7 +166,7 @@ impl DocStoreClient for DocStoreDefault {
                 guard
                     .documents(&collection)?
                     .iter()
-                    .filter(|(_, body)| filter.as_ref().is_none_or(|f| filter::matches(f, body)))
+                    .filter(|(_, body)| filter::matches(&filter, body))
                     .map(|(id, body)| Row::new(id, body, order_by))
                     .collect()
             };
@@ -178,12 +178,11 @@ impl DocStoreClient for DocStoreDefault {
                 rows.partition_point(|row| row.cmp(&after, order_by) != Ordering::Greater)
             });
             let rest = &rows[start..];
-            let page: Vec<&Row> = rest.iter().skip(offset).take(page_size).collect();
-            let more = offset.saturating_add(page.len()) < rest.len();
+            let page = &rest[..rest.len().min(page_size)];
 
-            let continuation = page.last().filter(|_| more).map(|row| row.encode());
+            let continuation = page.last().filter(|_| page.len() < rest.len()).map(Row::encode);
             let documents = page
-                .into_iter()
+                .iter()
                 .map(|row| to_document(&row.id, &row.body))
                 .collect::<Result<Vec<_>>>()?;
             Ok(QueryResult {

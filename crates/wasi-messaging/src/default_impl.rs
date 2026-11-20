@@ -6,6 +6,7 @@
 //! messages (the lag error is filtered out of the subscription stream).
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Result;
 use futures::FutureExt;
@@ -15,10 +16,8 @@ use tokio::sync::broadcast::{self, Sender};
 use tokio_stream::wrappers::BroadcastStream;
 use tracing::instrument;
 
-use crate::host::MessagingClient;
-use crate::host::resource::{
-    Endpoint, FutureResult, Handler, Message, RequestOptions, Subscriptions, dispatch,
-};
+use crate::MessagingClient;
+use crate::resource::{Endpoint, FutureResult, Handler, Message, Subscriptions, dispatch};
 
 /// Default implementation for `omnia:messaging`.
 #[derive(Clone, Debug)]
@@ -79,7 +78,7 @@ impl Endpoint for MessagingDefault {
     }
 
     fn request(
-        &self, topic: String, mut message: Message, _options: Option<RequestOptions>,
+        &self, topic: String, mut message: Message, _timeout: Option<Duration>,
     ) -> FutureResult<Message> {
         tracing::trace!("sending request to topic: {}", topic);
         let sender = self.sender.clone();

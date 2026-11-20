@@ -1,9 +1,9 @@
 use omnia_core::HostView;
 use wasmtime::component::{Accessor, Resource};
 
-use crate::host::collection_impl::CollectionHandle;
-use crate::host::generated::omnia::docstore::store::{Host, HostWithStore};
-use crate::host::{DocStoreClient, Result, WasiDocStore};
+use crate::collection_impl::CollectionHandle;
+use crate::generated::omnia::docstore::store::{Host, HostWithStore};
+use crate::{DocStoreClient, Result, WasiDocStore};
 
 impl<T> HostWithStore<T> for WasiDocStore {
     // `DocStoreClient` has no call that opens a collection, so a name the

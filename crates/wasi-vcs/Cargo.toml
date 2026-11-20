@@ -15,17 +15,17 @@ version.workspace = true
 [lints]
 workspace = true
 
-# host dependencies
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+[dependencies]
 anyhow.workspace = true
 cap-std.workspace = true
 omnia-core.workspace = true
+omnia-wasi-types.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 wasmtime.workspace = true
 wasmtime-wasi.workspace = true
 
-[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+[dev-dependencies]
 cap-std.workspace = true
 futures.workspace = true
 omnia.workspace = true

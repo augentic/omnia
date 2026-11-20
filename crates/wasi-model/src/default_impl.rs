@@ -19,7 +19,7 @@ use futures::FutureExt as _;
 use omnia_core::Connect;
 use serde_json::json;
 
-use crate::host::{
+use crate::{
     Answer, Budget, Error, Exhausted, Format, FutureResult, Generation, ModelClient, Request,
     ToolHost,
 };

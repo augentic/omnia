@@ -7,13 +7,6 @@ pub use omnia_core::FutureResult;
 /// Providers implement the [`Container`] trait to allow the host to
 /// interact with different backend containers.
 pub trait Container: Debug + Send + Sync + 'static {
-    /// The name of the container.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the container name cannot be retrieved.
-    fn name(&self) -> anyhow::Result<String>;
-
     /// Returns the metadata for the container.
     ///
     /// # Errors
@@ -66,8 +59,6 @@ impl dyn Container {
 /// A container's metadata, as [`Container::info`] reports it.
 #[derive(Clone, Debug)]
 pub struct ContainerMetadata {
-    /// The container's name.
-    pub name: String,
     /// When the container was created, in seconds since the Unix epoch, or
     /// zero where the store records no time.
     pub created_at: u64,
@@ -78,8 +69,6 @@ pub struct ContainerMetadata {
 pub struct ObjectMetadata {
     /// The object's name.
     pub name: String,
-    /// The container holding the object.
-    pub container: String,
     /// When the object was written, in seconds since the Unix epoch.
     pub created_at: u64,
     /// The object's size in bytes.

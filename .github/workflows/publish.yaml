@@ -29,6 +29,8 @@ jobs:
     secrets: inherit
     with:
       targets: wasm32-wasip3
+      # Mirrors `WASM32_PACKAGES` in mise.toml.
+      wasm-packages: omnia-sdk omnia-guest-macros omnia-test test-programs examples
 
   publish:
     name: Publish

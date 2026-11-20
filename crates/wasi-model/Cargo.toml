@@ -15,26 +15,23 @@ version.workspace = true
 [lints]
 workspace = true
 
-# dependencies shared across host and guest
 [dependencies]
 anyhow.workspace = true
-serde.workspace = true
-tracing.workspace = true
-
-# host dependencies
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 cap-std.workspace = true
 fromenv.workspace = true
 futures.workspace = true
 omnia-core.workspace = true
+omnia-wasi-types.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["rt", "sync", "time"] }
+tracing.workspace = true
 # `component-model-async` for `StreamReader`/`FutureReader`
 # belongs on the direct dependency.
 wasmtime = { workspace = true, features = ["component-model-async"] }
 wasmtime-wasi.workspace = true
 
-[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+[dev-dependencies]
 omnia.workspace = true
 omnia-test = { workspace = true, default-features = false, features = ["host"] }
 test-programs.workspace = true

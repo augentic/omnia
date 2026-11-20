@@ -1,9 +1,9 @@
 use omnia_core::HostView;
 use wasmtime::component::{Accessor, Resource};
 
-use crate::host::database_impl::DatabaseHandle;
-use crate::host::generated::omnia::sql::store::{Host, HostWithStore};
-use crate::host::{Result, SqlClient, WasiSql};
+use crate::database_impl::DatabaseHandle;
+use crate::generated::omnia::sql::store::{Host, HostWithStore};
+use crate::{Result, SqlClient, WasiSql};
 
 impl<T> HostWithStore<T> for WasiSql {
     async fn open(accessor: &Accessor<T, Self>, name: String) -> Result<Resource<DatabaseHandle>> {

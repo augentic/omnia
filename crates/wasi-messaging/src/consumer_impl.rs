@@ -4,12 +4,12 @@
 use omnia_core::HostView;
 use wasmtime::component::{Access, Accessor, Resource};
 
-use crate::host::generated::omnia::messaging::consumer::{
+use crate::generated::omnia::messaging::consumer::{
     Host, HostLease, HostLeaseWithStore, HostWithStore, Lease,
 };
-use crate::host::generated::omnia::messaging::types::Delivery;
-use crate::host::resource::ClientProxy;
-use crate::host::{Error, MessagingClient, Result, WasiMessaging};
+use crate::generated::omnia::messaging::types::Delivery;
+use crate::resource::ClientProxy;
+use crate::{Error, MessagingClient, Result, WasiMessaging};
 
 impl<T> HostWithStore<T> for WasiMessaging {
     fn receive(

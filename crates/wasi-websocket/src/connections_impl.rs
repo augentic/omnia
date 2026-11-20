@@ -3,11 +3,11 @@
 use omnia_core::HostView;
 use wasmtime::component::{Accessor, Resource};
 
-use crate::host::generated::omnia::websocket::connections::{Host, HostWithStore};
-use crate::host::generated::omnia::websocket::types::{self, ConnectionId};
-use crate::host::resource::{ClientProxy, CloseFrame, Event};
-use crate::host::types_impl::get_client;
-use crate::host::{Result, WasiWebSocket, WebSocketClient};
+use crate::generated::omnia::websocket::connections::{Host, HostWithStore};
+use crate::generated::omnia::websocket::types::{self, ConnectionId};
+use crate::resource::{ClientProxy, CloseFrame, Event};
+use crate::types_impl::get_client;
+use crate::{Result, WasiWebSocket, WebSocketClient};
 
 impl<T> HostWithStore<T> for WasiWebSocket {
     async fn send(

@@ -13,8 +13,8 @@ use moka::sync::Cache;
 use omnia_core::Connect;
 use tracing::instrument;
 
-use crate::host::resource::{Bucket, Entry, FutureResult, Lifetime, Precondition, Revision};
-use crate::host::{Error, KeyValueClient};
+use crate::resource::{Bucket, Entry, FutureResult, Lifetime, Precondition, Revision};
+use crate::{Error, KeyValueClient};
 
 #[expect(missing_docs, reason = "`FromEnv` has no docs")]
 mod config {

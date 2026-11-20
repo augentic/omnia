@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use omnia::{Connect as _, ExitStatus};
 use omnia_test::host::{Backends, Deployment};
 use omnia_wasi_docstore::{
-    ConnectOptions, DocStoreClient, DocStoreDefault, Document, Error, FilterTree, FutureResult,
+    ConnectOptions, DocStoreClient, DocStoreDefault, Document, Error, Filter, FutureResult,
     QueryOpts, QueryResult, WasiDocStore,
 };
 use serde_json::{Value, json};
@@ -135,7 +135,7 @@ impl DocStoreClient for Faulting {
     }
 
     fn query(
-        &self, collection: String, filter: Option<FilterTree>, options: QueryOpts,
+        &self, collection: String, filter: Filter, options: QueryOpts,
     ) -> FutureResult<QueryResult> {
         let fault = self.fault(&collection);
         fault.map_or_else(|| self.inner.query(collection, filter, options), failed)

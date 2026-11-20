@@ -14,7 +14,7 @@ use futures::{Stream, StreamExt as _};
 pub use omnia_core::FutureResult;
 use tokio::task::{JoinError, JoinSet};
 
-use crate::host::generated::omnia::messaging::types;
+use crate::generated::omnia::messaging::types;
 
 /// Stream of messages.
 pub type Subscriptions = Pin<Box<dyn Stream<Item = Message> + Send>>;
@@ -42,8 +42,11 @@ pub trait Endpoint: Debug + Send + Sync + 'static {
     fn send(&self, topic: String, message: Message) -> FutureResult<()>;
 
     /// Request a response from a topic.
+    ///
+    /// The backend waits `timeout` for the reply, or its own bound when it is
+    /// `None`. The host never sends a zero `timeout`.
     fn request(
-        &self, topic: String, message: Message, options: Option<RequestOptions>,
+        &self, topic: String, message: Message, timeout: Option<Duration>,
     ) -> FutureResult<Message>;
 }
 
@@ -220,13 +223,4 @@ impl From<types::Metadata> for Metadata {
 pub struct Reply {
     /// The reply topic.
     pub topic: String,
-}
-
-/// Options for messaging requests.
-#[derive(Clone, Debug, Default)]
-pub struct RequestOptions {
-    /// Request timeout.
-    pub timeout: Option<std::time::Duration>,
-    /// Number of expected replies.
-    pub expected_replies: Option<u32>,
 }

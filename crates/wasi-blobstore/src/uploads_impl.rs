@@ -1,12 +1,12 @@
 use omnia_core::HostView;
 use wasmtime::component::{Access, Accessor, FutureReader, Resource, StreamReader};
 
-use crate::host::container_impl::ContainerHandle;
-use crate::host::generated::omnia::blobstore::types::{Attributes, Conflict, Precondition, Stored};
-use crate::host::generated::omnia::blobstore::uploads::{
+use crate::container_impl::ContainerHandle;
+use crate::generated::omnia::blobstore::types::{Attributes, Conflict, Precondition, Stored};
+use crate::generated::omnia::blobstore::uploads::{
     Host, HostUpload, HostUploadWithStore, HostWithStore, Part, Upload,
 };
-use crate::host::{BlobStoreClient, Error, Result, WasiBlobStore};
+use crate::{BlobStoreClient, Error, Result, WasiBlobStore};
 
 impl<T> HostWithStore<T> for WasiBlobStore {
     fn begin(

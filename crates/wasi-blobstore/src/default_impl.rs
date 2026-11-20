@@ -14,8 +14,8 @@ use omnia_core::Connect;
 use parking_lot::RwLock;
 use tracing::instrument;
 
-use crate::host::resource::{Container, FutureResult};
-use crate::host::{BlobStoreClient, ContainerMetadata, Error, ObjectMetadata, Page};
+use crate::resource::{Container, FutureResult};
+use crate::{BlobStoreClient, ContainerMetadata, ObjectMetadata, Page, missing_container};
 
 /// Default implementation for `omnia:blobstore`.
 #[derive(Debug, Clone)]
@@ -58,7 +58,7 @@ impl BlobStoreClient for BlobStoreDefault {
         async move {
             let container = {
                 let store = store.read();
-                store.get(&name).cloned().ok_or_else(|| Error::missing_container(&name))?
+                store.get(&name).cloned().ok_or_else(|| missing_container(&name))?
             };
             Ok(Arc::new(container) as Arc<dyn Container>)
         }
@@ -109,17 +109,9 @@ impl InMemContainer {
 }
 
 impl Container for InMemContainer {
-    fn name(&self) -> Result<String> {
-        Ok(self.name.clone())
-    }
-
     fn info(&self) -> Result<ContainerMetadata> {
-        let name = self.name.clone();
-        let created_at = self.created_at;
-
         Ok(ContainerMetadata {
-            name,
-            created_at: created_at.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs(),
+            created_at: self.created_at.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs(),
         })
     }
 
@@ -166,7 +158,6 @@ impl Container for InMemContainer {
     fn list_objects(&self, prefix: String, after: Option<String>) -> FutureResult<Page> {
         tracing::trace!("listing objects in container: {}", self.name);
         let objects = Arc::clone(&self.objects);
-        let container = self.name.clone();
 
         async move {
             let mut listed: Vec<_> = {
@@ -177,7 +168,7 @@ impl Container for InMemContainer {
                         name.starts_with(&prefix)
                             && after.as_ref().is_none_or(|after| *name > after)
                     })
-                    .map(|(name, object)| object.metadata(name.clone(), container.clone()))
+                    .map(|(name, object)| object.metadata(name.clone()))
                     .collect()
             };
             listed.sort_unstable_by(|a, b| a.name.cmp(&b.name));
@@ -217,11 +208,10 @@ impl Container for InMemContainer {
     fn object_info(&self, name: String) -> FutureResult<Option<ObjectMetadata>> {
         tracing::trace!("getting info for object: {name} in container: {}", self.name);
         let objects = Arc::clone(&self.objects);
-        let container = self.name.clone();
 
         async move {
             let objects = objects.read();
-            Ok(objects.get(&name).map(|object| object.metadata(name, container)))
+            Ok(objects.get(&name).map(|object| object.metadata(name)))
         }
         .boxed()
     }
@@ -234,10 +224,9 @@ struct Object {
 }
 
 impl Object {
-    fn metadata(&self, name: String, container: String) -> ObjectMetadata {
+    fn metadata(&self, name: String) -> ObjectMetadata {
         ObjectMetadata {
             name,
-            container,
             created_at: self.created_at.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs(),
             size: self.data.len() as u64,
         }

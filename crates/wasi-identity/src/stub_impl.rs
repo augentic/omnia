@@ -6,8 +6,8 @@ use anyhow::{Context, Result};
 use futures::FutureExt;
 use omnia_core::Connect;
 
-use crate::host::resource::{AccessToken, FutureResult, Identity};
-use crate::host::{Error, IdentityClient};
+use crate::resource::{AccessToken, FutureResult, Identity};
+use crate::{Error, IdentityClient};
 
 const DEFAULT: &str = "default";
 

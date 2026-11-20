@@ -5,12 +5,12 @@ use omnia_core::HostView;
 use tokio::sync::{mpsc, oneshot};
 use wasmtime::component::{Access, Accessor, Resource};
 
-use crate::host::database_impl::{DatabaseHandle, Selected, statement};
-use crate::host::generated::omnia::sql::transactions::{
+use crate::database_impl::{DatabaseHandle, Selected, statement};
+use crate::generated::omnia::sql::transactions::{
     Host, HostTransaction, HostTransactionWithStore, HostWithStore,
 };
-use crate::host::generated::omnia::sql::types::{ResultSet, Value};
-use crate::host::{Connection, Error, Result, SqlClient, WasiSql};
+use crate::generated::omnia::sql::types::{ResultSet, Value};
+use crate::{Connection, Error, Result, SqlClient, WasiSql};
 
 // The host's side of a guest's `transaction` handle. Its calls queue for the
 // one task that owns the transaction's connection, which runs them in the

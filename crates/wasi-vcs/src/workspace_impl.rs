@@ -4,14 +4,14 @@
 use omnia_core::{HostView, StoreCtx};
 use wasmtime::component::{Access, Accessor, Resource};
 
-use crate::host::generated::omnia::vcs::types::{
+use crate::generated::omnia::vcs::types::{
     CommitId, Conflict, Error, Location, Occupied, Precondition,
 };
-use crate::host::generated::omnia::vcs::workspace::{
+use crate::generated::omnia::vcs::workspace::{
     self, Host, HostWorkspace, HostWorkspaceWithStore, LogPage, StatusPage, Unmerged,
 };
-use crate::host::location::Intent;
-use crate::host::{
+use crate::location::Intent;
+use crate::{
     Change, ChangeKind, Entry, Error as BackendError, FutureResult, Merged, Place, Rule, Strategy,
     VcsClient, WasiVcs,
 };
@@ -81,12 +81,14 @@ impl WorkspaceHandle {
         }
     }
 
-    // starts `call` on the deployment's backend, at this workspace's place
-    pub fn call<T, R>(
+    // runs `call` on the deployment's backend, at this workspace's place, and
+    // types the failure it returns
+    pub async fn call<T, R>(
         &self, accessor: &Accessor<T, WasiVcs>,
         call: impl FnOnce(&dyn VcsClient, Place) -> FutureResult<R>,
-    ) -> FutureResult<R> {
-        accessor.with(|mut store| call(store.get().client, self.place.clone()))
+    ) -> Result<R, BackendError> {
+        let answer = accessor.with(|mut store| call(store.get().client, self.place.clone()));
+        answer.await.map_err(BackendError::typed)
     }
 }
 
@@ -184,7 +186,7 @@ impl<T> HostWorkspaceWithStore<T> for WasiVcs {
         let merged = workspace
             .call(accessor, |client, place| client.merge(place, revision, message, policy))
             .await;
-        match merged.map_err(BackendError::typed) {
+        match merged {
             Ok(Merged {
                 commit: Some(commit), ..
             }) => Ok(Ok(commit)),
@@ -226,8 +228,8 @@ impl<T> HostWorkspaceWithStore<T> for WasiVcs {
 }
 
 // What a lookup finds. A backend's `NotFound` is nothing found.
-pub fn found<R>(answer: anyhow::Result<R>) -> Result<Option<R>, Error> {
-    match answer.map_err(BackendError::typed) {
+pub fn found<R>(answer: Result<R, BackendError>) -> Result<Option<R>, Error> {
+    match answer {
         Ok(value) => Ok(Some(value)),
         Err(BackendError::NotFound(_)) => Ok(None),
         Err(err) => Err(err.into()),
@@ -236,8 +238,8 @@ pub fn found<R>(answer: anyhow::Result<R>) -> Result<Option<R>, Error> {
 
 // What a call that lays a workspace down did. A backend's `Exists` is the
 // place found occupied.
-pub fn laid<R>(answer: anyhow::Result<R>) -> Result<Result<R, Occupied>, Error> {
-    match answer.map_err(BackendError::typed) {
+pub fn laid<R>(answer: Result<R, BackendError>) -> Result<Result<R, Occupied>, Error> {
+    match answer {
         Ok(value) => Ok(Ok(value)),
         Err(BackendError::Exists(detail)) => Ok(Err(Occupied { detail })),
         Err(err) => Err(err.into()),

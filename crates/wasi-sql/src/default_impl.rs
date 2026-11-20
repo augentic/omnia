@@ -17,8 +17,8 @@ use rusqlite::types::{Value as SqliteValue, ValueRef};
 use rusqlite::{Connection as SqliteConnection, ErrorCode, Statement as SqliteStatement};
 use tracing::instrument;
 
-use crate::host::resource::{Connection, FutureResult};
-use crate::host::{Error, Field, ResultSet, Row, SqlClient, Statement, Value};
+use crate::resource::{Connection, FutureResult};
+use crate::{Error, Field, ResultSet, Row, SqlClient, Statement, Value};
 
 const DEFAULT: &str = "default";
 

@@ -18,7 +18,7 @@ use omnia::{ExitStatus, GuestEntry, Host, Runtime};
 use omnia_test::host::{Backends, Deployment};
 use omnia_wasi_messaging::{
     Endpoint, Error, FutureResult, HandleError, Handler, Message, MessagingClient,
-    MessagingHandler, Metadata, Reply, RequestOptions, WasiMessaging,
+    MessagingHandler, Metadata, Reply, WasiMessaging,
 };
 use omnia_wasi_otel::WasiOtel;
 
@@ -47,7 +47,7 @@ impl Endpoint for EndedBroker {
     }
 
     fn request(
-        &self, _topic: String, _message: Message, _options: Option<RequestOptions>,
+        &self, _topic: String, _message: Message, _timeout: Option<Duration>,
     ) -> FutureResult<Message> {
         async { Ok(Message::default()) }.boxed()
     }
@@ -430,7 +430,7 @@ impl Endpoint for Faulting {
     }
 
     fn request(
-        &self, _topic: String, _message: Message, _options: Option<RequestOptions>,
+        &self, _topic: String, _message: Message, _timeout: Option<Duration>,
     ) -> FutureResult<Message> {
         unreachable!("the host refuses the guest's one request")
     }

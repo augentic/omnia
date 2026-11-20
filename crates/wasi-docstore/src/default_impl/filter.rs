@@ -1,63 +1,52 @@
-//! Pure JSON evaluation of [`FilterTree`](crate::host::resource::FilterTree)
-//! for the default in-memory backend.
+//! How the default in-memory backend applies a query's
+//! [`Filter`](crate::Filter) and order to stored JSON.
 //!
-//! Semantics follow the backend-portable filter contract:
-//! - Field paths are dotted (`"a.b"` descends into nested objects); a missing
-//!   field reads as JSON `null`, so `is-null` matches absent fields and
-//!   `ne` matches documents lacking the field.
-//! - Ordering comparisons (`gt`/`gte`/`lt`/`lte`) only match when the stored
-//!   value and the target are of comparable types (numbers with numbers,
-//!   strings with strings); `eq`/`ne` treat incomparable types as unequal.
-//! - `binary` scalars never match JSON-derived values (JSON has no binary
-//!   type), mirroring the previous default backend.
+//! - A field path is dotted, so `"a.b"` descends into nested objects, and a
+//!   missing field reads as JSON `null`.
+//! - A test compares a stored value only with a value of the same type, so
+//!   numbers with numbers and text with text. A stored value of any other
+//!   type fails the test.
+//! - Sorting orders values of different JSON types by a fixed type rank.
 
 use std::cmp::Ordering;
 
 use serde_json::Value;
 
-use crate::host::resource::{ComparisonOp, FilterTree, ScalarValue, SortField};
+use crate::{Condition, Filter, SortField, Test, Value as Operand};
 
-/// Evaluate `tree` against a JSON document body.
-#[must_use]
-pub fn matches(tree: &FilterTree, doc: &Value) -> bool {
-    match tree {
-        FilterTree::Compare { field, op, value } => {
-            let stored = lookup(doc, field);
-            match op {
-                ComparisonOp::Eq => scalar_cmp(stored, value) == Some(Ordering::Equal),
-                ComparisonOp::Ne => scalar_cmp(stored, value) != Some(Ordering::Equal),
-                ComparisonOp::Gt => scalar_cmp(stored, value) == Some(Ordering::Greater),
-                ComparisonOp::Gte => {
-                    matches!(scalar_cmp(stored, value), Some(Ordering::Greater | Ordering::Equal))
-                }
-                ComparisonOp::Lt => scalar_cmp(stored, value) == Some(Ordering::Less),
-                ComparisonOp::Lte => {
-                    matches!(scalar_cmp(stored, value), Some(Ordering::Less | Ordering::Equal))
-                }
-            }
+// the field of the first `array-contains` in `filter`, a test this backend
+// cannot serve
+pub fn array_test(filter: &Filter) -> Option<&str> {
+    let condition = filter.iter().flatten().find(|c| matches!(c.test, Test::ArrayContains(_)));
+    condition.map(|condition| condition.field.as_str())
+}
+
+pub fn matches(filter: &Filter, doc: &Value) -> bool {
+    filter.iter().all(|group| group.iter().any(|condition| holds(condition, doc)))
+}
+
+fn holds(condition: &Condition, doc: &Value) -> bool {
+    passes(&condition.test, lookup(doc, &condition.field)) != condition.negated
+}
+
+fn passes(test: &Test, stored: &Value) -> bool {
+    let equal = |value: &Operand| scalar_cmp(stored, value) == Some(Ordering::Equal);
+    match test {
+        Test::Eq(value) => equal(value),
+        Test::Lt(value) => scalar_cmp(stored, value) == Some(Ordering::Less),
+        Test::Lte(value) => scalar_cmp(stored, value).is_some_and(Ordering::is_le),
+        Test::Gt(value) => scalar_cmp(stored, value) == Some(Ordering::Greater),
+        Test::Gte(value) => scalar_cmp(stored, value).is_some_and(Ordering::is_ge),
+        Test::In(values) => values.iter().any(equal),
+        Test::StartsWith(pattern) => {
+            stored.as_str().is_some_and(|s| s.starts_with(pattern.as_str()))
         }
-        FilterTree::InList { field, values } => {
-            let stored = lookup(doc, field);
-            values.iter().any(|v| scalar_cmp(stored, v) == Some(Ordering::Equal))
+        Test::EndsWith(pattern) => stored.as_str().is_some_and(|s| s.ends_with(pattern.as_str())),
+        Test::Contains(pattern) => stored.as_str().is_some_and(|s| s.contains(pattern.as_str())),
+        Test::Null => stored.is_null(),
+        Test::ArrayContains(_) => {
+            unreachable!("`query` refuses `array-contains` before it filters")
         }
-        FilterTree::NotInList { field, values } => {
-            let stored = lookup(doc, field);
-            values.iter().all(|v| scalar_cmp(stored, v) != Some(Ordering::Equal))
-        }
-        FilterTree::IsNull(field) => lookup(doc, field).is_null(),
-        FilterTree::IsNotNull(field) => !lookup(doc, field).is_null(),
-        FilterTree::Contains { field, pattern } => {
-            lookup(doc, field).as_str().is_some_and(|s| s.contains(pattern))
-        }
-        FilterTree::StartsWith { field, pattern } => {
-            lookup(doc, field).as_str().is_some_and(|s| s.starts_with(pattern))
-        }
-        FilterTree::EndsWith { field, pattern } => {
-            lookup(doc, field).as_str().is_some_and(|s| s.ends_with(pattern))
-        }
-        FilterTree::And(children) => children.iter().all(|c| matches(c, doc)),
-        FilterTree::Or(children) => children.iter().any(|c| matches(c, doc)),
-        FilterTree::Not(inner) => !matches(inner, doc),
     }
 }
 
@@ -94,24 +83,19 @@ fn lookup<'a>(doc: &'a Value, path: &str) -> &'a Value {
     current
 }
 
-// Compare a stored JSON value with a target scalar; `None` = incomparable.
-fn scalar_cmp(stored: &Value, target: &ScalarValue) -> Option<Ordering> {
+// Compare a stored JSON value with a test's value; `None` = incomparable.
+fn scalar_cmp(stored: &Value, target: &Operand) -> Option<Ordering> {
     match (stored, target) {
-        (Value::Null, ScalarValue::Null) => Some(Ordering::Equal),
-        (Value::Bool(a), ScalarValue::Boolean(b)) => Some(a.cmp(b)),
-        (Value::Number(n), _) => {
-            let target = match target {
-                ScalarValue::Int32(i) => f64::from(*i),
-                #[expect(clippy::cast_precision_loss, reason = "dev backend accepts f64 range")]
-                ScalarValue::Int64(i) => *i as f64,
-                ScalarValue::Float64(f) => *f,
-                _ => return None,
-            };
+        (Value::Bool(a), Operand::Boolean(b)) => Some(a.cmp(b)),
+        (Value::Number(n), Operand::Integer(i)) => {
+            #[expect(clippy::cast_precision_loss, reason = "dev backend accepts f64 range")]
+            let target = *i as f64;
             n.as_f64().and_then(|stored| stored.partial_cmp(&target))
         }
-        (Value::String(s), ScalarValue::Str(t) | ScalarValue::Timestamp(t)) => {
-            Some(s.as_str().cmp(t.as_str()))
+        (Value::Number(n), Operand::Number(f)) => {
+            n.as_f64().and_then(|stored| stored.partial_cmp(f))
         }
+        (Value::String(s), Operand::Text(t)) => Some(s.as_str().cmp(t.as_str())),
         _ => None,
     }
 }

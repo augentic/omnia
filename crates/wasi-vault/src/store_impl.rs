@@ -1,9 +1,9 @@
 use omnia_core::HostView;
 use wasmtime::component::{Accessor, Resource};
 
-use crate::host::generated::omnia::vault::store::{Host, HostWithStore};
-use crate::host::resource::LockerProxy;
-use crate::host::{Result, VaultClient, WasiVault};
+use crate::generated::omnia::vault::store::{Host, HostWithStore};
+use crate::resource::LockerProxy;
+use crate::{Result, VaultClient, WasiVault};
 
 impl<T> HostWithStore<T> for WasiVault {
     async fn open(accessor: &Accessor<T, Self>, name: String) -> Result<Resource<LockerProxy>> {

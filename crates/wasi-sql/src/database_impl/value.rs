@@ -1,7 +1,7 @@
 use chrono::{DateTime, NaiveDate, NaiveTime};
 
-use crate::host::generated::omnia::sql::types::Value as WitValue;
-use crate::host::{Error, Result, Value};
+use crate::generated::omnia::sql::types::Value as WitValue;
+use crate::{Error, Result, Value};
 
 // `none` binds as `Str(None)`, which every backend binds as `NULL` to a
 // parameter of any type.

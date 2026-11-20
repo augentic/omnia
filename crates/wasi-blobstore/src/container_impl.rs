@@ -6,14 +6,14 @@ use futures::channel::oneshot;
 use omnia_core::HostView;
 use wasmtime::component::{Access, Accessor, FutureReader, Resource, StreamReader};
 
-use crate::host::generated::omnia::blobstore::container::{
+use crate::generated::omnia::blobstore::container::{
     self as wit, ByteRange, Content, Host, HostContainer, HostContainerWithStore, Listing,
 };
-use crate::host::generated::omnia::blobstore::types::{
+use crate::generated::omnia::blobstore::types::{
     self, Attributes, Conflict, ObjectEntry, Precondition, Stored,
 };
-use crate::host::transfer::{Collect, Commit, Staging};
-use crate::host::{BlobStoreClient, Container, Error, ObjectMetadata, Result, WasiBlobStore};
+use crate::transfer::{Collect, Commit, Staging};
+use crate::{BlobStoreClient, Container, Error, ObjectMetadata, Result, WasiBlobStore};
 
 const PAGE_LIMIT: u32 = 1_000;
 
@@ -21,8 +21,8 @@ const PAGE_LIMIT: u32 = 1_000;
 // ending in it resumes after every name under that prefix.
 const PAST_PREFIX: char = '\u{10FFFF}';
 
-// The host's side of a guest's `container` handle. It keeps the name the
-// guest opened, since a backend's `Container::name` can fail.
+// The host's side of a guest's `container` handle. A backend's `Container`
+// reports no name, so the handle keeps the one the guest opened.
 #[derive(Clone, Debug)]
 pub struct ContainerHandle {
     name: String,
@@ -44,7 +44,7 @@ impl ContainerHandle {
     fn info(&self) -> Result<wit::ContainerMetadata> {
         let info = self.inner.info()?;
         Ok(wit::ContainerMetadata {
-            name: info.name,
+            name: self.name.clone(),
             created_at: (info.created_at > 0).then(|| millis(info.created_at)),
         })
     }

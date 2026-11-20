@@ -1,8 +1,8 @@
 use omnia_core::HostView;
 use wasmtime::component::Accessor;
 
-use crate::host::generated::omnia::config::entries::{Host, HostWithStore, Page};
-use crate::host::{ConfigClient, Error, Result, WasiConfig};
+use crate::generated::omnia::config::entries::{Host, HostWithStore, Page};
+use crate::{ConfigClient, Error, Result, WasiConfig};
 
 const PAGE_LIMIT: u32 = 1_000;
 

@@ -5,11 +5,11 @@ use std::time::Duration;
 use omnia_core::HostView;
 use wasmtime::component::{Accessor, Resource};
 
-use crate::host::generated::omnia::messaging::request_reply::{Host, HostWithStore};
-use crate::host::generated::omnia::messaging::types::{self, Topic};
-use crate::host::resource::{ClientProxy, Message, RequestOptions};
-use crate::host::types_impl::get_client;
-use crate::host::{Error, MessagingClient, Result, WasiMessaging};
+use crate::generated::omnia::messaging::request_reply::{Host, HostWithStore};
+use crate::generated::omnia::messaging::types::{self, Topic};
+use crate::resource::{ClientProxy, Message};
+use crate::types_impl::get_client;
+use crate::{Error, MessagingClient, Result, WasiMessaging};
 
 impl<T> HostWithStore<T> for WasiMessaging {
     async fn request(
@@ -21,12 +21,9 @@ impl<T> HostWithStore<T> for WasiMessaging {
         }
         let client = get_client(accessor, &client)?;
         let request = Message::from(message);
-        let options = timeout_ms.map(|timeout_ms| RequestOptions {
-            timeout: Some(Duration::from_millis(timeout_ms)),
-            ..RequestOptions::default()
-        });
+        let timeout = timeout_ms.map(Duration::from_millis);
 
-        let reply = client.request(topic, request, options).await?;
+        let reply = client.request(topic, request, timeout).await?;
         Ok(reply.into())
     }
 

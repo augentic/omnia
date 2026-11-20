@@ -13,9 +13,9 @@ use parking_lot::Mutex;
 use wasmtime::StoreContextMut;
 use wasmtime::component::{FutureConsumer, Source, StreamConsumer, StreamResult};
 
-use crate::host::container_impl::ContainerHandle;
-use crate::host::generated::omnia::blobstore::types::Stored;
-use crate::host::{Error, Result};
+use crate::container_impl::ContainerHandle;
+use crate::generated::omnia::blobstore::types::Stored;
+use crate::{Error, Result};
 
 // The bytes one `put` has received. It empties to `None` once `finished`
 // resolves, which refuses any later write.

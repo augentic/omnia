@@ -174,8 +174,9 @@ Unreleased
   `timestamp` whatever its text holds.
 - `#[derive(Settings)]` reads through `omnia_sdk::config`, so `load()`
   takes no argument.
-- The `omnia-wasi-*` crates and `omnia-plugin` are host-only, and empty on
-  `wasm32`. Their guest halves moved into `omnia-sdk`:
+- The `omnia-wasi-*` crates and `omnia-plugin` are host-only.
+  `omnia-plugin` is empty on `wasm32`, and the `omnia-wasi-*` crates are no
+  longer built for it. Their guest halves moved into `omnia-sdk`:
   - the guest telemetry library is `omnia_sdk::otel`, with
     `#[omnia_sdk::otel::instrument]`;
   - `omnia_wasi_http::{serve, handle}` are `omnia_sdk::http::{serve, send}`;
@@ -192,6 +193,28 @@ Unreleased
   direct-command binary links `clap`.
 - `omnia::Command::Compile` is a variant in every build, not only with
   `jit`. The generated `main` refuses it, as before.
+- Every `omnia:*` host reports one `omnia_wasi_types::Error`.
+  `omnia-wasi-types` binds `omnia:types` for the host, and each host crate
+  maps its vendored copy onto that binding. Each crate's `Error` re-exports
+  it, except in `omnia-wasi-vcs`, whose backends keep an `Error` of their
+  own. A typed error a backend returns keeps its kind whichever host carries
+  it, where another host's `Error` reached the guest as `other`.
+- `omnia_wasi_blobstore::Error::missing_container` is the free fn
+  `omnia_wasi_blobstore::missing_container`.
+- `DocStoreClient::query` takes the WIT's `Filter` in place of an
+  `Option<FilterTree>`, and `omnia-wasi-docstore` re-exports the generated
+  `Condition`, `Filter`, `SortField`, `Test`, and `Value`:
+  - every group must hold, and any condition in a group;
+  - `negated` flips a condition's test;
+  - an empty filter selects every document.
+
+  An `array-contains` test reaches the backend, and `DocStoreDefault` fails
+  it with `unsupported`, as the host did before.
+- `omnia_wasi_docstore::QueryOpts` holds `order_by`, `limit`, and
+  `continuation`. Its `limit` is a `u32` from 1 to 1,000 that the host
+  always sets.
+- `Endpoint::request` takes a `timeout: Option<Duration>` in place of an
+  `Option<RequestOptions>`. The host never sends a zero `timeout`.
 
 ### Removed
 
@@ -225,6 +248,16 @@ Unreleased
   `pool_max_memory_protection_keys`. The runtime no longer reads
   `POOL_TOTAL_GC_HEAPS`, `POOL_MEMORY_PROTECTION_KEYS`, or
   `POOL_MAX_MEMORY_PROTECTION_KEYS`, and ignores them when set.
+- `host_error!`, from `omnia-core` and `omnia`. No host defines an `Error`
+  of its own.
+- `omnia_wasi_docstore::{FilterTree, ScalarValue, ComparisonOp}`, the
+  hand-written `omnia_wasi_docstore::SortField`, and `QueryOpts::offset`. A
+  backend reads the generated `Filter` and `SortField`.
+- `Container::name`, `ContainerMetadata::name`, and
+  `ObjectMetadata::container` from `omnia-wasi-blobstore`. The host keeps
+  each container's name on its handle.
+- `omnia_wasi_messaging::RequestOptions`, whose `expected_replies` the host
+  never set.
 
 ## 0.38.0
 

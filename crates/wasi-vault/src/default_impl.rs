@@ -11,8 +11,8 @@ use omnia_core::Connect;
 use parking_lot::RwLock;
 use tracing::instrument;
 
-use crate::host::resource::{FutureResult, Locker};
-use crate::host::{Error, VaultClient};
+use crate::resource::{FutureResult, Locker};
+use crate::{Error, VaultClient};
 
 #[expect(missing_docs, reason = "`FromEnv` has no docs")]
 mod config {

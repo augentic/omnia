@@ -3,11 +3,11 @@
 use omnia_core::{HostView, StoreCtx};
 use wasmtime::component::{Accessor, Resource};
 
-use crate::host::generated::omnia::vcs::remotes::{Diverged, Host, HostWithStore};
-use crate::host::generated::omnia::vcs::types::{CommitId, Error, Location, Occupied};
-use crate::host::location::Intent;
-use crate::host::workspace_impl::{WorkspaceHandle, found, laid};
-use crate::host::{CloneOptions, Error as BackendError, VcsClient, WasiVcs};
+use crate::generated::omnia::vcs::remotes::{Diverged, Host, HostWithStore};
+use crate::generated::omnia::vcs::types::{CommitId, Error, Location, Occupied};
+use crate::location::Intent;
+use crate::workspace_impl::{WorkspaceHandle, found, laid};
+use crate::{CloneOptions, Error as BackendError, VcsClient, WasiVcs};
 
 impl<B: Send + 'static> HostWithStore<StoreCtx<B>> for WasiVcs {
     async fn clone(
@@ -46,7 +46,7 @@ impl<B: Send + 'static> HostWithStore<StoreCtx<B>> for WasiVcs {
 
         // an unknown remote fails, and a bookmark the repository has not seen
         // is nothing found
-        match answer.map_err(BackendError::typed) {
+        match answer {
             Ok(commit) => Ok(Some(commit)),
             Err(BackendError::NotFound(missing)) if missing != remote || remote == name => Ok(None),
             Err(err) => Err(err.into()),
@@ -62,7 +62,7 @@ impl<B: Send + 'static> HostWithStore<StoreCtx<B>> for WasiVcs {
         let pushed = workspace
             .call(accessor, |client, place| client.push(place, remote.clone(), name.clone()))
             .await;
-        match pushed.map_err(BackendError::typed) {
+        match pushed {
             Ok(()) => Ok(Ok(())),
             Err(BackendError::Diverged(_)) => {
                 let seen = workspace

@@ -14,3 +14,8 @@ version.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+anyhow.workspace = true
+omnia-core.workspace = true
+wasmtime.workspace = true

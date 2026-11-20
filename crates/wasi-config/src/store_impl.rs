@@ -1,8 +1,8 @@
 use omnia_core::HostView;
 use wasmtime::component::Accessor;
 
-use crate::host::generated::omnia::config::store::{Host, HostWithStore};
-use crate::host::{ConfigClient, Result, WasiConfig};
+use crate::generated::omnia::config::store::{Host, HostWithStore};
+use crate::{ConfigClient, Result, WasiConfig};
 
 impl<T> HostWithStore<T> for WasiConfig {
     async fn get(accessor: &Accessor<T, Self>, key: String) -> Result<Option<String>> {

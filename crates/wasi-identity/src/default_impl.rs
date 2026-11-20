@@ -16,8 +16,8 @@ use oauth2::{
 use omnia_core::Connect;
 use tracing::instrument;
 
-use crate::host::resource::{AccessToken, FutureResult, Identity};
-use crate::host::{Error, IdentityClient};
+use crate::resource::{AccessToken, FutureResult, Identity};
+use crate::{Error, IdentityClient};
 
 #[derive(Clone, FromEnv)]
 pub struct ConnectOptions {

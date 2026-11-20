@@ -27,8 +27,8 @@ use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 use tokio_tungstenite::{WebSocketStream, accept_async};
 use tracing::instrument;
 
-use crate::host::resource::{CloseFrame, Endpoint, Event, Events, Frame};
-use crate::host::{Error, WebSocketClient};
+use crate::resource::{CloseFrame, Endpoint, Event, Events, Frame};
+use crate::{Error, WebSocketClient};
 
 /// Options used to connect to the WebSocket service.
 #[derive(Debug, Clone)]

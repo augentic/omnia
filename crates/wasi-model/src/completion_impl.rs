@@ -8,16 +8,16 @@ use futures::{FutureExt as _, future};
 use omnia_core::{HostView, StoreCtx};
 use wasmtime::component::{Access, Accessor, FutureReader, Resource, StreamReader};
 
-use crate::host::generated::omnia::model::completion::{
+use crate::generated::omnia::model::completion::{
     self, Host, HostModel, HostModelWithStore, HostWithStore, Session,
 };
-use crate::host::generated::omnia::model::types::CallResult;
-use crate::host::session::{
+use crate::generated::omnia::model::types::CallResult;
+use crate::session::{
     CallsProducer, Halt, Replied, ReplyTask, ResultsConsumer, SessionClose, ToolSession,
 };
-use crate::host::tool_host::DirEntry;
-use crate::host::workspace::{self, Workspace};
-use crate::host::{
+use crate::tool_host::DirEntry;
+use crate::workspace::{self, Workspace};
+use crate::{
     Answer, Error, Exhausted, FutureResult, ModelClient, Request, ToolHost, ToolOutcome, WasiModel,
 };
 

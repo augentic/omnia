@@ -1,9 +1,9 @@
 use omnia_core::HostView;
 use wasmtime::component::{Accessor, Resource};
 
-use crate::host::container_impl::ContainerHandle;
-use crate::host::generated::omnia::blobstore::admin::{Host, HostWithStore, Names};
-use crate::host::{BlobStoreClient, Error, Result, WasiBlobStore};
+use crate::container_impl::ContainerHandle;
+use crate::generated::omnia::blobstore::admin::{Host, HostWithStore, Names};
+use crate::{BlobStoreClient, Error, Result, WasiBlobStore};
 
 impl<T> HostWithStore<T> for WasiBlobStore {
     async fn create_container(

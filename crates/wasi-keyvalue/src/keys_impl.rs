@@ -1,9 +1,9 @@
 use omnia_core::HostView;
 use wasmtime::component::{Accessor, Resource};
 
-use crate::host::bucket_impl::BucketHandle;
-use crate::host::generated::omnia::keyvalue::keys::{Host, HostWithStore, Page};
-use crate::host::{Error, KeyValueClient, Result, WasiKeyValue};
+use crate::bucket_impl::BucketHandle;
+use crate::generated::omnia::keyvalue::keys::{Host, HostWithStore, Page};
+use crate::{Error, KeyValueClient, Result, WasiKeyValue};
 
 const PAGE_LIMIT: u32 = 1_000;
 

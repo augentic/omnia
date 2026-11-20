@@ -7,7 +7,7 @@ use std::pin::Pin;
 use futures::{FutureExt as _, Stream, future};
 use omnia_core::FutureResult;
 
-use crate::host::Error;
+use crate::Error;
 
 /// Stream of events.
 pub type Events = Pin<Box<dyn Stream<Item = Event> + Send>>;
