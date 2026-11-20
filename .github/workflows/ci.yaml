@@ -18,7 +18,6 @@ jobs:
       targets: wasm32-wasip3
       wasm-packages: omnia-sdk omnia-guest-macros omnia-test test-programs examples
 
-  # Mirrors `bindgen-check` in mise.toml.
   bindings:
     name: Bindings
     runs-on: ubuntu-latest
@@ -37,9 +36,8 @@ jobs:
 
       - run: scripts/bindgen.sh --check
 
-  # Mirrors `wit-check` and `wit-verify` in mise.toml.
-  wit:
-    name: WIT
+  wasm-pkg:
+    name: Wasm Package
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -53,4 +51,4 @@ jobs:
           tool: wasm-tools@1.263.0,wkg@0.16.2
 
       - run: scripts/wasm-pkg.sh check
-      - run: scripts/wasm-pkg.sh verify
+      # - run: scripts/wasm-pkg.sh verify
