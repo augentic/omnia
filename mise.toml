@@ -13,30 +13,27 @@ OUTDATED_IGNORE = "cap-fs-ext,cap-std,cap-primitives,thiserror"
 WASM32_PACKAGES = "omnia-sdk omnia-guest-macros omnia-test test-programs examples"
 
 # -------------------------------------
-# WIT and guest bindings (project-specific; each task runs a `cargo xtask`
-# command, and `wit-check` is the `xtask` suite, so the workspace test runs it;
-# `wit-verify` is mirrored by the `wit` job in `.github/workflows/ci.yaml`,
-# `wit-publish` by the `wit` job in `publish.yaml`)
+# WIT packages and guest bindings
 # -------------------------------------
 
 [tasks.bindgen]
-description = "Regenerate the omnia-sdk guest bindings in crates/sdk/src/bindings from the WIT"
+description = "Regenerate the guest bindings from WIT packages"
 run = "cargo xtask bindgen"
 
 [tasks.wit-sync]
-description = "Rewrite every package a crate copies into wit/deps from the package that owns it"
+description = "Rewrite every WIT package into each crate'swit/deps"
 run = "cargo xtask sync"
 
 [tasks.wit-check]
-description = "Fail if a wit/deps copy is stale, a WIT package holds a plain comment or fails to parse or encode, or the guest bindings differ from a regeneration"
+description = "Check integrity of WIT packages and guest bindings"
 run = "cargo nextest run -p xtask --all-features"
 
 [tasks.wit-verify]
-description = "Fail if a WIT release the registry holds differs from the package the tree builds"
+description = "Verify published WIT packages against local ones"
 run = "cargo xtask verify"
 
 [tasks.wit-publish]
-description = "Publish every WIT release the registry lacks"
+description = "Publish WIT packages"
 run = "cargo xtask publish"
 
 # -------------------------------------
