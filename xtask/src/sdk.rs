@@ -219,10 +219,7 @@ fn extras<'a>(root: &Path, generated: impl Iterator<Item = &'a str>) -> Result<V
 }
 
 fn scan_extras(
-    root: &Path,
-    dir: &Path,
-    generated: &HashSet<&str>,
-    extras: &mut Vec<PathBuf>,
+    root: &Path, dir: &Path, generated: &HashSet<&str>, extras: &mut Vec<PathBuf>,
 ) -> Result<()> {
     for entry in fs::read_dir(dir).with_context(|| format!("cannot read {}", dir.display()))? {
         let entry = entry?;
@@ -249,8 +246,9 @@ fn scan_extras(
 
 #[cfg(test)]
 mod tests {
-    use super::extras;
     use std::fs;
+
+    use super::extras;
 
     // the committed file `wit.sh` caught with `diff -ru` but a name-only stale loop missed
     #[test]
