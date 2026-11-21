@@ -46,19 +46,17 @@ query: async func(filter: filter, order-by: list<sort-field>, after: option<stri
 
 The deployment declares its collections. The default backend serves the names `DOCSTORE_COLLECTIONS` lists, and a write never creates a collection. Every backend serves the `core` world, which is the `types`, `store`, and `collection` interfaces.
 
-The host answers `unsupported` for the calls a backend cannot express yet:
-
-- a `put` with `matches`;
-- a `delete` with a revision;
-- an `array-contains` test.
+The host answers `unsupported` for a `put` with `matches` and a `delete` with a revision, which a backend cannot express yet.
 
 Guests call these through `omnia_sdk::docstore`, which re-exports the bindings as `store`, `collection`, and `types`. `docstore::open(name)` opens a `Collection`, whose generated methods are the WIT's own. Its helpers map to the WIT as follows:
 
-- `get_as` is `get`, with the body decoded as `T`. `Document::decode` decodes a document `get` returned.
+- `get_json` is `get`, with the body decoded as `T`. `read` is `get` with a borrowed id, and `Document::decode` decodes a document either returned.
+- `contains` is `exists`.
 - `insert` is `put` with `absent`. A conflict is `Ok(Err(Exists))`, an outcome rather than an error.
 - `upsert` is `put` with no precondition.
 - `remove` is `delete` with no revision, and answers whether a document was removed.
 - `find` is `query`, sending the `Filter` tree as groups (see [Filters](#filters)). `Query::after` is the WIT `after`, and the page's `next` is the cursor for the next page.
+- `find_all` is `query` repeated, following each page's `next` until the last.
 
 ## Types
 
@@ -163,6 +161,7 @@ On the guest side, build a filter with the `Filter` constructors from `omnia_sdk
 | `Filter::contains(field, pattern)` / `starts_with` / `ends_with` | String matching. Optional. |
 | `Filter::array_contains(field, value)` | Array membership: the field is an array holding the value. Optional. |
 | `Filter::and(filters)` / `Filter::or(filters)` | Boolean composition; **must have at least one child**. Portable. |
+| `Filter::all(filters)` | `None` for no filters, the filter itself for one, and their `and` otherwise. Portable. |
 | `Filter::negate(filter)` (also the `!` operator) | Logical NOT of any sub-tree. Portable. |
 | `Filter::on_date(field, "YYYY-MM-DD")` | Convenience: expands to a `gte`/`lt` timestamp range covering the UTC day. **Fallible** — returns an error for an invalid date. |
 
@@ -230,7 +229,7 @@ The SDK reports each case as an `omnia_sdk::Error` coded with the case's name: a
 
 | Backend | Location | Notes |
 | ------- | -------- | ----- |
-| `DocStoreDefault` | in-tree (`wasi-docstore`) | In-memory; serves the collections `DOCSTORE_COLLECTIONS` declares (comma-separated, default `default`), and every query feature the host passes it, by evaluating filters directly over the stored JSON. State is process-local and lost on exit. |
+| `DocStoreDefault` | in-tree (`wasi-docstore`) | In-memory; serves the collections `DOCSTORE_COLLECTIONS` declares (comma-separated, default `default`), and every query feature but `array-contains`, which it fails with `unsupported`, by evaluating filters directly over the stored JSON. State is process-local and lost on exit. |
 | `omnia-azure-table` | [omnia-backends](https://github.com/augentic/omnia-backends) repo | Azure Table Storage over REST. Serves the portable query by translating filters to an OData `$filter`, and fails every optional feature with `unsupported` rather than scanning client-side. Azure Table has no string functions or null checks, cannot compare with `null`, stores a nested value as a string, and has no server-side sort. A `Timestamp` reaches it as text, so it compares as a string rather than as an `Edm.DateTime`. It rewrites a body on read, so a read reports another revision than the `put` returned. Config: `AZURE_STORAGE_ACCOUNT`, `AZURE_STORAGE_KEY`, optional `AZURE_TABLE_ENDPOINT` (point at Azurite for local emulation). |
 
-Writing a portable guest: keep to the [portable names and bodies](#portable-names-and-bodies) and the portable query of the [query contract](#query-contract), and the guest runs unchanged on every backend. An optional feature runs on the default backend, and fails with `unsupported` on a backend that cannot serve it.
+Writing a portable guest: keep to the [portable names and bodies](#portable-names-and-bodies) and the portable query of the [query contract](#query-contract), and the guest runs unchanged on every backend. An optional feature other than `array-contains` runs on the default backend, and fails with `unsupported` on a backend that cannot serve it.

@@ -82,11 +82,12 @@ pub struct Commands {
 }
 
 impl Commands {
-    pub fn route<F, I>(self, name: impl Into<String>, handler: F) -> Self
+    pub fn route<F, I, M>(self, name: impl Into<String>, handler: F) -> Self
     where
-        F: Handler<I>,
+        F: Handler<I, M>,
         F::Output: Serialize + Render,
         I: clap::Args + Send + 'static,
+        M: 'static,
     {
         let name = name.into();
         assert!(!name.is_empty(), "command name cannot be empty");
@@ -96,15 +97,16 @@ impl Commands {
         })
     }
 
-    pub fn route_with<F, I, D>(self, command: clap::Command, handler: F, decode: D) -> Self
+    pub fn route_with<F, I, M, D>(self, command: clap::Command, handler: F, decode: D) -> Self
     where
-        F: Handler<I>,
+        F: Handler<I, M>,
         F::Output: Serialize + Render,
         I: Send + 'static,
+        M: 'static,
         D: Fn(&clap::ArgMatches) -> crate::Result<I> + Send + Sync + 'static,
     {
         let name = command.get_name().to_owned();
-        let route = Route::<F, I, D> {
+        let route = Route::<F, I, M, D> {
             handler,
             decode,
             marker: PhantomData,
@@ -154,17 +156,18 @@ trait ErasedRoute: Send + Sync {
     ) -> DispatchFuture<'a>;
 }
 
-struct Route<F, I, D> {
+struct Route<F, I, M, D> {
     handler: F,
     decode: D,
-    marker: PhantomData<fn() -> I>,
+    marker: PhantomData<fn() -> (I, M)>,
 }
 
-impl<F, I, D> ErasedRoute for Route<F, I, D>
+impl<F, I, M, D> ErasedRoute for Route<F, I, M, D>
 where
-    F: Handler<I>,
+    F: Handler<I, M>,
     F::Output: Serialize + Render,
     I: Send + 'static,
+    M: 'static,
     D: Fn(&clap::ArgMatches) -> crate::Result<I> + Send + Sync + 'static,
 {
     fn dispatch<'a>(
@@ -345,11 +348,12 @@ impl Handlers {
     /// # Panics
     ///
     /// Panics when `name` is empty or already registered.
-    pub fn command<F, I>(mut self, name: impl Into<String>, handler: F) -> Self
+    pub fn command<F, I, M>(mut self, name: impl Into<String>, handler: F) -> Self
     where
-        F: Handler<I>,
+        F: Handler<I, M>,
         F::Output: Serialize + Render,
         I: clap::Args + Send + 'static,
+        M: 'static,
     {
         self.commands = self.commands.route(name, handler);
         self
@@ -364,11 +368,12 @@ impl Handlers {
     /// # Panics
     ///
     /// Panics when the subcommand's name is empty or already registered.
-    pub fn command_with<F, I, D>(mut self, command: clap::Command, handler: F, decode: D) -> Self
+    pub fn command_with<F, I, M, D>(mut self, command: clap::Command, handler: F, decode: D) -> Self
     where
-        F: Handler<I>,
+        F: Handler<I, M>,
         F::Output: Serialize + Render,
         I: Send + 'static,
+        M: 'static,
         D: Fn(&clap::ArgMatches) -> crate::Result<I> + Send + Sync + 'static,
     {
         self.commands = self.commands.route_with(command, handler, decode);

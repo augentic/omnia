@@ -2,31 +2,52 @@
 includes = ["git::https://github.com/augentic/toolkit.git//mise/rust.toml?ref=v0.7.0"]
 
 # Knobs read by the included tasks. Keep `OUTDATED_IGNORE` in step with the
-# `outdated` input in `.github/workflows/audit.yaml`.
+# `outdated` input in `.github/workflows/audit.yaml`, and `WASM32_PACKAGES`
+# with the `wasm-packages` passed to `.github/workflows/ci.yaml` and
+# `publish.yaml`.
+#
+# `WASM32_PACKAGES` names the members a guest builds against. Every other
+# member is host-only and never builds for wasm32-wasip3.
 [env]
 OUTDATED_IGNORE = "cap-fs-ext,cap-std,cap-primitives,thiserror"
+WASM32_PACKAGES = "omnia-sdk omnia-guest-macros omnia-test test-programs examples"
 
 # -------------------------------------
-# Guest bindings (project-specific; mirrored by the `bindings` job in
-# `.github/workflows/ci.yaml`, so bump the tool pins in both)
+# WIT and guest bindings (project-specific; `wit-check` and `bindgen-check`
+# are mirrored by the `wit` job in `.github/workflows/ci.yaml`, `wit-check`
+# and `wit-publish` by the `wit` job in `publish.yaml`; tool pins live in
+# `scripts/wit.sh`)
 # -------------------------------------
 
-[tasks.bindings]
-description = "Regenerate crates/sdk/src/bindings from the WIT under crates/wasi-*/wit and crates/plugin/wit"
+[tasks.bindgen]
+description = "Regenerate the omnia-sdk guest bindings in crates/sdk/src/bindings from the WIT"
 tools = { jq = "1.8", "cargo:wit-bindgen-cli" = "0.63.0" }
-run = "scripts/bindings"
+run = "scripts/wit.sh bindgen"
 
-[tasks.bindings-check]
-description = "Fail if crates/sdk/src/bindings is stale, then check a built guest targets the staged world"
+[tasks.bindgen-check]
+description = "Fail if the committed guest bindings differ from a regeneration, or a command guest does not target the staged world"
 tools = { jq = "1.8", "cargo:wit-bindgen-cli" = "0.63.0", "cargo:wasm-tools" = "1.263.0" }
-run = '''
-#!/usr/bin/env bash
-set -euo pipefail
-ws="$(cargo locate-project --workspace --message-format=plain)"
-ws="${ws%/Cargo.toml}"
-cargo build --locked -p test-programs --example config_seeded --target wasm32-wasip3
-scripts/bindings --check "${CARGO_TARGET_DIR:-$ws/target}/wasm32-wasip3/debug/examples/config_seeded.wasm"
-'''
+run = "scripts/wit.sh check bindings"
+
+[tasks.wit-sync]
+description = "Rewrite every package a crate copies into wit/deps from the package that owns it"
+tools = { jq = "1.8" }
+run = "scripts/wit.sh sync"
+
+[tasks.wit-check]
+description = "Fail if a wit/deps copy is stale, or a WIT package holds a plain comment, fails to parse, or fails to build"
+tools = { jq = "1.8", "cargo:wasm-tools" = "1.263.0" }
+run = "scripts/wit.sh check packages"
+
+[tasks.wit-verify]
+description = "Fail if a WIT release the registry holds differs from the package the tree builds"
+tools = { jq = "1.8", "cargo:wasm-tools" = "1.263.0", "cargo:wkg" = "0.16.2" }
+run = "scripts/wit.sh verify"
+
+[tasks.wit-publish]
+description = "Publish every WIT release the registry lacks: mise run wit-publish [-- --overwrite PACKAGE,..]"
+tools = { jq = "1.8", "cargo:wasm-tools" = "1.263.0", "cargo:wkg" = "0.16.2" }
+run = "scripts/wit.sh publish"
 
 # -------------------------------------
 # Examples (project-specific; the generic Rust tasks live in the include)

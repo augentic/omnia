@@ -63,6 +63,7 @@ returns that class from its handler so the mapping can be observed:
 | `fail not-found`   | `NotFound`       | 2    |
 | `fail` (default)   | `ServerError`    | 3    |
 | `fail bad-gateway` | `BadGateway`     | 4    |
+| `fail conflict`    | `Conflict`       | 5    |
 | `bogus`            | clap usage error | 64   |
 
 Usage errors exit 64 (`EX_USAGE`), so exit 2 always means `NotFound`.

@@ -1,3 +1,4 @@
+/// Containers of named objects a guest reads and writes, whole or by range.
 package omnia:blobstore@0.1.0;
 
 /// The types the blob store interfaces share.
@@ -275,8 +276,6 @@ interface admin {
     -> result<names, error>;
 }
 
-// wit-parser excludes a gated interface's types only where each carries the
-// interface's gate, so every type and `use` inside one repeats it
 /// Optional: an object assembled from parts, over as many invocations as it
 /// takes.
 ///

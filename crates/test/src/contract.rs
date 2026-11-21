@@ -15,7 +15,7 @@ pub mod state;
 
 use std::fmt::Debug;
 
-use omnia_sdk::Error;
+use omnia_sdk::{Error, ErrorKind};
 
 #[track_caller]
 fn expect_code<T: Debug, E: Into<Error>>(result: Result<T, E>, code: &str, call: &str) {
@@ -26,7 +26,7 @@ fn expect_code<T: Debug, E: Into<Error>>(result: Result<T, E>, code: &str, call:
 }
 
 // a binding failure the rows expect is a `ServerError`, so a backend
-// answering with another variant breaks the row even under the right code
+// answering with another kind breaks the row even under the right code
 fn is_code(err: &Error, code: &str) -> bool {
-    matches!(err, Error::ServerError { code: found, .. } if found == code)
+    err.kind() == ErrorKind::ServerError && err.code() == code
 }

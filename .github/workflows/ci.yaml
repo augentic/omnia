@@ -16,10 +16,10 @@ jobs:
     secrets: inherit
     with:
       targets: wasm32-wasip3
+      wasm-packages: omnia-sdk omnia-guest-macros omnia-test test-programs examples
 
-  # Mirrors `bindings-check` in mise.toml.
-  bindings:
-    name: Bindings
+  wit:
+    name: WIT
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -32,7 +32,7 @@ jobs:
           cache-on-failure: true
       - uses: taiki-e/install-action@v2
         with:
-          tool: wit-bindgen-cli@0.63.0,wasm-tools@1.263.0
+          tool: wit-bindgen-cli@0.63.0,wasm-tools@1.263.0,wkg@0.16.2
 
-      - run: cargo build --locked -p test-programs --example config_seeded --target wasm32-wasip3
-      - run: scripts/bindings --check target/wasm32-wasip3/debug/examples/config_seeded.wasm
+      - run: scripts/wit.sh check
+

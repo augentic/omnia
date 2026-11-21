@@ -16,13 +16,7 @@ version.workspace = true
 workspace = true
 
 [features]
-default = ["cli", "jit"]
-
-# Enables the standard `omnia run` CLI grammar in generated `main`s and the
-# `clap` re-export. Without it, deployments are direct commands (command mode
-# with a compiled-in deployment) or built programmatically via
-# `DeploymentBuilder`.
-cli = ["dep:omnia-cli"]
+default = ["jit"]
 
 # Enables the guest loader (`omnia:plugins/loader`): the `WasiPlugins` host,
 # the `Plugins` load path over the runtime's first-use seam, and the
@@ -43,24 +37,12 @@ link = ["dep:omnia-link"]
 # Enables just-in-time wasm to machine code compilation. Raw `.wasm` guests
 # and `omnia::compile` exist only with it; without it every guest, at boot or
 # at first use, is a pre-compiled `omnia compile` artifact.
-jit = ["omnia-cli?/jit", "omnia-compile/cranelift", "omnia-core/jit"]
-
-# Enables memory protection keys (MPK) support in the pooling allocator. MPK
-# only functions on Linux/x86_64; elsewhere it compiles but is inert
-# (`POOL_MEMORY_PROTECTION_KEYS=auto` falls back to leaving guard regions in
-# place). Off by default.
-mpk = ["omnia-core/mpk"]
-
-# Enables the WebAssembly GC / reference-types proposal (with the default
-# copying collector) and the pooling allocator's `total_gc_heaps` control
-# (`POOL_TOTAL_GC_HEAPS`). Current guests compile to linear memory and never
-# allocate a GC heap, so this is off by default.
-gc = ["omnia-core/gc"]
+jit = ["omnia-compile/cranelift", "omnia-core/jit"]
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 anyhow.workspace = true
 futures.workspace = true
-omnia-cli = { workspace = true, optional = true }
+omnia-cli.workspace = true
 omnia-compile.workspace = true
 omnia-core.workspace = true
 omnia-host-macros.workspace = true
@@ -83,4 +65,4 @@ required-features = ["link", "jit"]
 
 [[test]]
 name = "runtime"
-required-features = ["cli", "jit", "loader"]
+required-features = ["jit", "loader"]

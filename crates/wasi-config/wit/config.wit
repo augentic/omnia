@@ -1,3 +1,4 @@
+/// Configuration a deployment supplies to its guests, read by key.
 package omnia:config@0.1.0;
 
 /// The types the configuration interfaces share.

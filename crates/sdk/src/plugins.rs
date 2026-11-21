@@ -18,7 +18,7 @@ use crate::Result;
 pub use crate::bindings::imports::omnia::plugins::types::{
     Conflict, File, Plugin, Release, Source,
 };
-pub use crate::bindings::imports::omnia::plugins::{loader, types};
+pub use crate::bindings::imports::omnia::plugins::*;
 
 /// Load the guest `source` names and return it.
 ///

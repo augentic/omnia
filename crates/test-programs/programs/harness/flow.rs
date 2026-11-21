@@ -1,6 +1,6 @@
 //! One guest that reaches every scripted and recording backend of
 //! `omnia_test::host`, through both triggers the harness drives, over the
-//! handles the SDK's modules open.
+//! default handles the SDK's modules open.
 //!
 //! - `POST /items/{id}` reads the item's name, renames it in a transaction,
 //!   prices it upstream under a token, caches the price, drops the cached
@@ -16,13 +16,11 @@ use std::time::Duration;
 
 use axum::Router;
 use axum::extract::{Json, Path};
-use axum::http::{Request, StatusCode};
+use axum::http::StatusCode;
 use axum::routing::post;
-use bytes::Bytes;
 use omnia_sdk::exports::messaging::incoming_handler::Guest;
 use omnia_sdk::messaging::Message;
 use omnia_sdk::messaging::types::{Delivery, Settle};
-use omnia_sdk::sql::Row;
 use omnia_sdk::{Result, http, identity, keyvalue, messaging, not_found, sql, websocket};
 use serde::{Deserialize, Serialize};
 
@@ -56,37 +54,31 @@ async fn rename(
     Path(id): Path<i64>, Json(input): Json<Rename>,
 ) -> Result<(StatusCode, Json<Renamed>)> {
     // read the item, then rename it
-    let db = sql::open(sql::DEFAULT).await?;
+    let db = sql::default().await?;
     let select = "SELECT name FROM items WHERE id = $1";
-    let Some(row) = db.query_opt::<Row>(select, &[id.into()]).await? else {
+    let Some((previous,)) = db.query_opt::<(String,)>(select, sql::params![id]).await? else {
         return Err(not_found!("no item {id}"));
     };
-    let previous: String = row.get("name")?;
-    let transaction = db.begin().await?;
     let update = "UPDATE items SET name = $1 WHERE id = $2";
-    transaction.exec(update, &[input.name.as_str().into(), id.into()]).await?;
-    transaction.commit().await?;
+    db.transaction(async |tx| tx.exec(update, sql::params![input.name.as_str(), id]).await).await?;
 
     // price it upstream, under a token of its own
-    let credentials = identity::open(identity::DEFAULT).await?;
+    let credentials = identity::default().await?;
     let token = credentials.token(&["prices.read"]).await?.token;
-    let request = Request::get(format!("https://prices.test/items/{id}"))
-        .header("authorization", format!("Bearer {token}"))
-        .body(Bytes::new())
-        .expect("a valid request");
-    let Price { price } = http::fetch_json(request).await?;
+    let url = format!("https://prices.test/items/{id}");
+    let Price { price } = http::get(url).bearer(&token).fetch_json().await?;
 
     // cache the price, and drop the name cached before the rename
-    let cache = keyvalue::open(keyvalue::DEFAULT).await?;
+    let cache = keyvalue::default().await?;
     let priced = price.to_string();
     cache.write(&format!("prices.{id}"), priced.as_bytes(), Some(PRICE_TTL)).await?;
     cache.remove(&format!("names.{id}")).await?;
 
     // announce the rename
-    let client = messaging::connect(messaging::DEFAULT).await?;
+    let client = messaging::default().await?;
     let renamed = Message::new(input.name.clone()).with_key(id.to_string());
     client.send("items.renamed", renamed).await?;
-    let sockets = websocket::connect(websocket::DEFAULT).await?;
+    let sockets = websocket::default().await?;
     sockets.broadcast(websocket::Message::Text(input.name), &[]).await?;
 
     Ok((
@@ -110,7 +102,7 @@ impl Guest for Messaging {
         }
         let key = String::from_utf8_lossy(&id).into_owned();
 
-        let client = messaging::connect(messaging::DEFAULT).await.expect("connect");
+        let client = messaging::default().await.expect("connect");
         let refreshed = Message::new(id).with_key(key);
         client.send("items.refreshed", refreshed).await.expect("send");
         Ok(())

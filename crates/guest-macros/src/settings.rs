@@ -53,10 +53,10 @@ pub fn expand(input: &DeriveInput) -> Result<TokenStream> {
             ///
             /// # Errors
             ///
-            /// - [`ServerError`](::omnia_sdk::Error::ServerError) when the key
+            /// - [`ServerError`](::omnia_sdk::ErrorKind::ServerError) when the key
             ///   of a field that is not an `Option` is unset, or a value does not
             ///   parse as its field's type.
-            /// - [`BadGateway`](::omnia_sdk::Error::BadGateway) when the
+            /// - [`BadGateway`](::omnia_sdk::ErrorKind::BadGateway) when the
             ///   configuration source does not answer.
             pub async fn load() -> ::omnia_sdk::Result<Self> {
                 ::core::result::Result::Ok(Self {

@@ -12,7 +12,7 @@ use omnia_sdk::identity::AccessToken;
 use omnia_sdk::keyvalue::{self, Lifetime};
 use omnia_sdk::messaging::Message;
 use omnia_sdk::sql::types::Value as Wire;
-use omnia_sdk::sql::{Field, FromRow, Row, Statement, Value};
+use omnia_sdk::sql::{self, Field, FromRow, Row, Statement, Value};
 use serde::Deserialize;
 use serde_json::json;
 
@@ -89,6 +89,38 @@ fn statement_binding() {
         "{:?}",
         statement.params
     );
+}
+
+#[test]
+fn params_list() {
+    let none: Option<i64> = None;
+
+    let params = sql::params![7_i64, "text", none, 3_u32, vec![1_u8]];
+
+    assert_eq!(
+        params,
+        [
+            Value::Int64(7),
+            Value::Text("text".to_owned()),
+            Value::Null,
+            Value::Int64(3),
+            Value::from(vec![1_u8]),
+        ]
+    );
+    assert_eq!(sql::params![], []);
+}
+
+#[test]
+fn row_tuple() {
+    let row = item(Some("first"));
+
+    let (id, label, note) = <(i64, String, Option<String>)>::from_row(&row).expect("decode");
+    let short = <(i64, String, String, i64)>::from_row(&row).expect_err("three columns, not four");
+    let mismatch = <(String,)>::from_row(&row).expect_err("an integer into String");
+
+    assert_eq!((id, label.as_str(), note.as_deref()), (1, "alpha", Some("first")));
+    assert_eq!(short.description(), "row lacks a column at index 3");
+    assert!(mismatch.description().starts_with("column `id` is not a string"), "{mismatch}");
 }
 
 #[test]

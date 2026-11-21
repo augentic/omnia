@@ -7,7 +7,7 @@
 
 use std::fmt::Debug;
 
-use omnia_sdk::{Error, Result, Settings, config};
+use omnia_sdk::{ErrorKind, Result, Settings, config};
 
 omnia_sdk::command::export!(scenario);
 
@@ -54,7 +54,7 @@ fn expect_code<T: Debug>(result: Result<T>, code: &str) {
     match result {
         Ok(value) => panic!("returned {value:?}, not a `{code}` failure"),
         Err(err) => assert!(
-            matches!(&err, Error::ServerError { code: found, .. } if found == code),
+            err.kind() == ErrorKind::ServerError && err.code() == code,
             "failed with `{err}`, not `{code}`"
         ),
     }

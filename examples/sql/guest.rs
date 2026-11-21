@@ -12,7 +12,7 @@ use axum::extract::Path;
 use axum::routing::{delete, get};
 use axum::{Json, Router};
 use chrono::Utc;
-use omnia_sdk::sql::{self, Database, FromRow, Value};
+use omnia_sdk::sql::{self, Database, FromRow};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use wasip3::exports::http::handler::Guest;
@@ -38,7 +38,7 @@ async fn list_agencies() -> omnia_sdk::Result<Json<serde_json::Value>> {
     let agencies: Vec<Agency> = database
         .query_as(
             "SELECT agency_id, name, url, timezone, created_at FROM agency ORDER BY created_at DESC",
-            &[],
+            sql::params![],
         )
         .await
         .context("executing query")?;
@@ -65,12 +65,12 @@ async fn create_agency(
         .exec(
             "INSERT INTO agency (agency_id, name, url, timezone, created_at) \
              VALUES ($1, $2, $3, $4, $5)",
-            &[
-                Value::from(agency.agency_id),
-                Value::from(agency.name.as_str()),
-                Value::from(agency.url.as_deref()),
-                Value::from(agency.timezone.as_deref()),
-                Value::from(agency.created_at.as_str()),
+            sql::params![
+                agency.agency_id,
+                agency.name.as_str(),
+                agency.url.as_deref(),
+                agency.timezone.as_deref(),
+                agency.created_at.as_str(),
             ],
         )
         .await
@@ -86,7 +86,7 @@ async fn delete_agency(Path(id): Path<i64>) -> omnia_sdk::Result<Json<serde_json
     let database = database().await?;
 
     let rows_affected = database
-        .exec("DELETE FROM agency WHERE agency_id = $1", &[Value::from(id)])
+        .exec("DELETE FROM agency WHERE agency_id = $1", sql::params![id])
         .await
         .context("deleting agency")?;
 
@@ -100,7 +100,7 @@ async fn delete_agency(Path(id): Path<i64>) -> omnia_sdk::Result<Json<serde_json
 // creates the schema per request, since each is handled by a fresh instance;
 // fine for an example
 async fn database() -> Result<Database> {
-    let database = sql::open(sql::DEFAULT).await.context("opening the database")?;
+    let database = sql::default().await.context("opening the database")?;
 
     let create_agency = "CREATE TABLE IF NOT EXISTS agency (
         agency_id BIGINT PRIMARY KEY,
@@ -110,7 +110,7 @@ async fn database() -> Result<Database> {
         created_at TEXT NOT NULL
     )";
 
-    database.exec(create_agency, &[]).await.context("creating agency table")?;
+    database.exec(create_agency, sql::params![]).await.context("creating agency table")?;
 
     Ok(database)
 }

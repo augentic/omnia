@@ -29,6 +29,8 @@ jobs:
     secrets: inherit
     with:
       targets: wasm32-wasip3
+      # Mirrors `WASM32_PACKAGES` in mise.toml.
+      wasm-packages: omnia-sdk omnia-guest-macros omnia-test test-programs examples
 
   publish:
     name: Publish
@@ -44,3 +46,29 @@ jobs:
       contents: read
     uses: augentic/toolkit/.github/workflows/crates.yaml@v0.7.0
     secrets: inherit
+
+  # Mirrors `wit-check`, then `wit-publish`, in mise.toml.
+  wit:
+    name: Publish WIT
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: v${{ needs.publish.outputs.version }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-tools@1.263.0,wkg@0.16.2
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - run: scripts/wit.sh check packages
+      - run: scripts/wit.sh publish

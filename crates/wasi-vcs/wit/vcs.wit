@@ -1,3 +1,5 @@
+/// Version control over the repositories and working copies beneath a
+/// guest's mounts.
 package omnia:vcs@0.1.0;
 
 /// The types the version control interfaces share.

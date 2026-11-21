@@ -111,7 +111,7 @@ async fn upsert(collection: &Collection, id: &str, body: Value) {
 }
 
 async fn get(collection: &Collection, id: &str) -> Option<Value> {
-    collection.get_as(id).await.unwrap_or_else(|e| panic!("get {id}: {e}"))
+    collection.get_json(id).await.unwrap_or_else(|e| panic!("get {id}: {e}"))
 }
 
 async fn remove(collection: &Collection, id: &str) -> bool {

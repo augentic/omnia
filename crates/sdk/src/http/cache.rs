@@ -1,7 +1,8 @@
 //! An outbound response cache over an `omnia:keyvalue` bucket.
 //!
 //! [`HttpCache::fetch`] sends a request through [`fetch`](super::fetch), and
-//! answers it from the bucket where its `Cache-Control` asks. Caching is
+//! answers it from the bucket where its `Cache-Control` asks.
+//! [`HttpCache::fetch_json`] reads the JSON of either answer. Caching is
 //! opt-in per call site. A guest fetches through an [`HttpCache`] where it
 //! wants cached responses, and through [`fetch`](super::fetch) elsewhere.
 //!
@@ -54,6 +55,7 @@ use std::time::Duration;
 use bytes::Bytes;
 use http::header::{ETAG, IF_NONE_MATCH};
 use http::{HeaderValue, Request, Response, StatusCode};
+use serde::de::DeserializeOwned;
 use sha2::{Digest, Sha256};
 
 pub use self::control::Control;
@@ -73,7 +75,7 @@ use crate::{Error, Result};
 /// use omnia_sdk::keyvalue;
 ///
 /// # async fn cached() -> anyhow::Result<()> {
-/// let cache = HttpCache::new(keyvalue::open(keyvalue::DEFAULT).await?);
+/// let cache = HttpCache::new(keyvalue::default().await?);
 /// let request = Request::get("https://origin.example/resource")
 ///     .header(CACHE_CONTROL, "max-age=300")
 ///     .header(IF_NONE_MATCH, "\"v1\"")
@@ -101,9 +103,9 @@ impl HttpCache {
     ///
     /// # Errors
     ///
-    /// - [`ServerError`](Error::ServerError) with the code `invalid` for
+    /// - [`ServerError`](crate::ErrorKind::ServerError) with the code `invalid` for
     ///   malformed or conflicting caching headers, before any request leaves.
-    /// - [`BadGateway`](Error::BadGateway) with the code `unavailable` when
+    /// - [`BadGateway`](crate::ErrorKind::BadGateway) with the code `unavailable` when
     ///   the origin does not answer.
     pub async fn fetch(&self, mut request: Request<Bytes>) -> Result<Response<Bytes>> {
         // pass through a request the cache does not act on
@@ -137,6 +139,18 @@ impl HttpCache {
         }
 
         Ok(response)
+    }
+
+    /// Answer `request` as [`fetch`](Self::fetch) does, require a 2xx status,
+    /// and deserialize the body as JSON.
+    ///
+    /// # Errors
+    ///
+    /// - As [`fetch`](Self::fetch).
+    /// - [`BadGateway`](crate::ErrorKind::BadGateway) when the answer, stored or fresh,
+    ///   has a non-2xx status or a body that is not the JSON of an `O`.
+    pub async fn fetch_json<O: DeserializeOwned>(&self, request: Request<Bytes>) -> Result<O> {
+        super::json(self.fetch(request).await?)
     }
 }
 

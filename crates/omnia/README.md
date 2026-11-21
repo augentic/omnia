@@ -51,7 +51,7 @@ The runtime is built around a set of traits that allow services to be plugged in
 - **Trigger routing (host servers):** `RouteTable` + `MatchStrategy` (aliased `HttpRoutes`/`PatternRoutes`/`CliRoutes`), `Routes`, `Resolver`, `TriggerRouter`
 - **Guest-to-guest dispatch (`link` feature):** `GuestSelector`, `FirstArgSelector`, `InProcessLinks`, and the `is_host` namespace predicate; every import a guest makes outside the runtime's own `wasi:`/`omnia:` namespaces is relayed to the guest exporting it, nothing declaring the seam
 - **Telemetry:** `Telemetry` (the host's `tracing` subscriber: console logging with OTLP span and metric exporters beneath it), `telemetry::flush`, `telemetry::resource`, `LevelFilter`
-- **CLI:** `Cli`, `Command`, `Parser` (`cli` feature)
+- **CLI:** `Cli`, `Command`, `Parser`
 - **Guest loader (`omnia:plugins/loader`, `loader` feature):** `WasiPlugins`, `Plugins`, `PluginLoader`, `Location`, the `RegistryClient` acquirer behind the `RegistrySource` seam (the trait itself lives in `omnia-core`, where the runtime fetches a `source.package` guest through it at first use), the `PackageStore` trait with its `FsStore` and `NoStore` impls and the `Reference` it is keyed by, and `Deployment::registry_source` for a custom acquirer; `RegistryConfig` and `PluginsConfig` are always available as manifest data, and a deployment declaring `plugins` or a package guest requires the feature
 - **Signature vocabulary:** `anyhow` (`omnia::anyhow::Result`) because `Connect`, `Wiring`, and the generated runtime module speak it, and `futures` (`omnia::futures::future::BoxFuture`) because the loader store and acquirer seams return it
 
@@ -59,7 +59,6 @@ Most deployments only touch the `runtime!` macro; a hand-written runtime instead
 
 ## Features
 
-- **`cli`** (default): Enables the `run` command-line grammar (the `omnia-cli` crate) and the `Cli`, `Command`, and `Parser` re-exports. Disable it for a direct-command binary that owns its whole argv; no `clap` is linked.
 - **`jit`** (default): Enables Cranelift JIT compilation, allowing you to run `.wasm` files directly. Disable this to only support pre-compiled `.bin` components (useful for faster startup in production).
 - **`link`:** Enables guest-to-guest dispatch (the `omnia-link` crate): every import outside the runtime's own namespaces is relayed to the guest exporting it. Without it such an import is unresolved and the deployment fails at boot.
 - **`loader`:** Enables the guest loader (`omnia:plugins/loader`) and the registry client a `source.package` guest is fetched with. With it, `Deployment::assemble` links the loader host beside WASI — worlds that do not import it never see it — hands the runtime the registry client for its package guests, and installs the loader's grant: the deployment's guests as the names a `declared` load may name (loaded through the same first-use seam a route or a link call uses), the read-only mounts as the roots a `path` load reads through, and the deployment's `plugins` as the store every package is read from first and the routing one the store lacks is fetched by; a deployment declaring `plugins` or a package guest requires it. A loaded guest is raw wasm, or `omnia compile` output where its source admits it (embedded bytes, a pinned path); compiling the former needs `jit`.
@@ -88,7 +87,7 @@ Initialization is idempotent: the first `build` in the process installs the subs
 
 ## Architecture
 
-`omnia` is the composition root: it owns deployment assembly, process lifecycle, and composition of the optional crates (`omnia-link` behind `link`, `omnia-plugin` behind `loader`, `omnia-cli` behind `cli`, `omnia-compile`'s compiler behind `jit`, the `runtime!` macro), and re-exports the `omnia-core` live-runtime SDK under one root — the paths embedders (and the macro's generated code) use never name the underlying crates, and neither should a deployment's `Cargo.toml`. Depend on `omnia-core` (or `omnia-plugin`) directly only when building a capability crate of your own, and on `omnia-compile` only from a tool that pre-compiles a guest and never runs one. `omnia-cli` and `omnia-compile` are leaf crates with no `omnia-*` dependencies.
+`omnia` is the composition root: it owns deployment assembly, process lifecycle, and composition of the crates beneath it (`omnia-cli`, `omnia-link` behind `link`, `omnia-plugin` behind `loader`, `omnia-compile`'s compiler behind `jit`, the `runtime!` macro), and re-exports the `omnia-core` live-runtime SDK under one root — the paths embedders (and the macro's generated code) use never name the underlying crates, and neither should a deployment's `Cargo.toml`. Depend on `omnia-core` (or `omnia-plugin`) directly only when building a capability crate of your own, and on `omnia-compile` only from a tool that pre-compiles a guest and never runs one. `omnia-cli` and `omnia-compile` are leaf crates with no `omnia-*` dependencies.
 
 See the [workspace documentation](https://github.com/augentic/omnia) for the full architecture guide and list of available WASI interface crates.
 

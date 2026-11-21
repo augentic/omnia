@@ -2,11 +2,12 @@
 //! an identity backend answering fixed tokens.
 
 use std::sync::{Arc, Mutex, PoisonError};
+use std::time::Duration;
 
 use futures::future::{self, ready};
 use futures::{FutureExt as _, stream};
 use omnia_wasi_identity::{AccessToken, Identity, IdentityClient};
-use omnia_wasi_messaging::{self as messaging, Handler, Message, MessagingClient, RequestOptions};
+use omnia_wasi_messaging::{self as messaging, Handler, Message, MessagingClient};
 use omnia_wasi_websocket::{self as websocket, Event, Events, WebSocketClient};
 
 /// One WebSocket send a guest made.
@@ -84,7 +85,7 @@ impl messaging::Endpoint for Sink {
     }
 
     fn request(
-        &self, topic: String, _message: Message, _options: Option<RequestOptions>,
+        &self, topic: String, _message: Message, _timeout: Option<Duration>,
     ) -> messaging::FutureResult<Message> {
         let refused =
             messaging::Error::Unsupported(format!("the sink answers no request: {topic}"));

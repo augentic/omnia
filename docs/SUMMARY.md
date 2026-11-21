@@ -45,6 +45,7 @@
 # Reference
 
 - [WASI Interfaces](reference/wasi-interfaces.md)
+- [WIT Packages](reference/wit-packages.md)
 - [`runtime!` Macro](reference/runtime-macro.md)
 - [Model Interface](reference/model.md)
 - [SQL Interface](reference/sql.md)

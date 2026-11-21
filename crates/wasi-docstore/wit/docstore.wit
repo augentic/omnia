@@ -1,3 +1,4 @@
+/// Collections of JSON documents a guest stores, reads, and queries by filter.
 package omnia:docstore@0.1.0;
 
 /// The types the document store interfaces share.

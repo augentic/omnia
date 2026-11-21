@@ -1,5 +1,8 @@
 //! `wasi:http` for a guest: outbound requests, and inbound ones served by a router.
 //!
+//! - [`get`], [`post`], [`put`], [`patch`], and [`delete`] start a
+//!   [`RequestBuilder`], which sends what it builds through [`fetch`] or
+//!   [`fetch_json`].
 //! - [`fetch`] sends a request whose body is [`Bytes`], and [`fetch_json`]
 //!   reads its JSON reply.
 //! - [`send`] takes any body, and fails with the host's own error.
@@ -19,6 +22,7 @@
 
 #[cfg(feature = "http")]
 pub mod cache;
+mod request;
 #[cfg(feature = "http")]
 mod server;
 
@@ -34,6 +38,7 @@ use serde::de::DeserializeOwned;
 use wasip3::http::client;
 use wasip3::http_compat::{IncomingMessage as _, http_from_wasi_response, http_into_wasi_request};
 
+pub use self::request::{RequestBuilder, delete, get, patch, post, put};
 #[cfg(all(feature = "http", target_arch = "wasm32"))]
 pub use self::server::serve;
 #[cfg(feature = "http")]
@@ -46,7 +51,7 @@ use crate::{Error, Result};
 ///
 /// # Errors
 ///
-/// [`BadGateway`](Error::BadGateway) with the code `unavailable` when the
+/// [`BadGateway`](crate::ErrorKind::BadGateway) with the code `unavailable` when the
 /// upstream does not answer.
 pub async fn fetch(request: Request<Bytes>) -> Result<Response<Bytes>> {
     let target = format!("{} {}", request.method(), request.uri());
@@ -59,7 +64,7 @@ pub async fn fetch(request: Request<Bytes>) -> Result<Response<Bytes>> {
 ///
 /// # Errors
 ///
-/// [`BadGateway`](Error::BadGateway) when the upstream does not answer,
+/// [`BadGateway`](crate::ErrorKind::BadGateway) when the upstream does not answer,
 /// returns a non-2xx status, or returns a body that is not the JSON of an `O`.
 pub async fn fetch_json<O: DeserializeOwned>(request: Request<Bytes>) -> Result<O> {
     json(fetch(request).await?)
@@ -88,10 +93,10 @@ where
     T::Data: Into<Vec<u8>>,
     T::Error: Into<Box<dyn StdError + Send + Sync + 'static>>,
 {
-    tracing::trace!("forwarding request to proxy: {:?}", request.headers());
-    let request = http_into_wasi_request(request).context("Issue converting request")?;
-    let response = client::send(request).await.context("Issue calling proxy")?;
-    let response = http_from_wasi_response(response).context("Issue converting response")?;
+    tracing::trace!("sending request: {:?}", request.headers());
+    let request = http_into_wasi_request(request).context("converting request")?;
+    let response = client::send(request).await.context("calling the outbound client")?;
+    let response = http_from_wasi_response(response).context("converting response")?;
 
     // read the body in full
     let (parts, mut body) = response.into_parts();
@@ -104,7 +109,7 @@ where
     };
 
     let response = Response::from_parts(parts, bytes.into());
-    tracing::trace!("proxy response: {response:?}");
+    tracing::trace!("response: {response:?}");
     Ok(response)
 }
 

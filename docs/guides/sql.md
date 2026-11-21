@@ -8,19 +8,19 @@ The [`sql`](../../examples/sql/) example is a minimal CRUD service over a single
 
 ## Opening a database
 
-`sql::open(name)` opens a `Database` on a name the deployment declares, `sql::DEFAULT` unless it declares another. A `Database` runs SQL through four methods:
+`sql::open(name)` opens a `Database` on a name the deployment declares, and `sql::default()` opens `sql::DEFAULT`. A `Database` runs SQL through four methods:
 
 - `query_as` decodes the rows a statement selects (see [Mapping rows](#mapping-rows)).
 - `query_opt` decodes the first row a statement selects, or answers `None` when it selects none.
 - `exec` returns the number of rows a statement changed. DDL runs through it too, and returns zero.
 - `batch` runs a list of `Statement`s in order, in one transaction, and returns each one's count. A failing statement rolls back the whole batch.
 
-Each call commits before it returns, and `Database::begin` starts a transaction for work that spans several calls (see [Transactions](#transactions)). `query_as`, `query_opt`, and `exec` take the SQL text and its `$n` parameters as a slice of `Value`s, which convert from Rust scalars and `Option`s of them. `Statement::new(sql, params)` takes the same pair.
+Each call commits before it returns, and `Database::transaction` runs work that spans several calls in one transaction (see [Transactions](#transactions)). `query_as`, `query_opt`, and `exec` take the SQL text and its `$n` parameters as a slice of `Value`s, which convert from Rust scalars and `Option`s of them. `sql::params![..]` lists the parameters as that slice, converting each. `Statement::new(sql, params)` takes the same pair.
 
 ```rust,noplayground
-use omnia_sdk::sql::{self, Value};
+use omnia_sdk::sql;
 
-let database = sql::open(sql::DEFAULT).await?;
+let database = sql::default().await?;
 ```
 
 Insert with bound parameters — a `None` binds a NULL:
@@ -30,12 +30,12 @@ database
     .exec(
         "INSERT INTO agency (agency_id, name, url, timezone, created_at) \
          VALUES ($1, $2, $3, $4, $5)",
-        &[
-            Value::from(agency.agency_id),
-            Value::from(agency.name.as_str()),
-            Value::from(agency.url.as_deref()),
-            Value::from(agency.timezone.as_deref()),
-            Value::from(agency.created_at.as_str()),
+        sql::params![
+            agency.agency_id,
+            agency.name.as_str(),
+            agency.url.as_deref(),
+            agency.timezone.as_deref(),
+            agency.created_at.as_str(),
         ],
     )
     .await
@@ -48,7 +48,7 @@ Delete, checking the affected-row count for a not-found result:
 
 ```rust,noplayground
 let rows_affected = database
-    .exec("DELETE FROM agency WHERE agency_id = $1", &[Value::from(id)])
+    .exec("DELETE FROM agency WHERE agency_id = $1", sql::params![id])
     .await
     .context("deleting agency")?;
 
@@ -61,7 +61,7 @@ A statement against another database goes through a database opened on its name:
 
 ```rust,noplayground
 let events = sql::open("eventstore").await?;
-events.exec("DELETE FROM event WHERE agency_id = $1", &[Value::from(id)]).await?;
+events.exec("DELETE FROM event WHERE agency_id = $1", sql::params![id]).await?;
 ```
 
 The database name is what the backend resolves, and both backends refuse a name they do not declare. `SqlDefault` declares `default` plus the names in `SQL_DATABASES`, and `omnia-postgres` maps `default` to `POSTGRES_URL` and each name in `POSTGRES_POOLS` to `POSTGRES_URL__<NAME>`.
@@ -93,7 +93,14 @@ let agencies: Vec<Agency> = database
     .context("executing query")?;
 ```
 
-`Row` is a `FromRow` too, so `query_as::<Row>` answers the rows themselves. Each `Row` carries `fields`, a list of `Field { name, value }` in column order. `Row::get` reads one column by name as a Rust type — an integer, float, boolean, string, or binary scalar, or `Option` of one for a nullable column — and fails with a `ServerError` with the code `invalid` when the column is absent, holds `NULL` for a non-`Option` type, or holds another kind of `Value`:
+A tuple of up to twelve column types is a `FromRow` too, decoding a row by position, so a query that selects a few columns needs no record type:
+
+```rust,noplayground
+let names: Vec<(i64, String)> =
+    database.query_as("SELECT agency_id, name FROM agency", sql::params![]).await?;
+```
+
+`Row` is a `FromRow` as well, so `query_as::<Row>` answers the rows themselves. Each `Row` carries `fields`, a list of `Field { name, value }` in column order. `Row::get` reads one column by name as a Rust type — an integer, float, boolean, string, or binary scalar, or `Option` of one for a nullable column — and fails with a `ServerError` with the code `invalid` when the column is absent, holds `NULL` for a non-`Option` type, or holds another kind of `Value`:
 
 ```rust,noplayground
 let name: String = row.get("name")?;
@@ -106,24 +113,27 @@ A handler test serves the database from `omnia_test::host::ScriptedTables`. It s
 
 ## Transactions
 
-`database.begin()` starts a `Transaction` on the database. Its `query_as`, `query_opt`, and `exec` work as on the database, and `commit` or `rollback` ends it:
+`database.transaction(work)` runs `work` over a `Transaction`, whose `query_as`, `query_opt`, and `exec` work as on the database. It commits when `work` returns `Ok`, rolls back when `work` returns `Err`, and answers what `work` returned:
 
 ```rust,noplayground
-use omnia_sdk::sql::Value;
-
-let transfer = database.begin().await?;
 let debit = "UPDATE account SET balance = balance - $1 WHERE id = $2";
-transfer.exec(debit, &[Value::from(amount), Value::from(from)]).await?;
 let credit = "UPDATE account SET balance = balance + $1 WHERE id = $2";
-transfer.exec(credit, &[Value::from(amount), Value::from(to)]).await?;
-transfer.commit().await?;
+database
+    .transaction(async |tx| {
+        tx.exec(debit, sql::params![amount, from]).await?;
+        tx.exec(credit, sql::params![amount, to]).await?;
+        Ok(())
+    })
+    .await?;
 ```
+
+`database.begin()` starts a `Transaction` that `commit` or `rollback` ends by hand. A fn over `&impl Executor` runs its statements on a `Database` or inside a `Transaction`, wherever its caller does. `Executor` is `Sync`, so such a fn's future is `Send` and an axum handler can await it.
 
 - Dropping a transaction rolls it back, so an early return through `?` discards its changes.
 - Any failure rolls it back too. After an `Err`, the transaction is over, and `commit` fails with the code `invalid`.
 - A commit that fails committed nothing, unless its code is `unavailable`, when the outcome is unknown.
 - A transaction holds one of the backend's connections until it ends, and a call on the database outside it may wait until then. So a handler awaits no other call on the database while a transaction is open. On the default backend, such a call fails with the code `unavailable` after five seconds.
-- `batch` runs a fixed list of statements in one transaction, in one call. Use `begin` when a later statement depends on what an earlier one read.
+- `batch` runs a fixed list of statements in one transaction, in one call. Use `transaction` when a later statement depends on what an earlier one read.
 - There are no savepoints. `SAVEPOINT`, like `BEGIN` and `COMMIT`, fails with the code `invalid`. `INSERT ... ON CONFLICT` covers the usual reason for one, an insert that may collide with an existing row.
 
 A `SET TRANSACTION ISOLATION LEVEL ...` statement, as a transaction's first, sets its isolation level on a backend that serves it, such as Postgres.

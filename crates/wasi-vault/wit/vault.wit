@@ -1,3 +1,4 @@
+/// Secrets held in the lockers a deployment declares.
 package omnia:vault@0.1.0;
 
 /// The types the vault interfaces share.

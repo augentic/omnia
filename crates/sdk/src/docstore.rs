@@ -1,12 +1,20 @@
 //! `omnia:docstore`, the collections of JSON documents a deployment declares.
 //!
 //! A guest opens a [`Collection`] with [`open`]. Beside the generated
-//! methods, a collection stores and reads documents as typed JSON,
-//! [`remove`](Collection::remove)s one unconditionally, and
-//! [`find`](Collection::find) runs a [`Query`].
+//! methods, a collection has forms that take borrowed ids:
 //!
-//! [`Filter::matches`] tests a JSON document against a filter, and
-//! [`SortField::compare`] orders two by a field.
+//! - [`get_json`](Collection::get_json) reads a document's JSON as a typed
+//!   value, and [`read`](Collection::read) reads the raw [`Document`].
+//! - [`insert`](Collection::insert) stores a document unless its id is
+//!   stored, and [`upsert`](Collection::upsert) stores one unconditionally.
+//! - [`remove`](Collection::remove) deletes a document, and
+//!   [`contains`](Collection::contains) tells whether one is stored.
+//! - [`find`](Collection::find) runs a [`Query`] for one page, and
+//!   [`find_all`](Collection::find_all) for every page.
+//!
+//! [`Query::builder`] builds a query, and [`Filter::all`] joins the filters
+//! a request asks for into one. [`Filter::matches`] tests a JSON document
+//! against a filter, and [`SortField::compare`] orders two by a field.
 //!
 //! Every backend serves a portable query:
 //!
@@ -32,9 +40,10 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
-pub use crate::bindings::imports::omnia::docstore::{collection, store, types};
+pub use crate::bindings::imports::omnia::docstore::*;
 pub use crate::docstore::collection::{Collection, Page, SortField};
 pub use crate::docstore::types::Document;
+use crate::error::unconditional;
 use crate::{Error, Result};
 
 /// Open the collection `name`, a binding the deployment declares.
@@ -53,11 +62,29 @@ impl Collection {
     ///
     /// # Errors
     ///
-    /// - [`ServerError`](Error::ServerError) with the code `invalid` when the
+    /// - [`ServerError`](crate::ErrorKind::ServerError) with the code `invalid` when the
     ///   JSON does not decode as `T`.
     /// - The host's failure, under its code.
-    pub async fn get_as<T: DeserializeOwned>(&self, id: &str) -> Result<Option<T>> {
+    pub async fn get_json<T: DeserializeOwned>(&self, id: &str) -> Result<Option<T>> {
         self.get(id.to_owned()).await?.map(|document| document.decode()).transpose()
+    }
+
+    /// The document `id` as it is stored, or `None` when it is absent.
+    ///
+    /// # Errors
+    ///
+    /// The host's failure, under its code.
+    pub async fn read(&self, id: &str) -> Result<Option<Document>> {
+        Ok(self.get(id.to_owned()).await?)
+    }
+
+    /// Whether a document is stored under `id`.
+    ///
+    /// # Errors
+    ///
+    /// The host's failure, under its code.
+    pub async fn contains(&self, id: &str) -> Result<bool> {
+        Ok(self.exists(id.to_owned()).await?)
     }
 
     /// Store `value` as the JSON of the document `id`, unless `id` is stored.
@@ -67,7 +94,7 @@ impl Collection {
     ///
     /// # Errors
     ///
-    /// - [`ServerError`](Error::ServerError) with the code `invalid` when
+    /// - [`ServerError`](crate::ErrorKind::ServerError) with the code `invalid` when
     ///   `value` does not serialize.
     /// - The host's failure, under its code.
     pub async fn insert<T: Serialize + Sync + ?Sized>(
@@ -82,7 +109,7 @@ impl Collection {
     ///
     /// # Errors
     ///
-    /// - [`ServerError`](Error::ServerError) with the code `invalid` when
+    /// - [`ServerError`](crate::ErrorKind::ServerError) with the code `invalid` when
     ///   `value` does not serialize.
     /// - The host's failure, under its code.
     pub async fn upsert<T: Serialize + Sync + ?Sized>(&self, id: &str, value: &T) -> Result<()> {
@@ -105,7 +132,7 @@ impl Collection {
     ///
     /// # Errors
     ///
-    /// - [`ServerError`](Error::ServerError) with the code `invalid` for a
+    /// - [`ServerError`](crate::ErrorKind::ServerError) with the code `invalid` for a
     ///   filter [`Filter::check`] refuses.
     /// - The host's failure, under its code: `unsupported` for a feature the
     ///   backend does not serve.
@@ -118,6 +145,29 @@ impl Collection {
         let order_by = query.order_by.clone();
         Ok(self.query(filter.collect(), order_by, query.after.clone(), query.limit).await?)
     }
+
+    /// Every document `query` selects, from its `after` cursor on, in the
+    /// order it asks for.
+    ///
+    /// The query's `limit` sizes each page. A document unchanged for the
+    /// whole walk is in it once, and one written or deleted during it may or
+    /// may not be.
+    ///
+    /// # Errors
+    ///
+    /// As [`find`](Self::find), on any page.
+    pub async fn find_all(&self, query: &Query) -> Result<Vec<Document>> {
+        let mut query = query.clone();
+        let mut documents = Vec::new();
+        loop {
+            let page = self.find(&query).await?;
+            documents.extend(page.documents);
+            match page.next {
+                Some(next) => query.after = Some(next),
+                None => return Ok(documents),
+            }
+        }
+    }
 }
 
 impl types::Document {
@@ -125,18 +175,11 @@ impl types::Document {
     ///
     /// # Errors
     ///
-    /// [`ServerError`](Error::ServerError) with the code `invalid` when the
+    /// [`ServerError`](crate::ErrorKind::ServerError) with the code `invalid` when the
     /// JSON does not decode as `T`.
     pub fn decode<T: DeserializeOwned>(&self) -> Result<T> {
         decode(&self.id, self.data.as_bytes())
     }
-}
-
-// a call with no precondition has none to fail, so a conflict is the host's
-fn unconditional<T>(outcome: Result<T, types::Conflict>) -> Result<T> {
-    outcome.map_err(|_conflict| {
-        Error::server_error("other", "the host reported a conflict on an unconditional call")
-    })
 }
 
 fn encode<T: Serialize + ?Sized>(id: &str, value: &T) -> Result<String> {
@@ -432,6 +475,35 @@ impl Filter {
         Self::Or(filters.into_iter().collect())
     }
 
+    /// The filter every one of `filters` must pass: `None` when there are
+    /// none, the filter itself when there is one, and an [`And`](Self::And)
+    /// of them all otherwise.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use omnia_sdk::docstore::{Filter, Query};
+    ///
+    /// let route = Some("r1");
+    /// let stop: Option<&str> = None;
+    /// let filters =
+    ///     [route.map(|id| Filter::eq("route_id", id)), stop.map(|id| Filter::eq("stop_id", id))];
+    ///
+    /// let filter = Filter::all(filters.into_iter().flatten());
+    /// let query = Query::builder().maybe_filter(filter).limit(50).build();
+    ///
+    /// assert!(matches!(query.filter, Some(Filter::Compare { .. })));
+    /// ```
+    #[must_use]
+    pub fn all(filters: impl IntoIterator<Item = Self>) -> Option<Self> {
+        let mut filters: Vec<Self> = filters.into_iter().collect();
+        match filters.len() {
+            0 => None,
+            1 => filters.pop(),
+            _ => Some(Self::And(filters)),
+        }
+    }
+
     /// Logical NOT.
     #[must_use]
     pub fn negate(inner: Self) -> Self {
@@ -442,7 +514,7 @@ impl Filter {
     ///
     /// # Errors
     ///
-    /// A [`ServerError`](Error::ServerError) with the code `invalid` if
+    /// A [`ServerError`](crate::ErrorKind::ServerError) with the code `invalid` if
     /// `iso_date` is not a zero-padded `YYYY-MM-DD` date, or is `9999-12-31`,
     /// which has no next day in that form.
     pub fn on_date(field: &str, iso_date: &str) -> Result<Self> {
@@ -471,7 +543,7 @@ impl Filter {
     ///
     /// # Errors
     ///
-    /// A [`ServerError`](Error::ServerError) with the code `invalid` when:
+    /// A [`ServerError`](crate::ErrorKind::ServerError) with the code `invalid` when:
     ///
     /// - the tree nests deeper than [`MAX_DEPTH`](Self::MAX_DEPTH);
     /// - a list is empty or holds more than [`MAX_LIST_LEN`](Self::MAX_LIST_LEN) values;
@@ -690,12 +762,16 @@ fn json_cmp(a: &Value, b: &Value) -> Ordering {
 }
 
 /// A query over the documents in a collection.
-#[derive(Debug, Clone, Default)]
+///
+/// [`Query::builder`] sets only the parts a query needs, as does
+/// `..Query::default()`.
+#[derive(Debug, Clone, Default, bon::Builder)]
 pub struct Query {
     /// Optional filter tree.
     pub filter: Option<Filter>,
 
     /// Sort order (first key wins, then next, etc.).
+    #[builder(default)]
     pub order_by: Vec<SortField>,
 
     /// Maximum documents to return.
@@ -703,6 +779,7 @@ pub struct Query {
 
     /// The `next` cursor of the previous [`Page`], or `None` for the first
     /// page.
+    #[builder(into)]
     pub after: Option<String>,
 }
 

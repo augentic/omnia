@@ -37,21 +37,23 @@ async fn create_stop(Json(req): Json<CreateStopRequest>) -> omnia_sdk::Result<Js
 
 async fn get_stop(Path(id): Path<String>) -> omnia_sdk::Result<Json<Stop>> {
     let stop: Stop =
-        stops().await?.get_as(&id).await?.ok_or_else(|| not_found!("stop {id} not found"))?;
+        stops().await?.get_json(&id).await?.ok_or_else(|| not_found!("stop {id} not found"))?;
     Ok(Json(stop))
 }
 ```
 
-The four operations:
+The operations:
 
 | Method | Semantics |
 | ------ | --------- |
 | `insert(id, &value)` | Create; answers `Ok(Err(Exists))` and leaves the stored document untouched if the id exists |
-| `get_as::<T>(id)` | Fetch by id, decoded → `Option<T>` |
+| `get_json::<T>(id)` | Fetch by id, decoded → `Option<T>` |
+| `read(id)` | Fetch by id as stored → `Option<Document>` |
+| `contains(id)` | Whether the id is stored → `bool` |
 | `upsert(id, &value)` | Create or replace |
 | `remove(id)` | Remove → `bool` (whether anything was removed) |
 
-The generated `get(id)` answers the stored `Option<Document>`, and `Document::decode` decodes its body. A body is a JSON object, and any other body fails with the code `invalid`. The generated `delete(id, revision)` removes the document only while it holds that revision, and answers a `Conflict` otherwise. Every call fails with the shared `types::Error`, which `?` converts into an `omnia_sdk::Error` under the code the [reference](../reference/docstore.md#errors) lists.
+`Document::decode` decodes the body of a document `read` answers. A body is a JSON object, and any other body fails with the code `invalid`. The generated `delete(id, revision)` removes the document only while it holds that revision, and answers a `Conflict` otherwise. Every call fails with the shared `types::Error`, which `?` converts into an `omnia_sdk::Error` under the code the [reference](../reference/docstore.md#errors) lists.
 
 ## Filters
 
@@ -67,11 +69,12 @@ Filters reference fields *inside* the document JSON and compose into trees. Avai
 | `Filter::array_contains(field, value)` | An array field holding the value |
 | `Filter::on_date(field, "YYYY-MM-DD")` | Date-day match on a timestamp field (fallible — validates the date) |
 | `Filter::and(filters)` / `Filter::or(filters)` | Boolean composition |
+| `Filter::all(filters)` | The `and` of any number → `None` for none, the filter itself for one |
 | `Filter::negate(filter)` | Logical NOT of any sub-tree |
 
 A `Timestamp` value, such as the bounds `on_date` builds, compares as text. ISO-8601 instants written in one zone and format therefore order correctly.
 
-Building a filter from optional query parameters is the common pattern — collect predicates, then `and` them:
+Building a filter from optional query parameters is the common pattern — collect predicates, then pass them to `Filter::all`:
 
 ```rust,noplayground
 let mut filters = Vec::new();
@@ -108,7 +111,7 @@ if let Some(date) = &p.updated_on {
     filters.push(Filter::on_date("last_updated", date)?);
 }
 
-let filter = if filters.is_empty() { None } else { Some(Filter::and(filters)) };
+let filter = Filter::all(filters);
 ```
 
 Nested composition — OR across fields, and negated conjunctions:
@@ -159,22 +162,22 @@ The rest is optional: the string predicates, the null predicates, a comparison w
 
 ## Queries, sorting, and pagination
 
-`find(&Query)` combines the filter with sorting and cursor pagination:
+`find(&Query)` combines the filter with sorting and cursor pagination. `Query::builder()` sets only the parts a query needs, and each `maybe_` setter takes an `Option`:
 
 ```rust,noplayground
-let query = Query {
-    filter,
-    order_by: vec![SortField::asc("stop_name")],
-    limit: p.limit,
-    after: p.after,
-};
+let query = Query::builder()
+    .maybe_filter(filter)
+    .order_by(vec![SortField::asc("stop_name")])
+    .maybe_limit(p.limit)
+    .maybe_after(p.after)
+    .build();
 let page = stops().await?.find(&query).await?;
 
 let stops: Vec<Stop> = page.documents.iter().map(Document::decode).collect::<Result<_, _>>()?;
 Ok(Json(json!({ "stops": stops, "next": page.next })))
 ```
 
-`SortField` is the interface's own record, and `SortField::asc` and `desc` build one. The result is a `collection::Page`: the page's `documents`, plus an opaque `next` cursor when more pages exist. Hand the cursor back as the next query's `after` to resume. Treat it as opaque — its format is backend-specific. A page holds at most 1,000 documents, and the cursor is the only way to page.
+`SortField` is the interface's own record, and `SortField::asc` and `desc` build one. The result is a `collection::Page`: the page's `documents`, plus an opaque `next` cursor when more pages exist. Hand the cursor back as the next query's `after` to resume. Treat it as opaque — its format is backend-specific. A page holds at most 1,000 documents, and the cursor is the only way to page. `find_all(&Query)` follows every cursor and answers all the documents the query selects, in pages its `limit` sizes.
 
 ## Backends
 

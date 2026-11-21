@@ -16,7 +16,7 @@ use std::fmt;
 use clap::{Args, ValueEnum};
 use omnia_sdk::command::{self, Render};
 use omnia_sdk::{
-    Context, Error, Handlers, Router, bad_gateway, bad_request, not_found, server_error,
+    Error, Handlers, Router, bad_gateway, bad_request, conflict, not_found, server_error,
 };
 use serde::Serialize;
 
@@ -57,6 +57,8 @@ enum ErrorClass {
     ServerError,
     /// Exit 4
     BadGateway,
+    /// Exit 5
+    Conflict,
 }
 
 const GREETING: &str = "Hello";
@@ -93,28 +95,29 @@ impl Render for Env {
     }
 }
 
-async fn greet(_context: Context, input: GreetInput) -> Result<Greeting, Error> {
+async fn greet(input: GreetInput) -> Result<Greeting, Error> {
     Ok(Greeting {
         greeting: format!("{GREETING}, {}!", input.name),
     })
 }
 
-async fn add(_context: Context, input: AddInput) -> Result<Sum, Error> {
+async fn add(input: AddInput) -> Result<Sum, Error> {
     Ok(Sum {
         sum: input.numbers.iter().sum(),
     })
 }
 
-async fn env(_context: Context, EnvInput: EnvInput) -> Result<Env, Error> {
+async fn env(EnvInput: EnvInput) -> Result<Env, Error> {
     Ok(Env(std::env::vars().collect()))
 }
 
-async fn fail(_context: Context, input: FailInput) -> Result<(), Error> {
+async fn fail(input: FailInput) -> Result<(), Error> {
     Err(match input.class {
         ErrorClass::BadRequest => bad_request!("failing as a bad request"),
         ErrorClass::NotFound => not_found!("failing as not found"),
         ErrorClass::ServerError => server_error!("failing as a server error"),
         ErrorClass::BadGateway => bad_gateway!("failing as a bad gateway"),
+        ErrorClass::Conflict => conflict!("failing as a conflict"),
     })
 }
 

@@ -47,7 +47,7 @@ impl Guest for Http {
 async fn pub_sub(Json(body): Json<Value>) -> omnia_sdk::Result<Json<Value>> {
     tracing::debug!("sending message to topic 'a'");
 
-    let client = messaging::connect(messaging::DEFAULT).await.context("connect")?;
+    let client = messaging::default().await.context("connect")?;
     let outgoing = Message::json(&body)?.with_key("example_key");
     client.send("a", outgoing).await.context("publishing to topic 'a'")?;
 
@@ -55,7 +55,7 @@ async fn pub_sub(Json(body): Json<Value>) -> omnia_sdk::Result<Json<Value>> {
 }
 
 async fn request_reply_handler(body: Bytes) -> omnia_sdk::Result<Json<Value>> {
-    let client = messaging::connect(messaging::DEFAULT).await.context("connect")?;
+    let client = messaging::default().await.context("connect")?;
     let reply = client.request("c", Message::new(body), None).await.context("request-reply")?;
 
     let data_str = String::from_utf8_lossy(&reply.data);
@@ -87,7 +87,7 @@ impl omnia_sdk::exports::messaging::incoming_handler::Guest for Messaging {
                 for i in 0..1000 {
                     wit_bindgen::spawn_local(async move {
                         tracing::debug!("sending message iteration {i}");
-                        let Ok(client) = messaging::connect(messaging::DEFAULT).await else {
+                        let Ok(client) = messaging::default().await else {
                             tracing::error!("failed to connect default client");
                             return;
                         };
@@ -143,7 +143,7 @@ impl omnia_sdk::exports::messaging::incoming_handler::Guest for Messaging {
                     format!("Hello from topic c | input: {data_str} | upstream: {upstream_body}");
 
                 if let Some(reply_to) = delivery.reply_to {
-                    let client = messaging::connect(messaging::DEFAULT).await.map_err(release)?;
+                    let client = messaging::default().await.map_err(release)?;
                     client.reply(&reply_to, Message::new(combined)).await.map_err(release)?;
                 }
             }

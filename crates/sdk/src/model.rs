@@ -33,7 +33,7 @@ pub use crate::bindings::imports::omnia::model::types::{
     Budget, Candidate, Effort, Exhausted, Format, Generation, Message, Reply, Role, Schema, Tool,
     ToolCall, Usage, WorkerGrant,
 };
-pub use crate::bindings::imports::omnia::model::{completion, types};
+pub use crate::bindings::imports::omnia::model::*;
 use crate::lend::resolve_lend;
 use crate::{Result, wit_stream};
 
@@ -51,6 +51,15 @@ pub const DEFAULT: &str = "default";
 /// `name`, or the host fails the call.
 pub async fn open(name: &str) -> Result<Model> {
     Ok(completion::open(name.to_owned()).await?)
+}
+
+/// Open the [`DEFAULT`] model.
+///
+/// # Errors
+///
+/// As [`open`].
+pub async fn default() -> Result<Model> {
+    open(DEFAULT).await
 }
 
 /// What the guest asks of a model in one completion.

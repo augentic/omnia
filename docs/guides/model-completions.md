@@ -163,6 +163,6 @@ impl Guest for HttpGuest {
 }
 ```
 
-The `McpServer` trait has five methods: `info` (server identity), `tools` (tool declarations with JSON Schema inputs), `call_tool`, and optionally `resources`/`read_resource`. The router handles the JSON-RPC and Streamable HTTP transport details.
+The `McpServer` trait has five methods: `info` (server identity), `tools` (tool declarations with JSON Schema inputs), `call_tool`, and optionally `resources`/`read_resource`. `call_tool` and `read_resource` are async, so a tool may await a capability such as `config::require` or a key-value read. `Tool::of::<T>(name, description)` declares a tool whose input schema is derived from a `JsonSchema` type, and `mcp::arguments` decodes a call's arguments into that type. The router handles the JSON-RPC and Streamable HTTP transport details.
 
 The [`mcp`](../../examples/mcp/) example serves a small document set. A completion reaches the tools a guest runs through the request's function tools instead, so this server is for MCP clients outside the deployment.

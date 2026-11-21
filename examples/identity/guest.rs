@@ -35,7 +35,7 @@ impl Guest for Http {
 
 #[omnia_sdk::otel::instrument]
 async fn handler() -> omnia_sdk::Result<Json<Value>> {
-    let credentials = identity::open(identity::DEFAULT).await.context("opening identity")?;
+    let credentials = identity::default().await.context("opening identity")?;
 
     let access_token = credentials.token(&[SCOPE]).await.context("getting access token")?;
 

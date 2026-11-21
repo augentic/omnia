@@ -1,10 +1,11 @@
-//! `Filter::on_date` across calendar edges and `Filter::array_contains`,
-//! observed through `Filter::matches`, and `Filter::check` at and past each
-//! limit and on each value it refuses.
+//! `Filter::on_date` across calendar edges, `Filter::array_contains`, and
+//! `Filter::all` over none, one, and several filters, observed through
+//! `Filter::matches`, and `Filter::check` at and past each limit and on each
+//! value it refuses.
 
 use std::iter;
 
-use omnia_sdk::Error;
+use omnia_sdk::ErrorKind;
 use omnia_sdk::docstore::{ComparisonOp, Filter, ScalarValue};
 use serde_json::json;
 
@@ -42,10 +43,7 @@ fn invalid_dates() {
         "9999-12-31",
     ] {
         let err = Filter::on_date("at", date).expect_err(date);
-        assert!(
-            matches!(&err, Error::ServerError { code, .. } if code == "invalid"),
-            "{date}: {err}"
-        );
+        assert!(err.kind() == ErrorKind::ServerError && err.code() == "invalid", "{date}: {err}");
     }
 }
 
@@ -60,7 +58,7 @@ fn list(len: usize) -> Filter {
 #[track_caller]
 fn refused(filter: &Filter) {
     let err = filter.check().expect_err("a filter past a limit");
-    assert!(matches!(&err, Error::ServerError { code, .. } if code == "invalid"), "{err}");
+    assert!(err.kind() == ErrorKind::ServerError && err.code() == "invalid", "{err}");
 }
 
 #[test]
@@ -136,4 +134,18 @@ fn array_contains() {
     assert!(!tagged.matches(&json!({})));
     tagged.check().expect("an array test with a string");
     refused(&Filter::array_contains("tags", ScalarValue::Null));
+}
+
+#[test]
+fn joined() {
+    assert!(Filter::all([]).is_none(), "no filters joined into one");
+    let one = Filter::all([Filter::eq("kind", "veg")]).expect("one filter");
+    assert!(matches!(one, Filter::Compare { .. }), "one filter came back wrapped: {one:?}");
+
+    let both = Filter::all([Filter::eq("kind", "veg"), Filter::gt("rank", 2)]);
+    let both = both.expect("two filters");
+
+    assert!(both.matches(&json!({ "kind": "veg", "rank": 3 })));
+    assert!(!both.matches(&json!({ "kind": "veg", "rank": 1 })), "one filter alone matched");
+    assert!(!both.matches(&json!({ "kind": "fruit", "rank": 3 })), "one filter alone matched");
 }

@@ -25,7 +25,7 @@ pub use crate::bindings::imports::omnia::vcs::types::{CommitId, Occupied};
 pub use crate::bindings::imports::omnia::vcs::workspace::{
     Change, ChangeKind, LogEntry, Rule, Strategy, Unmerged, Workspace,
 };
-pub use crate::bindings::imports::omnia::vcs::{remotes, store, types, workspace, workspaces};
+pub use crate::bindings::imports::omnia::vcs::*;
 use crate::lend::resolve_lend;
 
 /// Open the workspace at `path`.

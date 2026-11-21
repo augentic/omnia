@@ -1,4 +1,9 @@
-default_registry = "omnia.host"
+# The wasm-pkg routing `scripts/wit.sh` verifies and publishes the omnia:*
+# WIT packages through, passed to wkg with `--config`.
+#
+# `omnia.host` serves `/.well-known/wasm-pkg/registry.json`, which points
+# wkg at `ghcr.io/augentic/omnia/<name>`. Credentials never live here: wkg
+# reads them from the Docker credential store (`docker login ghcr.io`).
 
 [namespace_registries]
 omnia = "omnia.host"

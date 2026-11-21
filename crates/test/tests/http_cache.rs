@@ -41,7 +41,12 @@ async fn http_cache_headers() {
         ("namespaced", StatusCode::OK),
         ("plain", StatusCode::OK),
         ("unknown", StatusCode::OK),
-    ]);
+    ])
+    .on(
+        Method::GET,
+        "https://origin.test/json",
+        Response::new(Bytes::from_static(br#"{"payload":true}"#)),
+    );
     let backends = Backends::defaults().await;
     let store = Strict(backends.keyvalue.clone());
     let backends = backends.keyvalue(store).http(origin.clone());
@@ -68,6 +73,7 @@ async fn http_cache_headers() {
             "/plain",
             "/unknown",
             "/unknown",
+            "/json",
         ]
     );
 

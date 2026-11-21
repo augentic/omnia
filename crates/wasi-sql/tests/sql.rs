@@ -91,6 +91,17 @@ async fn sql_transactions() {
     assert_eq!(names(&sql, "default").await, ["committed", "outlived", "usable"]);
 }
 
+// The `Handler` bound itself is checked when the guest compiles.
+#[tokio::test]
+async fn sql_transaction_scope() {
+    let sql = in_memory(&[]).await;
+
+    run_guest(test_programs::SQL_TRANSACTION_SCOPE, sql.clone()).await;
+
+    // Persisted state: the two items that fit, and not the one rolled back.
+    assert_eq!(names(&sql, "default").await, ["kept", "second"]);
+}
+
 #[tokio::test]
 async fn sql_sql_db() {
     // `omnia_test::contract::sql` runs over one private `default` database

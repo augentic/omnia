@@ -60,7 +60,6 @@ pub fn plan(
                 args,
             })
         }
-        #[cfg(feature = "jit")]
         Command::Compile { .. } => Err(PlanError::Fatal(anyhow!(
             "the generated `main` only supports `run`; supply a custom `main` for other subcommands"
         ))),

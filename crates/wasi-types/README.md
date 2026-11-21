@@ -15,9 +15,13 @@ shares.
 
 - **Guest**: `omnia-sdk` binds every `omnia:*` package in one world, so a
   guest matches one `Error` whichever interface returned it.
-- **Host**: each host crate binds its own copy of `omnia:types/types`, so
-  its `Error` stays its own. Every host defines the same instance on the
-  linker, and a later host reopens it.
+- **Host**: this crate binds `omnia:types` once, and every host crate maps
+  its vendored copy onto that binding with `bindgen!`'s `with`. So every
+  host returns this crate's `Error`. Every host still defines the `types`
+  instance on the linker, and a later host reopens it.
+- An `anyhow::Error` that holds an `Error` converts to that `Error`, so a
+  backend picks the kind a guest sees. Any other failure converts to
+  `Error::Other`, with its full context chain.
 
 ## License
 

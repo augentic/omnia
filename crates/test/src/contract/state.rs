@@ -4,8 +4,8 @@
 //! once, over one bucket. Every key is portable, as `omnia:keyvalue`
 //! defines it. The deployment must:
 //!
-//! - declare [`DEFAULT`], the rows' bucket, and [`SECOND`], both empty when
-//!   the rows start;
+//! - declare [`DEFAULT`](keyvalue::DEFAULT), the rows' bucket, and
+//!   [`SECOND`], both empty when the rows start;
 //! - leave [`UNDECLARED`] undeclared.
 //!
 //! A row that waits out a TTL takes a `wait` that returns once the duration
@@ -14,12 +14,12 @@
 use std::time::Duration;
 
 use omnia_sdk::keyvalue::{
-    self, Bucket, Conflict, DEFAULT, Entry, Lifetime, Precondition, Revision, ttl_ms,
+    self, Bucket, Conflict, Entry, Lifetime, Precondition, Revision, ttl_ms,
 };
 
 use super::expect_code;
 
-/// A bucket the deployment declares beside [`DEFAULT`].
+/// A bucket the deployment declares beside [`DEFAULT`](keyvalue::DEFAULT).
 pub const SECOND: &str = "second";
 
 /// A bucket the deployment does not declare.
@@ -83,23 +83,27 @@ pub async fn zero_ttl(bucket: &Bucket) {
     let absent = Some(Precondition::Absent);
     let set_if =
         bucket.set("zero_ttl".to_owned(), b"new".to_vec(), Lifetime::KeepOrTtlMs(0), absent).await;
-    let swap =
-        bucket.compare_and_swap("zero_ttl", Some(b"old"), b"new", Some(Duration::ZERO)).await;
-    let increment = bucket.increment("zero_ttl.counter".to_owned(), 1, Some(0)).await;
+    let swap = bucket.compare_and_swap("zero_ttl", None, b"new", Some(Duration::ZERO)).await;
+    let update = bucket.update_json("zero_ttl.json", Some(Duration::ZERO), |_: Option<u8>| Ok(1));
+    let update = update.await;
+    let add = bucket.add("zero_ttl.counter", 1, Some(Duration::ZERO)).await;
 
     expect_code(set, "invalid", "set with a zero TTL");
     expect_code(set_if, "invalid", "a conditional set with a zero TTL");
     expect_code(swap, "invalid", "compare_and_swap with a zero TTL");
-    expect_code(increment, "invalid", "increment with a zero TTL");
+    expect_code(update, "invalid", "update_json with a zero TTL");
+    expect_code(add, "invalid", "add with a zero TTL");
     let stored = value(bucket, "zero_ttl").await;
     assert_eq!(stored, Some(b"old".to_vec()), "a zero TTL wrote the value");
+    assert_eq!(value(bucket, "zero_ttl.json").await, None, "a zero TTL wrote the JSON");
     assert_eq!(counter_at(bucket, "zero_ttl.counter").await, 0, "a zero TTL wrote the counter");
 }
 
 /// A conditional [`set`](Bucket::set) under
 /// [`KeepOrTtlMs`](Lifetime::KeepOrTtlMs),
-/// [`compare_and_swap`](Bucket::compare_and_swap), and
-/// [`increment`](Bucket::increment) apply their TTL to an entry they create.
+/// [`compare_and_swap`](Bucket::compare_and_swap),
+/// [`update_json`](Bucket::update_json), and [`add`](Bucket::add) apply
+/// their TTL to an entry they create.
 ///
 /// # Panics
 ///
@@ -109,19 +113,23 @@ pub async fn create_ttl(bucket: &Bucket, wait: impl AsyncFn(Duration)) {
     created.await.expect("a create conflicted");
     let swapped = bucket.compare_and_swap("create_ttl.lock", None, b"held", Some(TTL)).await;
     assert!(swapped.expect("compare_and_swap").is_ok(), "a creating swap conflicted");
-    assert_eq!(increment(bucket, "create_ttl.counter", 1, Some(TTL)).await, 1);
+    let updated = bucket.update_json("create_ttl.json", Some(TTL), |_: Option<u8>| Ok(1)).await;
+    assert_eq!(updated.expect("update_json"), 1);
+    assert_eq!(add(bucket, "create_ttl.counter", 1, Some(TTL)).await, 1);
 
     wait(EXPIRED).await;
 
     let entry = value(bucket, "create_ttl.entry").await;
     assert_eq!(entry, None, "a created entry outlived its TTL");
     assert_eq!(value(bucket, "create_ttl.lock").await, None, "a created lock outlived its TTL");
+    assert_eq!(value(bucket, "create_ttl.json").await, None, "created JSON outlived its TTL");
     assert_eq!(counter_at(bucket, "create_ttl.counter").await, 0, "a counter outlived its TTL");
 }
 
 /// An update through a conditional [`set`](Bucket::set),
-/// [`compare_and_swap`](Bucket::compare_and_swap), or
-/// [`increment`](Bucket::increment) keeps the time the entry has left.
+/// [`compare_and_swap`](Bucket::compare_and_swap),
+/// [`update_json`](Bucket::update_json), or [`add`](Bucket::add) keeps the
+/// time the entry has left.
 ///
 /// # Panics
 ///
@@ -133,34 +141,42 @@ pub async fn update_ttl(bucket: &Bucket, wait: impl AsyncFn(Duration)) {
     let updated = conditional(bucket, "update_ttl.entry", b"two", Some(LONG), matching).await;
     updated.expect("a matching revision conflicted");
     write(bucket, "update_ttl.value", b"one", TTL.into()).await;
+    let stored = entry(bucket, "update_ttl.value").await.expect("a stored entry");
     let swapped =
-        bucket.compare_and_swap("update_ttl.value", Some(b"one"), b"two", Some(LONG)).await;
-    assert!(swapped.expect("compare_and_swap").is_ok(), "a matching swap conflicted");
-    assert_eq!(increment(bucket, "update_ttl.counter", 1, Some(TTL)).await, 1);
-    assert_eq!(increment(bucket, "update_ttl.counter", 1, Some(LONG)).await, 2);
-    assert_eq!(increment(bucket, "update_ttl.counter", 1, None).await, 3);
+        bucket.compare_and_swap("update_ttl.value", Some(stored.revision), b"two", Some(LONG));
+    assert!(swapped.await.expect("compare_and_swap").is_ok(), "a matching swap conflicted");
+    write(bucket, "update_ttl.json", b"1", TTL.into()).await;
+    let updated = bucket
+        .update_json("update_ttl.json", Some(LONG), |n: Option<u8>| Ok(n.unwrap_or_default() + 1));
+    assert_eq!(updated.await.expect("update_json"), 2);
+    assert_eq!(add(bucket, "update_ttl.counter", 1, Some(TTL)).await, 1);
+    assert_eq!(add(bucket, "update_ttl.counter", 1, Some(LONG)).await, 2);
+    assert_eq!(add(bucket, "update_ttl.counter", 1, None).await, 3);
 
     wait(EXPIRED).await;
 
     let entry = value(bucket, "update_ttl.entry").await;
     assert_eq!(entry, None, "a conditional set refreshed the lifetime");
     assert_eq!(value(bucket, "update_ttl.value").await, None, "a swap refreshed the lifetime");
-    assert_eq!(counter_at(bucket, "update_ttl.counter").await, 0, "an increment refreshed it");
+    assert_eq!(value(bucket, "update_ttl.json").await, None, "update_json refreshed it");
+    assert_eq!(counter_at(bucket, "update_ttl.counter").await, 0, "an add refreshed it");
 }
 
-/// [`compare_and_swap`](Bucket::compare_and_swap) matches the bytes of a
-/// value set with a TTL.
+/// [`compare_and_swap`](Bucket::compare_and_swap) matches the revision of a
+/// value set with a TTL, and returns the revision it writes.
 ///
 /// # Panics
 ///
-/// Panics if the swap conflicts or does not land.
+/// Panics if the swap conflicts, does not land, or returns another revision.
 pub async fn swap_expiring(bucket: &Bucket) {
     write(bucket, "swap_expiring", b"one", LONG.into()).await;
+    let stored = entry(bucket, "swap_expiring").await.expect("a stored entry");
 
-    let swapped = bucket.compare_and_swap("swap_expiring", Some(b"one"), b"two", None).await;
+    let swapped = bucket.compare_and_swap("swap_expiring", Some(stored.revision), b"two", None);
+    let swapped = swapped.await.expect("compare_and_swap").expect("a TTL hid the revision");
 
-    assert!(swapped.expect("compare_and_swap").is_ok(), "a TTL hid the stored bytes");
-    assert_eq!(value(bucket, "swap_expiring").await, Some(b"two".to_vec()));
+    let stored = entry(bucket, "swap_expiring").await.expect("a stored entry");
+    assert_eq!((stored.value, stored.revision), (b"two".to_vec(), swapped));
 }
 
 /// A [`compare_and_swap`](Bucket::compare_and_swap) that does not match
@@ -170,14 +186,18 @@ pub async fn swap_expiring(bucket: &Bucket) {
 ///
 /// Panics if a mismatched swap writes or reports another value.
 pub async fn conflict(bucket: &Bucket) {
-    let absent = bucket.compare_and_swap("conflict", Some(b"one"), b"two", None).await;
+    write(bucket, "conflict.other", b"other", Lifetime::Forever).await;
+    let foreign = entry(bucket, "conflict.other").await.expect("a stored entry").revision;
+    let absent = bucket.compare_and_swap("conflict", Some(foreign), b"two", None).await;
     let absent = absent.expect("compare_and_swap").map_err(found_value);
     assert_eq!(absent, Err(None), "a swap over an absent key landed");
     assert_eq!(value(bucket, "conflict").await, None, "a conflicting swap wrote");
 
+    write(bucket, "conflict", b"zero", Lifetime::Forever).await;
+    let stale = entry(bucket, "conflict").await.expect("a stored entry").revision;
     write(bucket, "conflict", b"one", Lifetime::Forever).await;
     let present = bucket.compare_and_swap("conflict", None, b"two", None).await;
-    let stale = bucket.compare_and_swap("conflict", Some(b"zero"), b"two", None).await;
+    let stale = bucket.compare_and_swap("conflict", Some(stale), b"two", None).await;
 
     let found = Err(Some(b"one".to_vec()));
     assert_eq!(present.expect("compare_and_swap").map_err(found_value), found);
@@ -231,19 +251,20 @@ pub async fn revision(bucket: &Bucket) {
     assert_eq!(value(bucket, "revision.absent").await, None, "an unmatched revision wrote");
 }
 
-/// [`increment`](Bucket::increment) starts an absent counter at zero, and a
-/// `delta` of zero reads it.
+/// [`add`](Bucket::add) starts an absent counter at zero, and a `delta` of
+/// zero reads it.
 ///
 /// # Panics
 ///
 /// Panics if a counter starts elsewhere or reads back another value.
 pub async fn counter(bucket: &Bucket) {
-    assert_eq!(increment(bucket, "counter", 5, None).await, 5);
-    assert_eq!(increment(bucket, "counter", -7, None).await, -2);
+    assert_eq!(add(bucket, "counter", 5, None).await, 5);
+    assert_eq!(add(bucket, "counter", -7, None).await, -2);
     assert_eq!(counter_at(bucket, "counter").await, -2);
 }
 
-/// Two buckets never share a key, and the rows' bucket is [`DEFAULT`].
+/// Two buckets never share a key, and the rows' bucket is
+/// [`DEFAULT`](keyvalue::DEFAULT).
 ///
 /// # Panics
 ///
@@ -258,7 +279,8 @@ pub async fn named(bucket: &Bucket) {
     let own = value(bucket, "named").await;
     assert_eq!(own, Some(b"own".to_vec()), "a second bucket overwrote the key");
     assert_eq!(value(&second, "named").await, Some(b"second".to_vec()));
-    let default = value(&open(DEFAULT).await, "named").await;
+    let default = keyvalue::default().await.expect("open the default bucket");
+    let default = value(&default, "named").await;
     assert_eq!(default, Some(b"own".to_vec()), "the rows' bucket is not `default`");
 }
 
@@ -274,7 +296,8 @@ pub async fn undeclared() {
     expect_code(opened, "not-found", "opening an undeclared bucket");
 }
 
-/// Deleting an absent key succeeds.
+/// Deleting an absent key succeeds, and a deleted key is not
+/// [`contains`](Bucket::contains)ed.
 ///
 /// # Panics
 ///
@@ -282,10 +305,12 @@ pub async fn undeclared() {
 pub async fn delete_absent(bucket: &Bucket) {
     delete(bucket, "delete_absent").await;
     write(bucket, "delete_absent", b"v", Lifetime::Forever).await;
+    assert!(contains(bucket, "delete_absent").await, "a stored key is absent");
     delete(bucket, "delete_absent").await;
     delete(bucket, "delete_absent").await;
 
     assert_eq!(value(bucket, "delete_absent").await, None);
+    assert!(!contains(bucket, "delete_absent").await, "a deleted key is stored");
 }
 
 /// A key holding every kind of character a portable key may use works like
@@ -296,7 +321,8 @@ pub async fn delete_absent(bucket: &Bucket) {
 /// Panics if a call on the key fails or reads back another value.
 pub async fn portable_key(bucket: &Bucket) {
     write(bucket, PORTABLE, b"one", Lifetime::Forever).await;
-    let swapped = bucket.compare_and_swap(PORTABLE, Some(b"one"), b"two", None).await;
+    let stored = entry(bucket, PORTABLE).await.expect("a stored entry");
+    let swapped = bucket.compare_and_swap(PORTABLE, Some(stored.revision), b"two", None).await;
     assert!(swapped.expect("compare_and_swap").is_ok(), "a matching swap conflicted");
     assert_eq!(value(bucket, PORTABLE).await, Some(b"two".to_vec()));
 
@@ -318,6 +344,63 @@ pub async fn json(bucket: &Bucket) {
     let read = bucket.get_json::<serde_json::Value>("json").await.expect("get_json");
 
     assert_eq!(read, Some(stored), "get_json read back another value");
+}
+
+/// [`get_json_entry`](Bucket::get_json_entry) reads a value with the
+/// revision [`get`](Bucket::get) reports, and
+/// [`set_json_if`](Bucket::set_json_if) writes only while its precondition
+/// holds.
+///
+/// # Panics
+///
+/// Panics if a revision does not match the stored state, or a failed
+/// precondition writes or reports another entry.
+pub async fn json_revision(bucket: &Bucket) {
+    let absent = bucket.get_json_entry::<u32>("json_revision").await.expect("get_json_entry");
+    assert_eq!(absent, None, "an absent key has an entry");
+    let created = bucket.set_json_if("json_revision", &1, None, Precondition::Absent).await;
+    let created = created.expect("set_json_if").expect("a create conflicted");
+
+    let read = bucket.get_json_entry::<u32>("json_revision").await.expect("get_json_entry");
+    assert_eq!(read, Some((1, created.clone())), "get_json_entry read another entry");
+    let again = bucket.set_json_if("json_revision", &2, None, Precondition::Absent).await;
+    let one = Some((b"1".to_vec(), created.clone()));
+    assert_eq!(again.expect("set_json_if").map_err(found_entry), Err(one));
+    let matching = Precondition::Matches(created.clone());
+    let updated = bucket.set_json_if("json_revision", &3, None, matching).await;
+    let updated = updated.expect("set_json_if").expect("a matching revision conflicted");
+    let stale = bucket.set_json_if("json_revision", &4, None, Precondition::Matches(created));
+    let three = Some((b"3".to_vec(), updated));
+    assert_eq!(stale.await.expect("set_json_if").map_err(found_entry), Err(three));
+}
+
+/// [`update_json`](Bucket::update_json) stores what its closure makes of the
+/// value, creating an absent one, and a closure's error writes nothing.
+///
+/// # Panics
+///
+/// Panics if an update stores another value, or a refused one writes.
+pub async fn update_json(bucket: &Bucket) {
+    let created = bucket.update_json("update_json", None, |tags: Option<Vec<String>>| {
+        assert_eq!(tags, None, "an absent key read as a value");
+        Ok(vec!["a".to_owned()])
+    });
+    assert_eq!(created.await.expect("update_json"), ["a"]);
+    let updated = bucket.update_json("update_json", None, |tags: Option<Vec<String>>| {
+        let mut tags = tags.expect("a stored value");
+        tags.push("b".to_owned());
+        Ok(tags)
+    });
+    assert_eq!(updated.await.expect("update_json"), ["a", "b"]);
+
+    let refused = bucket.update_json("update_json", None, |_: Option<Vec<String>>| {
+        Err(omnia_sdk::Error::bad_request("refused", "the closure refused"))
+    });
+    let refused = refused.await.expect_err("a refusing closure stored a value");
+
+    assert_eq!(refused.code(), "refused", "update_json lost the closure's error");
+    let stored = bucket.get_json::<Vec<String>>("update_json").await.expect("get_json");
+    assert_eq!(stored.expect("a stored value"), ["a", "b"], "a refused update wrote");
 }
 
 /// [`get_json`](Bucket::get_json) over bytes that do not decode fails with
@@ -362,13 +445,17 @@ async fn entry(bucket: &Bucket, key: &str) -> Option<Entry> {
     bucket.get(key.to_owned()).await.unwrap_or_else(|err| panic!("get `{key}`: {err}"))
 }
 
-async fn increment(bucket: &Bucket, key: &str, delta: i64, ttl: Option<Duration>) -> i64 {
-    let counted = bucket.increment(key.to_owned(), delta, ttl.map(ttl_ms)).await;
-    counted.unwrap_or_else(|err| panic!("increment `{key}`: {err}"))
+async fn contains(bucket: &Bucket, key: &str) -> bool {
+    bucket.contains(key).await.unwrap_or_else(|err| panic!("contains `{key}`: {err}"))
+}
+
+async fn add(bucket: &Bucket, key: &str, delta: i64, ttl: Option<Duration>) -> i64 {
+    let counted = bucket.add(key, delta, ttl).await;
+    counted.unwrap_or_else(|err| panic!("add to `{key}`: {err}"))
 }
 
 async fn counter_at(bucket: &Bucket, key: &str) -> i64 {
-    increment(bucket, key, 0, None).await
+    add(bucket, key, 0, None).await
 }
 
 async fn open(name: &str) -> Bucket {

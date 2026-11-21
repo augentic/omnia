@@ -49,7 +49,7 @@ The `core` world holds `types`, `store`, and `database`, which every backend ser
 - `execute` returns how many rows a statement changed. A statement that changes no row, such as DDL, returns zero.
 - `batch` runs its statements in order, in one transaction, and returns each one's changed-row count. A failing statement rolls back the whole batch, and the call fails with that statement's error. An empty batch returns an empty list.
 
-A `database` handle holds the connection `open` returned until its first call. Every later call opens a connection for that call alone. Guests reach these interfaces through `omnia_sdk::sql`, which re-exports the bindings with helpers on the `database` and `transaction` handles (see the [guide](../guides/sql.md)).
+A `database` handle holds the connection `open` returned until its first call. Every later call opens a connection for that call alone. Guests reach these interfaces through `omnia_sdk::sql`, which re-exports the bindings with helpers on the `database` and `transaction` handles, the `Executor` trait both implement, and `Database::transaction`, which commits a closure's work on `Ok` and rolls it back on `Err` (see the [guide](../guides/sql.md)).
 
 ## Statements and placeholders
 
@@ -150,7 +150,7 @@ The SDK reports each case as an `omnia_sdk::Error` coded with the case's name: a
 
 `omnia_sdk::sql::Value` is the WIT's cases under their own names, with `Null` for `none`. Each case binds the WIT case of its name, and `Null` binds `none`, which is `NULL`. A timestamp with a zone is a `TimestampTz`, and one without is a `Timestamp`, whatever its text holds.
 
-`Value::from` builds the case a Rust value maps to, and builds `Null` from a `None`. A `u32` builds an `Int64`, and a `u64` binds once the caller converts it to an `i64`.
+`Value::from` builds the case a Rust value maps to, and builds `Null` from a `None`. `sql::params!` applies it to each of a statement's parameters. A `u32` builds an `Int64`, and a `u64` binds once the caller converts it to an `i64`.
 
 It reads each case back into the case of its name, and `none` reads as `Null`, whatever its column's type. `Row::get` then decodes a column as a Rust type, whichever backend returned it:
 

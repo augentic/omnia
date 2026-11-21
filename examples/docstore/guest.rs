@@ -68,7 +68,7 @@ async fn create_stop(Json(req): Json<CreateStopRequest>) -> omnia_sdk::Result<Js
 async fn get_stop(Path(id): Path<String>) -> omnia_sdk::Result<Json<Value>> {
     let stop: Stop = stops()
         .await?
-        .get_as(&id)
+        .get_json(&id)
         .await
         .context("fetching stop")?
         .ok_or_else(|| anyhow!("stop not found"))?;
@@ -112,14 +112,12 @@ async fn list_stops(Query(p): Query<StopQuery>) -> omnia_sdk::Result<Json<Value>
         filters.push(Filter::lte("stop_lat", v));
     }
 
-    let filter = if filters.is_empty() { None } else { Some(Filter::and(filters)) };
-
-    let query = docstore::Query {
-        filter,
-        order_by: vec![SortField::asc("stop_name")],
-        limit: p.limit,
-        after: p.continuation,
-    };
+    let query = docstore::Query::builder()
+        .maybe_filter(Filter::all(filters))
+        .order_by(vec![SortField::asc("stop_name")])
+        .maybe_limit(p.limit)
+        .maybe_after(p.continuation)
+        .build();
     let page = stops().await?.find(&query).await.context("querying stops")?;
 
     let stops = page

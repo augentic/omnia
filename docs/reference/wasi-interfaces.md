@@ -26,32 +26,31 @@ Notes:
 
 - Package names on crates.io carry the `omnia-` prefix (`omnia-wasi-keyvalue`, and so on); directory names in `crates/` drop it.
 - `wasi-keyvalue`, `wasi-blobstore`, `wasi-docstore`, `wasi-messaging`, `wasi-sql`, `wasi-websocket`, `wasi-identity`, `wasi-vault`, `wasi-otel`, and `wasi-config` serve `omnia:keyvalue`, `omnia:blobstore`, `omnia:docstore`, `omnia:messaging`, `omnia:sql`, `omnia:websocket`, `omnia:identity`, `omnia:vault`, `omnia:otel`, and `omnia:config` alone.
-- Every `omnia:*` package takes its `error`, its `timestamp`, and its `json` from `omnia:types`, which `wasi-types` holds. Each interface crate vendors it under `wit/deps`, and the guest bindings in `omnia-sdk` generate it once, so a guest matches one `Error` whichever interface returned it.
+- Every `omnia:*` package takes its `error`, its `timestamp`, and its `json` from `omnia:types`, which `wasi-types` holds. Each interface crate copies it into `wit/deps`, and the guest bindings in `omnia-sdk` generate it once, so a guest matches one `Error` whichever interface returned it.
 - The unstable interfaces are `consumer`, `log`, and `admin` in `omnia:messaging`, `uploads` and `presign` in `omnia:blobstore`, and `logs` in `omnia:otel`. `omnia-sdk` carries their bindings raw, with no helpers. Every host links them, and answers `unsupported` for each today.
 - Most defaults are genuinely zero-config and in-memory. The exceptions: `HttpDefault` and `WebSocketDefault` bind real TCP ports, and `IdentityDefault` needs OAuth credentials. `ModelDefault` is a zero-config echo — it answers text/json completions with the prompt itself but answers `format::schema` with `unsupported`, so deployments bind a real backend and tests script `ScriptedModel` or define inline scenario backends. `wasi-vcs` ships no default at all: a repository is a tree on disk, so a deployment that links `WasiVcs` names a production backend, and a test scripts a `VcsClient` of its own.
 - `omnia:vcs` opens a `workspace` handle on the repository or working copy at a `location`, a lent mount-root descriptor plus a relative subpath, and every call goes through the handle. The host resolves the location beneath its mount before any backend runs. A root that is not a mount, a subpath that leads out of one, and a change beneath a read-only mount are `denied`. A subpath that is not plainly spelled, such as one that starts at `/`, is `invalid`. None of these reaches the backend. The backend works through a `Place`, an open directory handle the host holds for the whole call, never a path it would walk again.
 - Each interface crate is the host implementation alone. A guest reaches every interface through the bindings `omnia-sdk` carries, generated from the same WIT.
+- Every `omnia:*` package is published to the `omnia.host` wasm-pkg registry. [WIT Packages](wit-packages.md) lists the packages and how a component outside `omnia-sdk` fetches one.
 
 ## Crate anatomy
 
 ```text
 wasi-keyvalue/
 ├── src/
-│   ├── lib.rs          # host-only; empty on wasm32
-│   ├── host.rs         # bindgen!, #[derive(HostCtx)] WasiKeyValue, Host impl
-│   └── host/           # Host-side implementation (native)
-│       ├── bucket_impl.rs    # omnia:keyvalue/bucket Host* impls on the table-held BucketHandle
-│       ├── store_impl.rs     # omnia:keyvalue/store Host* impls on HostView<'_, dyn KeyValueClient>
-│       ├── keys_impl.rs      # ... one file per WIT interface
-│       ├── resource.rs       # the Bucket trait a backend implements
-│       └── default_impl.rs   # KeyValueDefault backend
+│   ├── lib.rs            # bindgen!, #[derive(HostCtx)] WasiKeyValue, Host impl
+│   ├── bucket_impl.rs    # omnia:keyvalue/bucket Host* impls on the table-held BucketHandle
+│   ├── store_impl.rs     # omnia:keyvalue/store Host* impls on HostView<'_, dyn KeyValueClient>
+│   ├── keys_impl.rs      # ... one file per WIT interface
+│   ├── resource.rs       # the Bucket trait a backend implements
+│   └── default_impl.rs   # KeyValueDefault backend
 └── wit/
     ├── keyvalue.wit    # omnia:keyvalue, owned and edited here
     └── deps/
-        └── types.wit   # omnia:types, vendored from wasi-types
+        └── types.wit   # omnia:types, copied from wasi-types by wit-sync
 ```
 
-`host.rs` declares the host type and derives `HostCtx` on it with `#[host_ctx(client = KeyValueClient)]`, which emits the `HasData` and `HostCtx` impls that let a `runtime!` bundle serve it; its view is the library `HostView<'_, dyn KeyValueClient>` — `{ client, table }` — the `*_impl.rs` files implement the generated `Host*` traits on. See [Extending Omnia](../Architecture.md#extending-omnia) for the chain from backend to linker.
+`lib.rs` declares the host type and derives `HostCtx` on it with `#[host_ctx(client = KeyValueClient)]`, which emits the `HasData` and `HostCtx` impls that let a `runtime!` bundle serve it; its view is the library `HostView<'_, dyn KeyValueClient>` — `{ client, table }` — the `*_impl.rs` files implement the generated `Host*` traits on. Its `bindgen!` maps `omnia:types` onto `omnia_wasi_types`, so every host returns the one `omnia_wasi_types::Error`. See [Extending Omnia](../Architecture.md#extending-omnia) for the chain from backend to linker.
 
 ## Supporting crates
 

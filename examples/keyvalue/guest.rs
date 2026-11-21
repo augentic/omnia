@@ -19,7 +19,7 @@ use anyhow::{Context, anyhow};
 use axum::routing::post;
 use axum::{Json, Router};
 use bytes::Bytes;
-use omnia_sdk::keyvalue::{self, Lifetime, Precondition};
+use omnia_sdk::keyvalue;
 use serde_json::{Value, json};
 use wasip3::exports::http::handler::Guest;
 use wasip3::http::types::{ErrorCode, Request, Response};
@@ -47,14 +47,7 @@ async fn handler(body: Bytes) -> omnia_sdk::Result<Json<Value>> {
     // read at. A write that slips in between is a conflict carrying the entry
     // it left, so the one retry starts from that.
     let entry = res.context("`my_key` is missing")?;
-    let update = |revision| {
-        bucket.set(
-            "my_key".to_string(),
-            b"updated".to_vec(),
-            Lifetime::Keep,
-            Some(Precondition::Matches(revision)),
-        )
-    };
+    let update = |revision| bucket.compare_and_swap("my_key", Some(revision), b"updated", None);
     if let Err(conflict) = update(entry.revision).await.context("updating data")? {
         let current = conflict.current.context("`my_key` was deleted")?;
         if update(current.revision).await.context("retrying the update")?.is_err() {

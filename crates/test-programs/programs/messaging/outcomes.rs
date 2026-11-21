@@ -21,11 +21,11 @@ fn router() -> Router {
 }
 
 // the suite's order is not JSON, so the router refuses it before this runs
-async fn order(_: Context, _: Value) -> omnia_sdk::Result<()> {
+async fn order(_: Value) -> omnia_sdk::Result<()> {
     Ok(())
 }
 
-async fn pricing(_: Context, _: Delivery) -> omnia_sdk::Result<()> {
+async fn pricing(_: Delivery) -> omnia_sdk::Result<()> {
     Err(Error::bad_gateway("unavailable", "the pricing service did not answer"))
 }
 

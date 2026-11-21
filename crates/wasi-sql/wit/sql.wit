@@ -1,3 +1,5 @@
+/// SQL databases a deployment declares, queried with portable statements, in
+/// a transaction or not.
 package omnia:sql@0.1.0;
 
 /// The types the SQL interfaces share.

@@ -76,11 +76,11 @@ A [guest entry](#guest-entry) whose component is not compiled into the runtime �
 
 ### Bindings
 
-The guest side of each `omnia:*` interface: the Rust `wit-bindgen` generates from its WIT, committed under `crates/sdk/src/bindings` and re-exported by the `omnia-sdk` interface modules (`keyvalue`, `sql`, ...) with typed helpers beside the generated methods. `mise run bindings` regenerates them, and CI fails when the committed bindings drift from the WIT.
+The guest side of each `omnia:*` interface: the Rust `wit-bindgen` generates from its WIT, committed under `crates/sdk/src/bindings` and re-exported by the `omnia-sdk` interface modules (`keyvalue`, `sql`, ...) with typed helpers beside the generated methods. `mise run bindgen` regenerates them, and CI fails when the committed bindings drift from the WIT.
 
 ### Handler contract
 
-The transport-neutral unit of guest application logic: an `async fn(Context, I) -> Result<O, E>`, registered on a `Handlers` and invoked by the closed `Router`'s dispatch. The messaging router and the command façade are adapters that decode a transport event into `I` and encode the result back; an HTTP route is a plain axum handler that takes the same `Context` as an extractor. A handler reaches the host through the [bindings](#bindings), and a test runs it as the compiled component. See [Writing Guests](guides/writing-guests.md#the-handler-contract).
+The transport-neutral unit of guest application logic: an `async fn(I) -> Result<O, E>`, or an `async fn(Context, I) -> Result<O, E>` when it reads the invocation's metadata, registered on a `Handlers` and invoked by the closed `Router`'s dispatch. The messaging router and the command façade are adapters that decode a transport event into `I` and encode the result back, as a request's reply on a request route; an HTTP route is a plain axum handler that may take the same `Context` as an extractor. A handler reaches the host through the [bindings](#bindings), and a test runs it as the compiled component. See [Writing Guests](guides/writing-guests.md#the-handler-contract).
 
 ### Provider
 
@@ -96,7 +96,7 @@ What a command reports on stderr when a verb fails: the `Failure` type wrapping 
 
 ### Exit map
 
-The fixed mapping from an `omnia_sdk::Error` variant to a process exit status, `Error::exit_code()`: `BadRequest` 1, `NotFound` 2, `ServerError` 3, `BadGateway` 4 — the exit-code twin of `Error::status()` (400 / 404 / 500 / 502). A clap usage error exits `USAGE_EXIT` (64, `EX_USAGE`) rather than clap's default 2, so exit 2 always means a `NotFound` envelope. A guest never chooses an exit code; the error class does.
+The fixed mapping from an `omnia_sdk::Error`'s `ErrorKind` to a process exit status, `Error::exit_code()`: `BadRequest` 1, `NotFound` 2, `ServerError` 3, `BadGateway` 4, `Conflict` 5 — the exit-code twin of `Error::status()` (400 / 404 / 500 / 502 / 409). A clap usage error exits `USAGE_EXIT` (64, `EX_USAGE`) rather than clap's default 2, so exit 2 always means a `NotFound` envelope. A guest never chooses an exit code; the error class does.
 
 ## Runtime platform
 
@@ -108,7 +108,7 @@ Same layer as **Layers 1 + 2 (composition root + live-runtime SDK + WASI interfa
 
 ### Facade
 
-The `omnia` crate, the **composition root** and an embedder's only omnia dependency: it owns deployment assembly and process lifecycle, composes the optional crates — `omnia-link` (guest-to-guest dispatch, behind the `link` feature), `omnia-plugin` (the guest loader, behind the `loader` feature), `omnia-cli` (the `run` grammar, a leaf crate behind the `cli` feature), and `omnia-compile` (the ahead-of-time compiler, a leaf crate whose Cranelift backend the `jit` feature turns on) — and re-exports the `omnia-core` live-runtime SDK and the `runtime!` macro under `omnia::…` paths.
+The `omnia` crate, the **composition root** and an embedder's only omnia dependency: it owns deployment assembly and process lifecycle, composes the crates beneath it — `omnia-link` (guest-to-guest dispatch, behind the `link` feature), `omnia-plugin` (the guest loader, behind the `loader` feature), `omnia-cli` (the `run` grammar, a leaf crate), and `omnia-compile` (the ahead-of-time compiler, a leaf crate whose Cranelift backend the `jit` feature turns on) — and re-exports the `omnia-core` live-runtime SDK and the `runtime!` macro under `omnia::…` paths.
 
 ### Runtime contract
 

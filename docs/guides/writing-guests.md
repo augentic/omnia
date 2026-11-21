@@ -55,7 +55,7 @@ cargo build --example <name>-wasm --target wasm32-wasip3
 
 ## The handler contract
 
-`omnia-sdk` keeps application logic independent of how it is invoked. A handler is an `async fn` over a **context** and its input:
+`omnia-sdk` keeps application logic independent of how it is invoked. A handler is an `async fn` over its input, and over a **context** when it reads the invocation's metadata:
 
 - A **context** (`Context`) carries the public transport-neutral `metadata`: the request, correlation, and causation ids, the tenant when the transport names one, and the deadline the host set for the invocation.
 - A handler reaches the host through the interface modules (`keyvalue`, `sql`, `messaging`, ...), never through the context. Each opens a resource on a binding the deployment declares (see [Using host interfaces](#using-host-interfaces)).
@@ -63,15 +63,13 @@ cargo build --example <name>-wasm --target wasm32-wasip3
 An **HTTP handler** is a plain [Axum](https://github.com/tokio-rs/axum) handler. `Context` is an extractor over any router state; the input comes through axum's own `Path`, `Query`, and `Json` extractors; the output is anything `IntoResponse`, typically `Json<Reply>`:
 
 ```rust,noplayground
-async fn create_item(
-    context: Context, Json(input): Json<CreateItem>,
-) -> Result<Json<ItemReply>, Error> {
-    let bucket = keyvalue::open(keyvalue::DEFAULT).await?;
+async fn create_item(Json(input): Json<CreateItem>) -> Result<Json<ItemReply>, Error> {
+    let bucket = keyvalue::default().await?;
     // ...
 }
 ```
 
-A **messaging or command handler** is an `async fn(Context, I) -> Result<O, E>` named for the operation, taking the context first as an HTTP handler does and the input DTO by value. Every fn of that shape is a `Handler<I>` through a blanket impl, as is any `Clone` closure of it — so a closure can carry configuration into a route. Implementing `Handler<I>` by hand on a local non-fn type is the escape hatch for the rare case a fn cannot express. To call a fn that takes a context without a router, build its context with `Context::new(metadata)`.
+A **messaging or command handler** is an `async fn(I) -> Result<O, E>` named for the operation, taking the input DTO by value. One that reads the metadata is an `async fn(Context, I) -> Result<O, E>`, taking the context first as an HTTP handler does. Every fn of either shape is a `Handler<I, M>` through a blanket impl, where the inferred `M` is the fn's argument list, as is any `Clone` closure of it — so a closure can carry configuration into a route. Implementing `Handler<I, M>` by hand on a local non-fn type is the escape hatch for the rare case a fn cannot express. To call a fn that takes a context without a router, build its context with `Context::new(metadata)`.
 
 A module registers its handlers on a `Handlers` of its own, and the guest root merges each module's and closes the whole into its one `Router`:
 
@@ -93,11 +91,11 @@ Logic shared by an HTTP route and a topic lives in a plain fn both call: the axu
 
 One `Handlers` maps every transport's events onto handlers: an HTTP route is registered through axum's own `get`/`post`/`put`/`patch`/`delete` (`route`), a messaging topic by exact name (`topic`), and a CLI subcommand by name (`command`), and `into_router()` closes them into the one `Router`. Each transport's `export!` macro (`http::export!`, `messaging::export!`, or `command::export!`) binds its WASI export, calling the router fn on each invocation. It expands to the telemetry-scoped export on `wasm32` and binds nothing on native targets. The HTTP export also layers `http::trace`, which serves each request inside a `handler` span carrying the request and correlation ids, the method, and the matched route; a native host or test layers it with `axum::middleware::from_fn(trace)`. A delivery and a subcommand run inside the same span through the router's dispatch, which names the `topic` or the `command`.
 
-Messaging is `topic("items.created", item_created)` on the same `Handlers`; topic matching is exact. A path or topic registered twice panics where the two meet, and `Handlers::into_router` is the router's only constructor. `topic` decodes JSON; `topic_with(topic, handler, decode)` takes a decoder `Fn(&Delivery) -> omnia_sdk::Result<I>` over the whole `Delivery` for any other wire format.
+Messaging is `topic("items.created", item_created)` on the same `Handlers`; topic matching is exact. A path or topic registered twice panics where the two meet, and `Handlers::into_router` is the router's only constructor. `topic` decodes JSON; `topic_with(topic, handler, decode)` takes a decoder `Fn(&Delivery) -> omnia_sdk::Result<I>` over the whole `Delivery` for any other wire format. `request` and `request_with` register a handler that answers a request (see [Handling incoming messages](#handling-incoming-messages)).
 
 ### Errors
 
-An HTTP handler's error is anything `IntoResponse`. An `omnia_sdk::Error` becomes the JSON `ErrorBody` (`{"error","message"}`) at the variant's status, the same envelope the command transport writes to stderr; `?` on an `anyhow::Error` or a `serde_json::Error` converts into it. The macros `bad_request!`, `not_found!`, `server_error!`, and `bad_gateway!` build a variant under its default code; `Error::bad_request(code, description)` and its siblings name the code, for a specification's own reason code (`"segment_unknown"`). A domain error with its own wire shape (another status, another content type such as an XML fault) implements `IntoResponse` itself and delegates its host-failure variant to `omnia_sdk::Error::into_response`. A malformed body or query is refused by axum's extractor before the handler runs (`400`, or `415` without `Content-Type: application/json`).
+An HTTP handler's error is anything `IntoResponse`. An `omnia_sdk::Error` becomes the JSON `ErrorBody` (`{"error","message"}`) at its kind's status, the same envelope the command transport writes to stderr; `?` on an `anyhow::Error` or a `serde_json::Error` converts into it. The macros `bad_request!`, `not_found!`, `conflict!`, `server_error!`, and `bad_gateway!` build an error of their kind under its default code; `Error::bad_request(code, description)` and its siblings name the code, for a specification's own reason code (`"segment_unknown"`). `Error::kind` answers the `ErrorKind` a caller matches on. A domain error with its own wire shape (another status, another content type such as an XML fault) implements `IntoResponse` itself and delegates its host failures to `omnia_sdk::Error::into_response`. A malformed body or query is refused by axum's extractor before the handler runs (`400`, or `415` without `Content-Type: application/json`).
 
 ## HTTP handlers
 
@@ -116,7 +114,7 @@ http::export!(router);
 
 The router fn may answer an `axum::Router` instead, for a guest that needs axum's own routing features.
 
-For **outbound** HTTP requests inside a handler, call `omnia_sdk::http::fetch(request).await` with a standard `http::Request<Bytes>`, or `fetch_json` to require a 2xx status and decode a JSON reply. `omnia_sdk::http::send` takes any body and fails with the host's own `ErrorCode`, as `examples/http-proxy` shows. With the default `http` feature, `omnia_sdk::http::cache::HttpCache` fetches through an `omnia:keyvalue` bucket. A request carrying `Cache-Control: max-age` and an `If-None-Match` entity-tag is then answered from the bucket while its stored response lives, as `examples/http-cache` shows.
+For **outbound** HTTP requests inside a handler, start a request with `http::get`, `post`, `put`, `patch`, or `delete`, set its `header`, `bearer` token, `json` or `body`, and `timeout`, and end it with `fetch`, or `fetch_json` to require a 2xx status and decode a JSON reply. `omnia_sdk::http::fetch(request)` and `fetch_json(request)` take a standard `http::Request<Bytes>` built another way. `omnia_sdk::http::send` takes any body and fails with the host's own `ErrorCode`, as `examples/http-proxy` shows. With the default `http` feature, `omnia_sdk::http::cache::HttpCache` fetches through an `omnia:keyvalue` bucket. A request carrying `Cache-Control: max-age` and an `If-None-Match` entity-tag is then answered from the bucket while its stored response lives, as `examples/http-cache` shows.
 
 > **Advanced: raw WASI HTTP export.** When you need to customize the `wasi:http/handler` export directly (as the standalone `examples/` do to show the low-level binding), implement `wasip3::exports::http::handler::Guest` and hand the request to `omnia_sdk::http::serve`, which opens the telemetry scope and the `handler` span itself:
 >
@@ -134,18 +132,19 @@ For **outbound** HTTP requests inside a handler, call `omnia_sdk::http::fetch(re
 
 ## Using host interfaces
 
-Each `omnia:*` interface is a module of `omnia-sdk`, and a module over resources the deployment declares has the same shape. A handler opens a resource with the module's one opener, `open` or `connect`, naming a binding the deployment declares. The types it holds are the generated ones, at the module root, and their helpers take `&str` and `&[u8]` and return a `Result`. The bindings `wit-bindgen` generates stay public under the module, such as `keyvalue::store` and `keyvalue::types`, for the raw calls. The guest never names a backend implementation — the host decides what backs each interface.
+Each `omnia:*` interface is a module of `omnia-sdk`, and a module over resources the deployment declares has the same shape. A handler opens a resource with the module's one opener, `open` or `connect`, naming a binding the deployment declares. The types it holds are the generated ones, at the module root, and their helpers take `&str` and `&[u8]` and return a `Result`. A short verb over borrowed arguments is the everyday form, such as `Bucket::read`. The generated name is the full-control form, such as `Bucket::set` with its lifetime and precondition. A helper that encodes or decodes JSON ends in `_json`. The bindings `wit-bindgen` generates stay public under the module, such as `keyvalue::store` and `keyvalue::types`, for the raw calls. The guest never names a backend implementation — the host decides what backs each interface.
 
-A binding fails with the shared `types::Error`, whose variant names the class of failure, such as `not-found`, `invalid`, or `unavailable`. `?` converts it into an `omnia_sdk::Error` under that code, every interface alike. The [provider contract](../reference/provider-contract.md#enforce-the-argument-rules) says which interfaces carry each code exactly. Absence is `None` rather than an error. An outcome the interface names for the caller to act on is the inner `Err` of a nested `Result<Result<T, Outcome>>`, such as a `keyvalue::Conflict` or a `model::Exhausted`, and `?` on one gives a `BadRequest` under the outcome's name. A module whose bindings a deployment names, such as `keyvalue` or `sql`, has a `DEFAULT` for the one a guest opens when it names no other.
+A binding fails with the shared `types::Error`, whose variant names the class of failure, such as `not-found`, `invalid`, or `unavailable`. `?` converts it into an `omnia_sdk::Error` under that code, every interface alike. The [provider contract](../reference/provider-contract.md#enforce-the-argument-rules) says which interfaces carry each code exactly. Absence is `None` rather than an error. An outcome the interface names for the caller to act on is the inner `Err` of a nested `Result<Result<T, Outcome>>`, such as a `keyvalue::Conflict` or a `model::Exhausted`. `?` on a `model`, `plugins`, or `vcs` outcome gives an `omnia_sdk::Error` under the outcome's name: a `BadRequest` for `model::Exhausted`, and a `Conflict` for the others. A module whose bindings a deployment names, such as `keyvalue` or `sql`, has a `DEFAULT` for the one a guest opens when it names no other, and `default()` opens it.
 
 Key-value (`omnia:keyvalue`):
 
 ```rust,noplayground
 use omnia_sdk::keyvalue::{self, Conflict};
 
-let bucket = keyvalue::open(keyvalue::DEFAULT).await?;
+let bucket = keyvalue::default().await?;
 bucket.set_json("my_key", &body, Some(Duration::from_secs(300))).await?;
 let res: Option<Body> = bucket.get_json("my_key").await?;
+let visits = bucket.update_json("visits", None, |count: Option<u64>| Ok(count.unwrap_or(0) + 1)).await?;
 
 let locks = keyvalue::open("locks").await?;
 let lease = Some(Duration::from_secs(30));
@@ -159,18 +158,18 @@ The deployment declares every bucket a guest opens, and opening an undeclared on
 A write names what it does to the entry's lifetime, a `Lifetime` the host enforces:
 
 - `Forever` and `TtlMs` replace it, as `set_json` does, and a `Duration` converts into the second.
-- `Keep` and `KeepOrTtlMs` leave an existing entry the time it has left, as `compare_and_swap` does.
-- `increment` gives its TTL only to a counter it creates.
+- `Keep` and `KeepOrTtlMs` leave an existing entry the time it has left, as `compare_and_swap`, `set_json_if`, and `update_json` do.
+- `add`, like the generated `increment`, gives its TTL only to a counter it creates.
 - A zero TTL fails with the code `invalid`.
 
-`read`, `write`, and `remove` are the unconditional forms over raw bytes. The generated `get` reads a value with its `Revision`, and `set` with a `Precondition` writes only while it holds: the key is `Absent`, or its entry `Matches` a revision read before. A precondition that does not hold changes nothing and answers the entry found.
+`read`, `write`, `remove`, and `contains` are the unconditional forms over raw bytes. The generated `get` reads a value with its `Revision`, and `set` with a `Precondition` writes only while it holds: the key is `Absent`, or its entry `Matches` a revision read before. A precondition that does not hold changes nothing and answers the entry found. `compare_and_swap` and `set_json_if` take the `Revision` read before, or `None` for an absent key, and answer the new one. `update_json` stores what its closure makes of the current value, and runs the closure again over the newer value when another write lands first.
 
 Publishing a message (`omnia:messaging`), with a key that orders and partitions it:
 
 ```rust,noplayground
 use omnia_sdk::messaging::{self, Message};
 
-let client = messaging::connect(messaging::DEFAULT).await?;
+let client = messaging::default().await?;
 let message = Message::json(&payload)?.with_key("customer-7");
 client.send("my-topic", message).await?;
 ```
@@ -179,19 +178,19 @@ Every interface has a module, an example, and where it needs one a deep dive:
 
 | Interface | Module (`omnia_sdk`) | Opener | Example | Deep dive |
 | --------- | -------------------- | ------ | ------- | --------- |
-| Key-value | `keyvalue` | `open` | `examples/keyvalue` | — |
-| Messaging | `messaging` | `connect` | `examples/messaging` | [Messaging](messaging.md) |
-| SQL | `sql` | `open` | `examples/sql` | [SQL](sql.md) |
+| Key-value | `keyvalue` | `open`, `default` | `examples/keyvalue` | — |
+| Messaging | `messaging` | `connect`, `default` | `examples/messaging` | [Messaging](messaging.md) |
+| SQL | `sql` | `open`, `default` | `examples/sql` | [SQL](sql.md) |
 | Document store | `docstore` | `open` | `examples/docstore` | [Document Store](document-store.md) |
-| Blob store | `blobstore` | `open` | `examples/blobstore` | — |
-| Secrets | `vault` | `open` | `examples/vault` | — |
+| Blob store | `blobstore` | `open`, `create` | `examples/blobstore` | — |
+| Secrets | `vault` | `open`, `default` | `examples/vault` | — |
 | Config | `config` | `get`, `require` | `examples/config` | — |
-| Identity/OAuth | `identity` | `open` | `examples/identity` | — |
-| Outbound HTTP | `http` | `fetch` | `examples/http-proxy`, `examples/http-cache` | — |
-| Model completions | `model` | `open`, `Request::complete` | `examples/model` | [Model Completions](model-completions.md) |
+| Identity/OAuth | `identity` | `open`, `default` | `examples/identity` | — |
+| Outbound HTTP | `http` | `get`, `post`, `put`, `patch`, `delete`, `fetch` | `examples/http-proxy`, `examples/http-cache` | — |
+| Model completions | `model` | `open`, `default`, `Request::complete` | `examples/model` | [Model Completions](model-completions.md) |
 | Version control | `vcs` | `open`, `init`, `clone` | — | — |
 | Dynamic plugins | `plugins` | `load` | — | — |
-| WebSockets | `websocket` | `connect` | `examples/websocket` | [Messaging § WebSockets](messaging.md#websockets) |
+| WebSockets | `websocket` | `connect`, `default` | `examples/websocket` | [Messaging § WebSockets](messaging.md#websockets) |
 
 ## Handling incoming messages
 
@@ -207,7 +206,7 @@ fn messaging_router() -> Router {
 messaging::export!(messaging_router);
 ```
 
-A handler that answers a request registers with `topic_with`, so its decoder can pass the delivery's `reply_to` into the input (see [Messaging § Request-reply](messaging.md#request-reply)).
+A handler that answers a request registers with `request`, which sends its output back as JSON, or with `request_with`, whose handler returns the reply `Message` (see [Messaging § Request-reply](messaging.md#request-reply)).
 
 For guests that need direct control over the raw `omnia:messaging/incoming-handler` export (for example, `examples/messaging` demonstrating request-reply and fan-out, or a guest that sets a release delay), implement `omnia_sdk::exports::messaging::incoming_handler::Guest`, bind it with `omnia_sdk::exports::messaging::export!`, and dispatch through `omnia_sdk::messaging::handle`, which opens the guest telemetry scope around the delivery and settles a failure:
 
@@ -235,7 +234,7 @@ use std::fmt;
 
 use clap::Args;
 use omnia_sdk::command::{self, Render};
-use omnia_sdk::{Context, Error, Handlers, Router};
+use omnia_sdk::{Error, Handlers, Router};
 use serde::Serialize;
 
 /// Sync items from a source.
@@ -256,7 +255,7 @@ impl Render for Synced {
     }
 }
 
-async fn sync(context: Context, input: SyncInput) -> Result<Synced, Error> {
+async fn sync(input: SyncInput) -> Result<Synced, Error> {
     // ...
 }
 
@@ -282,15 +281,16 @@ The pieces, in the order argv flows through them:
 
 A decode or handler error becomes a `Failure` envelope on stderr, in the same `Format` as a success body. A handler's error takes its class and code from the first `omnia_sdk::Error`, binding error, or typed outcome in its source chain, as on a topic, and anything else is a `ServerError`. The process exits with `Error::exit_code()`:
 
-| Error class | `error` (the macros' default code) | Exit | HTTP status |
+| `ErrorKind` | `error` (the macros' default code) | Exit | HTTP status |
 | ----------- | ---------------------------------- | ---- | ----------- |
 | `BadRequest` | `bad_request` | 1 | 400 |
 | `NotFound` | `not_found` | 2 | 404 |
 | `ServerError` | `server_error` | 3 | 500 |
 | `BadGateway` | `bad_gateway` | 4 | 502 |
+| `Conflict` | `conflict` | 5 | 409 |
 | clap usage error | — | 64 | — |
 
-As text the envelope is `error[<code>]: <message>` followed by `hint: <hint>` when a hint is attached; as JSON it is flat: `{"error","message","exit-code","hint"?}` (the hint key is omitted when absent). `error` and `message` are the transport-neutral `ErrorBody` — `Error::into_response` emits the same two fields as an `application/json` body at the variant's status — so a client reads one discriminant whether it reached the handler over HTTP or a shell. Usage errors exit 64 rather than clap's default 2, so exit 2 always means a `NotFound` envelope.
+As text the envelope is `error[<code>]: <message>` followed by `hint: <hint>` when a hint is attached; as JSON it is flat: `{"error","message","exit-code","hint"?}` (the hint key is omitted when absent). `error` and `message` are the transport-neutral `ErrorBody` — `Error::into_response` emits the same two fields as an `application/json` body at its kind's status — so a client reads one discriminant whether it reached the handler over HTTP or a shell. Usage errors exit 64 rather than clap's default 2, so exit 2 always means a `NotFound` envelope.
 
 - Arguments after `--` on the host command line arrive as the guest's argv (`args[0]` is the program name, supplied by the runtime).
 - The host runtime must be built with `mode: command` — see [Composing a Runtime](composing-a-runtime.md).
@@ -306,9 +306,7 @@ Annotate handlers with `#[omnia_sdk::otel::instrument]`, or `#[tracing::instrume
 
 ```rust
 #[omnia_sdk::otel::instrument]
-pub(crate) async fn place(
-    context: Context, Path(id): Path<String>,
-) -> omnia_sdk::Result<Json<Option<Place>>> { /* ... */ }
+pub(crate) async fn place(Path(id): Path<String>) -> omnia_sdk::Result<Json<Option<Place>>> { /* ... */ }
 ```
 
 A guest that binds its WASI export by hand annotates the export's `handle` with `#[omnia_sdk::otel::instrument]`, which opens that scope itself. `omnia_sdk::http::serve` and `omnia_sdk::messaging::handle` already do:

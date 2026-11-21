@@ -7,12 +7,13 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use omnia::{Connect as _, ExitStatus};
 use omnia_test::host::{Backends, Deployment};
 use omnia_wasi_keyvalue::{
-    Bucket, ConnectOptions, Error, FutureResult, KeyValueClient, KeyValueDefault, Lifetime,
-    WasiKeyValue,
+    Bucket, ConnectOptions, Entry, Error, FutureResult, KeyValueClient, KeyValueDefault, Lifetime,
+    Precondition, Revision, WasiKeyValue,
 };
 
 // Every guest program in `crates/test-programs` must have a matching test
@@ -67,6 +68,107 @@ async fn keyvalue_state_store() {
     assert_eq!(backends.state("host.raw").await, Some(b"raw".to_vec()));
     assert_eq!(backends.state("host.persist").await, Some(b"kept".to_vec()));
     assert_eq!(backends.state("host.expiring").await, None);
+}
+
+#[tokio::test]
+async fn keyvalue_update_raced() {
+    let racing = Racing {
+        inner: declaring(&["default"]).await,
+        calls: Arc::default(),
+        raced: Arc::default(),
+    };
+    let backends = Backends::defaults().await.keyvalue(racing);
+    let bucket = backends.keyvalue.inner.open_bucket("default".to_owned()).await.expect("bucket");
+    let seeded = bucket.set("visits".to_owned(), b"1".to_vec(), Lifetime::Replace(None), None);
+    let seeded = seeded.await.expect("seed").expect("no precondition");
+
+    let status = Deployment::new()
+        .guest("guest", test_programs::KEYVALUE_UPDATE_RACED)
+        .run_host::<WasiKeyValue, _>(backends.clone())
+        .await
+        .expect("guest runs");
+    assert_eq!(status, ExitStatus::SUCCESS, "guest failed");
+
+    // one read, then each store under the revision of what it read: the
+    // seed, then the racing write the conflict carried back
+    let raced = backends.keyvalue.raced.lock().expect("raced").clone().expect("a racing write");
+    let calls = backends.keyvalue.calls.lock().expect("calls").clone();
+    let [seeded, raced] = [seeded, raced].map(|revision| Some(Precondition::Matches(revision)));
+    assert_eq!(calls, [Call::Get, Call::Set(seeded), Call::Set(raced)]);
+    let visits = bucket.get("visits".to_owned()).await.expect("get").map(|entry| entry.value);
+    assert_eq!(visits, Some(b"11".to_vec()));
+}
+
+// lands a write of `10` before the first conditional set reaches the
+// store, as a writer racing the guest would, and records each call
+#[derive(Clone, Debug)]
+struct Racing {
+    inner: KeyValueDefault,
+    calls: Arc<Mutex<Vec<Call>>>,
+    raced: Arc<Mutex<Option<Revision>>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Call {
+    Get,
+    Set(Option<Precondition>),
+}
+
+impl KeyValueClient for Racing {
+    fn open_bucket(&self, identifier: String) -> FutureResult<Arc<dyn Bucket>> {
+        let racing = self.clone();
+        Box::pin(async move {
+            let inner = racing.inner.open_bucket(identifier).await?;
+            Ok(Arc::new(Raced { inner, racing }) as Arc<dyn Bucket>)
+        })
+    }
+}
+
+#[derive(Debug)]
+struct Raced {
+    inner: Arc<dyn Bucket>,
+    racing: Racing,
+}
+
+impl Bucket for Raced {
+    fn get(&self, key: String) -> FutureResult<Option<Entry>> {
+        self.racing.calls.lock().expect("calls").push(Call::Get);
+        self.inner.get(key)
+    }
+
+    fn set(
+        &self, key: String, value: Vec<u8>, lifetime: Lifetime, when: Option<Precondition>,
+    ) -> FutureResult<Result<Revision, Option<Entry>>> {
+        self.racing.calls.lock().expect("calls").push(Call::Set(when.clone()));
+        let inner = Arc::clone(&self.inner);
+        let raced = Arc::clone(&self.racing.raced);
+        Box::pin(async move {
+            if when.is_some() && raced.lock().expect("raced").is_none() {
+                let racing = inner.set(key.clone(), b"10".to_vec(), Lifetime::Replace(None), None);
+                let revision = racing.await?.expect("an unconditional set");
+                *raced.lock().expect("raced") = Some(revision);
+            }
+            inner.set(key, value, lifetime, when).await
+        })
+    }
+
+    fn delete(
+        &self, _key: String, _when: Option<Revision>,
+    ) -> FutureResult<Result<(), Option<Entry>>> {
+        unreachable!("the scenario deletes nothing")
+    }
+
+    fn exists(&self, _key: String) -> FutureResult<bool> {
+        unreachable!("the scenario checks no key")
+    }
+
+    fn keys(&self) -> FutureResult<Vec<String>> {
+        unreachable!("the scenario lists no key")
+    }
+
+    fn increment(&self, _key: String, _delta: i64, _ttl: Option<Duration>) -> FutureResult<i64> {
+        unreachable!("the scenario counts nothing")
+    }
 }
 
 // fails `open_bucket` with the kind a bucket is named for, delegating any

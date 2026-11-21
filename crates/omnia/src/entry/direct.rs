@@ -1,10 +1,10 @@
 //! Entry planning for the generated `main`: macro-compiled [`MainOptions`]
 //! plus process argv resolve into a deployment builder.
 //!
-//! Core plans only direct commands; the standard `run` grammar lives in
-//! `omnia-cli`, which delegates the direct shape back here. [`plan`] is pure
-//! with respect to the process — argv is a parameter — so argv policy is
-//! unit-testable without spawning a binary.
+//! This module plans direct commands; every other shape takes the `run`
+//! grammar in `omnia-cli`. [`plan_direct`] is pure with respect to the
+//! process — argv is a parameter — so argv policy is unit-testable without
+//! spawning a binary.
 
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -114,31 +114,11 @@ impl EntryPlan {
     }
 }
 
-/// Resolve [`MainOptions`] plus process argv into an [`EntryPlan`].
-///
-/// Command mode with a compiled-in manifest is a *direct command*: no host
-/// CLI grammar, argv belongs to the guest verbatim. The direct plan always
-/// carries the compiled-in manifest, so the builder never falls through to
-/// its own `OMNIA_MANIFEST` lookup — the environment is untouched by design.
-/// Every other shape needs the standard `run` grammar, which only
-/// `omnia-cli` provides.
-///
-/// # Errors
-///
-/// Returns an error if the shape is not a direct command, or if the direct
-/// plan fails (see [`plan_direct`]).
-pub fn plan(options: MainOptions, argv: impl IntoIterator<Item = OsString>) -> Result<EntryPlan> {
-    if options.is_direct() {
-        return plan_direct(options, argv);
-    }
-    Err(anyhow!(
-        "this runtime was built without omnia's `cli` feature; compile the deployment in \
-         (command mode with a manifest) or enable the feature"
-    ))
-}
-
 /// Plan a direct command: argv belongs to the guest verbatim, and the
 /// compiled-in manifest is the sole source.
+///
+/// The plan always carries that manifest, so the builder never falls through
+/// to its own `OMNIA_MANIFEST` lookup.
 ///
 /// The host reads the verbosity flags (`-v`, `-q`, and their long forms) out
 /// of argv to select the run's levels, but removes nothing: the guest
@@ -173,7 +153,7 @@ pub fn plan_direct(
     })
 }
 
-// Unit tests by design: `plan` is factored pure (argv is a parameter)
+// Unit tests by design: `plan_direct` is factored pure (argv is a parameter)
 // precisely so argv policy is testable without spawning a binary.
 #[cfg(test)]
 mod tests {
@@ -202,9 +182,11 @@ mod tests {
     fn host_grammar() {
         // nothing in argv is reserved for the host
         let options = MainOptions::new(Mode::Command).manifest(inline_source("app"));
-        let plan =
-            plan(options, argv(&["bin", "--manifest", "foo.toml", "run", "--debug", "greet"]))
-                .unwrap_or_else(|error| panic!("{}", fatal(&error)));
+        let plan = plan_direct(
+            options,
+            argv(&["bin", "--manifest", "foo.toml", "run", "--debug", "greet"]),
+        )
+        .unwrap_or_else(|error| panic!("{}", fatal(&error)));
         assert_eq!(plan.args, ["--manifest", "foo.toml", "run", "--debug", "greet"]);
         assert_eq!(first_guest(&plan), "app");
         assert_eq!(
@@ -221,7 +203,7 @@ mod tests {
         use crate::LevelFilter;
 
         let options = MainOptions::new(Mode::Command).manifest(inline_source("app"));
-        let verbose = plan(options, argv(&["bin", "-v", "greet"]))
+        let verbose = plan_direct(options, argv(&["bin", "-v", "greet"]))
             .unwrap_or_else(|error| panic!("{}", fatal(&error)));
         assert_eq!(verbose.args, ["-v", "greet"]);
         assert_eq!(
@@ -234,7 +216,7 @@ mod tests {
         );
 
         let options = MainOptions::new(Mode::Command).manifest(inline_source("app"));
-        let conflict = plan(options, argv(&["bin", "-v", "greet", "--quiet"]))
+        let conflict = plan_direct(options, argv(&["bin", "-v", "greet", "--quiet"]))
             .unwrap_or_else(|error| panic!("{}", fatal(&error)));
         assert_eq!(conflict.args, ["-v", "greet", "--quiet"]);
         assert_eq!(
@@ -244,14 +226,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn non_direct() {
-        let error = plan(MainOptions::new(Mode::Server), argv(&["bin", "run", "guest.wasm"]))
-            .err()
-            .expect("core cannot serve the `run` grammar");
-        assert!(fatal(&error).contains("built without omnia's `cli` feature"));
-    }
-
     #[cfg(unix)]
     #[test]
     fn non_utf8() {
@@ -259,7 +233,7 @@ mod tests {
 
         let options = MainOptions::new(Mode::Command).manifest(inline_source("app"));
         let bad = OsString::from_vec(vec![b'f', b'o', 0x80]);
-        let error = plan(options, vec![OsString::from("bin"), bad])
+        let error = plan_direct(options, vec![OsString::from("bin"), bad])
             .err()
             .expect("non-UTF-8 argv must fail, not panic");
         assert!(fatal(&error).contains("not valid UTF-8"));

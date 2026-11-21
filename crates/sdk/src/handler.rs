@@ -5,11 +5,12 @@ use std::error::Error;
 use std::future::Future;
 use std::time::{Duration, SystemTime};
 
+use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 #[cfg(feature = "command")]
 use crate::command::program::{Commands, Program};
-use crate::messaging::{Delivery, Topics};
+use crate::messaging::{Delivery, Message, Topics};
 
 /// Transport-neutral invocation metadata.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -102,13 +103,18 @@ impl Context {
     }
 }
 
-/// An application handler: any `async fn(Context, I) -> Result<O, E>`.
+/// An application handler: an `async fn(Context, I)` or an `async fn(I)`
+/// that returns `Result<O, E>`.
 ///
-/// The context comes first, as it does for an HTTP handler that takes
-/// [`Context`] as its leading extractor. Every such fn (and every `Clone`
-/// closure of that shape) is a `Handler` through the blanket impl; implement
-/// the trait by hand only for a non-fn type.
-pub trait Handler<I>: Clone + Send + Sync + 'static {
+/// A handler that reads its invocation's [`Metadata`] takes the [`Context`]
+/// first, as an HTTP handler takes it as its leading extractor, and one that
+/// does not leaves it out. `M` is the fn's argument list as a tuple,
+/// `(Context, I)` or `(I,)`, so it is inferred and never named.
+///
+/// Every such fn, and every `Clone` closure of either shape, is a `Handler`
+/// through the blanket impls. Implement the trait by hand only for a non-fn
+/// type.
+pub trait Handler<I, M>: Clone + Send + Sync + 'static {
     /// The typed handler output.
     type Output: Send;
 
@@ -116,11 +122,10 @@ pub trait Handler<I>: Clone + Send + Sync + 'static {
     ///
     /// A topic or subcommand reports it as an [`Error`](crate::Error):
     ///
-    /// - The first domain error in its source chain sets the variant and
-    ///   code. That is an [`Error`](crate::Error), a host's
+    /// - The first domain error in its source chain sets the kind and code. That is an [`Error`](crate::Error), a host's
     ///   [`types::Error`](crate::keyvalue::types::Error), or a typed outcome
     ///   the [`Error`](crate::Error) docs list.
-    /// - Any other error is a [`ServerError`](crate::Error::ServerError) with
+    /// - Any other error is a [`ServerError`](crate::ErrorKind::ServerError) with
     ///   the code `server_error`.
     /// - The description is the whole chain.
     type Error: Error + Send + Sync + 'static;
@@ -136,8 +141,9 @@ pub trait Handler<I>: Clone + Send + Sync + 'static {
 }
 
 // `I` is a trait parameter rather than an associated type: an associated
-// `Input` would be unconstrained in this blanket impl (E0207).
-impl<F, Fut, I, O, E> Handler<I> for F
+// `Input` would be unconstrained in these blanket impls (E0207). `M` keeps
+// them apart, as a fn has one argument list or the other.
+impl<F, Fut, I, O, E> Handler<I, (Context, I)> for F
 where
     F: FnOnce(Context, I) -> Fut + Clone + Send + Sync + 'static,
     Fut: Future<Output = Result<O, E>> + Send,
@@ -151,6 +157,23 @@ where
         self, context: Context, input: I,
     ) -> impl Future<Output = Result<Self::Output, Self::Error>> + Send {
         self(context, input)
+    }
+}
+
+impl<F, Fut, I, O, E> Handler<I, (I,)> for F
+where
+    F: FnOnce(I) -> Fut + Clone + Send + Sync + 'static,
+    Fut: Future<Output = Result<O, E>> + Send,
+    O: Send,
+    E: Error + Send + Sync + 'static,
+{
+    type Error = E;
+    type Output = O;
+
+    fn call(
+        self, _context: Context, input: I,
+    ) -> impl Future<Output = Result<Self::Output, Self::Error>> + Send {
+        self(input)
     }
 }
 
@@ -204,10 +227,11 @@ impl Handlers {
     /// # Panics
     ///
     /// Panics when the topic is empty or already registered.
-    pub fn topic<F, I>(mut self, topic: impl Into<String>, handler: F) -> Self
+    pub fn topic<F, I, M>(mut self, topic: impl Into<String>, handler: F) -> Self
     where
-        F: Handler<I>,
+        F: Handler<I, M>,
         I: DeserializeOwned + Send + 'static,
+        M: 'static,
     {
         self.topics = self.topics.route(topic, handler);
         self
@@ -216,23 +240,64 @@ impl Handlers {
     /// Register one handler for one exact topic with a decoder over the whole delivery.
     ///
     /// A decoder's refusal fails the delivery as a
-    /// [`BadRequest`](crate::Error::BadRequest) with the code `undecodable`,
-    /// whatever its own variant and code, and keeps its description.
-    ///
-    /// A handler that answers a request registers here, so its decoder can
-    /// pass the delivery's [`reply_to`](crate::messaging::Delivery::reply_to)
-    /// into the input.
+    /// [`BadRequest`](crate::ErrorKind::BadRequest) with the code `undecodable`,
+    /// whatever its own kind and code, and keeps its description.
     ///
     /// # Panics
     ///
     /// Panics when the topic is empty or already registered.
-    pub fn topic_with<F, I, D>(mut self, topic: impl Into<String>, handler: F, decode: D) -> Self
+    pub fn topic_with<F, I, M, D>(mut self, topic: impl Into<String>, handler: F, decode: D) -> Self
     where
-        F: Handler<I>,
+        F: Handler<I, M>,
         I: Send + 'static,
+        M: 'static,
         D: Fn(&Delivery) -> crate::Result<I> + Send + Sync + 'static,
     {
         self.topics = self.topics.route_with(topic, handler, decode);
+        self
+    }
+
+    /// Register one handler for one exact topic that answers each request with its output.
+    ///
+    /// The payload decodes as JSON, and the output is the reply's JSON
+    /// [`Message`]. The guest's messaging export sends the reply to the
+    /// delivery's [`reply_to`](Delivery::reply_to) through the
+    /// [`DEFAULT`](crate::messaging::DEFAULT) broker, and drops it when the
+    /// delivery awaits no reply.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the topic is empty or already registered.
+    pub fn request<F, I, M>(mut self, topic: impl Into<String>, handler: F) -> Self
+    where
+        F: Handler<I, M>,
+        F::Output: Serialize,
+        I: DeserializeOwned + Send + 'static,
+        M: 'static,
+    {
+        self.topics = self.topics.request(topic, handler);
+        self
+    }
+
+    /// Register one handler for one exact topic that answers each request with the [`Message`] it returns.
+    ///
+    /// The decoder reads the whole delivery, as on
+    /// [`topic_with`](Self::topic_with), and the reply goes where
+    /// [`request`](Self::request) sends one.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the topic is empty or already registered.
+    pub fn request_with<F, I, M, D>(
+        mut self, topic: impl Into<String>, handler: F, decode: D,
+    ) -> Self
+    where
+        F: Handler<I, M, Output = Message>,
+        I: Send + 'static,
+        M: 'static,
+        D: Fn(&Delivery) -> crate::Result<I> + Send + Sync + 'static,
+    {
+        self.topics = self.topics.request_with(topic, handler, decode);
         self
     }
 
@@ -298,24 +363,30 @@ impl Router {
         self.topics.topics()
     }
 
-    /// Dispatch one delivery by exact topic.
+    /// Dispatch one delivery by exact topic, returning a request route's reply.
     ///
-    /// A broker serving the router acts on a failure by its code and variant:
+    /// A [`topic`](Handlers::topic) route returns `None`, and a
+    /// [`request`](Handlers::request) route the [`Message`] that answers the
+    /// delivery.
+    ///
+    /// A broker serving the router acts on a failure by its code and kind:
     ///
     /// - It drops one with the code `undecodable`, which no redelivery decodes.
-    /// - It redelivers a [`BadGateway`](crate::Error::BadGateway), which may
+    /// - It redelivers a [`BadGateway`](crate::ErrorKind::BadGateway), which may
     ///   succeed later.
     ///
     /// # Errors
     ///
-    /// - A [`BadRequest`](crate::Error::BadRequest) with the code
+    /// - A [`BadRequest`](crate::ErrorKind::BadRequest) with the code
     ///   `missing-topic` when the delivery has no topic.
-    /// - A [`NotFound`](crate::Error::NotFound) with the code `unhandled-topic`
+    /// - A [`NotFound`](crate::ErrorKind::NotFound) with the code `unhandled-topic`
     ///   when no route takes the topic.
-    /// - A [`BadRequest`](crate::Error::BadRequest) with the code
+    /// - A [`BadRequest`](crate::ErrorKind::BadRequest) with the code
     ///   `undecodable` when the payload does not decode.
     /// - The handler's error when it fails, as [`Handler::Error`] describes.
-    pub async fn handle(&self, delivery: Delivery) -> crate::Result<()> {
+    /// - A [`ServerError`](crate::ErrorKind::ServerError) with the code
+    ///   `invalid` when a request route's output does not encode as JSON.
+    pub async fn handle(&self, delivery: Delivery) -> crate::Result<Option<Message>> {
         self.topics.handle(delivery).await
     }
 }

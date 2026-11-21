@@ -104,6 +104,11 @@ path = "programs/harness/flow.rs"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "http_builder"
+path = "programs/http/builder.rs"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "http_cache_headers"
 path = "programs/http_cache/headers.rs"
 crate-type = ["cdylib"]
@@ -116,6 +121,11 @@ crate-type = ["cdylib"]
 [[example]]
 name = "http_incoming_echo"
 path = "programs/http/incoming_echo.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "http_mcp_server"
+path = "programs/http/mcp_server.rs"
 crate-type = ["cdylib"]
 
 [[example]]
@@ -166,6 +176,11 @@ crate-type = ["cdylib"]
 [[example]]
 name = "keyvalue_state_store"
 path = "programs/keyvalue/state_store.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "keyvalue_update_raced"
+path = "programs/keyvalue/update_raced.rs"
 crate-type = ["cdylib"]
 
 [[example]]
@@ -231,6 +246,11 @@ crate-type = ["cdylib"]
 [[example]]
 name = "messaging_produce_handle"
 path = "programs/messaging/produce_handle.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "messaging_replying"
+path = "programs/messaging/replying.rs"
 crate-type = ["cdylib"]
 
 [[example]]
@@ -529,8 +549,18 @@ path = "programs/sql/sql_db.rs"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "sql_transaction_scope"
+path = "programs/sql/transaction_scope.rs"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "sql_transactions"
 path = "programs/sql/transactions.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "vault_default_locker"
+path = "programs/vault/default_locker.rs"
 crate-type = ["cdylib"]
 
 [[example]]

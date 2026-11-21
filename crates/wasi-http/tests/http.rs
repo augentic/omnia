@@ -9,15 +9,14 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use std::convert::Infallible;
-use std::future::ready;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use base64ct::{Base64, Encoding};
 use bytes::Bytes;
-use http::header::{CONTENT_TYPE, HOST};
-use http::{HeaderMap, Request, Response, StatusCode};
+use http::header::{AUTHORIZATION, CONTENT_TYPE, HOST};
+use http::{HeaderMap, Method, Request, Response, StatusCode};
 use http_body_util::{BodyExt as _, Full};
 use hyper::body::Incoming;
 use hyper::server::conn::http1;
@@ -47,12 +46,15 @@ const BODY: &[u8] = b"hello from origin";
 // one request as the origin saw it
 #[derive(Clone, Debug)]
 struct Hit {
+    method: Method,
     path: String,
     headers: HeaderMap,
+    body: Bytes,
 }
 
-// a loopback origin answering every request with `200`, a marker header and
-// `BODY`, honouring nothing conditional, and recording each hit
+// a loopback origin answering every request with `200`, a marker header, and
+// the request's own body where it has one or `BODY` where not, honouring
+// nothing conditional, and recording each hit
 #[derive(Clone, Debug, Default)]
 struct Origin {
     hits: Arc<Mutex<Vec<Hit>>>,
@@ -71,7 +73,8 @@ impl Origin {
                 let origin = accepting.clone();
                 tokio::spawn(async move {
                     let service = service_fn(move |request| {
-                        ready(Ok::<_, Infallible>(origin.answer(&request)))
+                        let origin = origin.clone();
+                        async move { Ok::<_, Infallible>(origin.answer(request).await) }
                     });
                     let _ =
                         http1::Builder::new().serve_connection(TokioIo::new(stream), service).await;
@@ -82,14 +85,19 @@ impl Origin {
         (origin, format!("http://{addr}"))
     }
 
-    fn answer(&self, request: &Request<Incoming>) -> Response<Full<Bytes>> {
+    async fn answer(&self, request: Request<Incoming>) -> Response<Full<Bytes>> {
+        let (parts, body) = request.into_parts();
+        let body = body.collect().await.expect("the request body streams").to_bytes();
         self.hits.lock().expect("hits lock").push(Hit {
-            path: request.uri().path().to_owned(),
-            headers: request.headers().clone(),
+            method: parts.method,
+            path: parts.uri.path().to_owned(),
+            headers: parts.headers,
+            body: body.clone(),
         });
+        let reply = if body.is_empty() { Bytes::from_static(BODY) } else { body };
         Response::builder()
             .header("x-mock", "origin")
-            .body(Full::new(Bytes::from_static(BODY)))
+            .body(Full::new(reply))
             .expect("origin response")
     }
 
@@ -340,6 +348,29 @@ async fn http_outgoing_timeout() {
 }
 
 #[tokio::test]
+async fn http_builder() {
+    let (origin, url) = Origin::serve().await;
+    let (stalling, stalling_url) = StallingOrigin::serve().await;
+    let backends = Backends::defaults().await.config([("ORIGIN", url), ("STALLING", stalling_url)]);
+
+    run_guest(test_programs::HTTP_BUILDER, backends).await;
+
+    // the post arrived as built: its method, credential, content type, and body
+    let hits = origin.hits();
+    let paths: Vec<_> = hits.iter().map(|hit| hit.path.as_str()).collect();
+    assert_eq!(paths, ["/orders", "/resource"]);
+    let posted = &hits[0];
+    assert_eq!(posted.method, Method::POST);
+    assert_eq!(posted.headers[AUTHORIZATION], "Bearer t0ken");
+    assert_eq!(posted.headers[CONTENT_TYPE], "application/json");
+    let body: Value = serde_json::from_slice(&posted.body).expect("a JSON body");
+    assert_eq!(body, json!({ "sku": "a-1", "quantity": 2 }));
+
+    // the timeout fired on a connection the origin held, not before one was made
+    assert_eq!(stalling.accepted(), 1);
+}
+
+#[tokio::test]
 async fn http_incoming_echo() {
     const GUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -419,6 +450,47 @@ async fn http_incoming_echo() {
         assert_eq!(response.status(), status, "{path}");
         assert_eq!(runtime.stores_built() > built, ran, "{path}");
     }
+
+    runtime.shutdown();
+}
+
+// An MCP tool awaits a capability before it answers, served through the
+// guest's `wasi:http` handler.
+#[tokio::test]
+async fn http_mcp_server() {
+    let guest = std::fs::read(test_programs::HTTP_MCP_SERVER).expect("guest bytes");
+    let backends = Backends::defaults().await.config([("GREETING", "hello")]);
+    let runtime = Deployment::new()
+        .entry(GuestEntry::new("guest", guest).route_http("/mcp"))
+        .boot(backends, |deployment| {
+            deployment.host::<WasiHttp>()?;
+            deployment.host::<WasiConfig>()?;
+            deployment.host::<WasiOtel>()?;
+            Ok(())
+        })
+        .await
+        .expect("runtime boots");
+    let handler = HttpHandler::new(&runtime)
+        .expect("http routes consistent")
+        .expect("the guest exports the http handler");
+
+    let call = json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": { "name": "greet", "arguments": { "name": "ann" } },
+    });
+    let request = Request::post("/mcp")
+        .header(HOST, "mcp.test")
+        .header(CONTENT_TYPE, "application/json")
+        .body(Full::new(Bytes::from(call.to_string())))
+        .expect("request");
+    let response = handler.handle(request).await.expect("handled");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let reply = collect(response).await;
+    assert_eq!(reply["result"]["isError"], false, "{reply}");
+    assert_eq!(reply["result"]["content"][0]["text"], "hello, ann", "{reply}");
 
     runtime.shutdown();
 }

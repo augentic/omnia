@@ -25,11 +25,15 @@ const OPTIONAL: &str = "optionalquery";
 const MAX_PAGES: usize = 32;
 
 /// [`insert`](Collection::insert) on an id already stored returns [`Exists`]
-/// and leaves the stored body unchanged.
+/// and leaves the stored document unchanged.
+///
+/// [`read`](Collection::read) and [`contains`](Collection::contains) find
+/// the stored id, and no other.
 ///
 /// # Panics
 ///
-/// Panics if the second insert fails, succeeds, or replaces the body.
+/// Panics if the second insert fails, succeeds, or replaces the body, or a
+/// lookup finds another document.
 pub async fn insert_exists() {
     let collection = open(EXISTS).await;
     let first = collection.insert("dup", &json!({"v": 1})).await;
@@ -38,13 +42,20 @@ pub async fn insert_exists() {
     let second = collection.insert("dup", &json!({"v": 2})).await;
 
     assert_eq!(second.expect("insert a stored id"), Err(Exists));
-    let stored = collection.get_as::<Value>("dup").await.expect("get_as");
+    let stored = collection.get_json::<Value>("dup").await.expect("get_json");
     assert_eq!(stored, Some(json!({"v": 1})), "a refused insert replaced the body");
+    let raw = collection.read("dup").await.expect("read").expect("the document is stored");
+    assert_eq!(raw.id, "dup", "read returned another document");
+    assert!(collection.read("missing").await.expect("read").is_none(), "read found a missing id");
+    let contains = collection.contains("dup").await.expect("contains");
+    let missing = collection.contains("missing").await.expect("contains");
+    assert_eq!((contains, missing), (true, false), "contains found other ids");
 }
 
 /// Every portable filter selects what [`Filter::matches`] selects, a small
-/// `limit` pages through each match once, and a zero `limit` fails with the
-/// code `invalid`.
+/// `limit` pages through each match once, as
+/// [`find_all`](Collection::find_all) does, and a zero `limit` fails with
+/// the code `invalid`.
 ///
 /// # Panics
 ///
@@ -87,18 +98,15 @@ pub async fn portable_query() {
         assert_eq!(sorted(selected), matching(&stored, &filter), "{filter:?} selected others");
     }
 
-    let paged = Query {
-        limit: Some(2),
-        ..filtered(&Filter::gte("rank", 2))
-    };
+    let paged = Query::builder().filter(Filter::gte("rank", 2)).limit(2).build();
     let walked = walk(&collection, &paged).await.expect("page through the matches");
     let expected = matching(&stored, &Filter::gte("rank", 2));
     assert_eq!(sorted(walked), expected, "the pages did not hold each match once");
+    let found = collection.find_all(&paged).await.expect("find_all");
+    let found = found.into_iter().map(|document| document.id).collect();
+    assert_eq!(sorted(found), expected, "find_all did not hold each match once");
 
-    let zero = Query {
-        limit: Some(0),
-        ..Query::default()
-    };
+    let zero = Query::builder().limit(0).build();
     expect_code(collection.find(&zero).await, "invalid", "a query with a zero limit");
 }
 
@@ -189,10 +197,7 @@ pub async fn optional_query() {
         let mut expected: Vec<_> = stored.iter().collect();
         expected.sort_by(|(a_id, a), (b_id, b)| sort.compare(a, b).then_with(|| a_id.cmp(b_id)));
         let expected: Vec<String> = expected.into_iter().map(|(id, _)| (*id).to_owned()).collect();
-        let query = Query {
-            order_by: vec![sort.clone()],
-            ..Query::default()
-        };
+        let query = Query::builder().order_by(vec![sort.clone()]).build();
         served(walk(&collection, &query).await, &expected, &format!("{sort:?}"));
     }
 }
@@ -246,8 +251,5 @@ fn sorted(mut ids: Vec<String>) -> Vec<String> {
 }
 
 fn filtered(filter: &Filter) -> Query {
-    Query {
-        filter: Some(filter.clone()),
-        ..Query::default()
-    }
+    Query::builder().filter(filter.clone()).build()
 }

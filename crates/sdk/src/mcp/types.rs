@@ -1,5 +1,6 @@
 //! Model Context Protocol schema types, mirroring the MCP wire format.
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -59,6 +60,15 @@ impl Tool {
             description: description.into(),
             input_schema,
         }
+    }
+
+    /// A tool whose arguments are `T`, advertised by `T`'s JSON Schema.
+    ///
+    /// [`arguments`](super::arguments) decodes a call's `arguments` into the
+    /// same `T`.
+    #[must_use]
+    pub fn of<T: JsonSchema>(name: impl Into<String>, description: impl Into<String>) -> Self {
+        Self::new(name, description, schemars::schema_for!(T).to_value())
     }
 }
 

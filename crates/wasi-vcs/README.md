@@ -75,7 +75,7 @@ omnia::runtime!({
 });
 ```
 
-A guest opens a workspace with `omnia_sdk::vcs::open`, `init`, or `clone`, naming its location as a deployment-local path (`"."` the project mount, `"./.cache/repo"` beneath it), and calls the generated `Workspace` methods. The raw `omnia_sdk::vcs::{store, workspace, workspaces, remotes}` bindings take a lent `location` instead.
+A guest opens a workspace with `omnia_sdk::vcs::open`, `init`, or `clone`, naming its location as a deployment-local path (`"."` the project mount, `"./.cache/repo"` beneath it), and calls the generated `Workspace` methods. `?` on an `occupied`, `unmerged`, or `diverged` outcome gives an `omnia_sdk::Error` of kind `Conflict` (a `409`, exit 5) under the outcome's name. The raw `omnia_sdk::vcs::{store, workspace, workspaces, remotes}` bindings take a lent `location` instead.
 
 ## License
 

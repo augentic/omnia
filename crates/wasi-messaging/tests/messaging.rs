@@ -18,7 +18,7 @@ use omnia::{ExitStatus, GuestEntry, Host, Runtime};
 use omnia_test::host::{Backends, Deployment};
 use omnia_wasi_messaging::{
     Endpoint, Error, FutureResult, HandleError, Handler, Message, MessagingClient,
-    MessagingHandler, Metadata, Reply, RequestOptions, WasiMessaging,
+    MessagingHandler, Metadata, Reply, WasiMessaging,
 };
 use omnia_wasi_otel::WasiOtel;
 
@@ -47,7 +47,7 @@ impl Endpoint for EndedBroker {
     }
 
     fn request(
-        &self, _topic: String, _message: Message, _options: Option<RequestOptions>,
+        &self, _topic: String, _message: Message, _timeout: Option<Duration>,
     ) -> FutureResult<Message> {
         async { Ok(Message::default()) }.boxed()
     }
@@ -430,7 +430,7 @@ impl Endpoint for Faulting {
     }
 
     fn request(
-        &self, _topic: String, _message: Message, _options: Option<RequestOptions>,
+        &self, _topic: String, _message: Message, _timeout: Option<Duration>,
     ) -> FutureResult<Message> {
         unreachable!("the host refuses the guest's one request")
     }
@@ -481,4 +481,45 @@ async fn messaging_outcomes() {
     );
 
     runtime.shutdown();
+}
+
+// A request route's reply reaches the delivery's reply topic through the
+// default broker, and a delivery that awaits no reply drops it.
+#[tokio::test]
+async fn messaging_replying() {
+    const QUOTE: &[u8] = br#"{"sku":"apple","quantity":3}"#;
+
+    let backends = Backends::defaults().await;
+    let mut stream = backends.messaging.subscribe();
+    let runtime = boot(&sole(test_programs::MESSAGING_REPLYING), backends).await;
+    let handler = handler(&runtime);
+
+    handler.handle(request("quotes", QUOTE, Some("quotes.reply"))).await.expect("quoted");
+    let reply = next(&mut stream).await;
+    assert_eq!(reply.topic, "quotes.reply");
+    assert_eq!(reply.payload, br#"{"sku":"apple","total_cents":375}"#);
+    assert_eq!(metadata(&reply), [("content-type".to_owned(), "application/json".to_owned())]);
+
+    handler.handle(request("echo", b"ping", Some("echo.reply"))).await.expect("echoed");
+    let reply = next(&mut stream).await;
+    assert_eq!(reply.topic, "echo.reply");
+    assert_eq!(reply.payload, b"ping");
+    assert_eq!(metadata(&reply), [("content-type".to_owned(), "text/plain".to_owned())]);
+
+    handler.handle(request("quotes", QUOTE, None)).await.expect("quoted");
+    assert!(
+        tokio::time::timeout(Duration::from_millis(200), stream.next()).await.is_err(),
+        "a reply no delivery awaits reached the broker"
+    );
+
+    runtime.shutdown();
+}
+
+fn request(topic: &str, payload: &[u8], reply: Option<&str>) -> Message {
+    let mut message = Message::new(payload.to_vec());
+    topic.clone_into(&mut message.topic);
+    message.reply = reply.map(|topic| Reply {
+        topic: topic.to_owned(),
+    });
+    message
 }

@@ -23,10 +23,10 @@ The `wasi:http` host stamps `x-deadline` on every request and enforces the budge
 
 The messaging host sets each delivery's `deadline`, which the router passes on as `Metadata::deadline`. A failure settles the delivery, with the `omnia_sdk::Error`'s text as the reason:
 
-- A `BadRequest`, such as the code `undecodable`, rejects it, since no redelivery handles it.
+- A `BadRequest`, such as the code `undecodable`, or a `Conflict` rejects it, since no redelivery handles it.
 - Any other failure releases it, since it may succeed later.
 
-What a backend does with a rejected or released delivery is its own policy.
+A request route's reply goes to the delivery's `reply_to` through the `default` broker before the delivery is accepted, and a reply that fails to send releases it. What a backend does with a rejected or released delivery is its own policy.
 
 ### Commands
 

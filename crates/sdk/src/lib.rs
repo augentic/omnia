@@ -29,7 +29,7 @@ pub mod websocket;
 pub use omnia_guest_macros::Settings;
 
 pub use crate::bindings::imports::{wit_future, wit_stream};
-pub use crate::error::*;
+pub use crate::error::{Error, ErrorBody, ErrorKind, Result};
 pub use crate::handler::{Context, Handler, Handlers, Metadata, Router};
 
 /// The handlers a guest implements by hand, each a `Guest` trait beside the

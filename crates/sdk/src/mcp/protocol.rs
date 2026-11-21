@@ -14,8 +14,7 @@ pub const PROTOCOL_VERSION: &str = "2025-06-18";
 ///
 /// The dispatch holds no state between calls, so a caller may serve each
 /// message on a freshly instantiated server.
-#[must_use]
-pub fn handle_message(server: &dyn McpServer, body: &str) -> Option<String> {
+pub async fn handle_message<S: McpServer>(server: &S, body: &str) -> Option<String> {
     let request: Value = match serde_json::from_str(body) {
         Ok(value) => value,
         Err(error) => {
@@ -46,21 +45,23 @@ pub fn handle_message(server: &dyn McpServer, body: &str) -> Option<String> {
     // A message with no `id` member is a notification: it never gets a reply.
     let id = id?;
 
-    Some(match dispatch(server, method, &params) {
+    Some(match dispatch(server, method, &params).await {
         Ok(result) => success_response(&id, &result),
         Err(error) => error_response(&id, error.code, &error.message),
     })
 }
 
 // Route a request method to the matching server capability.
-fn dispatch(server: &dyn McpServer, method: &str, params: &Value) -> Result<Value, McpError> {
+async fn dispatch<S: McpServer>(
+    server: &S, method: &str, params: &Value,
+) -> Result<Value, McpError> {
     match method {
         "initialize" => Ok(initialize_result(server, params)),
         "ping" => Ok(json!({})),
         "tools/list" => Ok(json!({ "tools": server.tools() })),
-        "tools/call" => tools_call(server, params),
+        "tools/call" => tools_call(server, params).await,
         "resources/list" => Ok(json!({ "resources": server.resources() })),
-        "resources/read" => resources_read(server, params),
+        "resources/read" => resources_read(server, params).await,
         other => Err(McpError::method_not_found(format!("unknown method `{other}`"))),
     }
 }
@@ -71,7 +72,7 @@ const SUPPORTED_VERSIONS: &[&str] = &["2025-06-18", "2025-03-26"];
 
 // Capabilities advertise feature support, not list contents: the trait
 // always answers `tools/list` and `resources/list`.
-fn initialize_result(server: &dyn McpServer, params: &Value) -> Value {
+fn initialize_result<S: McpServer>(server: &S, params: &Value) -> Value {
     let protocol_version = params
         .get("protocolVersion")
         .and_then(Value::as_str)
@@ -89,22 +90,22 @@ fn initialize_result(server: &dyn McpServer, params: &Value) -> Value {
     result
 }
 
-fn tools_call(server: &dyn McpServer, params: &Value) -> Result<Value, McpError> {
+async fn tools_call<S: McpServer>(server: &S, params: &Value) -> Result<Value, McpError> {
     let name = params
         .get("name")
         .and_then(Value::as_str)
         .ok_or_else(|| McpError::invalid_params("missing tool `name`"))?;
     let arguments = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
-    let result = server.call_tool(name, &arguments)?;
+    let result = server.call_tool(name, &arguments).await?;
     Ok(serde_json::to_value(result).expect("CallToolResult serializes"))
 }
 
-fn resources_read(server: &dyn McpServer, params: &Value) -> Result<Value, McpError> {
+async fn resources_read<S: McpServer>(server: &S, params: &Value) -> Result<Value, McpError> {
     let uri = params
         .get("uri")
         .and_then(Value::as_str)
         .ok_or_else(|| McpError::invalid_params("missing resource `uri`"))?;
-    Ok(json!({ "contents": [server.read_resource(uri)?] }))
+    Ok(json!({ "contents": [server.read_resource(uri).await?] }))
 }
 
 fn success_response(id: &Value, result: &Value) -> String {

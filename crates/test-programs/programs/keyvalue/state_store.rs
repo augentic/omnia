@@ -35,6 +35,8 @@ async fn scenario() {
         state::delete_absent(&bucket),
         state::portable_key(&bucket),
         state::json(&bucket),
+        state::json_revision(&bucket),
+        state::update_json(&bucket),
         state::malformed_json(&bucket),
     );
 }
