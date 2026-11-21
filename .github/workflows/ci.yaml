@@ -18,21 +18,26 @@ jobs:
       targets: wasm32-wasip3
       wasm-packages: omnia-sdk omnia-guest-macros omnia-test test-programs examples
 
+  # Mirrors `wit-verify` in mise.toml. A package starts private on ghcr.io, so
+  # reading its releases takes a login.
   wit:
     name: WIT
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: read
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-wasip3
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - uses: taiki-e/install-action@v2
+      - uses: docker/login-action@v4
         with:
-          tool: wit-bindgen-cli@0.63.0,wasm-tools@1.263.0,wkg@0.16.2
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - run: scripts/wit.sh check
+      - run: cargo xtask verify
 

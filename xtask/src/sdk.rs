@@ -1,0 +1,200 @@
+//! The `omnia:sdk` aggregate that the `omnia-sdk` guest bindings generate from.
+//!
+//! The aggregate is never published. Its `imports` world includes each
+//! published package's `imports` world, beside the WASI packages the locked
+//! `wasip3` ships. The bindings follow `wasi-rs`'s `ci/regenerate.sh`: one
+//! `imports.rs` for every import, and one file per export world whose import
+//! types point back at it. Every `@unstable` feature is enabled, since every
+//! host links the gated interfaces.
+
+use std::fmt::Write;
+use std::fs;
+use std::path::Path;
+
+use anyhow::{Context, Result, anyhow};
+use wit_bindgen_core::wit_parser::{
+    PackageId, PackageName, Resolve, SourceMap, UnresolvedPackageGroup,
+};
+use wit_bindgen_core::{Files, WorldGenerator};
+use wit_bindgen_rust::{Opts, WithOption};
+
+use crate::package::Package;
+use crate::workspace::{Workspace, wit_files};
+
+pub struct Sdk {
+    resolve: Resolve,
+    id: PackageId,
+}
+
+impl Sdk {
+    pub fn new(workspace: &Workspace, packages: &[Package], all_features: bool) -> Result<Self> {
+        // each WASI package, then each published package alone
+        let mut deps = Vec::new();
+        for file in wit_files(&workspace.wasi)? {
+            let mut map = SourceMap::default();
+            map.push_file(&file)?;
+            deps.push(map.parse().map_err(|(map, err)| anyhow!(err.render(&map)))?);
+        }
+        for package in packages {
+            deps.push(UnresolvedPackageGroup::parse_dir(&package.dir)?);
+        }
+
+        // the aggregate over them
+        let names: Vec<_> = deps.iter().map(|dep| &dep.main.name).collect();
+        let wit = aggregate(&workspace.sdk_version, packages, &names)?;
+        let main = UnresolvedPackageGroup::parse("sdk.wit", &wit)
+            .map_err(|(map, err)| anyhow!(err.render(&map)))?;
+        let mut resolve = Resolve {
+            all_features,
+            ..Resolve::default()
+        };
+        let id = resolve
+            .push_groups(main, deps)
+            .map_err(|err| anyhow!(resolve.render_error(&err.into())))?;
+        Ok(Self { resolve, id })
+    }
+
+    pub fn bindings(&self) -> Result<Bindings> {
+        let names: Vec<_> = self.resolve.package_names.keys().collect();
+        let sdk = &self.resolve.packages[self.id].name;
+        let version = sdk.version.as_ref().with_context(|| format!("{sdk} has no version"))?;
+        let suffix = format!("rust-omnia-sdk-{version}");
+        let mut files = Files::default();
+
+        let filesystem = find(&names, "wasi", "filesystem")?;
+        let clocks = find(&names, "wasi", "clocks")?;
+        self.generate(
+            "imports",
+            Opts {
+                generate_all: true,
+                with: vec![
+                    remap(filesystem, "types", "wasip3::filesystem::types"),
+                    remap(clocks, "system-clock", "wasip3::clocks::system_clock"),
+                    remap(clocks, "types", "wasip3::clocks::types"),
+                ],
+                type_section_suffix: Some(suffix.clone()),
+                ..Opts::default()
+            },
+            &mut files,
+        )?;
+
+        let types = find(&names, "omnia", "types")?;
+        for world in ["messaging", "websocket"] {
+            self.generate(
+                world,
+                Opts {
+                    with: vec![
+                        remap(types, "types", "crate::bindings::imports::omnia::types::types"),
+                        remap(
+                            find(&names, "omnia", world)?,
+                            "types",
+                            &format!("crate::bindings::imports::omnia::{world}::types"),
+                        ),
+                    ],
+                    type_section_suffix: Some(format!("{suffix}-{world}-world")),
+                    default_bindings_module: Some("$crate".to_owned()),
+                    pub_export_macro: true,
+                    export_macro_name: Some(format!("_export_{world}")),
+                    ..Opts::default()
+                },
+                &mut files,
+            )?;
+        }
+        Ok(Bindings(files))
+    }
+
+    pub fn targets(&self, guest: &[u8]) -> Result<()> {
+        let world = self.resolve.select_world(&[self.id], Some("command"))?;
+        wit_component::targets(&self.resolve, world, guest, false)
+            .context("the guest does not target `omnia:sdk/command`")
+    }
+
+    // `world` as `wit-bindgen rust --format --runtime-path wasip3::wit_bindgen::rt` generates it
+    fn generate(&self, world: &str, opts: Opts, files: &mut Files) -> Result<()> {
+        let world = self.resolve.select_world(&[self.id], Some(world))?;
+        let opts = Opts {
+            format: true,
+            runtime_path: Some("wasip3::wit_bindgen::rt".to_owned()),
+            ..opts
+        };
+        opts.build().generate(&mut self.resolve.clone(), world, files)
+    }
+}
+
+// the WIT of `omnia:sdk`, versioned as the `omnia-sdk` crate is
+fn aggregate(version: &str, packages: &[Package], names: &[&PackageName]) -> Result<String> {
+    let mut includes = String::new();
+    for package in packages.iter().filter(|package| package.has_imports()) {
+        writeln!(includes, "  include {};", package.name.interface_id("imports"))?;
+    }
+    let messaging = find(names, "omnia", "messaging")?.interface_id("incoming-handler");
+    let websocket = find(names, "omnia", "websocket")?.interface_id("incoming-handler");
+    let cli = find(names, "wasi", "cli")?.interface_id("command");
+    Ok(format!(
+        "package omnia:sdk@{version};
+
+world imports {{
+{includes}}}
+
+world messaging {{
+  export {messaging};
+}}
+
+world websocket {{
+  export {websocket};
+}}
+
+world command {{
+  include imports;
+  include {cli};
+}}
+"
+    ))
+}
+
+fn find<'a>(names: &[&'a PackageName], namespace: &str, name: &str) -> Result<&'a PackageName> {
+    names
+        .iter()
+        .copied()
+        .find(|package| package.namespace == namespace && package.name == name)
+        .with_context(|| format!("no `{namespace}:{name}` package"))
+}
+
+fn remap(package: &PackageName, interface: &str, path: &str) -> (String, WithOption) {
+    (package.interface_id(interface), WithOption::Path(path.to_owned()))
+}
+
+pub struct Bindings(Files);
+
+const BINDINGS: &str = "crates/sdk/src/bindings";
+
+impl Bindings {
+    pub fn write(&self) -> Result<()> {
+        for (name, contents) in self.0.iter() {
+            let path = Path::new(BINDINGS).join(name);
+            fs::write(&path, contents)
+                .with_context(|| format!("cannot write {}", path.display()))?;
+        }
+        Ok(())
+    }
+
+    // each committed file a regeneration would change
+    pub fn stale(&self) -> Vec<String> {
+        let mut stale = Vec::new();
+        for (name, contents) in self.0.iter() {
+            let path = Path::new(BINDINGS).join(name);
+            let committed = fs::read(&path).unwrap_or_default();
+            if committed != contents {
+                let line = crate::parting_line(
+                    &String::from_utf8_lossy(&committed),
+                    &String::from_utf8_lossy(contents),
+                );
+                stale.push(format!(
+                    "{} is stale from line {line}: run `mise run bindgen`",
+                    path.display()
+                ));
+            }
+        }
+        stale
+    }
+}

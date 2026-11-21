@@ -1,7 +1,7 @@
 //! The guest bindings `wit-bindgen` generates from every `omnia:*` package.
 //!
-//! `mise run bindgen` regenerates them, and `mise run bindgen-check` fails
-//! when they drift from the WIT. Nothing here is edited by hand.
+//! `mise run bindgen` regenerates them, and `mise run wit-check` fails when
+//! they drift from the WIT. Nothing here is edited by hand.
 
 #![allow(
     missing_docs,

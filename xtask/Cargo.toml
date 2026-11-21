@@ -1,0 +1,28 @@
+[package]
+name = "xtask"
+description = "Keeps the omnia:* WIT in step with its copies, the omnia-sdk bindings, and the registry"
+publish = false
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+futures.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["rt"] }
+wasm-metadata.workspace = true
+wasm-pkg-client.workspace = true
+wit-bindgen-core.workspace = true
+wit-bindgen-rust.workspace = true
+wit-component.workspace = true
+
+# `tests/wit.rs` checks the bindings against a guest built from them.
+[dev-dependencies]
+test-programs.workspace = true

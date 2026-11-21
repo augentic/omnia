@@ -13,41 +13,31 @@ OUTDATED_IGNORE = "cap-fs-ext,cap-std,cap-primitives,thiserror"
 WASM32_PACKAGES = "omnia-sdk omnia-guest-macros omnia-test test-programs examples"
 
 # -------------------------------------
-# WIT and guest bindings (project-specific; `wit-check` and `bindgen-check`
-# are mirrored by the `wit` job in `.github/workflows/ci.yaml`, `wit-check`
-# and `wit-publish` by the `wit` job in `publish.yaml`; tool pins live in
-# `scripts/wit.sh`)
+# WIT and guest bindings (project-specific; each task runs a `cargo xtask`
+# command, and `wit-check` is the `xtask` suite, so the workspace test runs it;
+# `wit-verify` is mirrored by the `wit` job in `.github/workflows/ci.yaml`,
+# `wit-publish` by the `wit` job in `publish.yaml`)
 # -------------------------------------
 
 [tasks.bindgen]
 description = "Regenerate the omnia-sdk guest bindings in crates/sdk/src/bindings from the WIT"
-tools = { jq = "1.8", "cargo:wit-bindgen-cli" = "0.63.0" }
-run = "scripts/wit.sh bindgen"
-
-[tasks.bindgen-check]
-description = "Fail if the committed guest bindings differ from a regeneration, or a command guest does not target the staged world"
-tools = { jq = "1.8", "cargo:wit-bindgen-cli" = "0.63.0", "cargo:wasm-tools" = "1.263.0" }
-run = "scripts/wit.sh check bindings"
+run = "cargo xtask bindgen"
 
 [tasks.wit-sync]
 description = "Rewrite every package a crate copies into wit/deps from the package that owns it"
-tools = { jq = "1.8" }
-run = "scripts/wit.sh sync"
+run = "cargo xtask sync"
 
 [tasks.wit-check]
-description = "Fail if a wit/deps copy is stale, or a WIT package holds a plain comment, fails to parse, or fails to build"
-tools = { jq = "1.8", "cargo:wasm-tools" = "1.263.0" }
-run = "scripts/wit.sh check packages"
+description = "Fail if a wit/deps copy is stale, a WIT package holds a plain comment or fails to parse or encode, or the guest bindings differ from a regeneration"
+run = "cargo nextest run -p xtask --all-features"
 
 [tasks.wit-verify]
 description = "Fail if a WIT release the registry holds differs from the package the tree builds"
-tools = { jq = "1.8", "cargo:wasm-tools" = "1.263.0", "cargo:wkg" = "0.16.2" }
-run = "scripts/wit.sh verify"
+run = "cargo xtask verify"
 
 [tasks.wit-publish]
-description = "Publish every WIT release the registry lacks: mise run wit-publish [-- --overwrite PACKAGE,..]"
-tools = { jq = "1.8", "cargo:wasm-tools" = "1.263.0", "cargo:wkg" = "0.16.2" }
-run = "scripts/wit.sh publish"
+description = "Publish every WIT release the registry lacks"
+run = "cargo xtask publish"
 
 # -------------------------------------
 # Examples (project-specific; the generic Rust tasks live in the include)

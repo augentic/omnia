@@ -68,18 +68,17 @@ A component whose own `wit/` imports an `omnia:*` interface runs `wkg fetch`. It
 - wit-parser reads a plain `//` comment as the next item's docs, so it reaches the published package and the guest bindings. A maintainer's note lives outside the WIT, and `mise run wit-check` refuses a plain comment in a published package.
 - An `@unstable` interface repeats its gate on every type and `use` inside it. wit-parser excludes a gated interface's types only where each carries the interface's gate.
 - A crate copies each package its WIT uses into its own `wit/deps`, since `bindgen!` reads the crate's `wit/` when the published crate builds. A copy's owner is the published package of its name, or the WASI package the locked `wasip3` ships. Edit the owner, then run `mise run wit-sync`, which rewrites every copy. `mise run wit-check` fails on a stale one.
-- `mise run wit-check` is the offline gate. It checks the copies and comments, parses every package with no features and with all of them, and builds every release to `target/wit`.
+- `mise run wit-check` is the offline gate. It is the `xtask` suite, so the workspace test runs it in CI. It checks the copies and comments, and parses every `wit` directory with no features and with all of them. It encodes every release, and fails when the guest bindings differ from a regeneration.
 
 ## Publishing
 
-The **Publish Release** workflow publishes the WIT once the release is tagged. Its `Publish WIT` job checks out the tag, runs `scripts/wit.sh check packages`, then runs `scripts/wit.sh publish` with the workflow's `GITHUB_TOKEN`. `publish` goes in three steps:
+The **Publish Release** workflow publishes the WIT once the release is tagged. Its `CI` job runs `wit-check` with the workspace test. Its `Publish WIT` job then checks out the tag and runs `cargo xtask publish` with the workflow's `GITHUB_TOKEN`. `publish` goes in two steps:
 
-1. Build every package to `target/wit/<namespace>_<name>@<version>.wasm`, `omnia:types` first.
-2. Read each release the registry holds, and fail before publishing anything if one differs from the tree.
-3. Publish each release the registry lacks.
+1. Read each release the registry holds, and fail before publishing anything if one differs from the tree.
+2. Publish each release the registry lacks, `omnia:types` first.
 
 A run that stops partway is re-run as it is, since a release already published with the same WIT is skipped.
 
-`mise run wit-publish` runs the same steps locally. It routes through the repository's `.wkg-config.toml`, and wkg reads the credentials from `docker login ghcr.io`, with a token that has `write:packages`. `--overwrite <package>,..` republishes a named package's differing release instead of failing. It exists to replace releases published before this repository published its own, and no workflow passes it.
+`mise run wit-publish` runs the same steps locally. It routes through the repository's `.wkg-config.toml`. It reads the credentials from `WKG_REGISTRY_GHCR_IO_AUTH_BEARER`, or else from `docker login ghcr.io`, with a token that has `write:packages`. `mise run wit-verify` reads a private package's releases with the same credentials.
 
 A new package on `ghcr.io` starts private, so make it public in its package settings after its first release. A package first published from another repository needs `augentic/omnia` granted write access under its **Manage Actions access** settings before the workflow can publish to it.
