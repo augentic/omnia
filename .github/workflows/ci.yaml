@@ -18,8 +18,8 @@ jobs:
       targets: wasm32-wasip3
       wasm-packages: omnia-sdk omnia-guest-macros omnia-test test-programs examples
 
-  bindings:
-    name: Bindings
+  wit:
+    name: WIT
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -32,23 +32,7 @@ jobs:
           cache-on-failure: true
       - uses: taiki-e/install-action@v2
         with:
-          tool: wit-bindgen-cli@0.63.0,wasm-tools@1.263.0
+          tool: wit-bindgen-cli@0.63.0,wasm-tools@1.263.0,wkg@0.16.2
 
-      - run: scripts/bindgen.sh --check
+      - run: scripts/wit.sh check
 
-  wasm-pkg:
-    name: Wasm Package
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: wasm-tools@1.263.0,wkg@0.16.2
-
-      - run: scripts/wasm-pkg.sh check
-      # - run: scripts/wasm-pkg.sh verify

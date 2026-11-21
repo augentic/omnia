@@ -70,5 +70,5 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - run: scripts/wasm-pkg.sh check
-      - run: scripts/wasm-pkg.sh publish
+      - run: scripts/wit.sh check packages
+      - run: scripts/wit.sh publish

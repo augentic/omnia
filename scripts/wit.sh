@@ -1,34 +1,48 @@
 #!/usr/bin/env bash
-# Packages the omnia:* WIT for the wasm-pkg registry, and keeps the packages
-# a crate copies into its wit/deps in step with the packages that own them.
+# Keeps the omnia:* WIT in step with what is built from it: the copies a
+# crate keeps in its wit/deps, the omnia-sdk guest bindings, and the packages
+# the wasm-pkg registry serves.
 #
-#   scripts/wasm-pkg.sh sync     rewrite every copy under a crate's wit/deps from
+#   scripts/wit.sh sync     rewrite every copy under a crate's wit/deps from
 #                           the package of that name
-#   scripts/wasm-pkg.sh check    fail if a copy is stale, a published package
+#   scripts/wit.sh check [packages|bindings [GUEST]]
+#                           run both checks, or the one named
+#       packages            fail if a copy is stale, a published package
 #                           holds a plain comment, or a package does not
 #                           parse with and without its features, or build
-#   scripts/wasm-pkg.sh stage    stage omnia:sdk, the aggregate package bindgen.sh
-#                           generates from, under target/omnia-sdk-wit
-#   scripts/wasm-pkg.sh build    encode every published package, with metadata,
+#       bindings [GUEST]    fail if a regeneration differs from the committed
+#                           bindings, or GUEST (a command component) does not
+#                           target the staged world; with no GUEST, build
+#                           config_seeded for wasm32-wasip3
+#   scripts/wit.sh bindgen  regenerate crates/sdk/src/bindings
+#   scripts/wit.sh build    encode every published package, with metadata,
 #                           to target/wit/<namespace>_<name>@<version>.wasm
-#   scripts/wasm-pkg.sh verify   fail if a release the registry holds differs
+#   scripts/wit.sh verify   fail if a release the registry holds differs
 #                           from the package the tree builds
-#   scripts/wasm-pkg.sh publish [--overwrite PACKAGE,..]
+#   scripts/wit.sh publish [--overwrite PACKAGE,..]
 #                           verify, then publish every release the registry
 #                           lacks; --overwrite republishes the named
 #                           packages' differing releases instead of failing
 #
-# Tool pins (bump with mise.toml and the CI install-action):
-#   jq 1.8, wasm-tools 1.263.0, wkg 0.16.2
+# Tool pins (bump with mise.toml and the CI install-action, and
+# wit-bindgen-cli with the workspace wit-bindgen):
+#   jq 1.8, wasm-tools 1.263.0, wit-bindgen-cli 0.63.0, wkg 0.16.2
 #
 # The published packages are every crates/wasi-*/wit and crates/plugin/wit
-# package, omnia:types first. The staged omnia:sdk is not one of them. A
-# copy's owner is the published package of its name, or the WASI package the
-# locked wasip3 ships. Each package is encoded with every `@unstable`
-# feature, since the gates travel with it and a consumer enables its own.
-# Its description is the first paragraph of its package docs, and the rest
-# of its metadata is its crate's. A release is compared as WIT text, so
-# metadata alone is never a change.
+# package, omnia:types first. A copy's owner is the published package of its
+# name, or the WASI package the locked wasip3 ships. Each package is encoded
+# with every `@unstable` feature, since the gates travel with it and a
+# consumer enables its own. Its description is the first paragraph of its
+# package docs, and the rest of its metadata is its crate's. A release is
+# compared as WIT text, so metadata alone is never a change.
+#
+# The bindings generate from omnia:sdk, an aggregate package staged under
+# target/omnia-sdk-wit and never published. It sits beside the WASI packages
+# the locked wasip3 ships and includes each published package's `imports`
+# world. The bindings follow `wasi-rs`'s `ci/regenerate.sh`: one `imports.rs`
+# for every import, and one file per export world whose import types point
+# back at it. Every `@unstable` feature is enabled, since every host links
+# the gated interfaces.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -36,14 +50,18 @@ cd "$root"
 
 config="$root/.wkg-config.toml"
 stage="target/omnia-sdk-wit"
+bindings="crates/sdk/src/bindings"
 out="target/wit"
 
 metadata="$(cargo metadata --format-version 1 --locked)"
+sdk_version="$(jq -r '.packages[] | select(.name == "omnia-sdk") | .version' <<<"$metadata")"
 wasi="$(jq -r '.packages[] | select(.name == "wasip3") | .manifest_path' <<<"$metadata")"
 wasi="$(dirname "$wasi")/wit/deps"
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
+
+usage="usage: scripts/wit.sh sync|check [packages|bindings [GUEST]]|bindgen|build|verify|publish [--overwrite PACKAGE,..]"
 
 fail() {
   echo "$*" >&2
@@ -97,6 +115,21 @@ sync_copies() {
 # --- check ---
 
 check() {
+  case "${1:-}" in
+    "")
+      check_packages
+      check_bindings
+      ;;
+    packages) check_packages ;;
+    bindings)
+      shift
+      check_bindings "$@"
+      ;;
+    *) fail "$usage" ;;
+  esac
+}
+
+check_packages() {
   local status=0 copy package owner dir
 
   # copies in step with their owners
@@ -132,9 +165,15 @@ check() {
 
 # --- stage ---
 
+staged=false
+
+# stage omnia:sdk once a run, however many modes read it
 stage() {
-  local version file package name includes messaging websocket cli
-  version="$(jq -r '.packages[] | select(.name == "omnia-sdk") | .version' <<<"$metadata")"
+  local file package name includes messaging websocket cli
+  if $staged; then
+    return
+  fi
+  staged=true
   messaging="$(package_of crates/wasi-messaging/wit/*.wit)"
   websocket="$(package_of crates/wasi-websocket/wit/*.wit)"
   cli="$(package_of "$wasi/cli.wit")"
@@ -155,7 +194,7 @@ stage() {
   done
 
   cat >"$stage/sdk.wit" <<EOF
-package omnia:sdk@$version;
+package omnia:sdk@$sdk_version;
 
 world imports {
 $includes}
@@ -173,6 +212,60 @@ world command {
   include ${cli%@*}/command@${cli#*@};
 }
 EOF
+}
+
+# --- bindgen ---
+
+# regenerate the bindings into $1 from a fresh stage
+bindgen() {
+  local dir="$1" filesystem clocks types world package with
+  stage
+  mkdir -p "$dir"
+
+  filesystem="$(package_of "$wasi/filesystem.wit")"
+  clocks="$(package_of "$wasi/clocks.wit")"
+  with="${filesystem%@*}/types@${filesystem#*@}=wasip3::filesystem::types"
+  with="$with,${clocks%@*}/system-clock@${clocks#*@}=wasip3::clocks::system_clock"
+  with="$with,${clocks%@*}/types@${clocks#*@}=wasip3::clocks::types"
+  wit_bindgen "$dir" \
+    --world omnia:sdk/imports \
+    --generate-all \
+    --with "$with" \
+    --type-section-suffix "rust-omnia-sdk-$sdk_version"
+
+  types="$(package_of crates/wasi-types/wit/*.wit)"
+  for world in messaging websocket; do
+    package="$(package_of "crates/wasi-$world/wit/"*.wit)"
+    with="${types%@*}/types@${types#*@}=crate::bindings::imports::omnia::types::types"
+    with="$with,${package%@*}/types@${package#*@}=crate::bindings::imports::omnia::$world::types"
+    wit_bindgen "$dir" \
+      --world "omnia:sdk/$world" \
+      --with "$with" \
+      --type-section-suffix "rust-omnia-sdk-$sdk_version-$world-world" \
+      --default-bindings-module '$crate' \
+      --pub-export-macro \
+      --export-macro-name "_export_$world"
+  done
+}
+
+wit_bindgen() {
+  local dir="$1"
+  shift
+  wit-bindgen rust "$stage" --out-dir "$dir" --format --all-features \
+    --runtime-path wasip3::wit_bindgen::rt "$@"
+}
+
+check_bindings() {
+  local guest="${1:-}"
+  bindgen "$work/bindings"
+  diff -ru "$bindings" "$work/bindings" >&2 ||
+    fail "$bindings is stale: run \`mise run bindgen\`"
+
+  if [ -z "$guest" ]; then
+    cargo build --locked -p test-programs --example config_seeded --target wasm32-wasip3
+    guest="${CARGO_TARGET_DIR:-$root/target}/wasm32-wasip3/debug/examples/config_seeded.wasm"
+  fi
+  wasm-tools component targets --all-features "$stage" "$guest" --world omnia:sdk/command
 }
 
 # --- build ---
@@ -326,13 +419,16 @@ publish() {
 
 case "${1:-}" in
   sync) sync_copies ;;
-  check) check ;;
-  stage) stage ;;
+  check)
+    shift
+    check "$@"
+    ;;
+  bindgen) bindgen "$bindings" ;;
   build) build ;;
   verify) verify ;;
   publish)
     shift
     publish "$@"
     ;;
-  *) fail "usage: scripts/wasm-pkg.sh sync|check|stage|build|verify|publish [--overwrite PACKAGE,..]" ;;
+  *) fail "$usage" ;;
 esac
