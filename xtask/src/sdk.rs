@@ -9,7 +9,7 @@
 
 use std::fmt::Write;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
 use wit_bindgen_core::wit_parser::{
@@ -170,19 +170,25 @@ const BINDINGS: &str = "crates/sdk/src/bindings";
 
 impl Bindings {
     pub fn write(&self) -> Result<()> {
+        let root = Path::new(BINDINGS);
         for (name, contents) in self.0.iter() {
-            let path = Path::new(BINDINGS).join(name);
+            let path = root.join(name);
             fs::write(&path, contents)
                 .with_context(|| format!("cannot write {}", path.display()))?;
+        }
+        for extra in extras(root, self.0.iter().map(|(name, _)| name))? {
+            fs::remove_file(&extra)
+                .with_context(|| format!("cannot remove {}", extra.display()))?;
         }
         Ok(())
     }
 
-    // each committed file a regeneration would change
+    // each committed file a regeneration would change, and any it would drop
     pub fn stale(&self) -> Vec<String> {
+        let root = Path::new(BINDINGS);
         let mut stale = Vec::new();
         for (name, contents) in self.0.iter() {
-            let path = Path::new(BINDINGS).join(name);
+            let path = root.join(name);
             let committed = fs::read(&path).unwrap_or_default();
             if committed != contents {
                 let line = crate::parting_line(
@@ -195,6 +201,32 @@ impl Bindings {
                 ));
             }
         }
+        if let Ok(extras) = extras(root, self.0.iter().map(|(name, _)| name)) {
+            for path in extras {
+                stale.push(format!("{} is not generated: run `mise run bindgen`", path.display()));
+            }
+        }
         stale
     }
+}
+
+fn extras<'a>(root: &Path, generated: impl Iterator<Item = &'a str>) -> Result<Vec<PathBuf>> {
+    use std::collections::HashSet;
+
+    let generated: HashSet<_> = generated.collect();
+    let mut extras = Vec::new();
+    for entry in fs::read_dir(root).with_context(|| format!("cannot read {}", root.display()))? {
+        let entry = entry?;
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if !generated.contains(name) {
+            extras.push(path);
+        }
+    }
+    Ok(extras)
 }

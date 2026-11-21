@@ -59,14 +59,19 @@ impl Registry {
 
         // absent when the registry lists no such package, or no such version of it
         let versions = match self.client.list_all_versions(&reference).await {
-            Err(Error::PackageNotFound) => return Ok(Release::absent(package, wasm)),
-            versions => versions.map_err(unread)?,
+            Ok(versions) => versions,
+            Err(err) if registry_absent(&err) => return Ok(Release::absent(package, wasm)),
+            Err(err) => return Err(unread(err)),
         };
         if !versions.iter().any(|info| info.version == version) {
             return Ok(Release::absent(package, wasm));
         }
 
-        let release = self.client.get_release(&reference, &version).await.map_err(unread)?;
+        let release = match self.client.get_release(&reference, &version).await {
+            Ok(release) => release,
+            Err(err) if registry_absent(&err) => return Ok(Release::absent(package, wasm)),
+            Err(err) => return Err(unread(err)),
+        };
         let published = self
             .client
             .stream_content(&reference, &release)
@@ -80,6 +85,19 @@ impl Registry {
             .map_err(unread)?;
         let state = State::compare(&wit(&published)?, &wit(&wasm)?);
         Ok(Release { package, wasm, state })
+    }
+}
+
+// the absent states `wkg get` used to read out of its stderr
+fn registry_absent(err: &Error) -> bool {
+    match err {
+        Error::PackageNotFound | Error::VersionNotFound(_) => true,
+        err => {
+            let message = format!("{err:#}").to_ascii_lowercase();
+            ["manifest unknown", "name unknown", "package not found", "version not found"]
+                .iter()
+                .any(|needle| message.contains(needle))
+        }
     }
 }
 
