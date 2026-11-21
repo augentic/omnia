@@ -5775,6 +5775,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "xtask"
+version = "0.38.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "futures",
+ "serde",
+ "serde_json",
+ "test-programs",
+ "tokio",
+ "wasm-metadata 0.263.0",
+ "wasm-pkg-client",
+ "wit-bindgen-core",
+ "wit-bindgen-rust",
+ "wit-component 0.262.0",
+]
+
+[[package]]
 name = "yasna"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

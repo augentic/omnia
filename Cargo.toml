@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/*", "examples"]
+members = ["crates/*", "examples", "xtask"]
 resolver = "3"
 
 [workspace.package]
@@ -89,11 +89,15 @@ tracing-opentelemetry = { version = "0.34.0", default-features = false }
 tracing-subscriber = { version = "0.3.23", default-features = false, features = ["env-filter", "fmt"] }
 trybuild = "1"
 wasip3 = { version = "0.10.0", features = ["http-compat"] }
+wasm-metadata = { version = "0.263.0", default-features = false, features = ["oci"] }
 wasm-pkg-client = "0.16.2"
 wasmtime = { version = "50.0.2", default-features = false, features = ["anyhow", "component-model-bytes", "parallel-compilation"] }
 wasmtime-wasi = { version = "50.0.2", default-features = false, features = ["p3"] }
 wasmtime-wasi-http = { version = "50.0.2", default-features = false, features = ["p3"] }
 wit-bindgen = { version = "0.63.0", features = ["async-spawn"] }
+wit-bindgen-core = "0.63.0"
+wit-bindgen-rust = "0.63.0"
+wit-component = "0.262.0"
 x509-cert = { version = "0.3.0", default-features = false, features = ["std"] }
 
 # internally referenced crates

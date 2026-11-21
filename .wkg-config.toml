@@ -1,9 +1,10 @@
-# The wasm-pkg routing `scripts/wit.sh` verifies and publishes the omnia:*
-# WIT packages through, passed to wkg with `--config`.
+# The wasm-pkg routing `cargo xtask verify` and `cargo xtask publish` read
+# and publish the omnia:* WIT packages through.
 #
 # `omnia.host` serves `/.well-known/wasm-pkg/registry.json`, which points
-# wkg at `ghcr.io/augentic/omnia/<name>`. Credentials never live here: wkg
-# reads them from the Docker credential store (`docker login ghcr.io`).
+# the client at `ghcr.io/augentic/omnia/<name>`. Credentials never live here:
+# the client reads them from `WKG_REGISTRY_GHCR_IO_AUTH_BEARER`, or else from
+# the Docker credential store (`docker login ghcr.io`), as wkg does.
 
 [namespace_registries]
 omnia = "omnia.host"
