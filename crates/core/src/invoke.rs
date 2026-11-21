@@ -7,6 +7,7 @@ use std::time::Duration;
 use anyhow::Context as _;
 use tokio::task::JoinHandle;
 use tracing::Instrument as _;
+use wasmtime::PoolConcurrencyLimitError;
 use wasmtime::component::{ComponentExportIndex, InstancePre, Val};
 
 use crate::chain::ChainCtx;
@@ -34,10 +35,26 @@ pub enum InvokeError {
     Timeout(Duration),
     /// A result carried a store-bound handle of the named kind.
     Handle(&'static str),
+    /// The instance pool was full, so the callee could not run.
+    ///
+    /// A call takes no slot of the concurrency gate, and fails at once
+    /// rather than wait on a slot its own caller may hold.
+    Saturated,
     /// Instantiation, export resolution, or the call itself failed.
     Trap(anyhow::Error),
     /// The callee task panicked or was cancelled.
     Join(tokio::task::JoinError),
+}
+
+impl InvokeError {
+    // a full pool is load the caller may shed, not a fault in the callee
+    fn from_wasmtime(error: wasmtime::Error) -> Self {
+        if error.is::<PoolConcurrencyLimitError>() {
+            Self::Saturated
+        } else {
+            Self::Trap(error.into())
+        }
+    }
 }
 
 impl fmt::Display for InvokeError {
@@ -45,6 +62,7 @@ impl fmt::Display for InvokeError {
         match self {
             Self::Timeout(bound) => write!(f, "timed out after {bound:?}"),
             Self::Handle(kind) => write!(f, "a {kind} handle cannot cross the link seam"),
+            Self::Saturated => write!(f, "the instance pool is full"),
             // transparent, so an `anyhow` wrap renders the chain once under `{:#}`
             Self::Trap(err) => write!(f, "{err}"),
             Self::Join(err) => write!(f, "{err}"),
@@ -57,7 +75,7 @@ impl std::error::Error for InvokeError {
         match self {
             Self::Trap(err) => err.chain().nth(1),
             Self::Join(err) => std::error::Error::source(err),
-            Self::Timeout(_) | Self::Handle(_) => None,
+            Self::Timeout(_) | Self::Handle(_) | Self::Saturated => None,
         }
     }
 }
@@ -71,10 +89,12 @@ impl std::error::Error for InvokeError {
 ///
 /// # Errors
 ///
-/// Returns [`InvokeError::Timeout`] when `bound` elapses, [`InvokeError::Handle`]
-/// when a result carries a store-bound handle, [`InvokeError::Trap`] when
-/// instantiation, export resolution, or the call fails, and
-/// [`InvokeError::Join`] when the callee task panics or is cancelled.
+/// - [`InvokeError::Timeout`] when `bound` elapses.
+/// - [`InvokeError::Handle`] when a result carries a store-bound handle.
+/// - [`InvokeError::Saturated`] when the instance pool is full.
+/// - [`InvokeError::Trap`] when instantiation, export resolution, or the call
+///   fails.
+/// - [`InvokeError::Join`] when the callee task panics or is cancelled.
 pub async fn call_fresh<B: Send + 'static>(
     call: FreshCall<B>, args: Vec<Val>, ctx: ChainCtx, bound: Option<Duration>,
 ) -> Result<Vec<Val>, InvokeError> {
@@ -83,13 +103,18 @@ pub async fn call_fresh<B: Send + 'static>(
     // docs recommend; the span `spawn` drops is re-entered for otel parenting
     let callee = async move {
         let mut store = (call.factory)(ctx);
-        let instance = call.instance_pre.instantiate_async(&mut store).await?;
+        let instance = call
+            .instance_pre
+            .instantiate_async(&mut store)
+            .await
+            .map_err(InvokeError::from_wasmtime)?;
         let func = instance
             .get_func(&mut store, call.export)
-            .context("export resolved at serve time vanished")?;
+            .context("export resolved at serve time vanished")
+            .map_err(InvokeError::Trap)?;
         let mut out = vec![Val::Bool(false); call.results];
-        func.call_async(&mut store, &args, &mut out).await?;
-        Ok::<_, anyhow::Error>(out)
+        func.call_async(&mut store, &args, &mut out).await.map_err(InvokeError::from_wasmtime)?;
+        Ok::<_, InvokeError>(out)
     }
     .in_current_span();
 
@@ -101,8 +126,7 @@ pub async fn call_fresh<B: Send + 'static>(
             .map_err(|_elapsed| InvokeError::Timeout(limit))?,
         None => (&mut callee.0).await,
     }
-    .map_err(InvokeError::Join)?
-    .map_err(InvokeError::Trap)?;
+    .map_err(InvokeError::Join)??;
 
     if let Some(kind) = out.iter().find_map(handle_kind) {
         return Err(InvokeError::Handle(kind));

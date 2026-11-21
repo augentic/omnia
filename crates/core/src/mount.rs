@@ -130,6 +130,13 @@ impl MountRegistry {
         &self.entries
     }
 
+    // shares each kept mount's opened directory
+    pub(crate) fn only(&self, keep: impl Fn(&Mount) -> bool) -> Self {
+        Self {
+            entries: self.entries.iter().filter(|mount| keep(mount)).cloned().collect(),
+        }
+    }
+
     /// The registered mount whose directory identity matches `(dev, ino)`, if
     /// any — how a lent descriptor selects its registry entry.
     #[must_use]

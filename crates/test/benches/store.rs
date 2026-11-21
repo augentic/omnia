@@ -1,14 +1,14 @@
 //! What a guest store costs: building one over the deployment's backend
 //! bundle, and assembling one host's view of it.
 //!
-//! The runtime links twelve hosts over the in-memory defaults. Run with
-//! `cargo bench -p omnia-test --features host --bench store`.
+//! The runtime links twelve hosts over the in-memory defaults, for one
+//! guest. Run with `cargo bench -p omnia-test --features host --bench store`.
 
 use std::hint::black_box;
 use std::time::Instant;
 
-use anyhow::Result;
-use omnia::{DeploymentBuilder, Runtime};
+use anyhow::{Context as _, Result};
+use omnia::{ChainCtx, DeploymentBuilder, Manifest, Runtime, StoreFactory};
 use omnia_test::host::Backends;
 use omnia_wasi_blobstore::WasiBlobStore;
 use omnia_wasi_config::WasiConfig;
@@ -31,12 +31,14 @@ const VIEWS_PER_ROUND: u32 = 2_000_000;
 #[expect(clippy::print_stdout, reason = "a bench reports on stdout")]
 async fn main() -> Result<()> {
     let runtime = boot(Backends::defaults().await).await?;
+    let guest = runtime.registry().guests().next().context("the deployment runs a guest")?;
+    let factory = runtime.store_factory(&guest);
 
     let mut store = Samples::default();
     let mut view = Samples::default();
     for round in 0..=ROUNDS {
-        let store_nanos = time_store(&runtime);
-        let view_nanos = time_view(&runtime);
+        let store_nanos = time_store(&factory);
+        let view_nanos = time_view(&factory);
         // the first round warms the allocator and the caches
         if round > 0 {
             store.0.push(store_nanos);
@@ -53,7 +55,8 @@ async fn main() -> Result<()> {
 }
 
 async fn boot(backends: Backends) -> Result<Runtime<Backends>> {
-    let mut deployment = DeploymentBuilder::new().dynamic().build::<Backends>().await?;
+    let manifest = Manifest::from_wasm(test_programs::LINK_ECHOER)?;
+    let mut deployment = DeploymentBuilder::new().manifest(manifest).build::<Backends>().await?;
     deployment
         .host::<WasiBlobStore>()?
         .host::<WasiDocStore>()?
@@ -70,14 +73,14 @@ async fn boot(backends: Backends) -> Result<Runtime<Backends>> {
     deployment.assemble(backends).await
 }
 
-fn time_store(runtime: &Runtime<Backends>) -> f64 {
-    time(STORES_PER_ROUND, || drop(black_box(runtime.build_store(runtime.store()))))
+fn time_store(factory: &StoreFactory<Backends>) -> f64 {
+    time(STORES_PER_ROUND, || drop(black_box(factory(ChainCtx::server()))))
 }
 
-fn time_view(runtime: &Runtime<Backends>) -> f64 {
-    let mut store = runtime.store();
+fn time_view(factory: &StoreFactory<Backends>) -> f64 {
+    let mut store = factory(ChainCtx::server());
     time(VIEWS_PER_ROUND, || {
-        let view = black_box(&mut store).view::<WasiKeyValue>();
+        let view = black_box(store.data_mut()).view::<WasiKeyValue>();
         black_box(view.client);
     })
 }

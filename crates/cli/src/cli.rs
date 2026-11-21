@@ -49,6 +49,13 @@ pub enum Command {
         #[arg(long = "mount")]
         mounts: Vec<MountArg>,
 
+        /// Pass a host environment variable to every guest (repeatable). A
+        /// name ending in `*` passes every variable it prefixes, and `*`
+        /// alone passes them all. Added to the manifest's `[environment]
+        /// inherit` when `--manifest` is also given.
+        #[arg(long = "env", value_name = "NAME")]
+        env: Vec<String>,
+
         /// Arguments forwarded to the guest as its argv (everything after
         /// `--`). Empty for a long-lived server; a `wasi:cli` command reads
         /// them as `wasi:cli/environment`'s `get-arguments`. `args[0]` is the

@@ -78,7 +78,7 @@ Everything is environment variables — backend connection strings, runtime limi
 Two variables deserve attention in production:
 
 - `RUST_LOG` — a server defaults to `warn`; set at least `info` (or start the binary with `-v`) so startup, readiness, and trigger-server logs are emitted.
-- `OTEL_EXPORTER_OTLP_ENDPOINT` — point at your collector; the host exports traces and metrics (including pool-occupancy gauges) with no further wiring. Unset (and no per-signal `OTEL_EXPORTER_OTLP_*_ENDPOINT`), nothing is exported — guest telemetry included.
+- `OTEL_EXPORTER_OTLP_ENDPOINT` — point at your collector; the host exports traces and metrics with no further wiring. The metrics include the runtime's own, whatever `RUST_LOG` is: the `pool_*` and `invocations_*` gauges and counters ([tuning guide](performance-tuning.md#2-pool-sizing)), and `message_counter` and `event_counter` per service. Unset (and no per-signal `OTEL_EXPORTER_OTLP_*_ENDPOINT`), nothing is exported — guest telemetry included.
 
 ## Readiness and health
 
@@ -90,11 +90,19 @@ omnia ready
 
 with the mode and guest count attached. Orchestrators (or a log-watching startup probe) should key on this line; a process that is up but hasn't logged it is still connecting backends or compiling guests. For HTTP deployments, the listening port only accepts traffic after this point, so a TCP readiness probe on `HTTP_ADDR` is equivalent.
 
+An HTTP deployment can also answer a probe itself. Set `HTTP_HEALTH_PATH` (for example `/healthz`) and the HTTP trigger answers a request for that path with `200`:
+
+- It enters no guest, so it takes no slot of the [concurrency gate](../reference/configuration.md#concurrency-gate). A deployment at capacity answers its guests' requests with `503` and its probe with `200`, so the orchestrator does not restart a pod for being busy.
+- It wins over a guest route that covers the same path.
+- It exists only where the HTTP trigger runs, so a deployment with no guest serving HTTP has none.
+
+Not ready is a refused connection. On shutdown the trigger drops its listener before in-flight requests drain, so a probe made after that point is refused rather than answered.
+
 ## Production checklist
 
 - [ ] Release build; consider AOT (`compile`) plus a `jit`-less host for fastest, smallest deployments
 - [ ] Backend env vars set and validated (the host fails at startup if a backend cannot connect)
 - [ ] `GUEST_TIMEOUT_MS`, `MAX_MEMORY_BYTES` sized for your workload ([tuning guide](performance-tuning.md))
 - [ ] `RUST_LOG=info` and `OTEL_EXPORTER_OTLP_ENDPOINT` set
-- [ ] Readiness keyed on the `omnia ready` log line (or TCP on `HTTP_ADDR`)
+- [ ] Readiness keyed on the `omnia ready` log line, TCP on `HTTP_ADDR`, or an HTTP probe on `HTTP_HEALTH_PATH`
 - [ ] Mounts limited to the directories guests actually need, read-only unless writes are required ([security model](../security-model.md))

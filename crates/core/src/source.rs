@@ -30,6 +30,7 @@ use wasmtime::component::Component;
 
 use crate::artifact::component;
 use crate::digest::Digest;
+use crate::grants::Grants;
 use crate::registry::GuestId;
 
 /// A compiled component paired with the identity to register it under.
@@ -40,6 +41,8 @@ pub struct LoadedGuest {
     pub component: Component,
     /// The digest of the bytes it was loaded from.
     pub digest: Digest,
+    /// What of the deployment the guest reaches.
+    pub grants: Grants,
 }
 
 /// Where a guest's component bytes come from.
@@ -140,22 +143,26 @@ impl From<Vec<u8>> for SourceSpec {
 }
 
 /// One declared guest, resolved for loading: its identity, where its bytes
-/// come from, and what the bytes must satisfy before they become a guest.
+/// come from, what the bytes must satisfy before they become a guest, and
+/// what the guest reaches.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Source {
     id: GuestId,
     spec: SourceSpec,
     digest: Option<Digest>,
+    grants: Grants,
 }
 
 impl Source {
-    /// A source registering `spec`'s bytes under `id`, unpinned.
+    /// A source registering `spec`'s bytes under `id`, unpinned, under
+    /// [`Grants::all`].
     #[must_use]
     pub fn new(id: impl Into<GuestId>, spec: impl Into<SourceSpec>) -> Self {
         Self {
             id: id.into(),
             spec: spec.into(),
             digest: None,
+            grants: Grants::all(),
         }
     }
 
@@ -165,6 +172,19 @@ impl Source {
     pub const fn pinned(mut self, digest: Digest) -> Self {
         self.digest = Some(digest);
         self
+    }
+
+    /// Run the guest under `grants`.
+    #[must_use]
+    pub fn granted(mut self, grants: Grants) -> Self {
+        self.grants = grants;
+        self
+    }
+
+    /// What of the deployment the guest reaches.
+    #[must_use]
+    pub const fn grants(&self) -> &Grants {
+        &self.grants
     }
 
     /// The identity this source registers under.
@@ -257,6 +277,7 @@ impl Source {
             id: self.id.clone(),
             component,
             digest,
+            grants: self.grants.clone(),
         })
     }
 }

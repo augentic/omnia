@@ -51,16 +51,14 @@ where
         );
     }
 
-    let instance_pre = runtime
+    let guest = runtime
         .guest(target)
         .await
-        .with_context(|| format!("dispatching `{interface}/{func}` to guest `{target}`"))?
-        .instance_pre()
-        .clone();
+        .with_context(|| format!("dispatching `{interface}/{func}` to guest `{target}`"))?;
 
     // Resolve the export on the component so no store is touched before the
     // callee task owns one.
-    let component = instance_pre.component();
+    let component = guest.component();
     let iface_idx = component
         .get_export_index(None, interface)
         .with_context(|| format!("guest `{target}` exports no interface `{interface}`"))?;
@@ -75,8 +73,8 @@ where
     let ctx = policy.enter(caller, target)?;
     let bound = (!ctx.uncapped).then_some(policy.timeout);
     let call = FreshCall {
-        factory: runtime.store_factory(),
-        instance_pre,
+        factory: runtime.store_factory(&guest),
+        instance_pre: guest.instance_pre().clone(),
         export: func_idx,
         results: func_ty.results().count(),
     };

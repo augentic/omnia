@@ -26,11 +26,23 @@ A WASI host that runs a server and drives guest instances per inbound request: `
 
 ### Deployment manifest
 
-The `omnia.toml` file (or equivalent programmatic `omnia::Manifest`) declaring guests, mounts, routes, and the package store and registries. See [Configuration](reference/configuration.md#deployment-manifest-omniatoml).
+The `omnia.toml` file (or equivalent programmatic `omnia::Manifest`) declaring guests and their [grants](#grants), mounts, routes, and the package store and registries. See [Configuration](reference/configuration.md#deployment-manifest-omniatoml).
 
 ### Guest entry
 
-One guest a deployment declares: a `[[guest]]` table, a `runtime!` `guests:` entry, or an `omnia::GuestEntry`. Its `name` is the guest's identity (`GuestId`) — what routes and link dispatch address, and what a `load("name")` answers with; omitted, the component file's stem names it (`echo.wasm` is `echo`) or the package reference without its version does (`acme:tool@1.2.3` is `acme:tool`). A manifest file's entry reads its component from a file (`source.path`) or fetches a package (`source.package`); the macro's embeds it (`path:`) or names a package (`package:`). Embedded bytes load at boot; every other entry is a [first-use guest](#first-use-guest).
+One guest a deployment declares: a `[[guest]]` table, a `runtime!` `guests:` entry, or an `omnia::GuestEntry`. Its `name` is the guest's identity (`GuestId`) — what routes and link dispatch address, and what a `load("name")` answers with; omitted, the component file's stem names it (`echo.wasm` is `echo`) or the package reference without its version does (`acme:tool@1.2.3` is `acme:tool`). A manifest file's entry reads its component from a file (`source.path`) or fetches a package (`source.package`); the macro's embeds it (`path:`) or names a package (`package:`). Embedded bytes load at boot; every other entry is a [first-use guest](#first-use-guest). An entry's optional [grants](#grants) narrow what its guest reaches.
+
+### Grants
+
+What of the deployment one guest reaches: an `omnia::Grants`, declared as a manifest's `[guest.grants]`, the macro's `grants:`, or `GuestEntry::grants`. It holds five lists:
+
+- `env`, the inherited host variables the guest sees;
+- `mounts`, the [mounts](#mount) preopened into it;
+- `hosts`, every host name it states — its outbound `wasi:http` requests and the redirects followed for them, a model worker's egress, and a load's registry;
+- `guests`, the guests it calls over a link and loads;
+- `interfaces`, the packages it may import, checked when it is admitted.
+
+A guest without grants reaches everything, and startup logs it. With them, an omitted list grants nothing, except `interfaces`, which grants every package. A guest the [guest loader](#guest-loader) admits by path or package runs under `plugins.grants` within its loader's grants. The store carries a guest's grants (`StoreCtx::grants`), and each host reads them there. See the [security model](security-model.md#per-guest-grants).
 
 ### Registry
 
@@ -38,11 +50,11 @@ The runtime's map from each opaque guest identity (`GuestId`) to a pre-instantia
 
 ### Mount
 
-A host directory preopened into every guest sandbox (`[[mount]]` in the manifest, the macro's `mounts:` list, or `--mount` on the CLI). Read-only unless marked writable; the guest sees it under its guest-visible name via `wasi:filesystem` preopens. A read-only mount is also a root the [guest loader](#guest-loader) reads a component from when a guest names a path beneath it; a writable mount never is, and one that shares or nests a read-only mount's directory is refused at startup. Mounts dedup by name, last wins, before any directory opens — how a test overlays a binary's `.` root.
+A host directory preopened into every guest sandbox its [grants](#grants) reach (`[[mount]]` in the manifest, the macro's `mounts:` list, or `--mount` on the CLI). Read-only unless marked writable; the guest sees it under its guest-visible name via `wasi:filesystem` preopens. A read-only mount is also a root the [guest loader](#guest-loader) reads a component from when a guest names a path beneath it; a writable mount never is, and one that shares or nests a read-only mount's directory is refused at startup. Mounts dedup by name, last wins, before any directory opens — how a test overlays a binary's `.` root.
 
 ### Dispatch (host-mediated)
 
-Guest-to-guest calls carried through the host: a guest imports an interface outside the runtime's own namespaces, and the host routes the call to whichever guest exports it. Nothing declares the seam — the [namespace rule](#namespace-rule) decides what crosses. Nesting is bounded by `MAX_DISPATCH_DEPTH`. Distinct from the host→guest `Dispatcher`, which names its target explicitly. Both paths drive a fresh callee through `call_fresh`.
+Guest-to-guest calls carried through the host: a guest imports an interface outside the runtime's own namespaces, and the host routes the call to whichever guest exports it. Nothing declares the seam — the [namespace rule](#namespace-rule) decides what crosses. A caller with [grants](#grants) reaches only the guests its `guests` list names. Nesting is bounded by `MAX_DISPATCH_DEPTH`. Distinct from the host→guest `Dispatcher`, which names its target explicitly. Both paths drive a fresh callee through `call_fresh`.
 
 ### Namespace rule
 
@@ -62,7 +74,7 @@ Omnia's off-by-default `loader` cargo feature: the [guest loader](#guest-loader)
 
 ### Guest loader
 
-The `omnia:plugins` host capability: a guest names a source — `declared(name)`, one of the deployment's guests; `path(p)`, a component beneath one of its read-only [mounts](#mount); `release(reference, registry?)`, an exact package release — and the host acquires the bytes inside the deployment's grant (its guest list, its mounts, its package store, its `registries` routing) and admits them through the runtime's one admission body (`Runtime::admit_bytes`), which verifies them against the digest and seats them under the name the source derives (the declared name, the file stem, the reference without its version), returning a typed handle carrying the name, the content digest, and the names the component exports. A `declared` name is one more first use of the runtime's guest seam, so a [first-use guest](#first-use-guest) loads there exactly as a route would load it; a name already active under the same bytes is attested. A failed load answers one case: `not-found` for an undeclared name, a missing file, or a release nothing routes or holds; `denied` for a path beneath a writable mount or a name the deployment declares; `invalid` for a malformed request or bytes that miss the deployment's pin; `unsupported`, `unavailable`, or `other`. Bytes that miss the load's own digest, or a name active under other bytes, answer a `conflict` instead. Component bytes never cross the interface, and the requester gains no lifecycle authority. Ships behind omnia's `loader` feature; linked at assembly for every deployment alike, reachable only from worlds that import it. The requester surface, `plugins::load` over the generated `Source`, `Plugin`, and `Conflict` records, ships in `omnia-sdk`'s `plugins` module.
+The `omnia:plugins` host capability: a guest names a source — `declared(name)`, one of the deployment's guests; `path(p)`, a component beneath one of its read-only [mounts](#mount); `release(reference, registry?)`, an exact package release — and the host acquires the bytes inside the deployment's grant (its guest list, its mounts, its package store, its `registries` routing) and admits them through the runtime's one admission body (`Runtime::admit_bytes`), which verifies them against the digest and seats them under the name the source derives (the declared name, the file stem, the reference without its version), returning a typed handle carrying the name, the content digest, and the names the component exports. A `declared` name is one more first use of the runtime's guest seam, so a [first-use guest](#first-use-guest) loads there exactly as a route would load it; a name already active under the same bytes is attested. A failed load answers one case: `not-found` for an undeclared name, a missing file, or a release nothing routes or holds; `denied` for a path beneath a writable mount, a name the deployment declares, a name, mount, or registry outside the requester's [grants](#grants), or a component importing a package outside the grants it would run under; `invalid` for a malformed request or bytes that miss the deployment's pin; `unsupported`, `unavailable`, or `other`. Bytes that miss the load's own digest, or a name active under other bytes, answer a `conflict` instead. A path or release runs under `plugins.grants` within the requester's grants, and a declared guest under its own entry's. Component bytes never cross the interface, and the requester gains no lifecycle authority. Ships behind omnia's `loader` feature; linked at assembly for every deployment alike, reachable only from worlds that import it. The requester surface, `plugins::load` over the generated `Source`, `Plugin`, and `Conflict` records, ships in `omnia-sdk`'s `plugins` module.
 
 ### Package store
 

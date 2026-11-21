@@ -7,8 +7,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use anyhow::{Result, anyhow};
 use futures::FutureExt as _;
 use futures::future::BoxFuture;
-use omnia_core::{PatternRoutes, Provides, Runtime, TriggerRouter};
-use tokio::sync::Semaphore;
+use omnia_core::{ChainCtx, PatternRoutes, Provides, Runtime, TriggerRouter};
 use tracing::{Instrument, info_span, instrument};
 
 use crate::WasiMessaging;
@@ -50,9 +49,6 @@ where
     state: Runtime<B>,
     component: Arc<str>,
     routing: Arc<TriggerRouter<PatternRoutes>>,
-    // one permit per running guest: whatever a backend delivers at once,
-    // this trigger alone never exhausts the instance pool
-    permits: Arc<Semaphore>,
 }
 
 impl<B> MessagingHandler<B>
@@ -82,7 +78,6 @@ where
             state: runtime.clone(),
             component: Arc::from(runtime.name()),
             routing: Arc::new(routing),
-            permits: Arc::new(Semaphore::new(runtime.options().pool_max_instances as usize)),
         }))
     }
 
@@ -90,19 +85,22 @@ where
     ///
     /// A topic with no route is dropped silently with `Ok`; the message has
     /// no handler in this deployment. Every message is counted, and every
-    /// failure logged and counted, before it is returned. The guest receives
-    /// the delivery with its `deadline` set to the instant the guest timeout
-    /// expires, and its metadata as the backend delivered it.
+    /// failure logged and counted, before it is returned. A delivery waits
+    /// for a slot of the runtime's concurrency gate, however long that takes.
+    /// The guest receives the delivery with its `deadline` set to the instant
+    /// the guest timeout expires, and its metadata as the backend delivered
+    /// it.
     ///
     /// # Errors
     ///
-    /// Returns [`HandleError::Unavailable`] if the guest cannot be loaded at
-    /// its first use or instantiated, [`HandleError::Rejected`] or
-    /// [`HandleError::Released`] as the guest settles the message,
-    /// [`HandleError::Trapped`] if it traps, and [`HandleError::TimedOut`] if
-    /// it runs past the guest timeout.
+    /// - [`HandleError::Unavailable`] if the guest cannot be loaded at its
+    ///   first use or instantiated, or the instance pool is full.
+    /// - [`HandleError::Rejected`] or [`HandleError::Released`] as the guest
+    ///   settles the message.
+    /// - [`HandleError::Trapped`] if it traps.
+    /// - [`HandleError::TimedOut`] if it runs past the guest timeout.
     pub async fn handle(&self, message: Message) -> Result<(), HandleError> {
-        tracing::info!(monotonic_counter.message_counter = 1, service = %self.component);
+        omnia_core::telemetry::count_message(&self.component);
 
         let topic = message.topic.clone();
         let outcome = self.deliver(message).await;
@@ -125,8 +123,6 @@ where
             return Ok(());
         };
 
-        let _permit = self.permits.acquire().await.expect("the pool semaphore is never closed");
-
         // a routed guest that fails to load is an error, never a panic
         let guest = self.state.guest(guest_id).await.map_err(|error| {
             HandleError::Unavailable(format!("resolving the routed guest `{guest_id}`: {error}"))
@@ -139,16 +135,14 @@ where
             ))
         })?;
 
+        let (mut store, instance) =
+            self.state.enter(&guest, ChainCtx::server(), None).await.map_err(|error| {
+                HandleError::Unavailable(format!("instantiating `{guest_id}`: {error:#}"))
+            })?;
         let delivery = Delivery {
             deadline: Some(deadline_millis(self.state.options().guest_timeout)),
             ..Delivery::from(message)
         };
-
-        let mut store = self.state.build_store(self.state.store());
-        let instance =
-            self.state.instantiate(guest.instance_pre(), &mut store).await.map_err(|error| {
-                HandleError::Unavailable(format!("instantiating `{guest_id}`: {error:#}"))
-            })?;
         let messaging = indices
             .load(&mut store, &instance)
             .map_err(|error| HandleError::Unavailable(format!("{error:#}")))?;
@@ -171,7 +165,9 @@ where
     }
 
     async fn client(&self) -> Result<Arc<dyn Endpoint>> {
-        self.state.store().view::<WasiMessaging>().client.endpoint().await
+        let mut backends = self.state.backends().clone();
+        let endpoint = Provides::<WasiMessaging>::borrow(&mut backends).endpoint();
+        endpoint.await
     }
 }
 

@@ -57,8 +57,8 @@ fn materialize(
         path: arg.host_path,
         writable: arg.writable,
     });
-    let builder =
-        DeploymentBuilder::new().manifest(manifest.mounts(mounts)).args(plan.args).mode(mode);
+    let manifest = manifest.mounts(mounts).inherit(plan.env);
+    let builder = DeploymentBuilder::new().manifest(manifest).args(plan.args).mode(mode);
     let builder = match program_name {
         Some(name) => builder.program_name(name),
         None => builder,

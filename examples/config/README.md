@@ -2,6 +2,10 @@
 
 Demonstrates listing runtime configuration over `omnia:config`.
 
+The runtime serves the host variables `HOME` and `USER`, the keys it
+compiles into `ConfigDefault`. A runtime that compiles none in serves the
+variables `CONFIG_KEYS` names, and none when it is unset.
+
 ## Quick Start
 
 ```bash

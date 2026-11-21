@@ -26,7 +26,10 @@ Implements `omnia:config`, the interface the SDK's `config` module binds, over o
 
 ## Backend
 
-- **Default**: Answers from a snapshot of the host process environment, taken when it connects. It skips a variable whose name or value is not Unicode, and lists every variable through `entries`.
+- **Default**: Serves the host variables `CONFIG_KEYS` names, comma-separated, from a snapshot taken when it connects. It serves none when `CONFIG_KEYS` is unset.
+  - A `get` for any other key answers unset. The first one for a variable the host sets logs a warning naming `CONFIG_KEYS`.
+  - It skips a variable whose name or value is not Unicode.
+  - It lists every variable it serves through `entries`.
 
 ## Usage
 
@@ -38,6 +41,20 @@ use omnia_wasi_config::{ConfigDefault, WasiConfig};
 omnia::runtime!({
     hosts: {
         WasiConfig: ConfigDefault,
+    }
+});
+```
+
+The runtime above serves the variables `CONFIG_KEYS` names when it starts. A runtime can compile its keys in instead:
+
+```rust,ignore
+use omnia_wasi_config::{ConfigDefault, ConnectOptions, WasiConfig};
+
+omnia::runtime!({
+    hosts: {
+        WasiConfig: ConfigDefault(ConnectOptions {
+            keys: vec!["UPSTREAM_URL".to_owned()],
+        }),
     }
 });
 ```

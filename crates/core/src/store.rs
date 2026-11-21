@@ -11,7 +11,11 @@ use wasmtime::{StoreLimits, StoreLimitsBuilder};
 use wasmtime_wasi::cli::StdoutStream;
 use wasmtime_wasi::{FsPerms, ResourceTable, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 
-use crate::{ChainCtx, Dispatcher, Extensions, HostCtx, MountRegistry, Provides, RuntimeOptions};
+use crate::runtime::Slot;
+use crate::{
+    ChainCtx, Dispatcher, Extensions, Grants, GuestId, HostCtx, MountRegistry, Provides,
+    RuntimeOptions,
+};
 
 /// Where every guest's stdout and stderr go when a deployment redirects
 /// them: one shared stream pair, each store opening a fresh writer onto it.
@@ -47,10 +51,15 @@ impl fmt::Debug for Stdio {
 
 /// The per-store construction inputs for [`StoreBase::new`].
 ///
-/// `options`, `dispatcher`, and `chain` are required; the rest default
-/// sensibly (empty argv, no mounts, host env inheritance) so hand-written test
-/// runtimes build unchanged.
+/// `guest`, `grants`, `options`, `dispatcher`, and `chain` say what the
+/// store is for. Each of the rest has a `None` or empty value (empty argv,
+/// no mounts, an empty environment) a hand-built store context can pass.
 pub struct StoreConfig<'a> {
+    /// The guest the store is built for.
+    pub guest: GuestId,
+    /// What of the deployment the guest reaches; [`Grants::all`] for a
+    /// hand-built store context.
+    pub grants: Arc<Grants>,
     /// Runtime options; caps linear-memory growth at
     /// [`RuntimeOptions::max_memory_bytes`].
     pub options: &'a RuntimeOptions,
@@ -67,11 +76,13 @@ pub struct StoreConfig<'a> {
     /// Guest argv (`args[0]` is the program name); `None` for reactor
     /// deployments that do not model a CLI invocation.
     pub args: Option<Arc<Vec<String>>>,
-    /// Mount registry preopened into the guest sandbox; `None` for
-    /// deployments without `[[mount]]`s.
+    /// The deployment's mount registry, of which the store preopens the
+    /// mounts the [`grants`](Self::grants) reach; `None` for deployments
+    /// without `[[mount]]`s.
     pub mounts: Option<Arc<MountRegistry>>,
-    /// Complete guest environment replacing host inheritance; `None` inherits
-    /// the host env.
+    /// The deployment's guest environment, of which the store keeps
+    /// `RUST_LOG`, `NO_COLOR`, and the variables the
+    /// [`grants`](Self::grants) reach; `None` gives the guest an empty one.
     pub env: Option<Arc<Vec<(String, String)>>>,
     /// Where the guest's stdout and stderr go; `None` inherits the process
     /// streams.
@@ -85,11 +96,18 @@ pub struct StoreConfig<'a> {
 ///
 /// Construction policy (WASI inheritance, argv, and the memory limit) lives in
 /// [`StoreBase::new`] so it is documented and unit-testable instead of being
-/// inlined in [`Runtime::store`](crate::Runtime::store).
+/// inlined in [`Runtime::enter`](crate::Runtime::enter).
 pub struct StoreBase {
+    /// The guest this store runs.
+    pub guest: GuestId,
+    /// What of the deployment this store's guest reaches. The link relay and
+    /// the guest loader hold the guest to its [`guests`](Grants::guests)
+    /// grant.
+    pub grants: Arc<Grants>,
     /// The store's WASI resource table.
     pub table: ResourceTable,
-    /// The store's WASI context (inherited env/stdin, host stdout/stderr).
+    /// The store's WASI context (the guest environment, inherited stdin,
+    /// host stdout/stderr).
     pub wasi: WasiCtx,
     /// The per-guest memory limiter the runtime installs on every [`Store`].
     ///
@@ -101,37 +119,43 @@ pub struct StoreBase {
     /// The dispatch-chain context this store's guest runs at. A link relay
     /// reads it to derive the callee's.
     pub chain: ChainCtx,
-    /// Mount registry: the startup-validated mounts also preopened into
-    /// [`wasi`](Self::wasi). A consuming host crate reads it to match a lent
-    /// `descriptor` back to its mount by directory identity. Empty unless the
-    /// deployment configures `[[mount]]`s.
+    /// Mount registry: the startup-validated mounts the guest's grants reach,
+    /// also preopened into [`wasi`](Self::wasi). A consuming host crate reads
+    /// it to match a lent `descriptor` back to its mount by directory
+    /// identity. Empty unless the deployment configures `[[mount]]`s.
     pub mounts: Arc<MountRegistry>,
     /// Handle to the runtime's installed extensions, the state slot a
     /// capability crate's host binding reaches for. Empty in hand-built
     /// store contexts.
     pub extensions: Extensions,
+    // the concurrency gate's slot `Runtime::enter` took, freed as the store drops
+    pub(crate) slot: Option<Slot>,
 }
 
 impl StoreBase {
     /// Build the fixed per-store state for a single guest invocation, applying
     /// the WASI construction policy shared by every deployment.
     ///
-    /// Applies the guest environment (the explicit [`env`](StoreConfig::env)
-    /// list when set, host inheritance otherwise), inherits stdin, wires
-    /// stdout/stderr to the [`stdio`](StoreConfig::stdio) pair when set and
-    /// the host streams otherwise, applies the configured argv, and caps
-    /// linear-memory growth.
+    /// - Applies the guest environment: the [`env`](StoreConfig::env) pairs
+    ///   the [`grants`](StoreConfig::grants) reach, beside `RUST_LOG` and
+    ///   `NO_COLOR`.
+    /// - Preopens the [`mounts`](StoreConfig::mounts) the grants reach.
+    /// - Inherits stdin, and wires stdout and stderr to the
+    ///   [`stdio`](StoreConfig::stdio) pair when set, the host streams
+    ///   otherwise.
+    /// - Applies the configured argv, and caps linear-memory growth.
     #[must_use]
     pub fn new(config: StoreConfig<'_>) -> Self {
-        let mounts = config.mounts.unwrap_or_default();
+        let grants = config.grants;
+        let mut mounts = config.mounts.unwrap_or_default();
+        if grants.mounts.is_some() {
+            mounts = Arc::new(mounts.only(|mount| grants.allows_mount(&mount.name)));
+        }
 
         let mut wasi_builder = WasiCtxBuilder::new();
-        match &config.env {
-            Some(env) => {
-                wasi_builder.envs(env);
-            }
-            None => {
-                wasi_builder.inherit_env();
+        for (name, value) in config.env.iter().flat_map(|env| env.iter()) {
+            if grants.allows_env(name) || [RUST_LOG, NO_COLOR].contains(&name.as_str()) {
+                wasi_builder.env(name, value);
             }
         }
         wasi_builder.inherit_stdin();
@@ -161,6 +185,8 @@ impl StoreBase {
         }
 
         Self {
+            guest: config.guest,
+            grants,
             table: ResourceTable::new(),
             wasi: wasi_builder.build(),
             limits: StoreLimitsBuilder::new().memory_size(config.options.max_memory_bytes).build(),
@@ -168,6 +194,7 @@ impl StoreBase {
             chain: config.chain,
             mounts,
             extensions: config.extensions,
+            slot: None,
         }
     }
 }
@@ -189,7 +216,7 @@ pub struct StoreCtx<B> {
 
 impl<B> StoreCtx<B> {
     /// Assemble host `H`'s linker-facing view: the host's borrow of the
-    /// bundle plus the store's resource table.
+    /// bundle, the store's resource table, and its guest's grants.
     ///
     /// A host passes `StoreCtx::view::<Self>` as the accessor of its
     /// bindgen `add_to_linker`; a trigger server calls it on the store it
@@ -198,7 +225,13 @@ impl<B> StoreCtx<B> {
     where
         B: Provides<H>,
     {
-        H::view(self.backends.borrow(), &mut self.base.table)
+        H::view(self.backends.borrow(), &mut self.base.table, &self.base.grants)
+    }
+
+    /// The guest this store runs.
+    #[must_use]
+    pub const fn guest(&self) -> &GuestId {
+        &self.base.guest
     }
 
     /// A handle to the store's startup-validated mount registry, for
@@ -207,6 +240,12 @@ impl<B> StoreCtx<B> {
     #[must_use]
     pub fn mounts(&self) -> Arc<MountRegistry> {
         Arc::clone(&self.base.mounts)
+    }
+
+    /// What of the deployment this store's guest reaches.
+    #[must_use]
+    pub fn grants(&self) -> Arc<Grants> {
+        Arc::clone(&self.base.grants)
     }
 
     /// A handle to the store's host->guest dispatcher, for host-mediated
@@ -243,23 +282,30 @@ impl<B: Send + 'static> WasiView for StoreCtx<B> {
 const RUST_LOG: &str = "RUST_LOG";
 const NO_COLOR: &str = "NO_COLOR";
 
-/// The complete guest environment: every `host` pair, with `RUST_LOG` set to
-/// the run's tracing directives and `NO_COLOR` set when the console does not
-/// colour its lines.
+/// The complete guest environment: the `host` pairs `inherit` names, with
+/// `RUST_LOG` set to the run's tracing directives and `NO_COLOR` set when
+/// the console does not colour its lines.
+///
+/// Each `inherit` entry is a whole name, or a prefix that ends in `*`, so
+/// `*` alone keeps every pair.
 ///
 /// `rust_log` is the composition of the run's verbosity flag with the
 /// process `RUST_LOG` ([`telemetry::directives`](crate::telemetry::directives)),
-/// so it replaces the host's variable in place — the process value is already
-/// folded in — or is appended when the host carries none.
+/// so it replaces an inherited variable in place — the process value is
+/// already folded in — or is appended when none is inherited.
 ///
 /// `ansi` is whether the host console colours its lines. When it does not,
 /// `NO_COLOR=1` is appended so a guest's console — which cannot see the
-/// descriptor it shares — decides the same way; a host `NO_COLOR` already set
+/// descriptor it shares — decides the same way; an inherited `NO_COLOR` set
 /// to a non-empty value stands as it is.
 pub fn guest_env(
-    host: impl IntoIterator<Item = (String, String)>, rust_log: &str, ansi: bool,
+    host: impl IntoIterator<Item = (String, String)>, inherit: &[String], rust_log: &str,
+    ansi: bool,
 ) -> Vec<(String, String)> {
-    let mut env: Vec<(String, String)> = host.into_iter().collect();
+    let mut env: Vec<(String, String)> = host
+        .into_iter()
+        .filter(|(name, _)| inherit.iter().any(|pattern| crate::names::matches(pattern, name)))
+        .collect();
     match env.iter_mut().find(|(name, _)| name == RUST_LOG) {
         Some((_, value)) => rust_log.clone_into(value),
         None => env.push((RUST_LOG.to_owned(), rust_log.to_owned())),
@@ -284,27 +330,55 @@ mod tests {
         entries.iter().map(|(name, value)| ((*name).to_owned(), (*value).to_owned())).collect()
     }
 
-    // A console off a terminal tells the guest so; a host `NO_COLOR` already
-    // in force stands, and an empty one — no colour suppression, by the
-    // convention — is filled the way an absent one is.
+    fn names(patterns: &[&str]) -> Vec<String> {
+        patterns.iter().map(|pattern| (*pattern).to_owned()).collect()
+    }
+
+    // A console off a terminal tells the guest so; an inherited `NO_COLOR`
+    // already in force stands, and an empty one — no colour suppression, by
+    // the convention — is filled the way an absent one is.
     #[test]
     fn piped_stderr() {
+        let all = names(&["*"]);
         let host = pairs(&[("HOME", "/home/op")]);
         assert_eq!(
-            guest_env(host, "info", false),
+            guest_env(host, &all, "info", false),
             pairs(&[("HOME", "/home/op"), ("RUST_LOG", "info"), ("NO_COLOR", "1")])
         );
 
         let host = pairs(&[("NO_COLOR", "true"), ("RUST_LOG", "off")]);
         assert_eq!(
-            guest_env(host, "info", false),
+            guest_env(host, &all, "info", false),
             pairs(&[("NO_COLOR", "true"), ("RUST_LOG", "info")])
         );
 
         let host = pairs(&[("NO_COLOR", ""), ("RUST_LOG", "off")]);
         assert_eq!(
-            guest_env(host, "info", false),
+            guest_env(host, &all, "info", false),
             pairs(&[("NO_COLOR", "1"), ("RUST_LOG", "info")])
         );
+    }
+
+    // The runtime's own variables reach the guest whatever it inherits; a
+    // host `NO_COLOR` it does not inherit leaves the console's decision.
+    #[test]
+    fn named_variables() {
+        let host = pairs(&[
+            ("HOME", "/home/op"),
+            ("ORDERS_URL", "https://orders"),
+            ("ORDERS_KEY", "secret"),
+            ("PATH", "/bin"),
+            ("NO_COLOR", "true"),
+        ]);
+        assert_eq!(
+            guest_env(host.clone(), &names(&["ORDERS_*", "HOME"]), "warn", true),
+            pairs(&[
+                ("HOME", "/home/op"),
+                ("ORDERS_URL", "https://orders"),
+                ("ORDERS_KEY", "secret"),
+                ("RUST_LOG", "warn"),
+            ])
+        );
+        assert_eq!(guest_env(host, &[], "warn", true), pairs(&[("RUST_LOG", "warn")]));
     }
 }

@@ -3,7 +3,8 @@
 
 use std::collections::HashSet;
 use std::fmt;
-use std::net::IpAddr;
+
+use omnia_core::host_pattern;
 
 use crate::generated::omnia::model::{completion, types};
 use crate::{Effort, Error, Format, Grants, Location, Message, Role, WorkerGrant};
@@ -203,7 +204,7 @@ impl WorkerGrant {
     /// detail.
     pub fn validate(&self) -> Result<(), String> {
         for entry in &self.egress {
-            egress_host(entry).map_err(|what| format!("worker egress `{entry}` {what}"))?;
+            host_pattern(entry).map_err(|what| format!("worker egress `{entry}` {what}"))?;
         }
         for entry in &self.read {
             read_root(entry).map_err(|what| format!("worker read root `{entry}` {what}"))?;
@@ -215,35 +216,6 @@ impl WorkerGrant {
         }
         Ok(())
     }
-}
-
-// a name whole or `*.suffix`: labels of `[A-Za-z0-9-]` joined by `.`, never
-// an address, a port, a scheme, or a path
-fn egress_host(entry: &str) -> Result<(), &'static str> {
-    if entry.contains("://") {
-        return Err("carries a scheme");
-    }
-    if entry.contains('/') {
-        return Err("carries a path");
-    }
-    let name = entry.trim_prefix("*.");
-    if name.starts_with('[') || name.parse::<IpAddr>().is_ok() {
-        return Err("is an IP literal, not a host name");
-    }
-    if name.contains(':') {
-        return Err("carries a port");
-    }
-    let labelled = !name.is_empty()
-        && name.split('.').all(|label| {
-            !label.is_empty()
-                && !label.starts_with('-')
-                && !label.ends_with('-')
-                && label.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
-        });
-    if !labelled {
-        return Err("is not a host name or `*.suffix`");
-    }
-    Ok(())
 }
 
 // `~/` then a plain relative path, the shape a workspace lend's subpath is

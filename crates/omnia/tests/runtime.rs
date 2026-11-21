@@ -6,14 +6,21 @@ use std::future::{Future, ready};
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 
+use omnia::wasmtime::Store;
 use omnia::wasmtime::component::Linker;
 use omnia::{
-    DeploymentBuilder, ExitStatus, Host, HostCtx, Manifest, ManifestSource, Mount, PluginsConfig,
-    Provides, Runtime, SourceSpec, StoreCtx,
+    Backends, ChainCtx, DeploymentBuilder, ExitStatus, Grants, Host, HostCtx, Manifest,
+    ManifestSource, Mount, PluginsConfig, Provides, Runtime, SourceSpec, StoreCtx,
 };
 
 trait TagClient: Send + Sync + 'static {
     fn id(&self) -> usize;
+}
+
+// a store for the deployment's guest, as a link call to it would build one
+fn guest_store<B: Backends>(runtime: &Runtime<B>) -> Store<StoreCtx<B>> {
+    let guest = runtime.registry().guests().next().expect("the deployment runs a guest");
+    runtime.store_factory(&guest)(ChainCtx::server())
 }
 
 #[derive(HostCtx)]
@@ -26,7 +33,7 @@ impl<B: Provides<Self>> Host<B> for WasiAlpha {
     }
 
     fn run(runtime: &Runtime<B>) -> impl Future<Output = omnia::anyhow::Result<()>> + Send {
-        let mut store = runtime.build_store(runtime.store());
+        let mut store = guest_store(runtime);
         assert_eq!(store.data_mut().view::<Self>().client.id(), 1);
         ready(Ok(()))
     }
@@ -42,7 +49,7 @@ impl<B: Provides<Self>> Host<B> for WasiBeta {
     }
 
     fn run(runtime: &Runtime<B>) -> impl Future<Output = omnia::anyhow::Result<()>> + Send {
-        let mut store = runtime.build_store(runtime.store());
+        let mut store = guest_store(runtime);
         assert_eq!(store.data_mut().view::<Self>().client.id(), 1);
         ready(Ok(()))
     }
@@ -58,7 +65,7 @@ impl<B: Provides<Self>> Host<B> for WasiGamma {
     }
 
     fn run(runtime: &Runtime<B>) -> impl Future<Output = omnia::anyhow::Result<()>> + Send {
-        let mut store = runtime.build_store(runtime.store());
+        let mut store = guest_store(runtime);
         assert_eq!(store.data_mut().view::<Self>().client.id(), 1);
         ready(Ok(()))
     }
@@ -235,6 +242,9 @@ mod embedded_guests {
             { path: "../Cargo.toml", command: true },
             { path: concat!(env!("CARGO_MANIFEST_DIR"), "/README.md") },
         ],
+        plugins: {
+            grants: { guests: ["acme:*"] },
+        },
     });
 }
 
@@ -252,15 +262,30 @@ mod deployment_keys {
     omnia::runtime!({
         mode: command,
         guests: [
-            { name: "specify", path: "../Cargo.toml", command: true },
-            { name: "target:mock", path: "runtime.rs" },
+            {
+                name: "specify",
+                path: "../Cargo.toml",
+                command: true,
+                grants: {
+                    env: ["SPECIFY_*"],
+                    mounts: ["project"],
+                    hosts: ["api.example.com", "*.example.net"],
+                    guests: ["target:*"],
+                    interfaces: ["wasi:*", "omnia:otel"],
+                },
+            },
+            { name: "target:mock", path: "runtime.rs", grants: {} },
         ],
         mounts: [
             { name: "project", path: project_root(), writable: true },
             { name: "store", path: store_root() },
         ],
+        environment: {
+            inherit: ["SPECIFY_*", "HOME"],
+        },
         plugins: {
             store: "store",
+            grants: { mounts: ["store"], interfaces: [] },
         },
     });
 }
@@ -337,8 +362,18 @@ fn inline_deployment() {
             include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/README.md")).as_slice()
         )
     );
+    assert!(readme.grants.is_all(), "a guest naming no grants reaches everything");
+    assert_eq!(
+        embedded.plugins,
+        Some(PluginsConfig {
+            store: None,
+            registries: None,
+            grants: Grants::none().guests(["acme:*"]),
+        })
+    );
 
-    // explicit guest names, expression-valued mounts, and store-only `plugins`
+    // explicit guest names and grants, expression-valued mounts, the
+    // inherited environment, and `plugins` with a store and grants
     let keyed = deployment_keys::manifest().into_manifest().expect("inline manifest");
     let [specify, mock] = keyed.guests.as_slice() else {
         panic!("two named guests: {:?}", keyed.guests);
@@ -346,10 +381,20 @@ fn inline_deployment() {
     assert_eq!(specify.name, "specify");
     assert!(specify.command);
     assert_eq!(specify.source, SourceSpec::from(include_bytes!("../Cargo.toml").as_slice()));
+    assert_eq!(
+        specify.grants,
+        Grants::none()
+            .env(["SPECIFY_*"])
+            .mounts(["project"])
+            .hosts(["api.example.com", "*.example.net"])
+            .guests(["target:*"])
+            .interfaces(["wasi:*", "omnia:otel"])
+    );
 
     assert_eq!(mock.name, "target:mock");
     assert!(!mock.command);
     assert_eq!(mock.source, SourceSpec::from(include_bytes!("runtime.rs").as_slice()));
+    assert_eq!(mock.grants, Grants::none(), "an empty block grants nothing");
 
     assert_eq!(
         keyed.mounts,
@@ -366,11 +411,13 @@ fn inline_deployment() {
             },
         ]
     );
+    assert_eq!(keyed.environment.inherit, ["SPECIFY_*", "HOME"]);
     assert_eq!(
         keyed.plugins,
         Some(PluginsConfig {
             store: Some(PathBuf::from("store")),
             registries: None,
+            grants: Grants::none().mounts(["store"]).interfaces(Vec::<String>::new()),
         })
     );
 }

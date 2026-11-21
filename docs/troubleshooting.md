@@ -88,6 +88,23 @@ Only `in-process` is a valid `[transport] default`. Remove `unix`/`nats`/`quic` 
 
 A manifest declares a `source.package` guest, but the runtime has no registry client to fetch it with. Packages are fetched through omnia's `loader` feature; enable it on the `omnia` dependency (`features = ["loader"]`), or give the guest a `source.path`. The run-time twin, `... has no registry to fetch it from`, is the same gap reached through an embedder's own `RuntimeParts` with `packages: None`.
 
+### `guest ... imports ..., but its grants reach no ...: add ... to its interfaces`
+
+The guest declares grants with an `interfaces` list, and its component imports a package outside it. Add the package the message names. A guest built on `omnia-sdk` imports `omnia:otel` beside the WASI packages it uses, so `["wasi:*", "omnia:otel", ..]` is the usual start. An import with no function and no resource needs no entry. A guest loaded at boot is refused at startup, a first-use guest at its first use, and a loaded guest at its `load`, as `denied`.
+
+### `guest ... has invalid grants` / `` `[plugins.grants]` is invalid ``
+
+A grants table holds an entry of the wrong shape, and the message names it:
+
+- an `env` entry that is not a variable name, or a prefix of one ending in `*`;
+- a `mounts` entry that names no `[[mount]]` of the deployment;
+- a `hosts` entry that is an IP literal, or carries a scheme, path, or port, where a host name or `*.suffix` belongs;
+- an `interfaces` entry that names an interface (`wasi:http/types`) or a version (`wasi:http@0.3.0`) where a package (`wasi:http`) belongs.
+
+### `guest declares no grants: it reaches every variable, mount, host name, guest, and interface of the deployment`
+
+Not an error. Startup logs it at `info` for each guest without a grants table, and logs ``the deployment declares no `[plugins.grants]` `` for a loader without one, so an operator sees what nothing narrows. Declare `[guest.grants]` (or `[plugins.grants]`) to narrow it — see the [security model](security-model.md#per-guest-grants).
+
 ### `guest ... targets WASI 0.2 (wasm32-wasip2), importing ...; rebuild it for wasm32-wasip3`
 
 The guest was built for WASI 0.2, and the runtime serves WASI 0.3 alone. Rebuild it with `--target wasm32-wasip3` against an `omnia-sdk` of the runtime's release. A compiled-in guest is refused at startup, and a declared or dynamically registered one at its first use.
@@ -120,7 +137,26 @@ A guest export typed `func` in its WIT suspended before it returned. On `wasm32-
 
 ### `preopens.get_directories()` returns an empty list
 
-No mount reached the guest. Check: a `[[mount]]` in the manifest or a `--mount` flag exists; the guest-visible `name` matches what the guest looks for (default `.`); and with both manifest and CLI mounts, remember CLI entries override manifest entries with the same name (last wins).
+No mount reached the guest. Check: a `[[mount]]` in the manifest or a `--mount` flag exists; the guest-visible `name` matches what the guest looks for (default `.`); a guest that declares grants lists the mount in its `mounts`; and with both manifest and CLI mounts, remember CLI entries override manifest entries with the same name (last wins).
+
+A host variable a guest expects is missing for the same reasons: `[environment] inherit` or `--env` must pass it, and a guest that declares grants must list it in its `env`.
+
+### An outbound request fails with `http-request-denied`
+
+The guest declares grants with a `hosts` list, and the request's host matches no entry, or a redirect led to a host that matches none. Add the host name, or `*.suffix` for a domain and every host beneath it. An IP literal never matches, so call the host by its name. An entry names no port, so a granted name is reached on any port.
+
+### `guest ... may not call ... (call to ...): its grants reach no such guest`
+
+A guest under grants called an interface whose exporter is a guest outside its `guests` list. Add the target's name, or a prefix ending in `*` for a namespace of loaded guests (`acme:*`).
+
+### A `load` is `denied` by the loading guest's grants
+
+The guest that loads declares grants, and the load reaches past them. The message says which list:
+
+- ``the loading guest's grants reach no guest `...` `` — the name the source derives is outside its `guests`;
+- ``path `...` is beneath the mount `...`, which the loading guest's grants do not reach`` — the mount is outside its `mounts`;
+- ``registry `...` is a host the loading guest's grants do not reach`` — the registry the load names is outside its `hosts`;
+- ``guest `...` is active under other grants than this load would run it under`` — another loader admitted the guest under other grants, so this load cannot attest it.
 
 ### Guest writes to a mount fail
 
@@ -153,6 +189,10 @@ The runtime is serving `wasi-model` with the echo `ModelDefault`, which answers 
 ### `invalid` errors
 
 The host rejected the request, or the guest's side of its session: messages with no text, a guest tool named after a reserved name (`read`, `list`, or `write`), a tool name given twice, a tool `input-schema` that is not valid JSON, a `format` schema that is not JSON, or a tool result or check correction over the host's per-result size cap. The message names the violation. A `Question<T>` also reports `invalid` when a candidate never deserialized as `T` and nothing was accepted — the steering schema and the type disagree.
+
+### `denied: worker egress ... reaches hosts the guest's hosts grant does not`
+
+The guest declares grants with a `hosts` list, and a worker grant's `egress` entry reaches hosts the list does not cover. An entry is covered whole or not at all: under `*.npmjs.org`, `registry.npmjs.org` and `*.cdn.npmjs.org` are covered, and `*.org` is not. Narrow the entry, or widen the guest's `hosts`.
 
 ### `no local tree on this node` (cursor backend)
 

@@ -62,8 +62,7 @@ async fn run_guest<B: Backends>(
     tracing::debug!(guest = %guest_id, "running wasi:cli/run");
 
     // a command chain root: its link hops run uncapped, like the run itself
-    let mut store = runtime.build_store(runtime.store_in(ChainCtx::command()));
-    let instance = runtime.instantiate(guest.instance_pre(), &mut store).await?;
+    let (mut store, instance) = runtime.enter(guest, ChainCtx::command(), None).await?;
     let command = Command::new(&mut store, &instance)?;
 
     // the host span a guest's root spans join through `omnia:otel`

@@ -6,7 +6,7 @@ use proc_macro2::TokenStream;
 use quote::{ToTokens, format_ident, quote};
 use syn::{Expr, Ident, Path};
 
-use crate::runtime::parse::{Config, GuestSource, HostEntry, ManifestSpec, Mode};
+use crate::runtime::parse::{Config, GrantsSpec, GuestSource, HostEntry, ManifestSpec, Mode};
 
 // Token fragments needed to expand the runtime macro.
 pub struct Codegen {
@@ -151,9 +151,14 @@ fn emit_manifest_builder(manifest: &ManifestSpec) -> TokenStream {
                 .registries(omnia::RegistryConfig::contents(#config))
             }
         });
+        let grants = plugins.grants.as_ref().map(|grants| {
+            let grants = emit_grants(grants);
+            quote! { .plugin_grants(#grants) }
+        });
         quote! {
             #store
             #registries
+            #grants
         }
     });
 
@@ -192,6 +197,10 @@ fn emit_manifest_builder(manifest: &ManifestSpec) -> TokenStream {
             let bytes = bytes.iter();
             quote! { .digest(omnia::Digest::from([#(#bytes),*])) }
         });
+        let grants = guest.grants.as_ref().map(|grants| {
+            let grants = emit_grants(grants);
+            quote! { .grants(#grants) }
+        });
         quote! {
             .guest(
                 #entry
@@ -200,9 +209,14 @@ fn emit_manifest_builder(manifest: &ManifestSpec) -> TokenStream {
                     #(.route_websocket(#websocket))*
                     #command
                     #digest
+                    #grants
             )
         }
     });
+
+    // one call per name, so an empty list infers no element type
+    let inherit = manifest.environment.iter().flat_map(|environment| &environment.inherit);
+    let inherit = quote! { #(.inherit([#inherit]))* };
 
     let mounts = manifest.mounts.iter().map(|mount| {
         let name = &mount.name;
@@ -223,6 +237,30 @@ fn emit_manifest_builder(manifest: &ManifestSpec) -> TokenStream {
             #plugins
             #(#guests)*
             #(#mounts)*
+            #inherit
+    }
+}
+
+// one call per name, so an empty list infers no element type; a listed
+// `interfaces` opens with an empty call, since naming none grants none
+fn emit_grants(grants: &GrantsSpec) -> TokenStream {
+    let env = &grants.env;
+    let mounts = &grants.mounts;
+    let hosts = &grants.hosts;
+    let guests = &grants.guests;
+    let interfaces = grants.interfaces.as_ref().map(|packages| {
+        quote! {
+            .interfaces(::std::iter::empty::<::std::string::String>())
+            #(.interfaces([#packages]))*
+        }
+    });
+    quote! {
+        omnia::Grants::none()
+            #(.env([#env]))*
+            #(.mounts([#mounts]))*
+            #(.hosts([#hosts]))*
+            #(.guests([#guests]))*
+            #interfaces
     }
 }
 

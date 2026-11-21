@@ -116,6 +116,14 @@ impl WasiModel {
         let request = Request::new(name, request);
         request.validate()?;
 
+        let grants = access.data_mut().grants();
+        let egress = request.grants.worker().map_or(&[][..], |worker| &worker.egress);
+        if let Some(entry) = egress.iter().find(|entry| !grants.covers_host(entry)) {
+            return Err(Error::Denied(format!(
+                "worker egress `{entry}` reaches hosts the guest's `hosts` grant does not"
+            )));
+        }
+
         let workspace = match request.grants.location() {
             Some(location) => {
                 let mounts = access.data_mut().mounts();

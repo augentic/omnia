@@ -17,7 +17,7 @@ cfg_select! {
 
         use anyhow::{Context as _, Result, bail};
         use omnia::wasmtime::component::Val;
-        use omnia::{DeploymentBuilder, GuestEntry, GuestId, Manifest, Runtime};
+        use omnia::{ChainCtx, DeploymentBuilder, Grants, GuestEntry, GuestId, Manifest, Runtime};
 
         #[tokio::main]
         async fn main() -> Result<()> {
@@ -45,7 +45,7 @@ cfg_select! {
                 "extra guest not built: cargo build -p examples --example \
                  guest-link-extra-wasm --target wasm32-wasip3",
             )?;
-            runtime.register("extra", wasm).await?;
+            runtime.register("extra", wasm, Grants::all()).await?;
 
             // dispatched exactly as a manifest guest; the second call loads `responder` on the way
             println!("{}", call_router(&runtime, "extra", "hello").await?);
@@ -61,9 +61,8 @@ cfg_select! {
                 .guest(&GuestId::from("router"))
                 .await
                 .context("resolving the router guest")?;
-            let mut store = runtime.build_store(runtime.store());
-            let instance = runtime
-                .instantiate(guest.instance_pre(), &mut store)
+            let (mut store, instance) = runtime
+                .enter(&guest, ChainCtx::server(), None)
                 .await
                 .context("instantiating router")?;
             let run_to =

@@ -1,10 +1,10 @@
-error: `plugins:` block is empty; name a `store`, a `registries` configuration, or both
+error: `plugins:` block is empty; name a `store`, a `registries` configuration, or `grants`
  --> tests/ui/runtime_invalid.rs:3:18
   |
 3 |         plugins: {},
   |                  ^^
 
-error: unknown plugins key `cache`; expected `store` or `registries`
+error: unknown plugins key `cache`; expected `store`, `registries`, or `grants`
  --> tests/ui/runtime_invalid.rs:9:20
   |
 9 |         plugins: { cache: "store" },
@@ -40,13 +40,13 @@ error: `path:` and `package:` are mutually exclusive; a guest has one source
 42 |         guests: [{ name: "tool", path: "tool.wasm", package: "acme:tool@1.2.3" }],
    |                                                     ^^^^^^^
 
-error: unknown guest key `on_demand`; expected `path` or `package`, `name`, `routes`, `command`, or `digest`
+error: unknown guest key `on_demand`; expected `path` or `package`, `name`, `routes`, `command`, `digest`, or `grants`
   --> tests/ui/runtime_invalid.rs:48:39
    |
 48 |         guests: [{ path: "tool.wasm", on_demand: true }],
    |                                       ^^^^^^^^^
 
-error: unknown guest key `wasm_only`; expected `path` or `package`, `name`, `routes`, `command`, or `digest`
+error: unknown guest key `wasm_only`; expected `path` or `package`, `name`, `routes`, `command`, `digest`, or `grants`
   --> tests/ui/runtime_invalid.rs:54:39
    |
 54 |         guests: [{ path: "tool.wasm", wasm_only: true }],
@@ -64,8 +64,26 @@ error: guest entry is missing `path` (or `package`)
 66 |         guests: [{ name: "api" }],
    |                  ^^^^^^^^^^^^^^^
 
-error: `manifest:` and the inline keys (`guests`, `mounts`, `plugins`) are mutually exclusive; declare the deployment in the manifest file
+error: `manifest:` and the inline keys (`guests`, `mounts`, `environment`, `plugins`) are mutually exclusive; declare the deployment in the manifest file
   --> tests/ui/runtime_invalid.rs:73:9
    |
 73 |         plugins: { registries: "default_registry = \"ghcr.io\"\n" },
    |         ^^^^^^^
+
+error: `environment:` block is empty; name the host variables guests see in `inherit`
+  --> tests/ui/runtime_invalid.rs:79:22
+   |
+79 |         environment: {},
+   |                      ^^
+
+error: unknown environment key `pass`; expected `inherit`
+  --> tests/ui/runtime_invalid.rs:85:24
+   |
+85 |         environment: { pass: ["HOME"] },
+   |                        ^^^^
+
+error: unknown grants key `network`; expected `env`, `mounts`, `hosts`, `guests`, or `interfaces`
+  --> tests/ui/runtime_invalid.rs:91:48
+   |
+91 |         guests: [{ path: "app.wasm", grants: { network: ["api"] } }],
+   |                                                ^^^^^^^

@@ -14,7 +14,8 @@ stored for 300 seconds. Every request after that is answered from the bucket.
 
 ## Quick Start
 
-`UPSTREAM_URL` is read from the runtime's environment through `omnia:config`.
+`UPSTREAM_URL` is read from the runtime's environment through `omnia:config`,
+which serves it because the runtime compiles it into `ConfigDefault`'s keys.
 Any origin that answers `GET /resource` with a 2xx status will do:
 
 ```bash

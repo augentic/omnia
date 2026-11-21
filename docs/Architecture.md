@@ -129,7 +129,7 @@ Each interface crate provides a host implementation and, with one exception, a d
 | `wasi-blobstore` | `omnia:blobstore` | Blob storage                       | `BlobStoreDefault` — in-memory            |
 | `wasi-sql`       | `omnia:sql`       | Parameterized SQL and transactions | `SqlDefault` — SQLite                     |
 | `wasi-docstore`  | `omnia:docstore`  | JSON document store with filters   | `DocStoreDefault` — in-memory             |
-| `wasi-config`    | `omnia:config`    | Runtime configuration              | `ConfigDefault` — process environment     |
+| `wasi-config`    | `omnia:config`    | Runtime configuration              | `ConfigDefault` — the variables `CONFIG_KEYS` names |
 | `wasi-vault`     | `omnia:vault`     | Secrets management                 | `VaultDefault` — in-memory                |
 | `wasi-identity`  | `omnia:identity`  | Identity/OAuth tokens              | `IdentityDefault` — OAuth2 client flow    |
 | `wasi-otel`      | Custom            | Guest OpenTelemetry export         | `OtelDefault` — log-only                  |
@@ -177,10 +177,11 @@ The macro generates a `Backends` bundle (one connected backend per `Host: Backen
 
 ## The Guest Registry
 
-A deployment can hold many guests. All of them share one wasmtime `Engine` and one `Linker`; the `Registry` maps each opaque `GuestId` to a pre-instantiated `InstancePre`, so per-request instantiation is cheap, and keeps beside that table the `Source` of every declared guest not yet loaded — a manifest file's `[[guest]]`, a `package:` — which `Runtime::guest` loads the first time anything names it. Three things hang off the registry:
+A deployment can hold many guests. All of them share one wasmtime `Engine` and one `Linker`; the `Registry` maps each opaque `GuestId` to a pre-instantiated `InstancePre`, so per-request instantiation is cheap, and keeps beside that table the `Source` of every declared guest not yet loaded — a manifest file's `[[guest]]`, a `package:` — which `Runtime::guest` loads the first time anything names it. Four things hang off the registry:
 
 - **Route tables** — per-trigger routing (each guest's `routes.http` by longest prefix, `routes.messaging`/`routes.websocket` by NATS-style pattern) selects which guest handles an inbound request.
-- **Mounts** — `[[mount]]` entries preopen host directories into every guest sandbox (read-only unless marked writable). A read-only mount is also a root the guest loader reads a component from when a guest names a path beneath it; a writable mount never is, and one overlapping a read-only mount's directory is refused at startup.
+- **Grants** — each guest's `Grants` sit beside its `InstancePre`, and admission refuses a component that imports a package outside its `interfaces`. Every store a guest gets carries them (`StoreCtx::grants`): the store filters the guest's environment and preopens by `env` and `mounts`, the link relay and the loader check `guests`, and `wasi:http`, `omnia:model`, and the loader check `hosts`.
+- **Mounts** — `[[mount]]` entries preopen host directories into every guest sandbox its grants reach (read-only unless marked writable). A read-only mount is also a root the guest loader reads a component from when a guest names a path beneath it; a writable mount never is, and one overlapping a read-only mount's directory is refused at startup.
 - **Link seam** — every import a guest makes outside the runtime's own namespaces (`wasi:`, `omnia:`; the predicate is `omnia::is_host`, and it is closed — a native host linked under any other namespace collides with the polyfill at boot, so a third-party host lives under `omnia:` or the predicate grows) is polyfilled onto the shared linker, nothing declaring it; calls dispatch to whichever guest exports the interface, by in-memory routing to a fresh callee instance on its own task, with nesting bounded by `MAX_DISPATCH_DEPTH`; the callee inherits the caller's chain context — its depth and its wall-clock policy. The registry always holds a `LinkSeam`: `InProcessLinks` (in `omnia-link`) under omnia's `link` feature, `NoLinks` (every method a no-op) without it.
 
 Endpoints move through two stages inside the seam. `serve` runs *outside* the registry's lifecycle gate and writes only pending state; `publish`, `discard`, and `remove` run *under* the gate's write guard, so a guest's registry entry and its live endpoint change as one step. A call path never reads pending state and reads live state under the seam's own lock, not the gate: a call racing a deregister may complete against the departing instance, exactly as an in-flight invocation does.
@@ -242,6 +243,7 @@ omnia/
 │   └── <example>/
 │       ├── guest.rs        # Guest code (→ .wasm)
 │       └── runtime.rs      # Host code (→ native binary)
+├── xtask/                  # `cargo xtask`: WIT copies, guest bindings, registry releases
 └── docs/                   # This documentation
 ```
 
@@ -257,7 +259,7 @@ Redis: Connect + KeyValueClient          the backend the deployment connects
    v
 StoreCtx<Backends>                       one per guest store
    |  StoreCtx::view::<WasiKeyValue>():
-   |  WasiKeyValue::view(backends.borrow(), &mut base.table)
+   |  WasiKeyValue::view(backends.borrow(), &mut base.table, &base.grants)
    v
 HostView<'_, dyn KeyValueClient>         #[host_ctx(client = KeyValueClient)]: the host's HasData::Data
    |  bindgen Host* impls on the view; Host::add_to_linker(linker, StoreCtx::view::<Self>)

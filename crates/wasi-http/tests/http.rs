@@ -15,16 +15,18 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use base64ct::{Base64, Encoding};
 use bytes::Bytes;
-use http::header::{AUTHORIZATION, CONTENT_TYPE, HOST};
+use futures::StreamExt as _;
+use futures::channel::mpsc::UnboundedSender;
+use http::header::{AUTHORIZATION, CONTENT_TYPE, HOST, LOCATION, RETRY_AFTER};
 use http::{HeaderMap, Method, Request, Response, StatusCode};
-use http_body_util::{BodyExt as _, Full};
-use hyper::body::Incoming;
+use http_body_util::{BodyExt as _, Full, StreamBody};
+use hyper::body::{Body, Frame, Incoming};
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
-use omnia::{ExitStatus, GuestEntry};
+use omnia::{ExitStatus, Grants, GuestEntry, Runtime, RuntimeOptions};
 use omnia_test::host::{Backends, Deployment};
 use omnia_wasi_config::WasiConfig;
-use omnia_wasi_http::{HttpHandler, WasiHttp};
+use omnia_wasi_http::{HttpHandler, ServerOptions, WasiHttp};
 use omnia_wasi_otel::WasiOtel;
 use rcgen::{
     BasicConstraints, CertificateParams, ExtendedKeyUsagePurpose, IsCa, Issuer, KeyPair,
@@ -54,7 +56,8 @@ struct Hit {
 
 // a loopback origin answering every request with `200`, a marker header, and
 // the request's own body where it has one or `BODY` where not, honouring
-// nothing conditional, and recording each hit
+// nothing conditional, and recording each hit; `/redirect?to=<url>` alone is
+// answered `303` to `<url>`, the status a client follows whatever the body
 #[derive(Clone, Debug, Default)]
 struct Origin {
     hits: Arc<Mutex<Vec<Hit>>>,
@@ -88,12 +91,23 @@ impl Origin {
     async fn answer(&self, request: Request<Incoming>) -> Response<Full<Bytes>> {
         let (parts, body) = request.into_parts();
         let body = body.collect().await.expect("the request body streams").to_bytes();
+        let location = match (parts.uri.path(), parts.uri.query()) {
+            ("/redirect", Some(query)) => query.strip_prefix("to=").map(str::to_owned),
+            _ => None,
+        };
         self.hits.lock().expect("hits lock").push(Hit {
             method: parts.method,
             path: parts.uri.path().to_owned(),
             headers: parts.headers,
             body: body.clone(),
         });
+        if let Some(location) = location {
+            return Response::builder()
+                .status(StatusCode::SEE_OTHER)
+                .header(LOCATION, location)
+                .body(Full::default())
+                .expect("origin redirect");
+        }
         let reply = if body.is_empty() { Bytes::from_static(BODY) } else { body };
         Response::builder()
             .header("x-mock", "origin")
@@ -107,9 +121,12 @@ impl Origin {
 }
 
 async fn run_guest(wasm: &str, backends: Backends) {
+    run_deployment(Deployment::new().guest("guest", wasm), backends).await;
+}
+
+async fn run_deployment(deployment: Deployment, backends: Backends) {
     // linked by hand: the guest reads the origin from `omnia:config`
-    let status = Deployment::new()
-        .guest("guest", wasm)
+    let status = deployment
         .run(backends, |deployment| {
             deployment.host::<WasiHttp>()?;
             deployment.host::<WasiConfig>()?;
@@ -118,7 +135,7 @@ async fn run_guest(wasm: &str, backends: Backends) {
         })
         .await
         .expect("guest runs");
-    assert_eq!(status, ExitStatus::SUCCESS, "guest `{wasm}` failed");
+    assert_eq!(status, ExitStatus::SUCCESS, "the guest's assertions held");
 }
 
 #[tokio::test]
@@ -133,6 +150,25 @@ async fn http_outgoing_get() {
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].path, "/resource");
     assert_eq!(hits[0].headers.get("x-probe").and_then(|v| v.to_str().ok()), Some("1"));
+}
+
+// The origin listens on `127.0.0.1`, so one origin answers both names the
+// guest uses, and a refusal shows as a hit that never arrives.
+#[tokio::test]
+async fn http_outgoing_hosts() {
+    let (origin, url) = Origin::serve().await;
+    let (_, port) = url.rsplit_once(':').expect("the origin's port");
+    let backends = Backends::defaults().await.config([("PORT", port.to_owned())]);
+    let grants = Grants::none().hosts(["localhost"]);
+
+    let guest =
+        GuestEntry::new("guest", test_programs::HTTP_OUTGOING_HOSTS).command().grants(grants);
+    run_deployment(Deployment::new().entry(guest), backends).await;
+
+    // the address and the hop to it were refused before any connection
+    let hits = origin.hits();
+    let paths: Vec<_> = hits.iter().map(|hit| hit.path.as_str()).collect();
+    assert_eq!(paths, ["/resource", "/redirect", "/resource", "/redirect"]);
 }
 
 // rcgen's defaults: no EKU, no key usage, no basic constraints
@@ -452,6 +488,141 @@ async fn http_incoming_echo() {
     }
 
     runtime.shutdown();
+}
+
+// A request holds its gate slot until its guest is done with it, and the echo
+// guest is not done until the request body ends. With a gate of one, a
+// request that may not wait is refused while the slot is held, and one that
+// may wait is served once it frees.
+#[tokio::test]
+async fn full_gate() {
+    let runtime = gate_of_one().await;
+    let handler = |queue_wait| {
+        let options = ServerOptions {
+            queue_wait,
+            ..ServerOptions::default()
+        };
+        HttpHandler::with_options(&runtime, options)
+            .expect("http routes consistent")
+            .expect("the guest exports the http handler")
+    };
+    let refusing = handler(Duration::ZERO);
+    let waiting = handler(Duration::from_secs(30));
+
+    let (body, request) = held_post();
+    let first = tokio::spawn({
+        let handler = refusing.clone();
+        async move { handler.handle(request).await }
+    });
+    until(|| runtime.invocations().in_flight == 1).await;
+
+    // refused at once, without running a guest
+    let built = runtime.stores_built();
+    let response = refusing.handle(echo_get("busy")).await.expect("handled");
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(response.headers()[RETRY_AFTER], "1");
+    assert_eq!(runtime.stores_built(), built);
+
+    // queued behind the first, then served once its slot frees
+    let third = tokio::spawn(async move { waiting.handle(echo_get("waited")).await });
+    until(|| runtime.invocations().waiting == 1).await;
+    body.unbounded_send(Bytes::from_static(br#""held"}"#)).expect("the body is open");
+    drop(body);
+
+    let response = first.await.expect("first request joins").expect("handled");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(echoed(response).await.0["message"], "held");
+    let response = third.await.expect("third request joins").expect("handled");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(echoed(response).await.0["message"], "waited");
+
+    // the slot frees as the guest's task drops its store, after the body
+    until(|| runtime.invocations().in_flight == 0).await;
+
+    runtime.shutdown();
+}
+
+// The health path enters no guest, so it takes no slot: it is `200` while a
+// held request fills a gate of one, though the guest's route covers it and
+// the probe names no host.
+#[tokio::test]
+async fn health_path() {
+    let runtime = gate_of_one().await;
+    let options = ServerOptions {
+        health_path: Some("/echo/health".to_owned()),
+        ..ServerOptions::default()
+    };
+    let handler = HttpHandler::with_options(&runtime, options)
+        .expect("http routes consistent")
+        .expect("the guest exports the http handler");
+
+    let (body, request) = held_post();
+    let held = tokio::spawn({
+        let handler = handler.clone();
+        async move { handler.handle(request).await }
+    });
+    until(|| runtime.invocations().in_flight == 1).await;
+
+    let built = runtime.stores_built();
+    let probe = Request::get("/echo/health").body(Full::new(Bytes::new())).expect("request");
+    let response = handler.handle(probe).await.expect("handled");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(runtime.stores_built(), built);
+
+    body.unbounded_send(Bytes::from_static(br#""held"}"#)).expect("the body is open");
+    drop(body);
+    held.await.expect("held request joins").expect("handled");
+
+    runtime.shutdown();
+}
+
+// the echo guest at `/echo` behind a gate of one
+async fn gate_of_one() -> Runtime<Backends> {
+    let guest = std::fs::read(test_programs::HTTP_INCOMING_ECHO).expect("guest bytes");
+    let mut options = RuntimeOptions::load_env().expect("runtime options load");
+    options.max_concurrent_invocations = Some(1);
+    Deployment::new()
+        .entry(GuestEntry::new("guest", guest).route_http("/echo"))
+        .options(options)
+        .boot(Backends::defaults().await, |deployment| {
+            deployment.host::<WasiHttp>()?;
+            deployment.host::<WasiOtel>()?;
+            Ok(())
+        })
+        .await
+        .expect("runtime boots")
+}
+
+// a POST to the echo guest sent only as far as `{"message":`, so its guest
+// holds its slot until the rest of the body is sent or the sender drops
+fn held_post()
+-> (UnboundedSender<Bytes>, Request<impl Body<Data = Bytes, Error = Infallible> + Send + 'static>) {
+    let (body, chunks) = futures::channel::mpsc::unbounded::<Bytes>();
+    body.unbounded_send(Bytes::from_static(br#"{"message":"#)).expect("the body is open");
+    let request = Request::post("/echo")
+        .header(HOST, "echo.test")
+        .header(CONTENT_TYPE, "application/json")
+        .body(StreamBody::new(chunks.map(|chunk| Ok::<_, Infallible>(Frame::data(chunk)))))
+        .expect("request");
+    (body, request)
+}
+
+fn echo_get(message: &str) -> Request<Full<Bytes>> {
+    Request::get(format!("/echo?message={message}"))
+        .header(HOST, "echo.test")
+        .body(Full::new(Bytes::new()))
+        .expect("request")
+}
+
+// polls `ready` until it holds, failing the test when it never does
+async fn until(ready: impl Fn() -> bool + Send + Sync) {
+    tokio::time::timeout(Duration::from_secs(30), async {
+        while !ready() {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("the runtime reaches the awaited state");
 }
 
 // An MCP tool awaits a capability before it answers, served through the

@@ -1,6 +1,6 @@
-//! The `run` grammar through [`omnia_cli::plan`]: `--mount` parsing and the
-//! `--manifest` › `OMNIA_MANIFEST` › positional wasm › compiled-in source
-//! ladder.
+//! The `run` grammar through [`omnia_cli::plan`]: `--mount` and `--env`
+//! parsing and the `--manifest` › `OMNIA_MANIFEST` › positional wasm ›
+//! compiled-in source ladder.
 
 #![cfg(not(target_arch = "wasm32"))]
 
@@ -53,6 +53,17 @@ fn run_mounts() {
 
     let error = usage(run(&["bin", "run", "x.wasm", "--mount", "path=x,bogus=1"], None, false));
     assert!(error.contains("unknown mount key `bogus`"), "{error}");
+}
+
+#[test]
+fn run_env() {
+    let plan = planned(run(
+        &["bin", "run", "x.wasm", "--env", "HOME", "--env", "ORDERS_*", "--", "--env", "GUEST"],
+        None,
+        false,
+    ));
+    assert_eq!(plan.env, ["HOME", "ORDERS_*"]);
+    assert_eq!(plan.args, ["--env", "GUEST"], "after `--`, `--env` is the guest's");
 }
 
 #[test]

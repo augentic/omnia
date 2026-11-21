@@ -19,10 +19,12 @@ use std::sync::{Arc, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use anyhow::{Context as _, Result, bail, ensure};
 pub use routing::{CliRoutes, HttpRoutes, PatternRoutes, Resolver, Routes, TriggerRouter};
 use wasmtime::Engine;
+use wasmtime::component::types::ComponentItem;
 use wasmtime::component::{Component, InstancePre, Linker};
 
 use crate::RuntimeOptions;
 use crate::digest::Digest;
+use crate::grants::Grants;
 use crate::seam::LinkSeam;
 use crate::source::{LoadedGuest, Source};
 use crate::store::StoreCtx;
@@ -104,15 +106,20 @@ pub struct Guest<B: 'static> {
     target: Target<B>,
     digest: Digest,
     exports: Arc<[String]>,
+    grants: Arc<Grants>,
 }
 
 impl<B: 'static> Guest<B> {
-    /// Create a guest backed by a local pre-instantiated component, recording
-    /// the content digest of the bytes it was loaded from so the attestation
-    /// lives and dies with the registry entry itself, and the names the
-    /// component exports.
+    /// Create a guest backed by a local pre-instantiated component, running
+    /// under `grants`.
+    ///
+    /// The entry records the content digest of the bytes the guest was
+    /// loaded from, so the attestation lives and dies with the entry, and
+    /// the names the component exports.
     #[must_use]
-    pub fn local(id: GuestId, instance_pre: InstancePre<StoreCtx<B>>, digest: Digest) -> Self {
+    pub fn local(
+        id: GuestId, instance_pre: InstancePre<StoreCtx<B>>, digest: Digest, grants: Grants,
+    ) -> Self {
         let component = instance_pre.component();
         let exports = component
             .component_type()
@@ -124,6 +131,7 @@ impl<B: 'static> Guest<B> {
             target: Target::Local(instance_pre),
             digest,
             exports,
+            grants: Arc::new(grants),
         }
     }
 
@@ -146,6 +154,13 @@ impl<B: 'static> Guest<B> {
     #[must_use]
     pub const fn exports(&self) -> &Arc<[String]> {
         &self.exports
+    }
+
+    /// What of the deployment the guest reaches, carried by every store
+    /// built for it.
+    #[must_use]
+    pub const fn grants(&self) -> &Arc<Grants> {
+        &self.grants
     }
 
     /// Returns the guest's pre-instantiated component, ready to instantiate
@@ -235,10 +250,11 @@ impl<B: 'static> Registry<B> {
     /// # Errors
     ///
     /// Returns an error if there are no guests at all (unless `allow_empty`),
-    /// a guest was built for WASI 0.2 (`wasm32-wasip2`), link imports cannot
-    /// be polyfilled, a component cannot be pre-instantiated, an identity
-    /// repeats, or a route targets a guest that is neither loaded nor
-    /// declared.
+    /// a guest was built for WASI 0.2 (`wasm32-wasip2`) or imports a package
+    /// its [`interfaces`](Grants::interfaces) grant does not reach, link
+    /// imports cannot be polyfilled, a component cannot be pre-instantiated,
+    /// an identity repeats, or a route targets a guest that is neither
+    /// loaded nor declared.
     pub fn assemble(parts: RegistryParts<B>) -> Result<Self> {
         let RegistryParts {
             engine,
@@ -256,6 +272,7 @@ impl<B: 'static> Registry<B> {
 
         for guest in &loaded {
             ensure_wasi_03(&guest.id, &guest.component, &engine)?;
+            ensure_granted(&guest.id, &guest.component, &engine, &guest.grants)?;
         }
         seam.polyfill(&engine, &mut linker, &loaded)?;
 
@@ -264,13 +281,14 @@ impl<B: 'static> Registry<B> {
             id,
             component,
             digest,
+            grants,
         } in loaded
         {
             let instance_pre = linker
                 .instantiate_pre(&component)
                 .map_err(anyhow::Error::from)
                 .with_context(|| format!("pre-instantiating guest `{id}`"))?;
-            let guest = Guest::local(id.clone(), instance_pre, digest);
+            let guest = Guest::local(id.clone(), instance_pre, digest, grants);
             if guests.insert(id.clone(), Arc::new(guest)).is_some() {
                 bail!("duplicate guest id `{id}`: guest identities must be unique");
             }
@@ -484,6 +502,49 @@ fn wasi_02_import<'a>(imports: impl IntoIterator<Item = &'a str>) -> Option<&'a 
                 && WASI_02_PACKAGES.iter().any(|package| interface.starts_with(package))
         })
     })
+}
+
+// an import with no function and no resource, such as a `types` interface,
+// needs no grant
+pub fn ensure_granted(
+    id: &GuestId, component: &Component, engine: &Engine, grants: &Grants,
+) -> Result<()> {
+    if grants.interfaces.is_none() {
+        return Ok(());
+    }
+    let component_type = component.component_type();
+    for (import, item) in component_type.imports(engine) {
+        let package = package(import);
+        if carries_code(&item.ty, engine) && !grants.allows_interface(package) {
+            bail!(
+                "guest `{id}` imports `{import}`, but its grants reach no `{package}`: add \
+                 `{package}` to its `interfaces`"
+            );
+        }
+    }
+    Ok(())
+}
+
+fn carries_code(item: &ComponentItem, engine: &Engine) -> bool {
+    match item {
+        ComponentItem::ComponentInstance(instance) => {
+            instance.exports(engine).any(|(_, export)| {
+                matches!(export.ty, ComponentItem::ComponentFunc(_) | ComponentItem::Resource(_))
+            })
+        }
+        ComponentItem::Type(_) => false,
+        ComponentItem::ComponentFunc(_)
+        | ComponentItem::CoreFunc(_)
+        | ComponentItem::Module(_)
+        | ComponentItem::Component(_)
+        | ComponentItem::Resource(_) => true,
+    }
+}
+
+// `wasi:http` of `wasi:http/types@0.3.0`; a plain name is its own package
+fn package(import: &str) -> &str {
+    let name = import.split_once('@').map_or(import, |(name, _)| name);
+    name.split_once('/').map_or(name, |(package, _)| package)
 }
 
 /// Why [`Registry::publish`] refused a late guest; `Occupied` is distinct so

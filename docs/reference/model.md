@@ -130,7 +130,7 @@ The model calls a tool through the session's `calls`, and the guest runs it.
 
 `worker` is what a backend's worker may reach beyond the `location`, an `option<worker-grant>`. A worker is a process the backend runs for the completion, such as a command the model asks for. The guest states the grant, because it knows the toolchain the completion runs:
 
-- `egress` lists the host names the worker may connect to through the backend's proxy. Each is a whole name, or `*.suffix` for a domain and every host beneath it. None is an IP literal, and none carries a port, a scheme, or a path.
+- `egress` lists the host names the worker may connect to through the backend's proxy. Each is a whole name, or `*.suffix` for a domain and every host beneath it. None is an IP literal, and none carries a port, a scheme, or a path. A guest whose deployment grants declare `hosts` may state only entries those cover whole, and the request is `denied` otherwise.
 - `read` lists the directories the worker may read beside the workspace. Each is `~/<path>` beneath the operator's home, where `<path>` follows the rule of `location.subpath` and is not empty. A directory the machine lacks grants nothing.
 - `env` lists the environment variables set for the worker. A name matches `[A-Za-z_][A-Za-z0-9_]*`, and a leading `~/` in a value stands for the operator's home.
 

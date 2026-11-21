@@ -42,8 +42,8 @@ impl Config {
         if let (Some(_), Some(inline)) = (spans.manifest, spans.inline) {
             return Err(syn::Error::new(
                 inline,
-                "`manifest:` and the inline keys (`guests`, `mounts`, `plugins`) are mutually \
-                 exclusive; declare the deployment in the manifest file",
+                "`manifest:` and the inline keys (`guests`, `mounts`, `environment`, `plugins`) \
+                 are mutually exclusive; declare the deployment in the manifest file",
             ));
         }
 
@@ -120,11 +120,15 @@ impl Parse for Config {
                     inline_span.get_or_insert(span);
                 }
                 OptValue::Plugins(p) => {
-                    manifest.plugins = Some(p);
+                    manifest.plugins = Some(*p);
                     inline_span.get_or_insert(span);
                 }
                 OptValue::Mounts(m) => {
                     manifest.mounts = m;
+                    inline_span.get_or_insert(span);
+                }
+                OptValue::Environment(e) => {
+                    manifest.environment = Some(e);
                     inline_span.get_or_insert(span);
                 }
             }
@@ -181,7 +185,7 @@ impl Parse for Opt {
         } else if l.peek(kw::plugins) {
             let key = input.parse::<kw::plugins>()?;
             input.parse::<Token![:]>()?;
-            ("plugins", key.span, OptValue::Plugins(input.parse()?))
+            ("plugins", key.span, OptValue::Plugins(Box::new(input.parse()?)))
         } else if l.peek(kw::registries) {
             // the retired top-level key, refused with its new home
             let key = input.parse::<kw::registries>()?;
@@ -193,6 +197,10 @@ impl Parse for Opt {
             let key = input.parse::<kw::mounts>()?;
             input.parse::<Token![:]>()?;
             ("mounts", key.span, OptValue::Mounts(parse_bracketed_list(input)?))
+        } else if l.peek(kw::environment) {
+            let key = input.parse::<kw::environment>()?;
+            input.parse::<Token![:]>()?;
+            ("environment", key.span, OptValue::Environment(input.parse()?))
         } else {
             return Err(l.error());
         };
@@ -205,8 +213,9 @@ enum OptValue {
     Hosts(Vec<HostEntry>),
     Manifest(Expr),
     Guests(Vec<GuestSpec>),
-    Plugins(PluginsSpec),
+    Plugins(Box<PluginsSpec>),
     Mounts(Vec<MountSpec>),
+    Environment(EnvironmentSpec),
 }
 
 mod kw {
@@ -217,6 +226,7 @@ mod kw {
     syn::custom_keyword!(plugins);
     syn::custom_keyword!(registries);
     syn::custom_keyword!(mounts);
+    syn::custom_keyword!(environment);
 }
 
 fn parse_mode(input: ParseStream) -> Result<Mode> {
@@ -281,13 +291,16 @@ impl Parse for HostEntry {
     }
 }
 
-/// Inline manifest keys (`guests`, `mounts`, `plugins`) parsed from
-/// `runtime!({ ... })`; mirrors the `omnia::Manifest` schema.
+/// Inline manifest keys (`guests`, `mounts`, `environment`, `plugins`)
+/// parsed from `runtime!({ ... })`; mirrors the `omnia::Manifest` schema.
 #[derive(Default)]
 pub struct ManifestSpec {
     /// The `guests:` list — every component the deployment may run.
     pub guests: Vec<GuestSpec>,
     pub mounts: Vec<MountSpec>,
+    /// The `environment: { .. }` block — the host variables every guest
+    /// sees.
+    pub environment: Option<EnvironmentSpec>,
     /// The `plugins: { .. }` block — the package store and the routing of
     /// every package source.
     pub plugins: Option<PluginsSpec>,
@@ -295,11 +308,46 @@ pub struct ManifestSpec {
 
 impl ManifestSpec {
     pub const fn is_empty(&self) -> bool {
-        self.guests.is_empty() && self.mounts.is_empty() && self.plugins.is_none()
+        self.guests.is_empty()
+            && self.mounts.is_empty()
+            && self.environment.is_none()
+            && self.plugins.is_none()
     }
 }
 
-/// The `plugins: { store: ..., registries: ... }` block.
+/// The `environment: { inherit: [...] }` block.
+pub struct EnvironmentSpec {
+    /// The `inherit:` names, each a whole variable name or a prefix that
+    /// ends in `*`.
+    pub inherit: Vec<Expr>,
+}
+
+impl Parse for EnvironmentSpec {
+    fn parse(input: ParseStream) -> Result<Self> {
+        let mut inherit = None;
+        let span = parse_kv_block(input, |key, value| {
+            match key.to_string().as_str() {
+                "inherit" => inherit = Some(parse_bracketed_list(value)?),
+                other => {
+                    return Err(syn::Error::new(
+                        key.span(),
+                        format!("unknown environment key `{other}`; expected `inherit`"),
+                    ));
+                }
+            }
+            Ok(())
+        })?;
+        let inherit = inherit.ok_or_else(|| {
+            syn::Error::new(
+                span,
+                "`environment:` block is empty; name the host variables guests see in `inherit`",
+            )
+        })?;
+        Ok(Self { inherit })
+    }
+}
+
+/// The `plugins: { store: ..., registries: ..., grants: { .. } }` block.
 pub struct PluginsSpec {
     /// The `store:` path expression — the directory every package is kept
     /// in; a leading `~/` expands against `$HOME` at start-up.
@@ -307,32 +355,95 @@ pub struct PluginsSpec {
     /// The `registries:` expression — the wasm-pkg configuration (TOML) that
     /// routes package sources, typically an `include_str!`.
     pub registries: Option<Expr>,
+    /// The `grants:` block — what a guest loaded at run time by path or
+    /// package reaches, within its loader's grants.
+    pub grants: Option<GrantsSpec>,
 }
 
 impl Parse for PluginsSpec {
     fn parse(input: ParseStream) -> Result<Self> {
         let mut store = None;
         let mut registries = None;
+        let mut grants = None;
         let span = parse_kv_block(input, |key, value| {
             match key.to_string().as_str() {
                 "store" => store = Some(value.parse()?),
                 "registries" => registries = Some(value.parse()?),
+                "grants" => grants = Some(value.parse()?),
                 other => {
                     return Err(syn::Error::new(
                         key.span(),
-                        format!("unknown plugins key `{other}`; expected `store` or `registries`"),
+                        format!(
+                            "unknown plugins key `{other}`; expected `store`, `registries`, or \
+                             `grants`"
+                        ),
                     ));
                 }
             }
             Ok(())
         })?;
-        if store.is_none() && registries.is_none() {
+        if store.is_none() && registries.is_none() && grants.is_none() {
             return Err(syn::Error::new(
                 span,
-                "`plugins:` block is empty; name a `store`, a `registries` configuration, or both",
+                "`plugins:` block is empty; name a `store`, a `registries` configuration, or \
+                 `grants`",
             ));
         }
-        Ok(Self { store, registries })
+        Ok(Self {
+            store,
+            registries,
+            grants,
+        })
+    }
+}
+
+/// A `grants: { env: [..], mounts: [..], hosts: [..], guests: [..],
+/// interfaces: [..] }` block, on a guest or in `plugins:`.
+///
+/// An omitted list grants nothing, and omitted `interfaces` grant every
+/// package, as a manifest's grants table does.
+pub struct GrantsSpec {
+    /// The host variables the guest sees.
+    pub env: Vec<Expr>,
+    /// The mounts preopened into the guest, by name.
+    pub mounts: Vec<Expr>,
+    /// The host names the guest's requests, worker grants, and loads reach.
+    pub hosts: Vec<Expr>,
+    /// The guests the guest calls over a link or loads by name.
+    pub guests: Vec<Expr>,
+    /// The packages the guest may import; `None` for every package.
+    pub interfaces: Option<Vec<Expr>>,
+}
+
+impl Parse for GrantsSpec {
+    fn parse(input: ParseStream) -> Result<Self> {
+        let mut grants = Self {
+            env: Vec::new(),
+            mounts: Vec::new(),
+            hosts: Vec::new(),
+            guests: Vec::new(),
+            interfaces: None,
+        };
+        parse_kv_block(input, |key, value| {
+            match key.to_string().as_str() {
+                "env" => grants.env = parse_bracketed_list(value)?,
+                "mounts" => grants.mounts = parse_bracketed_list(value)?,
+                "hosts" => grants.hosts = parse_bracketed_list(value)?,
+                "guests" => grants.guests = parse_bracketed_list(value)?,
+                "interfaces" => grants.interfaces = Some(parse_bracketed_list(value)?),
+                other => {
+                    return Err(syn::Error::new(
+                        key.span(),
+                        format!(
+                            "unknown grants key `{other}`; expected `env`, `mounts`, `hosts`, \
+                             `guests`, or `interfaces`"
+                        ),
+                    ));
+                }
+            }
+            Ok(())
+        })?;
+        Ok(grants)
     }
 }
 
@@ -361,7 +472,8 @@ fn parse_kv_block(
 }
 
 /// One `{ path: ..., name: ..., routes: { ... }, command: true }` (or
-/// `{ package: ..., digest: ... }`) guest entry.
+/// `{ package: ..., digest: ... }`) guest entry, with an optional
+/// `grants: { .. }` block.
 pub struct GuestSpec {
     pub source: GuestSource,
     pub routes: GuestRoutesSpec,
@@ -370,6 +482,8 @@ pub struct GuestSpec {
     pub command_span: Option<Span>,
     /// The `digest:` pin, decoded from its `sha256:<hex>` literal.
     pub digest: Option<[u8; DIGEST_LEN]>,
+    /// The `grants:` block; absent, the guest reaches everything.
+    pub grants: Option<GrantsSpec>,
 }
 
 impl Parse for GuestSpec {
@@ -381,6 +495,7 @@ impl Parse for GuestSpec {
         let mut command = false;
         let mut command_span = None;
         let mut digest = None;
+        let mut grants = None;
 
         let span = parse_kv_block(input, |key, value| {
             match key.to_string().as_str() {
@@ -394,12 +509,13 @@ impl Parse for GuestSpec {
                     command_span = command.then(|| key.span());
                 }
                 "digest" => digest = Some(parse_digest(value)?),
+                "grants" => grants = Some(value.parse()?),
                 other => {
                     return Err(syn::Error::new(
                         key.span(),
                         format!(
                             "unknown guest key `{other}`; expected `path` or `package`, `name`, \
-                             `routes`, `command`, or `digest`"
+                             `routes`, `command`, `digest`, or `grants`"
                         ),
                     ));
                 }
@@ -427,6 +543,7 @@ impl Parse for GuestSpec {
             command,
             command_span,
             digest,
+            grants,
         })
     }
 }

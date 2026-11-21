@@ -19,7 +19,7 @@ hey -z 30s -c 64 http://127.0.0.1:8080/
 
 Watch two signals while it runs:
 
-- **Pool occupancy gauges** — with `RUST_LOG=omnia=trace`, the host logs pool-occupancy metrics every `POOL_METRICS_INTERVAL_MS` (default 5s; set `1000` while tuning). If occupancy hits the pool ceilings, requests queue.
+- **Occupancy gauges** — every `POOL_METRICS_INTERVAL_MS` (default 5s; set `1000` while tuning) the host samples the instance pool and the [concurrency gate](../reference/configuration.md#concurrency-gate) onto OpenTelemetry gauges. They export to the collector `OTEL_EXPORTER_OTLP_ENDPOINT` names, whatever `RUST_LOG` is. A full gate refuses HTTP requests with `503`, and so does a full pool; neither queues a request unless `HTTP_QUEUE_WAIT_MS` buys it a wait.
 - **Resident memory** — `ps -o rss= -p $(pgrep -f 'my-runtime run')` while under load, since most pooling knobs trade memory for latency.
 
 ## Knobs, in the order to try them
@@ -42,7 +42,23 @@ POOL_IDLE_RELEASE_MS=60000          # release warm memory after a minute without
 
 ### 2. Pool sizing
 
-The defaults (1000 instances/memories/tables/stacks, 100 warm slots) suit moderate concurrency. Raise `POOL_MAX_INSTANCES` and the `POOL_TOTAL_*` ceilings if occupancy gauges show saturation under your target load; raise `POOL_MAX_UNUSED_WARM_SLOTS` if your steady-state concurrency exceeds 100 and you can spend the memory.
+The defaults (1000 instances, 100 warm slots) suit moderate concurrency. The `POOL_TOTAL_*` ceilings follow `POOL_MAX_INSTANCES` unless set, so it is the one knob to raise when occupancy gauges show saturation under your target load. Raise `POOL_MAX_UNUSED_WARM_SLOTS` if your steady-state concurrency exceeds 100 and you can spend the memory.
+
+`MAX_CONCURRENT_INVOCATIONS` bounds the invocations triggers run at once. Each one holds an instance, and so does every link hop it has in flight, which takes no slot of its own. Size the pool for the gate and its hops together:
+
+```text
+POOL_MAX_INSTANCES >= MAX_CONCURRENT_INVOCATIONS × (1 + hops in flight per invocation)
+```
+
+A runtime built with `link` leaves half the pool to hops when the gate is unset, which covers one hop in flight per invocation. A host that dispatches into guests draws on the same headroom. A deeper chain, or a guest that awaits several hops at once, needs a smaller gate or a larger pool. Otherwise the hop that finds the pool full fails at once, and its root sees the failure.
+
+Under a burst, a full gate answers HTTP `503` with `Retry-After` at once. Set `HTTP_QUEUE_WAIT_MS` to trade that refusal for latency: a request waits up to that long for a slot, first come first served.
+
+Three metrics say which way to move:
+
+- `invocations_in_flight` near the gate's size means the gate is the limit.
+- `invocations_waiting` above zero means requests are queueing for a slot under `HTTP_QUEUE_WAIT_MS`, or deliveries are waiting.
+- `invocations_refused` rising means requests are turned away. With `pool_component_instances` near `POOL_MAX_INSTANCES` the pool is the cause, and the pool needs room for the gate's hops.
 
 ### 3. Batched decommit
 

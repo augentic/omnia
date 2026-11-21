@@ -11,10 +11,10 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use futures::{FutureExt as _, StreamExt as _};
-use omnia::{ExitStatus, GuestEntry, Host, Runtime};
+use omnia::{ExitStatus, GuestEntry, Host, Runtime, RuntimeOptions};
 use omnia_test::host::{Backends, Deployment};
 use omnia_wasi_messaging::{
     Endpoint, Error, FutureResult, HandleError, Handler, Message, MessagingClient,
@@ -252,6 +252,53 @@ async fn messaging_handle_sleep() {
     );
 
     runtime.shutdown();
+}
+
+// With a gate of one, a second delivery waits for the first's slot rather
+// than failing, and its guest timeout runs from when it holds the slot, so
+// the two hung guests time out one after the other.
+#[tokio::test]
+async fn queued_delivery() {
+    const TIMEOUT: Duration = Duration::from_millis(500);
+
+    let mut options = RuntimeOptions::load_env().expect("runtime options load");
+    options.max_concurrent_invocations = Some(1);
+    let deployment =
+        sole(test_programs::MESSAGING_HANDLE_SLEEP).options(options).guest_timeout(TIMEOUT);
+    let runtime = boot(&deployment, Backends::defaults().await).await;
+    let handler = handler(&runtime);
+    let deliver = || {
+        let handler = handler.clone();
+        tokio::spawn(async move { handler.handle(order("orders")).await })
+    };
+
+    let started = Instant::now();
+    let first = deliver();
+    until(|| runtime.invocations().in_flight == 1).await;
+    let second = deliver();
+    until(|| runtime.invocations().waiting == 1).await;
+
+    for delivery in [first, second] {
+        let error = delivery.await.expect("delivery joins").expect_err("a hung guest is an error");
+        assert!(
+            matches!(error, HandleError::TimedOut(timeout) if timeout == TIMEOUT),
+            "unexpected error: {error}"
+        );
+    }
+    assert!(started.elapsed() >= 2 * TIMEOUT, "the second guest ran its whole timeout");
+
+    runtime.shutdown();
+}
+
+// polls `ready` until it holds, failing the test when it never does
+async fn until(ready: impl Fn() -> bool + Send + Sync) {
+    tokio::time::timeout(Duration::from_secs(30), async {
+        while !ready() {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("the runtime reaches the awaited state");
 }
 
 // A topic no route matches has nothing to run: the message is dropped with `Ok`.

@@ -3,7 +3,7 @@
 
 use futures::FutureExt as _;
 use futures::future::BoxFuture;
-use omnia_core::{Backends, Digest, GuestError, GuestId, Policy, SourceSpec, WeakRuntime};
+use omnia_core::{Backends, Digest, Grants, GuestError, GuestId, Policy, SourceSpec, WeakRuntime};
 
 use crate::loader::{LoadConflict, Plugin};
 
@@ -26,18 +26,22 @@ pub trait Admission: Send + Sync + 'static {
         &self, package: &str, endpoint: Option<&str>,
     ) -> BoxFuture<'static, Result<Vec<u8>, GuestError>>;
 
-    /// Admit caller-named `bytes` as `id`, held to `pin`, and return the
-    /// handle of the guest standing under `id` afterwards, or the conflict
-    /// that kept the bytes out.
+    /// Admit caller-named `bytes` as `id`, held to `pin` and running under
+    /// `grants`, and return the handle of the guest standing under `id`
+    /// afterwards, or the conflict that kept the bytes out.
     fn admit_bytes(
-        &self, id: GuestId, bytes: Vec<u8>, pin: Option<Digest>,
+        &self, id: GuestId, bytes: Vec<u8>, pin: Option<Digest>, grants: Grants,
     ) -> BoxFuture<'static, Result<Result<Plugin, LoadConflict>, GuestError>>;
 }
 
 // Weak: a strong handle would cycle through the extension.
 impl<B: Backends> Admission for WeakRuntime<B> {
     fn admits(&self, id: &GuestId) -> Result<(), GuestError> {
-        live(self)?.admits(id, &Policy::CallerNamed { pin: None })
+        let policy = Policy::CallerNamed {
+            pin: None,
+            grants: &Grants::all(),
+        };
+        live(self)?.admits(id, &policy)
     }
 
     fn guest(&self, id: &GuestId) -> BoxFuture<'static, Result<Plugin, GuestError>> {
@@ -56,12 +60,13 @@ impl<B: Backends> Admission for WeakRuntime<B> {
     }
 
     fn admit_bytes(
-        &self, id: GuestId, bytes: Vec<u8>, pin: Option<Digest>,
+        &self, id: GuestId, bytes: Vec<u8>, pin: Option<Digest>, grants: Grants,
     ) -> BoxFuture<'static, Result<Result<Plugin, LoadConflict>, GuestError>> {
         let weak = self.clone();
         async move {
             let runtime = live(&weak)?;
-            match runtime.admit_bytes(id.clone(), bytes, Policy::CallerNamed { pin }).await {
+            let policy = Policy::CallerNamed { pin, grants: &grants };
+            match runtime.admit_bytes(id.clone(), bytes, policy).await {
                 Ok(guest) => Ok(Ok(Plugin::of(&guest))),
                 Err(GuestError::Conflict { found, .. }) => {
                     let current = runtime.registry().get(&id).map(|guest| Plugin::of(&guest));

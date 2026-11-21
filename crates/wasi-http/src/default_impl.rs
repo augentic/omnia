@@ -1,5 +1,5 @@
 use std::error::Error;
-use std::fmt::Display;
+use std::fmt::{self, Display};
 use std::io;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
@@ -10,10 +10,11 @@ use anyhow::{Context, Result};
 use base64ct::{Base64, Encoding};
 use bytes::Bytes;
 use futures::{Future, TryStreamExt};
-use http::{Request, Response};
+use http::{Request, Response, Uri};
 use http_body::{Body, Frame, SizeHint};
 use http_body_util::BodyExt;
-use omnia_core::Connect;
+use omnia_core::{Connect, Grants, matches_host};
+use reqwest::redirect;
 use tokio::time::Sleep;
 use tracing::instrument;
 use wasmtime::component::ResourceTable;
@@ -53,7 +54,10 @@ pub struct HttpDefault {
 }
 
 impl HttpBorrow for HttpDefault {
-    fn as_view<'a>(&'a mut self, table: &'a mut ResourceTable) -> WasiHttpCtxView<'a> {
+    fn as_view<'a>(
+        &'a mut self, table: &'a mut ResourceTable, grants: &'a Grants,
+    ) -> WasiHttpCtxView<'a> {
+        self.hooks.hold_to(grants.hosts.as_deref());
         WasiHttpCtxView {
             hooks: &mut self.hooks,
             ctx: &mut self.ctx,
@@ -68,10 +72,14 @@ impl Connect for HttpDefault {
     #[instrument]
     async fn connect_with(options: Self::ConnectOptions) -> Result<Self> {
         ensure_crypto_provider();
-        let clients = Clients::new(Duration::from_secs(options.connect_timeout))
+        let clients = Clients::new(Duration::from_secs(options.connect_timeout), None)
             .context("building HTTP client")?;
         Ok(Self {
-            hooks: HttpHooks { clients },
+            hooks: HttpHooks {
+                clients,
+                held: Arc::default(),
+                hosts: None,
+            },
             ctx: WasiHttpCtx::default(),
         })
     }
@@ -86,9 +94,46 @@ fn ensure_crypto_provider() {
     }
 }
 
+// A clone serves one store, so `hosts` is the grant of one guest. `held`
+// is shared by every clone: one set of clients per distinct `hosts` list,
+// each following redirects within that list alone.
 #[derive(Debug, Clone)]
 struct HttpHooks {
     clients: Clients,
+    held: Arc<Mutex<Vec<Clients>>>,
+    hosts: Option<Arc<[String]>>,
+}
+
+impl HttpHooks {
+    // `as_view` runs on every host call, so the list is copied only when it
+    // differs, which is once per store
+    fn hold_to(&mut self, hosts: Option<&[String]>) {
+        if self.hosts.as_deref() != hosts {
+            self.hosts = hosts.map(Arc::from);
+        }
+    }
+
+    // a URI with no host reaches nothing, and fails as invalid when sent
+    fn reaches(&self, uri: &Uri) -> bool {
+        match (&self.hosts, uri.host()) {
+            (Some(hosts), Some(host)) => hosts.iter().any(|pattern| matches_host(pattern, host)),
+            _ => true,
+        }
+    }
+
+    fn clients(&self) -> reqwest::Result<Clients> {
+        let Some(hosts) = &self.hosts else {
+            return Ok(self.clients.clone());
+        };
+        let mut held = self.held.lock().expect("clients lock");
+        if let Some(clients) = held.iter().find(|clients| clients.hosts.as_ref() == Some(hosts)) {
+            return Ok(clients.clone());
+        }
+        let clients = Clients::new(self.clients.connect_timeout, Some(Arc::clone(hosts)))?;
+        held.push(clients.clone());
+        drop(held);
+        Ok(clients)
+    }
 }
 
 impl WasiHttpHooks for HttpHooks {
@@ -102,7 +147,8 @@ impl WasiHttpHooks for HttpHooks {
         fut: FutureResult<()>,
     ) -> Box<dyn Future<Output = Result<(Response<WasiBody>, FutureResult<()>), HttpError>> + Send>
     {
-        let clients = self.clients.clone();
+        let reached = self.reaches(request.uri());
+        let clients = self.clients();
 
         // guest-supplied timeouts from `wasi:http/types.request-options`
         let opt_connect = options.and_then(|o| o.connect_timeout);
@@ -110,6 +156,10 @@ impl WasiHttpHooks for HttpHooks {
         let opt_between = options.and_then(|o| o.between_bytes_timeout);
 
         Box::new(async move {
+            if !reached {
+                return Err(HttpError::HttpRequestDenied);
+            }
+            let clients = clients.map_err(internal_err)?;
             let (mut parts, body) = request.into_parts();
 
             let client = match parts.headers.remove("Client-Cert") {
@@ -165,11 +215,13 @@ impl WasiHttpHooks for HttpHooks {
 // The shared client and the ones built for a guest's own `connect-timeout`,
 // one per distinct value, so a guest that sets one on every request keeps a
 // connection pool rather than opening a connection per request. A client is
-// `Arc`-backed, so a clone per store shares the pools.
+// `Arc`-backed, so a clone per store shares the pools. Under `hosts`, every
+// client follows a redirect only to a host the list reaches.
 #[derive(Debug, Clone)]
 struct Clients {
     shared: reqwest::Client,
     connect_timeout: Duration,
+    hosts: Option<Arc<[String]>>,
     by_timeout: Arc<Mutex<Vec<(Duration, reqwest::Client)>>>,
 }
 
@@ -177,18 +229,23 @@ impl Clients {
     // distinct guest `connect-timeout` values kept; past it a request builds its own
     const CAP: usize = 8;
 
-    fn new(connect_timeout: Duration) -> reqwest::Result<Self> {
+    fn new(connect_timeout: Duration, hosts: Option<Arc<[String]>>) -> reqwest::Result<Self> {
         Ok(Self {
-            shared: Self::builder(connect_timeout).build()?,
+            shared: Self::builder(connect_timeout, hosts.as_ref()).build()?,
             connect_timeout,
+            hosts,
             by_timeout: Arc::default(),
         })
     }
 
     // what every client starts from, so one built for a request differs from
     // the shared one only in what the request asked for
-    fn builder(connect_timeout: Duration) -> reqwest::ClientBuilder {
-        reqwest::Client::builder().connect_timeout(connect_timeout)
+    fn builder(connect_timeout: Duration, hosts: Option<&Arc<[String]>>) -> reqwest::ClientBuilder {
+        let builder = reqwest::Client::builder().connect_timeout(connect_timeout);
+        match hosts {
+            Some(hosts) => builder.redirect(held_redirects(Arc::clone(hosts))),
+            None => builder,
+        }
     }
 
     // the client for a request's `connect-timeout`: the shared one when the
@@ -203,7 +260,7 @@ impl Clients {
         if let Some((_, client)) = by_timeout.iter().find(|(kept, _)| *kept == timeout) {
             return Ok(client.clone());
         }
-        let client = Self::builder(timeout).build()?;
+        let client = Self::builder(timeout, self.hosts.as_ref()).build()?;
         if by_timeout.len() < Self::CAP {
             by_timeout.push((timeout, client.clone()));
         }
@@ -215,9 +272,33 @@ impl Clients {
     fn with_identity(
         &self, connect_timeout: Option<Duration>, identity: reqwest::Identity,
     ) -> reqwest::Result<reqwest::Client> {
-        Self::builder(connect_timeout.unwrap_or(self.connect_timeout)).identity(identity).build()
+        let connect_timeout = connect_timeout.unwrap_or(self.connect_timeout);
+        Self::builder(connect_timeout, self.hosts.as_ref()).identity(identity).build()
     }
 }
+
+// reqwest's default policy past the host check, so the ten-hop limit holds
+fn held_redirects(hosts: Arc<[String]>) -> redirect::Policy {
+    redirect::Policy::custom(move |attempt| {
+        let host = attempt.url().host_str().unwrap_or_default().to_owned();
+        if hosts.iter().any(|pattern| matches_host(pattern, &host)) {
+            redirect::Policy::default().redirect(attempt)
+        } else {
+            attempt.error(RedirectDenied(host))
+        }
+    })
+}
+
+#[derive(Debug)]
+struct RedirectDenied(String);
+
+impl Display for RedirectDenied {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "a redirect to `{}` is outside the guest's `hosts` grant", self.0)
+    }
+}
+
+impl Error for RedirectDenied {}
 
 // A response body held to the guest's `between-bytes-timeout`: the deadline
 // restarts at every frame, and a body silent past it fails as a read timeout.
@@ -275,6 +356,9 @@ fn internal_err(e: impl Display) -> HttpError {
 // wasmtime's own classification (dns, unreachable, timed out, terminated,
 // ...) rather than flattening every connection failure to `connection-refused`
 fn reqwest_err(e: &reqwest::Error) -> HttpError {
+    if e.is_redirect() && cause::<RedirectDenied>(e).is_some() {
+        return HttpError::HttpRequestDenied;
+    }
     if e.is_timeout() {
         return if e.is_connect() {
             HttpError::ConnectionTimeout

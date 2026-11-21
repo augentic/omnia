@@ -14,12 +14,19 @@
 //! no-ops that reuse the first initialization. Batch exporters queue
 //! telemetry, so call [`flush`] before a fast process exit; the runtime does
 //! this at the end of every drive.
+//!
+//! The runtime's own metrics ([`record_pool`], [`record_invocations`],
+//! [`count_message`], [`count_event`]) record on the global meter provider
+//! whatever the run's filter, so they export wherever an OTLP endpoint is
+//! configured. They bind to the provider set when the first is recorded, as
+//! [`Telemetry::build`] publishes it before the runtime runs.
 
 use std::env;
 use std::io::IsTerminal;
 use std::sync::{Mutex, OnceLock, PoisonError};
 
 use anyhow::{Result, anyhow};
+use opentelemetry::metrics::{Counter, Gauge, Meter};
 use opentelemetry::trace::TracerProvider;
 use opentelemetry::{KeyValue, global};
 use opentelemetry_otlp::{
@@ -38,6 +45,9 @@ use tracing_subscriber::layer::{Layer, SubscriberExt};
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Registry};
+use wasmtime::PoolingAllocatorMetrics;
+
+use crate::Invocations;
 
 static SETTLED: Mutex<bool> = Mutex::new(false);
 static PROVIDERS: OnceLock<Providers> = OnceLock::new();
@@ -457,6 +467,127 @@ pub fn resource() -> Option<&'static Resource> {
     PROVIDERS.get().map(|providers| &providers.resource)
 }
 
+/// Records one sample of the instance pool's occupancy on the `pool_*` gauges.
+///
+/// The gauges are `pool_core_instances`, `pool_component_instances`,
+/// `pool_memories`, `pool_tables`, `pool_stacks`,
+/// `pool_unused_warm_memories` and `pool_unused_memory_bytes_resident`.
+pub fn record_pool(sample: &PoolingAllocatorMetrics) {
+    Metrics::global().pool(sample);
+}
+
+/// Records how full the concurrency gate is on two gauges.
+///
+/// The gauges are `invocations_in_flight` and `invocations_waiting`. The
+/// runtime counts each invocation it refuses at capacity on
+/// `invocations_refused` itself.
+pub fn record_invocations(invocations: Invocations) {
+    Metrics::global().invocations(invocations);
+}
+
+/// Counts one message delivered to `service` on `message_counter`.
+pub fn count_message(service: &str) {
+    Metrics::global().message(service);
+}
+
+/// Counts one websocket event delivered to `service` on `event_counter`.
+pub fn count_event(service: &str) {
+    Metrics::global().event(service);
+}
+
+pub(crate) fn count_refused() {
+    Metrics::global().refused();
+}
+
+struct Metrics {
+    pool_core_instances: Gauge<u64>,
+    pool_component_instances: Gauge<u64>,
+    pool_memories: Gauge<u64>,
+    pool_tables: Gauge<u64>,
+    pool_stacks: Gauge<u64>,
+    pool_unused_warm_memories: Gauge<u64>,
+    pool_unused_memory_bytes_resident: Gauge<u64>,
+    invocations_in_flight: Gauge<u64>,
+    invocations_waiting: Gauge<u64>,
+    invocations_refused: Counter<u64>,
+    message_counter: Counter<u64>,
+    event_counter: Counter<u64>,
+}
+
+impl Metrics {
+    // built on first use, so on whatever provider is global by then
+    fn global() -> &'static Self {
+        static METRICS: OnceLock<Metrics> = OnceLock::new();
+        METRICS.get_or_init(|| Self::new(&global::meter("omnia")))
+    }
+
+    fn new(meter: &Meter) -> Self {
+        let gauge = |name, description| meter.u64_gauge(name).with_description(description).build();
+        let counter =
+            |name, description| meter.u64_counter(name).with_description(description).build();
+        Self {
+            pool_core_instances: gauge("pool_core_instances", "Core instances the pool holds"),
+            pool_component_instances: gauge(
+                "pool_component_instances",
+                "Component instances the pool holds",
+            ),
+            pool_memories: gauge("pool_memories", "Linear memories the pool holds"),
+            pool_tables: gauge("pool_tables", "Tables the pool holds"),
+            pool_stacks: gauge("pool_stacks", "Fiber stacks the pool holds"),
+            pool_unused_warm_memories: gauge(
+                "pool_unused_warm_memories",
+                "Unused memory slots the pool keeps warm",
+            ),
+            pool_unused_memory_bytes_resident: gauge(
+                "pool_unused_memory_bytes_resident",
+                "Resident bytes of the pool's unused memory slots",
+            ),
+            invocations_in_flight: gauge(
+                "invocations_in_flight",
+                "Invocations holding a slot of the concurrency gate",
+            ),
+            invocations_waiting: gauge(
+                "invocations_waiting",
+                "Invocations waiting for a slot of the concurrency gate",
+            ),
+            invocations_refused: counter(
+                "invocations_refused",
+                "Invocations refused with the gate or the instance pool full",
+            ),
+            message_counter: counter("message_counter", "Messages delivered to the runtime"),
+            event_counter: counter("event_counter", "Websocket events delivered to the runtime"),
+        }
+    }
+
+    fn pool(&self, sample: &PoolingAllocatorMetrics) {
+        self.pool_core_instances.record(sample.core_instances(), &[]);
+        self.pool_component_instances.record(sample.component_instances(), &[]);
+        self.pool_memories.record(sample.memories() as u64, &[]);
+        self.pool_tables.record(sample.tables() as u64, &[]);
+        self.pool_stacks.record(sample.stacks() as u64, &[]);
+        self.pool_unused_warm_memories.record(u64::from(sample.unused_warm_memories()), &[]);
+        self.pool_unused_memory_bytes_resident
+            .record(sample.unused_memory_bytes_resident() as u64, &[]);
+    }
+
+    fn invocations(&self, invocations: Invocations) {
+        self.invocations_in_flight.record(invocations.in_flight as u64, &[]);
+        self.invocations_waiting.record(invocations.waiting as u64, &[]);
+    }
+
+    fn refused(&self) {
+        self.invocations_refused.add(1, &[]);
+    }
+
+    fn message(&self, service: &str) {
+        self.message_counter.add(1, &[KeyValue::new("service", service.to_owned())]);
+    }
+
+    fn event(&self, service: &str) {
+        self.event_counter.add(1, &[KeyValue::new("service", service.to_owned())]);
+    }
+}
+
 // private rules over the run's directives and environment, which no public
 // boundary reaches
 #[cfg(test)]
@@ -598,6 +729,108 @@ mod tests {
                     metrics: true
                 }
             );
+        }
+    }
+
+    // the runtime's instruments over a provider of the test's own, read back
+    // through an in-memory exporter rather than the global provider
+    mod metrics {
+        use opentelemetry::metrics::MeterProvider as _;
+        use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData, ScopeMetrics};
+        use opentelemetry_sdk::metrics::{InMemoryMetricExporter, SdkMeterProvider};
+        use wasmtime::{
+            Config, Engine, InstanceAllocationStrategy, PoolingAllocationConfig,
+            PoolingAllocatorMetrics,
+        };
+
+        use super::super::Metrics;
+        use crate::Invocations;
+
+        #[test]
+        fn recorded() {
+            let exporter = InMemoryMetricExporter::default();
+            let provider =
+                SdkMeterProvider::builder().with_periodic_exporter(exporter.clone()).build();
+            let metrics = Metrics::new(&provider.meter("omnia"));
+
+            metrics.invocations(Invocations {
+                in_flight: 3,
+                waiting: 2,
+                limit: 4,
+            });
+            metrics.refused();
+            metrics.refused();
+            metrics.message("orders");
+            metrics.event("chat");
+            metrics.pool(&idle_pool());
+            provider.force_flush().expect("metrics flush");
+
+            let points = points(&exporter);
+            let expected = [
+                ("invocations_in_flight", None, 3),
+                ("invocations_waiting", None, 2),
+                ("invocations_refused", None, 2),
+                ("message_counter", Some("orders"), 1),
+                ("event_counter", Some("chat"), 1),
+                ("pool_core_instances", None, 0),
+                ("pool_component_instances", None, 0),
+                ("pool_memories", None, 0),
+                ("pool_tables", None, 0),
+                ("pool_stacks", None, 0),
+                ("pool_unused_warm_memories", None, 0),
+                ("pool_unused_memory_bytes_resident", None, 0),
+            ];
+            assert_eq!(points.len(), expected.len(), "unexpected points: {points:?}");
+            for (name, service, value) in expected {
+                let point = (name.to_owned(), service.map(str::to_owned), value);
+                assert!(points.contains(&point), "{point:?} missing from {points:?}");
+            }
+        }
+
+        // a pool of one of everything, none of it in use
+        fn idle_pool() -> PoolingAllocatorMetrics {
+            let mut pool = PoolingAllocationConfig::new();
+            pool.total_component_instances(1)
+                .total_core_instances(1)
+                .total_memories(1)
+                .total_tables(1)
+                .total_stacks(1);
+            let mut config = Config::new();
+            config.allocation_strategy(InstanceAllocationStrategy::Pooling(pool));
+            let engine = Engine::new(&config).expect("pooling engine");
+            engine.pooling_allocator_metrics().expect("the engine pools")
+        }
+
+        // every point exported: its instrument, its `service`, and its value
+        fn points(exporter: &InMemoryMetricExporter) -> Vec<(String, Option<String>, u64)> {
+            let mut points = Vec::new();
+            for resource in exporter.get_finished_metrics().expect("metrics exported") {
+                for metric in resource.scope_metrics().flat_map(ScopeMetrics::metrics) {
+                    let values: Vec<_> = match metric.data() {
+                        AggregatedMetrics::U64(MetricData::Gauge(gauge)) => gauge
+                            .data_points()
+                            .map(|point| (service(point.attributes()), point.value()))
+                            .collect(),
+                        AggregatedMetrics::U64(MetricData::Sum(sum)) => sum
+                            .data_points()
+                            .map(|point| (service(point.attributes()), point.value()))
+                            .collect(),
+                        _ => panic!("`{}` is neither a u64 gauge nor a u64 sum", metric.name()),
+                    };
+                    for (service, value) in values {
+                        points.push((metric.name().to_owned(), service, value));
+                    }
+                }
+            }
+            points
+        }
+
+        fn service<'a>(
+            mut attributes: impl Iterator<Item = &'a opentelemetry::KeyValue>,
+        ) -> Option<String> {
+            attributes
+                .find(|attribute| attribute.key.as_str() == "service")
+                .map(|attribute| attribute.value.to_string())
         }
     }
 }

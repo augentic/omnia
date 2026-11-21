@@ -1,6 +1,8 @@
 //! Connected runtime: [`Runtime`], [`RuntimeParts`], [`WeakRuntime`], and [`ExitStatus`].
 
 mod command;
+mod enter;
+mod gate;
 
 use std::io;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -9,13 +11,17 @@ use std::sync::{Arc, Weak};
 use anyhow::Result;
 use tokio::sync::watch;
 use wasmtime::Store;
-use wasmtime::component::{Instance, InstancePre};
+use wasmtime::component::InstancePre;
 
+pub use self::enter::EnterError;
+use self::gate::Gate;
+pub use self::gate::{Invocations, Slot};
 use crate::artifact::component;
 use crate::digest::Digest;
 use crate::extensions::Extensions;
+use crate::grants::Grants;
 use crate::mount::MountRegistry;
-use crate::registry::{Guest, GuestId, HttpRoutes, PublishError, TriggerRouter};
+use crate::registry::{Guest, GuestId, HttpRoutes, PublishError, TriggerRouter, ensure_granted};
 use crate::seam::StoreFactory;
 use crate::source::{AcquireError, RegistrySource, Source, SourceSpec, Verified};
 use crate::store::Stdio;
@@ -63,8 +69,8 @@ pub struct RuntimeParts<B: 'static> {
     pub registry: Arc<Registry<B>>,
     /// Guest argv.
     pub args: Vec<String>,
-    /// Mount registry opened from the deployment's preopens — the WASI
-    /// preopens of every store.
+    /// Mount registry opened from the deployment's preopens. Each store
+    /// preopens the mounts its guest's grants reach.
     pub mounts: Arc<MountRegistry>,
     /// Connected backend bundle.
     pub backends: B,
@@ -80,11 +86,19 @@ pub struct RuntimeParts<B: 'static> {
     /// process `RUST_LOG` ([`telemetry::directives`](crate::telemetry::directives))
     /// — set as every guest's `RUST_LOG`.
     pub rust_log: String,
+    /// The host environment variables guests see, each a whole name or a
+    /// prefix that ends in `*`, narrowed per guest by its grants. Empty, a
+    /// guest sees only `RUST_LOG`, and `NO_COLOR` when the console does not
+    /// colour its lines.
+    pub inherit: Vec<String>,
     /// Where every guest's stdout and stderr go; `None` inherits the process
     /// streams.
     pub stdio: Option<Stdio>,
     /// Command-mode guest identity, if any.
     pub command_guest: Option<GuestId>,
+    /// How many invocations [`Runtime::enter`] lets run at once, each holding
+    /// one slot of the concurrency gate. Zero counts as one.
+    pub max_concurrent_invocations: usize,
 }
 
 /// Connected host runtime: registry, argv, mounts, and backend bundle.
@@ -117,7 +131,12 @@ impl<B: Backends> Runtime<B> {
         let host = std::env::vars_os().filter_map(|(name, value)| {
             Some((name.into_string().ok()?, value.into_string().ok()?))
         });
-        let env = crate::store::guest_env(host, &parts.rust_log, crate::telemetry::ansi());
+        let env = crate::store::guest_env(
+            host,
+            &parts.inherit,
+            &parts.rust_log,
+            crate::telemetry::ansi(),
+        );
 
         Self::with_inner(Arc::new(RuntimeInner {
             name: parts.name,
@@ -132,11 +151,13 @@ impl<B: Backends> Runtime<B> {
             stdio: parts.stdio,
             extensions: Extensions::new(),
             stores_built: AtomicU64::new(0),
+            gate: Gate::new(parts.max_concurrent_invocations),
             stop: watch::channel(false).0,
         }))
     }
 
-    /// The mounts preopened into every store.
+    /// The deployment's mounts; each store preopens those its guest's grants
+    /// reach.
     #[must_use]
     pub fn mounts(&self) -> &MountRegistry {
         &self.inner.mounts
@@ -168,6 +189,8 @@ impl<B: Backends> Runtime<B> {
     ///   [`GuestError::Unsupported`], or [`GuestError::Unavailable`] when the
     ///   source did not produce its bytes, as [`acquire`](Self::acquire)
     ///   reports.
+    /// - [`GuestError::Denied`] when the component imports a package its
+    ///   entry's grants do not reach.
     /// - [`GuestError::Invalid`] when the bytes miss the pin, are a
     ///   pre-compiled artifact where raw wasm alone is admitted, or do not
     ///   load as a component.
@@ -270,9 +293,10 @@ impl<B: Backends> Runtime<B> {
     /// loaded as a boot guest's are, pre-instantiated against the shared
     /// host set, wired into the host-mediated link serve side, and
     /// published with their endpoint as one lifecycle transition, the digest
-    /// recorded on the entry ([`Guest::digest`]). A name already active when
-    /// the bytes arrive stands for a declared entry (a racing first use) and
-    /// attests caller-named bytes on the same digest alone. Whether the
+    /// recorded on the entry ([`Guest::digest`]). The guest runs under the
+    /// grants the policy names. A name already active when the bytes arrive
+    /// stands for a declared entry (a racing first use), and attests
+    /// caller-named bytes on the same digest and grants alone. Whether the
     /// component exports a linked interface is not checked: a guest that
     /// exports none is still reachable through the host [`Dispatcher`], and
     /// a link call to it fails at the call site.
@@ -285,7 +309,8 @@ impl<B: Backends> Runtime<B> {
     /// # Errors
     ///
     /// - [`GuestError::Denied`] for caller-named bytes under a name the
-    ///   deployment declares.
+    ///   deployment declares, a name active under other grants, or bytes
+    ///   importing a package their grants do not reach.
     /// - [`GuestError::Invalid`] when a declared entry's bytes miss its pin,
     ///   or the bytes are a pre-compiled artifact where raw wasm alone is
     ///   admitted, or do not load as a component.
@@ -296,12 +321,16 @@ impl<B: Backends> Runtime<B> {
         &self, id: GuestId, bytes: Vec<u8>, policy: Policy<'_>,
     ) -> Result<Arc<Guest<B>>, GuestError> {
         self.admits(&id, &policy)?;
+        let grants = match policy {
+            Policy::Declared(entry) => entry.grants(),
+            Policy::CallerNamed { grants, .. } => grants,
+        };
 
         // verify under the policy
         let invalid = |error: anyhow::Error| GuestError::Invalid(format!("{error:#}"));
         let verified = match policy {
             Policy::Declared(entry) => entry.verified(bytes).map_err(invalid)?,
-            Policy::CallerNamed { pin } => {
+            Policy::CallerNamed { pin, .. } => {
                 let found = Digest::of(&bytes);
                 if let Some(pin) = pin
                     && pin != found
@@ -319,7 +348,7 @@ impl<B: Backends> Runtime<B> {
         let digest = verified.digest();
 
         // seat them, or settle with the registration that got there first
-        match self.seat(id.clone(), verified).await {
+        match self.seat(id.clone(), verified, grants.clone()).await {
             Ok(guest) => Ok(guest),
             Err(SeatError::Occupied) => {
                 let standing = self.registry().get(&id).ok_or_else(|| {
@@ -329,17 +358,25 @@ impl<B: Backends> Runtime<B> {
                     ))
                 })?;
                 match policy {
-                    Policy::Declared(_) => Ok(standing),
-                    Policy::CallerNamed { .. } if standing.digest() == digest => Ok(standing),
-                    Policy::CallerNamed { .. } => Err(GuestError::Conflict {
-                        found: digest,
-                        detail: format!(
-                            "guest `{id}` is active under other bytes ({}, not {digest})",
-                            standing.digest()
-                        ),
-                    }),
+                    Policy::CallerNamed { .. } if standing.digest() != digest => {
+                        Err(GuestError::Conflict {
+                            found: digest,
+                            detail: format!(
+                                "guest `{id}` is active under other bytes ({}, not {digest})",
+                                standing.digest()
+                            ),
+                        })
+                    }
+                    Policy::CallerNamed { grants, .. } if **standing.grants() != *grants => {
+                        Err(GuestError::Denied(format!(
+                            "guest `{id}` is active under other grants than this load would run \
+                             it under"
+                        )))
+                    }
+                    Policy::Declared(_) | Policy::CallerNamed { .. } => Ok(standing),
                 }
             }
+            Err(SeatError::Denied(reason)) => Err(GuestError::Denied(reason)),
             Err(SeatError::Invalid(reason)) => Err(GuestError::Invalid(reason)),
             Err(SeatError::Internal(reason)) => Err(GuestError::Internal(reason)),
         }
@@ -434,25 +471,25 @@ impl<B: Backends> Runtime<B> {
         self.inner.stores_built.load(Ordering::Relaxed)
     }
 
-    /// Fresh per-guest store context at the root of a server chain
-    /// ([`ChainCtx::server`]): what a trigger builds for the guest it serves.
+    /// How full the concurrency gate is: the invocations
+    /// [`enter`](Self::enter) has let run, those waiting, and its size.
+    ///
+    /// A link hop or a host dispatch takes no slot, so neither counts.
     #[must_use]
-    pub fn store(&self) -> StoreCtx<B> {
-        self.store_in(ChainCtx::server())
+    pub fn invocations(&self) -> Invocations {
+        self.inner.gate.occupancy()
     }
 
-    /// Fresh per-guest store context at `chain`: a root for the command
-    /// driver, the context a link dispatch derived for its callee.
-    ///
-    /// The guest's environment is the host's as it stood when the runtime
-    /// was assembled, with `RUST_LOG` set to the deployment's tracing
-    /// directives — the run's verbosity flag composed with the process
-    /// variable, decided once at build — and `NO_COLOR` set when the console
-    /// the guest shares does not colour its lines.
-    #[must_use]
-    pub fn store_in(&self, chain: ChainCtx) -> StoreCtx<B> {
+    // A fresh store context for `guest` at `chain`. The guest's environment
+    // is the inherited host variables its grants reach, as they stood when
+    // the runtime was assembled, with `RUST_LOG` set to the run's tracing
+    // directives and `NO_COLOR` set when the console the guest shares does
+    // not colour its lines.
+    fn store_ctx(&self, guest: &Guest<B>, chain: ChainCtx) -> StoreCtx<B> {
         StoreCtx {
             base: StoreBase::new(crate::StoreConfig {
+                guest: guest.id().clone(),
+                grants: Arc::clone(guest.grants()),
                 options: self.options(),
                 dispatcher: Arc::clone(&self.dispatcher),
                 chain,
@@ -466,15 +503,10 @@ impl<B: Backends> Runtime<B> {
         }
     }
 
-    /// Store with epoch deadline, optional fuel, and memory limiter installed.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `MAX_FUEL` is set but the engine was built without fuel
-    /// metering — a configuration mismatch that would otherwise run guests
-    /// unmetered.
-    #[must_use]
-    pub fn build_store(&self, data: StoreCtx<B>) -> Store<StoreCtx<B>> {
+    // A store with epoch deadline, optional fuel, and memory limiter
+    // installed. Panics when `MAX_FUEL` is set but the engine was built
+    // without fuel metering, which would otherwise run guests unmetered.
+    fn build_store(&self, data: StoreCtx<B>) -> Store<StoreCtx<B>> {
         self.inner.stores_built.fetch_add(1, Ordering::Relaxed);
         let options = self.options();
         let mut store = Store::new(self.registry().engine(), data);
@@ -491,26 +523,22 @@ impl<B: Backends> Runtime<B> {
         store
     }
 
-    /// A shareable factory for fresh, fully configured guest stores at a given
-    /// chain context — what the link serve side hands to each served function
-    /// to instantiate the target per call.
+    /// A shareable factory for fresh, fully configured stores for `guest` at
+    /// a given chain context: what the link serve side and host dispatch
+    /// instantiate the guest on, per call.
+    ///
+    /// A store from the factory is the one [`enter`](Self::enter) builds,
+    /// and takes no invocation slot.
+    ///
+    /// # Panics
+    ///
+    /// The factory panics if `MAX_FUEL` is set but the engine was built
+    /// without fuel metering.
     #[must_use]
-    pub fn store_factory(&self) -> StoreFactory<B> {
+    pub fn store_factory(&self, guest: &Arc<Guest<B>>) -> StoreFactory<B> {
         let runtime = self.clone();
-        Arc::new(move |chain| runtime.build_store(runtime.store_in(chain)))
-    }
-
-    /// Instantiate a guest component into `store`.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the component cannot be instantiated.
-    pub async fn instantiate(
-        &self, instance_pre: &InstancePre<StoreCtx<B>>, store: &mut Store<StoreCtx<B>>,
-    ) -> Result<Instance> {
-        let instance = instance_pre.instantiate_async(store).await?;
-        tracing::debug!("component instantiated");
-        Ok(instance)
+        let guest = Arc::clone(guest);
+        Arc::new(move |chain| runtime.build_store(runtime.store_ctx(&guest, chain)))
     }
 
     /// Drive the deployment's `wasi:cli/run` command once, returning the
@@ -525,55 +553,70 @@ impl<B: Backends> Runtime<B> {
         command::drive(self).await
     }
 
-    /// Register a raw wasm component at run time under `id`: the embedder's
-    /// caller-named admission, [`admit_bytes`](Self::admit_bytes) under
-    /// [`Policy::CallerNamed`] with no pin. Pre-compiled bytes are refused
-    /// here: an embedder holding `omnia compile` output its own pipeline
-    /// produced admits it through [`admit`](Self::admit) with an `unsafe`
-    /// [`Verified::trusted`].
+    /// Register a raw wasm component at run time under `id`, running under
+    /// `grants`: the embedder's caller-named admission,
+    /// [`admit_bytes`](Self::admit_bytes) under [`Policy::CallerNamed`] with
+    /// no pin. Pre-compiled bytes are refused here: an embedder holding
+    /// `omnia compile` output its own pipeline produced admits it through
+    /// [`admit`](Self::admit) with an `unsafe` [`Verified::trusted`].
     ///
     /// The identity is opaque and must not be one the deployment declares;
     /// an upgrade is [`deregister`](Self::deregister) + `register` (or a new
-    /// id), and an identity already active attests on the same bytes alone.
-    /// A failed registration leaves no partial state. The registry entry
-    /// records the content digest of `bytes`, as it does for every guest.
+    /// id), and an identity already active attests on the same bytes and
+    /// grants alone. A failed registration leaves no partial state. The
+    /// registry entry records the content digest of `bytes`, as it does for
+    /// every guest.
     ///
     /// # Errors
     ///
     /// Returns an error if the bytes are a pre-compiled artifact, `id` is a
-    /// name the deployment declares or is active under other bytes, the
-    /// bytes cannot be loaded, the component's imports exceed the
-    /// deployment's linked host set and declared link interfaces, or its
-    /// linked exports cannot be served.
-    pub async fn register(&self, id: impl Into<GuestId>, bytes: Vec<u8>) -> Result<()> {
-        self.admit_bytes(id.into(), bytes, Policy::CallerNamed { pin: None }).await?;
+    /// name the deployment declares or is active under other bytes or
+    /// grants, the bytes cannot be loaded, the component imports a package
+    /// `grants` does not reach or exceeds the deployment's linked host set
+    /// and declared link interfaces, or its linked exports cannot be served.
+    pub async fn register(
+        &self, id: impl Into<GuestId>, bytes: Vec<u8>, grants: Grants,
+    ) -> Result<()> {
+        let policy = Policy::CallerNamed {
+            pin: None,
+            grants: &grants,
+        };
+        self.admit_bytes(id.into(), bytes, policy).await?;
         Ok(())
     }
 
-    /// Admit verified component bytes as a late guest under `id`: the
-    /// embedder's path for bytes it vouches for itself, seated exactly as
-    /// [`admit_bytes`](Self::admit_bytes) seats them and held to the same
-    /// rule that a name the deployment declares is bound by its entry alone.
-    /// The token's digest is recorded on the registry entry, so the
-    /// attestation lives exactly as long as the entry.
+    /// Admit verified component bytes as a late guest under `id`, running
+    /// under `grants`: the embedder's path for bytes it vouches for itself,
+    /// seated exactly as [`admit_bytes`](Self::admit_bytes) seats them and
+    /// held to the same rule that a name the deployment declares is bound by
+    /// its entry alone. The token's digest is recorded on the registry
+    /// entry, so the attestation lives exactly as long as the entry.
     ///
     /// # Errors
     ///
-    /// - [`GuestError::Denied`] for a name the deployment declares.
+    /// - [`GuestError::Denied`] for a name the deployment declares, or bytes
+    ///   importing a package `grants` does not reach.
     /// - [`GuestError::Conflict`] for a name already registered, by an
     ///   earlier or a racing registration.
     /// - [`GuestError::Invalid`] for bytes that do not load as a component
     ///   against the deployment's host set.
     /// - [`GuestError::Internal`] on a serve or publication failure.
-    pub async fn admit(&self, id: GuestId, verified: Verified) -> Result<(), GuestError> {
-        self.admits(&id, &Policy::CallerNamed { pin: None })?;
+    pub async fn admit(
+        &self, id: GuestId, verified: Verified, grants: Grants,
+    ) -> Result<(), GuestError> {
+        let policy = Policy::CallerNamed {
+            pin: None,
+            grants: &grants,
+        };
+        self.admits(&id, &policy)?;
         let found = verified.digest();
-        match self.seat(id.clone(), verified).await {
+        match self.seat(id.clone(), verified, grants.clone()).await {
             Ok(_) => Ok(()),
             Err(SeatError::Occupied) => Err(GuestError::Conflict {
                 found,
                 detail: format!("guest `{id}` is already registered"),
             }),
+            Err(SeatError::Denied(reason)) => Err(GuestError::Denied(reason)),
             Err(SeatError::Invalid(reason)) => Err(GuestError::Invalid(reason)),
             Err(SeatError::Internal(reason)) => Err(GuestError::Internal(reason)),
         }
@@ -584,7 +627,9 @@ impl<B: Backends> Runtime<B> {
     // host-mediated link serve side, then publish entry and endpoint as one
     // lifecycle transition, so no dispatch resolves the entry and misses the
     // endpoint or vice versa.
-    async fn seat(&self, id: GuestId, verified: Verified) -> Result<Arc<Guest<B>>, SeatError> {
+    async fn seat(
+        &self, id: GuestId, verified: Verified, grants: Grants,
+    ) -> Result<Arc<Guest<B>>, SeatError> {
         let registry = self.registry();
 
         // early occupancy check; the publish below re-checks transactionally
@@ -596,13 +641,15 @@ impl<B: Backends> Runtime<B> {
         let component = component(registry.engine(), verified)
             .await
             .map_err(|error| SeatError::Invalid(format!("validating `{id}`: {error:#}")))?;
+        ensure_granted(&id, &component, registry.engine(), &grants)
+            .map_err(|error| SeatError::Denied(format!("{error:#}")))?;
         let instance_pre = registry
             .instantiate_late(&id, &component)
             .map_err(|error| SeatError::Invalid(format!("pre-instantiating `{id}`: {error:#}")))?;
-        let guest = Arc::new(Guest::local(id.clone(), instance_pre, digest));
+        let guest = Arc::new(Guest::local(id.clone(), instance_pre, digest, grants));
 
         // serve as a pending endpoint, then publish endpoint and entry as one step
-        registry.seam().serve(self.store_factory(), &guest).await.map_err(|error| {
+        registry.seam().serve(self.store_factory(&guest), &guest).await.map_err(|error| {
             SeatError::Internal(format!("serving `{id}` seam exports: {error:#}"))
         })?;
         registry.publish(Arc::clone(&guest)).map_err(|error| match error {
@@ -668,7 +715,6 @@ impl<B: Backends> Runtime<B> {
     pub async fn serve_links(&self) -> Result<()> {
         let registry = self.registry();
         let seam = registry.seam();
-        let factory = self.store_factory();
         let guests: Vec<_> = registry.guests().collect();
 
         // on failure, release what is still parked so a failed bootstrap pins nothing
@@ -679,7 +725,7 @@ impl<B: Backends> Runtime<B> {
         };
 
         for guest in &guests {
-            if let Err(error) = seam.serve(Arc::clone(&factory), guest).await {
+            if let Err(error) = seam.serve(self.store_factory(guest), guest).await {
                 discard_from(0);
                 return Err(error);
             }
@@ -725,6 +771,7 @@ struct RuntimeInner<B: 'static> {
     // one per `build_store`, so an observer can tell a quiet pool from one
     // whose guests finished between its looks
     stores_built: AtomicU64,
+    gate: Gate,
     stop: watch::Sender<bool>,
 }
 
@@ -732,6 +779,8 @@ struct RuntimeInner<B: 'static> {
 enum SeatError {
     // an earlier or racing registration holds the identity
     Occupied,
+    // the component imports a package its grants do not reach
+    Denied(String),
     Invalid(String),
     Internal(String),
 }
@@ -784,11 +833,14 @@ pub enum Policy<'a> {
     /// racing first use that seated the name first stands.
     Declared(&'a Source),
     /// A caller named the bytes: raw wasm alone, hashing to `pin` when one
-    /// is given, under a name the deployment does not declare; a name
-    /// already active attests on the same digest alone.
+    /// is given, under a name the deployment does not declare, running under
+    /// `grants`; a name already active attests on the same digest and grants
+    /// alone.
     CallerNamed {
         /// The digest the bytes must hash to, when the caller knows it.
         pin: Option<Digest>,
+        /// What of the deployment the admitted guest reaches.
+        grants: &'a Grants,
     },
 }
 

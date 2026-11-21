@@ -14,7 +14,7 @@ use anyhow::{Context as _, Result, bail};
 use omnia::wasmtime::Enabled;
 use omnia::wasmtime::component::Val;
 use omnia::{
-    ChainCtx, ChainPolicy, CompileOptions, DeploymentBuilder, FirstArgSelector, GuestEntry,
+    ChainCtx, ChainPolicy, CompileOptions, DeploymentBuilder, FirstArgSelector, Grants, GuestEntry,
     GuestId, GuestSelector as _, Manifest, Runtime, RuntimeOptions, Transport, TransportKind,
     Verified,
 };
@@ -56,9 +56,8 @@ async fn call(runtime: &Runtime<()>, guest: &str, func: &str, message: &str) -> 
         .guest(&GuestId::from(guest))
         .await
         .with_context(|| format!("resolving guest `{guest}`"))?;
-    let mut store = runtime.build_store(runtime.store());
-    let instance = runtime
-        .instantiate(entry.instance_pre(), &mut store)
+    let (mut store, instance) = runtime
+        .enter(&entry, ChainCtx::server(), None)
         .await
         .with_context(|| format!("instantiating `{guest}`"))?;
     let export = instance
@@ -192,7 +191,7 @@ async fn late_registration() {
             .expect("deployment boots");
 
     let wasm = std::fs::read(test_programs::LINK_FULL).expect("reading full guest artifact");
-    runtime.register("full", wasm).await.expect("late registration");
+    runtime.register("full", wasm, Grants::all()).await.expect("late registration");
 
     let sync = call(&runtime, "full", "poke", "late").await.expect("sync dispatch");
     assert_eq!(sync, "echoer pong: late");
@@ -224,7 +223,10 @@ async fn register_precompiled() {
     .expect("compiling the full guest ahead of time");
     let bytes = std::fs::read(&artifact).expect("reading the compiled artifact");
 
-    let err = runtime.register("full", bytes.clone()).await.expect_err("pre-compiled is refused");
+    let err = runtime
+        .register("full", bytes.clone(), Grants::all())
+        .await
+        .expect_err("pre-compiled is refused");
     assert!(format!("{err:#}").contains("`Verified::wasm`"), "unexpected error: {err:#}");
     assert!(runtime.registry().get(&GuestId::from("full")).is_none(), "nothing was admitted");
 
@@ -232,7 +234,10 @@ async fn register_precompiled() {
     // SAFETY: the artifact was compiled two statements up by this process's
     // own `omnia::compile`, from a guest the test suite built.
     let trusted = unsafe { Verified::trusted(bytes) };
-    runtime.admit("full".into(), trusted).await.expect("the embedder's own artifact is admitted");
+    runtime
+        .admit("full".into(), trusted, Grants::all())
+        .await
+        .expect("the embedder's own artifact is admitted");
     let sync = call(&runtime, "full", "poke", "trusted").await.expect("sync dispatch");
     assert_eq!(sync, "echoer pong: trusted");
 }
@@ -248,10 +253,12 @@ async fn register_declared() {
         .guest(GuestEntry::new("echoer", test_programs::LINK_ECHOER));
     let runtime = assemble(manifest, |builder| builder).await.expect("deployment boots");
 
-    let err = runtime.register("echoer", full.clone()).await.expect_err("a declared name");
+    let err =
+        runtime.register("echoer", full.clone(), Grants::all()).await.expect_err("a declared name");
     assert!(format!("{err:#}").contains("declares"), "unexpected error: {err:#}");
     let verified = Verified::wasm(full).expect("the full guest is raw wasm");
-    let err = runtime.admit("echoer".into(), verified).await.expect_err("a declared name");
+    let err =
+        runtime.admit("echoer".into(), verified, Grants::all()).await.expect_err("a declared name");
     assert!(format!("{err:#}").contains("declares"), "unexpected error: {err:#}");
     assert!(runtime.registry().get(&GuestId::from("echoer")).is_none(), "nothing was admitted");
 
@@ -304,6 +311,34 @@ async fn link_sleeper() {
     // The target is still reachable after the timed-out call was abandoned.
     let answer = call(&runtime, "full", "poke", "awake").await.expect("dispatch after timeout");
     assert_eq!(answer, "echoer woke: awake");
+}
+
+// A hop takes an instance from the pool and no slot of the gate. With a pool
+// of one, the root's own instance fills it, so the hop is refused at once,
+// naming the full pool, rather than wait on an instance its root holds.
+#[tokio::test]
+async fn full_pool() {
+    let mut options = RuntimeOptions::load_env().expect("runtime options load");
+    options.pooling = true;
+    options.pool_max_instances = 1;
+    options.pool_total_core_instances = None;
+    options.pool_total_memories = None;
+    options.pool_total_tables = None;
+    options.pool_total_stacks = None;
+    options.max_concurrent_invocations = None;
+    let runtime = boot_with(
+        &[("echoer", test_programs::LINK_ECHOER), ("full", test_programs::LINK_FULL)],
+        |builder| builder.options(options),
+    )
+    .await
+    .expect("deployment boots");
+    assert_eq!(runtime.invocations().limit, 1, "half a pool of one is a gate of one");
+
+    let err = call(&runtime, "full", "poke", "hi").await.expect_err("the hop finds the pool full");
+    let text = format!("{err:#}");
+    for needle in ["link dispatch to `echoer`", "instance pool is full", "POOL_MAX_INSTANCES"] {
+        assert!(text.contains(needle), "`{needle}` missing from: {text}");
+    }
 }
 
 // The skewed exporter takes the id `echoer` so `full`'s wired import of
@@ -483,6 +518,41 @@ fn runtime_options() {
     remove_env("POOLING");
     remove_env("POOL_TOTAL_MEMORIES");
     remove_env("POOL_MAX_MEMORIES_PER_MODULE");
+}
+
+// The relay forwards to whichever guest its first argument names, so one
+// program reaches a granted target and an ungranted one. The ungranted target
+// is declared by path, so a refusal that came after its first use would load
+// it.
+#[tokio::test]
+async fn caller_grants() {
+    let relay = std::fs::read(test_programs::LINK_RELAY).expect("reading the relay");
+    let echoer = std::fs::read(test_programs::LINK_ECHOER).expect("reading the echoer");
+    let manifest = Manifest::new()
+        .guest(GuestEntry::new("relay", relay).grants(Grants::none().guests(["echoer"])))
+        .guest(GuestEntry::new("echoer", echoer))
+        .guest(GuestEntry::new("other", test_programs::LINK_ECHOER));
+    let runtime = assemble(manifest, |builder| builder).await.expect("deployment boots");
+
+    let relay_to = |target: &str| {
+        runtime.dispatcher().invoke(
+            ChainCtx::server(),
+            GuestId::from("relay"),
+            Some("omnia-test:link/ops".into()),
+            "ping".into(),
+            vec![Val::String(target.to_owned()), Val::String("1".into())],
+        )
+    };
+
+    let answer = relay_to("echoer").await.expect("the relay's grants reach `echoer`");
+    assert_eq!(answer, vec![Val::String("echoer pong: 0".into())]);
+
+    let err = relay_to("other").await.expect_err("the relay's grants reach no `other`");
+    assert!(
+        format!("{err:#}").contains("guest `relay` may not call `other`"),
+        "unexpected error: {err:#}"
+    );
+    assert!(runtime.registry().get(&GuestId::from("other")).is_none(), "nothing was loaded");
 }
 
 // The host→guest hop is entered from a root, so it is depth 1 and with a bound

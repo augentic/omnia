@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use bytes::Bytes;
 use http::{HeaderMap, Method, Request, Response, StatusCode, Uri};
 use http_body_util::{BodyExt as _, Full};
+use omnia::Grants;
 use omnia::wasmtime::component::ResourceTable;
 use omnia_wasi_http::{
     ErrorCode, HttpBorrow, RequestOptions, WasiBody, WasiHttpCtx, WasiHttpCtxView, WasiHttpHooks,
@@ -88,7 +89,9 @@ impl MatchedHttp {
 }
 
 impl HttpBorrow for MatchedHttp {
-    fn as_view<'a>(&'a mut self, table: &'a mut ResourceTable) -> WasiHttpCtxView<'a> {
+    fn as_view<'a>(
+        &'a mut self, table: &'a mut ResourceTable, _grants: &'a Grants,
+    ) -> WasiHttpCtxView<'a> {
         WasiHttpCtxView {
             hooks: &mut self.hooks,
             ctx: &mut self.ctx,

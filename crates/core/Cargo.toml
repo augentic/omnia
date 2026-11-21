@@ -45,4 +45,5 @@ wasmtime = { workspace = true, features = ["pooling-allocator", "runtime"] }
 wasmtime-wasi.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+opentelemetry_sdk = { workspace = true, features = ["testing"] }
 trybuild.workspace = true

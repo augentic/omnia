@@ -1,3 +1,145 @@
+## 0.41.0
+
+Unreleased
+
+### Added
+
+- Per-guest grants, `omnia::Grants`: what of the deployment one guest
+  reaches, as five lists.
+  - `env`, the host variables it sees, of those `[environment] inherit`
+    passes.
+  - `mounts`, the mounts preopened into it. A model workspace,
+    `omnia:vcs`, and a path it loads resolve these alone.
+  - `hosts`, every host name it states: each outbound `wasi:http` request
+    and each redirect hop `HttpDefault` follows for it, each `egress`
+    entry of a model worker grant, and the registry a load names. An entry
+    is a whole host name or `*.suffix`, never an IP literal, and carries
+    no port.
+  - `guests`, the guests it calls over a link and loads.
+  - `interfaces`, the packages it may import, checked when it is
+    admitted.
+
+  A guest without grants reaches everything, as before. With them, an
+  omitted list grants nothing, except `interfaces`, which grants every
+  package until it names some.
+- Grants are declared in four places, and startup refuses a malformed
+  entry, naming it:
+  - `[guest.grants]` and `[plugins.grants]` in the manifest;
+  - `grants: { .. }` on a `runtime!` guest and in its `plugins:` block;
+  - `GuestEntry::grants`, and `Manifest::plugin_grants` with
+    `PluginsConfig::grants`;
+  - `omnia_test::host::Deployment::plugin_grants`, beside a granted
+    `GuestEntry`.
+- A guest a loading guest admits by path or package runs under
+  `[plugins.grants]` within the loading guest's grants, or under the
+  loading guest's own when the deployment declares none. A declared guest
+  keeps its own entry's grants, however it is first used.
+- Each list is held where the access happens:
+  - an ungranted variable or mount is absent from the guest's environment
+    and preopens;
+  - a request or followed redirect to an ungranted host fails as
+    `ErrorCode::HttpRequestDenied`, before any connection;
+  - a worker grant whose `egress` reaches past `hosts` is the model
+    interface's `denied`;
+  - a load outside the caller's `guests`, `mounts`, or `hosts` is the
+    loader's `denied`;
+  - a link call to an ungranted guest fails as a call to an unregistered
+    guest does;
+  - a component importing an ungranted package is refused at admission,
+    naming the import.
+- Startup logs, at `info`, each guest that declares no grants, and a
+  loader without `[plugins.grants]`.
+- `StoreCtx::grants`, `StoreBase::grants`, `Guest::grants`,
+  `LoadedGuest::grants`, `Source::granted`, `Source::grants`, and
+  `WasiPluginsView::grants`, which carry a guest's grants from its entry to
+  every store it gets.
+- `omnia_core::{host_pattern, matches_host}`, the host-name rule a `hosts`
+  entry and a worker grant's `egress` entry share.
+
+### Changed
+
+- `HostCtx::view` takes the store's grants after its table. A derived
+  `HostCtx` passes them by. A hand-written one takes the argument, and
+  reads it where it holds a guest to its grants.
+- `HttpBorrow::as_view` takes the grants. A custom HTTP backend that
+  ignores them lets a guest reach every host. To hold `hosts`, it refuses
+  a request outside the list with `ErrorCode::HttpRequestDenied`, as
+  `HttpDefault` does.
+- `StoreConfig` takes the `grants` its guest runs under, and `Guest::local`
+  the grants of the guest it builds. `Grants::all()` keeps a hand-built
+  store's reach.
+- `Runtime::register` and `Runtime::admit` take the grants the guest runs
+  under. `Grants::all()` keeps the old reach.
+- `Policy::CallerNamed` carries the `grants` the admitted guest runs
+  under. A name already active under other grants is `GuestError::Denied`,
+  as is a component importing a package outside its grants.
+- `Plugins::install` takes the deployment's `plugins.grants`, and
+  `Plugins::load` the caller's grants. The embedder's
+  `PluginLoader::load` is held to no caller, so a guest it admits runs
+  under `plugins.grants` alone.
+- `LoadError::Denied` also covers a load outside the caller's grants, a
+  name active under other grants, and a component importing a package
+  outside the grants it would run under.
+
+## 0.40.0
+
+Unreleased
+
+### Added
+
+- A concurrency gate. Every invocation a trigger or the command driver
+  runs takes a slot, and holds it until its store drops.
+  - `MAX_CONCURRENT_INVOCATIONS` sizes it. Unset, it is
+    `POOL_MAX_INSTANCES`, or half of it in a build with omnia's `link`
+    feature, so link hops keep half the pool.
+  - A link hop or a host dispatch takes no slot. One that finds the
+    instance pool full fails at once with `InvokeError::Saturated`.
+  - `Runtime::enter` takes a `wait` bound and answers `EnterError::Busy`
+    when no slot frees within it, or when the instance pool is full.
+  - `Runtime::invocations` reports how full the gate is, as an
+    `Invocations` of those in flight, those waiting, and its size.
+- `HTTP_QUEUE_WAIT_MS`, how long an HTTP request waits for a gate slot
+  before it is refused. `omnia_wasi_http::ServerOptions` carries it with
+  `HTTP_ADDR`, and `HttpHandler::with_options` takes it in code.
+- `HTTP_HEALTH_PATH`, a path the HTTP trigger answers `200` without
+  entering a guest. A readiness probe on it takes no gate slot, so it
+  stays `200` while the runtime is at capacity, and it wins over a guest
+  route. `ServerOptions::health_path` sets it in code.
+- `DeploymentBuilder::options` and `omnia_test::host::Deployment::options`
+  set the `RuntimeOptions` a deployment runs under, in place of the
+  environment's, before the engine and its instance pool are built.
+- `RuntimeOptions::validate`, and `total_core_instances`,
+  `total_memories`, `total_tables` and `total_stacks`, the pool totals a
+  runtime builds.
+- Gate metrics: the `invocations_in_flight` and `invocations_waiting`
+  gauges, sampled with the pool's, and the `invocations_refused` counter.
+- `omnia_core::telemetry::{record_pool, record_invocations,
+  count_message, count_event}`, which record the runtime's own metrics on
+  the global meter provider.
+
+### Changed
+
+- HTTP answers `503 Service Unavailable` with `Retry-After: 1` when the
+  gate or the instance pool is full, where a full pool was a `500`.
+- Messaging no longer caps deliveries at `POOL_MAX_INSTANCES` with a
+  semaphore of its own. A delivery waits for a gate slot, and one that
+  finds the instance pool full fails as `HandleError::Unavailable`.
+- `POOL_TOTAL_CORE_INSTANCES` and `POOL_TOTAL_TABLES` default to four
+  times `POOL_MAX_INSTANCES`, and `POOL_TOTAL_MEMORIES` and
+  `POOL_TOTAL_STACKS` to `POOL_MAX_INSTANCES`, where each was a flat
+  `1000`. A guest holds several core instances and tables, so the flat
+  totals filled near a third of `POOL_MAX_INSTANCES`. The
+  `RuntimeOptions` fields are `Option<u32>`, `None` when unset.
+- `Runtime::enter` takes `wait: Option<Duration>`; `None` waits as long
+  as a slot takes.
+- An HTTP request's or a delivery's guest timeout starts once it holds a
+  gate slot, so time spent waiting for one is not taken from the guest.
+- The `pool_*` gauges, `message_counter` and `event_counter` record on
+  OpenTelemetry instruments, so they export whatever `RUST_LOG` is. They
+  were `tracing` events, which a server's default `warn` filter dropped
+  before they reached the exporter. `RUST_LOG=omnia=trace` is no longer
+  needed to see the pool gauges, and they no longer appear in the log.
+
 ## 0.39.0
 
 Unreleased
@@ -6,9 +148,9 @@ Unreleased
 
 - Committed guest bindings for every `omnia:*` interface in `omnia-sdk`,
   generated by `wit-bindgen` 0.63 from the interface crates' WIT.
-  `mise run bindgen` regenerates them. The CI `bindings` job fails when
-  they drift from the WIT, and checks with `wasm-tools` that a built guest
-  targets the world they were generated from.
+  `mise run bindgen` regenerates them. `mise run wit-check` fails when
+  they drift from the WIT, or when a built guest does not target the
+  world they were generated from.
 - One `omnia_sdk` module per interface, each in the same shape:
   - one opener, `open` or `connect`, taking a binding name as `&str`;
   - a `DEFAULT` where the interface has a default binding, and a
@@ -116,17 +258,49 @@ Unreleased
 - The `omnia:*` WIT packages, published to the `omnia.host` wasm-pkg
   registry by the release workflow. Each release's description is the
   summary of its package docs, and `docs/reference/wit-packages.md` says
-  how to fetch one. The tasks behind it:
+  how to fetch one. The tasks behind it run `cargo xtask`, an unpublished
+  workspace member, so no WIT tool is installed:
   - `mise run wit-check` fails on a `wit/deps` copy that differs from
     the package that owns it, or a plain `//` comment, which wit-parser
     reads as docs. It parses every package with and without its
-    `@unstable` features, and builds every release.
+    `@unstable` features, and encodes every release. It is the `xtask`
+    suite, so CI's workspace test runs it.
   - `mise run wit-verify` fails when a release the registry holds differs
-    from the tree. CI's `WIT` job runs it beside `wit-check`.
+    from the tree. CI's `WIT` job runs it on every push.
   - `mise run wit-sync` rewrites every copy from the package that owns it.
+- `Runtime::enter`, which instantiates a guest on a fresh store at a chain
+  context, and `EnterError`. Every trigger and the command driver run a
+  guest through it.
+- `StoreCtx::guest` and `StoreBase::guest`, the guest a store runs.
+- The host variables every guest sees, each a whole name or a prefix that
+  ends in `*`:
+  - `[environment] inherit` in the manifest, and `Manifest::inherit` with
+    the `Environment` table;
+  - `environment: { inherit: [..] }` in `runtime!`;
+  - `--env NAME` on `run`, carried as `RunPlan::env`;
+  - `RuntimeParts::inherit`, and `omnia_test::host::Deployment::inherit`.
+- `omnia_wasi_config::ConnectOptions`, whose `keys` are the host variables
+  `ConfigDefault` serves, loaded from `CONFIG_KEYS`.
 
 ### Changed
 
+- A guest no longer sees the host's environment. Its `wasi:cli`
+  environment holds `RUST_LOG`, `NO_COLOR` when the console is plain, and
+  the host variables the deployment names. To keep a guest's variables,
+  name them in `[environment] inherit` (`inherit = ["ORDERS_*"]`), in
+  `runtime!` as `environment: { inherit: [..] }`, or with `run --env`.
+  `inherit = ["*"]` passes every variable, as before.
+- `ConfigDefault` serves only the host variables `CONFIG_KEYS` names,
+  comma-separated, and none when it is unset. To keep a guest's
+  `omnia:config` reads, set `CONFIG_KEYS`, or compile the keys in as
+  `WasiConfig: ConfigDefault(ConnectOptions { keys: vec![..] })`. The first
+  `get` for a variable the host sets and the backend does not serve logs a
+  warning naming `CONFIG_KEYS`.
+- `Runtime::store_factory` takes the guest whose stores it builds. The link
+  serve side and host dispatch hold one factory per guest.
+- `StoreConfig` takes the `guest` the store is built for, and an `env` of
+  `None` gives the guest an empty environment, where it inherited the
+  host's.
 - `omnia_sdk::api` is gone, and its items moved:
   - `Context`, `Metadata`, `Handler`, `Handlers`, and `Router` to the crate
     root;
@@ -229,6 +403,9 @@ Unreleased
 
 ### Removed
 
+- `Runtime::store`, `store_in`, `build_store`, and `instantiate`. A trigger
+  calls `Runtime::enter`, and a store for a call that takes no trigger comes
+  from `Runtime::store_factory`.
 - The capability traits: `BlobStore`, `Config`, `DocumentDb`, `HttpClient`,
   `Identity`, `Model`, `Plugins`, `Publisher`, `SecretStore`, `SqlDb`,
   `StateStore`, `Vcs`, and `WebSockets`, with their `*Ext` and `Has*`

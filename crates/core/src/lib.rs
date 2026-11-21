@@ -5,10 +5,13 @@ mod artifact;
 mod chain;
 mod digest;
 mod dispatch;
+mod egress;
 mod extensions;
+mod grants;
 mod host;
 mod invoke;
 mod mount;
+mod names;
 mod options;
 mod registry;
 mod runtime;
@@ -27,7 +30,9 @@ pub use {anyhow, futures, tokio, wasmtime, wasmtime_wasi};
 pub use self::chain::{ChainCtx, ChainPolicy};
 pub use self::digest::Digest;
 pub use self::dispatch::Dispatcher;
+pub use self::egress::{host_pattern, matches_host};
 pub use self::extensions::Extensions;
+pub use self::grants::Grants;
 pub use self::host::{
     Backends, Connect, FromEnv, FutureResult, HasTable, Host, HostCtx, HostView, NoOptions,
     Provides, Proxy, get_cloned,
@@ -39,7 +44,9 @@ pub use self::registry::{
     CliRoutes, Guest, GuestId, HttpRoutes, PatternRoutes, Registry, RegistryParts, Resolver,
     Routes, TriggerRouter,
 };
-pub use self::runtime::{ExitStatus, GuestError, Policy, Runtime, RuntimeParts, WeakRuntime};
+pub use self::runtime::{
+    EnterError, ExitStatus, GuestError, Invocations, Policy, Runtime, RuntimeParts, WeakRuntime,
+};
 pub use self::seam::{LinkSeam, NoLinks, StoreFactory};
 pub use self::source::{AcquireError, LoadedGuest, RegistrySource, Source, SourceSpec, Verified};
 pub use self::store::{Stdio, StoreBase, StoreConfig, StoreCtx};

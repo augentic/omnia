@@ -2462,12 +2462,14 @@ name = "omnia-wasi-config"
 version = "0.38.0"
 dependencies = [
  "anyhow",
+ "fromenv",
  "futures",
  "omnia",
  "omnia-core",
  "omnia-test",
  "omnia-wasi-otel",
  "omnia-wasi-types",
+ "parking_lot 0.13.0",
  "test-programs",
  "tokio",
  "tracing",
@@ -2783,6 +2785,7 @@ dependencies = [
  "portable-atomic",
  "rand 0.9.5",
  "thiserror 2.0.21",
+ "tokio",
 ]
 
 [[package]]

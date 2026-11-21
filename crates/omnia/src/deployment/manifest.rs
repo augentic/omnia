@@ -18,9 +18,10 @@
 //! command drive, a link call, a host dispatch, or the guest loader names
 //! it. An entry may pin the `digest` its bytes must hash to; the format it
 //! admits follows from the source (see [`SourceSpec`]). Each guest's
-//! `routes` tables and the `[plugins]` table — the package store and the
-//! `registries` configuration that routes package sources — are consumed
-//! too. Distributed `[transport]` is not yet implemented: only the
+//! `routes` tables and its `grants` (see [`Grants`]) are consumed too, as is
+//! the `[plugins]` table: the package store, the `registries` configuration
+//! that routes package sources, and the `grants` a guest loaded at run time
+//! runs under. Distributed `[transport]` is not yet implemented: only the
 //! in-process default is accepted.
 
 use std::borrow::Cow;
@@ -28,10 +29,10 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context as _, Result, bail};
+use anyhow::{Context as _, Result, anyhow, bail};
 use omnia_core::{
-    CliRoutes, Digest, GuestId, HttpRoutes, PatternRoutes, ResolvedPreopen, Routes, Source,
-    SourceSpec,
+    CliRoutes, Digest, Grants, GuestId, HttpRoutes, PatternRoutes, ResolvedPreopen, Routes, Source,
+    SourceSpec, host_pattern,
 };
 use serde::Deserialize;
 
@@ -61,6 +62,8 @@ pub struct Manifest {
     /// Working-tree mounts preopened into the guest sandbox.
     #[serde(rename = "mount")]
     pub mounts: Vec<Mount>,
+    /// What of the host's environment every guest sees.
+    pub environment: Environment,
     /// The package store and the registry routing every package — a
     /// declared `source.package` or one a guest loads — is acquired through;
     /// absent, every package is refused.
@@ -127,6 +130,17 @@ impl Manifest {
         self
     }
 
+    /// Pass the host variables `names` to every guest (the manifest's
+    /// `[environment] inherit`).
+    ///
+    /// Each name is whole, or a prefix that ends in `*`. `*` alone passes
+    /// every variable.
+    #[must_use]
+    pub fn inherit<S: Into<String>>(mut self, names: impl IntoIterator<Item = S>) -> Self {
+        self.environment.inherit.extend(names.into_iter().map(Into::into));
+        self
+    }
+
     /// Set the `[plugins]` table: the package store and the registry routing.
     #[must_use]
     pub fn plugins(mut self, config: PluginsConfig) -> Self {
@@ -151,17 +165,33 @@ impl Manifest {
         self
     }
 
+    /// Set the grants a guest loaded at run time by path or package runs
+    /// under, within its loader's (the manifest's `[plugins.grants]`).
+    #[must_use]
+    pub fn plugin_grants(mut self, grants: Grants) -> Self {
+        self.plugins.get_or_insert_default().grants = grants;
+        self
+    }
+
     /// Validate manifest-level invariants surfaced before the registry is
     /// built. An `allow_empty` (dynamic) deployment may define no `[[guest]]`
     /// entry; `features` is what the manifest may declare.
     ///
     /// # Errors
     ///
-    /// Returns an error if a `[[guest]]` entry names no guest or repeats a
-    /// name, no entry exists when `allow_empty` is false, more than one entry
-    /// is the command guest, the transport is not in-process, or the manifest
-    /// declares `[plugins]` or a package source that `features` lacks the
-    /// `loader` to serve.
+    /// Returns an error if:
+    ///
+    /// - a `[[guest]]` entry names no guest or repeats a name, or no entry
+    ///   exists when `allow_empty` is false;
+    /// - more than one entry is the command guest;
+    /// - an `[environment] inherit` or grants `env` entry is not a variable
+    ///   name or a prefix of one that ends in `*`;
+    /// - a grants `mounts` entry names no `[[mount]]`, a `hosts` entry is
+    ///   not a host name or `*.suffix`, or an `interfaces` entry is not a
+    ///   package name or a prefix of one;
+    /// - the transport is not in-process;
+    /// - the manifest declares `[plugins]` or a package source that
+    ///   `features` lacks the `loader` to serve.
     pub fn validate(&self, allow_empty: bool, features: Features) -> Result<()> {
         let mut names = BTreeSet::new();
         for entry in &self.guests {
@@ -187,6 +217,20 @@ impl Manifest {
                  be the command guest",
                 marked.join(", ")
             );
+        }
+        if let Some(entry) = self.environment.inherit.iter().find(|entry| !is_env_pattern(entry)) {
+            bail!(
+                "`[environment] inherit` entry `{entry}` is not a variable name, or a prefix of \
+                 one that ends in `*`"
+            );
+        }
+        let mounts: Vec<&str> = self.mounts.iter().map(|mount| mount.name.as_str()).collect();
+        for entry in &self.guests {
+            check_grants(&entry.grants, &mounts)
+                .with_context(|| format!("guest `{}` has invalid grants", entry.name))?;
+        }
+        if let Some(plugins) = &self.plugins {
+            check_grants(&plugins.grants, &mounts).context("`[plugins.grants]` is invalid")?;
         }
         if self.transport.default != TransportKind::InProcess {
             bail!(
@@ -369,13 +413,64 @@ fn is_home_relative(path: &Path) -> bool {
     path.starts_with("~")
 }
 
+// `*` alone, or `[A-Za-z_][A-Za-z0-9_]*` optionally ending in `*`
+fn is_env_pattern(entry: &str) -> bool {
+    let mut bytes = entry.strip_suffix('*').unwrap_or(entry).bytes();
+    entry == "*"
+        || (bytes.next().is_some_and(|first| first == b'_' || first.is_ascii_alphabetic())
+            && bytes.all(|byte| byte == b'_' || byte.is_ascii_alphanumeric()))
+}
+
+// a `guests` entry need not be declared, since a guest may be loaded or
+// registered at run time; a granted mount must be
+fn check_grants(grants: &Grants, mounts: &[&str]) -> Result<()> {
+    if let Some(entry) = grants.env.iter().flatten().find(|entry| !is_env_pattern(entry)) {
+        bail!("`env` entry `{entry}` is not a variable name, or a prefix of one that ends in `*`");
+    }
+    if let Some(entry) = grants.undeclared_mount(mounts) {
+        bail!("`mounts` entry `{entry}` names no [[mount]] of the deployment");
+    }
+    for entry in grants.hosts.iter().flatten() {
+        host_pattern(entry).map_err(|what| anyhow!("`hosts` entry `{entry}` {what}"))?;
+    }
+    if let Some(entry) = grants.interfaces.iter().flatten().find(|entry| !is_package_pattern(entry))
+    {
+        bail!(
+            "`interfaces` entry `{entry}` is not a package name (`wasi:http`), or a prefix of one \
+             that ends in `*`"
+        );
+    }
+    Ok(())
+}
+
+// a package names no interface or version, so `wasi:http/types@0.3.0` is
+// refused rather than never matching
+fn is_package_pattern(entry: &str) -> bool {
+    !entry.is_empty() && !entry.contains(['/', '@'])
+}
+
 // The one resolution from a `[[guest]]` entry to its loadable source.
 fn source(entry: &GuestEntry) -> Source {
-    let source = Source::new(entry.name.as_str(), entry.source.clone());
+    let source =
+        Source::new(entry.name.as_str(), entry.source.clone()).granted(entry.grants.clone());
     match entry.digest {
         Some(digest) => source.pinned(digest),
         None => source,
     }
+}
+
+/// The `[environment]` table: what of the host's environment every guest
+/// sees.
+///
+/// A guest's environment holds the host variables `inherit` names, read once
+/// at startup. The runtime also sets `RUST_LOG` to the run's tracing
+/// directives, and `NO_COLOR` when the console does not colour its lines.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(default, deny_unknown_fields)]
+pub struct Environment {
+    /// The host variables every guest sees, each a whole name or a prefix
+    /// that ends in `*`. `*` alone passes every variable.
+    pub inherit: Vec<String>,
 }
 
 /// The `[plugins]` table: where acquired packages are kept and how they are
@@ -398,6 +493,12 @@ pub struct PluginsConfig {
     /// Where the wasm-pkg client configuration that routes packages comes
     /// from; absent, a package the store does not hold is refused.
     pub registries: Option<RegistryConfig>,
+    /// The grants a guest loaded at run time by path or package runs under,
+    /// within the grants of the guest that loaded it.
+    ///
+    /// Absent, such a guest runs under its loader's grants. A declared guest
+    /// a load names keeps its own.
+    pub grants: Grants,
 }
 
 /// Where the wasm-pkg client configuration comes from: the `[plugins]`
@@ -506,6 +607,10 @@ pub struct GuestEntry {
     /// output only when pinned.
     #[serde(default)]
     pub digest: Option<Digest>,
+    /// What of the deployment the guest reaches (its `[guest.grants]`
+    /// table); absent, [`Grants::all`].
+    #[serde(default)]
+    pub grants: Grants,
 }
 
 impl GuestEntry {
@@ -519,6 +624,7 @@ impl GuestEntry {
             routes: GuestRoutes::default(),
             command: false,
             digest: None,
+            grants: Grants::all(),
         }
     }
 
@@ -574,6 +680,13 @@ impl GuestEntry {
     #[must_use]
     pub const fn digest(mut self, digest: Digest) -> Self {
         self.digest = Some(digest);
+        self
+    }
+
+    /// Run the guest under `grants`.
+    #[must_use]
+    pub fn grants(mut self, grants: Grants) -> Self {
+        self.grants = grants;
         self
     }
 }
@@ -661,5 +774,108 @@ mod tests {
             .expect_err("a package needs the loader feature");
         assert!(error.to_string().contains("without the `loader` feature"), "{error}");
         assert!(error.to_string().contains("acme:tool"), "{error}");
+    }
+
+    #[test]
+    fn environment_table() {
+        let manifest: Manifest = toml::from_str(
+            "[environment]\ninherit = [\"ORDERS_*\", \"HOME\", \"*\"]\n\n[[guest]]\nname = \
+             \"app\"\nsource.path = \"app.wasm\"\n",
+        )
+        .expect("the table parses");
+        assert_eq!(manifest.environment.inherit, ["ORDERS_*", "HOME", "*"]);
+        manifest.validate(false, Features { loader: false }).expect("every entry is a pattern");
+
+        let unknown = toml::from_str::<Manifest>("[environment]\npass = [\"HOME\"]\n");
+        assert!(unknown.is_err(), "an unknown key is refused");
+
+        for entry in ["", "**", "9LIVES", "ORDERS-URL", "A*B", "HOME "] {
+            let error = Manifest::new()
+                .guest(GuestEntry::new("app", "./app.wasm"))
+                .inherit([entry])
+                .validate(false, Features { loader: false })
+                .expect_err("not a variable pattern");
+            assert!(error.to_string().contains("[environment] inherit"), "{error}");
+        }
+    }
+
+    #[test]
+    fn grants_tables() {
+        let manifest: Manifest = toml::from_str(
+            r#"
+            [[mount]]
+            name = "data"
+            path = "data"
+
+            [[guest]]
+            name = "app"
+            source.path = "app.wasm"
+
+            [guest.grants]
+            env = ["ORDERS_*"]
+            mounts = ["data"]
+            hosts = ["api.example.com", "*.example.net"]
+
+            [[guest]]
+            name = "open"
+            source.path = "open.wasm"
+
+            [plugins.grants]
+            guests = ["acme:*"]
+            interfaces = ["wasi:http", "omnia:*"]
+            "#,
+        )
+        .expect("the tables parse");
+        assert_eq!(
+            manifest.guests[0].grants,
+            Grants::none()
+                .env(["ORDERS_*"])
+                .mounts(["data"])
+                .hosts(["api.example.com", "*.example.net"])
+        );
+        assert!(manifest.guests[1].grants.is_all(), "no table reaches everything");
+        let plugins = manifest.plugins.as_ref().expect("the `[plugins]` table");
+        assert_eq!(
+            plugins.grants,
+            Grants::none().guests(["acme:*"]).interfaces(["wasi:http", "omnia:*"])
+        );
+        manifest.validate(false, Features { loader: true }).expect("the grants are valid");
+
+        let unknown = toml::from_str::<Manifest>(
+            "[[guest]]\nname = \"app\"\nsource.path = \"app.wasm\"\n\n[guest.grants]\nnetwork = \
+             [\"api\"]\n",
+        );
+        assert!(unknown.is_err(), "an unknown key is refused");
+    }
+
+    #[test]
+    fn invalid_grants() {
+        let refusals = [
+            (Grants::none().env(["ORDERS-URL"]), "`env` entry `ORDERS-URL`"),
+            (Grants::none().mounts(["data"]), "`mounts` entry `data` names no [[mount]]"),
+            (Grants::none().hosts(["127.0.0.1"]), "`hosts` entry `127.0.0.1` is an IP literal"),
+            (Grants::none().hosts(["api.example.com:443"]), "`hosts` entry `api.example.com:443`"),
+            (Grants::none().hosts(["https://api.example.com"]), "carries a scheme"),
+            (Grants::none().hosts(["*example.com"]), "is not a host name or `*.suffix`"),
+            (Grants::all().interfaces(["wasi:http/types"]), "`interfaces` entry `wasi:http/types`"),
+            (Grants::all().interfaces(["wasi:http@0.3.0"]), "`interfaces` entry `wasi:http@0.3.0`"),
+        ];
+        for (grants, needle) in refusals {
+            let guest =
+                Manifest::new().guest(GuestEntry::new("app", "./app.wasm").grants(grants.clone()));
+            let error = guest
+                .validate(false, Features { loader: true })
+                .expect_err("the guest's grants are invalid");
+            assert!(format!("{error:#}").contains("guest `app` has invalid grants"), "{error:#}");
+            assert!(format!("{error:#}").contains(needle), "{error:#}");
+
+            let plugins =
+                Manifest::new().guest(GuestEntry::new("app", "./app.wasm")).plugin_grants(grants);
+            let error = plugins
+                .validate(false, Features { loader: true })
+                .expect_err("the plugin grants are invalid");
+            assert!(format!("{error:#}").contains("`[plugins.grants]` is invalid"), "{error:#}");
+            assert!(format!("{error:#}").contains(needle), "{error:#}");
+        }
     }
 }

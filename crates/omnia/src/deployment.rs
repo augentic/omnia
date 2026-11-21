@@ -12,13 +12,11 @@ use std::time::Duration;
 use anyhow::bail;
 use anyhow::{Context, Result};
 pub use manifest::{
-    GuestEntry, GuestRoutes, Manifest, Mount, PluginsConfig, RegistryConfig, Transport,
-    TransportKind,
+    Environment, GuestEntry, GuestRoutes, Manifest, Mount, PluginsConfig, RegistryConfig,
+    Transport, TransportKind,
 };
 #[cfg(feature = "link")]
 use omnia_core::ChainPolicy;
-#[cfg(feature = "loader")]
-use omnia_core::RegistrySource;
 use omnia_core::wasmtime::component::Linker;
 use omnia_core::wasmtime::{Config, Engine};
 use omnia_core::{
@@ -26,6 +24,8 @@ use omnia_core::{
     RegistryParts, Routes, Runtime, RuntimeOptions, RuntimeParts, Source, SourceSpec, Stdio,
     StoreCtx, Telemetry, telemetry,
 };
+#[cfg(feature = "loader")]
+use omnia_core::{Grants, RegistrySource};
 #[cfg(feature = "link")]
 use omnia_link::{FirstArgSelector, GuestSelector, InProcessLinks};
 #[cfg(feature = "loader")]
@@ -55,6 +55,7 @@ pub struct DeploymentBuilder {
     runtime_level: Option<LevelFilter>,
     allow_empty: bool,
     program_name: Option<String>,
+    options: Option<RuntimeOptions>,
     guest_timeout: Option<Duration>,
     max_dispatch_depth: Option<usize>,
     stdio: Option<Stdio>,
@@ -143,6 +144,19 @@ impl DeploymentBuilder {
         self
     }
 
+    /// Run the deployment under `options`, in place of the ones the
+    /// environment sets.
+    ///
+    /// They size the engine and its instance pool, so they apply before
+    /// anything compiles, and are [validated](RuntimeOptions::validate) as
+    /// the environment's are. [`guest_timeout`](Self::guest_timeout) and
+    /// [`max_dispatch_depth`](Self::max_dispatch_depth) still apply on top.
+    #[must_use]
+    pub const fn options(mut self, options: RuntimeOptions) -> Self {
+        self.options = Some(options);
+        self
+    }
+
     /// Override the wall-clock cap on server and server-rooted link-dispatch
     /// invocations for this deployment. Unset defers to `GUEST_TIMEOUT_MS`.
     #[must_use]
@@ -214,7 +228,7 @@ impl DeploymentBuilder {
             .context("initializing telemetry")?;
         tracing::debug!("initializing runtime");
 
-        let (engine, linker, mut options) = engine_and_linker()?;
+        let (engine, linker, mut options) = engine_and_linker(self.options)?;
         if let Some(timeout) = self.guest_timeout {
             options.guest_timeout = timeout;
         }
@@ -287,16 +301,30 @@ impl DeploymentBuilder {
             loader: Loader {
                 store,
                 registry: None,
+                grants: manifest
+                    .plugins
+                    .as_ref()
+                    .map_or_else(Grants::all, |plugins| plugins.grants.clone()),
             },
             rust_log,
+            inherit: manifest.environment.inherit,
             stdio: self.stdio,
         })
     }
 }
 
-// Build the shared engine, WASI-linked linker, and runtime options.
-fn engine_and_linker<B: Send + 'static>() -> Result<(Engine, Linker<StoreCtx<B>>, RuntimeOptions)> {
-    let options = RuntimeOptions::load_env()?;
+// Build the shared engine, WASI-linked linker, and runtime options: the
+// options given in code, else the environment's.
+fn engine_and_linker<B: Send + 'static>(
+    options: Option<RuntimeOptions>,
+) -> Result<(Engine, Linker<StoreCtx<B>>, RuntimeOptions)> {
+    let options = match options {
+        Some(options) => {
+            options.validate()?;
+            options
+        }
+        None => RuntimeOptions::load_env()?,
+    };
     let engine = Engine::new(&Config::from(&options))?;
 
     // register services with runtime's Linker
@@ -333,6 +361,8 @@ pub struct Deployment<B: 'static> {
     loader: Loader,
     // every store's `RUST_LOG`
     rust_log: String,
+    // the host variables every store's environment holds
+    inherit: Vec<String>,
     stdio: Option<Stdio>,
 }
 
@@ -455,6 +485,24 @@ impl<B: Backends> Deployment<B> {
         #[cfg(feature = "loader")]
         let registry = loader.registry(deployment.registry_config.as_deref())?;
 
+        // name what reaches everything, so an operator sees what grants would narrow
+        let boot = deployment.guests.iter().map(|guest| (&guest.id, &guest.grants));
+        let first_use = deployment.declared.iter().map(|source| (source.id(), source.grants()));
+        for (id, _) in boot.chain(first_use).filter(|(_, grants)| grants.is_all()) {
+            tracing::info!(
+                guest = %id,
+                "guest declares no grants: it reaches every variable, mount, host name, guest, \
+                 and interface of the deployment"
+            );
+        }
+        #[cfg(feature = "loader")]
+        if loader.grants.is_all() {
+            tracing::info!(
+                "the deployment declares no `[plugins.grants]`: a guest loaded at run time \
+                 reaches whatever its loader does"
+            );
+        }
+
         let runtime = Runtime::from_parts(RuntimeParts {
             name: Arc::from(deployment.name.as_str()),
             args: deployment.args.to_vec(),
@@ -465,14 +513,16 @@ impl<B: Backends> Deployment<B> {
             },
             registry_config: deployment.registry_config.clone(),
             rust_log: deployment.rust_log.clone(),
+            inherit: deployment.inherit.clone(),
             stdio: deployment.stdio.clone(),
             command_guest: deployment.command_guest.clone(),
+            max_concurrent_invocations: gate_size(&deployment.options),
             backends,
             registry: Arc::new(deployment.into_registry().context("assembling registry")?),
         });
 
         #[cfg(feature = "loader")]
-        Plugins::install(&runtime).context("installing the guest loader")?;
+        Plugins::install(&runtime, loader.grants).context("installing the guest loader")?;
 
         runtime.serve_links().await.context("serving the guests' linked exports")?;
         Ok(runtime)
@@ -488,6 +538,16 @@ impl<B: Backends> Deployment<B> {
     }
 }
 
+// Unset, the gate is the pool. With `link`, a hop takes an instance and no
+// slot, so the gate leaves half the pool to hops.
+fn gate_size(options: &RuntimeOptions) -> usize {
+    let size = options.max_concurrent_invocations.unwrap_or(cfg_select! {
+        feature = "link" => options.pool_max_instances / 2,
+        _ => options.pool_max_instances,
+    });
+    usize::try_from(size).unwrap_or(usize::MAX).max(1)
+}
+
 cfg_select! {
     feature = "loader" => {
         #[derive(Default)]
@@ -496,6 +556,8 @@ cfg_select! {
             store: Option<PathBuf>,
             // `None` installs a `RegistryClient` over the store and the deployment's `registries`
             registry: Option<Arc<dyn RegistrySource>>,
+            // what a guest loaded by path or package runs under, within its loader's
+            grants: Grants,
         }
 
         impl Loader {

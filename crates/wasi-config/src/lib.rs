@@ -33,7 +33,7 @@ pub use omnia_core::FutureResult;
 use omnia_core::{Host, HostCtx, HostView, Provides, StoreCtx};
 use wasmtime::component::Linker;
 
-pub use self::default_impl::ConfigDefault;
+pub use self::default_impl::{ConfigDefault, ConnectOptions};
 pub use self::generated::Error;
 use self::generated::omnia::config::{entries, store, types};
 

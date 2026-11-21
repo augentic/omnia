@@ -6,13 +6,15 @@ use std::time::Duration;
 use anyhow::{Context as _, Result};
 use omnia::wasmtime_wasi::p2::pipe::MemoryOutputPipe;
 use omnia::{
-    Backends, DeploymentBuilder, ExitStatus, GuestEntry, Host, LevelFilter, Manifest,
-    ManifestSource, Mode, Mount, Provides, RegistryConfig, Runtime, SourceSpec, Stdio, Wiring,
+    Backends, DeploymentBuilder, ExitStatus, Grants, GuestEntry, Host, LevelFilter, Manifest,
+    ManifestSource, Mode, Mount, Provides, RegistryConfig, Runtime, RuntimeOptions, SourceSpec,
+    Stdio, Wiring,
 };
 use omnia_wasi_otel::WasiOtel;
 
-/// One command-mode deployment: guests, mounts, arguments, the package
-/// store and registries, and the tracing level.
+/// One command-mode deployment: guests, mounts, the environment they
+/// inherit, arguments, the package store, registries, and plugin grants, the
+/// tracing level, and the runtime options.
 ///
 /// What guests call between themselves is read off their components,
 /// declared nowhere; `store` is where a package a guest names is kept, and
@@ -49,10 +51,13 @@ pub struct Deployment {
     guests: Vec<Entry>,
     command: Option<String>,
     mounts: Vec<Mount>,
+    inherit: Vec<String>,
     args: Vec<String>,
     store: Option<PathBuf>,
     registries: Option<RegistryConfig>,
+    plugin_grants: Option<Grants>,
     level: Option<LevelFilter>,
+    options: Option<RuntimeOptions>,
     guest_timeout: Option<Duration>,
     stdio: Option<Stdio>,
 }
@@ -109,6 +114,16 @@ impl Deployment {
         self
     }
 
+    /// Passes the test process's variables `names` to every guest, beside
+    /// the base manifest's `[environment] inherit`.
+    ///
+    /// Each name is whole, or a prefix that ends in `*`.
+    #[must_use]
+    pub fn inherit<S: Into<String>>(mut self, names: impl IntoIterator<Item = S>) -> Self {
+        self.inherit.extend(names.into_iter().map(Into::into));
+        self
+    }
+
     /// The operator's arguments (the runtime supplies `argv[0]`).
     #[must_use]
     pub fn args<S: Into<String>>(mut self, args: impl IntoIterator<Item = S>) -> Self {
@@ -131,6 +146,15 @@ impl Deployment {
     #[must_use]
     pub fn registries(mut self, config: impl Into<RegistryConfig>) -> Self {
         self.registries = Some(config.into());
+        self
+    }
+
+    /// The grants a guest loaded at run time by path or package runs under,
+    /// within its loader's, replacing the base manifest's
+    /// `[plugins.grants]`.
+    #[must_use]
+    pub fn plugin_grants(mut self, grants: Grants) -> Self {
+        self.plugin_grants = Some(grants);
         self
     }
 
@@ -167,6 +191,17 @@ impl Deployment {
         self
     }
 
+    /// The runtime options for the run, whatever the test process's
+    /// environment sets, so a suite sizes the instance pool or the
+    /// concurrency gate.
+    ///
+    /// [`guest_timeout`](Self::guest_timeout) still applies on top.
+    #[must_use]
+    pub const fn options(mut self, options: RuntimeOptions) -> Self {
+        self.options = Some(options);
+        self
+    }
+
     /// The wall-clock cap on each trigger invocation, whatever the test
     /// process sets in `GUEST_TIMEOUT_MS`, so a suite pins a hung guest
     /// without waiting out the default.
@@ -184,12 +219,18 @@ impl Deployment {
     /// a [`guest`](Self::guest) path cannot be read.
     pub fn manifest(&self) -> Result<Manifest> {
         let base = self.base.clone().map(ManifestSource::into_manifest).transpose()?;
-        let mut manifest = base.unwrap_or_default().mounts(self.mounts.iter().cloned());
+        let mut manifest = base
+            .unwrap_or_default()
+            .mounts(self.mounts.iter().cloned())
+            .inherit(self.inherit.iter().cloned());
         if let Some(store) = &self.store {
             manifest = manifest.store(store.clone());
         }
         if let Some(registries) = &self.registries {
             manifest = manifest.registries(registries.clone());
+        }
+        if let Some(grants) = &self.plugin_grants {
+            manifest = manifest.plugin_grants(grants.clone());
         }
         for Entry { entry, embed } in &self.guests {
             let mut entry = entry.clone();
@@ -214,6 +255,9 @@ impl Deployment {
             DeploymentBuilder::new().manifest(manifest).mode(Mode::Command).args(self.args.clone());
         if let Some(level) = self.level {
             builder = builder.level(level);
+        }
+        if let Some(options) = &self.options {
+            builder = builder.options(options.clone());
         }
         if let Some(timeout) = self.guest_timeout {
             builder = builder.guest_timeout(timeout);

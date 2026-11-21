@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use futures::FutureExt as _;
-use omnia::{Connect as _, ExitStatus, Mount};
+use omnia::{Connect as _, ExitStatus, GuestEntry, Mount};
 use omnia_test::host::{Backends, Deployment, ScriptedModel, scratch};
 use omnia_test::{Exchange, SeenFormat, SeenWorker};
 use omnia_wasi_model::{
@@ -247,6 +247,38 @@ async fn model_request_shape() {
             egress: vec!["registry.npmjs.org".to_owned(), "*.cursor.sh".to_owned()],
             read: vec!["~/.nvm/versions/node".to_owned()],
             env: vec![("VOLTA_HOME".to_owned(), "~/.volta".to_owned())],
+        })
+    );
+}
+
+#[tokio::test]
+async fn model_worker_hosts() {
+    let workspace = scratch();
+    let model = ScriptedModel::answering(["hi"]);
+    let grants = omnia::Grants::all().hosts(["*.npmjs.org", "api.cursor.sh"]);
+    let guest =
+        GuestEntry::new("guest", test_programs::MODEL_WORKER_HOSTS).command().grants(grants);
+
+    let status = Deployment::new()
+        .entry(guest)
+        .mount(workspace.mount(true))
+        .run_host::<WasiModel, _>(Backends::defaults().await.model(model.clone()))
+        .await
+        .expect("guest runs");
+    assert_eq!(status, ExitStatus::SUCCESS, "the guest's assertions held");
+
+    // the refused grants never reached the backend
+    model.assert_exhausted();
+    let seen = model.seen();
+    assert_eq!(seen.len(), 1);
+    assert_eq!(
+        seen[0].worker,
+        Some(SeenWorker {
+            egress: ["registry.npmjs.org", "*.cdn.npmjs.org", "api.cursor.sh"]
+                .map(String::from)
+                .into(),
+            read: vec![],
+            env: vec![],
         })
     );
 }

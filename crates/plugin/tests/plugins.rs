@@ -3,8 +3,9 @@
 //! runtime against a deployment whose grant bounds what may be loaded — the
 //! `[[guest]]` list it declares (from a staged file, embedded bytes, or a
 //! wasm-pkg `local` registry), each loaded at boot or at its first use as
-//! its source decides, the read-only mounts a path may lie beneath, and the
-//! registries its `registries` routes a package to. The requester
+//! its source decides, the read-only mounts a path may lie beneath, the
+//! registries its `registries` routes a package to, and the grants the
+//! requester and what it loads run under. The requester
 //! asserts internally (handles, digests, dispatch answers, and every typed
 //! failure and conflict); the host side declares the deployment and checks
 //! the exit and the registry. Lifecycle scenarios the WASI surface cannot
@@ -21,9 +22,9 @@ use omnia::futures::future::BoxFuture;
 use omnia::wasmtime::Engine;
 use omnia::wasmtime::component::Val;
 use omnia::{
-    AcquireError, ChainCtx, CompileOptions, DeploymentBuilder, Digest, ExitStatus, GuestEntry,
-    GuestId, LoadError, Location, Manifest, Mode, Mount, NoStore, PluginLoader as _, Plugins,
-    PluginsConfig, RegistryClient, RegistryConfig, RegistrySource, Runtime, SourceSpec,
+    AcquireError, ChainCtx, CompileOptions, DeploymentBuilder, Digest, ExitStatus, Grants,
+    GuestEntry, GuestId, LoadError, Location, Manifest, Mode, Mount, NoStore, PluginLoader as _,
+    Plugins, PluginsConfig, RegistryClient, RegistryConfig, RegistrySource, Runtime, SourceSpec,
 };
 use omnia_test::host::{Backends, Scratch, scratch};
 use omnia_wasi_otel::WasiOtel;
@@ -103,9 +104,8 @@ async fn call_export(
         .registry()
         .get(&GuestId::from(guest))
         .with_context(|| format!("guest `{guest}` is not registered"))?;
-    let mut store = runtime.build_store(runtime.store());
-    let instance = runtime
-        .instantiate(entry.instance_pre(), &mut store)
+    let (mut store, instance) = runtime
+        .enter(&entry, ChainCtx::server(), None)
         .await
         .with_context(|| format!("instantiating `{guest}`"))?;
     let export = instance
@@ -801,6 +801,30 @@ async fn endpoint_unrouted() {
     assert_eq!(status, ExitStatus::SUCCESS, "the requester's assertions all held");
 }
 
+// The registry a load names is held to the requester's `hosts`: refused
+// outside them before any fetch, and fetched from within them.
+#[tokio::test]
+async fn endpoint_hosts() {
+    let scratch = scratch();
+    stage_package(scratch.path(), ECHOER_PACKAGE, test_programs::LINK_ECHOER);
+    let held = |wasm: &str, hosts: &[&str]| {
+        let grants = Grants::all().hosts(hosts.iter().copied());
+        Manifest::new()
+            .guest(GuestEntry::new("requester", wasm).command().grants(grants))
+            .registries(RegistryConfig::contents(local_backend_toml(scratch.path())))
+    };
+
+    let manifest = held(test_programs::PLUGINS_REFUSED, &["*.example.com"]);
+    let args = ["release@registry.test", ECHOER_PACKAGE, "denied", "registry `registry.test`"];
+    let status = run(manifest, &args).await.expect("deployment runs");
+    assert_eq!(status, ExitStatus::SUCCESS, "the requester's assertions all held");
+
+    let manifest = held(test_programs::PLUGINS_LOAD, &["registry.test"]);
+    let status =
+        run(manifest, &["release@registry.test", ECHOER_PACKAGE]).await.expect("deployment runs");
+    assert_eq!(status, ExitStatus::SUCCESS, "the requester's assertions all held");
+}
+
 // Loading a name that is already active attests it — a boot guest from
 // embedded bytes, the requester the command drive loaded — with the digest
 // its registration recorded for its bytes.
@@ -858,7 +882,8 @@ async fn plugins_host_only() {
         Registered::Active(digest_of(test_programs::PLUGINS_HOST_ONLY)),
         "the requester loaded at boot under its file stem"
     );
-    let error = Plugins::install(&runtime).expect_err("the loader is installed once");
+    let error =
+        Plugins::install(&runtime, Grants::all()).expect_err("the loader is installed once");
     assert!(format!("{error:#}").contains("installs exactly once"), "{error:#}");
 
     let status = runtime.run_command().await.expect("deployment runs");
@@ -896,6 +921,46 @@ async fn plugins_mixed() {
     let answer =
         call_export(&runtime, "handler", "poke", "hi").await.expect("host dispatch of the handler");
     assert_eq!(answer, "echoer pong: hi");
+    runtime.shutdown();
+}
+
+// The requester's grants reach two of the deployment's guests and one of its
+// two read-only mounts, and the guests it may load by path. `[plugins.grants]`
+// reaches both mounts and `wasi:` packages alone, so the linked `full` is
+// refused at admission.
+#[tokio::test]
+async fn plugins_grants() {
+    let (store, vault) = (scratch(), scratch());
+    stage(&store, "tool.wasm", test_programs::LINK_ECHOER);
+    stage(&store, "full.wasm", test_programs::LINK_FULL);
+    stage(&vault, "tool.wasm", test_programs::LINK_ECHOER);
+    let requester = Grants::none().mounts(["store"]).guests(["plugin", "tool", "full"]);
+    let loaded =
+        Grants::none().mounts(["store", "vault"]).guests(["plugin"]).interfaces(["wasi:*"]);
+
+    let manifest = Manifest::new()
+        .guest(
+            GuestEntry::new("requester", test_programs::PLUGINS_GRANTS).command().grants(requester),
+        )
+        .guest(GuestEntry::new("plugin", test_programs::LINK_ECHOER))
+        .guest(GuestEntry::new("secret", test_programs::LINK_ECHOER))
+        .mounts([store.mount_as("store", false), vault.mount_as("vault", false)])
+        .plugin_grants(loaded);
+    let runtime = boot(manifest, &[]).await.expect("assembling runtime");
+    let status = runtime.run_command().await.expect("deployment runs");
+    assert_eq!(status, ExitStatus::SUCCESS, "the requester's assertions all held");
+
+    let grants = |guest: &str| {
+        runtime.registry().get(&GuestId::from(guest)).map(|entry| Grants::clone(entry.grants()))
+    };
+    assert_eq!(grants("plugin"), Some(Grants::all()), "a declared guest keeps its own grants");
+    assert_eq!(
+        grants("tool"),
+        Some(Grants::none().mounts(["store"]).guests(["plugin"]).interfaces(["wasi:*"])),
+        "a guest loaded by path runs under `[plugins.grants]` within the requester's"
+    );
+    assert_eq!(grants("secret"), None, "the denied guest was not loaded");
+    assert_eq!(grants("full"), None, "the refused component was not admitted");
     runtime.shutdown();
 }
 
@@ -989,7 +1054,7 @@ async fn reregister() {
         runtime.load(declared("plugin"), None).await.expect("first load").expect("no conflict");
     runtime.deregister(first.id()).expect("deregistering the loaded plugin");
     let refused = runtime
-        .register("plugin", changed_echoer(b"reregister"))
+        .register("plugin", changed_echoer(b"reregister"), Grants::all())
         .await
         .expect_err("a declared name is its entry's alone");
     assert!(format!("{refused:#}").contains("declares"), "{refused:#}");
@@ -1003,17 +1068,6 @@ async fn reregister() {
     assert_eq!(reloaded.id(), first.id());
     assert_eq!(reloaded.digest(), first.digest(), "the declared source was re-admitted");
     runtime.shutdown();
-}
-
-// test-programs resolves its worlds from its own `wit/deps`; this crate's copy
-// stays canonical.
-#[test]
-fn wit_copies() {
-    assert_eq!(
-        include_str!("../../test-programs/wit/deps/plugins/plugins.wit"),
-        include_str!("../wit/plugins.wit"),
-        "test-programs' plugins.wit copy drifted from crates/plugin/wit/plugins.wit"
-    );
 }
 
 // Compile-time proof that the macro's inline keys lower into the manifest
@@ -1057,6 +1111,7 @@ fn loader_grammar() {
         Some(PluginsConfig {
             store: Some(PathBuf::from("~/.app/store")),
             registries: Some(RegistryConfig::contents("default_registry = \"ghcr.io\"\n")),
+            grants: Grants::all(),
         }),
         "the store is carried as written; `~/` expands when the deployment builds"
     );

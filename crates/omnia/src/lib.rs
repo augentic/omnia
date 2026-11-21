@@ -22,12 +22,12 @@ pub use omnia_compile as compile;
 #[doc(inline)]
 pub use omnia_core::{
     AcquireError, Backends, ChainCtx, ChainPolicy, CliRoutes, CompileOptions, Connect, Digest,
-    Dispatcher, ExitStatus, Extensions, FromEnv, FutureResult, Guest, GuestError, GuestId,
-    HasTable, Host, HostCtx, HostView, HttpRoutes, LevelFilter, LinkSeam, MountRegistry, NoLinks,
-    NoOptions, PatternRoutes, Policy, Provides, Proxy, Registry, RegistryParts, RegistrySource,
-    ResolvedPreopen, Routes, Runtime, RuntimeOptions, RuntimeParts, Source, SourceSpec, Stdio,
-    StoreBase, StoreConfig, StoreCtx, StoreFactory, Telemetry, TriggerRouter, Verified,
-    WeakRuntime, get_cloned, telemetry,
+    Dispatcher, EnterError, ExitStatus, Extensions, FromEnv, FutureResult, Grants, Guest,
+    GuestError, GuestId, HasTable, Host, HostCtx, HostView, HttpRoutes, Invocations, LevelFilter,
+    LinkSeam, MountRegistry, NoLinks, NoOptions, PatternRoutes, Policy, Provides, Proxy, Registry,
+    RegistryParts, RegistrySource, ResolvedPreopen, Routes, Runtime, RuntimeOptions, RuntimeParts,
+    Source, SourceSpec, Stdio, StoreBase, StoreConfig, StoreCtx, StoreFactory, Telemetry,
+    TriggerRouter, Verified, WeakRuntime, get_cloned, telemetry,
 };
 #[doc(hidden)]
 pub use omnia_core::{tokio, wasmtime, wasmtime_wasi};
@@ -44,8 +44,8 @@ pub use omnia_plugin::{
 };
 
 pub use self::deployment::{
-    Deployment, DeploymentBuilder, GuestEntry, GuestRoutes, Manifest, Mount, PluginsConfig,
-    RegistryConfig, Transport, TransportKind,
+    Deployment, DeploymentBuilder, Environment, GuestEntry, GuestRoutes, Manifest, Mount,
+    PluginsConfig, RegistryConfig, Transport, TransportKind,
 };
 #[doc(hidden)]
 pub use self::entry::{MainOptions, ManifestSource, main};

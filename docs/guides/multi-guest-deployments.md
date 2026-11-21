@@ -1,6 +1,6 @@
 # Multi-Guest Deployments
 
-One Omnia runtime can run many guests at once. You can split inbound HTTP (or messaging, or WebSocket) across them, give them a host directory to work in, and let one guest call another. All of that is declared in a TOML manifest — you do not change guest or host code to add a second guest.
+One Omnia runtime can run many guests at once. You can split inbound HTTP (or messaging, or WebSocket) across them, give them a host directory to work in, let one guest call another, and narrow what each one reaches. All of that is declared in a TOML manifest — you do not change guest or host code to add a second guest.
 
 Start here once a single-guest runtime works ([Composing a Runtime](composing-a-runtime.md)). Passing one `.wasm` path to `run` is still the zero-config case. Use a manifest when you have more than one guest, or when you need routes or mounts.
 
@@ -16,7 +16,7 @@ cargo run --example http-routing -- run --manifest examples/http-routing/omnia.t
 
 The `runtime!` macro can also compile a default deployment into the binary: a path via `manifest:`, or the manifest itself via the inline `guests` / `mounts` / `plugins` keys, where each guest's component is embedded in the binary and carries its own `routes`. That default is used only when the command line supplies no source. See [Composing a Runtime](composing-a-runtime.md#default-manifest-manifest).
 
-A manifest declares guests, mounts, routes, the package store and registries, and (eventually) transports. Every field is optional except at least one `[[guest]]`. Paths resolve relative to the manifest's own directory.
+A manifest declares guests, mounts, routes, each guest's grants, the package store and registries, and (eventually) transports. Every field is optional except at least one `[[guest]]`. Paths resolve relative to the manifest's own directory.
 
 ```toml
 [[guest]]
@@ -37,7 +37,7 @@ The full field reference lives in [Configuration](../reference/configuration.md#
 
 ## Programmatic manifests
 
-Everything the TOML expresses can also be assembled in Rust. `omnia::Manifest` is the same schema as a value, with fluent setters for guests, mounts, the store, registries, and routes. Pass it to the deployment builder (or the `runtime!`-generated `run(builder)`) instead of a file path:
+Everything the TOML expresses can also be assembled in Rust. `omnia::Manifest` is the same schema as a value, with fluent setters for guests, mounts, the store, registries, routes, and grants (`GuestEntry::grants`, `Manifest::plugin_grants`). Pass it to the deployment builder (or the `runtime!`-generated `run(builder)`) instead of a file path:
 
 ```rust,ignore
 use omnia::{DeploymentBuilder, GuestEntry, Manifest};
@@ -81,7 +81,7 @@ Each matched message starts a fresh instance of the routed guest, exactly like a
 
 ## Mounts: giving guests a workspace
 
-Guests cannot see the host filesystem unless you say so. A **mount** takes a host directory and makes it visible inside every guest, under a name the guest can look up:
+Guests cannot see the host filesystem unless you say so. A **mount** takes a host directory and makes it visible inside every guest, under a name the guest can look up. A guest with [grants](#grants-what-each-guest-reaches) sees only the mounts they name.
 
 ```toml
 [[mount]]
@@ -126,11 +126,37 @@ When `router` calls `echo`, the host starts a fresh `responder` instance, runs t
 
 A few constraints:
 
-- Dispatch is deployment-wide. Any guest that imports an interface can call any guest that exports it; what a guest may reach is bounded by which guests the deployment runs, not by a list. An import no guest exports fails when the deployment boots, not at the first call. The exporter does not have to be loaded at startup: a manifest file's guest loads when the first call names it (so above, `router`'s first `echo` is what loads `responder`), and a guest registered later — or loaded through `omnia:plugins/loader` — can serve the call too. A runtime built without Omnia's `link` feature leaves such imports unsatisfied, so the deployment fails at boot.
+- Dispatch is deployment-wide. Any guest that imports an interface can call any guest that exports it, unless its [grants](#grants-what-each-guest-reaches) list the guests it may call. An import no guest exports fails when the deployment boots, not at the first call. The exporter does not have to be loaded at startup: a manifest file's guest loads when the first call names it (so above, `router`'s first `echo` is what loads `responder`), and a guest registered later — or loaded through `omnia:plugins/loader` — can serve the call too. A runtime built without Omnia's `link` feature leaves such imports unsatisfied, so the deployment fails at boot.
 - Calls can nest (A calls B calls C) up to `MAX_DISPATCH_DEPTH` (default 8), so accidental recursion cannot run forever.
 - Today the call stays in-process. Declaring `unix`, `nats`, or `quic` under `[transport]` is rejected at load.
 
 The [`guest-link`](../../examples/guest-link/) example is a complete caller/callee pair.
+
+## Grants: what each guest reaches
+
+By default a guest reaches the whole deployment: every variable `[environment] inherit` passes, every mount, every host name, every other guest, and every capability the runtime links. That suits guests you wrote. When one guest is trusted less than the rest, such as a third-party adapter, give it a grants table, and it reaches only what the table lists:
+
+```toml
+[[guest]]
+source.path = "./guests/adapter.wasm"
+routes.http = ["/adapter"]
+
+[guest.grants]
+env = ["ADAPTER_*"]                    # of the variables [environment] inherit passes
+mounts = ["data"]                      # the [[mount]]s it sees, by name
+hosts = ["api.partner.com"]            # the host names it may reach
+guests = ["ledger"]                    # the guests it may call or load
+interfaces = ["wasi:*", "omnia:otel", "acme:ledger"]  # the packages it may import
+```
+
+Once a guest has a table, a list the table leaves out grants nothing. The exception is `interfaces`, which grants every package until it names some. Each list is held where the access happens:
+
+- `env` filters the guest's environment, and `mounts` its preopens, so it never sees what it was not granted.
+- `hosts` refuses an outbound request outside it, or a redirect to such a host, with `http-request-denied`, before any connection. It also bounds a model worker's egress and the registry a load names.
+- `guests` refuses a link call to a guest outside it, and a load naming one.
+- `interfaces` refuses a component that imports a package outside it when the guest is admitted, naming the import.
+
+In Rust, `GuestEntry::grants(Grants::none().mounts(["data"]))` declares the same table. Startup logs each guest without one, so what nothing narrows stays visible. A guest loaded at run time is held to `[plugins.grants]` within its loader's grants. The [security model](../security-model.md#per-guest-grants) has the full rules.
 
 ## How execution scales
 

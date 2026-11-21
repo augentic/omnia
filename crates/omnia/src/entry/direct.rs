@@ -22,6 +22,10 @@ use crate::{DeploymentBuilder, Manifest, Mode};
 /// lowest-priority source (behind `--manifest`/`OMNIA_MANIFEST` and a
 /// positional wasm path); on the direct-command path it is the sole source.
 #[derive(Clone, Debug)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "one value is built per process, at startup, so its size costs nothing"
+)]
 pub enum ManifestSource {
     /// A manifest path, loaded only when this source is selected.
     Path(PathBuf),

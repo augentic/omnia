@@ -11,7 +11,9 @@ use bytes::Bytes;
 use http::header::CONTENT_TYPE;
 use http::{Method, Request, Response, StatusCode};
 use omnia::wasmtime::component::{ResourceTable, Val};
-use omnia::{Connect as _, Digest, ExitStatus, GuestEntry, GuestId, HostCtx, Runtime};
+use omnia::{
+    ChainCtx, Connect as _, Digest, ExitStatus, Grants, GuestEntry, GuestId, HostCtx, Runtime,
+};
 use omnia_test::host::sql::{Field, Row, Value};
 use omnia_test::host::{
     Asked, Backends, Deployment, Ended, FixedIdentity, HandleError, MatchedHttp, STATE_BUCKET,
@@ -360,8 +362,8 @@ struct WasiEcho;
 // resolves here only under `crate = omnia`.
 #[test]
 fn facade_host() {
-    let mut table = ResourceTable::new();
-    let view = WasiEcho::view(&Named, &mut table);
+    let (mut table, grants) = (ResourceTable::new(), Grants::all());
+    let view = WasiEcho::view(&Named, &mut table, &grants);
     assert_eq!(view.client.name(), "named");
 }
 
@@ -483,8 +485,7 @@ async fn call<B: omnia::Backends>(
         .registry()
         .get(&GuestId::from(guest))
         .with_context(|| format!("guest `{guest}` is not registered"))?;
-    let mut store = runtime.build_store(runtime.store());
-    let instance = runtime.instantiate(entry.instance_pre(), &mut store).await?;
+    let (mut store, instance) = runtime.enter(&entry, ChainCtx::server(), None).await?;
     let export = instance
         .get_func(&mut store, func)
         .with_context(|| format!("guest `{guest}` exports `{func}`"))?;

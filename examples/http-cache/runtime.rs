@@ -2,14 +2,16 @@
 
 cfg_select! {
     not(target_arch = "wasm32") => {
-        use omnia_wasi_config::{ConfigDefault, WasiConfig};
+        use omnia_wasi_config::{ConfigDefault, ConnectOptions, WasiConfig};
         use omnia_wasi_http::{HttpDefault, WasiHttp};
         use omnia_wasi_keyvalue::{KeyValueDefault, WasiKeyValue};
         use omnia_wasi_otel::{OtelDefault, WasiOtel};
 
         omnia::runtime!({
             hosts: {
-                WasiConfig: ConfigDefault,
+                WasiConfig: ConfigDefault(ConnectOptions {
+                    keys: vec!["UPSTREAM_URL".to_owned()],
+                }),
                 WasiHttp: HttpDefault,
                 WasiKeyValue: KeyValueDefault,
                 WasiOtel: OtelDefault,
