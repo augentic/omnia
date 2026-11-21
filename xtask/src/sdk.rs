@@ -7,6 +7,7 @@
 //! types point back at it. Every `@unstable` feature is enabled, since every
 //! host links the gated interfaces.
 
+use std::collections::HashSet;
 use std::fmt::Write;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -211,22 +212,58 @@ impl Bindings {
 }
 
 fn extras<'a>(root: &Path, generated: impl Iterator<Item = &'a str>) -> Result<Vec<PathBuf>> {
-    use std::collections::HashSet;
-
     let generated: HashSet<_> = generated.collect();
     let mut extras = Vec::new();
-    for entry in fs::read_dir(root).with_context(|| format!("cannot read {}", root.display()))? {
+    scan_extras(root, root, &generated, &mut extras)?;
+    Ok(extras)
+}
+
+fn scan_extras(
+    root: &Path,
+    dir: &Path,
+    generated: &HashSet<&str>,
+    extras: &mut Vec<PathBuf>,
+) -> Result<()> {
+    for entry in fs::read_dir(dir).with_context(|| format!("cannot read {}", dir.display()))? {
         let entry = entry?;
         let path = entry.path();
+        if path.is_dir() {
+            scan_extras(root, &path, generated, extras)?;
+            continue;
+        }
         if !path.is_file() {
             continue;
         }
-        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+        let relative = path
+            .strip_prefix(root)
+            .with_context(|| format!("{} is not under {}", path.display(), root.display()))?;
+        let Some(name) = relative.to_str() else {
             continue;
         };
         if !generated.contains(name) {
             extras.push(path);
         }
     }
-    Ok(extras)
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::extras;
+    use std::fs;
+
+    // the committed file `wit.sh` caught with `diff -ru` but a name-only stale loop missed
+    #[test]
+    fn extras_lists_files_bindgen_would_drop() {
+        let root = std::env::temp_dir().join(format!("omnia-xtask-extras-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("imports.rs"), b"a").unwrap();
+        fs::write(root.join("leftover.rs"), b"b").unwrap();
+
+        let found = extras(&root, ["imports.rs", "messaging.rs"].into_iter()).unwrap();
+        assert_eq!(found, vec![root.join("leftover.rs")]);
+
+        let _ = fs::remove_dir_all(&root);
+    }
 }

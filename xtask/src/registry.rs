@@ -171,3 +171,33 @@ impl fmt::Display for State {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use wasm_pkg_client::{Error, Version};
+
+    use super::registry_absent;
+
+    #[test]
+    fn registry_absent_package_and_version_variants() {
+        assert!(registry_absent(&Error::PackageNotFound));
+        assert!(registry_absent(&Error::VersionNotFound(Version::parse("0.1.0").unwrap())));
+    }
+
+    // the needles `scripts/wit.sh` matched in `wkg get` stderr
+    #[test]
+    fn registry_absent_oci_stderr_needles() {
+        for message in
+            ["manifest unknown", "NAME UNKNOWN", "Package Not Found", "version not found: 0.1.0"]
+        {
+            let err = Error::RegistryError(anyhow::anyhow!(message));
+            assert!(registry_absent(&err), "{message}");
+        }
+    }
+
+    #[test]
+    fn registry_absent_other_errors() {
+        assert!(!registry_absent(&Error::CredentialError(anyhow::anyhow!("denied"))));
+        assert!(!registry_absent(&Error::RegistryError(anyhow::anyhow!("connection reset"))));
+    }
+}
