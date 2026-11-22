@@ -10,51 +10,20 @@ use anyhow::{Context as _, Result, anyhow};
 use futures::FutureExt;
 use moka::Expiry;
 use moka::sync::Cache;
-use omnia_core::Connect;
+use omnia_core::{Connect, FromEnv};
 use tracing::instrument;
 
 use crate::resource::{Bucket, Entry, FutureResult, Lifetime, Precondition, Revision};
 use crate::{Error, KeyValueClient};
 
-#[expect(missing_docs, reason = "`FromEnv` has no docs")]
-mod config {
-    use fromenv::{FromEnv, ParseResult};
-
-    /// Options used to connect to the in-memory key-value store.
-    ///
-    /// This struct is used to load connection options from environment variables.
-    #[derive(Debug, Clone, FromEnv)]
-    pub struct ConnectOptions {
-        /// The buckets a guest may open (`KEYVALUE_BUCKETS`, comma-separated, default: `default`).
-        #[env(from = "KEYVALUE_BUCKETS", default = "default", with = comma_separated)]
-        pub buckets: Vec<String>,
-    }
-
-    impl Default for ConnectOptions {
-        fn default() -> Self {
-            Self {
-                buckets: vec!["default".to_owned()],
-            }
-        }
-    }
-
-    #[expect(clippy::unnecessary_wraps, reason = "the signature `fromenv` parsers take")]
-    fn comma_separated(value: &str) -> ParseResult<Vec<String>> {
-        Ok(value
-            .split(',')
-            .map(str::trim)
-            .filter(|name| !name.is_empty())
-            .map(str::to_owned)
-            .collect())
-    }
-}
-pub use config::ConnectOptions;
-
-impl omnia_core::FromEnv for ConnectOptions {
-    fn load_env() -> Result<Self> {
-        // `Self::from_env()` is the builder the `FromEnv` derive emits
-        Self::from_env().finalize().context("issue loading connection options")
-    }
+/// Options used to connect to the in-memory key-value store.
+///
+/// This struct is used to load connection options from environment variables.
+#[derive(Debug, Clone, FromEnv)]
+pub struct ConnectOptions {
+    /// The buckets a guest may open (`KEYVALUE_BUCKETS`, comma-separated, default: `default`).
+    #[env(from = "KEYVALUE_BUCKETS", default = "default", with = omnia_core::env::list)]
+    pub buckets: Vec<String>,
 }
 
 /// Default implementation for `omnia:keyvalue`.

@@ -5,6 +5,7 @@ mod artifact;
 mod chain;
 mod digest;
 mod dispatch;
+pub mod env;
 mod extensions;
 mod host;
 mod invoke;
@@ -19,7 +20,7 @@ pub mod telemetry;
 mod value;
 
 pub use omnia_compile::CompileOptions;
-pub use omnia_host_macros::HostCtx;
+pub use omnia_host_macros::{FromEnv, HostCtx};
 pub use tracing_subscriber::filter::LevelFilter;
 #[doc(hidden)]
 pub use {anyhow, futures, tokio, wasmtime, wasmtime_wasi};

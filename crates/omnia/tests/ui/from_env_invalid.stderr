@@ -1,0 +1,23 @@
+error: unknown `env` key; expected `from`, `default`, `with`, or `nested`
+ --> tests/ui/from_env_invalid.rs:5:15
+  |
+5 |         #[env(form = "PORT")]
+  |               ^^^^
+
+error: `#[derive(FromEnv)]` only supports structs with named fields
+  --> tests/ui/from_env_invalid.rs:13:10
+   |
+13 |     enum Mode {
+   |          ^^^^
+
+error: an `Option` field takes no `default`, since `None` is its default
+  --> tests/ui/from_env_invalid.rs:22:40
+   |
+22 |         #[env(from = "PORT", default = "8080")]
+   |                                        ^^^^^^
+
+error: a `FromEnv` field takes `#[env(from = "NAME")]` to read a variable, `#[env(default = "..")]` to be set in code alone, or `#[env(nested)]`
+  --> tests/ui/from_env_invalid.rs:31:9
+   |
+31 |         port: u16,
+   |         ^^^^

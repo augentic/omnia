@@ -3,8 +3,7 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use anyhow::{Context, Result};
-use fromenv::FromEnv;
+use anyhow::Result;
 use futures::FutureExt;
 use futures::lock::Mutex;
 use oauth2::basic::{BasicClient, BasicTokenType};
@@ -13,7 +12,7 @@ use oauth2::{
     ClientId, ClientSecret, EmptyExtraTokenFields, Scope, StandardTokenResponse,
     TokenResponse as _, TokenUrl,
 };
-use omnia_core::Connect;
+use omnia_core::{Connect, FromEnv};
 use tracing::instrument;
 
 use crate::resource::{AccessToken, FutureResult, Identity};
@@ -38,13 +37,6 @@ impl fmt::Debug for ConnectOptions {
             .field("client_secret", &"<redacted>")
             .field("token_url", &self.token_url)
             .finish()
-    }
-}
-
-impl omnia_core::FromEnv for ConnectOptions {
-    fn load_env() -> Result<Self> {
-        // `Self::from_env()` is the builder the `FromEnv` derive emits
-        Self::from_env().finalize().context("issue loading connection options")
     }
 }
 

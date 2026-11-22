@@ -13,7 +13,7 @@ use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use anyhow::{Context as _, Result};
 use futures::FutureExt;
-use omnia_core::Connect;
+use omnia_core::{Connect, FromEnv};
 use serde_json::Value;
 use tracing::instrument;
 
@@ -21,45 +21,14 @@ use crate::{
     DocStoreClient, Document, Error, Filter, FutureResult, QueryOpts, QueryResult, SortField,
 };
 
-#[expect(missing_docs, reason = "`FromEnv` has no docs")]
-mod config {
-    use fromenv::{FromEnv, ParseResult};
-
-    /// Options used to connect to the in-memory document store.
-    ///
-    /// This struct is used to load connection options from environment variables.
-    #[derive(Debug, Clone, FromEnv)]
-    pub struct ConnectOptions {
-        /// The collections a guest may open (`DOCSTORE_COLLECTIONS`, comma-separated, default: `default`).
-        #[env(from = "DOCSTORE_COLLECTIONS", default = "default", with = comma_separated)]
-        pub collections: Vec<String>,
-    }
-
-    impl Default for ConnectOptions {
-        fn default() -> Self {
-            Self {
-                collections: vec!["default".to_owned()],
-            }
-        }
-    }
-
-    #[expect(clippy::unnecessary_wraps, reason = "the signature `fromenv` parsers take")]
-    fn comma_separated(value: &str) -> ParseResult<Vec<String>> {
-        Ok(value
-            .split(',')
-            .map(str::trim)
-            .filter(|name| !name.is_empty())
-            .map(str::to_owned)
-            .collect())
-    }
-}
-pub use config::ConnectOptions;
-
-impl omnia_core::FromEnv for ConnectOptions {
-    fn load_env() -> Result<Self> {
-        // `Self::from_env()` is the builder the `FromEnv` derive emits
-        Self::from_env().finalize().context("issue loading connection options")
-    }
+/// Options used to connect to the in-memory document store.
+///
+/// This struct is used to load connection options from environment variables.
+#[derive(Debug, Clone, FromEnv)]
+pub struct ConnectOptions {
+    /// The collections a guest may open (`DOCSTORE_COLLECTIONS`, comma-separated, default: `default`).
+    #[env(from = "DOCSTORE_COLLECTIONS", default = "default", with = omnia_core::env::list)]
+    pub collections: Vec<String>,
 }
 
 /// Default in-memory [`DocStoreClient`].

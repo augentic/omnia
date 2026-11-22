@@ -127,6 +127,19 @@ Unreleased
 - `Runtime::enter`, which instantiates a guest on a fresh store at a chain
   context. Every trigger and the command driver run a guest through it.
 - `StoreCtx::guest` and `StoreBase::guest`, the guest a store runs.
+- `#[derive(FromEnv)]`, from `omnia-core` and `omnia` under the trait's
+  name. Each field of an options struct takes `#[env(from = "NAME")]`,
+  with a `default` and a `with` parser where it needs them, a `default`
+  alone for a field set in code, or `nested`. The struct takes
+  `#[env(validate = path)]`, and `#[env(crate = omnia)]` where it reaches
+  the derive through `omnia`. The derive emits:
+  - `FromEnv`, which `Connect::connect` calls;
+  - inherent `load_env`, `with_env`, which applies the variables that are
+    set over options built in code, and `load_from`, which loads through a
+    lookup in place of the process environment;
+  - `Default`, where every field has a `default` or is an `Option`.
+- `omnia_core::env`, re-exported as `omnia::env`, with the `list`,
+  `millis`, and `paths` parsers a `with` names.
 
 ### Changed
 
@@ -230,6 +243,14 @@ Unreleased
 - `Endpoint::request` takes a `timeout: Option<Duration>` in place of an
   `Option<RequestOptions>`. The host never sends a zero `timeout`.
 - `StoreConfig` takes the `guest` the store is built for.
+- `RuntimeOptions` and the `ConnectOptions` of `omnia-wasi-http`,
+  `omnia-wasi-keyvalue`, `omnia-wasi-vault`, `omnia-wasi-model`,
+  `omnia-wasi-docstore`, and `omnia-wasi-identity` derive omnia's
+  `FromEnv`:
+  - a load fails with one error naming every variable that is unset or
+    does not parse, and no error prints a value;
+  - a value that is not valid Unicode is invalid, where it read as unset;
+  - `RuntimeOptions` and `omnia_wasi_http::ConnectOptions` gain `Default`.
 
 ### Removed
 
@@ -276,6 +297,13 @@ Unreleased
 - `Runtime::store`, `store_in`, `build_store`, `instantiate`, and
   `store_factory`. A trigger calls `Runtime::enter`, and reads a client
   through `Provides::borrow` on a clone of `Runtime::backends`.
+- The `fromenv` builder of `RuntimeOptions` and the `omnia-wasi-*`
+  `ConnectOptions`: `from_env()`, the `*Builder` it returned with a setter
+  per field and `finalize()`, and `requirements()`. `with_env` applies the
+  environment over options built in code, and `load_from` loads through a
+  lookup.
+- The `fromenv` dependency, which the `oauth` feature of
+  `omnia-wasi-identity` no longer enables.
 
 ## 0.38.0
 
