@@ -511,7 +511,7 @@ impl Metadata {
     /// missing request id is minted as on every transport.
     ///
     /// In a guest, these variables arrive only when the deployment passes
-    /// `<PREFIX>_*` to it, through `[environment] inherit` or `run --env`.
+    /// `<PREFIX>_*` to it, through `[env] inherit` or `run --env`.
     ///
     /// # Panics
     ///

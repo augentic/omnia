@@ -114,7 +114,7 @@ impl Deployment {
     }
 
     /// Passes the test process's variables `names` to every guest, beside
-    /// the base manifest's `[environment] inherit`.
+    /// the base manifest's `[env] inherit`.
     ///
     /// Each name is whole, or a prefix that ends in `*`.
     #[must_use]

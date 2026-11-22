@@ -259,7 +259,7 @@ mod deployment_keys {
             { name: "project", path: project_root(), writable: true },
             { name: "store", path: store_root() },
         ],
-        environment: {
+        env: {
             inherit: ["SPECIFY_*", "HOME"],
         },
         plugins: {
@@ -370,7 +370,7 @@ fn inline_deployment() {
             },
         ]
     );
-    assert_eq!(keyed.environment.inherit, ["SPECIFY_*", "HOME"]);
+    assert_eq!(keyed.env.inherit, ["SPECIFY_*", "HOME"]);
     assert_eq!(
         keyed.plugins,
         Some(PluginsConfig {

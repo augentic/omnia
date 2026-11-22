@@ -12,8 +12,8 @@ use std::time::Duration;
 use anyhow::bail;
 use anyhow::{Context, Result};
 pub use manifest::{
-    Environment, GuestEntry, GuestRoutes, Manifest, Mount, PluginsConfig, RegistryConfig,
-    Transport, TransportKind,
+    Env, GuestEntry, GuestRoutes, Manifest, Mount, PluginsConfig, RegistryConfig, Transport,
+    TransportKind,
 };
 #[cfg(feature = "link")]
 use omnia_core::ChainPolicy;
@@ -326,7 +326,7 @@ impl DeploymentBuilder {
                 registry: None,
             },
             rust_log,
-            inherit: manifest.environment.inherit,
+            inherit: manifest.env.inherit,
             stdio: self.stdio,
         })
     }

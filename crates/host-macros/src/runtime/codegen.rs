@@ -219,7 +219,7 @@ fn emit_manifest_builder(manifest: &ManifestSpec) -> TokenStream {
     });
 
     // one call per name, so an empty list infers no element type
-    let inherit = manifest.environment.iter().flat_map(|environment| &environment.inherit);
+    let inherit = manifest.env.iter().flat_map(|env| &env.inherit);
     let inherit = quote! { #(.inherit([#inherit]))* };
 
     quote! {

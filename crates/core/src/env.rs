@@ -59,7 +59,6 @@ pub fn paths(value: &str) -> Result<Vec<PathBuf>, Infallible> {
 /// Checks a variable pattern: a whole variable name, or a prefix of one that ends in `*`.
 ///
 /// A name is `[A-Za-z_][A-Za-z0-9_]*`, and `*` alone names every variable.
-/// A list of patterns is a [`list`] whose entries each pass this check.
 ///
 /// # Errors
 ///

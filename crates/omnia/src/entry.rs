@@ -44,7 +44,7 @@ fn builder(options: MainOptions) -> anyhow::Result<DeploymentBuilder> {
 }
 
 // a malformed `--env` is refused before any manifest loads, so the error
-// names the flag rather than the `[environment]` table it joins
+// names the flag rather than the `[env]` table it joins
 fn materialize(
     options: MainOptions, argv: impl IntoIterator<Item = OsString>,
     omnia_manifest: Option<OsString>,
@@ -116,14 +116,14 @@ mod tests {
     #[test]
     fn run_env() {
         let manifest = Manifest::new().guest(GuestEntry::new("app", "app.wasm")).inherit(["HOME"]);
-        let plan = match materialize(server(manifest), argv(&["bin", "run", "--env", "ORDERS_*"]), None)
-        {
-            Ok(plan) => plan,
-            Err(PlanError::Usage(error)) => panic!("expected a plan, got usage: {error}"),
-            Err(PlanError::Fatal(error)) => panic!("expected a plan, got fatal: {error:#}"),
-        };
+        let plan =
+            match materialize(server(manifest), argv(&["bin", "run", "--env", "ORDERS_*"]), None) {
+                Ok(plan) => plan,
+                Err(PlanError::Usage(error)) => panic!("expected a plan, got usage: {error}"),
+                Err(PlanError::Fatal(error)) => panic!("expected a plan, got fatal: {error:#}"),
+            };
         let manifest = plan.manifest.expect("the plan carries the compiled-in manifest");
-        assert_eq!(manifest.environment.inherit, ["HOME", "ORDERS_*"]);
+        assert_eq!(manifest.env.inherit, ["HOME", "ORDERS_*"]);
     }
 
     // `Cargo.toml` is what an unquoted `*` becomes in a crate's directory.
@@ -136,7 +136,9 @@ mod tests {
                     let error = format!("{error:#}");
                     assert!(error.contains(&format!("`--env` `{entry}`")), "{error}");
                 }
-                Err(PlanError::Usage(error)) => panic!("expected a fatal error, got usage: {error}"),
+                Err(PlanError::Usage(error)) => {
+                    panic!("expected a fatal error, got usage: {error}")
+                }
                 Ok(_) => panic!("`--env {entry}` is not a variable pattern"),
             }
         }

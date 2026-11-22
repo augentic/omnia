@@ -31,6 +31,6 @@ curl localhost:8080/b    # -> http-routing example: guest b
 curl -i localhost:8080/c # -> HTTP/1.1 404 Not Found (no route matched)
 ```
 
-Guest `a` reports `HTTP_ADDR` because the manifest's `[environment] inherit`
-names it. Run with `HTTP_ADDR=127.0.0.1:8080` and it reports that address. A
+Guest `a` reports `HTTP_ADDR` because the manifest's `[env] inherit` names
+it. Run with `HTTP_ADDR=127.0.0.1:8080` and it reports that address. A
 variable the manifest does not name never reaches a guest.

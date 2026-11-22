@@ -22,7 +22,7 @@ cfg_select! {
             guests: [
                 { path: env!("CLI_WASM") },
             ],
-            environment: {
+            env: {
                 inherit: ["CLI_*"],
             },
         });

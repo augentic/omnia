@@ -145,9 +145,9 @@ Unreleased
   with a `PatternError`. `matches` applies one to a name.
 - The host variables every guest sees, each a whole name or a prefix that
   ends in `*`:
-  - `[environment] inherit` in the manifest, and `Manifest::inherit` with
-    the `Environment` table;
-  - `environment: { inherit: [..] }` in `runtime!`;
+  - `[env] inherit` in the manifest, and `Manifest::inherit` with the
+    `Env` table;
+  - `env: { inherit: [..] }` in `runtime!`;
   - `--env NAME` on `run`, carried as `RunPlan::env`;
   - `omnia_test::host::Deployment::inherit`.
 - `DeploymentBuilder::options` and `omnia_test::host::Deployment::options`
@@ -162,8 +162,8 @@ Unreleased
 - A guest no longer sees the host's environment. Its `wasi:cli`
   environment holds `RUST_LOG`, `NO_COLOR` when the console is plain, and
   the host variables the deployment names. To keep a guest's variables,
-  name them in `[environment] inherit` (`inherit = ["ORDERS_*"]`), in
-  `runtime!` as `environment: { inherit: [..] }`, or with `run --env`.
+  name them in `[env] inherit` (`inherit = ["ORDERS_*"]`), in `runtime!`
+  as `env: { inherit: [..] }`, or with `run --env`.
   `inherit = ["*"]` passes every variable, as before. The variables
   `Metadata::from_env` reads, such as `CLI_REQUEST_ID`, arrive only when
   their prefix is passed, as `inherit = ["CLI_*"]` passes it.

@@ -198,7 +198,7 @@ A guest reads its settings through `config`, which the deployment's `omnia:confi
 
 - `RUST_LOG`, the run's tracing filter (see [Tracing](#tracing));
 - `NO_COLOR=1` when the host console is plain;
-- each host variable the deployment's `[environment] inherit` names, or `run --env` adds.
+- each host variable the deployment's `[env] inherit` names, or `run --env` adds.
 
 A variable the deployment does not name never reaches the guest's environment. See [Configuration](../reference/configuration.md#deployment-manifest-omniatoml).
 
@@ -285,7 +285,7 @@ The pieces, in the order argv flows through them:
 - **The program** is the router: `--version` answers the guest crate's `CARGO_PKG_VERSION` and `--help` opens with its `CARGO_PKG_DESCRIPTION`, both stamped by `command::export!`; `Router::name` (default `argv[0]`), `version`, `about`, and `env_prefix` override them, and `Router::hints(|error| ..)` attaches a remedy hint to every failure.
 - **`Command::new(&metadata, format)`** is the underlying projector the router dispatches through, and the escape hatch for a hand-written clap grammar: `parse::<App>(argv) -> Parsed` classifies argv, and `command.call(handler, input)` runs one verb, encoding a success body in the selected `command::Format` onto stdout at exit 0 — `Format::Text` is the output's `Render` form, `Format::Json` the output pretty-printed with a trailing newline.
 - **`Response { stdout, stderr, exit }`** buffers both channels. `command::export!(command_router)` binds a router fn (or a zero-argument `async fn` returning `IntoExit`) as the `wasi:cli/run` export and writes the channels at that boundary through `IntoExit`: a `BrokenPipe` on either channel (a reader that went away) keeps the response's own exit, any other refused channel exits 3. Because the channels are whole buffers, a command that must stream writes to the process channels itself and returns `Result<(), u8>` or `()`, which the export also accepts; a guest that needs its own export writes the raw `wasip3` export and calls `omnia_sdk::command::execute` itself.
-- **`Metadata::from_env(prefix)`** reads `<PREFIX>_REQUEST_ID`, `<PREFIX>_CORRELATION_ID`, `<PREFIX>_CAUSATION_ID`, `<PREFIX>_TENANT`, and `<PREFIX>_DEADLINE` from the environment (`Router::run` derives the default prefix from the program name, or `.env_prefix(..)` sets it; `run_with` takes explicit metadata). They reach the guest only when the deployment inherits them, as `[environment] inherit = ["<PREFIX>_*"]` or `run --env '<PREFIX>_*'` does. A missing request id is minted from the platform's CSPRNG (`wasi:random` in a guest), as on every transport, so a command invocation is as observable as an HTTP request: the router runs the verb in a `handler` span carrying the request and correlation ids and the `command`.
+- **`Metadata::from_env(prefix)`** reads `<PREFIX>_REQUEST_ID`, `<PREFIX>_CORRELATION_ID`, `<PREFIX>_CAUSATION_ID`, `<PREFIX>_TENANT`, and `<PREFIX>_DEADLINE` from the environment (`Router::run` derives the default prefix from the program name, or `.env_prefix(..)` sets it; `run_with` takes explicit metadata). They reach the guest only when the deployment inherits them, as `[env] inherit = ["<PREFIX>_*"]` or `run --env '<PREFIX>_*'` does. A missing request id is minted from the platform's CSPRNG (`wasi:random` in a guest), as on every transport, so a command invocation is as observable as an HTTP request: the router runs the verb in a `handler` span carrying the request and correlation ids and the `command`.
 
 ### Failures and the exit map
 

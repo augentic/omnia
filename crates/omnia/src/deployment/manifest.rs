@@ -22,8 +22,7 @@
 //! The manifest also carries:
 //!
 //! - each guest's `routes` tables;
-//! - the `[environment]` table, which names the host variables every guest
-//!   sees;
+//! - the `[env]` table, which names the host variables every guest sees;
 //! - the `[plugins]` table: the package store and the `registries`
 //!   configuration that routes package sources.
 //!
@@ -69,7 +68,7 @@ pub struct Manifest {
     #[serde(rename = "mount")]
     pub mounts: Vec<Mount>,
     /// What of the host's environment every guest sees.
-    pub environment: Environment,
+    pub env: Env,
     /// The package store and the registry routing every package — a
     /// declared `source.package` or one a guest loads — is acquired through;
     /// absent, every package is refused.
@@ -137,13 +136,13 @@ impl Manifest {
     }
 
     /// Pass the host variables `names` to every guest (the manifest's
-    /// `[environment] inherit`).
+    /// `[env] inherit`).
     ///
     /// Each name is whole, or a prefix that ends in `*`. `*` alone passes
     /// every variable.
     #[must_use]
     pub fn inherit<S: Into<String>>(mut self, names: impl IntoIterator<Item = S>) -> Self {
-        self.environment.inherit.extend(names.into_iter().map(Into::into));
+        self.env.inherit.extend(names.into_iter().map(Into::into));
         self
     }
 
@@ -182,8 +181,8 @@ impl Manifest {
     /// - a `[[guest]]` entry names no guest or repeats a name, or no entry
     ///   exists when `allow_empty` is false;
     /// - more than one entry is the command guest;
-    /// - an `[environment] inherit` entry is not a variable name or a prefix
-    ///   of one that ends in `*`;
+    /// - an `[env] inherit` entry is not a variable name or a prefix of one
+    ///   that ends in `*`;
     /// - the transport is not in-process;
     /// - the manifest declares `[plugins]` or a package source that
     ///   `features` lacks the `loader` to serve.
@@ -213,9 +212,9 @@ impl Manifest {
                 marked.join(", ")
             );
         }
-        for entry in &self.environment.inherit {
+        for entry in &self.env.inherit {
             omnia_core::env::pattern(entry)
-                .map_err(|error| anyhow!("`[environment] inherit` entry {error}"))?;
+                .map_err(|error| anyhow!("`[env] inherit` entry {error}"))?;
         }
         if self.transport.default != TransportKind::InProcess {
             bail!(
@@ -407,15 +406,14 @@ fn source(entry: &GuestEntry) -> Source {
     }
 }
 
-/// The `[environment]` table: what of the host's environment every guest
-/// sees.
+/// The `[env]` table: what of the host's environment every guest sees.
 ///
 /// A guest's environment holds the host variables `inherit` names, read once
 /// at startup. The runtime also sets `RUST_LOG` to the run's tracing
 /// directives, and `NO_COLOR` when the console does not colour its lines.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
 #[serde(default, deny_unknown_fields)]
-pub struct Environment {
+pub struct Env {
     /// The host variables every guest sees, each a whole name or a prefix
     /// that ends in `*`. `*` alone passes every variable.
     pub inherit: Vec<String>,
@@ -707,16 +705,16 @@ mod tests {
     }
 
     #[test]
-    fn environment_table() {
+    fn env_table() {
         let manifest: Manifest = toml::from_str(
-            "[environment]\ninherit = [\"ORDERS_*\", \"HOME\", \"*\"]\n\n[[guest]]\nname = \
+            "[env]\ninherit = [\"ORDERS_*\", \"HOME\", \"*\"]\n\n[[guest]]\nname = \
              \"app\"\nsource.path = \"app.wasm\"\n",
         )
         .expect("the table parses");
-        assert_eq!(manifest.environment.inherit, ["ORDERS_*", "HOME", "*"]);
+        assert_eq!(manifest.env.inherit, ["ORDERS_*", "HOME", "*"]);
         manifest.validate(false, Features { loader: false }).expect("every entry is a pattern");
 
-        let unknown = toml::from_str::<Manifest>("[environment]\npass = [\"HOME\"]\n");
+        let unknown = toml::from_str::<Manifest>("[env]\npass = [\"HOME\"]\n");
         assert!(unknown.is_err(), "an unknown key is refused");
 
         let error = Manifest::new()
@@ -724,9 +722,6 @@ mod tests {
             .inherit(["ORDERS-URL"])
             .validate(false, Features { loader: false })
             .expect_err("not a variable pattern");
-        assert!(
-            error.to_string().contains("`[environment] inherit` entry `ORDERS-URL`"),
-            "{error}"
-        );
+        assert!(error.to_string().contains("`[env] inherit` entry `ORDERS-URL`"), "{error}");
     }
 }

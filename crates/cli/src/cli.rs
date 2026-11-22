@@ -52,8 +52,8 @@ pub enum Command {
         /// Pass a host environment variable to every guest (repeatable). A
         /// name ending in `*` passes every variable it prefixes, and `*`
         /// alone passes them all. Quote a pattern so the shell does not
-        /// expand it. Added to the `[environment] inherit` of whichever
-        /// manifest the run selects.
+        /// expand it. Added to the `[env] inherit` of whichever manifest the
+        /// run selects.
         #[arg(long = "env", value_name = "NAME")]
         env: Vec<String>,
 

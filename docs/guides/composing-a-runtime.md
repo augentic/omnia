@@ -85,7 +85,7 @@ cargo run -- run
 
 Explicit sources always win; the compiled-in default is the lowest-precedence fallback.
 
-The manifest itself — guests, routes, mounts, the package store and registries — is covered in [Multi-Guest Deployments](multi-guest-deployments.md). A manifest can also be written inline in the macro instead of a TOML file, with the guests embedded in the binary; see [Inline manifest keys](../reference/runtime-macro.md#inline-manifest-keys-guests-mounts-environment-plugins).
+The manifest itself — guests, routes, mounts, the package store and registries — is covered in [Multi-Guest Deployments](multi-guest-deployments.md). A manifest can also be written inline in the macro instead of a TOML file, with the guests embedded in the binary; see [Inline manifest keys](../reference/runtime-macro.md#inline-manifest-keys-guests-mounts-env-plugins).
 
 ## Choosing backends
 
@@ -131,7 +131,7 @@ Most runtimes never need these. Each solves one specific deployment shape — re
 
 | Key | Reach for it when |
 | --- | ----------------- |
-| [`guests:`/`mounts:`/`environment:`/`plugins:`](../reference/runtime-macro.md#inline-manifest-keys-guests-mounts-environment-plugins) | You want the deployment compiled into the binary instead of a TOML file — the guests embedded, named by their files unless you say otherwise, plus the mounts and host variables they see and the store and registries their `package:` guests are acquired through at first use. |
+| [`guests:`/`mounts:`/`env:`/`plugins:`](../reference/runtime-macro.md#inline-manifest-keys-guests-mounts-env-plugins) | You want the deployment compiled into the binary instead of a TOML file — the guests embedded, named by their files unless you say otherwise, plus the mounts and host variables they see and the store and registries their `package:` guests are acquired through at first use. |
 
 Shipping a product CLI whose argv belongs entirely to the guest needs no key: a command-mode runtime with a compiled-in deployment is a [direct command](../reference/runtime-macro.md#direct-commands-raw-argv-passthrough) — no host `run` grammar at all.
 

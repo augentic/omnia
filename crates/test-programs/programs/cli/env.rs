@@ -19,13 +19,13 @@ async fn scenario() {
         .map(|pair| pair.split_once('=').unwrap_or_else(|| panic!("`{pair}` is not `NAME=value`")))
         .collect();
 
-    let environment = wasip3::cli::environment::get_environment();
-    let inherited: BTreeMap<&str, &str> = environment
+    let env = wasip3::cli::environment::get_environment();
+    let inherited: BTreeMap<&str, &str> = env
         .iter()
         .filter(|(name, _)| !SET_BY_RUNTIME.contains(&name.as_str()))
         .map(|(name, value)| (name.as_str(), value.as_str()))
         .collect();
 
     assert_eq!(inherited, expected, "the guest sees the host variables the deployment names");
-    assert!(environment.iter().any(|(name, _)| name == "RUST_LOG"), "the runtime sets `RUST_LOG`");
+    assert!(env.iter().any(|(name, _)| name == "RUST_LOG"), "the runtime sets `RUST_LOG`");
 }

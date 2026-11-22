@@ -44,8 +44,8 @@ pub use omnia_plugin::{
 };
 
 pub use self::deployment::{
-    Deployment, DeploymentBuilder, Environment, GuestEntry, GuestRoutes, Manifest, Mount,
-    PluginsConfig, RegistryConfig, Transport, TransportKind,
+    Deployment, DeploymentBuilder, Env, GuestEntry, GuestRoutes, Manifest, Mount, PluginsConfig,
+    RegistryConfig, Transport, TransportKind,
 };
 #[doc(hidden)]
 pub use self::entry::{MainOptions, ManifestSource, main};

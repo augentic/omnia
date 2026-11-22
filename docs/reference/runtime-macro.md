@@ -9,7 +9,7 @@ Every key the `omnia::runtime!` macro accepts, with exact semantics. The task-or
 | `hosts:` | The `Host: Backend` map — which WASI interfaces are linked and what implements them | Always (except a backend-less command runtime) |
 | `mode:` | `server` (default) or `command` | Running jobs/CLIs instead of servers |
 | `manifest:` | Compile in a default manifest *path* | You want `run` with no arguments to work |
-| `guests:`, `mounts:`, `environment:`, `plugins:` | Compile in a default manifest *value* (inline), the guests embedded | Same as `manifest:`, but self-contained — no TOML file and no `.wasm` beside the binary at run time |
+| `guests:`, `mounts:`, `env:`, `plugins:` | Compile in a default manifest *value* (inline), the guests embedded | Same as `manifest:`, but self-contained — no TOML file and no `.wasm` beside the binary at run time |
 
 There is no key for raw argv passthrough: a command-mode runtime with a compiled-in deployment is a [direct command](#direct-commands-raw-argv-passthrough) automatically.
 
@@ -66,7 +66,7 @@ The value is any expression evaluating to a path. Anchoring it with `env!("CARGO
 
 `manifest:` and the inline manifest keys are mutually exclusive — a runtime compiles in a manifest path or a manifest value, not both.
 
-## Inline manifest keys (`guests:`, `mounts:`, `environment:`, `plugins:`)
+## Inline manifest keys (`guests:`, `mounts:`, `env:`, `plugins:`)
 
 The deployment `omnia.toml` expresses can also be written directly in the macro, mirroring the `omnia::Manifest` schema. The macro expands the keys to a `Manifest` value compiled into the generated `main` as the same lowest-precedence fallback as `manifest:` — with one difference: an inline `path:` guest is *embedded*, its component bytes compiled into the binary and loaded at boot, where a manifest file's guest is read from disk at its first use.
 
@@ -91,7 +91,7 @@ omnia::runtime!({
     mounts: [
         { name: ".", path: concat!(env!("CARGO_MANIFEST_DIR"), "/workspace"), writable: true },
     ],
-    environment: {                                   // optional: the host variables guests see
+    env: {                                           // optional: the host variables guests see
         inherit: ["ORDERS_*", "TZ"],
     },
     plugins: {                                       // optional: where packages come from
@@ -107,9 +107,9 @@ omnia::runtime!({
 - `guests:` is a list of entries `{ path | package, name?, routes?, command?, digest? }` — see [Guest entries](#guest-entries-pathpackage-name-routes-command-digest).
 - `plugins:` is where a package comes from — the store every one is kept in and the registries one the store lacks is fetched through — see [`plugins:`](#plugins-store-registries).
 - `mounts:` are the directories preopened into every guest sandbox; each entry is `{ name, path, writable? }` (`writable` a literal bool, `false` by default). A read-only mount is also a root the guest loader reads a component from when a guest names a path beneath it; a writable mount never is, and one that shares or nests a read-only mount's directory is refused at startup. A relative mount path resolves against the process working directory at run time, so anchor it with `env!("CARGO_MANIFEST_DIR")` as with `manifest:`.
-- `environment: { inherit: [..] }` names the host variables every guest sees, each a whole name or a prefix that ends in `*`; `*` alone passes every variable. A guest sees no other host variable, beyond the `RUST_LOG` and `NO_COLOR` the runtime sets. An empty block is a compile error; `inherit: []` passes none. A malformed entry fails startup, naming it. On the `run` grammar, `--env` adds to the list of whichever manifest the run selects; a [direct command](#direct-commands-raw-argv-passthrough) has no `--env`, so this list is all its guests see.
+- `env: { inherit: [..] }` names the host variables every guest sees, each a whole name or a prefix that ends in `*`; `*` alone passes every variable. A guest sees no other host variable, beyond the `RUST_LOG` and `NO_COLOR` the runtime sets. An empty block is a compile error; `inherit: []` passes none. A malformed entry fails startup, naming it. On the `run` grammar, `--env` adds to the list of whichever manifest the run selects; a [direct command](#direct-commands-raw-argv-passthrough) has no `--env`, so this list is all its guests see.
 - Every value other than a guest's `path:` is any Rust expression evaluating to the field's type (strings for names, route patterns, and inherited variables, paths for mounts and the store, a `&'static str` or `String` of TOML for `registries`).
-- `manifest:` and the inline keys are mutually exclusive; a manifest file declares the same things as `[[guest]]`, `[[mount]]`, `[environment]`, and `[plugins]` — see [Configuration](configuration.md).
+- `manifest:` and the inline keys are mutually exclusive; a manifest file declares the same things as `[[guest]]`, `[[mount]]`, `[env]`, and `[plugins]` — see [Configuration](configuration.md).
 
 Nothing declares what guests call between themselves. Every import a guest makes outside the runtime's own namespaces (`wasi:`, `omnia:`) is relayed to the guest exporting it, whichever it is, and an import no guest exports fails at boot — see [Multi-Guest Deployments](../guides/multi-guest-deployments.md#guests-calling-guests).
 

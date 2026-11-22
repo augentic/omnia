@@ -62,7 +62,7 @@ fn host_pairs(select: impl Fn(&str) -> bool) -> Vec<String> {
 // Cargo and nextest set `CARGO_MANIFEST_DIR` and the `CARGO_PKG_*` family on
 // every test process, and `PATH` and the rest stay with the host.
 #[tokio::test]
-async fn cli_environment() {
+async fn cli_env() {
     let expected =
         host_pairs(|name| name == "CARGO_MANIFEST_DIR" || name.starts_with("CARGO_PKG_"));
     assert!(
@@ -71,16 +71,16 @@ async fn cli_environment() {
     );
 
     let deployment = Deployment::new().inherit(["CARGO_MANIFEST_DIR", "CARGO_PKG_*"]);
-    let status = run(deployment, test_programs::CLI_ENVIRONMENT, expected).await;
+    let status = run(deployment, test_programs::CLI_ENV, expected).await;
     assert_eq!(status, ExitStatus::SUCCESS);
 
-    let status = run(Deployment::new(), test_programs::CLI_ENVIRONMENT, Vec::new()).await;
+    let status = run(Deployment::new(), test_programs::CLI_ENV, Vec::new()).await;
     assert_eq!(status, ExitStatus::SUCCESS, "a deployment that names none passes none");
 }
 
 #[tokio::test]
 async fn inherit_all() {
     let deployment = Deployment::new().inherit(["*"]);
-    let status = run(deployment, test_programs::CLI_ENVIRONMENT, host_pairs(|_| true)).await;
+    let status = run(deployment, test_programs::CLI_ENV, host_pairs(|_| true)).await;
     assert_eq!(status, ExitStatus::SUCCESS);
 }

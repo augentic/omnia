@@ -11,7 +11,7 @@
 
 # A guest sees no host variable the deployment does not name; guest `a`
 # reports the server's address.
-[environment]
+[env]
 inherit = ["HTTP_ADDR"]
 
 [[guest]]
