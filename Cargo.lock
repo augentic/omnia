@@ -5789,7 +5789,7 @@ dependencies = [
  "wasm-pkg-client",
  "wit-bindgen-core",
  "wit-bindgen-rust",
- "wit-component 0.263.0",
+ "wit-component 0.262.0",
 ]
 
 [[package]]

@@ -97,7 +97,7 @@ wasmtime-wasi-http = { version = "50.0.2", default-features = false, features = 
 wit-bindgen = { version = "0.63.0", features = ["async-spawn"] }
 wit-bindgen-core = "0.63.0"
 wit-bindgen-rust = "0.63.0"
-wit-component = "0.263.0"
+wit-component = "0.262.0"
 x509-cert = { version = "0.3.0", default-features = false, features = ["std"] }
 
 # internally referenced crates
