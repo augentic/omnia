@@ -7,12 +7,13 @@ use anyhow::{Context as _, Result};
 use omnia::wasmtime_wasi::p2::pipe::MemoryOutputPipe;
 use omnia::{
     Backends, DeploymentBuilder, ExitStatus, GuestEntry, Host, LevelFilter, Manifest,
-    ManifestSource, Mode, Mount, Provides, RegistryConfig, Runtime, SourceSpec, Stdio, Wiring,
+    ManifestSource, Mode, Mount, Provides, RegistryConfig, Runtime, RuntimeOptions, SourceSpec,
+    Stdio, Wiring,
 };
 use omnia_wasi_otel::WasiOtel;
 
 /// One command-mode deployment: guests, mounts, arguments, the package
-/// store and registries, and the tracing level.
+/// store and registries, the tracing level, and the runtime options.
 ///
 /// What guests call between themselves is read off their components,
 /// declared nowhere; `store` is where a package a guest names is kept, and
@@ -53,6 +54,7 @@ pub struct Deployment {
     store: Option<PathBuf>,
     registries: Option<RegistryConfig>,
     level: Option<LevelFilter>,
+    options: Option<RuntimeOptions>,
     guest_timeout: Option<Duration>,
     stdio: Option<Stdio>,
 }
@@ -167,6 +169,19 @@ impl Deployment {
         self
     }
 
+    /// The runtime options for the run, whatever the test process's
+    /// environment sets, so a suite sizes the instance pool.
+    ///
+    /// [`guest_timeout`](Self::guest_timeout) still applies on top. A
+    /// [`precompiled`](fn@super::precompiled) artifact is compiled under the
+    /// environment's options, so a run whose options change a
+    /// compile-affecting field refuses it.
+    #[must_use]
+    pub const fn options(mut self, options: RuntimeOptions) -> Self {
+        self.options = Some(options);
+        self
+    }
+
     /// The wall-clock cap on each trigger invocation, whatever the test
     /// process sets in `GUEST_TIMEOUT_MS`, so a suite pins a hung guest
     /// without waiting out the default.
@@ -214,6 +229,9 @@ impl Deployment {
             DeploymentBuilder::new().manifest(manifest).mode(Mode::Command).args(self.args.clone());
         if let Some(level) = self.level {
             builder = builder.level(level);
+        }
+        if let Some(options) = &self.options {
+            builder = builder.options(options.clone());
         }
         if let Some(timeout) = self.guest_timeout {
             builder = builder.guest_timeout(timeout);

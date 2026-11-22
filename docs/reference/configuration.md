@@ -4,6 +4,8 @@ Omnia is configured entirely through environment variables (runtime options and 
 
 ## Runtime environment variables
 
+The [guest limits](#guest-limits), [instance pooling](#instance-pooling), and [memory layout](#memory-layout-and-artifacts-compile-affecting) variables are the fields of `RuntimeOptions`. An embedder sets them in code with `DeploymentBuilder::options`, and the deployment then reads none of them from the environment. `RuntimeOptions::with_env` applies the variables an operator sets over options built in code.
+
 ### General
 
 | Variable        | Default                                                    | Meaning                                                                                                                                          |
@@ -54,7 +56,18 @@ The pooling allocator recycles instance slots so per-request instantiation stays
 | `POOL_METRICS_INTERVAL_MS`   | `5000`                      | Interval between pool-occupancy metric samples; `0` disables. |
 | `POOL_IDLE_RELEASE_MS`       | `0`                         | Idle time, from the last guest invocation, after which warm slots' resident memory is released to the OS; `0` disables. |
 
-Further tunables mirror wasmtime's pooling configuration one-to-one: `POOL_TOTAL_CORE_INSTANCES`, `POOL_TOTAL_MEMORIES`, `POOL_TOTAL_TABLES`, `POOL_TOTAL_STACKS`, `POOL_MEMORY_KEEP_RESIDENT`, `POOL_TABLE_KEEP_RESIDENT`, `POOL_ASYNC_STACK_KEEP_RESIDENT`, `POOL_DECOMMIT_BATCH_SIZE`, `POOL_PAGEMAP_SCAN`, and per-component/per-module limits. See `crates/core/src/options.rs` for the authoritative list with doc comments.
+The pool's totals follow `POOL_MAX_INSTANCES` unless set:
+
+| Variable                    | Default                  |
+| --------------------------- | ------------------------ |
+| `POOL_TOTAL_CORE_INSTANCES` | 4 × `POOL_MAX_INSTANCES` |
+| `POOL_TOTAL_TABLES`         | 4 × `POOL_MAX_INSTANCES` |
+| `POOL_TOTAL_MEMORIES`       | `POOL_MAX_INSTANCES`     |
+| `POOL_TOTAL_STACKS`         | 2 × `POOL_MAX_INSTANCES` |
+
+These fit a guest built from one module, as an `omnia-sdk` guest is. It takes three core instances, one memory, and two tables. It runs on one stack, and takes a second while it blocks in a call and the host completes another of its calls. A component composed from several modules takes more of each, so a deployment that runs one sets the `POOL_TOTAL_*` totals it needs.
+
+Further tunables mirror wasmtime's pooling configuration one-to-one: `POOL_MEMORY_KEEP_RESIDENT`, `POOL_TABLE_KEEP_RESIDENT`, `POOL_ASYNC_STACK_KEEP_RESIDENT`, `POOL_DECOMMIT_BATCH_SIZE`, `POOL_PAGEMAP_SCAN`, and per-component/per-module limits. See `crates/core/src/options.rs` for the authoritative list with doc comments.
 
 ### Memory layout and artifacts (compile-affecting)
 

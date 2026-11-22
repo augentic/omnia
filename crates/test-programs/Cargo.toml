@@ -59,6 +59,11 @@ path = "programs/cli/rust_log.rs"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "command_blocking"
+path = "programs/command/blocking.rs"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "command_exit_map"
 path = "programs/command/exit_map.rs"
 crate-type = ["cdylib"]
