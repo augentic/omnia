@@ -4,10 +4,11 @@ Procedural macros for generating host-side WebAssembly Component Runtime infrast
 
 ## Overview
 
-This crate provides the two macros that meet at the seam between a WASI host and the backends a deployment connects:
+This crate provides the macros that meet at the seam between a WASI host and the backends a deployment connects:
 
 - **`runtime!`**, for a deployment: generates the backend bundle, the linker wiring, and the entry point from a declarative map of which WASI interfaces and backends the runtime needs, instead of hand-writing them.
 - **`#[derive(HostCtx)]`**, for a host crate: generates the borrowed view a `Wasi<Service>` host assembles over its backend, so the bundle `runtime!` emits can serve it.
+- **`#[derive(FromEnv)]`**, for a backend crate: generates the loaders that read a backend's connection options from environment variables, so `runtime!` can connect it.
 
 ## Usage
 
@@ -180,6 +181,39 @@ wasmtime Linker                          omnia:keyvalue/* resolved for the guest
 ```
 
 Nothing in the chain names the host from outside: `runtime!` keys the `Provides` impl by the host type, `StoreCtx::view` reads the host's `HostCtx::Borrow`, and the derive supplies both the borrow and the view.
+
+## Backend options: `#[derive(FromEnv)]`
+
+A backend's `Connect::connect()` reads its options through `omnia_core::FromEnv`. A backend crate derives it on its options struct, naming each field's variable in `#[env(..)]`; `omnia_core::FromEnv` names both the trait and the derive, so one import brings both:
+
+```rust,ignore
+use omnia_core::FromEnv;
+
+/// Options for the Redis backend.
+#[derive(Clone, Debug, FromEnv)]
+pub struct ConnectOptions {
+    /// Redis URL (`REDIS_URL`, default `redis://localhost:6379`).
+    #[env(from = "REDIS_URL", default = "redis://localhost:6379")]
+    pub url: String,
+    /// Buckets a guest may open (`KEYVALUE_BUCKETS`, comma-separated).
+    #[env(from = "KEYVALUE_BUCKETS", default = "default", with = omnia_core::env::list)]
+    pub buckets: Vec<String>,
+}
+```
+
+Each field takes one of three shapes:
+
+- **`from = "NAME"`** reads the variable `NAME`, parsed through the field type's `FromStr` or through the `with = path` the field names: any `fn(&str) -> Result<T, E>` whose `E` implements `Display`, such as the shared parsers in `omnia_core::env`. When the variable is unset, the field takes its `default = ".."`, an `Option` field is `None`, and any other field fails the load.
+- **`default = ".."`** alone marks a field set in code, which no variable reads.
+- **`nested`** loads a field whose type derives `FromEnv`. An `Option` field is `None` when every problem inside it is an unset variable.
+
+The struct may name `#[env(validate = path)]`, a `fn(&Self) -> anyhow::Result<()>` every load runs once its fields parse. The derive emits:
+
+- **`load_env()`**, **`with_env(self)`**, and **`load_from(lookup)`**, which load from the process environment, apply the variables that are set over a value built in code, and load through a lookup in place of the environment. A load fails with one error naming every required variable that is unset and every variable whose value does not parse, but never a value.
+- **`omnia_core::FromEnv`**, over `load_env`, which `Connect::connect()` calls.
+- **`Default`**, where every field has a `default` or is an `Option`, so `Connect::connect_with(..)` and tests build options with no environment.
+
+As with `HostCtx`, the emitted paths start at `::omnia_core`. A crate that reaches the derive as `omnia::FromEnv` writes `#[env(crate = omnia)]`.
 
 ## Example: multiple runtime configurations
 

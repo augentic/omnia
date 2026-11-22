@@ -13,7 +13,7 @@ use futures::{Future, TryStreamExt};
 use http::{Request, Response};
 use http_body::{Body, Frame, SizeHint};
 use http_body_util::BodyExt;
-use omnia_core::Connect;
+use omnia_core::{Connect, FromEnv};
 use tokio::time::Sleep;
 use tracing::instrument;
 use wasmtime::component::ResourceTable;
@@ -25,24 +25,12 @@ use super::{HttpBorrow, client_cert};
 
 pub type FutureResult<T> = Box<dyn Future<Output = Result<T, HttpError>> + Send>;
 
-#[expect(missing_docs, reason = "`FromEnv` has no docs")]
-mod config {
-    use fromenv::FromEnv;
-
-    /// Options for the default outbound `wasi:http` client.
-    #[derive(Debug, Clone, FromEnv)]
-    pub struct ConnectOptions {
-        /// Connect timeout in seconds (`HTTP_CONNECT_TIMEOUT`, default 10).
-        #[env(from = "HTTP_CONNECT_TIMEOUT", default = "10")]
-        pub connect_timeout: u64,
-    }
-}
-pub use config::ConnectOptions;
-
-impl omnia_core::FromEnv for ConnectOptions {
-    fn load_env() -> Result<Self> {
-        Self::from_env().finalize().context("issue loading connection options")
-    }
+/// Options for the default outbound `wasi:http` client.
+#[derive(Debug, Clone, FromEnv)]
+pub struct ConnectOptions {
+    /// Connect timeout in seconds (`HTTP_CONNECT_TIMEOUT`, default 10).
+    #[env(from = "HTTP_CONNECT_TIMEOUT", default = "10")]
+    pub connect_timeout: u64,
 }
 
 /// Default implementation for `wasi:http`.

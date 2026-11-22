@@ -19,7 +19,6 @@ workspace = true
 anyhow.workspace = true
 base64ct.workspace = true
 bytes.workspace = true
-fromenv.workspace = true
 futures.workspace = true
 http.workspace = true
 http-body.workspace = true

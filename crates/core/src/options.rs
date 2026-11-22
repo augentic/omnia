@@ -9,20 +9,20 @@
 //! ahead-of-time compiler goes through, [`CompileOptions::configure`], which
 //! is what lets the loading engine accept a pre-compiled artifact.
 
-#![expect(missing_docs, reason = "`FromEnv` has no docs")]
-
+use std::num::ParseIntError;
 use std::time::Duration;
 
 use anyhow::{Result, bail};
-use fromenv::{FromEnv, ParseResult};
 use omnia_compile::CompileOptions;
 use wasmtime::{Config, Enabled, InstanceAllocationStrategy, PoolingAllocationConfig};
+
+use crate::FromEnv;
 
 /// Runtime configuration loaded from the environment.
 ///
 /// Read once at start-up and threaded through the runtime to every store.
-/// Each field maps to one environment variable (booleans use `true`/`false`);
-/// [`RuntimeOptions::requirements`] prints the full list with defaults.
+/// Each field maps to one environment variable (booleans use `true`/`false`),
+/// which its doc names with its default. [`Default`] holds those defaults.
 ///
 /// The fields marked compile-affecting are the [`CompileOptions`] this
 /// runtime loads artifacts under ([`compile_options`](Self::compile_options))
@@ -30,6 +30,7 @@ use wasmtime::{Config, Enabled, InstanceAllocationStrategy, PoolingAllocationCon
 /// only affect the engine or individual stores at runtime.
 #[expect(clippy::struct_excessive_bools, reason = "flat by design: one environment variable each")]
 #[derive(Clone, Debug, FromEnv)]
+#[env(crate = crate, validate = Self::validate)]
 pub struct RuntimeOptions {
     /// Wall-clock cap on a server or server-rooted link-dispatch invocation (`GUEST_TIMEOUT_MS`, default 30s, min 1ms; a command-mode chain, including its link hops, is uncapped).
     #[env(from = "GUEST_TIMEOUT_MS", default = "30000", with = parse_timeout)]
@@ -128,10 +129,10 @@ pub struct RuntimeOptions {
     #[env(from = "POOL_PAGEMAP_SCAN", default = "no", with = parse_enabled)]
     pub pool_pagemap_scan: Enabled,
     /// Interval between pooling-occupancy metric samples; `0` disables (`POOL_METRICS_INTERVAL_MS`, default 5000ms).
-    #[env(from = "POOL_METRICS_INTERVAL_MS", default = "5000", with = parse_millis)]
+    #[env(from = "POOL_METRICS_INTERVAL_MS", default = "5000", with = crate::env::millis)]
     pub pool_metrics_interval: Duration,
     /// Idle time, measured from the last guest invocation, after which unused warm pooled memory is released to the OS; `0` disables (`POOL_IDLE_RELEASE_MS`, default 0).
-    #[env(from = "POOL_IDLE_RELEASE_MS", default = "0", with = parse_millis)]
+    #[env(from = "POOL_IDLE_RELEASE_MS", default = "0", with = crate::env::millis)]
     pub pool_idle_release: Duration,
     /// Honour WebAssembly branch hints during compilation; compile-affecting (`BRANCH_HINTING`, default `false`).
     #[env(from = "BRANCH_HINTING", default = "false")]
@@ -139,18 +140,6 @@ pub struct RuntimeOptions {
 }
 
 impl RuntimeOptions {
-    /// Finalize the runtime configuration.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the runtime configuration cannot be loaded from the
-    /// environment or fails cross-field validation.
-    pub fn load_env() -> Result<Self> {
-        let options = Self::from_env().finalize().map_err(anyhow::Error::from)?;
-        options.validate()?;
-        Ok(options)
-    }
-
     /// The compile-affecting settings among these options, as the value an
     /// artifact this runtime loads must have been compiled under.
     #[must_use]
@@ -165,8 +154,8 @@ impl RuntimeOptions {
         }
     }
 
-    // Cross-field invariants `FromEnv` cannot express, checked before the
-    // engine is built where wasmtime's own rejection is less specific.
+    // Cross-field invariants no one field's parser can express, checked before
+    // the engine is built where wasmtime's own rejection is less specific.
     fn validate(&self) -> Result<()> {
         if !self.pooling {
             return Ok(());
@@ -267,28 +256,24 @@ impl From<&RuntimeOptions> for Config {
 }
 
 // a zero wall-clock bound would time out every invocation
-fn parse_timeout(value: &str) -> ParseResult<Duration> {
-    let millis = value.parse::<u64>()?;
-    if millis == 0 {
-        return Err("must be at least 1 (a zero timeout would fail every invocation)".into());
+fn parse_timeout(value: &str) -> Result<Duration, String> {
+    let timeout = crate::env::millis(value).map_err(|err| err.to_string())?;
+    if timeout.is_zero() {
+        return Err("must be at least 1 (a zero timeout would fail every invocation)".to_owned());
     }
-    Ok(Duration::from_millis(millis))
+    Ok(timeout)
 }
 
 // clamped so the ticker interval can never be zero
-fn parse_tick(value: &str) -> ParseResult<Duration> {
-    Ok(Duration::from_millis(value.parse::<u64>()?.max(1)))
+fn parse_tick(value: &str) -> Result<Duration, ParseIntError> {
+    crate::env::millis(value).map(|tick| tick.max(Duration::from_millis(1)))
 }
 
-fn parse_enabled(value: &str) -> ParseResult<Enabled> {
+fn parse_enabled(value: &str) -> Result<Enabled, &'static str> {
     match value.trim().to_ascii_lowercase().as_str() {
         "auto" => Ok(Enabled::Auto),
         "yes" | "true" | "on" | "1" => Ok(Enabled::Yes),
         "no" | "false" | "off" | "0" => Ok(Enabled::No),
-        other => Err(format!("expected one of `auto`/`yes`/`no`, got `{other}`").into()),
+        _ => Err("expected one of `auto`/`yes`/`no`"),
     }
-}
-
-fn parse_millis(value: &str) -> ParseResult<Duration> {
-    Ok(Duration::from_millis(value.parse::<u64>()?))
 }

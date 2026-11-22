@@ -17,7 +17,6 @@ workspace = true
 
 [dependencies]
 anyhow.workspace = true
-fromenv.workspace = true
 futures.workspace = true
 omnia-core.workspace = true
 omnia-wasi-types.workspace = true

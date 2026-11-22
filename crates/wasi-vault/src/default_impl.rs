@@ -5,54 +5,23 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use anyhow::{Context as _, Result};
+use anyhow::Result;
 use futures::FutureExt;
-use omnia_core::Connect;
+use omnia_core::{Connect, FromEnv};
 use parking_lot::RwLock;
 use tracing::instrument;
 
 use crate::resource::{FutureResult, Locker};
 use crate::{Error, VaultClient};
 
-#[expect(missing_docs, reason = "`FromEnv` has no docs")]
-mod config {
-    use fromenv::{FromEnv, ParseResult};
-
-    /// Options used to connect to the in-memory vault.
-    ///
-    /// This struct is used to load connection options from environment variables.
-    #[derive(Debug, Clone, FromEnv)]
-    pub struct ConnectOptions {
-        /// The lockers a guest may open (`VAULT_LOCKERS`, comma-separated, default: `default`).
-        #[env(from = "VAULT_LOCKERS", default = "default", with = comma_separated)]
-        pub lockers: Vec<String>,
-    }
-
-    impl Default for ConnectOptions {
-        fn default() -> Self {
-            Self {
-                lockers: vec!["default".to_owned()],
-            }
-        }
-    }
-
-    #[expect(clippy::unnecessary_wraps, reason = "the signature `fromenv` parsers take")]
-    fn comma_separated(value: &str) -> ParseResult<Vec<String>> {
-        Ok(value
-            .split(',')
-            .map(str::trim)
-            .filter(|name| !name.is_empty())
-            .map(str::to_owned)
-            .collect())
-    }
-}
-pub use config::ConnectOptions;
-
-impl omnia_core::FromEnv for ConnectOptions {
-    fn load_env() -> Result<Self> {
-        // `Self::from_env()` is the builder the `FromEnv` derive emits
-        Self::from_env().finalize().context("issue loading connection options")
-    }
+/// Options used to connect to the in-memory vault.
+///
+/// This struct is used to load connection options from environment variables.
+#[derive(Debug, Clone, FromEnv)]
+pub struct ConnectOptions {
+    /// The lockers a guest may open (`VAULT_LOCKERS`, comma-separated, default: `default`).
+    #[env(from = "VAULT_LOCKERS", default = "default", with = omnia_core::env::list)]
+    pub lockers: Vec<String>,
 }
 
 /// Default implementation for `omnia:vault`.

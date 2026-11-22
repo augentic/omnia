@@ -208,15 +208,27 @@ Every invocation gets a **fresh instance in its own store** — no state survive
 
 ## Configuration
 
-All backends and runtime options use environment variables, parsed via the `FromEnv` derive:
+All backends and runtime options use environment variables, read through omnia's `FromEnv` derive. Each field names its variable, and a load fails once, naming every variable that is unset or does not parse:
 
 ```rust
+use omnia::FromEnv;
+
 #[derive(Debug, Clone, FromEnv)]
+#[env(crate = omnia)]
 pub struct ConnectOptions {
     #[env(from = "REDIS_URL", default = "redis://localhost:6379")]
     pub url: String,
+    #[env(from = "KEYVALUE_BUCKETS", default = "default", with = omnia::env::list)]
+    pub buckets: Vec<String>,
 }
 ```
+
+The derive emits:
+
+- `FromEnv`, which `Connect::connect()` calls;
+- `with_env`, which applies the variables an operator sets over options built in code;
+- `load_from`, which loads through a lookup in place of the environment;
+- `Default`, where every field has a `default` or is an `Option`.
 
 The consolidated list is in [Configuration](reference/configuration.md); individual backend READMEs document service-specific variables.
 

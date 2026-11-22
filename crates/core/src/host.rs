@@ -161,9 +161,46 @@ pub trait Connect: Sized + Sync + Send {
 
 /// Create backend connection options from environment variables.
 ///
-/// The method is `load_env` (not `from_env`) so it never shadows — or is shadowed
-/// by — the builder-returning inherent `from_env` the `fromenv` derive emits
-/// on option structs.
+/// An options struct derives the impl with
+/// [`#[derive(FromEnv)]`](derive@crate::FromEnv), naming each field's
+/// variable in `#[env(..)]`. The derive also emits inherent `load_env`,
+/// `with_env`, and `load_from` loaders, and a [`Default`] where every field
+/// has a `default` or is an `Option`.
+///
+/// # Examples
+///
+/// ```
+/// use omnia_core::FromEnv;
+///
+/// /// Options for an outbound client.
+/// #[derive(Debug, FromEnv)]
+/// pub struct ConnectOptions {
+///     /// Connect timeout in seconds (`CLIENT_CONNECT_TIMEOUT`, default 10).
+///     #[env(from = "CLIENT_CONNECT_TIMEOUT", default = "10")]
+///     pub connect_timeout: u64,
+///     /// Hosts the client may reach (`CLIENT_HOSTS`, comma-separated).
+///     #[env(from = "CLIENT_HOSTS", with = omnia_core::env::list)]
+///     pub hosts: Option<Vec<String>>,
+/// }
+///
+/// let options = ConnectOptions::load_from(|name| match name {
+///     "CLIENT_HOSTS" => Some("a.example, b.example".to_owned()),
+///     _ => None,
+/// })?;
+/// assert_eq!(options.connect_timeout, 10);
+/// assert_eq!(options.hosts, Some(vec!["a.example".to_owned(), "b.example".to_owned()]));
+///
+/// let err = ConnectOptions::load_from(|name| match name {
+///     "CLIENT_CONNECT_TIMEOUT" => Some("soon".to_owned()),
+///     _ => None,
+/// })
+/// .unwrap_err();
+/// assert_eq!(
+///     err.to_string(),
+///     "`CLIENT_CONNECT_TIMEOUT` is invalid: invalid digit found in string"
+/// );
+/// # Ok::<(), anyhow::Error>(())
+/// ```
 pub trait FromEnv: Sized {
     /// Load connection options from environment variables.
     ///
