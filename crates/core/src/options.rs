@@ -154,7 +154,7 @@ impl RuntimeOptions {
         }
     }
 
-    /// Checks the invariants that no one variable's parser can express.
+    /// Checks that a runtime can run under these options.
     ///
     /// [`load_env`](Self::load_env), [`with_env`](Self::with_env), and
     /// [`load_from`](Self::load_from) run it on what they load. A deployment
