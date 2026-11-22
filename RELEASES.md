@@ -140,6 +140,12 @@ Unreleased
   - `Default`, where every field has a `default` or is an `Option`.
 - `omnia_core::env`, re-exported as `omnia::env`, with the `list`,
   `millis`, and `paths` parsers a `with` names.
+- `DeploymentBuilder::options` and `omnia_test::host::Deployment::options`
+  set the `RuntimeOptions` a deployment runs under, in place of the
+  environment's, before the engine and its instance pool are built.
+- `RuntimeOptions::validate`, and `total_core_instances`,
+  `total_memories`, `total_tables` and `total_stacks`, the pool totals a
+  runtime builds.
 
 ### Changed
 
@@ -251,6 +257,20 @@ Unreleased
     does not parse, and no error prints a value;
   - a value that is not valid Unicode is invalid, where it read as unset;
   - `RuntimeOptions` and `omnia_wasi_http::ConnectOptions` gain `Default`.
+- `POOL_TOTAL_CORE_INSTANCES` and `POOL_TOTAL_TABLES` default to four
+  times `POOL_MAX_INSTANCES`, `POOL_TOTAL_STACKS` to twice it, and
+  `POOL_TOTAL_MEMORIES` to `POOL_MAX_INSTANCES`, where each was a flat
+  `1000`. A guest holds three core instances and two tables, so the flat
+  totals filled near a third of `POOL_MAX_INSTANCES`. It takes a second
+  stack while it blocks in a call and the host completes another. The
+  `RuntimeOptions` fields are `Option<u32>`, `None` when unset.
+- The table and stack pools map more at the defaults: about 625 MiB of
+  tables, up from about 160 MiB, and 4 GiB of stacks, up from 2 GiB. A
+  page is backed only once it is touched, so only a host with strict
+  overcommit is charged for the whole mapping.
+- A deployment validates its runtime options once
+  `DeploymentBuilder::guest_timeout` and `max_dispatch_depth` apply, so
+  `guest_timeout(Duration::ZERO)` fails the build where it was accepted.
 
 ### Removed
 

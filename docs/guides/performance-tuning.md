@@ -42,7 +42,9 @@ POOL_IDLE_RELEASE_MS=60000          # release warm memory after a minute without
 
 ### 2. Pool sizing
 
-The defaults (1000 instances/memories/tables/stacks, 100 warm slots) suit moderate concurrency. Raise `POOL_MAX_INSTANCES` and the `POOL_TOTAL_*` ceilings if occupancy gauges show saturation under your target load; raise `POOL_MAX_UNUSED_WARM_SLOTS` if your steady-state concurrency exceeds 100 and you can spend the memory.
+The defaults (1000 instances, 100 warm slots) suit moderate concurrency. The `POOL_TOTAL_*` ceilings follow `POOL_MAX_INSTANCES` unless set ([configuration reference](../reference/configuration.md#instance-pooling)), so it is the one knob to raise when occupancy gauges show saturation under your target load. Raise `POOL_MAX_UNUSED_WARM_SLOTS` if your steady-state concurrency exceeds 100 and you can spend the memory.
+
+The table and stack pools are mapped when the engine is built, four tables and two stacks for each instance. A host with strict overcommit is charged for the whole mapping, about 625 MiB of tables and 4 GiB of stacks at the defaults.
 
 ### 3. Batched decommit
 

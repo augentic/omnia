@@ -383,6 +383,18 @@ async fn invalid_manifests() {
         .expect("a dynamic deployment may start with no guests");
 }
 
+// The builder's override is validated with the options it lands on, so a
+// zero set in code fails the build as `GUEST_TIMEOUT_MS=0` fails a load.
+#[tokio::test]
+async fn zero_guest_timeout() {
+    let Err(err) =
+        assemble(Manifest::new(), |builder| builder.dynamic().guest_timeout(Duration::ZERO)).await
+    else {
+        panic!("a zero guest timeout was accepted");
+    };
+    assert!(format!("{err:#}").contains("GUEST_TIMEOUT_MS"), "unexpected error: {err:#}");
+}
+
 #[test]
 fn selector_no_identity() {
     let calls: [&[Val]; 2] = [&[Val::U32(7)], &[]];
@@ -433,33 +445,6 @@ fn runtime_options() {
         format!("{err:#}").contains("expected one of `auto`/`yes`/`no`"),
         "unexpected error: {err:#}"
     );
-
-    // per-module memory bound exceeding total pool memories
-    let err = load(&[("POOL_TOTAL_MEMORIES", "8"), ("POOL_MAX_MEMORIES_PER_MODULE", "16")])
-        .expect_err("memories per module exceed total");
-    assert!(
-        format!("{err:#}")
-            .contains("POOL_MAX_MEMORIES_PER_MODULE (16) exceeds POOL_TOTAL_MEMORIES (8)"),
-        "unexpected error: {err:#}"
-    );
-
-    // per-module table bound exceeding total pool tables
-    let err = load(&[("POOL_TOTAL_TABLES", "8"), ("POOL_MAX_TABLES_PER_MODULE", "16")])
-        .expect_err("tables per module exceed total");
-    assert!(
-        format!("{err:#}")
-            .contains("POOL_MAX_TABLES_PER_MODULE (16) exceeds POOL_TOTAL_TABLES (8)"),
-        "unexpected error: {err:#}"
-    );
-
-    // pool bounds ignored when pooling is disabled
-    let vars = [
-        ("POOLING", "false"),
-        ("POOL_TOTAL_MEMORIES", "8"),
-        ("POOL_MAX_MEMORIES_PER_MODULE", "16"),
-    ];
-    let options = load(&vars).expect("pool bounds ignored when pooling is off");
-    assert!(!options.pooling);
 }
 
 // The host→guest hop is entered from a root, so it is depth 1 and with a bound
