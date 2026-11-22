@@ -91,9 +91,9 @@ trybuild = "1"
 wasip3 = { version = "0.10.0", features = ["http-compat"] }
 wasm-metadata = { version = "0.263.0", default-features = false, features = ["oci"] }
 wasm-pkg-client = "0.16.2"
-wasmtime = { version = "50.0.2", default-features = false, features = ["anyhow", "component-model-bytes", "parallel-compilation"] }
-wasmtime-wasi = { version = "50.0.2", default-features = false, features = ["p3"] }
-wasmtime-wasi-http = { version = "50.0.2", default-features = false, features = ["p3"] }
+wasmtime = { version = "51.0.0", default-features = false, features = ["anyhow", "component-model-bytes", "parallel-compilation"] }
+wasmtime-wasi = { version = "51.0.0", default-features = false, features = ["p3"] }
+wasmtime-wasi-http = { version = "51.0.0", default-features = false, features = ["p3"] }
 wit-bindgen = { version = "0.63.0", features = ["async-spawn"] }
 wit-bindgen-core = "0.63.0"
 wit-bindgen-rust = "0.63.0"
