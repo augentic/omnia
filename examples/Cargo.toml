@@ -32,10 +32,10 @@ omnia-test = { workspace = true, features = ["build"] }
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 axum = { workspace = true, features = ["macros", "query"] }
 bytes.workspace = true
-chrono.workspace = true
 clap.workspace = true
 http.workspace = true
 http-body-util.workspace = true
+jiff.workspace = true
 omnia-sdk = { workspace = true, features = ["http", "command"] }
 opentelemetry = { workspace = true, features = ["metrics", "trace"] }
 schemars.workspace = true

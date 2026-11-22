@@ -11,7 +11,7 @@ use anyhow::{Context, Result, anyhow};
 use axum::extract::Path;
 use axum::routing::{delete, get};
 use axum::{Json, Router};
-use chrono::Utc;
+use jiff::Timestamp;
 use omnia_sdk::sql::{self, Database, FromRow};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -58,7 +58,7 @@ async fn create_agency(
         name: req.name,
         url: req.url,
         timezone: req.timezone,
-        created_at: Utc::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+        created_at: Timestamp::now().strftime("%Y-%m-%d %H:%M:%S").to_string(),
     };
 
     database
