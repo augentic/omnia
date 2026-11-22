@@ -17,7 +17,7 @@ cfg_select! {
 
         use anyhow::{Context as _, Result, bail};
         use omnia::wasmtime::component::Val;
-        use omnia::{DeploymentBuilder, GuestEntry, GuestId, Manifest, Runtime};
+        use omnia::{ChainCtx, DeploymentBuilder, GuestEntry, GuestId, Manifest, Runtime};
 
         #[tokio::main]
         async fn main() -> Result<()> {
@@ -61,11 +61,8 @@ cfg_select! {
                 .guest(&GuestId::from("router"))
                 .await
                 .context("resolving the router guest")?;
-            let mut store = runtime.build_store(runtime.store());
-            let instance = runtime
-                .instantiate(guest.instance_pre(), &mut store)
-                .await
-                .context("instantiating router")?;
+            let (mut store, instance) =
+                runtime.enter(&guest, ChainCtx::server()).await.context("instantiating router")?;
             let run_to =
                 instance.get_func(&mut store, "run-to").context("router exports `run-to`")?;
 

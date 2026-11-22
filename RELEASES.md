@@ -124,6 +124,9 @@ Unreleased
   - `mise run wit-verify` fails when a release the registry holds differs
     from the tree. CI's `WIT` job runs it beside `wit-check`.
   - `mise run wit-sync` rewrites every copy from the package that owns it.
+- `Runtime::enter`, which instantiates a guest on a fresh store at a chain
+  context. Every trigger and the command driver run a guest through it.
+- `StoreCtx::guest` and `StoreBase::guest`, the guest a store runs.
 
 ### Changed
 
@@ -226,6 +229,7 @@ Unreleased
   always sets.
 - `Endpoint::request` takes a `timeout: Option<Duration>` in place of an
   `Option<RequestOptions>`. The host never sends a zero `timeout`.
+- `StoreConfig` takes the `guest` the store is built for.
 
 ### Removed
 
@@ -269,6 +273,9 @@ Unreleased
   each container's name on its handle.
 - `omnia_wasi_messaging::RequestOptions`, whose `expected_replies` the host
   never set.
+- `Runtime::store`, `store_in`, `build_store`, `instantiate`, and
+  `store_factory`. A trigger calls `Runtime::enter`, and reads a client
+  through `Provides::borrow` on a clone of `Runtime::backends`.
 
 ## 0.38.0
 

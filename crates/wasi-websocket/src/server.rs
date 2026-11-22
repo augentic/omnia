@@ -6,7 +6,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow};
 use futures::StreamExt;
-use omnia_core::{PatternRoutes, Provides, Runtime, TriggerRouter};
+use omnia_core::{ChainCtx, PatternRoutes, Provides, Runtime, TriggerRouter};
 use tracing::{Instrument, info_span, instrument};
 
 use crate::WasiWebSocket;
@@ -135,8 +135,7 @@ where
 
         event.deadline = Some(deadline_millis(self.state.options().guest_timeout));
 
-        let mut store = self.state.build_store(self.state.store());
-        let instance = self.state.instantiate(guest.instance_pre(), &mut store).await?;
+        let (mut store, instance) = self.state.enter(&guest, ChainCtx::server()).await?;
         let websocket = indices.load(&mut store, &instance)?;
 
         let run = store
@@ -154,7 +153,9 @@ where
     }
 
     async fn events(&self) -> Result<Events> {
-        self.state.store().view::<WasiWebSocket>().client.endpoint().await?.events().await
+        let mut backends = self.state.backends().clone();
+        let endpoint = Provides::<WasiWebSocket>::borrow(&mut backends).endpoint();
+        endpoint.await?.events().await
     }
 }
 

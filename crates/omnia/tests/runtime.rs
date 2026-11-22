@@ -26,8 +26,8 @@ impl<B: Provides<Self>> Host<B> for WasiAlpha {
     }
 
     fn run(runtime: &Runtime<B>) -> impl Future<Output = omnia::anyhow::Result<()>> + Send {
-        let mut store = runtime.build_store(runtime.store());
-        assert_eq!(store.data_mut().view::<Self>().client.id(), 1);
+        let mut backends = runtime.backends().clone();
+        assert_eq!(Provides::<Self>::borrow(&mut backends).id(), 1);
         ready(Ok(()))
     }
 }
@@ -42,8 +42,8 @@ impl<B: Provides<Self>> Host<B> for WasiBeta {
     }
 
     fn run(runtime: &Runtime<B>) -> impl Future<Output = omnia::anyhow::Result<()>> + Send {
-        let mut store = runtime.build_store(runtime.store());
-        assert_eq!(store.data_mut().view::<Self>().client.id(), 1);
+        let mut backends = runtime.backends().clone();
+        assert_eq!(Provides::<Self>::borrow(&mut backends).id(), 1);
         ready(Ok(()))
     }
 }
@@ -58,8 +58,8 @@ impl<B: Provides<Self>> Host<B> for WasiGamma {
     }
 
     fn run(runtime: &Runtime<B>) -> impl Future<Output = omnia::anyhow::Result<()>> + Send {
-        let mut store = runtime.build_store(runtime.store());
-        assert_eq!(store.data_mut().view::<Self>().client.id(), 1);
+        let mut backends = runtime.backends().clone();
+        assert_eq!(Provides::<Self>::borrow(&mut backends).id(), 1);
         ready(Ok(()))
     }
 }

@@ -56,9 +56,8 @@ async fn call(runtime: &Runtime<()>, guest: &str, func: &str, message: &str) -> 
         .guest(&GuestId::from(guest))
         .await
         .with_context(|| format!("resolving guest `{guest}`"))?;
-    let mut store = runtime.build_store(runtime.store());
-    let instance = runtime
-        .instantiate(entry.instance_pre(), &mut store)
+    let (mut store, instance) = runtime
+        .enter(&entry, ChainCtx::server())
         .await
         .with_context(|| format!("instantiating `{guest}`"))?;
     let export = instance
