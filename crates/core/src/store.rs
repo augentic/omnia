@@ -11,7 +11,9 @@ use wasmtime::{StoreLimits, StoreLimitsBuilder};
 use wasmtime_wasi::cli::StdoutStream;
 use wasmtime_wasi::{FsPerms, ResourceTable, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 
-use crate::{ChainCtx, Dispatcher, Extensions, HostCtx, MountRegistry, Provides, RuntimeOptions};
+use crate::{
+    ChainCtx, Dispatcher, Extensions, GuestId, HostCtx, MountRegistry, Provides, RuntimeOptions,
+};
 
 /// Where every guest's stdout and stderr go when a deployment redirects
 /// them: one shared stream pair, each store opening a fresh writer onto it.
@@ -47,10 +49,12 @@ impl fmt::Debug for Stdio {
 
 /// The per-store construction inputs for [`StoreBase::new`].
 ///
-/// `options`, `dispatcher`, and `chain` are required; the rest default
-/// sensibly (empty argv, no mounts, host env inheritance) so hand-written test
-/// runtimes build unchanged.
+/// `guest`, `options`, `dispatcher`, and `chain` say what the store is for.
+/// Each of the rest has a `None` or empty value a hand-built store context
+/// can pass: empty argv, no mounts, host env inheritance.
 pub struct StoreConfig<'a> {
+    /// The guest the store is built for.
+    pub guest: GuestId,
     /// Runtime options; caps linear-memory growth at
     /// [`RuntimeOptions::max_memory_bytes`].
     pub options: &'a RuntimeOptions,
@@ -85,8 +89,10 @@ pub struct StoreConfig<'a> {
 ///
 /// Construction policy (WASI inheritance, argv, and the memory limit) lives in
 /// [`StoreBase::new`] so it is documented and unit-testable instead of being
-/// inlined in [`Runtime::store`](crate::Runtime::store).
+/// inlined in [`Runtime::enter`](crate::Runtime::enter).
 pub struct StoreBase {
+    /// The guest this store runs.
+    pub guest: GuestId,
     /// The store's WASI resource table.
     pub table: ResourceTable,
     /// The store's WASI context (inherited env/stdin, host stdout/stderr).
@@ -161,6 +167,7 @@ impl StoreBase {
         }
 
         Self {
+            guest: config.guest,
             table: ResourceTable::new(),
             wasi: wasi_builder.build(),
             limits: StoreLimitsBuilder::new().memory_size(config.options.max_memory_bytes).build(),
@@ -199,6 +206,12 @@ impl<B> StoreCtx<B> {
         B: Provides<H>,
     {
         H::view(self.backends.borrow(), &mut self.base.table)
+    }
+
+    /// The guest this store runs.
+    #[must_use]
+    pub const fn guest(&self) -> &GuestId {
+        &self.base.guest
     }
 
     /// A handle to the store's startup-validated mount registry, for

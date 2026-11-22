@@ -18,8 +18,9 @@ use crate::registry::{Guest, GuestId};
 use crate::source::LoadedGuest;
 use crate::store::StoreCtx;
 
-/// Builds a fresh, fully configured guest store over the backend bundle `B`
-/// per served invocation, at the chain context the invocation runs at.
+/// Builds a fresh, fully configured store for one guest over the backend
+/// bundle `B`, per served invocation, at the chain context the invocation
+/// runs at.
 pub type StoreFactory<B> = Arc<dyn Fn(ChainCtx) -> Store<StoreCtx<B>> + Send + Sync>;
 
 /// Guest→guest linking as the registry drives it, over the backend bundle `B`.

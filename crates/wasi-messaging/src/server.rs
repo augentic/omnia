@@ -7,7 +7,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use anyhow::{Result, anyhow};
 use futures::FutureExt as _;
 use futures::future::BoxFuture;
-use omnia_core::{PatternRoutes, Provides, Runtime, TriggerRouter};
+use omnia_core::{ChainCtx, PatternRoutes, Provides, Runtime, TriggerRouter};
 use tokio::sync::Semaphore;
 use tracing::{Instrument, info_span, instrument};
 
@@ -144,9 +144,8 @@ where
             ..Delivery::from(message)
         };
 
-        let mut store = self.state.build_store(self.state.store());
-        let instance =
-            self.state.instantiate(guest.instance_pre(), &mut store).await.map_err(|error| {
+        let (mut store, instance) =
+            self.state.enter(&guest, ChainCtx::server()).await.map_err(|error| {
                 HandleError::Unavailable(format!("instantiating `{guest_id}`: {error:#}"))
             })?;
         let messaging = indices
@@ -171,7 +170,9 @@ where
     }
 
     async fn client(&self) -> Result<Arc<dyn Endpoint>> {
-        self.state.store().view::<WasiMessaging>().client.endpoint().await
+        let mut backends = self.state.backends().clone();
+        let endpoint = Provides::<WasiMessaging>::borrow(&mut backends).endpoint();
+        endpoint.await
     }
 }
 

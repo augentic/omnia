@@ -409,6 +409,10 @@ criteria = "safe-to-run"
 version = "0.14.2"
 criteria = "safe-to-deploy"
 
+[[exemptions.hashbrown]]
+version = "0.17.2"
+criteria = "safe-to-deploy"
+
 [[exemptions.hashlink]]
 version = "0.12.2"
 criteria = "safe-to-deploy"
@@ -639,6 +643,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.portable-atomic]]
 version = "1.15.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.postcard]]
+version = "1.2.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.potential_utf]]
@@ -918,7 +926,7 @@ version = "0.30.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.toml]]
-version = "1.2.1+spec-1.1.0"
+version = "1.2.2+spec-1.1.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.toml_writer]]
@@ -986,7 +994,7 @@ version = "0.9.5"
 criteria = "safe-to-deploy"
 
 [[exemptions.walkdir]]
-version = "2.5.0"
+version = "2.5.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.wasm-bindgen]]
@@ -1058,11 +1066,11 @@ version = "0.8.4"
 criteria = "safe-to-deploy"
 
 [[exemptions.zerocopy]]
-version = "0.8.63"
+version = "0.8.64"
 criteria = "safe-to-deploy"
 
 [[exemptions.zerocopy-derive]]
-version = "0.8.63"
+version = "0.8.64"
 criteria = "safe-to-deploy"
 
 [[exemptions.zerofrom]]

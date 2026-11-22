@@ -21,16 +21,16 @@ use hyper::header::{FORWARDED, HOST, HeaderValue};
 use hyper::service::service_fn;
 use hyper_util::rt::TokioExecutor;
 use hyper_util::server::conn::auto;
-use omnia_core::{Backends, HttpRoutes, Provides, Runtime, StoreCtx, TriggerRouter};
+use omnia_core::{Backends, ChainCtx, HttpRoutes, Provides, Runtime, StoreCtx, TriggerRouter};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
-use tokio::task::JoinSet;
+use tokio::task::{JoinHandle, JoinSet};
 use tokio::time::timeout;
 use tracing::{Instrument, info_span, instrument};
-use wasmtime::AsContextMut as _;
+use wasmtime::{AsContextMut as _, Store};
 use wasmtime_wasi_http::io::TokioIo;
-use wasmtime_wasi_http::p3::bindings::ServiceIndices;
 use wasmtime_wasi_http::p3::bindings::http::types as wasi;
+use wasmtime_wasi_http::p3::bindings::{Service, ServiceIndices};
 
 use super::{WasiHttp, WasiHttpCtxView};
 
@@ -226,79 +226,11 @@ where
             )?;
 
         // instantiate the selected guest fresh (instance-per-call)
-        let store_data = self.state.store();
-        let mut store = self.state.build_store(store_data);
-        let instance = self.state.instantiate(guest.instance_pre(), &mut store).await?;
+        let (mut store, instance) = self.state.enter(&guest, ChainCtx::server()).await?;
         let service = indices.load(&mut store, &instance)?;
 
         let (sender, receiver) = oneshot::channel::<Result<hyper::Response<OutgoingBody>>>();
-
-        let guest_task = tokio::spawn(async move {
-            let result = store
-                .run_concurrent(async |store| {
-                    // one error path through `sender`, so the caller never
-                    // mistakes a real error for a panicked task
-                    let built = async move {
-                        let (request, io) = store.with(|mut access| {
-                            let mut cx = access.as_context_mut();
-                            wasi::Request::from_http(view(cx.data_mut()).hooks, request)
-                        });
-                        let req = store
-                            .with(|mut store| {
-                                view(store.as_context_mut().data_mut()).table.push(request)
-                            })
-                            .context("failed to push request to table")?;
-
-                        let res = service
-                            .wasi_http_handler()
-                            .call_handle(store, req)
-                            .await
-                            .map_err(anyhow::Error::from)
-                            .context("guest trap")?
-                            .map_err(|e| anyhow!("guest error: {e}"))?;
-                        let wasi_resp = store
-                            .with(|mut store| {
-                                view(store.as_context_mut().data_mut()).table.delete(res)
-                            })
-                            .context("failed to delete response from table")?;
-                        store
-                            .with(|mut store| wasi_resp.into_http_with_getter(&mut store, io, view))
-                            .map_err(|e| anyhow!("converting guest response: {e}"))
-                    }
-                    .await;
-
-                    match built {
-                        Ok(resp) => {
-                            // keep `run_concurrent` alive until hyper has consumed
-                            // the body, so the wasi pipe resources stay valid
-                            let (body_done_tx, body_done_rx) = oneshot::channel::<()>();
-                            let resp = resp.map(|body| {
-                                BodyDoneWrapper {
-                                    body: body.map_err(Into::into),
-                                    _tx: body_done_tx,
-                                }
-                                .boxed_unsync()
-                            });
-                            if sender.send(Ok(resp)).is_ok() {
-                                _ = body_done_rx.await;
-                            }
-                        }
-                        Err(error) => {
-                            _ = sender.send(Err(error));
-                        }
-                    }
-
-                    anyhow::Ok(())
-                })
-                .instrument(info_span!("http-request"))
-                .await;
-
-            match result {
-                Ok(Ok(())) => {}
-                Ok(Err(e)) => tracing::error!("http guest task error: {e:#}"),
-                Err(e) => tracing::error!("run_concurrent error: {e:?}"),
-            }
-        });
+        let guest_task = spawn_guest(store, service, request, sender);
 
         // bound time-to-response (not the streaming body); cancel a hung guest
         let response = match timeout(self.state.options().guest_timeout, receiver).await {
@@ -315,6 +247,84 @@ where
 
         Ok(response)
     }
+}
+
+// Runs the guest's handler on a task of its own, which owns the store. The
+// response or the failure goes through `sender`, and the task lives on until
+// hyper has consumed the body.
+fn spawn_guest<B, T>(
+    mut store: Store<StoreCtx<B>>, service: Service, request: http::Request<T>,
+    sender: oneshot::Sender<Result<hyper::Response<OutgoingBody>>>,
+) -> JoinHandle<()>
+where
+    B: Provides<WasiHttp>,
+    T: Body<Data = Bytes> + Send + 'static,
+    T::Error: Into<wasmtime_wasi_http::Error>,
+{
+    tokio::spawn(async move {
+        let result = store
+            .run_concurrent(async |store| {
+                // one error path through `sender`, so the caller never
+                // mistakes a real error for a panicked task
+                let built = async move {
+                    let (request, io) = store.with(|mut access| {
+                        let mut cx = access.as_context_mut();
+                        wasi::Request::from_http(view(cx.data_mut()).hooks, request)
+                    });
+                    let req = store
+                        .with(|mut store| {
+                            view(store.as_context_mut().data_mut()).table.push(request)
+                        })
+                        .context("failed to push request to table")?;
+
+                    let res = service
+                        .wasi_http_handler()
+                        .call_handle(store, req)
+                        .await
+                        .map_err(anyhow::Error::from)
+                        .context("guest trap")?
+                        .map_err(|e| anyhow!("guest error: {e}"))?;
+                    let wasi_resp = store
+                        .with(|mut store| view(store.as_context_mut().data_mut()).table.delete(res))
+                        .context("failed to delete response from table")?;
+                    store
+                        .with(|mut store| wasi_resp.into_http_with_getter(&mut store, io, view))
+                        .map_err(|e| anyhow!("converting guest response: {e}"))
+                }
+                .await;
+
+                match built {
+                    Ok(resp) => {
+                        // keep `run_concurrent` alive until hyper has consumed
+                        // the body, so the wasi pipe resources stay valid
+                        let (body_done_tx, body_done_rx) = oneshot::channel::<()>();
+                        let resp = resp.map(|body| {
+                            BodyDoneWrapper {
+                                body: body.map_err(Into::into),
+                                _tx: body_done_tx,
+                            }
+                            .boxed_unsync()
+                        });
+                        if sender.send(Ok(resp)).is_ok() {
+                            _ = body_done_rx.await;
+                        }
+                    }
+                    Err(error) => {
+                        _ = sender.send(Err(error));
+                    }
+                }
+
+                anyhow::Ok(())
+            })
+            .instrument(info_span!("http-request"))
+            .await;
+
+        match result {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => tracing::error!("http guest task error: {e:#}"),
+            Err(e) => tracing::error!("run_concurrent error: {e:?}"),
+        }
+    })
 }
 
 // The sender drops once the body is consumed (or the wrapper dropped); its

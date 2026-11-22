@@ -1,14 +1,15 @@
-//! What a guest store costs: building one over the deployment's backend
-//! bundle, and assembling one host's view of it.
+//! What entering a guest costs: building its store over the deployment's
+//! backend bundle and instantiating it, and assembling one host's view of the
+//! store.
 //!
-//! The runtime links twelve hosts over the in-memory defaults. Run with
-//! `cargo bench -p omnia-test --features host --bench store`.
+//! The runtime links twelve hosts over the in-memory defaults, for one
+//! guest. Run with `cargo bench -p omnia-test --features host --bench store`.
 
 use std::hint::black_box;
 use std::time::Instant;
 
-use anyhow::Result;
-use omnia::{DeploymentBuilder, Runtime};
+use anyhow::{Context as _, Result};
+use omnia::{ChainCtx, DeploymentBuilder, Guest, Manifest, Runtime};
 use omnia_test::host::Backends;
 use omnia_wasi_blobstore::WasiBlobStore;
 use omnia_wasi_config::WasiConfig;
@@ -24,28 +25,29 @@ use omnia_wasi_vault::WasiVault;
 use omnia_wasi_websocket::WasiWebSocket;
 
 const ROUNDS: usize = 41;
-const STORES_PER_ROUND: u32 = 2_000;
+const ENTRIES_PER_ROUND: u32 = 2_000;
 const VIEWS_PER_ROUND: u32 = 2_000_000;
 
 #[tokio::main]
 #[expect(clippy::print_stdout, reason = "a bench reports on stdout")]
 async fn main() -> Result<()> {
     let runtime = boot(Backends::defaults().await).await?;
+    let guest = runtime.registry().guests().next().context("the deployment runs a guest")?;
 
-    let mut store = Samples::default();
+    let mut entry = Samples::default();
     let mut view = Samples::default();
     for round in 0..=ROUNDS {
-        let store_nanos = time_store(&runtime);
-        let view_nanos = time_view(&runtime);
+        let entry_nanos = time_enter(&runtime, &guest).await?;
+        let view_nanos = time_view(&runtime, &guest).await?;
         // the first round warms the allocator and the caches
         if round > 0 {
-            store.0.push(store_nanos);
+            entry.0.push(entry_nanos);
             view.0.push(view_nanos);
         }
     }
 
     println!("nanoseconds per operation, median of {ROUNDS} rounds (fastest round)");
-    println!("store, built and dropped   {store}");
+    println!("guest entered and dropped  {entry}");
     println!("view of `omnia:keyvalue`   {view}");
 
     runtime.shutdown();
@@ -53,7 +55,8 @@ async fn main() -> Result<()> {
 }
 
 async fn boot(backends: Backends) -> Result<Runtime<Backends>> {
-    let mut deployment = DeploymentBuilder::new().dynamic().build::<Backends>().await?;
+    let manifest = Manifest::from_wasm(test_programs::LINK_ECHOER)?;
+    let mut deployment = DeploymentBuilder::new().manifest(manifest).build::<Backends>().await?;
     deployment
         .host::<WasiBlobStore>()?
         .host::<WasiDocStore>()?
@@ -70,16 +73,20 @@ async fn boot(backends: Backends) -> Result<Runtime<Backends>> {
     deployment.assemble(backends).await
 }
 
-fn time_store(runtime: &Runtime<Backends>) -> f64 {
-    time(STORES_PER_ROUND, || drop(black_box(runtime.build_store(runtime.store()))))
+async fn time_enter(runtime: &Runtime<Backends>, guest: &Guest<Backends>) -> Result<f64> {
+    let start = Instant::now();
+    for _ in 0..ENTRIES_PER_ROUND {
+        drop(black_box(runtime.enter(guest, ChainCtx::server()).await?));
+    }
+    Ok(nanos_per(start, ENTRIES_PER_ROUND))
 }
 
-fn time_view(runtime: &Runtime<Backends>) -> f64 {
-    let mut store = runtime.store();
-    time(VIEWS_PER_ROUND, || {
-        let view = black_box(&mut store).view::<WasiKeyValue>();
+async fn time_view(runtime: &Runtime<Backends>, guest: &Guest<Backends>) -> Result<f64> {
+    let (mut store, _instance) = runtime.enter(guest, ChainCtx::server()).await?;
+    Ok(time(VIEWS_PER_ROUND, || {
+        let view = black_box(store.data_mut()).view::<WasiKeyValue>();
         black_box(view.client);
-    })
+    }))
 }
 
 fn time(operations: u32, mut operation: impl FnMut()) -> f64 {
@@ -87,6 +94,10 @@ fn time(operations: u32, mut operation: impl FnMut()) -> f64 {
     for _ in 0..operations {
         operation();
     }
+    nanos_per(start, operations)
+}
+
+fn nanos_per(start: Instant, operations: u32) -> f64 {
     start.elapsed().as_secs_f64() * 1e9 / f64::from(operations)
 }
 

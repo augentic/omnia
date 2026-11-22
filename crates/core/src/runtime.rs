@@ -1,6 +1,7 @@
 //! Connected runtime: [`Runtime`], [`RuntimeParts`], [`WeakRuntime`], and [`ExitStatus`].
 
 mod command;
+mod enter;
 
 use std::io;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -9,7 +10,7 @@ use std::sync::{Arc, Weak};
 use anyhow::Result;
 use tokio::sync::watch;
 use wasmtime::Store;
-use wasmtime::component::{Instance, InstancePre};
+use wasmtime::component::InstancePre;
 
 use crate::artifact::component;
 use crate::digest::Digest;
@@ -434,25 +435,14 @@ impl<B: Backends> Runtime<B> {
         self.inner.stores_built.load(Ordering::Relaxed)
     }
 
-    /// Fresh per-guest store context at the root of a server chain
-    /// ([`ChainCtx::server`]): what a trigger builds for the guest it serves.
-    #[must_use]
-    pub fn store(&self) -> StoreCtx<B> {
-        self.store_in(ChainCtx::server())
-    }
-
-    /// Fresh per-guest store context at `chain`: a root for the command
-    /// driver, the context a link dispatch derived for its callee.
-    ///
-    /// The guest's environment is the host's as it stood when the runtime
-    /// was assembled, with `RUST_LOG` set to the deployment's tracing
-    /// directives — the run's verbosity flag composed with the process
-    /// variable, decided once at build — and `NO_COLOR` set when the console
-    /// the guest shares does not colour its lines.
-    #[must_use]
-    pub fn store_in(&self, chain: ChainCtx) -> StoreCtx<B> {
+    // A fresh store context for `guest` at `chain`. The guest's environment
+    // is the host's as it stood when the runtime was assembled, with
+    // `RUST_LOG` set to the run's tracing directives and `NO_COLOR` set when
+    // the console the guest shares does not colour its lines.
+    fn store_ctx(&self, guest: &Guest<B>, chain: ChainCtx) -> StoreCtx<B> {
         StoreCtx {
             base: StoreBase::new(crate::StoreConfig {
+                guest: guest.id().clone(),
                 options: self.options(),
                 dispatcher: Arc::clone(&self.dispatcher),
                 chain,
@@ -466,15 +456,10 @@ impl<B: Backends> Runtime<B> {
         }
     }
 
-    /// Store with epoch deadline, optional fuel, and memory limiter installed.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `MAX_FUEL` is set but the engine was built without fuel
-    /// metering — a configuration mismatch that would otherwise run guests
-    /// unmetered.
-    #[must_use]
-    pub fn build_store(&self, data: StoreCtx<B>) -> Store<StoreCtx<B>> {
+    // A store with epoch deadline, optional fuel, and memory limiter
+    // installed. Panics when `MAX_FUEL` is set but the engine was built
+    // without fuel metering, which would otherwise run guests unmetered.
+    fn build_store(&self, data: StoreCtx<B>) -> Store<StoreCtx<B>> {
         self.inner.stores_built.fetch_add(1, Ordering::Relaxed);
         let options = self.options();
         let mut store = Store::new(self.registry().engine(), data);
@@ -491,26 +476,14 @@ impl<B: Backends> Runtime<B> {
         store
     }
 
-    /// A shareable factory for fresh, fully configured guest stores at a given
-    /// chain context — what the link serve side hands to each served function
-    /// to instantiate the target per call.
+    // A shareable factory for fresh, fully configured stores for `guest` at a
+    // given chain context: what the link serve side and host dispatch
+    // instantiate the guest on, per call.
     #[must_use]
-    pub fn store_factory(&self) -> StoreFactory<B> {
+    pub(crate) fn store_factory(&self, guest: &Arc<Guest<B>>) -> StoreFactory<B> {
         let runtime = self.clone();
-        Arc::new(move |chain| runtime.build_store(runtime.store_in(chain)))
-    }
-
-    /// Instantiate a guest component into `store`.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the component cannot be instantiated.
-    pub async fn instantiate(
-        &self, instance_pre: &InstancePre<StoreCtx<B>>, store: &mut Store<StoreCtx<B>>,
-    ) -> Result<Instance> {
-        let instance = instance_pre.instantiate_async(store).await?;
-        tracing::debug!("component instantiated");
-        Ok(instance)
+        let guest = Arc::clone(guest);
+        Arc::new(move |chain| runtime.build_store(runtime.store_ctx(&guest, chain)))
     }
 
     /// Drive the deployment's `wasi:cli/run` command once, returning the
@@ -602,7 +575,7 @@ impl<B: Backends> Runtime<B> {
         let guest = Arc::new(Guest::local(id.clone(), instance_pre, digest));
 
         // serve as a pending endpoint, then publish endpoint and entry as one step
-        registry.seam().serve(self.store_factory(), &guest).await.map_err(|error| {
+        registry.seam().serve(self.store_factory(&guest), &guest).await.map_err(|error| {
             SeatError::Internal(format!("serving `{id}` seam exports: {error:#}"))
         })?;
         registry.publish(Arc::clone(&guest)).map_err(|error| match error {
@@ -668,7 +641,6 @@ impl<B: Backends> Runtime<B> {
     pub async fn serve_links(&self) -> Result<()> {
         let registry = self.registry();
         let seam = registry.seam();
-        let factory = self.store_factory();
         let guests: Vec<_> = registry.guests().collect();
 
         // on failure, release what is still parked so a failed bootstrap pins nothing
@@ -679,7 +651,7 @@ impl<B: Backends> Runtime<B> {
         };
 
         for guest in &guests {
-            if let Err(error) = seam.serve(Arc::clone(&factory), guest).await {
+            if let Err(error) = seam.serve(self.store_factory(guest), guest).await {
                 discard_from(0);
                 return Err(error);
             }
