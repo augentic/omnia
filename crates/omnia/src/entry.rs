@@ -7,10 +7,12 @@ use std::env;
 use std::ffi::OsString;
 use std::process::ExitCode;
 
+use anyhow::anyhow;
 use omnia_cli::{PlanError, RunSource};
 
 pub use self::direct::{MainOptions, ManifestSource};
-use crate::{ConnectAll, DeploymentBuilder, Manifest, Mount, Wiring};
+use self::verbosity::Levels;
+use crate::{ConnectAll, DeploymentBuilder, Manifest, Mode, Mount, Wiring};
 
 /// Entry point for generated `main` functions.
 ///
@@ -35,18 +37,25 @@ fn builder(options: MainOptions) -> anyhow::Result<DeploymentBuilder> {
         return Ok(direct::plan_direct(options, env::args_os())?.into_builder());
     }
     match materialize(options, env::args_os(), env::var_os("OMNIA_MANIFEST")) {
-        Ok(builder) => Ok(builder),
+        Ok(plan) => Ok(plan.into_builder()),
         Err(PlanError::Usage(error)) => error.exit(),
         Err(PlanError::Fatal(error)) => Err(error),
     }
 }
 
+// a malformed `--env` is refused before any manifest loads, so the error
+// names the flag rather than the `[environment]` table it joins
 fn materialize(
     options: MainOptions, argv: impl IntoIterator<Item = OsString>,
     omnia_manifest: Option<OsString>,
-) -> Result<DeploymentBuilder, PlanError> {
+) -> Result<EntryPlan, PlanError> {
     let (mode, compiled_in, program_name) = options.into_parts();
     let plan = omnia_cli::plan(argv, omnia_manifest, compiled_in.is_some())?;
+    for entry in &plan.env {
+        omnia_core::env::pattern(entry).map_err(|error| {
+            anyhow!("`--env` {error}; quote a pattern so the shell does not expand it")
+        })?;
+    }
     let manifest = match plan.source {
         RunSource::Manifest(path) => Manifest::load(path)?,
         RunSource::Wasm(path) => Manifest::from_wasm(path)?,
@@ -57,11 +66,79 @@ fn materialize(
         path: arg.host_path,
         writable: arg.writable,
     });
-    let builder =
-        DeploymentBuilder::new().manifest(manifest.mounts(mounts)).args(plan.args).mode(mode);
-    let builder = match program_name {
-        Some(name) => builder.program_name(name),
-        None => builder,
-    };
-    Ok(verbosity::levels(mode, plan.verbose, plan.quiet).apply(builder))
+    Ok(EntryPlan {
+        mode,
+        manifest: Some(manifest.mounts(mounts).inherit(plan.env)),
+        program_name,
+        args: plan.args,
+        levels: verbosity::levels(mode, plan.verbose, plan.quiet),
+    })
+}
+
+/// The planner's outcome: every deployment decision, resolved.
+pub struct EntryPlan {
+    mode: Mode,
+    manifest: Option<Manifest>,
+    program_name: Option<String>,
+    args: Vec<String>,
+    levels: Levels,
+}
+
+impl EntryPlan {
+    /// Assemble the deployment builder this plan describes.
+    pub fn into_builder(self) -> DeploymentBuilder {
+        let builder =
+            DeploymentBuilder::new().manifest(self.manifest).args(self.args).mode(self.mode);
+        let builder = match self.program_name {
+            Some(name) => builder.program_name(name),
+            None => builder,
+        };
+        self.levels.apply(builder)
+    }
+}
+
+// Unit tests by design: `materialize` takes argv and `OMNIA_MANIFEST` as
+// parameters precisely so the `run` grammar's policy is testable without
+// spawning a binary.
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::GuestEntry;
+
+    fn argv(args: &[&str]) -> Vec<OsString> {
+        args.iter().map(OsString::from).collect()
+    }
+
+    fn server(manifest: Manifest) -> MainOptions {
+        MainOptions::new(Mode::Server).manifest(ManifestSource::Inline(manifest))
+    }
+
+    #[test]
+    fn run_env() {
+        let manifest = Manifest::new().guest(GuestEntry::new("app", "app.wasm")).inherit(["HOME"]);
+        let plan = match materialize(server(manifest), argv(&["bin", "run", "--env", "ORDERS_*"]), None)
+        {
+            Ok(plan) => plan,
+            Err(PlanError::Usage(error)) => panic!("expected a plan, got usage: {error}"),
+            Err(PlanError::Fatal(error)) => panic!("expected a plan, got fatal: {error:#}"),
+        };
+        let manifest = plan.manifest.expect("the plan carries the compiled-in manifest");
+        assert_eq!(manifest.environment.inherit, ["HOME", "ORDERS_*"]);
+    }
+
+    // `Cargo.toml` is what an unquoted `*` becomes in a crate's directory.
+    #[test]
+    fn malformed_env() {
+        for entry in ["FOO=bar", "Cargo.toml"] {
+            let manifest = Manifest::new().guest(GuestEntry::new("app", "app.wasm"));
+            match materialize(server(manifest), argv(&["bin", "run", "--env", entry]), None) {
+                Err(PlanError::Fatal(error)) => {
+                    let error = format!("{error:#}");
+                    assert!(error.contains(&format!("`--env` `{entry}`")), "{error}");
+                }
+                Err(PlanError::Usage(error)) => panic!("expected a fatal error, got usage: {error}"),
+                Ok(_) => panic!("`--env {entry}` is not a variable pattern"),
+            }
+        }
+    }
 }

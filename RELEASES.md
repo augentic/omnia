@@ -140,6 +140,16 @@ Unreleased
   - `Default`, where every field has a `default` or is an `Option`.
 - `omnia_core::env`, re-exported as `omnia::env`, with the `list`,
   `millis`, and `paths` parsers a `with` names.
+- `omnia::env::pattern` and `omnia::env::matches`. `pattern` checks a
+  variable pattern, a whole name or a prefix that ends in `*`, and fails
+  with a `PatternError`. `matches` applies one to a name.
+- The host variables every guest sees, each a whole name or a prefix that
+  ends in `*`:
+  - `[environment] inherit` in the manifest, and `Manifest::inherit` with
+    the `Environment` table;
+  - `environment: { inherit: [..] }` in `runtime!`;
+  - `--env NAME` on `run`, carried as `RunPlan::env`;
+  - `omnia_test::host::Deployment::inherit`.
 - `DeploymentBuilder::options` and `omnia_test::host::Deployment::options`
   set the `RuntimeOptions` a deployment runs under, in place of the
   environment's, before the engine and its instance pool are built.
@@ -149,6 +159,14 @@ Unreleased
 
 ### Changed
 
+- A guest no longer sees the host's environment. Its `wasi:cli`
+  environment holds `RUST_LOG`, `NO_COLOR` when the console is plain, and
+  the host variables the deployment names. To keep a guest's variables,
+  name them in `[environment] inherit` (`inherit = ["ORDERS_*"]`), in
+  `runtime!` as `environment: { inherit: [..] }`, or with `run --env`.
+  `inherit = ["*"]` passes every variable, as before. The variables
+  `Metadata::from_env` reads, such as `CLI_REQUEST_ID`, arrive only when
+  their prefix is passed, as `inherit = ["CLI_*"]` passes it.
 - `omnia_sdk::api` is gone, and its items moved:
   - `Context`, `Metadata`, `Handler`, `Handlers`, and `Router` to the crate
     root;
@@ -248,7 +266,11 @@ Unreleased
   always sets.
 - `Endpoint::request` takes a `timeout: Option<Duration>` in place of an
   `Option<RequestOptions>`. The host never sends a zero `timeout`.
-- `StoreConfig` takes the `guest` the store is built for.
+- `StoreConfig` takes the `guest` the store is built for, and an `env` of
+  `None` gives the guest an empty environment, where it inherited the
+  host's.
+- `RuntimeParts` takes `inherit`, the host variables guests see. Empty, a
+  guest sees only `RUST_LOG`, and `NO_COLOR` when the console is plain.
 - `RuntimeOptions` and the `ConnectOptions` of `omnia-wasi-http`,
   `omnia-wasi-keyvalue`, `omnia-wasi-vault`, `omnia-wasi-model`,
   `omnia-wasi-docstore`, and `omnia-wasi-identity` derive omnia's

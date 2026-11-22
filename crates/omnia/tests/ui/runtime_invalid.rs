@@ -74,4 +74,16 @@ mod case_plugins_beside_manifest {
     });
 }
 
+mod case_environment_empty {
+    omnia::runtime!({
+        environment: {},
+    });
+}
+
+mod case_environment_unknown_key {
+    omnia::runtime!({
+        environment: { pass: ["HOME"] },
+    });
+}
+
 fn main() {}

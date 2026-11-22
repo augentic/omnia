@@ -9,7 +9,7 @@ Every key the `omnia::runtime!` macro accepts, with exact semantics. The task-or
 | `hosts:` | The `Host: Backend` map — which WASI interfaces are linked and what implements them | Always (except a backend-less command runtime) |
 | `mode:` | `server` (default) or `command` | Running jobs/CLIs instead of servers |
 | `manifest:` | Compile in a default manifest *path* | You want `run` with no arguments to work |
-| `guests:`, `mounts:`, `plugins:` | Compile in a default manifest *value* (inline), the guests embedded | Same as `manifest:`, but self-contained — no TOML file and no `.wasm` beside the binary at run time |
+| `guests:`, `mounts:`, `environment:`, `plugins:` | Compile in a default manifest *value* (inline), the guests embedded | Same as `manifest:`, but self-contained — no TOML file and no `.wasm` beside the binary at run time |
 
 There is no key for raw argv passthrough: a command-mode runtime with a compiled-in deployment is a [direct command](#direct-commands-raw-argv-passthrough) automatically.
 
@@ -66,7 +66,7 @@ The value is any expression evaluating to a path. Anchoring it with `env!("CARGO
 
 `manifest:` and the inline manifest keys are mutually exclusive — a runtime compiles in a manifest path or a manifest value, not both.
 
-## Inline manifest keys (`guests:`, `mounts:`, `plugins:`)
+## Inline manifest keys (`guests:`, `mounts:`, `environment:`, `plugins:`)
 
 The deployment `omnia.toml` expresses can also be written directly in the macro, mirroring the `omnia::Manifest` schema. The macro expands the keys to a `Manifest` value compiled into the generated `main` as the same lowest-precedence fallback as `manifest:` — with one difference: an inline `path:` guest is *embedded*, its component bytes compiled into the binary and loaded at boot, where a manifest file's guest is read from disk at its first use.
 
@@ -91,6 +91,9 @@ omnia::runtime!({
     mounts: [
         { name: ".", path: concat!(env!("CARGO_MANIFEST_DIR"), "/workspace"), writable: true },
     ],
+    environment: {                                   // optional: the host variables guests see
+        inherit: ["ORDERS_*", "TZ"],
+    },
     plugins: {                                       // optional: where packages come from
         store: "~/.app/store",                       // every package kept here, by reference
         registries: include_str!("wasm-pkg.toml"),   // where one the store lacks is fetched from
@@ -104,8 +107,9 @@ omnia::runtime!({
 - `guests:` is a list of entries `{ path | package, name?, routes?, command?, digest? }` — see [Guest entries](#guest-entries-pathpackage-name-routes-command-digest).
 - `plugins:` is where a package comes from — the store every one is kept in and the registries one the store lacks is fetched through — see [`plugins:`](#plugins-store-registries).
 - `mounts:` are the directories preopened into every guest sandbox; each entry is `{ name, path, writable? }` (`writable` a literal bool, `false` by default). A read-only mount is also a root the guest loader reads a component from when a guest names a path beneath it; a writable mount never is, and one that shares or nests a read-only mount's directory is refused at startup. A relative mount path resolves against the process working directory at run time, so anchor it with `env!("CARGO_MANIFEST_DIR")` as with `manifest:`.
-- Every value other than a guest's `path:` is any Rust expression evaluating to the field's type (strings for names and route patterns, paths for mounts and the store, a `&'static str` or `String` of TOML for `registries`).
-- `manifest:` and the inline keys are mutually exclusive; a manifest file declares the same things as `[[guest]]`, `[[mount]]`, and `[plugins]` — see [Configuration](configuration.md).
+- `environment: { inherit: [..] }` names the host variables every guest sees, each a whole name or a prefix that ends in `*`; `*` alone passes every variable. A guest sees no other host variable, beyond the `RUST_LOG` and `NO_COLOR` the runtime sets. An empty block is a compile error; `inherit: []` passes none. A malformed entry fails startup, naming it. On the `run` grammar, `--env` adds to the list of whichever manifest the run selects; a [direct command](#direct-commands-raw-argv-passthrough) has no `--env`, so this list is all its guests see.
+- Every value other than a guest's `path:` is any Rust expression evaluating to the field's type (strings for names, route patterns, and inherited variables, paths for mounts and the store, a `&'static str` or `String` of TOML for `registries`).
+- `manifest:` and the inline keys are mutually exclusive; a manifest file declares the same things as `[[guest]]`, `[[mount]]`, `[environment]`, and `[plugins]` — see [Configuration](configuration.md).
 
 Nothing declares what guests call between themselves. Every import a guest makes outside the runtime's own namespaces (`wasi:`, `omnia:`) is relayed to the guest exporting it, whichever it is, and an import no guest exports fails at boot — see [Multi-Guest Deployments](../guides/multi-guest-deployments.md#guests-calling-guests).
 
@@ -130,7 +134,7 @@ Where a package comes from — a `package:` guest at its first use, and a releas
 
 Nothing in the invocation opts into the guest loader. When omnia is built with its non-default `loader` feature (`omnia = { version = "...", features = ["loader"] }`), `Deployment::assemble` links the `omnia:plugins/loader` host beside WASI — worlds that do not import it never see it — and installs the loader's grant — the invocation's guests as the names a `declared` load may ensure are loaded (through the same first-use seam every other use goes through), its read-only `mounts:` as the roots a `path` load may lie beneath, and its `plugins:` as the store and routing a `release` load is acquired through; without the feature a manifest declaring `plugins` or a `package:` guest is refused at startup, and a guest importing the loader fails at instantiation. An embedder wanting a different acquirer — a `RegistryClient` over a `PackageStore` of its own, a source of its own — selects it on the built deployment with `Deployment::registry_source(..)` before `assemble`. The `loader` and `link` features are independent: loading a guest and dispatching to it are two capabilities, and a deployment that does both enables both.
 
-Because mounts, guests, and the plugins block are deployment data, a test can overlay them without touching the binary's declaration: `omnia_test::host::Deployment::from(runtime::manifest()).mount(scratch.mount(false))` replaces the binary's `.` mount (mounts dedup by name, last wins, before any directory opens) and `runtime::run_with(...)` drives the same generated wiring over in-memory backends — see [Testing omnia code](../guides/testing-omnia-code.md).
+Because mounts, guests, the environment, and the plugins block are deployment data, a test can overlay them without touching the binary's declaration: `omnia_test::host::Deployment::from(runtime::manifest()).mount(scratch.mount(false))` replaces the binary's `.` mount (mounts dedup by name, last wins, before any directory opens) and `runtime::run_with(...)` drives the same generated wiring over in-memory backends — see [Testing omnia code](../guides/testing-omnia-code.md).
 
 ## Command routing (`command: true`)
 

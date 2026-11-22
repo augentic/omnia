@@ -42,8 +42,8 @@ impl Config {
         if let (Some(_), Some(inline)) = (spans.manifest, spans.inline) {
             return Err(syn::Error::new(
                 inline,
-                "`manifest:` and the inline keys (`guests`, `mounts`, `plugins`) are mutually \
-                 exclusive; declare the deployment in the manifest file",
+                "`manifest:` and the inline keys (`guests`, `mounts`, `environment`, `plugins`) \
+                 are mutually exclusive; declare the deployment in the manifest file",
             ));
         }
 
@@ -127,6 +127,10 @@ impl Parse for Config {
                     manifest.mounts = m;
                     inline_span.get_or_insert(span);
                 }
+                OptValue::Environment(e) => {
+                    manifest.environment = Some(e);
+                    inline_span.get_or_insert(span);
+                }
             }
         }
 
@@ -193,6 +197,10 @@ impl Parse for Opt {
             let key = input.parse::<kw::mounts>()?;
             input.parse::<Token![:]>()?;
             ("mounts", key.span, OptValue::Mounts(parse_bracketed_list(input)?))
+        } else if l.peek(kw::environment) {
+            let key = input.parse::<kw::environment>()?;
+            input.parse::<Token![:]>()?;
+            ("environment", key.span, OptValue::Environment(input.parse()?))
         } else {
             return Err(l.error());
         };
@@ -207,6 +215,7 @@ enum OptValue {
     Guests(Vec<GuestSpec>),
     Plugins(PluginsSpec),
     Mounts(Vec<MountSpec>),
+    Environment(EnvironmentSpec),
 }
 
 mod kw {
@@ -217,6 +226,7 @@ mod kw {
     syn::custom_keyword!(plugins);
     syn::custom_keyword!(registries);
     syn::custom_keyword!(mounts);
+    syn::custom_keyword!(environment);
 }
 
 fn parse_mode(input: ParseStream) -> Result<Mode> {
@@ -281,13 +291,16 @@ impl Parse for HostEntry {
     }
 }
 
-/// Inline manifest keys (`guests`, `mounts`, `plugins`) parsed from
-/// `runtime!({ ... })`; mirrors the `omnia::Manifest` schema.
+/// Inline manifest keys (`guests`, `mounts`, `environment`, `plugins`)
+/// parsed from `runtime!({ ... })`; mirrors the `omnia::Manifest` schema.
 #[derive(Default)]
 pub struct ManifestSpec {
     /// The `guests:` list — every component the deployment may run.
     pub guests: Vec<GuestSpec>,
     pub mounts: Vec<MountSpec>,
+    /// The `environment: { .. }` block — the host variables every guest
+    /// sees.
+    pub environment: Option<EnvironmentSpec>,
     /// The `plugins: { .. }` block — the package store and the routing of
     /// every package source.
     pub plugins: Option<PluginsSpec>,
@@ -295,7 +308,42 @@ pub struct ManifestSpec {
 
 impl ManifestSpec {
     pub const fn is_empty(&self) -> bool {
-        self.guests.is_empty() && self.mounts.is_empty() && self.plugins.is_none()
+        self.guests.is_empty()
+            && self.mounts.is_empty()
+            && self.environment.is_none()
+            && self.plugins.is_none()
+    }
+}
+
+/// The `environment: { inherit: [...] }` block.
+pub struct EnvironmentSpec {
+    /// The `inherit:` names, each a whole variable name or a prefix that
+    /// ends in `*`.
+    pub inherit: Vec<Expr>,
+}
+
+impl Parse for EnvironmentSpec {
+    fn parse(input: ParseStream) -> Result<Self> {
+        let mut inherit = None;
+        let span = parse_kv_block(input, |key, value| {
+            match key.to_string().as_str() {
+                "inherit" => inherit = Some(parse_bracketed_list(value)?),
+                other => {
+                    return Err(syn::Error::new(
+                        key.span(),
+                        format!("unknown environment key `{other}`; expected `inherit`"),
+                    ));
+                }
+            }
+            Ok(())
+        })?;
+        let inherit = inherit.ok_or_else(|| {
+            syn::Error::new(
+                span,
+                "`environment:` block is empty; name the host variables guests see in `inherit`",
+            )
+        })?;
+        Ok(Self { inherit })
     }
 }
 

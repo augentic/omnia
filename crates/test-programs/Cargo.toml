@@ -54,6 +54,11 @@ path = "programs/blobstore/unstable.rs"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "cli_environment"
+path = "programs/cli/environment.rs"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "cli_rust_log"
 path = "programs/cli/rust_log.rs"
 crate-type = ["cdylib"]

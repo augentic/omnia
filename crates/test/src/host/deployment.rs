@@ -12,8 +12,9 @@ use omnia::{
 };
 use omnia_wasi_otel::WasiOtel;
 
-/// One command-mode deployment: guests, mounts, arguments, the package
-/// store and registries, the tracing level, and the runtime options.
+/// One command-mode deployment: guests, mounts, the environment they
+/// inherit, arguments, the package store and registries, the tracing level,
+/// and the runtime options.
 ///
 /// What guests call between themselves is read off their components,
 /// declared nowhere; `store` is where a package a guest names is kept, and
@@ -50,6 +51,7 @@ pub struct Deployment {
     guests: Vec<Entry>,
     command: Option<String>,
     mounts: Vec<Mount>,
+    inherit: Vec<String>,
     args: Vec<String>,
     store: Option<PathBuf>,
     registries: Option<RegistryConfig>,
@@ -108,6 +110,16 @@ impl Deployment {
     #[must_use]
     pub fn mounts(mut self, mounts: impl IntoIterator<Item = Mount>) -> Self {
         self.mounts.extend(mounts);
+        self
+    }
+
+    /// Passes the test process's variables `names` to every guest, beside
+    /// the base manifest's `[environment] inherit`.
+    ///
+    /// Each name is whole, or a prefix that ends in `*`.
+    #[must_use]
+    pub fn inherit<S: Into<String>>(mut self, names: impl IntoIterator<Item = S>) -> Self {
+        self.inherit.extend(names.into_iter().map(Into::into));
         self
     }
 
@@ -199,7 +211,10 @@ impl Deployment {
     /// a [`guest`](Self::guest) path cannot be read.
     pub fn manifest(&self) -> Result<Manifest> {
         let base = self.base.clone().map(ManifestSource::into_manifest).transpose()?;
-        let mut manifest = base.unwrap_or_default().mounts(self.mounts.iter().cloned());
+        let mut manifest = base
+            .unwrap_or_default()
+            .mounts(self.mounts.iter().cloned())
+            .inherit(self.inherit.iter().cloned());
         if let Some(store) = &self.store {
             manifest = manifest.store(store.clone());
         }

@@ -189,7 +189,7 @@ All of this is declared in the `omnia.toml` manifest ([reference](reference/conf
 
 ## Runtime Execution Flow
 
-1. **CLI parsing** — the generated `main` delegates to `omnia::main`, which parses the `run` subcommand (`omnia-cli` decides the source over `--manifest` / `OMNIA_MANIFEST` / positional `<wasm>` / compiled-in), materializes a `Manifest`, and appends CLI `--mount` entries onto it.
+1. **CLI parsing** — the generated `main` delegates to `omnia::main`, which parses the `run` subcommand (`omnia-cli` decides the source over `--manifest` / `OMNIA_MANIFEST` / positional `<wasm>` / compiled-in), materializes a `Manifest`, and appends CLI `--mount` and `--env` entries onto it.
 2. **Build** — `DeploymentBuilder` validates the manifest, expands `~/` paths against `$HOME`, resolves mounts, refuses a package store beneath a writable mount, reads the `registries` configuration, loads the guests compiled into the runtime (embedded bytes, the `run <component>` file — raw wasm or `omnia compile` output, either loads), carries every other `[[guest]]` as a declared `Source`, and returns a `Deployment` ready for host linking.
 3. **Assemble** — `run` connects backends, `Wiring::link` adds each host to the linker, `Deployment::assemble` links the guest loader host (with the `loader` feature), builds the `Runtime` from `RuntimeParts` — the registry client `source.package` guests are acquired through, over the `plugins.store` store and the `registries` routing, unless `Deployment::registry_source` selected one — and serves every loaded guest's linked exports.
 4. **Bootstrap** — starts epoch interruption and pool-metric sampling, then logs **`omnia ready`**.

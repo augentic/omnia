@@ -9,6 +9,11 @@
 #
 #   cargo run --example http-routing -- run
 
+# A guest sees no host variable the deployment does not name; guest `a`
+# reports the server's address.
+[environment]
+inherit = ["HTTP_ADDR"]
+
 [[guest]]
 name = "a"
 source.path = "../../target/wasm32-wasip3/debug/examples/http_routing_a_wasm.wasm"

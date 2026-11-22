@@ -12,8 +12,8 @@ use std::time::Duration;
 use anyhow::bail;
 use anyhow::{Context, Result};
 pub use manifest::{
-    GuestEntry, GuestRoutes, Manifest, Mount, PluginsConfig, RegistryConfig, Transport,
-    TransportKind,
+    Environment, GuestEntry, GuestRoutes, Manifest, Mount, PluginsConfig, RegistryConfig,
+    Transport, TransportKind,
 };
 #[cfg(feature = "link")]
 use omnia_core::ChainPolicy;
@@ -326,6 +326,7 @@ impl DeploymentBuilder {
                 registry: None,
             },
             rust_log,
+            inherit: manifest.environment.inherit,
             stdio: self.stdio,
         })
     }
@@ -371,6 +372,8 @@ pub struct Deployment<B: 'static> {
     loader: Loader,
     // every store's `RUST_LOG`
     rust_log: String,
+    // the host variables every store's environment holds
+    inherit: Vec<String>,
     stdio: Option<Stdio>,
 }
 
@@ -503,6 +506,7 @@ impl<B: Backends> Deployment<B> {
             },
             registry_config: deployment.registry_config.clone(),
             rust_log: deployment.rust_log.clone(),
+            inherit: deployment.inherit.clone(),
             stdio: deployment.stdio.clone(),
             command_guest: deployment.command_guest.clone(),
             backends,

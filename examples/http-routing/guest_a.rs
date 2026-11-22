@@ -19,7 +19,8 @@ impl Guest for GuestA {
     }
 }
 
-// `HTTP_ADDR` is the address actually serving, so a guest can advertise its own endpoint
+// `omnia.toml` passes the host's `HTTP_ADDR`, the address the server binds
+// when set, so a guest can advertise its own endpoint
 async fn respond() -> String {
     let addr = std::env::var("HTTP_ADDR").unwrap_or_else(|_| "unset".into());
     format!("http-routing example: guest a (HTTP_ADDR={addr})\n")

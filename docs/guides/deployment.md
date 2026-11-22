@@ -98,3 +98,4 @@ with the mode and guest count attached. Orchestrators (or a log-watching startup
 - [ ] `RUST_LOG=info` and `OTEL_EXPORTER_OTLP_ENDPOINT` set
 - [ ] Readiness keyed on the `omnia ready` log line (or TCP on `HTTP_ADDR`)
 - [ ] Mounts limited to the directories guests actually need, read-only unless writes are required ([security model](../security-model.md))
+- [ ] `[environment] inherit` (or `--env`) names each host variable guests read, since they see no other ([configuration](../reference/configuration.md#deployment-manifest-omniatoml))
