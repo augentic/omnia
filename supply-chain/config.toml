@@ -481,6 +481,18 @@ criteria = "safe-to-deploy"
 version = "1.0.19"
 criteria = "safe-to-deploy"
 
+[[exemptions.jiff]]
+version = "1.0.2"
+criteria = "safe-to-deploy"
+
+[[exemptions.jiff-core]]
+version = "1.0.1"
+criteria = "safe-to-deploy"
+
+[[exemptions.jiff-static]]
+version = "1.0.2"
+criteria = "safe-to-deploy"
+
 [[exemptions.jni]]
 version = "0.22.4"
 criteria = "safe-to-deploy"

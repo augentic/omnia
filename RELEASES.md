@@ -230,6 +230,11 @@ Unreleased
 - `Endpoint::request` takes a `timeout: Option<Duration>` in place of an
   `Option<RequestOptions>`. The host never sends a zero `timeout`.
 - `StoreConfig` takes the `guest` the store is built for.
+- The re-exported `wasmtime` and `wasmtime_wasi` are 51.0.0, a new major
+  version for embedders.
+- `omnia:sql` temporal parameters are validated with `jiff`. A fraction
+  longer than nine digits and a Unicode minus sign in an offset no
+  longer bind.
 
 ### Removed
 
