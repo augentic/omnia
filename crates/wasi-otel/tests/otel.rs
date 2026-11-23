@@ -152,14 +152,6 @@ async fn run<C: OtelClient + Clone>(wasm: &str, client: C) {
 }
 
 #[tokio::test]
-async fn otel_instrumented_handler() {
-    let recording = run_guest(test_programs::OTEL_INSTRUMENTED_HANDLER).await;
-    assert_eq!(recording.span_names(), ["traced"]);
-    // no metrics recorded, so the flush skips the export rather than send an empty one
-    assert!(recording.metrics.lock().expect("metrics lock").is_empty());
-}
-
-#[tokio::test]
 async fn otel_spawned_task_pending() {
     let recording = run_guest(test_programs::OTEL_SPAWNED_TASK_PENDING).await;
     assert_eq!(recording.span_names(), ["traced"]);
@@ -170,6 +162,8 @@ async fn otel_spawned_task_pending() {
 async fn otel_axum_handler() {
     let recording = run_guest(test_programs::OTEL_AXUM_HANDLER).await;
     assert_eq!(recording.span_names(), ["traced"]);
+    // no metrics recorded, so the flush skips the export rather than send an empty one
+    assert!(recording.metrics.lock().expect("metrics lock").is_empty());
 }
 
 #[tokio::test]
@@ -483,20 +477,6 @@ fn raw_metrics(resource: &ResourceMetrics) {
 }
 
 #[tokio::test]
-async fn otel_metrics_counter() {
-    let recording = run_guest(test_programs::OTEL_METRICS_COUNTER).await;
-
-    let exports = recording.metric_exports();
-    let [metrics] = exports.as_slice() else {
-        panic!("one flush exports one metrics collection, got {}", exports.len());
-    };
-    let hits = sum(metrics, "hits");
-    assert!(hits.is_monotonic);
-    assert_eq!(hits.data_points.len(), 1, "both increments land on one data point");
-    assert_eq!(hits.data_points[0].value, Some(Value::AsInt(2)));
-}
-
-#[tokio::test]
 async fn otel_metrics_instruments() {
     let recording = run_guest(test_programs::OTEL_METRICS_INSTRUMENTS).await;
 
@@ -512,10 +492,16 @@ async fn otel_metrics_instruments() {
     // `broken` (descending bounds) records nothing, so it never exports.
     assert_eq!(
         names(first),
-        ["big", "bytes", "inflight", "latency", "queue_depth", "requests", "sizes"]
+        ["big", "bytes", "hits", "inflight", "latency", "queue_depth", "requests", "sizes"]
     );
     // Only what was recorded since the first flush: no histogram, no gauge.
     assert_eq!(names(second), ["inflight", "requests"]);
+
+    // A `monotonic_counter.*` tracing field is a counter of its own.
+    let hits = sum(first, "hits");
+    assert!(hits.is_monotonic);
+    assert_eq!(hits.data_points.len(), 1, "both increments land on one data point");
+    assert_eq!(hits.data_points[0].value, Some(Value::AsInt(2)));
 
     // Counter: delta, one data point per attribute set however its keys were
     // ordered, and the later increment alone in the second export (through a

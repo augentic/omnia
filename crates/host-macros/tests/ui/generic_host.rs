@@ -1,4 +1,4 @@
-use omnia_core::HostCtx;
+use omnia_host_macros::HostCtx;
 
 pub trait FooClient {}
 

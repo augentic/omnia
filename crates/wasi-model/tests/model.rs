@@ -224,6 +224,8 @@ async fn model_echo_text() {
     assert_eq!(seen[0].messages, ["hi", "second"]);
     assert_eq!(seen[0].tools, Vec::<String>::new());
     assert!(seen[0].temperature.is_none());
+    assert_eq!(seen[0].format, SeenFormat::Text);
+    assert!(seen[0].workspace.is_none());
 }
 
 #[tokio::test]
@@ -252,18 +254,8 @@ async fn model_request_shape() {
 }
 
 #[tokio::test]
-async fn model_echo_json() {
-    run_guest(test_programs::MODEL_ECHO_JSON, vec![], echo(&["default"]).await).await;
-}
-
-#[tokio::test]
-async fn model_echo_unsupported() {
-    run_guest(test_programs::MODEL_ECHO_UNSUPPORTED, vec![], echo(&["default"]).await).await;
-}
-
-#[tokio::test]
-async fn model_named() {
-    run_guest(test_programs::MODEL_NAMED, vec![], echo(&["default", "fast"]).await).await;
+async fn model_echo_default() {
+    run_guest(test_programs::MODEL_ECHO_DEFAULT, vec![], echo(&["default", "fast"]).await).await;
 }
 
 #[tokio::test]
@@ -294,13 +286,15 @@ async fn model_error_codes() {
 }
 
 #[tokio::test]
-async fn model_invalid_request() {
+async fn model_refused_request() {
     // Every request is refused before the backend runs; an empty script
     // proves it is never reached. The mount is the lend a worker grant's
-    // shape rules are checked beneath.
+    // shape rules are checked beneath, and holds the nested directory no
+    // lend may take as its root.
     let workspace = scratch();
+    fs::create_dir(workspace.path().join("nested")).expect("creating nested dir");
     run_scripted(
-        test_programs::MODEL_INVALID_REQUEST,
+        test_programs::MODEL_REFUSED_REQUEST,
         vec![workspace.mount(true)],
         ScriptedModel::default(),
     )
@@ -308,16 +302,9 @@ async fn model_invalid_request() {
 }
 
 #[tokio::test]
-async fn model_schema_answer() {
-    let model = ScriptedModel::answering([r#"{"verdict":"pass"}"#]);
-    let model = run_scripted(test_programs::MODEL_SCHEMA_ANSWER, vec![], model).await;
-    assert!(!model.seen()[0].check, "no check was asked for");
-    assert_eq!(model.exchanges(), vec![]);
-}
-
-#[tokio::test]
-async fn model_usage() {
-    let answer = Answer {
+async fn model_answer_flow() {
+    let user_turn = "review the Rust code\n\nthe Rust crate\n\nInput: in\nOutput: out";
+    let usage = Answer {
         answer: "hi".to_owned(),
         usage: Some(Usage {
             input_tokens: 3,
@@ -328,17 +315,43 @@ async fn model_usage() {
         }),
         transcript: None,
     };
-    run_scripted(test_programs::MODEL_USAGE, vec![], ScriptedModel::replying([answer])).await;
+    let script = [
+        Answer::from(r#"{"verdict":"pass"}"#.to_owned()),
+        usage,
+        Answer::from(user_turn.to_owned()),
+    ];
+    let model =
+        run_scripted(test_programs::MODEL_ANSWER_FLOW, vec![], ScriptedModel::replying(script))
+            .await;
+    let seen = model.seen();
+    assert!(!seen[0].check, "no check was asked for");
+    assert_eq!(model.exchanges(), vec![]);
+
+    // the assembled system channel crossed the boundary intact
+    assert_eq!(
+        seen[2].system.as_deref(),
+        Some("prefer {language}\n\na Rust reviewer\n\n- be Rust-idiomatic")
+    );
 }
 
 #[tokio::test]
-async fn model_check_accepted() {
-    let model = ScriptedModel::answering([PASS]);
-    let model = run_scripted(test_programs::MODEL_CHECK_ACCEPTED, vec![], model).await;
+async fn model_check_flow() {
+    let accepted = [PASS];
+    let corrected = [FAIL, PASS];
+    let plain = ["nope", "hi"];
+    let recovered = [FAIL, PASS, r#"{"other":1}"#, PASS];
+    let tools = [PASS, PASS];
+    let exhausted = [FAIL, FAIL];
+    let script = [&accepted[..], &corrected, &plain, &recovered, &tools, &exhausted].concat();
 
-    // Wire fidelity: `check` and the type's schema crossed the boundary.
+    // the `tools` turns each call `lookup` before answering
+    let model = ScriptedModel::answering(script)
+        .calling(9, [("lookup", r#"{"id":1}"#)])
+        .calling(10, [("lookup", r#"{"id":1}"#)]);
+    let model = run_scripted(test_programs::MODEL_CHECK_FLOW, vec![], model).await;
+
+    // wire fidelity: `check` and the type's schema crossed the boundary
     let seen = model.seen();
-    assert_eq!(seen.len(), 1);
     assert!(seen[0].check);
     assert_eq!(seen[0].system.as_deref(), Some("judge"));
     assert_eq!(seen[0].messages, ["judge this"]);
@@ -347,35 +360,39 @@ async fn model_check_accepted() {
     };
     assert_eq!(name, "verdict");
     assert!(schema.contains(r#""verdict""#) && schema.contains(r#""findings""#), "{schema}");
-    assert_eq!(model.exchanges(), [check(PASS, Ok(""))]);
-}
-
-#[tokio::test]
-async fn model_check_corrected() {
-    let model = ScriptedModel::answering([FAIL, PASS]);
-    let model = run_scripted(test_programs::MODEL_CHECK_CORRECTED, vec![], model).await;
-
-    // The correction the guest's check produced went back over the session
-    // verbatim, and the backend's second attempt carried the same request.
-    assert_eq!(model.seen().len(), 2);
     let exchanges = model.exchanges();
-    assert_eq!(exchanges.len(), 2);
-    assert_eq!(exchanges[0].tool, "check");
-    assert_eq!(exchanges[0].arguments, FAIL);
-    let correction = exchanges[0].outcome.clone().expect_err("the first candidate is rejected");
+    assert_eq!(exchanges.len(), 15);
+    assert_eq!(exchanges[0], check(PASS, Ok("")));
+
+    // the check's correction went back over the session verbatim
+    assert_eq!(exchanges[1].tool, "check");
+    assert_eq!(exchanges[1].arguments, FAIL);
+    let correction = exchanges[1].outcome.clone().expect_err("the first candidate is rejected");
     assert!(correction.contains("## Previous answer (rejected)"), "{correction}");
     assert!(correction.contains(FAIL), "{correction}");
     assert!(correction.contains("## Findings\n\nverdict must be `pass`"), "{correction}");
-    assert_eq!(exchanges[1], check(PASS, Ok("")));
-}
+    assert_eq!(exchanges[2], check(PASS, Ok("")));
 
-#[tokio::test]
-async fn model_check_exhausted() {
-    let model = ScriptedModel::answering([FAIL, FAIL]);
-    let model = run_scripted(test_programs::MODEL_CHECK_EXHAUSTED, vec![], model).await;
-    let exchanges = model.exchanges();
-    assert_eq!(exchanges.len(), 2, "every scripted candidate was offered");
-    assert!(exchanges.iter().all(|exchange| exchange.outcome.is_err()));
+    // a hand-written check
+    assert_eq!(exchanges[3..5], [check("nope", Err("say `hi`, not `nope`")), check("hi", Ok(""))]);
+
+    // a custom correction, then a mismatch corrected like any rejection
+    let custom = format!("REJECTED {FAIL}: verdict must be `pass`; findings must be empty");
+    assert_eq!(exchanges[5], check(FAIL, Err(&custom)));
+    assert_eq!(exchanges[6], check(PASS, Ok("")));
+    let correction = exchanges[7].outcome.clone().expect_err("the mismatch is rejected");
+    assert!(correction.contains("does not match the expected shape"), "{correction}");
+    assert_eq!(exchanges[8], check(PASS, Ok("")));
+
+    // the guest's tools answer a call, and a question without them refuses it
+    assert_eq!(exchanges[9].outcome, Ok("looked up 1".to_owned()));
+    assert_eq!(exchanges[10], check(PASS, Ok("")));
+    let refusal = exchanges[11].outcome.clone().expect_err("the guest passed no tools");
+    assert!(refusal.contains("tool `lookup` has no handler"), "{refusal}");
+    assert_eq!(exchanges[12], check(PASS, Ok("")));
+
+    // every candidate the budget held was offered
+    assert!(exchanges[13..].iter().all(|exchange| exchange.outcome.is_err()));
 }
 
 #[tokio::test]
@@ -385,62 +402,6 @@ async fn model_check_mismatch() {
     let model = run_scripted(test_programs::MODEL_CHECK_MISMATCH, vec![], model).await;
     let correction = model.exchanges()[0].outcome.clone().expect_err("rejected");
     assert!(correction.contains("does not match the expected shape"), "{correction}");
-}
-
-#[tokio::test]
-async fn model_check_oversize() {
-    // The guest's correction is model-bound text: the result cap applies to
-    // it as to a tool result, and the breach fails the completion hard.
-    let model = ScriptedModel::answering([FAIL]).limits(Limits {
-        max_result_bytes: 4,
-        ..Limits::default()
-    });
-    let model = run_scripted(test_programs::MODEL_CHECK_OVERSIZE, vec![], model).await;
-    assert!(model.exchanges().is_empty(), "the oversize correction fails hard");
-}
-
-#[tokio::test]
-async fn model_check_plain() {
-    let model = ScriptedModel::answering(["nope", "hi"]);
-    let model = run_scripted(test_programs::MODEL_CHECK_PLAIN, vec![], model).await;
-    assert_eq!(
-        model.exchanges(),
-        [check("nope", Err("say `hi`, not `nope`")), check("hi", Ok(""))]
-    );
-
-    // The echo default honours `check` too: its one candidate is the prompt.
-    run_guest(test_programs::MODEL_CHECK_PLAIN, vec![], echo(&["default"]).await).await;
-}
-
-#[tokio::test]
-async fn model_check_recovered() {
-    let model = ScriptedModel::answering([FAIL, PASS, r#"{"other":1}"#, PASS]);
-    let model = run_scripted(test_programs::MODEL_CHECK_RECOVERED, vec![], model).await;
-    let exchanges = model.exchanges();
-    assert_eq!(exchanges.len(), 4);
-
-    let custom = format!("REJECTED {FAIL}: verdict must be `pass`; findings must be empty");
-    assert_eq!(exchanges[0], check(FAIL, Err(&custom)));
-    assert_eq!(exchanges[1], check(PASS, Ok("")));
-    let correction = exchanges[2].outcome.clone().expect_err("the mismatch is rejected");
-    assert!(correction.contains("does not match the expected shape"), "{correction}");
-    assert_eq!(exchanges[3], check(PASS, Ok("")));
-}
-
-#[tokio::test]
-async fn model_check_tools() {
-    let model = ScriptedModel::answering([PASS, PASS])
-        .calling(0, [("lookup", r#"{"id":1}"#)])
-        .calling(1, [("lookup", r#"{"id":1}"#)]);
-    let model = run_scripted(test_programs::MODEL_CHECK_TOOLS, vec![], model).await;
-    let exchanges = model.exchanges();
-    assert_eq!(exchanges.len(), 4);
-
-    assert_eq!(exchanges[0].outcome, Ok("looked up 1".to_owned()));
-    assert_eq!(exchanges[1], check(PASS, Ok("")));
-    let refusal = exchanges[2].outcome.clone().expect_err("the guest passed no tools");
-    assert!(refusal.contains("tool `lookup` has no handler"), "{refusal}");
-    assert_eq!(exchanges[3], check(PASS, Ok("")));
 }
 
 #[tokio::test]
@@ -463,36 +424,17 @@ async fn unheeded<M: ModelClient + Clone>(model: M, expected: &str) {
 }
 
 #[tokio::test]
-async fn model_sections() {
-    let user_turn = "review the Rust code\n\nthe Rust crate\n\nInput: in\nOutput: out";
-    let model =
-        run_scripted(test_programs::MODEL_SECTIONS, vec![], ScriptedModel::answering([user_turn]))
-            .await;
+async fn model_tool_flow() {
+    // one turn per completion, each calling `lookup` before it answers
+    let answers = ["42", "tool failed: no data", "42", "42", "42"];
+    let model = (0..answers.len()).fold(ScriptedModel::answering(answers), |model, turn| {
+        model.calling(turn, [("lookup", "{}")])
+    });
+    let model = run_scripted(test_programs::MODEL_TOOL_FLOW, vec![], model).await;
+    assert_eq!(model.seen()[0].tools, ["lookup"]);
 
-    // The assembled system channel crossed the boundary intact.
-    let seen = model.seen();
-    assert_eq!(seen.len(), 1);
-    assert_eq!(
-        seen[0].system.as_deref(),
-        Some("prefer {language}\n\na Rust reviewer\n\n- be Rust-idiomatic")
-    );
-}
-
-#[tokio::test]
-async fn model_tool_roundtrip() {
-    let model = run_scripted(test_programs::MODEL_TOOL_ROUNDTRIP, vec![], lookup_turn("42")).await;
-    assert_eq!(model.exchanges(), [lookup(Ok("42"))]);
-}
-
-#[tokio::test]
-async fn model_tool_failure() {
-    let model = run_scripted(
-        test_programs::MODEL_TOOL_FAILURE,
-        vec![],
-        lookup_turn("tool failed: no data"),
-    )
-    .await;
-    assert_eq!(model.exchanges(), [lookup(Err("no data"))]);
+    // the closed results stream and the dropped calls stream each fail hard
+    assert_eq!(model.exchanges(), [lookup(Ok("42")), lookup(Err("no data")), lookup(Ok("42"))]);
 }
 
 #[tokio::test]
@@ -523,35 +465,19 @@ async fn model_tool_timeout() {
 }
 
 #[tokio::test]
-async fn model_tool_oversize() {
-    // one completion answered with an oversize output, one with an oversize failure
-    let model = ScriptedModel::answering(["42", "42"])
+async fn model_oversize() {
+    // One completion answered with an oversize tool output, one with an
+    // oversize failure, then a correction: the guest's correction is
+    // model-bound text, so the result cap applies to it as to a tool result.
+    let model = ScriptedModel::answering(["42", "42", FAIL])
         .calling(0, [("lookup", "{}")])
         .calling(1, [("lookup", "{}")])
         .limits(Limits {
             max_result_bytes: 4,
             ..Limits::default()
         });
-    let model = run_scripted(test_programs::MODEL_TOOL_OVERSIZE, vec![], model).await;
-    assert!(model.exchanges().is_empty(), "the oversize text fails hard");
-}
-
-#[tokio::test]
-async fn model_results_closed() {
-    let model = run_scripted(test_programs::MODEL_RESULTS_CLOSED, vec![], lookup_turn("42")).await;
-    assert!(model.exchanges().is_empty(), "the closed stream fails hard");
-}
-
-#[tokio::test]
-async fn model_calls_dropped() {
-    let model = run_scripted(test_programs::MODEL_CALLS_DROPPED, vec![], lookup_turn("42")).await;
-    assert!(model.exchanges().is_empty(), "the dropped stream fails hard");
-}
-
-#[tokio::test]
-async fn model_stale_result() {
-    let model = run_scripted(test_programs::MODEL_STALE_RESULT, vec![], lookup_turn("42")).await;
-    assert_eq!(model.exchanges(), [lookup(Ok("42"))]);
+    let model = run_scripted(test_programs::MODEL_OVERSIZE, vec![], model).await;
+    assert!(model.exchanges().is_empty(), "every oversize text fails hard");
 }
 
 #[tokio::test]
@@ -666,18 +592,6 @@ async fn model_workspace_readonly() {
     )
     .await;
     assert_eq!(model.exchanges(), [workspace_exchanges()[0].clone()], "the write fails hard");
-}
-
-#[tokio::test]
-async fn model_workspace_unauthorized() {
-    let workspace = scratch();
-    fs::create_dir(workspace.path().join("nested")).expect("creating nested dir");
-    run_scripted(
-        test_programs::MODEL_WORKSPACE_UNAUTHORIZED,
-        vec![workspace.mount(true)],
-        ScriptedModel::default(),
-    )
-    .await;
 }
 
 // ------------------------------------------------------------------------

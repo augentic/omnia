@@ -1,6 +1,5 @@
 mod case_unknown_key {
-    #[derive(omnia::FromEnv)]
-    #[env(crate = omnia)]
+    #[derive(omnia_host_macros::FromEnv)]
     struct Options {
         #[env(form = "PORT")]
         port: u16,
@@ -8,16 +7,14 @@ mod case_unknown_key {
 }
 
 mod case_enum {
-    #[derive(omnia::FromEnv)]
-    #[env(crate = omnia)]
+    #[derive(omnia_host_macros::FromEnv)]
     enum Mode {
         Fast,
     }
 }
 
 mod case_default_on_option {
-    #[derive(omnia::FromEnv)]
-    #[env(crate = omnia)]
+    #[derive(omnia_host_macros::FromEnv)]
     struct Options {
         #[env(from = "PORT", default = "8080")]
         port: Option<u16>,
@@ -25,8 +22,7 @@ mod case_default_on_option {
 }
 
 mod case_no_env {
-    #[derive(omnia::FromEnv)]
-    #[env(crate = omnia)]
+    #[derive(omnia_host_macros::FromEnv)]
     struct Options {
         port: u16,
     }

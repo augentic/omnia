@@ -1,6 +1,7 @@
-//! A typed failure at the wire: argv names a source, the case its load must
-//! answer, a needle the detail must carry, and optionally the digest the
-//! source is pinned to — one program for the whole failure matrix. Bound
+//! A typed failure at the wire: each row of argv names a source, the case its
+//! load must answer, a needle the detail must carry, and optionally the digest
+//! the source is pinned to — one program for the whole failure matrix. Rows
+//! are split on a lone `--` and loaded in order by one requester. Bound
 //! directly to `omnia:plugins`, so the case is checked as the host sent it
 //! and a malformed digest reaches the host as written. A conflict is the
 //! case `conflict`, whose detail reads `found=<digest> current=<digest|none>`.
@@ -39,17 +40,23 @@ fn source(kind: &str, value: &str, pin: Option<String>) -> Source {
 
 async fn scenario() {
     let arguments = wasip3::cli::environment::get_arguments();
-    let (kind, value, case, needle, pin) = match arguments.as_slice() {
-        [_, kind, value, case, needle] => (kind, value, case, needle, None),
-        [_, kind, value, case, needle, pin] => (kind, value, case, needle, Some(pin.clone())),
+    for row in arguments[1..].split(|argument| argument == "--") {
+        refuse(row).await;
+    }
+}
+
+async fn refuse(row: &[String]) {
+    let (kind, value, case, needle, pin) = match row {
+        [kind, value, case, needle] => (kind, value, case, needle, None),
+        [kind, value, case, needle, pin] => (kind, value, case, needle, Some(pin.clone())),
         _ => panic!(
             "expected `<declared|path|release> <value> <not-found|denied|invalid|unsupported|\
-             unavailable|other|conflict> <needle> [pin]`; got {arguments:?}"
+             unavailable|other|conflict> <needle> [pin]`; got {row:?}"
         ),
     };
 
     let (answered, detail) = match loader::load(source(kind, value, pin)).await {
-        Ok(Ok(plugin)) => panic!("`{}` loaded, not a `{case}` failure", plugin.name),
+        Ok(Ok(plugin)) => panic!("row {row:?}: `{}` loaded, not a `{case}` failure", plugin.name),
         Ok(Err(conflict)) => {
             let current =
                 conflict.current.map_or_else(|| "none".to_owned(), |plugin| plugin.digest);
@@ -62,6 +69,9 @@ async fn scenario() {
         Err(Error::Unavailable(detail)) => ("unavailable", detail),
         Err(Error::Other(detail)) => ("other", detail),
     };
-    assert_eq!(answered, case, "{detail}");
-    assert!(detail.contains(needle.as_str()), "`{detail}` does not mention `{needle}`");
+    assert_eq!(answered, case, "row {row:?}: {detail}");
+    assert!(
+        detail.contains(needle.as_str()),
+        "row {row:?}: `{detail}` does not mention `{needle}`"
+    );
 }

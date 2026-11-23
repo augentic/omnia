@@ -36,7 +36,8 @@ async fn declaring(lockers: &[&str]) -> VaultDefault {
 
 #[tokio::test]
 async fn vault_locker() {
-    let backends = Backends::defaults().await.vault(declaring(&["locker"]).await);
+    let lockers = declaring(&["locker", "default", "payments"]).await;
+    let backends = Backends::defaults().await.vault(lockers);
     let locker = backends.vault.open_locker("locker".to_owned()).await.expect("locker");
     locker.set("seeded".to_owned(), b"from-host".to_vec()).await.expect("seed");
 
@@ -50,18 +51,14 @@ async fn vault_locker() {
     assert_eq!(names, ["doomed", "seeded", "tls-cert", "tls-key", "token"]);
     assert_eq!(locker.get("token".to_owned()).await.expect("get"), Some(b"v2".to_vec()));
     assert_eq!(locker.get("doomed".to_owned()).await.expect("get"), Some(b"back".to_vec()));
-}
 
-#[tokio::test]
-async fn vault_lockers() {
-    let backends = Backends::defaults().await.vault(declaring(&["default", "payments"]).await);
-
-    run_guest(test_programs::VAULT_LOCKERS, backends.clone()).await;
-
-    // Persisted state: the unnamed handle wrote to the locker named `default`.
-    let locker = backends.vault.open_locker("default".to_owned()).await.expect("locker");
-    assert_eq!(locker.list_ids().await.expect("list-ids"), ["api-key"]);
-    assert_eq!(locker.get("api-key".to_owned()).await.expect("get"), Some(b"default-key".to_vec()));
+    // `default` holds only what the guest wrote to it.
+    let default = backends.vault.open_locker("default".to_owned()).await.expect("locker");
+    assert_eq!(default.list_ids().await.expect("list-ids"), ["api-key"]);
+    assert_eq!(
+        default.get("api-key".to_owned()).await.expect("get"),
+        Some(b"default-key".to_vec())
+    );
 }
 
 #[tokio::test]

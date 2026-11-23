@@ -1,4 +1,4 @@
-//! `omnia::runtime!` wiring, manifest lowering, and compile-fail diagnostics.
+//! `omnia::runtime!` wiring and manifest lowering.
 
 #![cfg(not(target_arch = "wasm32"))]
 
@@ -396,9 +396,4 @@ fn inline_deployment() {
             grants: Grants::none().mounts(["store"]),
         })
     );
-}
-
-#[test]
-fn compile_fail_diagnostics() {
-    trybuild::TestCases::new().compile_fail("tests/ui/runtime_invalid.rs");
 }

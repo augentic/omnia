@@ -14,8 +14,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use futures::{FutureExt as _, StreamExt as _};
-use omnia::{ExitStatus, GuestEntry, Host, Runtime, RuntimeOptions};
-use omnia_test::host::{Backends, Deployment};
+use omnia::{ExitStatus, GuestEntry, Host, Runtime, RuntimeOptions, SourceSpec};
+use omnia_test::host::{Backends, Deployment, precompiled};
 use omnia_wasi_messaging::{
     Endpoint, Error, FutureResult, HandleError, Handler, Message, MessagingClient,
     MessagingHandler, Metadata, Reply, WasiMessaging,
@@ -75,9 +75,14 @@ fn handler(runtime: &Runtime<Backends>) -> MessagingHandler<Backends> {
         .expect("a guest exports the messaging handler")
 }
 
-// `wasm` as the sole guest, so it is the catch-all for every topic.
-fn sole(wasm: &str) -> Deployment {
-    Deployment::new().guest("guest", wasm)
+// `guest` as the sole guest, so it is the catch-all for every topic.
+fn sole(guest: impl Into<SourceSpec>) -> Deployment {
+    Deployment::new().guest("guest", guest)
+}
+
+// booted by most tests here, so compiled once
+fn produce_handle() -> SourceSpec {
+    precompiled(test_programs::MESSAGING_PRODUCE_HANDLE).expect("the guest precompiles")
 }
 
 // Explicit routes: `guest` handles `orders`, and `absent` — declared from a
@@ -133,7 +138,7 @@ async fn messaging_produce_handle() {
 
     // The guest exports both `wasi:cli/run` and the incoming handler: boot
     // without driving either, then drive each export in turn.
-    let runtime = boot(&sole(test_programs::MESSAGING_PRODUCE_HANDLE), backends).await;
+    let runtime = boot(&sole(produce_handle()), backends).await;
     let handler = handler(&runtime);
 
     // Producer: the one message the command sent reached the broker on its
@@ -222,8 +227,7 @@ async fn messaging_handle_err() {
 
 #[tokio::test]
 async fn guest_trap() {
-    let runtime =
-        boot(&sole(test_programs::MESSAGING_PRODUCE_HANDLE), Backends::defaults().await).await;
+    let runtime = boot(&sole(produce_handle()), Backends::defaults().await).await;
     let handler = handler(&runtime);
 
     // the guest asserts on `order-1`; any other payload trips its assert
@@ -321,7 +325,7 @@ async fn inert() {
 #[tokio::test]
 async fn inconsistent_routes() {
     let ambiguous = Deployment::new()
-        .guest("a", test_programs::MESSAGING_PRODUCE_HANDLE)
+        .guest("a", produce_handle())
         .guest("b", test_programs::MESSAGING_HANDLE_ERR);
     let command = std::fs::read(test_programs::MESSAGING_REQUEST_REPLY).expect("guest bytes");
     let misrouted =
@@ -358,7 +362,7 @@ async fn unloadable_guest() {
 #[tokio::test]
 async fn consumer_end() {
     let backends = Backends::defaults().await.messaging(EndedBroker);
-    let runtime = boot(&sole(test_programs::MESSAGING_PRODUCE_HANDLE), backends).await;
+    let runtime = boot(&sole(produce_handle()), backends).await;
 
     let error = WasiMessaging::run(&runtime).await.expect_err("an ended consumer fails the server");
     assert!(format!("{error:#}").contains("consumer ended"), "unexpected error: {error:#}");
@@ -376,11 +380,10 @@ async fn default_consume() {
     let backends = Backends::defaults().await;
     let broker = backends.messaging.clone();
     let mut stream = broker.subscribe();
-    // embedded bytes compile at boot, so the orders do not race the guest's
+    // embedded bytes load at boot, so the orders do not race the guest's
     // first-use load
-    let guest = std::fs::read(test_programs::MESSAGING_PRODUCE_HANDLE).expect("guest bytes");
-    let deployment =
-        Deployment::new().entry(GuestEntry::new("guest", guest).route_messaging("orders"));
+    let deployment = Deployment::new()
+        .entry(GuestEntry::new("guest", produce_handle()).route_messaging("orders"));
     let runtime = boot(&deployment, backends).await;
     let consumer = tokio::spawn(broker.consume(Arc::new(handler(&runtime))));
 

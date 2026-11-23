@@ -243,8 +243,3 @@ struct Late {
 fn bad_default() {
     let _ = Late::load_from(|_| None);
 }
-
-#[test]
-fn compile_fail_diagnostics() {
-    trybuild::TestCases::new().compile_fail("tests/ui/from_env_invalid.rs");
-}

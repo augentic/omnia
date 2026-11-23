@@ -2260,7 +2260,6 @@ dependencies = [
  "tokio",
  "toml",
  "tracing",
- "trybuild",
  "wasmtime",
 ]
 
@@ -2301,7 +2300,6 @@ dependencies = [
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",
- "trybuild",
  "wasmtime",
  "wasmtime-wasi",
 ]
@@ -2322,6 +2320,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.10",
+ "trybuild",
 ]
 
 [[package]]

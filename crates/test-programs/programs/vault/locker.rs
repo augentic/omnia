@@ -1,4 +1,4 @@
-//! One locker walked end to end over the raw `omnia:vault` bindings, on the
+//! Lockers walked end to end over the raw `omnia:vault` bindings, each on the
 //! one handle `store::open` returns.
 //!
 //! - An undeclared locker fails to open with `not-found`.
@@ -8,12 +8,14 @@
 //!   at once.
 //! - `list-secrets` pages the names under a prefix, and a zero `limit` is
 //!   `invalid`.
+//! - A second locker keeps its own secret under the same key, and
+//!   `list-secrets` lists one locker in no particular order.
 
 #![cfg(target_arch = "wasm32")]
 
 use omnia_sdk::vault::locker::Locker;
-use omnia_sdk::vault::store;
 use omnia_sdk::vault::types::Error;
+use omnia_sdk::vault::{DEFAULT, store};
 
 omnia_sdk::command::export!(scenario);
 
@@ -57,6 +59,22 @@ async fn scenario() {
     // refused as `invalid`
     let zero_limit = locker.list_secrets(String::new(), None, Some(0)).await;
     assert!(matches!(zero_limit, Err(Error::Invalid(_))), "{zero_limit:?}");
+
+    // the same key in each locker holds its own secret
+    let default = store::open(DEFAULT.to_owned()).await.expect("open default");
+    let payments = store::open("payments".to_owned()).await.expect("open payments");
+    default.set("api-key".to_owned(), b"default-key".to_vec()).await.expect("set in default");
+    payments.set("api-key".to_owned(), b"payments-key".to_vec()).await.expect("set in payments");
+    assert_eq!(value(&default, "api-key").await.as_deref(), Some(&b"default-key"[..]));
+    assert_eq!(value(&payments, "api-key").await.as_deref(), Some(&b"payments-key"[..]));
+
+    // `list-secrets` lists one locker
+    payments.set("c-token".to_owned(), b"c".to_vec()).await.expect("set");
+    payments.set("b-token".to_owned(), b"b".to_vec()).await.expect("set");
+    let mut all = payments.list_secrets(String::new(), None, None).await.expect("list");
+    assert_eq!(all.next, None, "three keys fit on one page");
+    all.secrets.sort();
+    assert_eq!(all.secrets, ["api-key", "b-token", "c-token"]);
 }
 
 async fn value(locker: &Locker, name: &str) -> Option<Vec<u8>> {

@@ -121,20 +121,6 @@ async fn run_guest(wasm: &str, backends: Backends) {
     assert_eq!(status, ExitStatus::SUCCESS, "guest `{wasm}` failed");
 }
 
-#[tokio::test]
-async fn http_outgoing_get() {
-    let (origin, url) = Origin::serve().await;
-    let backends = Backends::defaults().await.config([("ORIGIN", url)]);
-
-    run_guest(test_programs::HTTP_OUTGOING_GET, backends).await;
-
-    // wire fidelity: one request, at the guest's path, carrying the guest's header
-    let hits = origin.hits();
-    assert_eq!(hits.len(), 1);
-    assert_eq!(hits[0].path, "/resource");
-    assert_eq!(hits[0].headers.get("x-probe").and_then(|v| v.to_str().ok()), Some("1"));
-}
-
 // rcgen's defaults: no EKU, no key usage, no basic constraints
 fn cert_params(configure: impl FnOnce(&mut CertificateParams)) -> CertificateParams {
     let mut params = CertificateParams::new(Vec::<String>::new()).expect("parameters");
@@ -355,11 +341,13 @@ async fn http_builder() {
 
     run_guest(test_programs::HTTP_BUILDER, backends).await;
 
-    // the post arrived as built: its method, credential, content type, and body
+    // the sent request carried the guest's header, and the post arrived as
+    // built: its method, credential, content type, and body
     let hits = origin.hits();
     let paths: Vec<_> = hits.iter().map(|hit| hit.path.as_str()).collect();
-    assert_eq!(paths, ["/orders", "/resource"]);
-    let posted = &hits[0];
+    assert_eq!(paths, ["/resource", "/orders", "/resource"]);
+    assert_eq!(hits[0].headers.get("x-probe").and_then(|v| v.to_str().ok()), Some("1"));
+    let posted = &hits[1];
     assert_eq!(posted.method, Method::POST);
     assert_eq!(posted.headers[AUTHORIZATION], "Bearer t0ken");
     assert_eq!(posted.headers[CONTENT_TYPE], "application/json");
