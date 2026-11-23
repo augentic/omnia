@@ -14,14 +14,23 @@
 //! no-ops that reuse the first initialization. Batch exporters queue
 //! telemetry, so call [`flush`] before a fast process exit; the runtime does
 //! this at the end of every drive.
+//!
+//! The runtime's own metrics are OpenTelemetry instruments, so they record
+//! whatever the run's filter is. [`record_pool`] samples the instance pool,
+//! and [`count_message`], [`count_event`], and [`count_error`] count what the
+//! triggers handle. They bind once, when [`Telemetry::build`] settles, to the
+//! global meter provider as it then stands. That is omnia's own when the
+//! build installs it, and the one the process published otherwise. A metric
+//! recorded before then is dropped.
 
 use std::env;
 use std::io::IsTerminal;
 use std::sync::{Mutex, OnceLock, PoisonError};
 
 use anyhow::{Result, anyhow};
+use opentelemetry::metrics::{Counter, Gauge, Meter};
 use opentelemetry::trace::TracerProvider;
-use opentelemetry::{KeyValue, global};
+use opentelemetry::{InstrumentationScope, KeyValue, global};
 use opentelemetry_otlp::{
     MetricExporter, OTEL_EXPORTER_OTLP_ENDPOINT, OTEL_EXPORTER_OTLP_METRICS_ENDPOINT,
     OTEL_EXPORTER_OTLP_TRACES_ENDPOINT, SpanExporter, WithExportConfig,
@@ -38,9 +47,11 @@ use tracing_subscriber::layer::{Layer, SubscriberExt};
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Registry};
+use wasmtime::PoolingAllocatorMetrics;
 
 static SETTLED: Mutex<bool> = Mutex::new(false);
 static PROVIDERS: OnceLock<Providers> = OnceLock::new();
+static METRICS: OnceLock<Metrics> = OnceLock::new();
 
 /// The runtime's own crate prefixes, which the console may refine apart from
 /// the run — see [`Telemetry::runtime_level`].
@@ -87,9 +98,10 @@ impl Telemetry {
     ///
     /// `directives` is a `RUST_LOG` string (`info`, `omnia_core=debug`) —
     /// typically the run's [`directives`], composed from its verbosity flag
-    /// and the process `RUST_LOG`. It governs every span and event: the
-    /// console, the exporters, and the `RUST_LOG` every guest receives. The
-    /// always-on noisy-dependency mutes still apply.
+    /// and the process `RUST_LOG`. It governs every span and event, on the
+    /// console and through the exporters, and the `RUST_LOG` every guest
+    /// receives. The runtime's own metrics are instruments, not events, so it
+    /// does not govern them. The always-on noisy-dependency mutes still apply.
     #[must_use]
     pub fn filter(mut self, directives: impl Into<String>) -> Self {
         self.filter = Some(directives.into());
@@ -112,7 +124,7 @@ impl Telemetry {
     /// The console's filter is the run's with each of [`RUNTIME`] refined to
     /// `level`; a directive the run's filter already carries for one of them
     /// (`omnia_core=trace`, `omnia=debug`) stands as written. The refinement
-    /// is the console layer's: spans, the exporters, and every guest follow
+    /// is the console layer's: spans, exported events, and every guest follow
     /// the run's filter, so the span a guest's root spans join stays live
     /// whatever the console shows. `None` leaves the console at the run's
     /// filter, as does not calling.
@@ -174,6 +186,7 @@ impl Telemetry {
                 tracing::warn!(%error, "a tracing subscriber is already set; omnia's skipped");
             }
         }
+        Metrics::bind();
         *settled = true;
         drop(settled);
         Ok(())
@@ -455,6 +468,109 @@ fn settle(signal: &str, result: OTelSdkResult) {
 #[must_use]
 pub fn resource() -> Option<&'static Resource> {
     PROVIDERS.get().map(|providers| &providers.resource)
+}
+
+/// Records one sample of the instance pool's occupancy on the `pool_*` gauges.
+///
+/// The gauges are `pool_core_instances`, `pool_component_instances`,
+/// `pool_memories`, `pool_tables`, and `pool_stacks`.
+pub fn record_pool(sample: &PoolingAllocatorMetrics) {
+    if let Some(metrics) = METRICS.get() {
+        metrics.pool(sample);
+    }
+}
+
+/// Counts one message delivered to `service` on `message_counter`.
+pub fn count_message(service: &str) {
+    if let Some(metrics) = METRICS.get() {
+        metrics.message(service);
+    }
+}
+
+/// Counts one websocket event delivered to `service` on `event_counter`.
+pub fn count_event(service: &str) {
+    if let Some(metrics) = METRICS.get() {
+        metrics.event(service);
+    }
+}
+
+/// Counts one request, message, or event `service` failed to handle on
+/// `processing_errors`.
+///
+/// A failed message delivery passes its `topic`, which the count carries
+/// beside `service`.
+pub fn count_error(service: &str, topic: Option<&str>) {
+    if let Some(metrics) = METRICS.get() {
+        metrics.error(service, topic);
+    }
+}
+
+struct Metrics {
+    pool_core_instances: Gauge<u64>,
+    pool_component_instances: Gauge<u64>,
+    pool_memories: Gauge<u64>,
+    pool_tables: Gauge<u64>,
+    pool_stacks: Gauge<u64>,
+    message_counter: Counter<u64>,
+    event_counter: Counter<u64>,
+    processing_errors: Counter<u64>,
+}
+
+impl Metrics {
+    // the global provider once a build settles: omnia's own when it
+    // installed, the process's otherwise
+    fn bind() {
+        let scope =
+            InstrumentationScope::builder("omnia").with_version(env!("CARGO_PKG_VERSION")).build();
+        METRICS.get_or_init(|| Self::new(&global::meter_with_scope(scope)));
+    }
+
+    fn new(meter: &Meter) -> Self {
+        let gauge = |name, description| meter.u64_gauge(name).with_description(description).build();
+        let counter =
+            |name, description| meter.u64_counter(name).with_description(description).build();
+        Self {
+            pool_core_instances: gauge(
+                "pool_core_instances",
+                "Core instances allocated from the pool",
+            ),
+            pool_component_instances: gauge(
+                "pool_component_instances",
+                "Component instances allocated from the pool",
+            ),
+            pool_memories: gauge("pool_memories", "Linear memories allocated from the pool"),
+            pool_tables: gauge("pool_tables", "Tables allocated from the pool"),
+            pool_stacks: gauge("pool_stacks", "Fiber stacks allocated from the pool"),
+            message_counter: counter("message_counter", "Messages delivered to the runtime"),
+            event_counter: counter("event_counter", "Websocket events delivered to the runtime"),
+            processing_errors: counter(
+                "processing_errors",
+                "Requests, messages, and events the runtime failed to handle",
+            ),
+        }
+    }
+
+    fn pool(&self, sample: &PoolingAllocatorMetrics) {
+        self.pool_core_instances.record(sample.core_instances(), &[]);
+        self.pool_component_instances.record(sample.component_instances(), &[]);
+        self.pool_memories.record(sample.memories() as u64, &[]);
+        self.pool_tables.record(sample.tables() as u64, &[]);
+        self.pool_stacks.record(sample.stacks() as u64, &[]);
+    }
+
+    fn message(&self, service: &str) {
+        self.message_counter.add(1, &[KeyValue::new("service", service.to_owned())]);
+    }
+
+    fn event(&self, service: &str) {
+        self.event_counter.add(1, &[KeyValue::new("service", service.to_owned())]);
+    }
+
+    fn error(&self, service: &str, topic: Option<&str>) {
+        let mut attributes = vec![KeyValue::new("service", service.to_owned())];
+        attributes.extend(topic.map(|topic| KeyValue::new("topic", topic.to_owned())));
+        self.processing_errors.add(1, &attributes);
+    }
 }
 
 // private rules over the run's directives and environment, which no public

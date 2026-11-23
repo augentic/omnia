@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, Result};
 use omnia_core::wasmtime::Engine;
-use omnia_core::{Backends, ExitStatus, LevelFilter, Runtime, WeakRuntime};
+use omnia_core::{Backends, ExitStatus, LevelFilter, Runtime, WeakRuntime, telemetry};
 
 use crate::{Deployment, DeploymentBuilder};
 
@@ -149,12 +149,12 @@ where
     B: Backends,
     H: Wiring<B>,
 {
-    // background tasks hold engine clones; aborted after the drive so a
-    // finished deployment releases its pooling reservation
+    // the epoch task holds an engine clone; every task is aborted after the
+    // drive so a finished deployment releases its pooling reservation
     let engine = runtime.registry().engine();
     let options = runtime.options();
     let epoch = drive_epoch(engine.clone(), options.epoch_tick);
-    let metrics = sample_pool(engine.clone(), options.pool_metrics_interval);
+    let metrics = sample_pool(runtime.downgrade(), options.pool_metrics_interval);
     let idle = release_idle_pool(runtime.downgrade(), options.pool_idle_release);
 
     tracing::info!(component = runtime.name(), "omnia ready");
@@ -201,7 +201,7 @@ where
     runtime.shutdown();
 
     // batch-queued telemetry must survive a fast command-mode exit
-    omnia_core::telemetry::flush();
+    telemetry::flush();
     outcome
 }
 
@@ -215,7 +215,10 @@ fn drive_epoch(engine: Engine, tick: Duration) -> tokio::task::JoinHandle<()> {
     })
 }
 
-fn sample_pool(engine: Engine, interval: Duration) -> Option<tokio::task::JoinHandle<()>> {
+// holds no engine clone, for the reason `release_idle_pool` gives
+fn sample_pool<B: Backends>(
+    runtime: WeakRuntime<B>, interval: Duration,
+) -> Option<tokio::task::JoinHandle<()>> {
     if interval.is_zero() {
         return None;
     }
@@ -225,19 +228,23 @@ fn sample_pool(engine: Engine, interval: Duration) -> Option<tokio::task::JoinHa
         loop {
             ticker.tick().await;
 
-            let Some(metrics) = engine.pooling_allocator_metrics() else {
+            let Some(runtime) = runtime.upgrade() else {
+                break;
+            };
+            let Some(pool) = runtime.registry().engine().pooling_allocator_metrics() else {
                 break;
             };
 
+            telemetry::record_pool(&pool);
             tracing::trace!(
-                gauge.pool_core_instances = metrics.core_instances(),
-                gauge.pool_component_instances = metrics.component_instances(),
-                gauge.pool_memories = metrics.memories() as u64,
-                gauge.pool_tables = metrics.tables() as u64,
-                gauge.pool_stacks = metrics.stacks() as u64,
-                gauge.pool_unused_warm_memories = u64::from(metrics.unused_warm_memories()),
-                gauge.pool_unused_memory_bytes_resident =
-                    metrics.unused_memory_bytes_resident() as u64,
+                pool_core_instances = pool.core_instances(),
+                pool_component_instances = pool.component_instances(),
+                pool_memories = pool.memories(),
+                pool_tables = pool.tables(),
+                pool_stacks = pool.stacks(),
+                pool_unused_warm_memories = pool.unused_warm_memories(),
+                pool_unused_memory_bytes_resident = pool.unused_memory_bytes_resident(),
+                "pool occupancy"
             );
         }
     });

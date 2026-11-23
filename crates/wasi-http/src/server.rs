@@ -21,7 +21,9 @@ use hyper::header::{FORWARDED, HOST, HeaderValue};
 use hyper::service::service_fn;
 use hyper_util::rt::TokioExecutor;
 use hyper_util::server::conn::auto;
-use omnia_core::{Backends, ChainCtx, HttpRoutes, Provides, Runtime, StoreCtx, TriggerRouter};
+use omnia_core::{
+    Backends, ChainCtx, HttpRoutes, Provides, Runtime, StoreCtx, TriggerRouter, telemetry,
+};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio::task::{JoinHandle, JoinSet};
@@ -94,8 +96,8 @@ where
 
                     // track server error responses
                     if response.status() >= StatusCode::INTERNAL_SERVER_ERROR {
+                        telemetry::count_error(&handler.component, None);
                         tracing::error!(
-                            monotonic_counter.processing_errors = 1,
                             service = %handler.component,
                             error = format!("{response:?}"),
                         );
