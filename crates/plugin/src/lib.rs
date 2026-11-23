@@ -10,11 +10,13 @@
 //! never under a name the deployment declares), handing back a typed
 //! [`Plugin`] handle. Component bytes never cross the interface, and
 //! nothing a caller passes widens the grant: a declared name must be in the
-//! guest list, a path must lie beneath a read-only mount, and a package is
-//! served from the deployment's store or fetched from the registry its
-//! `registries` routes it to — the load may name a registry only for a
-//! namespace that routing leaves open. The requester receives no lifecycle authority: validation,
-//! compilation, and publication stay host-side.
+//! guest list, a path must lie beneath a read-only mount the loading guest's
+//! grants reach, and a package is served from the deployment's store or
+//! fetched from the registry its `registries` routes it to — the load may
+//! name a registry only for a namespace that routing leaves open. A guest
+//! loaded by path or package runs within the loading guest's grants. The
+//! requester receives no lifecycle authority: validation, compilation, and
+//! publication stay host-side.
 //!
 //! Everything loader lives here: the [`WasiPlugins`] host binding, the
 //! [`Plugins`] load path over the runtime's first-use seam (a declared name),

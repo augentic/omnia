@@ -17,8 +17,6 @@ pub use manifest::{
 };
 #[cfg(feature = "link")]
 use omnia_core::ChainPolicy;
-#[cfg(feature = "loader")]
-use omnia_core::RegistrySource;
 use omnia_core::wasmtime::component::Linker;
 use omnia_core::wasmtime::{Config, Engine};
 use omnia_core::{
@@ -26,6 +24,8 @@ use omnia_core::{
     RegistryParts, Routes, Runtime, RuntimeOptions, RuntimeParts, Source, SourceSpec, Stdio,
     StoreCtx, Telemetry, telemetry,
 };
+#[cfg(feature = "loader")]
+use omnia_core::{Grants, RegistrySource};
 #[cfg(feature = "link")]
 use omnia_link::{FirstArgSelector, GuestSelector, InProcessLinks};
 #[cfg(feature = "loader")]
@@ -324,6 +324,7 @@ impl DeploymentBuilder {
             loader: Loader {
                 store,
                 registry: None,
+                grants: manifest.plugins.map_or_else(Grants::all, |plugins| plugins.grants),
             },
             rust_log,
             inherit: manifest.env.inherit,
@@ -481,7 +482,9 @@ impl<B: Backends> Deployment<B> {
     /// every package — declared or named by a guest — is acquired through the
     /// runtime's own client, the deployment's package store first and the
     /// registry its `plugins.registries` routes it to after, unless
-    /// [`registry_source`](Self::registry_source) selected one.
+    /// [`registry_source`](Self::registry_source) selected one. A guest
+    /// loaded by path or package runs under `plugins.grants` within the
+    /// grants of the guest that loaded it.
     ///
     /// # Errors
     ///
@@ -511,6 +514,13 @@ impl<B: Backends> Deployment<B> {
                 tracing::info!(guest = %id, "{reach}");
             }
         }
+        #[cfg(feature = "loader")]
+        if loader.grants.is_all() {
+            tracing::info!(
+                "the deployment declares no `[plugins.grants]`: a guest loaded at run time \
+                 reaches whatever its loader does"
+            );
+        }
 
         let runtime = Runtime::from_parts(RuntimeParts {
             name: Arc::from(deployment.name.as_str()),
@@ -530,7 +540,7 @@ impl<B: Backends> Deployment<B> {
         });
 
         #[cfg(feature = "loader")]
-        Plugins::install(&runtime).context("installing the guest loader")?;
+        Plugins::install(&runtime, loader.grants).context("installing the guest loader")?;
 
         runtime.serve_links().await.context("serving the guests' linked exports")?;
         Ok(runtime)
@@ -548,12 +558,23 @@ impl<B: Backends> Deployment<B> {
 
 cfg_select! {
     feature = "loader" => {
-        #[derive(Default)]
         struct Loader {
             // the package store's root; `None` keeps nothing fetched
             store: Option<PathBuf>,
             // `None` installs a `RegistryClient` over the store and the deployment's `registries`
             registry: Option<Arc<dyn RegistrySource>>,
+            // what a guest loaded by path or package runs under, within its loader's
+            grants: Grants,
+        }
+
+        impl Default for Loader {
+            fn default() -> Self {
+                Self {
+                    store: None,
+                    registry: None,
+                    grants: Grants::all(),
+                }
+            }
         }
 
         impl Loader {

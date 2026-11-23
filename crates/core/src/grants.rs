@@ -121,6 +121,20 @@ impl Grants {
         self.env.is_none() && self.mounts.is_none() && self.interfaces.is_none()
     }
 
+    /// The grants that reach exactly what both these and `outer` reach.
+    ///
+    /// A list keeps no entry that another of its entries covers, so two
+    /// narrowings that reach the same names are equal. Two lists with
+    /// nothing in common narrow to an empty list, which reaches nothing.
+    #[must_use]
+    pub fn within(&self, outer: &Self) -> Self {
+        Self {
+            env: meet(self.env.as_deref(), outer.env.as_deref()),
+            mounts: meet(self.mounts.as_deref(), outer.mounts.as_deref()),
+            interfaces: meet(self.interfaces.as_deref(), outer.interfaces.as_deref()),
+        }
+    }
+
     /// Checks every entry against the deployment the guest runs in.
     ///
     /// `mounts` are the names of the deployment's mounts, and `inherit` the
@@ -177,6 +191,27 @@ fn allows(list: Option<&[String]>, name: &str) -> bool {
     list.is_none_or(|list| list.iter().any(|pattern| names::matches(pattern, name)))
 }
 
+// two patterns meet in the narrower of them, or not at all, so the meeting of
+// two lists is exact
+fn meet(inner: Option<&[String]>, outer: Option<&[String]>) -> Option<Vec<String>> {
+    let met: Vec<&str> = match (inner, outer) {
+        (None, None) => return None,
+        (Some(list), None) | (None, Some(list)) => list.iter().map(String::as_str).collect(),
+        (Some(inner), Some(outer)) => inner
+            .iter()
+            .flat_map(|a| outer.iter().filter_map(move |b| names::narrower(a, b)))
+            .collect(),
+    };
+    let mut list = None;
+    add(
+        &mut list,
+        met.iter()
+            .copied()
+            .filter(|entry| !met.iter().any(|other| other != entry && names::covers(other, entry))),
+    );
+    list
+}
+
 // `*`, a package of two WIT labels (`wasi:http`), or a prefix of one that
 // ends in `*`
 fn is_package_pattern(entry: &str) -> bool {
@@ -231,8 +266,9 @@ impl From<Table> for Grants {
     }
 }
 
-// Unit tests by design: validation is a pure function of the grants and the
-// deployment's names, and no one deployment reaches every refused shape.
+// Unit tests by design: validation and narrowing are pure functions of the
+// grants and the deployment's names, and no one deployment reaches every
+// shape they handle.
 #[cfg(test)]
 mod tests {
     use super::Grants;
@@ -270,5 +306,31 @@ mod tests {
                 "{error}"
             );
         }
+    }
+
+    #[test]
+    fn within_all() {
+        let declared = Grants::none().env(["ORDERS_*"]).interfaces(["wasi:*"]);
+        assert_eq!(declared.within(&Grants::all()), declared);
+        assert_eq!(Grants::all().within(&declared), declared);
+        assert!(Grants::all().within(&Grants::all()).is_all());
+    }
+
+    #[test]
+    fn within_lists() {
+        let inner = Grants::none()
+            .env(["ORDERS_*", "HOME", "PATH"])
+            .mounts(["data"])
+            .interfaces(["wasi:*"]);
+        let outer = Grants::none()
+            .env(["ORDERS_URL", "ORD*", "HOME*"])
+            .mounts(["logs"])
+            .interfaces(["wasi:http", "omnia:otel"]);
+        let met = inner.within(&outer);
+
+        // `ORDERS_URL` also meets `ORDERS_*`, which covers it, and the
+        // disjoint `mounts` meet in the empty list `Grants::none()` holds
+        assert_eq!(met, Grants::none().env(["ORDERS_*", "HOME"]).interfaces(["wasi:http"]));
+        assert_eq!(outer.within(&inner), met);
     }
 }

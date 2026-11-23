@@ -19,7 +19,7 @@ pub fn narrower<'a>(a: &'a str, b: &'a str) -> Option<&'a str> {
     }
 }
 
-fn covers(outer: &str, inner: &str) -> bool {
+pub fn covers(outer: &str, inner: &str) -> bool {
     outer.strip_suffix('*').map_or(outer == inner, |prefix| {
         inner.strip_suffix('*').unwrap_or(inner).starts_with(prefix)
     })

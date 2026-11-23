@@ -23,7 +23,7 @@ mod generated {
 
 use std::sync::Arc;
 
-use omnia_core::{Backends, Host, StoreCtx};
+use omnia_core::{Backends, Grants, GuestId, Host, StoreCtx};
 use wasmtime::component::{HasData, Linker};
 
 use self::generated::omnia::plugins::{loader, types};
@@ -49,6 +49,8 @@ impl<B: Backends> Host<B> for WasiPlugins {
 fn view<B: Backends>(store: &mut StoreCtx<B>) -> WasiPluginsView {
     WasiPluginsView {
         plugins: store.extensions().get::<Plugins>(),
+        guest: store.guest().clone(),
+        grants: store.grants(),
     }
 }
 
@@ -58,4 +60,10 @@ pub struct WasiPluginsView {
     /// installed no [`Plugins`] extension, where every load answers
     /// `unsupported`.
     pub plugins: Option<Arc<Plugins>>,
+    /// The guest the store runs, which the loader's log lines name as the
+    /// loading guest.
+    pub guest: GuestId,
+    /// The grants of the guest the store runs, which every load it makes is
+    /// held to.
+    pub grants: Arc<Grants>,
 }

@@ -186,6 +186,22 @@ Unreleased
 - `Source::granted`, `Source::grants`, and `Guest::grants`.
 - A startup log naming each guest that declares no grants, at `info`, or
   at `warn` once another guest declares some.
+- Grants for a guest loaded at run time by path or package. It runs under
+  them within the grants of the guest that loaded it, and under its
+  loader's grants when the deployment declares none. They are declared as:
+  - `[plugins.grants]` in the manifest, and `Manifest::plugin_grants`;
+  - `grants: { .. }` in a `runtime!` `plugins:` block.
+
+  A guest a declared load names keeps its own entry's grants.
+- `Grants::within`, the grants that reach exactly what two grants both
+  reach.
+- `Runtime::validate_grants`, which checks grants against the runtime's
+  mounts and inherited variables, as startup checks a guest's.
+- `StoreCtx::grants`, the grants the store's guest runs under.
+- A startup log, at `info`, when a runtime built with the `loader` feature
+  runs a deployment that declares no `[plugins.grants]`.
+- A `plugin-load` span around each load a guest makes, naming the loading
+  guest.
 - Three variables that tune or bound streaming:
   - `HTTP_BODY_BUFFER_CHUNKS`
     (`omnia_wasi_http::ConnectOptions::body_buffer_chunks`, default `1`),
@@ -345,9 +361,9 @@ Unreleased
   always sets.
 - `Endpoint::request` takes a `timeout: Option<Duration>` in place of an
   `Option<RequestOptions>`. The host never sends a zero `timeout`.
-- `StoreConfig` takes the `guest` the store is built for, and an `env` of
-  `None` gives the guest an empty environment, where it inherited the
-  host's.
+- `StoreConfig` takes the `guest` the store is built for and the `grants`
+  it runs under, and an `env` of `None` gives the guest an empty
+  environment, where it inherited the host's.
 - `RuntimeParts` takes `inherit`, the host variables guests see. Empty, a
   guest sees only `RUST_LOG`, and `NO_COLOR` when the console is plain.
 - `Runtime::register` and `Runtime::admit` take the `Grants` their guest
@@ -355,9 +371,22 @@ Unreleased
   to keep a guest's reach.
 - `Guest::local` takes the guest's grants, and `LoadedGuest` gains a
   `grants` field.
-- A second `register` or `admit` of a standing guest's bytes under other
-  grants is `GuestError::Denied`. The same bytes under the same grants
-  attest, as before.
+- A second `register` of a standing guest's bytes under other grants is
+  `GuestError::Denied`, and so is a load of them by path or package. The
+  same bytes under the same grants attest, as before. `admit` answers
+  `GuestError::Conflict` for any name already taken.
+- A guest loaded by path or package runs under `[plugins.grants]` within
+  the grants of the guest that loaded it, where it ran under
+  `Grants::all()`. A component importing code from a package outside them
+  is `denied`. An embedder's `PluginLoader::load` admits one under
+  `[plugins.grants]` alone.
+- A `path` load beneath a mount the loading guest's grants do not reach is
+  `denied`, naming the mount.
+- `Plugins::install` takes the grants a guest loaded by path or package
+  runs under, and refuses grants `Runtime::validate_grants` refuses.
+  `Plugins::load` takes the loading guest's grants.
+- `PluginsConfig` gains `grants`, and `WasiPluginsView` gains `guest` and
+  `grants`.
 - `RuntimeOptions` and the `ConnectOptions` of `omnia-wasi-http`,
   `omnia-wasi-keyvalue`, `omnia-wasi-vault`, `omnia-wasi-model`,
   `omnia-wasi-docstore`, and `omnia-wasi-identity` derive omnia's

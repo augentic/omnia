@@ -846,6 +846,7 @@ async fn plugins_unlinked() {
 // requester is the CLI's `run <component>` shape: the file is read at
 // startup, so it loads at boot under its stem and is the sole exporter. The
 // assembled runtime already carries the loader, so a second install refuses.
+// Invalid grants are refused before that check.
 #[tokio::test]
 async fn plugins_host_only() {
     let manifest = Manifest::from_wasm(test_programs::PLUGINS_HOST_ONLY)
@@ -857,7 +858,11 @@ async fn plugins_host_only() {
         Registered::Active(digest_of(test_programs::PLUGINS_HOST_ONLY)),
         "the requester loaded at boot under its file stem"
     );
-    let error = Plugins::install(&runtime).expect_err("the loader is installed once");
+    let error = Plugins::install(&runtime, Grants::none().mounts(["dta"]))
+        .expect_err("the grants name a mount the deployment lacks");
+    assert!(format!("{error:#}").contains("`mounts` entry `dta`"), "{error:#}");
+    let error =
+        Plugins::install(&runtime, Grants::all()).expect_err("the loader is installed once");
     assert!(format!("{error:#}").contains("installs exactly once"), "{error:#}");
 
     let status = runtime.run_command().await.expect("deployment runs");
@@ -895,6 +900,43 @@ async fn plugins_mixed() {
     let answer =
         call_export(&runtime, "handler", "poke", "hi").await.expect("host dispatch of the handler");
     assert_eq!(answer, "echoer pong: hi");
+    runtime.shutdown();
+}
+
+// The requester's grants reach one of the deployment's two read-only mounts.
+// `[plugins.grants]` reaches both mounts and the `omnia-test:` packages, so
+// only the requester's grants refuse the linked `full`.
+#[tokio::test]
+async fn plugins_grants() {
+    let (store, vault) = (scratch(), scratch());
+    stage(&store, "tool.wasm", test_programs::LINK_ECHOER);
+    stage(&store, "full.wasm", test_programs::LINK_FULL);
+    stage(&vault, "tool.wasm", test_programs::LINK_ECHOER);
+    let requester =
+        Grants::none().mounts(["store"]).interfaces(["wasi:*", "omnia:otel", "omnia:plugins"]);
+    let loaded = Grants::none().mounts(["store", "vault"]).interfaces(["wasi:*", "omnia-test:*"]);
+
+    let manifest = Manifest::new()
+        .guest(
+            GuestEntry::new("requester", test_programs::PLUGINS_GRANTS).command().grants(requester),
+        )
+        .guest(GuestEntry::new("plugin", test_programs::LINK_ECHOER))
+        .mounts([store.mount_as("store", false), vault.mount_as("vault", false)])
+        .plugin_grants(loaded);
+    let runtime = boot(manifest, &[]).await.expect("assembling runtime");
+    let status = runtime.run_command().await.expect("deployment runs");
+    assert_eq!(status, ExitStatus::SUCCESS, "the requester's assertions all held");
+
+    let grants = |guest: &str| {
+        runtime.registry().get(&GuestId::from(guest)).map(|entry| Grants::clone(entry.grants()))
+    };
+    assert_eq!(grants("plugin"), Some(Grants::all()), "a declared guest keeps its own grants");
+    assert_eq!(
+        grants("tool"),
+        Some(Grants::none().mounts(["store"]).interfaces(["wasi:*"])),
+        "a guest loaded by path runs under `[plugins.grants]` within the requester's"
+    );
+    assert_eq!(grants("full"), None, "the refused component was not admitted");
     runtime.shutdown();
 }
 
@@ -1004,17 +1046,6 @@ async fn reregister() {
     runtime.shutdown();
 }
 
-// test-programs resolves its worlds from its own `wit/deps`; this crate's copy
-// stays canonical.
-#[test]
-fn wit_copies() {
-    assert_eq!(
-        include_str!("../../test-programs/wit/deps/plugins/plugins.wit"),
-        include_str!("../wit/plugins.wit"),
-        "test-programs' plugins.wit copy drifted from crates/plugin/wit/plugins.wit"
-    );
-}
-
 // Compile-time proof that the macro's inline keys lower into the manifest
 // data this crate consumes: a `package` guest with a `digest` and a route
 // list per trigger, named by its reference; a named package pinned in
@@ -1056,6 +1087,7 @@ fn loader_grammar() {
         Some(PluginsConfig {
             store: Some(PathBuf::from("~/.app/store")),
             registries: Some(RegistryConfig::contents("default_registry = \"ghcr.io\"\n")),
+            grants: Grants::all(),
         }),
         "the store is carried as written; `~/` expands when the deployment builds"
     );

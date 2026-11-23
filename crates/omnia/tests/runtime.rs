@@ -273,6 +273,7 @@ mod deployment_keys {
         },
         plugins: {
             store: "store",
+            grants: { mounts: ["store"], interfaces: [] },
         },
     });
 }
@@ -353,7 +354,7 @@ fn inline_deployment() {
     assert_eq!(readme.grants, Grants::all());
 
     // explicit guest names and grants, expression-valued mounts, the
-    // inherited environment, and store-only `plugins`
+    // inherited environment, and `plugins` with a store and grants
     let keyed = deployment_keys::manifest().into_manifest().expect("inline manifest");
     let [specify, mock] = keyed.guests.as_slice() else {
         panic!("two named guests: {:?}", keyed.guests);
@@ -392,6 +393,7 @@ fn inline_deployment() {
         Some(PluginsConfig {
             store: Some(PathBuf::from("store")),
             registries: None,
+            grants: Grants::none().mounts(["store"]),
         })
     );
 }

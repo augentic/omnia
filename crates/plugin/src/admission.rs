@@ -26,11 +26,11 @@ pub trait Admission: Send + Sync + 'static {
         &self, package: &str, endpoint: Option<&str>,
     ) -> BoxFuture<'static, Result<Vec<u8>, GuestError>>;
 
-    /// Admit caller-named `bytes` as `id`, held to `pin`, and return the
-    /// handle of the guest standing under `id` afterwards, or the conflict
-    /// that kept the bytes out.
+    /// Admit caller-named `bytes` as `id`, held to `pin` and running under
+    /// `grants`, and return the handle of the guest standing under `id`
+    /// afterwards, or the conflict that kept the bytes out.
     fn admit_bytes(
-        &self, id: GuestId, bytes: Vec<u8>, pin: Option<Digest>,
+        &self, id: GuestId, bytes: Vec<u8>, pin: Option<Digest>, grants: Grants,
     ) -> BoxFuture<'static, Result<Result<Plugin, LoadConflict>, GuestError>>;
 }
 
@@ -62,12 +62,11 @@ impl<B: Backends> Admission for WeakRuntime<B> {
     }
 
     fn admit_bytes(
-        &self, id: GuestId, bytes: Vec<u8>, pin: Option<Digest>,
+        &self, id: GuestId, bytes: Vec<u8>, pin: Option<Digest>, grants: Grants,
     ) -> BoxFuture<'static, Result<Result<Plugin, LoadConflict>, GuestError>> {
         let weak = self.clone();
         async move {
             let runtime = live(&weak)?;
-            let grants = Grants::all();
             let policy = Policy::CallerNamed { pin, grants: &grants };
             match runtime.admit_bytes(id.clone(), bytes, policy).await {
                 Ok(guest) => Ok(Ok(Plugin::of(&guest))),

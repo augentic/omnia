@@ -50,12 +50,15 @@ impl fmt::Debug for Stdio {
 
 /// The per-store construction inputs for [`StoreBase::new`].
 ///
-/// `guest`, `options`, `dispatcher`, and `chain` say what the store is for.
-/// Each of the rest has a `None` or empty value a hand-built store context
-/// can pass: empty argv, no mounts, an empty environment.
+/// `guest`, `grants`, `options`, `dispatcher`, and `chain` say what the
+/// store is for. Each of the rest has a `None` or empty value a hand-built
+/// store context can pass: empty argv, no mounts, an empty environment.
 pub struct StoreConfig<'a> {
     /// The guest the store is built for.
     pub guest: GuestId,
+    /// What of the deployment the guest reaches; [`Grants::all`] for a
+    /// hand-built store context.
+    pub grants: Arc<Grants>,
     /// Runtime options; caps linear-memory growth at
     /// [`RuntimeOptions::max_memory_bytes`] and each file or socket read or
     /// write at [`RuntimeOptions::wasi_max_io_size`].
@@ -94,6 +97,8 @@ pub struct StoreConfig<'a> {
 pub struct StoreBase {
     /// The guest this store runs.
     pub guest: GuestId,
+    /// What of the deployment this store's guest reaches.
+    pub grants: Arc<Grants>,
     /// The store's WASI resource table.
     pub table: ResourceTable,
     /// The store's WASI context (the guest environment, inherited stdin,
@@ -169,6 +174,7 @@ impl StoreBase {
 
         Self {
             guest: config.guest,
+            grants: config.grants,
             table: ResourceTable::new(),
             wasi: wasi_builder.build(),
             limits: StoreLimitsBuilder::new().memory_size(config.options.max_memory_bytes).build(),
@@ -213,6 +219,13 @@ impl<B> StoreCtx<B> {
     #[must_use]
     pub const fn guest(&self) -> &GuestId {
         &self.base.guest
+    }
+
+    /// A handle to the grants this store's guest runs under, for a
+    /// capability that acts for the guest, such as the guest loader.
+    #[must_use]
+    pub fn grants(&self) -> Arc<Grants> {
+        Arc::clone(&self.base.grants)
     }
 
     /// A handle to the store's startup-validated mount registry, for

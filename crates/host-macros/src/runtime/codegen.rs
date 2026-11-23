@@ -151,9 +151,14 @@ fn emit_manifest_builder(manifest: &ManifestSpec) -> TokenStream {
                 .registries(omnia::RegistryConfig::contents(#config))
             }
         });
+        let grants = plugins.grants.as_ref().map(|grants| {
+            let grants = emit_grants(grants);
+            quote! { .plugin_grants(#grants) }
+        });
         quote! {
             #store
             #registries
+            #grants
         }
     });
 

@@ -15,8 +15,14 @@ pub enum LoadError {
     /// release.
     #[error("not-found: {0}")]
     NotFound(String),
-    /// The deployment does not grant the load, such as a path beneath a
-    /// writable mount or a name the deployment declares.
+    /// The deployment or the loading guest's grants do not allow the load.
+    ///
+    /// Refused loads include:
+    ///
+    /// - a path beneath a writable mount, or beneath a mount the loading
+    ///   guest does not reach;
+    /// - a path or package deriving a name the deployment declares;
+    /// - a component importing code from a package its grants do not reach.
     #[error("denied: {0}")]
     Denied(String),
     /// The request was rejected, such as a malformed path or digest, or the
