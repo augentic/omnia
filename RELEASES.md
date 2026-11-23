@@ -196,6 +196,16 @@ Unreleased
     unset for no cap), a wall-clock cap on an HTTP response body, counted
     from its head. A body still streaming at the cap is cut short, and
     `0` is refused.
+- `HTTP_HEALTH_PATH`, the path of a liveness or readiness probe the HTTP
+  trigger answers itself:
+  - it is answered `200` without entering a guest;
+  - it is matched exactly, and wins over a guest route that covers it;
+  - it is answered before the request target is checked, so a probe needs
+    no `Host`;
+  - a value that is not a request path is refused at startup.
+- `omnia_wasi_http::ServerOptions`, holding `HTTP_ADDR` and
+  `HTTP_HEALTH_PATH`, with `ServerOptions::validate`.
+  `HttpHandler::with_options` takes it in code.
 
 ### Changed
 

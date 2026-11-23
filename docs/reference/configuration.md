@@ -4,7 +4,7 @@ Omnia is configured entirely through environment variables (runtime options and 
 
 ## Runtime environment variables
 
-The [guest limits](#guest-limits), [instance pooling](#instance-pooling), and [memory layout](#memory-layout-and-artifacts-compile-affecting) variables are the fields of `RuntimeOptions`. An embedder sets them in code with `DeploymentBuilder::options`, and the deployment then reads none of them from the environment. `RuntimeOptions::with_env` applies the variables an operator sets over options built in code.
+The [guest limits](#guest-limits), [instance pooling](#instance-pooling), and [memory layout](#memory-layout-and-artifacts-compile-affecting) variables are the fields of `RuntimeOptions`, as is [`HTTP_STREAM_TIMEOUT_MS`](#http-trigger). An embedder sets them in code with `DeploymentBuilder::options`, and the deployment then reads none of them from the environment. `RuntimeOptions::with_env` applies the variables an operator sets over options built in code.
 
 ### General
 
@@ -35,8 +35,7 @@ On the `run` grammar the flags are the host's, global to the command (`bin -v ru
 
 | Variable             | Default               | Meaning                                                               |
 | -------------------- | --------------------- | --------------------------------------------------------------------- |
-| `GUEST_TIMEOUT_MS`   | `30000`               | Wall-clock cap on a single server guest invocation and each link-dispatch hop on a server-rooted chain. A command-mode (`wasi:cli/run`) chain is uncapped, including its link hops. The HTTP and messaging hosts stamp its expiry on each invocation as the guest's `Metadata::deadline`. For an HTTP guest it bounds the time to the response head, not the body that streams after it. |
-| `HTTP_STREAM_TIMEOUT_MS` | unset (no cap)    | Wall-clock cap on an HTTP response body, counted from when its head is sent. A body still streaming at the cap is cut, and the client sees it fail rather than end. Unset, a body streams for as long as the guest writes it. `0` is refused. |
+| `GUEST_TIMEOUT_MS`   | `30000`               | Wall-clock cap on a single server guest invocation and each link-dispatch hop on a server-rooted chain. A command-mode (`wasi:cli/run`) chain is uncapped, including its link hops. The HTTP and messaging hosts stamp its expiry on each invocation as the guest's `Metadata::deadline`. For an HTTP guest it bounds the time to the response head, not the body that streams after it, which [`HTTP_STREAM_TIMEOUT_MS`](#http-trigger) caps. |
 | `MAX_MEMORY_BYTES`   | `268435456` (256 MiB) | Maximum linear memory a guest may grow to.                            |
 | `WASI_MAX_IO_SIZE`   | unset (64 KiB)        | Largest single file or socket read or write the host performs for a guest. A larger value moves a large file in fewer calls. |
 | `MAX_FUEL`           | `0` (off)             | Per-invocation fuel budget; `0` disables metering. Compile-affecting. |
@@ -44,6 +43,16 @@ On the `run` grammar the flags are the host's, global to the command (`bin -v ru
 | `EPOCH_TICK_MS`      | `10`                  | Epoch-increment interval; the yield granularity for CPU-bound guests. |
 | `WASM_BACKTRACE`     | `false`               | Attach guest backtraces to trap errors.                               |
 | `ASYNC_STACK_ZEROING` | `false`              | Zero async (fiber) stacks before reuse, so no data lingers between guest invocations that share a recycled stack; costs a wipe per reuse. |
+
+### HTTP trigger
+
+| Variable                 | Default        | Meaning                                                    |
+| ------------------------ | -------------- | ---------------------------------------------------------- |
+| `HTTP_ADDR`              | `0.0.0.0:8080` | Address the HTTP trigger's server listens on.              |
+| `HTTP_HEALTH_PATH`       | unset (none)   | Path a probe requests, such as `/healthz`. The trigger answers it `200` without entering a guest. It is matched exactly and answered before the request's `Host` is checked, so it wins over a guest route that covers it, and a path below it goes to the guest. A request path starts with `/` and holds no `?`, `#`, or whitespace, and startup refuses any other value. See [Readiness and health](../guides/deployment.md#readiness-and-health). |
+| `HTTP_STREAM_TIMEOUT_MS` | unset (no cap) | Wall-clock cap on an HTTP response body, counted from when its head is sent. A body still streaming at the cap is cut, and the client sees it fail rather than end. Unset, a body streams for as long as the guest writes it. `0` is refused. |
+
+`HTTP_ADDR` and `HTTP_HEALTH_PATH` are the fields of `omnia_wasi_http::ServerOptions`. The trigger's server reads them from the environment alone, while an in-process caller passes them to `HttpHandler::with_options`.
 
 ### Instance pooling
 
@@ -81,7 +90,6 @@ Two further compile-affecting options trade artifact size against introspection:
 
 | Variable                                                             | Default                  | Used by                                                     |
 | -------------------------------------------------------------------- | ------------------------ | ----------------------------------------------------------- |
-| `HTTP_ADDR`                                                          | `0.0.0.0:8080`           | `HttpDefault` inbound server                                |
 | `HTTP_CONNECT_TIMEOUT`                                               | `10` (seconds)           | `HttpDefault` outbound client                               |
 | `HTTP_BODY_BUFFER_CHUNKS`                                            | `1`                      | `HttpDefault`: body chunks a guest may write ahead of the network, on the responses it serves and the requests it sends |
 | `WEBSOCKET_ADDR`                                                     | `0.0.0.0:80`             | `WebSocketDefault` server                                   |

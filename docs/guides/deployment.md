@@ -90,13 +90,23 @@ omnia ready
 
 with the mode and guest count attached. Orchestrators (or a log-watching startup probe) should key on this line; a process that is up but hasn't logged it is still connecting backends or compiling guests. For HTTP deployments, the listening port only accepts traffic after this point, so a TCP readiness probe on `HTTP_ADDR` is equivalent.
 
+An HTTP deployment can also answer a probe itself. Set [`HTTP_HEALTH_PATH`](../reference/configuration.md#http-trigger) (for example `/healthz`), and the HTTP trigger answers a request for exactly that path with `200`. The path:
+
+- enters no guest;
+- serves a liveness probe, so a busy pod is not restarted, or a readiness probe, so a busy pod stays in rotation rather than pushing its load onto peers that are just as full;
+- needs no `Host`, since it is answered before the request target is checked;
+- wins over a guest route that covers it, while a path below it goes to the guest;
+- exists only where the HTTP trigger runs, and a deployment with no guest serving HTTP logs a warning when the variable is set.
+
+Not ready is a refused connection. On shutdown the trigger drops its listener before in-flight requests drain, so a probe made after that point is refused rather than answered.
+
 ## Production checklist
 
 - [ ] Release build; consider AOT (`compile`) plus a `jit`-less host for fastest, smallest deployments
 - [ ] Backend env vars set and validated (the host fails at startup if a backend cannot connect)
 - [ ] `GUEST_TIMEOUT_MS`, `MAX_MEMORY_BYTES` sized for your workload ([tuning guide](performance-tuning.md))
 - [ ] `RUST_LOG=info` and `OTEL_EXPORTER_OTLP_ENDPOINT` set
-- [ ] Readiness keyed on the `omnia ready` log line (or TCP on `HTTP_ADDR`)
+- [ ] Readiness keyed on the `omnia ready` log line, TCP on `HTTP_ADDR`, or an HTTP probe on `HTTP_HEALTH_PATH`
 - [ ] Mounts limited to the directories guests actually need, read-only unless writes are required ([security model](../security-model.md))
 - [ ] `[env] inherit` (or `--env`) names each host variable guests read, since they see no other ([configuration](../reference/configuration.md#deployment-manifest-omniatoml))
 - [ ] `CONFIG_KEYS`, or the keys the runtime compiles in, names each host variable guests read through `omnia:config`, since `ConfigDefault` serves no other ([configuration](../reference/configuration.md#default-backends))

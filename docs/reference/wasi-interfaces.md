@@ -6,7 +6,7 @@ Every capability Omnia exposes to guests, its interface crate, the zero-config d
 
 | Interface | Crate | Host type | Default backend | Production backends |
 | --------- | ----- | --------- | --------------- | ------------------- |
-| HTTP client/server | `wasi-http` | `WasiHttp` † | `HttpDefault` — hyper outbound client, axum inbound server (`HTTP_ADDR`, default `0.0.0.0:8080`) | — |
+| HTTP client/server | `wasi-http` | `WasiHttp` † | `HttpDefault` — hyper outbound client; the trigger's server listens on `HTTP_ADDR` (default `0.0.0.0:8080`) | — |
 | Key-value storage | `wasi-keyvalue` | `WasiKeyValue` | `KeyValueDefault` — in-memory, serving the buckets `KEYVALUE_BUCKETS` declares (default `default`) | `omnia-redis`, `omnia-nats` |
 | Pub/sub messaging | `wasi-messaging` | `WasiMessaging` † | `MessagingDefault` — in-process broadcast | `omnia-kafka`, `omnia-nats` |
 | Blob storage | `wasi-blobstore` | `WasiBlobStore` | `BlobStoreDefault` — in-memory | `omnia-azure-blob`, `omnia-mongodb`, `omnia-nats` |

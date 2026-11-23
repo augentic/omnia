@@ -24,7 +24,7 @@ use hyper::service::service_fn;
 use omnia::{ExitStatus, GuestEntry, RuntimeOptions};
 use omnia_test::host::{Backends, Deployment};
 use omnia_wasi_config::WasiConfig;
-use omnia_wasi_http::{HttpHandler, WasiHttp};
+use omnia_wasi_http::{HttpHandler, ServerOptions, WasiHttp};
 use omnia_wasi_otel::WasiOtel;
 use rcgen::{
     BasicConstraints, CertificateParams, ExtendedKeyUsagePurpose, IsCa, Issuer, KeyPair,
@@ -480,6 +480,59 @@ async fn http_incoming_echo() {
         assert_eq!(response.status(), status, "{path}");
         assert_eq!(runtime.stores_built() > built, ran, "{path}");
     }
+
+    runtime.shutdown();
+}
+
+// The guest's route covers the health path, and the probe names no host, so
+// only a probe answered before the request is checked or routed is a `200`.
+#[tokio::test]
+async fn health_path() {
+    let guest = std::fs::read(test_programs::HTTP_INCOMING_ECHO).expect("guest bytes");
+    let runtime = Deployment::new()
+        .entry(GuestEntry::new("guest", guest).route_http("/echo"))
+        .boot(Backends::defaults().await, |deployment| {
+            deployment.host::<WasiHttp>()?;
+            deployment.host::<WasiOtel>()?;
+            Ok(())
+        })
+        .await
+        .expect("runtime boots");
+
+    // a health path that is not a request path is refused
+    let options = ServerOptions {
+        health_path: Some("healthz".into()),
+        ..ServerOptions::default()
+    };
+    let Err(error) = HttpHandler::with_options(&runtime, options) else {
+        panic!("a relative health path is refused");
+    };
+    let detail = format!("{error:#}");
+    assert!(detail.contains("HTTP_HEALTH_PATH"), "{detail}");
+
+    let options = ServerOptions {
+        health_path: Some("/echo/health".into()),
+        ..ServerOptions::default()
+    };
+    let handler = HttpHandler::with_options(&runtime, options)
+        .expect("http routes consistent")
+        .expect("the guest exports the http handler");
+
+    // the probe builds no store
+    let built = runtime.stores_built();
+    let request = Request::get("/echo/health").body(Full::new(Bytes::new())).expect("request");
+    let response = handler.handle(request).await.expect("handled");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(runtime.stores_built(), built);
+
+    // a path below it is the guest's, which has no such route
+    let request = Request::get("/echo/health/x")
+        .header(HOST, "echo.test")
+        .body(Full::new(Bytes::new()))
+        .expect("request");
+    let response = handler.handle(request).await.expect("handled");
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert!(runtime.stores_built() > built);
 
     runtime.shutdown();
 }

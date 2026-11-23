@@ -2,7 +2,6 @@
 
 use std::clone::Clone;
 use std::convert::Infallible;
-use std::env;
 use std::fmt::Debug;
 use std::future::Future;
 use std::pin::{Pin, pin};
@@ -22,7 +21,7 @@ use hyper::service::service_fn;
 use hyper_util::rt::TokioExecutor;
 use hyper_util::server::conn::auto;
 use omnia_core::{
-    Backends, ChainCtx, HttpRoutes, Provides, Runtime, StoreCtx, TriggerRouter, telemetry,
+    Backends, ChainCtx, FromEnv, HttpRoutes, Provides, Runtime, StoreCtx, TriggerRouter, telemetry,
 };
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
@@ -39,10 +38,51 @@ use super::{WasiHttp, WasiHttpCtxView};
 /// The streaming body of a response produced by [`HttpHandler::handle`].
 pub type OutgoingBody = UnsyncBoxBody<Bytes, anyhow::Error>;
 
-const HTTP_ADDR: &str = "0.0.0.0:8080";
-
 // the header omnia-sdk's `Metadata` reads a guest's deadline from
 const DEADLINE: &str = "x-deadline";
+
+/// Options for the HTTP trigger's server.
+///
+/// [`HttpHandler::new`] loads them from the environment, and
+/// [`HttpHandler::with_options`] takes them in code.
+#[derive(Clone, Debug, FromEnv)]
+#[env(validate = Self::validate)]
+pub struct ServerOptions {
+    /// The address the server listens on (`HTTP_ADDR`, default `0.0.0.0:8080`).
+    #[env(from = "HTTP_ADDR", default = "0.0.0.0:8080")]
+    pub addr: String,
+    /// The path a probe requests, answered `200` without entering a guest (`HTTP_HEALTH_PATH`, unset: none).
+    ///
+    /// The path is matched exactly, before the request's target is checked
+    /// or it is routed. It wins over a guest route that covers it, and a path
+    /// below it goes to the guest as usual.
+    #[env(from = "HTTP_HEALTH_PATH")]
+    pub health_path: Option<String>,
+}
+
+impl ServerOptions {
+    /// Checks that the HTTP trigger can serve under these options.
+    ///
+    /// [`load_env`](Self::load_env), [`with_env`](Self::with_env), and
+    /// [`load_from`](Self::load_from) run it on what they load, and
+    /// [`HttpHandler::with_options`] runs it on the options it is given.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the [health path](Self::health_path) is not a
+    /// request path, one that starts with `/` and holds no `?`, `#`, or
+    /// whitespace.
+    pub fn validate(&self) -> Result<()> {
+        if let Some(path) = &self.health_path {
+            let plain = !path.contains(|c: char| c == '?' || c == '#' || c.is_whitespace());
+            ensure!(
+                path.starts_with('/') && plain,
+                "HTTP_HEALTH_PATH must start with `/` and hold no `?`, `#`, or whitespace"
+            );
+        }
+        Ok(())
+    }
+}
 
 #[instrument("http-server", skip(state))]
 pub async fn run<B>(state: &Runtime<B>) -> Result<()>
@@ -54,8 +94,8 @@ where
         return Ok(());
     };
 
-    let addr = env::var("HTTP_ADDR").unwrap_or_else(|_| HTTP_ADDR.into());
-    let listener = TcpListener::bind(&addr).await.with_context(|| format!("binding {addr}"))?;
+    let addr = &handler.options.addr;
+    let listener = TcpListener::bind(addr).await.with_context(|| format!("binding {addr}"))?;
     let addr = listener.local_addr().context("reading http listener address")?;
     tracing::info!("{} http server listening on: {addr}", handler.component);
 
@@ -148,41 +188,68 @@ where
     state: Runtime<B>,
     component: Arc<str>,
     routing: Arc<TriggerRouter<HttpRoutes>>,
+    options: Arc<ServerOptions>,
 }
 
 impl<B> HttpHandler<B>
 where
     B: Provides<WasiHttp>,
 {
-    /// Build the handler over `runtime`'s registry; `None` when no guest
-    /// exports the http handler (the trigger is inert).
+    /// Build the handler over `runtime`'s registry under the
+    /// [`ServerOptions`] the environment sets; `None` when no guest exports
+    /// the http handler (the trigger is inert).
     ///
     /// # Errors
     ///
-    /// Returns an error if the deployment's http routes are inconsistent with
-    /// the guests' exports.
+    /// Returns an error if the server options do not load or
+    /// [validate](ServerOptions::validate), or the deployment's http routes
+    /// are inconsistent with the guests' exports.
     pub fn new(runtime: &Runtime<B>) -> Result<Option<Self>> {
+        Self::with_options(runtime, ServerOptions::load_env()?)
+    }
+
+    /// Build the handler over `runtime`'s registry under `options`; `None`
+    /// when no guest exports the http handler (the trigger is inert).
+    ///
+    /// An inert trigger answers no [health path](ServerOptions::health_path),
+    /// so it logs a warning when `options` sets one.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `options` do not [validate](ServerOptions::validate),
+    /// or the deployment's http routes are inconsistent with the guests'
+    /// exports.
+    pub fn with_options(runtime: &Runtime<B>, options: ServerOptions) -> Result<Option<Self>> {
+        options.validate()?;
+
         // a guest is capable exactly when its `ServiceIndices` resolve; a
         // declared guest is probed when its first request loads it
         let routing = runtime.http_trigger_router(ServiceIndices::new)?;
         if routing.is_inert() {
+            if let Some(path) = &options.health_path {
+                tracing::warn!(%path, "HTTP_HEALTH_PATH is set, but no guest serves http to answer it");
+            }
             return Ok(None);
         }
         Ok(Some(Self {
             state: runtime.clone(),
             component: Arc::from(runtime.name()),
             routing: Arc::new(routing),
+            options: Arc::new(options),
         }))
     }
 
     /// Forward a request to the routed guest and return its response.
     ///
-    /// The request is normalised first: its scheme and authority come from
+    /// A request for the [health path](ServerOptions::health_path) is answered
+    /// at once, before its target is checked, so a probe needs no `Host`. Any
+    /// other request is normalised first: its scheme and authority come from
     /// `Forwarded` where it names them, else from the URI or `Host`. Its
     /// `x-deadline` header is set to the instant the guest timeout expires, in
     /// milliseconds since the Unix epoch, replacing any the client sent.
     ///
     /// Outcomes the handler can answer itself come back as responses:
+    /// - `200` for the health path;
     /// - `400` for a malformed request target;
     /// - `404` for an unrouted path;
     /// - `500` for a guest that times out, cannot be loaded at its first use,
@@ -210,6 +277,11 @@ where
         T::Error: Into<wasmtime_wasi_http::Error>,
     {
         tracing::debug!(method = %request.method(), uri = %request.uri(), "handling request");
+
+        // answer a probe before the request is checked, so it needs no `Host`
+        if self.options.health_path.as_deref() == Some(request.uri().path()) {
+            return Ok(healthy());
+        }
 
         // normalise the request and stamp the guest's deadline; a bad `Host`
         // header is a 400, not a 500
@@ -471,6 +543,16 @@ fn checked(authority: Authority) -> Result<Authority> {
 fn deadline_millis(timeout: Duration) -> u64 {
     let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
     u64::try_from(now.saturating_add(timeout).as_millis()).unwrap_or(u64::MAX)
+}
+
+fn healthy() -> hyper::Response<OutgoingBody> {
+    let body = Full::new(Bytes::from_static(b"OK")).map_err(Into::into).boxed_unsync();
+
+    hyper::Response::builder()
+        .status(StatusCode::OK)
+        .header("Content-Type", "text/plain; charset=UTF-8")
+        .body(body)
+        .expect("should build health response")
 }
 
 fn bad_request() -> hyper::Response<OutgoingBody> {
