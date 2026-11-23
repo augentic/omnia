@@ -1,10 +1,10 @@
-error: `plugins:` block is empty; name a `store`, a `registries` configuration, or both
+error: `plugins:` block is empty; name a `store`, a `registries` configuration, or `grants`
  --> tests/ui/runtime_invalid.rs:3:18
   |
 3 |         plugins: {},
   |                  ^^
 
-error: unknown plugins key `cache`; expected `store` or `registries`
+error: unknown plugins key `cache`; expected `store`, `registries`, or `grants`
  --> tests/ui/runtime_invalid.rs:9:20
   |
 9 |         plugins: { cache: "store" },

@@ -519,6 +519,11 @@ path = "programs/plugins/error_codes.rs"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "plugins_grants"
+path = "programs/plugins/grants.rs"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "plugins_host_only"
 path = "programs/plugins/host_only.rs"
 crate-type = ["cdylib"]

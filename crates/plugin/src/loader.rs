@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use anyhow::{Context as _, bail, ensure};
 use cap_std::fs::Dir;
-use omnia_core::{Backends, Digest, Guest, GuestId, MountRegistry, Runtime};
+use omnia_core::{Backends, Digest, Grants, Guest, GuestError, GuestId, MountRegistry, Runtime};
 
 use crate::admission::Admission;
 use crate::error::LoadError;
@@ -17,6 +17,9 @@ use crate::source::Location;
 pub trait PluginLoader {
     /// Ensure the guest `from` names is active and return its handle, held
     /// to `pin` when one is given. Idempotent on (name, digest).
+    ///
+    /// The embedder's load is held to no caller's grants. A guest it admits
+    /// by path or package runs under the deployment's `[plugins.grants]`.
     ///
     /// A load whose bytes miss `pin`, or whose name is active under other
     /// bytes, loads nothing and answers a [`LoadConflict`].
@@ -38,7 +41,7 @@ impl<B: Backends> PluginLoader for Runtime<B> {
         let plugins = self.extensions().get::<Plugins>();
         async move {
             match plugins {
-                Some(plugins) => plugins.load(from, pin).await,
+                Some(plugins) => plugins.load(from, pin, &Grants::all()).await,
                 None => Err(LoadError::no_plugins(&from)),
             }
         }
@@ -49,32 +52,52 @@ impl<B: Backends> PluginLoader for Runtime<B> {
 /// reached through the runtime's first-use seam; its read-only mounts; and
 /// the registry source its packages are fetched through.
 ///
-/// The grant is fixed at install. `load` resolves a location inside it — a
-/// declared name to the deployment's own entry, a path to the read-only
-/// mount beneath which it lies, a package to the registry the deployment
-/// routes it to — and admits the bytes it finds there through the runtime's
-/// one admission body. Nothing a caller passes widens it.
+/// The grant is fixed at install. `load` resolves a location inside it:
+///
+/// - a declared name to the deployment's own entry;
+/// - a path to the read-only mount beneath which it lies, of those the
+///   loading guest reaches;
+/// - a package to the registry the deployment routes it to.
+///
+/// It admits the bytes it finds there through the runtime's one admission
+/// body. A guest loaded by path or package runs under the grants
+/// [`install`](Self::install) named, within the loading guest's. Nothing a
+/// caller passes widens the grant.
 pub struct Plugins {
     mounts: Vec<Root>,
+    grants: Grants,
     admission: Box<dyn Admission>,
 }
 
 impl Plugins {
-    /// Install the loader capability on `runtime`: its mounts are the roots
-    /// a path load resolves against — the read-only ones as code roots, the
-    /// writable ones as refusals — and its registry source fetches the
-    /// packages a load names. Mount directories are told apart by identity,
-    /// not path: two mount points of one directory are one directory here. A
-    /// declared name loads through the runtime's own first-use seam, so
-    /// nothing of the deployment's guests is copied here.
+    /// Install the loader capability on `runtime`, holding each path or
+    /// package load to `grants`.
+    ///
+    /// A guest loaded by path or package runs under `grants` within the
+    /// loading guest's. The deployment passes its `[plugins.grants]`, else
+    /// [`Grants::all`].
+    ///
+    /// The runtime's mounts are the roots a path load resolves against. The
+    /// read-only ones are code roots and the writable ones refusals. Mount
+    /// directories are told apart by identity, not path, so two mount points
+    /// of one directory are one directory here. The runtime's registry
+    /// source fetches the packages a load names. A declared name loads
+    /// through the runtime's own first-use seam, so nothing of the
+    /// deployment's guests is copied here.
     ///
     /// # Errors
     ///
-    /// Returns an error if a writable mount and a read-only mount share or
-    /// nest their directories, or the capability is already installed.
-    pub fn install<B: Backends>(runtime: &Runtime<B>) -> anyhow::Result<()> {
+    /// Returns an error if:
+    ///
+    /// - `grants` fail [`Runtime::validate_grants`];
+    /// - a writable mount and a read-only mount share or nest their
+    ///   directories;
+    /// - the capability is already installed.
+    pub fn install<B: Backends>(runtime: &Runtime<B>, grants: Grants) -> anyhow::Result<()> {
+        runtime.validate_grants(&grants).context("the guest loader's grants are invalid")?;
         let plugins = Self {
             mounts: roots(runtime.mounts())?,
+            grants,
             admission: Box::new(runtime.downgrade()),
         };
         ensure!(
@@ -84,27 +107,37 @@ impl Plugins {
         Ok(())
     }
 
-    /// Ensure the guest `from` names is active and return its handle. A
-    /// declared name goes through the runtime's first-use seam: the
-    /// deployment's entry is its source and its pin, and a guest already
-    /// loaded is attested. A path or package is acquired inside the
-    /// deployment's grant and admitted through the runtime's one admission
-    /// body as caller-named bytes — held to `pin` when one is given, raw
-    /// wasm alone, under the name the location derives, which no entry of
-    /// the deployment may declare; a name already active under the same
-    /// bytes is attested. Idempotent on (name, digest).
+    /// Ensure the guest `from` names is active and return its handle, loading
+    /// it for a guest that runs under `caller`.
     ///
-    /// A path or package whose bytes miss `pin`, or whose name is active
-    /// under other bytes, loads nothing and answers a [`LoadConflict`].
+    /// - A declared name goes through the runtime's first-use seam. The
+    ///   deployment's entry is its source, its pin, and its grants, so the
+    ///   load is not held to `caller`. A guest already loaded is attested.
+    /// - A path or package is acquired inside the deployment's grant, and a
+    ///   path beneath a mount `caller` reaches. It is admitted through the
+    ///   runtime's one admission body as caller-named bytes: held to `pin`
+    ///   when one is given, raw wasm alone, under the name the location
+    ///   derives, which no entry of the deployment may declare. The guest
+    ///   runs under the grants [`install`](Self::install) named, within
+    ///   `caller`. A name already active under the same bytes and grants is
+    ///   attested.
+    ///
+    /// Idempotent on (name, digest). A path or package whose bytes miss
+    /// `pin`, or whose name is active under other bytes, loads nothing and
+    /// answers a [`LoadConflict`].
     ///
     /// # Errors
     ///
     /// - [`LoadError::NotFound`] for an undeclared name, a path beneath no
     ///   mount or with no file, or a package nothing routes or holds.
-    /// - [`LoadError::Denied`] for a path or package deriving a name the
-    ///   deployment declares, a path beneath a writable mount or one the
-    ///   filesystem refuses to read, or a registry named for a package the
-    ///   deployment routes elsewhere.
+    /// - [`LoadError::Denied`] for:
+    ///   - a path or package deriving a name the deployment declares, or one
+    ///     active under other grants;
+    ///   - a path beneath a mount `caller` does not reach, beneath a writable
+    ///     mount, or one the filesystem refuses to read;
+    ///   - a registry named for a package the deployment routes elsewhere;
+    ///   - a component importing code from a package its grants do not
+    ///     reach.
     /// - [`LoadError::Invalid`] for a declared name with a pin, a malformed
     ///   path, package, or registry, or bytes that miss the deployment's
     ///   pin, are pre-compiled where raw wasm alone is admitted, or are not
@@ -115,7 +148,7 @@ impl Plugins {
     /// - [`LoadError::Other`] when the registration failed or the runtime
     ///   has shut down.
     pub async fn load(
-        &self, from: Location, pin: Option<Digest>,
+        &self, from: Location, pin: Option<Digest>, caller: &Grants,
     ) -> Result<Result<Plugin, LoadConflict>, LoadError> {
         let id = from.id();
 
@@ -135,7 +168,7 @@ impl Plugins {
             }
             Location::Path(path) => {
                 self.admission.admits(&id)?;
-                self.read(path).await?
+                self.read(path, caller).await?
             }
             Location::Registry { package, endpoint } => {
                 self.admission.admits(&id)?;
@@ -143,7 +176,16 @@ impl Plugins {
             }
         };
 
-        let loaded = self.admission.admit_bytes(id.clone(), bytes, pin).await?;
+        // admit under the deployment's grants within the caller's, which a refusal names
+        let grants = self.grants.within(caller);
+        let admitted = self.admission.admit_bytes(id.clone(), bytes, pin, grants).await;
+        let loaded = admitted.map_err(|error| match error {
+            GuestError::Denied(reason) => LoadError::Denied(format!(
+                "{reason}; a guest loaded by path or package runs under the deployment's \
+                 `[plugins.grants]` within the loading guest's grants"
+            )),
+            error => LoadError::from(error),
+        })?;
         match &loaded {
             Ok(plugin) => tracing::info!(%id, digest = %plugin.digest, "guest loaded"),
             Err(conflict) => tracing::debug!(%id, found = %conflict.found, "guest load conflicted"),
@@ -152,9 +194,9 @@ impl Plugins {
     }
 
     // Read the component at `path` through the read-only mount it lies
-    // beneath.
-    async fn read(&self, path: &str) -> Result<Vec<u8>, LoadError> {
-        let (dir, subpath) = self.resolve(path)?;
+    // beneath, of those `caller` reaches.
+    async fn read(&self, path: &str, caller: &Grants) -> Result<Vec<u8>, LoadError> {
+        let (dir, subpath) = self.resolve(path, caller)?;
         let read = tokio::task::spawn_blocking(move || {
             dir.read(&subpath).map_err(|error| {
                 let detail = format!("reading component `{subpath}`: {error}");
@@ -170,27 +212,24 @@ impl Plugins {
         })
     }
 
-    // The mount `path` lies beneath, as wasi-libc resolves a guest's own opens
-    // (longest name prefix, else `.`), refused before any read when writable;
-    // cap-std refuses any escape in the subpath at open time.
-    fn resolve(&self, path: &str) -> Result<(Arc<Dir>, String), LoadError> {
-        let best = self
-            .mounts
-            .iter()
-            .filter_map(|root| {
-                if path == root.name {
-                    // kept so `check_subpath`'s refusal names the mount
-                    return Some((root, ""));
-                }
-                let subpath = path.strip_prefix(&root.name)?.strip_prefix('/')?;
-                Some((root, subpath))
-            })
-            .max_by_key(|(root, _)| root.name.len())
-            .or_else(|| self.mounts.iter().find(|root| root.name == ".").map(|root| (root, path)));
-        let Some((root, subpath)) = best else {
-            return Err(LoadError::NotFound(format!(
-                "path `{path}` is beneath no mount of this deployment"
-            )));
+    // The mount `path` lies beneath, as the loading guest resolves its own
+    // opens over the mounts its grants reach, refused before any read when
+    // writable; cap-std refuses any escape in the subpath at open time.
+    fn resolve(&self, path: &str, caller: &Grants) -> Result<(Arc<Dir>, String), LoadError> {
+        let reached: Vec<&Root> =
+            self.mounts.iter().filter(|root| caller.allows_mount(&root.name)).collect();
+        let Some((root, subpath)) = beneath(&reached, path) else {
+            let all: Vec<&Root> = self.mounts.iter().collect();
+            return Err(match beneath(&all, path) {
+                Some((root, _)) => LoadError::Denied(format!(
+                    "path `{path}` is beneath the mount `{}`, which the loading guest's grants \
+                     do not reach",
+                    root.name
+                )),
+                None => LoadError::NotFound(format!(
+                    "path `{path}` is beneath no mount of this deployment"
+                )),
+            });
         };
         if root.writable {
             return Err(LoadError::Denied(format!(
@@ -202,6 +241,23 @@ impl Plugins {
         check_subpath(path, subpath)?;
         Ok((Arc::clone(&root.dir), subpath.to_owned()))
     }
+}
+
+// The root `path` lies beneath as wasi-libc resolves a guest's opens: the
+// longest name prefix, else `.`.
+fn beneath<'a>(roots: &[&'a Root], path: &'a str) -> Option<(&'a Root, &'a str)> {
+    roots
+        .iter()
+        .filter_map(|root| {
+            if path == root.name {
+                // kept so `check_subpath`'s refusal names the mount
+                return Some((*root, ""));
+            }
+            let subpath = path.strip_prefix(&root.name)?.strip_prefix('/')?;
+            Some((*root, subpath))
+        })
+        .max_by_key(|(root, _)| root.name.len())
+        .or_else(|| roots.iter().find(|root| root.name == ".").map(|root| (*root, path)))
 }
 
 // One of the deployment's mounts as a path load sees it: the handle it

@@ -173,6 +173,14 @@ impl Manifest {
         self
     }
 
+    /// Set the grants a guest loaded at run time by path or package runs
+    /// under, within its loader's (the manifest's `[plugins.grants]`).
+    #[must_use]
+    pub fn plugin_grants(mut self, grants: Grants) -> Self {
+        self.plugins.get_or_insert_default().grants = grants;
+        self
+    }
+
     /// Validate manifest-level invariants surfaced before the registry is
     /// built. An `allow_empty` (dynamic) deployment may define no `[[guest]]`
     /// entry; `features` is what the manifest may declare.
@@ -186,8 +194,9 @@ impl Manifest {
     /// - more than one entry is the command guest;
     /// - an `[env] inherit` entry is not a variable name or a prefix of one
     ///   that ends in `*`;
-    /// - a guest's grants do not [validate](Grants::validate) against the
-    ///   deployment's `[[mount]]`s and `[env] inherit`;
+    /// - a guest's grants, or `[plugins.grants]`, do not
+    ///   [validate](Grants::validate) against the deployment's `[[mount]]`s
+    ///   and `[env] inherit`;
     /// - the transport is not in-process;
     /// - the manifest declares `[plugins]` or a package source that
     ///   `features` lacks the `loader` to serve.
@@ -227,6 +236,12 @@ impl Manifest {
                 .grants
                 .validate(&mounts, &self.env.inherit)
                 .with_context(|| format!("guest `{}` has invalid grants", entry.name))?;
+        }
+        if let Some(plugins) = &self.plugins {
+            plugins
+                .grants
+                .validate(&mounts, &self.env.inherit)
+                .context("`[plugins.grants]` is invalid")?;
         }
         if self.transport.default != TransportKind::InProcess {
             bail!(
@@ -433,14 +448,14 @@ pub struct Env {
     pub inherit: Vec<String>,
 }
 
-/// The `[plugins]` table: where acquired packages are kept and how they are
-/// routed to a registry.
+/// The `[plugins]` table: where acquired packages are kept, how they are
+/// routed to a registry, and what a guest loaded at run time reaches.
 ///
 /// Every package — a declared `source.package` at its first use, a package a
 /// guest loads — is read from the `store` first and, when it is not there,
 /// fetched from the registry `registries` routes it to and written to the
 /// store once. A deployment naming neither refuses every package.
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(default, deny_unknown_fields)]
 pub struct PluginsConfig {
     /// The package store: one directory, each release filed as
@@ -453,6 +468,23 @@ pub struct PluginsConfig {
     /// Where the wasm-pkg client configuration that routes packages comes
     /// from; absent, a package the store does not hold is refused.
     pub registries: Option<RegistryConfig>,
+    /// The grants a guest loaded at run time by path or package runs under,
+    /// within the grants of the guest that loaded it.
+    ///
+    /// Absent, such a guest runs under its loader's grants. A declared guest
+    /// a load names keeps its own.
+    #[serde(default = "Grants::all")]
+    pub grants: Grants,
+}
+
+impl Default for PluginsConfig {
+    fn default() -> Self {
+        Self {
+            store: None,
+            registries: None,
+            grants: Grants::all(),
+        }
+    }
 }
 
 /// Where the wasm-pkg client configuration comes from: the `[plugins]`
@@ -762,6 +794,10 @@ mod tests {
             name = "data"
             path = "data"
 
+            [plugins.grants]
+            mounts = ["data"]
+            interfaces = ["wasi:*"]
+
             [[guest]]
             name = "app"
             source.path = "app.wasm"
@@ -789,7 +825,11 @@ mod tests {
         );
         assert_eq!(manifest.guests[1].grants, Grants::none());
         assert!(manifest.guests[2].grants.is_all(), "no table reaches everything");
-        manifest.validate(false, Features { loader: false }).expect("the grants are valid");
+        assert_eq!(
+            manifest.plugins.as_ref().map(|plugins| &plugins.grants),
+            Some(&Grants::none().mounts(["data"]).interfaces(["wasi:*"]))
+        );
+        manifest.validate(false, Features { loader: true }).expect("the grants are valid");
 
         let error = toml::from_str::<Manifest>(
             "[[guest]]\nname = \"app\"\nsource.path = \"app.wasm\"\n\n[guest.grants]\nhosts = \
@@ -818,5 +858,13 @@ mod tests {
             assert!(format!("{error:#}").contains("guest `app` has invalid grants"), "{error:#}");
             assert!(format!("{error:#}").contains(needle), "{error:#}");
         }
+
+        let error = Manifest::new()
+            .guest(GuestEntry::new("app", "./app.wasm"))
+            .plugin_grants(Grants::none().mounts(["data"]))
+            .validate(false, Features { loader: true })
+            .expect_err("the loaded guests' grants are invalid");
+        assert!(format!("{error:#}").contains("`[plugins.grants]` is invalid"), "{error:#}");
+        assert!(format!("{error:#}").contains("`mounts` entry `data` names no mount"), "{error:#}");
     }
 }

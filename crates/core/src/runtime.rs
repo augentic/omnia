@@ -262,8 +262,8 @@ impl<B: Backends> Runtime<B> {
     /// exposed so a caller can refuse before acquiring. A name the
     /// deployment declares is bound by its entry alone — [`Policy::Declared`]
     /// with that entry passes, and anything else offered under the name is
-    /// refused. Caller-named grants must [validate](Grants::validate)
-    /// against the deployment's mounts and inherited variables.
+    /// refused. Caller-named grants must pass
+    /// [`validate_grants`](Self::validate_grants).
     ///
     /// # Errors
     ///
@@ -285,13 +285,23 @@ impl<B: Backends> Runtime<B> {
                  as the declared guest `{id}`, whose source and pin are the deployment's"
             ))),
             (Policy::CallerNamed { grants, .. }, None) => {
-                let mounts: Vec<&str> =
-                    self.inner.mounts.entries().iter().map(|mount| mount.name.as_str()).collect();
-                grants.validate(&mounts, &self.inner.inherit).map_err(|error| {
+                self.validate_grants(grants).map_err(|error| {
                     GuestError::Invalid(format!("guest `{id}` has invalid grants: {error:#}"))
                 })
             }
         }
+    }
+
+    /// Check `grants` against this deployment's mounts and inherited host
+    /// variables, as startup checks a declared guest's.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error naming the first entry [`Grants::validate`] refuses.
+    pub fn validate_grants(&self, grants: &Grants) -> Result<()> {
+        let mounts: Vec<&str> =
+            self.inner.mounts.entries().iter().map(|mount| mount.name.as_str()).collect();
+        grants.validate(&mounts, &self.inner.inherit)
     }
 
     /// Verify `bytes` under `policy`, admit them as `id`, and answer the
@@ -499,6 +509,7 @@ impl<B: Backends> Runtime<B> {
         StoreCtx {
             base: StoreBase::new(crate::StoreConfig {
                 guest: guest.id().clone(),
+                grants: Arc::clone(grants),
                 options: self.options(),
                 dispatcher: Arc::clone(&self.dispatcher),
                 chain,

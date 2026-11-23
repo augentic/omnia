@@ -120,7 +120,7 @@ impl Parse for Config {
                     inline_span.get_or_insert(span);
                 }
                 OptValue::Plugins(p) => {
-                    manifest.plugins = Some(p);
+                    manifest.plugins = Some(*p);
                     inline_span.get_or_insert(span);
                 }
                 OptValue::Mounts(m) => {
@@ -185,7 +185,7 @@ impl Parse for Opt {
         } else if l.peek(kw::plugins) {
             let key = input.parse::<kw::plugins>()?;
             input.parse::<Token![:]>()?;
-            ("plugins", key.span, OptValue::Plugins(input.parse()?))
+            ("plugins", key.span, OptValue::Plugins(Box::new(input.parse()?)))
         } else if l.peek(kw::registries) {
             // the retired top-level key, refused with its new home
             let key = input.parse::<kw::registries>()?;
@@ -213,7 +213,7 @@ enum OptValue {
     Hosts(Vec<HostEntry>),
     Manifest(Expr),
     Guests(Vec<GuestSpec>),
-    Plugins(PluginsSpec),
+    Plugins(Box<PluginsSpec>),
     Mounts(Vec<MountSpec>),
     Env(EnvSpec),
 }
@@ -300,8 +300,8 @@ pub struct ManifestSpec {
     pub mounts: Vec<MountSpec>,
     /// The `env: { .. }` block — the host variables every guest sees.
     pub env: Option<EnvSpec>,
-    /// The `plugins: { .. }` block — the package store and the routing of
-    /// every package source.
+    /// The `plugins: { .. }` block — the package store, the routing of
+    /// every package source, and what a guest loaded at run time reaches.
     pub plugins: Option<PluginsSpec>,
 }
 
@@ -346,7 +346,7 @@ impl Parse for EnvSpec {
     }
 }
 
-/// The `plugins: { store: ..., registries: ... }` block.
+/// The `plugins: { store: ..., registries: ..., grants: { .. } }` block.
 pub struct PluginsSpec {
     /// The `store:` path expression — the directory every package is kept
     /// in; a leading `~/` expands against `$HOME` at start-up.
@@ -354,32 +354,45 @@ pub struct PluginsSpec {
     /// The `registries:` expression — the wasm-pkg configuration (TOML) that
     /// routes package sources, typically an `include_str!`.
     pub registries: Option<Expr>,
+    /// The `grants:` block — what a guest loaded at run time by path or
+    /// package reaches, within its loader's grants.
+    pub grants: Option<GrantsSpec>,
 }
 
 impl Parse for PluginsSpec {
     fn parse(input: ParseStream) -> Result<Self> {
         let mut store = None;
         let mut registries = None;
+        let mut grants = None;
         let span = parse_kv_block(input, |key, value| {
             match key.to_string().as_str() {
                 "store" => store = Some(value.parse()?),
                 "registries" => registries = Some(value.parse()?),
+                "grants" => grants = Some(value.parse()?),
                 other => {
                     return Err(syn::Error::new(
                         key.span(),
-                        format!("unknown plugins key `{other}`; expected `store` or `registries`"),
+                        format!(
+                            "unknown plugins key `{other}`; expected `store`, `registries`, or \
+                             `grants`"
+                        ),
                     ));
                 }
             }
             Ok(())
         })?;
-        if store.is_none() && registries.is_none() {
+        if store.is_none() && registries.is_none() && grants.is_none() {
             return Err(syn::Error::new(
                 span,
-                "`plugins:` block is empty; name a `store`, a `registries` configuration, or both",
+                "`plugins:` block is empty; name a `store`, a `registries` configuration, or \
+                 `grants`",
             ));
         }
-        Ok(Self { store, registries })
+        Ok(Self {
+            store,
+            registries,
+            grants,
+        })
     }
 }
 

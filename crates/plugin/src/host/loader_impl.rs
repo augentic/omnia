@@ -1,4 +1,5 @@
 use omnia_core::Digest;
+use tracing::Instrument as _;
 use wasmtime::component::Accessor;
 
 use crate::error::LoadError;
@@ -13,14 +14,17 @@ impl<T> loader::HostWithStore<T> for WasiPlugins {
         accessor: &Accessor<T, Self>, source: types::Source,
     ) -> Result<Result<types::Plugin, types::Conflict>, Error> {
         let (from, pin) = source.into_parts();
-        let plugins = accessor
-            .with(|mut store| store.get().plugins)
-            .ok_or_else(|| LoadError::no_plugins(&from))?;
+        let (plugins, guest, grants) = accessor.with(|mut store| {
+            let view = store.get();
+            (view.plugins, view.guest, view.grants)
+        });
+        let plugins = plugins.ok_or_else(|| LoadError::no_plugins(&from))?;
         let pin = pin
             .map(|digest| digest.parse::<Digest>())
             .transpose()
             .map_err(|error| LoadError::Invalid(format!("{error:#}")))?;
-        let loaded = plugins.load(from, pin).await?;
+        let span = tracing::info_span!("plugin-load", loader = %guest);
+        let loaded = plugins.load(from, pin, &grants).instrument(span).await?;
         Ok(loaded.map(|plugin| types::Plugin::from(&plugin)).map_err(types::Conflict::from))
     }
 }

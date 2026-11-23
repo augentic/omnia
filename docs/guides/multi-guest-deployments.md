@@ -37,7 +37,7 @@ The full field reference lives in [Configuration](../reference/configuration.md#
 
 ## Programmatic manifests
 
-Everything the TOML expresses can also be assembled in Rust. `omnia::Manifest` is the same schema as a value, with fluent setters for guests, mounts, the store, registries, routes, and grants (`GuestEntry::grants`). Pass it to the deployment builder (or the `runtime!`-generated `run(builder)`) instead of a file path:
+Everything the TOML expresses can also be assembled in Rust. `omnia::Manifest` is the same schema as a value, with fluent setters for guests, mounts, the store, registries, routes, and grants (`GuestEntry::grants`, and `Manifest::plugin_grants` for a guest loaded at run time). Pass it to the deployment builder (or the `runtime!`-generated `run(builder)`) instead of a file path:
 
 ```rust,ignore
 use omnia::{DeploymentBuilder, GuestEntry, Manifest};
@@ -105,7 +105,7 @@ let workspace = directories.iter().find_map(|(dir, name)| (name == ".").then_som
 
 The [`model`](../../examples/model/) example lends a mounted workspace to a model backend this way.
 
-A read-only mount is also where the guest loader (`omnia:plugins/loader`, behind the `loader` feature) reads a component a guest names by path; a writable mount never is, and a writable mount that shares or nests a read-only mount's directory is refused at startup. Mount code read-only and give state a mount of its own — see the [security model](../security-model.md#guest-requested-plugin-loading-omniapluginsloader).
+A read-only mount is also where the guest loader (`omnia:plugins/loader`, behind the `loader` feature) reads a component a guest whose grants reach the mount names by path; a writable mount never is, and a writable mount that shares or nests a read-only mount's directory is refused at startup. Mount code read-only and give state a mount of its own — see the [security model](../security-model.md#guest-requested-plugin-loading-omniapluginsloader).
 
 ## Guests calling guests
 
@@ -155,10 +155,10 @@ interfaces = [                         # the packages it imports code from
 
 Once a guest has a table, a list the table leaves out grants nothing, `interfaces` included. Each list is held where the access happens:
 
-- `env` filters the guest's environment, and `mounts` its preopens, so it never sees what it was not granted.
+- `env` filters the guest's environment, and `mounts` its preopens and the paths it may load a component from, so it never sees what it was not granted.
 - `interfaces` refuses a component that imports code from a package outside it when the guest is admitted, naming every such package at once. Name each package rather than writing `wasi:*`, which would grant `wasi:http`, and with it outbound requests, to a guest that serves no HTTP.
 
-In Rust, `GuestEntry::grants(Grants::none().mounts(["data"]))` declares a table, and `grants: { .. }` does in `runtime!`. Startup logs each guest without one, so what nothing narrows stays visible. A guest loaded at run time through `omnia:plugins/loader` by path or release runs with no grants. The [security model](../security-model.md#per-guest-grants) has the full rules.
+In Rust, `GuestEntry::grants(Grants::none().mounts(["data"]))` declares a table, and `grants: { .. }` does in `runtime!`. Startup logs each guest without one, so what nothing narrows stays visible. A guest loaded at run time through `omnia:plugins/loader` by path or release runs under `[plugins.grants]` within the grants of the guest that loaded it, or under its loader's grants when the deployment declares none. A declared guest a load names keeps its own table. The [security model](../security-model.md#per-guest-grants) has the full rules.
 
 ## How execution scales
 

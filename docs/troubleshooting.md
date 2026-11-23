@@ -92,6 +92,8 @@ A manifest declares a `source.package` guest, but the runtime has no registry cl
 
 The guest declares grants, and its component imports code from packages its `interfaces` list leaves out. The message names every one, so add them all at once. A guest built on `omnia-sdk` imports `wasi:cli`, `wasi:clocks`, `wasi:random`, and `omnia:otel`, so a list starts with those four. Name each package rather than writing `wasi:*`, which would grant `wasi:http` and `wasi:sockets` as well. An import with no function and no resource needs no entry. A guest loaded at boot is refused at startup, and any other guest at its first use, as `denied`.
 
+A guest loaded by path or release is refused at its load, as `denied`, and the message adds that it runs under `[plugins.grants]` within the loading guest's grants. Such a guest has no table of its own, so add the package to the loading guest's `interfaces`, and to `[plugins.grants]` where the deployment declares one.
+
 ### `guest ... has invalid grants`
 
 A grants table holds an entry the deployment cannot honour, and the message names it:
@@ -101,15 +103,21 @@ A grants table holds an entry the deployment cannot honour, and the message name
 - a `mounts` entry that names no `[[mount]]` of the deployment;
 - an `interfaces` entry that names an interface (`wasi:http/types`), a version (`wasi:http@0.3.0`), or a bare namespace (`wasi`), where a package (`wasi:http`) or a prefix such as `wasi:*` belongs.
 
-Startup refuses a manifest's table. `Runtime::register` and `Runtime::admit` refuse an embedder's as `invalid`.
+Startup refuses a manifest's table, and refuses `[plugins.grants]` for the same entries as `` `[plugins.grants]` is invalid ``. `Runtime::register` and `Runtime::admit` refuse an embedder's as `invalid`, and `Plugins::install` refuses the loader's.
 
 ### `guest ... is active under other grants than this admission names`
 
-An embedder's `Runtime::register` or `Runtime::admit` named a guest already active under other grants. A name already active attests on the same bytes and the same grants alone, so a caller never believes narrower grants hold a guest that keeps its first ones. Register under the grants the guest runs under, or under another name.
+An embedder's `Runtime::register`, or a guest's path or release load, named a guest already active under other grants. A name already active attests on the same bytes and the same grants alone, so a caller never believes narrower grants hold a guest that keeps its first ones. Register under the grants the guest runs under, or under another name. `Runtime::admit` never attests: it answers `Conflict` for any name already taken.
+
+Two loaders under different grants reach it when both load the same path or release. The first load seats the guest under `[plugins.grants]` within its loader's grants, and the second names that table within its own. Declare a `[plugins.grants]` both loaders' grants cover, so both loads narrow to the table itself.
 
 ### `guest declares no grants: it reaches every variable, mount, and interface of the deployment`
 
 Not an error. Startup logs it for each guest without a grants table, at `info` while no guest declares grants and at `warn` once one does, so an operator sees what nothing narrows. Declare `[guest.grants]` to narrow it; see the [security model](security-model.md#per-guest-grants).
+
+### `the deployment declares no [plugins.grants]: a guest loaded at run time reaches whatever its loader does`
+
+Not an error. A runtime built with the `loader` feature logs it at `info` when the deployment declares no `[plugins.grants]`. A guest loaded by path or release then runs under the grants of the guest that loaded it. Declare `[plugins.grants]` to narrow such guests further; see the [security model](security-model.md#guest-requested-plugin-loading-omniapluginsloader).
 
 ### `guest ... targets WASI 0.2 (wasm32-wasip2), importing ...; rebuild it for wasm32-wasip3`
 
