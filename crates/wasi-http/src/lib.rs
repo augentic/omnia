@@ -12,7 +12,7 @@ mod server;
 use anyhow::Result;
 pub use default_impl::{ConnectOptions, HttpDefault};
 use omnia_core::{Host, HostCtx, Provides, Runtime, StoreCtx};
-pub use server::{HttpHandler, OutgoingBody};
+pub use server::{HttpHandler, OutgoingBody, ServerOptions};
 use wasmtime::component::{HasData, Linker, ResourceTable};
 use wasmtime_wasi_http::p3::bindings::http::{client, types};
 pub use wasmtime_wasi_http::{
