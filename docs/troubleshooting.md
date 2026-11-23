@@ -90,7 +90,7 @@ A manifest declares a `source.package` guest, but the runtime has no registry cl
 
 ### `guest ... imports code from packages its grants do not reach: add ... to its interfaces`
 
-The guest declares grants, and its component imports code from packages its `interfaces` list leaves out. The message names every one, so add them all at once. A guest built on `omnia-sdk` imports `wasi:cli`, `wasi:clocks`, `wasi:random`, and `omnia:otel`, so `["wasi:*", "omnia:otel", ..]` is the usual start. An import with no function and no resource needs no entry. A guest loaded at boot is refused at startup, and any other guest at its first use, as `denied`.
+The guest declares grants, and its component imports code from packages its `interfaces` list leaves out. The message names every one, so add them all at once. A guest built on `omnia-sdk` imports `wasi:cli`, `wasi:clocks`, `wasi:random`, and `omnia:otel`, so a list starts with those four. Name each package rather than writing `wasi:*`, which would grant `wasi:http` and `wasi:sockets` as well. An import with no function and no resource needs no entry. A guest loaded at boot is refused at startup, and any other guest at its first use, as `denied`.
 
 ### `guest ... has invalid grants`
 

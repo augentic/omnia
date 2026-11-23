@@ -115,8 +115,12 @@ routes.websocket = ["events.*"]     # one optional list per trigger
 [guest.grants]                      # optional: present, the guest reaches only what is listed
 env = ["ORDERS_*"]                  # of what [env] inherit passes
 mounts = ["."]                      # [[mount]] names
-interfaces = ["wasi:*", "omnia:otel", "acme:orders"]  # the packages it imports code from;
-                                    # a package it calls `responder` through counts
+interfaces = [                      # the packages it imports code from
+    "wasi:cli", "wasi:clocks", "wasi:random", "omnia:otel",  # what every omnia-sdk guest imports
+    "wasi:filesystem",              # to use its mount
+    "wasi:http",                    # to serve `/api`, which lets it call out too
+    "acme:orders",                  # a package it calls `responder` through
+]
 
 [[guest]]
 source.path = "./responder.wasm"    # named by the file's stem: `responder`
@@ -164,7 +168,7 @@ Field notes:
 - **`guest.grants`** — what of the deployment the guest reaches, as three lists. Without the table the guest reaches everything, and startup logs its name, at `warn` once another guest declares grants. With it, a list the table omits grants nothing, `interfaces` included.
   - `env` — the host variables the guest sees through `wasi:cli/environment`, of those [`env.inherit`](#deployment-manifest-omniatoml) passes. Each entry must reach a variable `inherit` passes. The runtime's `RUST_LOG` and `NO_COLOR` reach the guest whatever the list says. What it reads through `omnia:config` is held by `interfaces` instead, and served from the variables [`CONFIG_KEYS`](#default-backends) names.
   - `mounts` — the `[[mount]]`s preopened into the guest, by name. A model workspace and `omnia:vcs` resolve these alone. A path the guest loads through `omnia:plugins` is not held to the list (see the [security model](../security-model.md#what-omnia-does-not-protect-against)). Each entry must match a declared mount.
-  - `interfaces` — the packages the guest imports code from (`wasi:http`, `acme:orders`). Admission refuses a component that imports a function or resource from any other package, naming every such package in one error. An import of types alone needs no entry. Every guest built on `omnia-sdk` imports `wasi:cli`, `wasi:clocks`, `wasi:random`, and `omnia:otel`. `wasi:*` opens every `wasi:` package: `wasi:http` for serving and calling alike, and `wasi:sockets`, which is linked but refuses every address.
+  - `interfaces` — the packages the guest imports code from (`wasi:http`, `acme:orders`). Admission refuses a component that imports a function or resource from any other package, naming every such package in one error. An import of types alone needs no entry. Every guest built on `omnia-sdk` imports `wasi:cli`, `wasi:clocks`, `wasi:random`, and `omnia:otel`. A guest that uses its mounts adds `wasi:filesystem`, and one that serves HTTP adds `wasi:http`, which lets it call out as well. Name each package rather than writing `wasi:*`: a prefix reaches every package it starts, so `wasi:*` grants `wasi:http`, and with it outbound requests, to a guest that serves no HTTP, and `wasi:sockets`, which is linked but refuses every address.
 
   An entry is a whole name, or a prefix that ends in `*`. An `interfaces` entry names a package (`wasi:http`), never an interface or a version. Startup refuses an entry of the wrong shape, naming it. Grants hold what a guest imports. What it exports, and who calls it, they leave alone.
 - **`mount`** — preopened into the sandbox of every guest that declares no grants, and of each guest whose `mounts` grant names it. A read-only mount is also a root the `omnia:plugins/loader` reads a component from when a guest names a path beneath it; a writable mount never is — a component beneath one is refused before it is read — and a writable mount that shares or nests a read-only mount's directory is refused at startup, so what a guest can write, it cannot run. CLI `--mount` entries layer on top; a duplicate guest-visible name wins over the manifest, before any directory opens.

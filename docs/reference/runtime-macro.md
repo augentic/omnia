@@ -89,7 +89,10 @@ omnia::runtime!({
             grants: {                                // optional: present, it reaches only these
                 env: ["ORDERS_*"],
                 mounts: ["."],
-                interfaces: ["wasi:*", "omnia:*"],
+                interfaces: [                        // the packages it imports code from
+                    "wasi:cli", "wasi:clocks", "wasi:random", "omnia:otel",
+                    "wasi:filesystem", "wasi:http", "omnia:websocket",
+                ],
             },
         },
     ],

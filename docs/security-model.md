@@ -25,7 +25,11 @@ source.path = "./orders.wasm"
 [guest.grants]
 env        = ["ORDERS_*"]                    # of what [env] inherit passes
 mounts     = ["data"]                        # [[mount]] names
-interfaces = ["wasi:*", "omnia:otel", "omnia:keyvalue", "acme:pricing"]
+interfaces = [
+    "wasi:cli", "wasi:clocks", "wasi:random", "omnia:otel",  # what every omnia-sdk guest imports
+    "wasi:filesystem",                                       # to use its mount
+    "omnia:keyvalue", "acme:pricing",
+]
 ```
 
 A guest with no table reaches everything, and startup logs its name. In a table, an omitted list grants nothing, `interfaces` included. An entry is a whole name, or a prefix that ends in `*`.
@@ -41,6 +45,7 @@ Each list is held where the runtime reaches what it names:
 Some of the rules behind those rows:
 
 - `interfaces` decides whether a guest has a package at all. A guest has all of `omnia:keyvalue`, `omnia:vcs`, or `wasi:http`, or none of it. An import with no function and no resource, such as a `types` interface, needs no entry. Every guest built on `omnia-sdk` imports `wasi:cli`, `wasi:clocks`, `wasi:random`, and `omnia:otel`, so a list without them refuses the guest. A linked package counts, as `acme:pricing` does above.
+- Name each package rather than writing a prefix. `wasi:*` grants `wasi:http`, and with it outbound requests, and `wasi:sockets`. `omnia:*` grants `omnia:plugins`, the loader.
 - `env` narrows `wasi:cli` alone. Whether a guest has `omnia:config` is its `interfaces`' decision, and `ConfigDefault` serves every guest that has it the variables `CONFIG_KEYS` names.
 - Startup checks every table against the deployment. An `env` entry that reaches no variable `inherit` passes, or a `mounts` entry that names no mount, fails startup rather than granting nothing.
 - An embedder's `Runtime::register` and `Runtime::admit` take the grants their guest runs under, checked the same way. A name already active attests on the same bytes and the same grants alone, and other grants are `denied`.
@@ -142,7 +147,7 @@ Honest limits, so you can layer the right controls on top:
 - [ ] Give the loader import only to worlds that genuinely request loads; keep loadable-plugin worlds free of it
 - [ ] Set a `default_registry`, or route every namespace, in any deployment whose loader-importing components are not the operator's own; a namespace routed nowhere is fetched from whichever `registry` the load names
 - [ ] Link only the interfaces each deployment's guests need
-- [ ] Declare `[guest.grants]` for each guest you do not author, and keep `omnia:plugins` out of its `interfaces`; the startup log names each guest that reaches everything
+- [ ] Declare `[guest.grants]` for each guest you do not author, naming its packages one by one rather than by prefix, and keep `omnia:plugins` out of its `interfaces`; the startup log names each guest that reaches everything
 - [ ] Mount the minimum directory set, read-only unless writes are required
 - [ ] Inherit only the host variables guests read (`[env] inherit`), and serve through `omnia:config` only the ones `CONFIG_KEYS` names; `*` in either hands every guest the whole process environment, credentials included
 - [ ] Keep resource ceilings meaningful for the workload (don't blanket-raise timeouts and memory)
