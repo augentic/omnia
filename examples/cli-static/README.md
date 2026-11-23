@@ -10,7 +10,9 @@ exporter, so command mode routes to it with no configuration.
 Because the deployment is compiled in, command mode makes the binary a
 **direct command** with no host CLI: there is no `run` subcommand and no
 `--manifest`/`OMNIA_MANIFEST`/positional-wasm override — every argument is
-forwarded to the guest verbatim.
+forwarded to the guest verbatim. A direct command takes no `--env` either,
+so the invocation's `env:` key passes the guest its `CLI_*`
+invocation metadata.
 
 ## Quick Start
 

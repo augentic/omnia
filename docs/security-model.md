@@ -8,7 +8,7 @@ The boundary sits between the **guest** (WebAssembly, untrusted) and the **host*
 
 - **No ambient filesystem.** A guest sees only the directories the host preopened via mounts, read-only unless marked writable.
 - **No ambient network.** A guest cannot open sockets. Outbound HTTP exists only if the host linked `WasiHttp`, and then only through the host's client.
-- **No process, clock, or environment escape.** Environment variables reach the guest only through `wasi:cli` argv/env the host chooses to forward — the process environment, with `RUST_LOG` set to the runtime's tracing filter — or `omnia:config`.
+- **No process, clock, or environment escape.** A guest's `wasi:cli` environment holds the runtime's own `RUST_LOG` (its tracing filter), `NO_COLOR` when the console is plain, and the host variables the deployment names in `[env] inherit` or with `run --env`. Nothing else of the process environment reaches it through `wasi:cli`. `omnia:config` is a separate doorway that answers from its backend, and `ConfigDefault` serves every host variable to a guest that imports it.
 - **Memory isolation.** WebAssembly linear memory is bounds-checked; a guest cannot read host memory or another guest's.
 
 Capability granting is therefore the host author's main security decision: the `hosts:` map in `runtime!` *is* the guest's permission set. A guest that only needs key-value storage should run in a host that links only `WasiKeyValue` (plus a trigger).
@@ -108,6 +108,7 @@ Honest limits, so you can layer the right controls on top:
 - [ ] Set a `default_registry`, or route every namespace, in any deployment whose loader-importing components are not the operator's own; a namespace routed nowhere is fetched from whichever `registry` the load names
 - [ ] Link only the interfaces each deployment's guests need
 - [ ] Mount the minimum directory set, read-only unless writes are required
+- [ ] Inherit only the host variables guests read (`[env] inherit`); `*` hands every guest the whole process environment, credentials included
 - [ ] Keep resource ceilings meaningful for the workload (don't blanket-raise timeouts and memory)
 - [ ] Scope backend service credentials narrowly; prefer per-deployment credentials
 - [ ] For model workloads, prefer read-only workspaces; treat `writable` lends as privileged

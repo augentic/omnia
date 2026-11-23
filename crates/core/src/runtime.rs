@@ -81,6 +81,10 @@ pub struct RuntimeParts<B: 'static> {
     /// process `RUST_LOG` ([`telemetry::directives`](crate::telemetry::directives))
     /// — set as every guest's `RUST_LOG`.
     pub rust_log: String,
+    /// The host environment variables guests see, each a whole name or a
+    /// prefix that ends in `*`. Empty, a guest sees only `RUST_LOG`, and
+    /// `NO_COLOR` when the console does not colour its lines.
+    pub inherit: Vec<String>,
     /// Where every guest's stdout and stderr go; `None` inherits the process
     /// streams.
     pub stdio: Option<Stdio>,
@@ -118,7 +122,12 @@ impl<B: Backends> Runtime<B> {
         let host = std::env::vars_os().filter_map(|(name, value)| {
             Some((name.into_string().ok()?, value.into_string().ok()?))
         });
-        let env = crate::store::guest_env(host, &parts.rust_log, crate::telemetry::ansi());
+        let env = crate::store::guest_env(
+            host,
+            &parts.inherit,
+            &parts.rust_log,
+            crate::telemetry::ansi(),
+        );
 
         Self::with_inner(Arc::new(RuntimeInner {
             name: parts.name,
@@ -436,9 +445,10 @@ impl<B: Backends> Runtime<B> {
     }
 
     // A fresh store context for `guest` at `chain`. The guest's environment
-    // is the host's as it stood when the runtime was assembled, with
-    // `RUST_LOG` set to the run's tracing directives and `NO_COLOR` set when
-    // the console the guest shares does not colour its lines.
+    // is the inherited host variables, as they stood when the runtime was
+    // assembled, with `RUST_LOG` set to the run's tracing directives and
+    // `NO_COLOR` set when the console the guest shares does not colour its
+    // lines.
     fn store_ctx(&self, guest: &Guest<B>, chain: ChainCtx) -> StoreCtx<B> {
         StoreCtx {
             base: StoreBase::new(crate::StoreConfig {

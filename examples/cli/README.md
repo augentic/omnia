@@ -36,6 +36,18 @@ cargo run --example cli -- run ./target/wasm32-wasip3/debug/examples/cli_wasm.wa
 ...
 ```
 
+## Environment
+
+A guest sees no host variable the run does not name. `env` prints
+`RUST_LOG` alone, and `NO_COLOR` when the console is plain. Each `--env`
+before the `--` that opens the guest's argv passes one more, and a name
+ending in `*` passes every variable it prefixes:
+
+```bash
+cargo run --example cli -- run --env HOME --env 'CLI_*' \
+  ./target/wasm32-wasip3/debug/examples/cli_wasm.wasm -- env
+```
+
 ## Output format
 
 Every verb takes a global `--format text|json` (default `text`). Text is the
@@ -68,4 +80,5 @@ returns that class from its handler so the mapping can be observed:
 
 Usage errors exit 64 (`EX_USAGE`), so exit 2 always means `NotFound`.
 Invocation metadata is read from `CLI_REQUEST_ID`, `CLI_CORRELATION_ID`,
-and `CLI_CAUSATION_ID`; a missing request id is minted.
+and `CLI_CAUSATION_ID`, which reach the guest when the run passes
+`--env 'CLI_*'`; a missing request id is minted.

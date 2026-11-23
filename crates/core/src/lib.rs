@@ -10,6 +10,7 @@ mod extensions;
 mod host;
 mod invoke;
 mod mount;
+mod names;
 mod options;
 mod registry;
 mod runtime;

@@ -510,6 +510,9 @@ impl Metadata {
     /// The command line's carrier for the values HTTP reads from headers; a
     /// missing request id is minted as on every transport.
     ///
+    /// In a guest, these variables arrive only when the deployment passes
+    /// `<PREFIX>_*` to it, through `[env] inherit` or `run --env`.
+    ///
     /// # Panics
     ///
     /// Panics as [`Metadata::from_lookup`] does.

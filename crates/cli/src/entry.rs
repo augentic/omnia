@@ -38,6 +38,7 @@ pub fn plan(
             wasm,
             manifest,
             mounts,
+            env,
             args,
         } => {
             let manifest = manifest.or_else(|| omnia_manifest.map(PathBuf::from));
@@ -55,6 +56,7 @@ pub fn plan(
             Ok(RunPlan {
                 source,
                 mounts,
+                env,
                 verbose,
                 quiet,
                 args,
@@ -66,13 +68,16 @@ pub fn plan(
     }
 }
 
-/// The planner's outcome: source, CLI mounts, verbosity, and guest argv.
+/// The planner's outcome: source, CLI mounts and environment, verbosity,
+/// and guest argv.
 #[derive(Debug, PartialEq, Eq)]
 pub struct RunPlan {
     /// Which source the precedence ladder selected.
     pub source: RunSource,
     /// `--mount` arguments, in argv order.
     pub mounts: Vec<MountArg>,
+    /// `--env` names, in argv order: the host variables every guest sees.
+    pub env: Vec<String>,
     /// How many `-v` flags were given; each raises the process tracing level
     /// one step.
     pub verbose: u8,

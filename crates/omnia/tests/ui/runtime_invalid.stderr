@@ -64,8 +64,20 @@ error: guest entry is missing `path` (or `package`)
 66 |         guests: [{ name: "api" }],
    |                  ^^^^^^^^^^^^^^^
 
-error: `manifest:` and the inline keys (`guests`, `mounts`, `plugins`) are mutually exclusive; declare the deployment in the manifest file
+error: `manifest:` and the inline keys (`guests`, `mounts`, `env`, `plugins`) are mutually exclusive; declare the deployment in the manifest file
   --> tests/ui/runtime_invalid.rs:73:9
    |
 73 |         plugins: { registries: "default_registry = \"ghcr.io\"\n" },
    |         ^^^^^^^
+
+error: `env:` block is empty; name the host variables guests see in `inherit`
+  --> tests/ui/runtime_invalid.rs:79:14
+   |
+79 |         env: {},
+   |              ^^
+
+error: unknown env key `pass`; expected `inherit`
+  --> tests/ui/runtime_invalid.rs:85:16
+   |
+85 |         env: { pass: ["HOME"] },
+   |                ^^^^
