@@ -52,8 +52,7 @@ impl<B: Backends> PluginLoader for Runtime<B> {
 /// reached through the runtime's first-use seam; its read-only mounts; and
 /// the registry source its packages are fetched through.
 ///
-/// The grant is fixed at install. `load` resolves a location inside it and
-/// inside the loading guest's grants:
+/// The grant is fixed at install. `load` resolves a location inside it:
 ///
 /// - a declared name to the deployment's own entry;
 /// - a path to the read-only mount beneath which it lies, of those the
@@ -61,7 +60,9 @@ impl<B: Backends> PluginLoader for Runtime<B> {
 /// - a package to the registry the deployment routes it to.
 ///
 /// It admits the bytes it finds there through the runtime's one admission
-/// body. Nothing a caller passes widens the grant.
+/// body. A guest loaded by path or package runs under the grants
+/// [`install`](Self::install) named, within the loading guest's. Nothing a
+/// caller passes widens the grant.
 pub struct Plugins {
     mounts: Vec<Root>,
     grants: Grants,
