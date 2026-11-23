@@ -1442,6 +1442,42 @@ Unreleased
   `omnia_sdk::Config`, and `omnia_wasi_config::omnia` holds the raw
   `omnia:config` bindings.
 
+<!-- Release notes generated using configuration in .github/release.yaml at 52a5b47874d6a7e1a39012fcdaae328555cebb39 -->
+
+## What's Changed
+* Bump to 0.38.0 by @augentic-releases[bot] in https://github.com/augentic/omnia/pull/386
+* Restructure to support Dapr by @andrewweston in https://github.com/augentic/omnia/pull/393
+* Improve wasi-http server by @andrewweston in https://github.com/augentic/omnia/pull/394
+* Simplify codegen by @andrewweston in https://github.com/augentic/omnia/pull/395
+* Rationalise host traits by @andrewweston in https://github.com/augentic/omnia/pull/396
+* WASI host restructuring by @andrewweston in https://github.com/augentic/omnia/pull/397
+* Code hygine by @andrewweston in https://github.com/augentic/omnia/pull/398
+* Simplify capablities by @andrewweston in https://github.com/augentic/omnia/pull/400
+* Upgrade to Rust 1.100 and wasm32-wasip3 by @andrewweston in https://github.com/augentic/omnia/pull/401
+* Future-forward WIT upgrade by @andrewweston in https://github.com/augentic/omnia/pull/403
+* Reshape SDK around WIT changes by @andrewweston in https://github.com/augentic/omnia/pull/404
+* Add http-cache to omnia-sdk by @andrewweston in https://github.com/augentic/omnia/pull/405
+* Post-SDK refactor improvements by @andrewweston in https://github.com/augentic/omnia/pull/406
+* xtask WIT actions by @andrewweston in https://github.com/augentic/omnia/pull/408
+* Resolve xtask issues by @andrewweston in https://github.com/augentic/omnia/pull/409
+* Unify guest instantiation  by @andrewweston in https://github.com/augentic/omnia/pull/410
+* Replace fromenv with internal module by @andrewweston in https://github.com/augentic/omnia/pull/411
+* Runtime options by @andrewweston in https://github.com/augentic/omnia/pull/412
+* Environment isolation by @andrewweston in https://github.com/augentic/omnia/pull/413
+* Wasmtime 51 and replace chrono with jiff by @andrew-goldie in https://github.com/augentic/omnia/pull/414
+* CONFIG_KEYS for config backend by @andrewweston in https://github.com/augentic/omnia/pull/415
+* Runtime metrics by @andrewweston in https://github.com/augentic/omnia/pull/416
+* Guest grants framework by @andrewweston in https://github.com/augentic/omnia/pull/417
+* HTTP hardening by @andrewweston in https://github.com/augentic/omnia/pull/418
+* HTTP health path by @andrewweston in https://github.com/augentic/omnia/pull/419
+* Concurrency gate by @andrewweston in https://github.com/augentic/omnia/pull/420
+* Guest grant enforcement by @andrewweston in https://github.com/augentic/omnia/pull/421
+* Optimise tests by @andrewweston in https://github.com/augentic/omnia/pull/433
+* Keep workspace-member dev-dependencies path-only by @andrew-goldie in https://github.com/augentic/omnia/pull/442
+
+
+**Full Changelog**: https://github.com/augentic/omnia/compare/v0.37.0...v0.38.0
+
 ---
 
 Release notes for previous releases can be found on the respective release branches of the repository.
