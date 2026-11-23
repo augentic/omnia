@@ -4,6 +4,8 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
+use std::time::Duration;
+
 use omnia::{ExitStatus, RuntimeOptions};
 use omnia_test::host::{Backends, Deployment};
 use omnia_wasi_otel::WasiOtel;
@@ -64,6 +66,37 @@ async fn command_blocking() {
     };
     let err = run(starved).await.expect_err("one core instance is too few for the guest");
     assert!(format!("{err:#}").contains("core instances"), "unexpected error: {err:#}");
+}
+
+// A command run competes with the triggers serving beside it, so it waits on a
+// full gate rather than failing.
+#[tokio::test]
+async fn queued_command() {
+    let runtime = Deployment::new()
+        .guest("cli", test_programs::COMMAND_EXIT_MAP)
+        .args(["ok"])
+        .options(RuntimeOptions {
+            max_concurrent_invocations: Some(1),
+            ..RuntimeOptions::default()
+        })
+        .boot(Backends::defaults().await, |deployment| {
+            deployment.host::<WasiOtel>()?;
+            Ok(())
+        })
+        .await
+        .expect("runtime boots");
+
+    // with the only slot held, the run waits for it
+    let slot = runtime.try_slot().expect("the gate is empty");
+    let release = async {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(runtime.invocations().waiting, 1);
+        drop(slot);
+    };
+    let ((), status) = tokio::join!(release, runtime.run_command());
+    assert_eq!(status.expect("command runs"), ExitStatus::SUCCESS);
+
+    runtime.shutdown();
 }
 
 // A captured deployment answers what the guest wrote beside its status: the

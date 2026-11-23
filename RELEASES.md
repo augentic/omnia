@@ -126,6 +126,7 @@ Unreleased
   - `mise run wit-sync` rewrites every copy from the package that owns it.
 - `Runtime::enter`, which instantiates a guest on a fresh store at a chain
   context. Every trigger and the command driver run a guest through it.
+  It takes no slot of the concurrency gate, so a trigger takes one first.
 - `StoreCtx::guest` and `StoreBase::guest`, the guest a store runs.
 - `#[derive(FromEnv)]`, from `omnia-core` and `omnia` under the trait's
   name. Each field of an options struct takes `#[env(from = "NAME")]`,
@@ -159,8 +160,9 @@ Unreleased
 - `RuntimeOptions::validate`, and `total_core_instances`,
   `total_memories`, `total_tables` and `total_stacks`, the pool totals a
   runtime builds.
-- `omnia_core::telemetry::record_pool`, `count_message`, `count_event`,
-  and `count_error`, re-exported through `omnia::telemetry`. They record
+- `omnia_core::telemetry::record_pool`, `record_invocations`,
+  `count_message`, `count_event`, and `count_error`, re-exported through
+  `omnia::telemetry`. They record
   the runtime's own metrics on OpenTelemetry instruments, and the pool
   sampler and the triggers record through them.
 - Per-guest grants. `omnia::Grants` is what of the deployment one guest
@@ -198,7 +200,8 @@ Unreleased
     `0` is refused.
 - `HTTP_HEALTH_PATH`, the path of a liveness or readiness probe the HTTP
   trigger answers itself:
-  - it is answered `200` without entering a guest;
+  - it is answered `200` without entering a guest or taking a slot of the
+    concurrency gate;
   - it is matched exactly, and wins over a guest route that covers it;
   - it is answered before the request target is checked, so a probe needs
     no `Host`;
@@ -206,6 +209,24 @@ Unreleased
 - `omnia_wasi_http::ServerOptions`, holding `HTTP_ADDR` and
   `HTTP_HEALTH_PATH`, with `ServerOptions::validate`.
   `HttpHandler::with_options` takes it in code.
+- `MAX_CONCURRENT_INVOCATIONS` (`RuntimeOptions::max_concurrent_invocations`,
+  unset for `POOL_MAX_INSTANCES`), the size of the runtime's concurrency
+  gate. Each invocation a trigger runs holds one slot of it, and so does a
+  command's run. `0` is refused, and so is a value above
+  `POOL_MAX_INSTANCES` while pooling is on.
+- The gate's API on `Runtime`, from `omnia-core` and `omnia`:
+  - `Runtime::slot`, which waits for a slot;
+  - `Runtime::try_slot`, which answers `None` at once when every slot is
+    held;
+  - `Runtime::invocations`, how full the gate is.
+
+  They return `Slot`, which frees its slot on drop, and `Invocations`.
+- The gate's metrics:
+  - the `invocations_in_flight` and `invocations_waiting` gauges, sampled
+    every `POOL_METRICS_INTERVAL_MS`;
+  - the `invocations_refused` counter.
+- A warning, logged once, when the first call between guests runs while
+  pooling is on and `MAX_CONCURRENT_INVOCATIONS` is unset.
 
 ### Changed
 
@@ -395,6 +416,22 @@ Unreleased
     no error text;
   - under a subscriber the process installed first, they record on the
     meter provider the process made global before `Telemetry::build`.
+- The HTTP trigger answers `503`, with `Retry-After: 1`, when every slot
+  of the concurrency gate is held. At that load a request found the
+  instance pool full, and was answered `500`.
+- A WebSocket event that finds every slot held fails before a store is
+  built, naming `MAX_CONCURRENT_INVOCATIONS`.
+- A message delivery waits for a slot of the gate every trigger shares
+  before its guest is instantiated, and its guest timeout counts from when
+  it takes one.
+- A command's run waits for a slot of the gate before its guest is
+  instantiated, and holds it until the run ends.
+- With `POOLING=false` the gate still applies, at 1000 by default, so
+  HTTP requests and WebSocket events are capped where they were not.
+- A guest instantiation that finds the instance pool full fails with an
+  error naming `MAX_CONCURRENT_INVOCATIONS` and `POOL_MAX_INSTANCES`.
+- The occupancy sampler runs with pooling off, and then records the gate
+  alone.
 
 ### Removed
 

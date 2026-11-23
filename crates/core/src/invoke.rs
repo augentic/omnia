@@ -7,6 +7,7 @@ use std::time::Duration;
 use anyhow::Context as _;
 use tokio::task::JoinHandle;
 use tracing::Instrument as _;
+use wasmtime::PoolConcurrencyLimitError;
 use wasmtime::component::{ComponentExportIndex, InstancePre, Val};
 
 use crate::chain::ChainCtx;
@@ -83,12 +84,13 @@ pub async fn call_fresh<B: Send + 'static>(
     // docs recommend; the span `spawn` drops is re-entered for otel parenting
     let callee = async move {
         let mut store = (call.factory)(ctx);
-        let instance = call.instance_pre.instantiate_async(&mut store).await?;
+        let instance =
+            call.instance_pre.instantiate_async(&mut store).await.map_err(explain_full_pool)?;
         let func = instance
             .get_func(&mut store, call.export)
             .context("export resolved at serve time vanished")?;
         let mut out = vec![Val::Bool(false); call.results];
-        func.call_async(&mut store, &args, &mut out).await?;
+        func.call_async(&mut store, &args, &mut out).await.map_err(explain_full_pool)?;
         Ok::<_, anyhow::Error>(out)
     }
     .in_current_span();
@@ -109,6 +111,21 @@ pub async fn call_fresh<B: Send + 'static>(
     }
 
     Ok(out)
+}
+
+// A full pool is a sizing fault, so its error names the two variables that
+// size the pool against the gate.
+pub fn explain_full_pool(error: wasmtime::Error) -> anyhow::Error {
+    let full = error.is::<PoolConcurrencyLimitError>();
+    let error = anyhow::Error::from(error);
+    if full {
+        error.context(
+            "the instance pool is full; set MAX_CONCURRENT_INVOCATIONS below POOL_MAX_INSTANCES \
+             to leave room for calls between guests, or raise POOL_MAX_INSTANCES",
+        )
+    } else {
+        error
+    }
 }
 
 struct AbortOnDrop<T>(JoinHandle<T>);

@@ -231,10 +231,21 @@ fn sample_pool<B: Backends>(
             let Some(runtime) = runtime.upgrade() else {
                 break;
             };
-            let Some(pool) = runtime.registry().engine().pooling_allocator_metrics() else {
-                break;
-            };
 
+            // the gate, the one bound with pooling off
+            let gate = runtime.invocations();
+            telemetry::record_invocations(&gate);
+            tracing::trace!(
+                invocations_in_flight = gate.in_flight,
+                invocations_waiting = gate.waiting,
+                invocations_limit = gate.limit,
+                "invocation occupancy"
+            );
+
+            // the pool, when there is one
+            let Some(pool) = runtime.registry().engine().pooling_allocator_metrics() else {
+                continue;
+            };
             telemetry::record_pool(&pool);
             tracing::trace!(
                 pool_core_instances = pool.core_instances(),

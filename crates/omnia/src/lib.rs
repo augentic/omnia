@@ -23,11 +23,11 @@ pub use omnia_compile as compile;
 pub use omnia_core::{
     AcquireError, Backends, ChainCtx, ChainPolicy, CliRoutes, CompileOptions, Connect, Digest,
     Dispatcher, ExitStatus, Extensions, FromEnv, FutureResult, Grants, Guest, GuestError, GuestId,
-    HasTable, Host, HostCtx, HostView, HttpRoutes, LevelFilter, LinkSeam, MountRegistry, NoLinks,
-    NoOptions, PatternRoutes, Policy, Provides, Proxy, Registry, RegistryParts, RegistrySource,
-    ResolvedPreopen, Routes, Runtime, RuntimeOptions, RuntimeParts, Source, SourceSpec, Stdio,
-    StoreBase, StoreConfig, StoreCtx, StoreFactory, Telemetry, TriggerRouter, Verified,
-    WeakRuntime, env, get_cloned, telemetry,
+    HasTable, Host, HostCtx, HostView, HttpRoutes, Invocations, LevelFilter, LinkSeam,
+    MountRegistry, NoLinks, NoOptions, PatternRoutes, Policy, Provides, Proxy, Registry,
+    RegistryParts, RegistrySource, ResolvedPreopen, Routes, Runtime, RuntimeOptions, RuntimeParts,
+    Slot, Source, SourceSpec, Stdio, StoreBase, StoreConfig, StoreCtx, StoreFactory, Telemetry,
+    TriggerRouter, Verified, WeakRuntime, env, get_cloned, telemetry,
 };
 #[doc(hidden)]
 pub use omnia_core::{tokio, wasmtime, wasmtime_wasi};

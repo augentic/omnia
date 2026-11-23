@@ -4,7 +4,7 @@ Omnia is configured entirely through environment variables (runtime options and 
 
 ## Runtime environment variables
 
-The [guest limits](#guest-limits), [instance pooling](#instance-pooling), and [memory layout](#memory-layout-and-artifacts-compile-affecting) variables are the fields of `RuntimeOptions`, as is [`HTTP_STREAM_TIMEOUT_MS`](#http-trigger). An embedder sets them in code with `DeploymentBuilder::options`, and the deployment then reads none of them from the environment. `RuntimeOptions::with_env` applies the variables an operator sets over options built in code.
+The [guest limits](#guest-limits), [instance pooling](#instance-pooling), [concurrency gate](#concurrency-gate), and [memory layout](#memory-layout-and-artifacts-compile-affecting) variables are the fields of `RuntimeOptions`, as is [`HTTP_STREAM_TIMEOUT_MS`](#http-trigger). An embedder sets them in code with `DeploymentBuilder::options`, and the deployment then reads none of them from the environment. `RuntimeOptions::with_env` applies the variables an operator sets over options built in code.
 
 ### General
 
@@ -64,7 +64,7 @@ The pooling allocator recycles instance slots so per-request instantiation stays
 | `POOL_MAX_INSTANCES`         | `1000`                      | Maximum component instances held by the pool.                 |
 | `POOL_MAX_MEMORY_BYTES`      | inherits `MAX_MEMORY_BYTES` | Linear-memory size reserved per pooled memory.                |
 | `POOL_MAX_UNUSED_WARM_SLOTS` | `100`                       | Unused warm slots retained for fast reuse.                    |
-| `POOL_METRICS_INTERVAL_MS`   | `5000`                      | Interval between pool-occupancy metric samples; `0` disables. |
+| `POOL_METRICS_INTERVAL_MS`   | `5000`                      | Interval between occupancy samples of the pool and the [concurrency gate](#concurrency-gate); `0` disables. |
 | `POOL_IDLE_RELEASE_MS`       | `0`                         | Idle time, from the last guest invocation, after which warm slots' resident memory is released to the OS; `0` disables. |
 
 The pool's totals follow `POOL_MAX_INSTANCES` unless set:
@@ -79,6 +79,23 @@ The pool's totals follow `POOL_MAX_INSTANCES` unless set:
 These fit a guest built from one module, as an `omnia-sdk` guest is. It takes three core instances, one memory, and two tables. It runs on one stack, and takes a second while it blocks in a call and the host completes another of its calls. A component composed from several modules takes more of each, so a deployment that runs one sets the `POOL_TOTAL_*` totals it needs.
 
 Further tunables mirror wasmtime's pooling configuration one-to-one: `POOL_MEMORY_KEEP_RESIDENT`, `POOL_TABLE_KEEP_RESIDENT`, `POOL_ASYNC_STACK_KEEP_RESIDENT`, `POOL_DECOMMIT_BATCH_SIZE`, `POOL_PAGEMAP_SCAN`, and per-component/per-module limits. See `crates/core/src/options.rs` for the authoritative list with doc comments.
+
+### Concurrency gate
+
+| Variable                     | Default              | Meaning                                                            |
+| ---------------------------- | -------------------- | ------------------------------------------------------------------ |
+| `MAX_CONCURRENT_INVOCATIONS` | `POOL_MAX_INSTANCES` | Most invocations the triggers and the command driver run at once. `0` is refused, and so is a value above `POOL_MAX_INSTANCES` while pooling is on. |
+
+Each invocation a trigger runs holds one slot of the gate, from before its guest is instantiated until its instance is back in the pool. A command's run holds one for as long as it runs. When every slot is held:
+
+- HTTP answers `503` with `Retry-After: 1`. A probe of [`HTTP_HEALTH_PATH`](#http-trigger) takes no slot, so it still answers `200`.
+- A WebSocket event fails before its guest is instantiated.
+- A message delivery waits for a slot, and its guest timeout counts from when it takes one.
+- A command's run waits for a slot.
+
+A call from one guest to another takes no slot, since the invocation at the root of its chain holds one. It still takes an instance from the pool. So does each invocation of a trigger an embedder runs itself through `Runtime::enter`. A deployment whose guests call other guests, including guests they load through `omnia:plugins/loader`, or that runs a trigger of its own, sets the gate below `POOL_MAX_INSTANCES` to leave those instances room. [Pool sizing](../guides/performance-tuning.md#2-pool-sizing) gives the formula. While the variable is unset and pooling is on, the first call between guests logs a warning.
+
+With `POOLING=false` there is no pool, and the gate is the only bound on how many invocations run at once. `POOL_METRICS_INTERVAL_MS` samples the gate as well as the pool, with pooling on or off.
 
 ### Memory layout and artifacts (compile-affecting)
 

@@ -43,7 +43,9 @@ pub use self::registry::{
     CliRoutes, Guest, GuestId, HttpRoutes, PatternRoutes, Registry, RegistryParts, Resolver,
     Routes, TriggerRouter,
 };
-pub use self::runtime::{ExitStatus, GuestError, Policy, Runtime, RuntimeParts, WeakRuntime};
+pub use self::runtime::{
+    ExitStatus, GuestError, Invocations, Policy, Runtime, RuntimeParts, Slot, WeakRuntime,
+};
 pub use self::seam::{LinkSeam, NoLinks, StoreFactory};
 pub use self::source::{AcquireError, LoadedGuest, RegistrySource, Source, SourceSpec, Verified};
 pub use self::store::{Stdio, StoreBase, StoreConfig, StoreCtx};

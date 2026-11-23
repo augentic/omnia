@@ -8,7 +8,6 @@ use anyhow::{Result, anyhow};
 use futures::FutureExt as _;
 use futures::future::BoxFuture;
 use omnia_core::{ChainCtx, PatternRoutes, Provides, Runtime, TriggerRouter, telemetry};
-use tokio::sync::Semaphore;
 use tracing::{Instrument, info_span, instrument};
 
 use crate::WasiMessaging;
@@ -50,9 +49,6 @@ where
     state: Runtime<B>,
     component: Arc<str>,
     routing: Arc<TriggerRouter<PatternRoutes>>,
-    // one permit per running guest: whatever a backend delivers at once,
-    // this trigger alone never exhausts the instance pool
-    permits: Arc<Semaphore>,
 }
 
 impl<B> MessagingHandler<B>
@@ -82,7 +78,6 @@ where
             state: runtime.clone(),
             component: Arc::from(runtime.name()),
             routing: Arc::new(routing),
-            permits: Arc::new(Semaphore::new(runtime.options().pool_max_instances as usize)),
         }))
     }
 
@@ -90,9 +85,12 @@ where
     ///
     /// A topic with no route is dropped silently with `Ok`; the message has
     /// no handler in this deployment. Every message is counted, and every
-    /// failure logged and counted, before it is returned. The guest receives
+    /// failure logged and counted, before it is returned. A routed message
+    /// waits for a slot of the runtime's [concurrency gate](Runtime::slot)
+    /// before its guest loads, however long that takes. The guest receives
     /// the delivery with its `deadline` set to the instant the guest timeout
-    /// expires, and its metadata as the backend delivered it.
+    /// expires, counted from when the slot was taken, and its metadata as the
+    /// backend delivered it.
     ///
     /// # Errors
     ///
@@ -125,7 +123,8 @@ where
             return Ok(());
         };
 
-        let _permit = self.permits.acquire().await.expect("the pool semaphore is never closed");
+        // wait for a slot of the gate, held until after the store drops
+        let _slot = self.state.slot().await;
 
         // a routed guest that fails to load is an error, never a panic
         let guest = self.state.guest(guest_id).await.map_err(|error| {

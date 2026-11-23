@@ -1,17 +1,21 @@
-//! Connected runtime: [`Runtime`], [`RuntimeParts`], [`WeakRuntime`], and [`ExitStatus`].
+//! Connected runtime: [`Runtime`], [`RuntimeParts`], [`WeakRuntime`],
+//! [`ExitStatus`], and the concurrency gate's [`Slot`] and [`Invocations`].
 
 mod command;
 mod enter;
+mod gate;
 
 use std::io;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Weak};
+use std::sync::{Arc, Once, Weak};
 
 use anyhow::Result;
 use tokio::sync::watch;
 use wasmtime::Store;
 use wasmtime::component::InstancePre;
 
+use self::gate::Gate;
+pub use self::gate::{Invocations, Slot};
 use crate::artifact::component;
 use crate::digest::Digest;
 use crate::extensions::Extensions;
@@ -130,6 +134,8 @@ impl<B: Backends> Runtime<B> {
             &parts.rust_log,
             crate::telemetry::ansi(),
         );
+        let options = parts.registry.options();
+        let gate = options.max_concurrent_invocations.unwrap_or(options.pool_max_instances);
 
         Self::with_inner(Arc::new(RuntimeInner {
             name: parts.name,
@@ -145,6 +151,8 @@ impl<B: Backends> Runtime<B> {
             stdio: parts.stdio,
             extensions: Extensions::new(),
             stores_built: AtomicU64::new(0),
+            gate: Gate::new(gate as usize),
+            hop_warning: Once::new(),
             stop: watch::channel(false).0,
         }))
     }
@@ -531,11 +539,34 @@ impl<B: Backends> Runtime<B> {
     pub(crate) fn store_factory(&self, guest: &Arc<Guest<B>>) -> StoreFactory<B> {
         let runtime = self.clone();
         let guest = Arc::clone(guest);
-        Arc::new(move |chain| runtime.build_store(runtime.store_ctx(&guest, chain)))
+        Arc::new(move |chain| {
+            runtime.warn_unsized_gate();
+            runtime.build_store(runtime.store_ctx(&guest, chain))
+        })
+    }
+
+    // A hop's instance takes no slot, so a gate as wide as the pool lets hops
+    // fill the pool before the gate refuses anything.
+    fn warn_unsized_gate(&self) {
+        let options = self.options();
+        if !options.pooling || options.max_concurrent_invocations.is_some() {
+            return;
+        }
+        self.inner.hop_warning.call_once(|| {
+            tracing::warn!(
+                pool_max_instances = options.pool_max_instances,
+                "a call between guests takes an instance outside the concurrency gate; with \
+                 MAX_CONCURRENT_INVOCATIONS unset the gate is as wide as the pool, so set it \
+                 below POOL_MAX_INSTANCES to leave these calls room"
+            );
+        });
     }
 
     /// Drive the deployment's `wasi:cli/run` command once, returning the
     /// guest's exit status.
+    ///
+    /// The run waits for a [slot](Self::slot) of the concurrency gate, as a
+    /// message delivery does, and holds it for as long as it runs.
     ///
     /// # Errors
     ///
@@ -770,6 +801,8 @@ struct RuntimeInner<B: 'static> {
     // one per `build_store`, so an observer can tell a quiet pool from one
     // whose guests finished between its looks
     stores_built: AtomicU64,
+    gate: Gate,
+    hop_warning: Once,
     stop: watch::Sender<bool>,
 }
 

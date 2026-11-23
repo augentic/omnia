@@ -16,9 +16,10 @@
 //! this at the end of every drive.
 //!
 //! The runtime's own metrics are OpenTelemetry instruments, so they record
-//! whatever the run's filter is. [`record_pool`] samples the instance pool,
-//! and [`count_message`], [`count_event`], and [`count_error`] count what the
-//! triggers handle. They bind once, when [`Telemetry::build`] settles, to the
+//! whatever the run's filter is. [`record_pool`] samples the instance pool
+//! and [`record_invocations`] the concurrency gate. [`count_message`],
+//! [`count_event`], and [`count_error`] count what the triggers handle. They
+//! bind once, when [`Telemetry::build`] settles, to the
 //! global meter provider as it then stands. That is omnia's own when the
 //! build installs it, and the one the process published otherwise. A metric
 //! recorded before then is dropped.
@@ -48,6 +49,8 @@ use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Registry};
 use wasmtime::PoolingAllocatorMetrics;
+
+use crate::Invocations;
 
 static SETTLED: Mutex<bool> = Mutex::new(false);
 static PROVIDERS: OnceLock<Providers> = OnceLock::new();
@@ -480,6 +483,22 @@ pub fn record_pool(sample: &PoolingAllocatorMetrics) {
     }
 }
 
+/// Records one sample of the concurrency gate on the `invocations_*` gauges.
+///
+/// The gauges are `invocations_in_flight` and `invocations_waiting`.
+pub fn record_invocations(sample: &Invocations) {
+    if let Some(metrics) = METRICS.get() {
+        metrics.invocations(sample);
+    }
+}
+
+// one invocation of `service` the gate turned away, on `invocations_refused`
+pub(crate) fn count_refused(service: &str) {
+    if let Some(metrics) = METRICS.get() {
+        metrics.refused(service);
+    }
+}
+
 /// Counts one message delivered to `service` on `message_counter`.
 pub fn count_message(service: &str) {
     if let Some(metrics) = METRICS.get() {
@@ -511,6 +530,9 @@ struct Metrics {
     pool_memories: Gauge<u64>,
     pool_tables: Gauge<u64>,
     pool_stacks: Gauge<u64>,
+    invocations_in_flight: Gauge<u64>,
+    invocations_waiting: Gauge<u64>,
+    invocations_refused: Counter<u64>,
     message_counter: Counter<u64>,
     event_counter: Counter<u64>,
     processing_errors: Counter<u64>,
@@ -541,6 +563,18 @@ impl Metrics {
             pool_memories: gauge("pool_memories", "Linear memories allocated from the pool"),
             pool_tables: gauge("pool_tables", "Tables allocated from the pool"),
             pool_stacks: gauge("pool_stacks", "Fiber stacks allocated from the pool"),
+            invocations_in_flight: gauge(
+                "invocations_in_flight",
+                "Invocations holding a slot of the concurrency gate",
+            ),
+            invocations_waiting: gauge(
+                "invocations_waiting",
+                "Invocations waiting for a slot of the concurrency gate",
+            ),
+            invocations_refused: counter(
+                "invocations_refused",
+                "Invocations refused because every slot of the concurrency gate was held",
+            ),
             message_counter: counter("message_counter", "Messages delivered to the runtime"),
             event_counter: counter("event_counter", "Websocket events delivered to the runtime"),
             processing_errors: counter(
@@ -556,6 +590,15 @@ impl Metrics {
         self.pool_memories.record(sample.memories() as u64, &[]);
         self.pool_tables.record(sample.tables() as u64, &[]);
         self.pool_stacks.record(sample.stacks() as u64, &[]);
+    }
+
+    fn invocations(&self, sample: &Invocations) {
+        self.invocations_in_flight.record(sample.in_flight as u64, &[]);
+        self.invocations_waiting.record(sample.waiting as u64, &[]);
+    }
+
+    fn refused(&self, service: &str) {
+        self.invocations_refused.add(1, &[KeyValue::new("service", service.to_owned())]);
     }
 
     fn message(&self, service: &str) {

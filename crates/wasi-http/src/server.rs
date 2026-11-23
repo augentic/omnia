@@ -16,12 +16,13 @@ use http::{StatusCode, Version};
 use http_body_util::combinators::UnsyncBoxBody;
 use http_body_util::{BodyExt, Full};
 use hyper::body::{Body, Frame, SizeHint};
-use hyper::header::{FORWARDED, HOST, HeaderValue};
+use hyper::header::{FORWARDED, HOST, HeaderValue, RETRY_AFTER};
 use hyper::service::service_fn;
 use hyper_util::rt::TokioExecutor;
 use hyper_util::server::conn::auto;
 use omnia_core::{
-    Backends, ChainCtx, FromEnv, HttpRoutes, Provides, Runtime, StoreCtx, TriggerRouter, telemetry,
+    Backends, ChainCtx, FromEnv, HttpRoutes, Provides, Runtime, Slot, StoreCtx, TriggerRouter,
+    telemetry,
 };
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
@@ -242,18 +243,21 @@ where
     /// Forward a request to the routed guest and return its response.
     ///
     /// A request for the [health path](ServerOptions::health_path) is answered
-    /// at once, before its target is checked, so a probe needs no `Host`. Any
-    /// other request is normalised first: its scheme and authority come from
-    /// `Forwarded` where it names them, else from the URI or `Host`. Its
-    /// `x-deadline` header is set to the instant the guest timeout expires, in
-    /// milliseconds since the Unix epoch, replacing any the client sent.
+    /// at once, before its target is checked, so a probe needs no `Host` and
+    /// takes no slot of the runtime's concurrency gate. Any other request is
+    /// normalised first: its scheme and authority come from `Forwarded` where
+    /// it names them, else from the URI or `Host`. Its `x-deadline` header is
+    /// set to the instant the guest timeout expires, in milliseconds since the
+    /// Unix epoch, replacing any the client sent.
     ///
     /// Outcomes the handler can answer itself come back as responses:
     /// - `200` for the health path;
     /// - `400` for a malformed request target;
     /// - `404` for an unrouted path;
     /// - `500` for a guest that times out, cannot be loaded at its first use,
-    ///   or is no longer registered.
+    ///   or is no longer registered;
+    /// - `503`, with `Retry-After: 1`, when every slot of the runtime's
+    ///   [concurrency gate](Runtime::try_slot) is held.
     ///
     /// A request target is malformed when the request:
     /// - carries no `Host`, unless it is HTTP/2 with an `:authority`;
@@ -313,13 +317,18 @@ where
                 || format!("routed guest `{guest_id}` does not export `wasi:http/handler`"),
             )?;
 
+        // a full gate is a 503, answered before a store is built
+        let Some(slot) = self.state.try_slot() else {
+            return Ok(unavailable());
+        };
+
         // instantiate the selected guest fresh (instance-per-call)
         let (mut store, instance) = self.state.enter(&guest, ChainCtx::server()).await?;
         let service = indices.load(&mut store, &instance)?;
 
         let (sender, receiver) = oneshot::channel::<Result<hyper::Response<OutgoingBody>>>();
         let stream_timeout = self.state.options().http_stream_timeout;
-        let guest_task = spawn_guest(store, service, request, sender, stream_timeout);
+        let guest_task = spawn_guest(store, slot, service, request, sender, stream_timeout);
 
         // bound time-to-response (not the streaming body); cancel a hung guest
         let response = match timeout(self.state.options().guest_timeout, receiver).await {
@@ -338,13 +347,13 @@ where
     }
 }
 
-// Runs the guest's handler on a task of its own, which owns the store. The
-// response or the failure goes through `sender`, and the task lives on until
-// hyper has consumed the body or `stream_timeout` has passed since the head
-// went out. Ending the task drops the store, which fails a body still
-// streaming.
+// Runs the guest's handler on a task of its own, which owns the store and
+// the request's slot of the gate. The response or the failure goes through
+// `sender`, and the task lives on until hyper has consumed the body or
+// `stream_timeout` has passed since the head went out. Ending the task drops
+// the store, which fails a body still streaming, and then frees the slot.
 fn spawn_guest<B, T>(
-    mut store: Store<StoreCtx<B>>, service: Service, request: http::Request<T>,
+    store: Store<StoreCtx<B>>, slot: Slot, service: Service, request: http::Request<T>,
     sender: oneshot::Sender<Result<hyper::Response<OutgoingBody>>>,
     stream_timeout: Option<Duration>,
 ) -> JoinHandle<()>
@@ -353,7 +362,15 @@ where
     T: Body<Data = Bytes> + Send + 'static,
     T::Error: Into<wasmtime_wasi_http::Error>,
 {
+    // HACK: the store and the slot move into the task as one tuple, rebound
+    // whole inside it, since an `async` block captures only the fields it
+    // touches. A tuple drops its fields in order however the task ends, so
+    // the pool has the store's instance back before the slot frees.
+    let held = (store, slot);
+
     tokio::spawn(async move {
+        let mut held = held;
+        let store = &mut held.0;
         let result = store
             .run_concurrent(async |store| {
                 // one error path through `sender`, so the caller never
@@ -573,6 +590,18 @@ fn not_found() -> hyper::Response<OutgoingBody> {
         .header("Content-Type", "text/plain; charset=UTF-8")
         .body(body)
         .expect("should build not found response")
+}
+
+fn unavailable() -> hyper::Response<OutgoingBody> {
+    let body =
+        Full::new(Bytes::from_static(b"Service Unavailable")).map_err(Into::into).boxed_unsync();
+
+    hyper::Response::builder()
+        .status(StatusCode::SERVICE_UNAVAILABLE)
+        .header("Content-Type", "text/plain; charset=UTF-8")
+        .header(RETRY_AFTER, "1")
+        .body(body)
+        .expect("should build service unavailable response")
 }
 
 const BODY: &str = r"<!doctype html>
