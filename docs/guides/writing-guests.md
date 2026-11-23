@@ -35,7 +35,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 axum = { version = "0.8", default-features = false, features = ["json"] }
-omnia-sdk = "0.39"
+omnia-sdk = "0.38"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 ```

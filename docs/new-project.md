@@ -51,7 +51,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 axum = { version = "0.8", default-features = false, features = ["json", "query"] }
-omnia-sdk = "0.39"
+omnia-sdk = "0.38"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 ```
@@ -109,9 +109,9 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-omnia = "0.39"
-omnia-wasi-http = "0.39"
-omnia-wasi-otel = "0.39"
+omnia = "0.38"
+omnia-wasi-http = "0.38"
+omnia-wasi-otel = "0.38"
 ```
 
 ```rust
@@ -149,7 +149,7 @@ curl -X POST http://localhost:8080 -H "Content-Type: application/json" -d '{"hel
 
 ## Matching versions
 
-Keep every `omnia*` dependency on the same release line (all `0.39`, for example) — the WIT contracts must agree between guest bindings and host implementations. If the line you need is not yet on crates.io, point the dependencies at the git repository instead:
+Keep every `omnia*` dependency on the same release line (all `0.38`, for example) — the WIT contracts must agree between guest bindings and host implementations. If the line you need is not yet on crates.io, point the dependencies at the git repository instead:
 
 ```toml
 [patch.crates-io]

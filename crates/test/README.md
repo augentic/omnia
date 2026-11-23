@@ -21,10 +21,10 @@ fixture pipeline as a build dependency.
 
 ```toml
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-omnia-test = { version = "0.39", features = ["host"] }
+omnia-test = { version = "0.38", features = ["host"] }
 
 [build-dependencies]
-omnia-test = { version = "0.39", features = ["build"] }
+omnia-test = { version = "0.38", features = ["build"] }
 ```
 
 The target gate on the dev line keeps the runtime out of the component's

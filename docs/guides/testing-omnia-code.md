@@ -20,10 +20,10 @@ Two lines cover a typical consumer:
 
 ```toml
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-omnia-test = { version = "0.39", features = ["host"] }
+omnia-test = { version = "0.38", features = ["host"] }
 
 [build-dependencies]
-omnia-test = { version = "0.39", features = ["build"] }
+omnia-test = { version = "0.38", features = ["build"] }
 ```
 
 The target gate on the dev line keeps the runtime out of the component's build. Without `contract`, the crate is also empty on `wasm32`, so an ungated line resolves on both targets and contributes nothing to the component. The `build` line stays `std`-only by contract (omnia's CI guards its dependency tree), so it never pulls the runtime into a `build.rs`.
