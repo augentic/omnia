@@ -437,34 +437,22 @@ async fn http_incoming_echo() {
     let request = Request::get("/echo?message=proxied")
         .header(HOST, "echo.test")
         .header(FORWARDED, "for=192.0.2.60")
-        .header("x-request-id", "req-proxied")
+        .header("x-request-id", "req-fwd")
         .body(Full::new(Bytes::new()))
         .expect("request");
     let response = handler.handle(request).await.expect("handled");
     assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(
-        echoed(response).await.0,
-        json!({ "message": "proxied", "request_id": "req-proxied" })
-    );
+    assert_eq!(echoed(response).await.0, json!({ "message": "proxied", "request_id": "req-fwd" }));
 
     // a malformed request target is refused before any guest is built
+    let echo = || Request::get("/echo").header(HOST, "echo.test");
     for (case, request) in [
-        ("two hosts", Request::get("/echo").header(HOST, "echo.test").header(HOST, "other.test")),
+        ("two hosts", echo().header(HOST, "other.test")),
         ("userinfo", Request::get("/echo").header(HOST, "user@echo.test")),
         ("named port", Request::get("/echo").header(HOST, "echo.test:http")),
         ("absolute form, no host", Request::get("http://echo.test/echo")),
-        (
-            "http/2 mismatch",
-            Request::get("http://echo.test/echo")
-                .version(Version::HTTP_2)
-                .header(HOST, "other.test"),
-        ),
-        (
-            "forwarded userinfo",
-            Request::get("/echo")
-                .header(HOST, "echo.test")
-                .header(FORWARDED, "host=user@echo.test"),
-        ),
+        ("http/2 mismatch", echo().uri("http://other.test/echo").version(Version::HTTP_2)),
+        ("forwarded userinfo", echo().header(FORWARDED, "host=user@echo.test")),
         ("no authority", Request::get("/echo")),
     ] {
         let built = runtime.stores_built();
