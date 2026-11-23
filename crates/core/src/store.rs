@@ -57,7 +57,8 @@ pub struct StoreConfig<'a> {
     /// The guest the store is built for.
     pub guest: GuestId,
     /// Runtime options; caps linear-memory growth at
-    /// [`RuntimeOptions::max_memory_bytes`].
+    /// [`RuntimeOptions::max_memory_bytes`] and each file or socket read or
+    /// write at [`RuntimeOptions::wasi_max_io_size`].
     pub options: &'a RuntimeOptions,
     /// Type-erased host->guest dispatcher: a fresh handle to the owning
     /// [`Runtime`](crate::Runtime) so any host->guest call lands a new
@@ -126,7 +127,9 @@ impl StoreBase {
     /// Applies the guest environment (the [`env`](StoreConfig::env) pairs,
     /// none when unset), inherits stdin, wires stdout/stderr to the
     /// [`stdio`](StoreConfig::stdio) pair when set and the host streams
-    /// otherwise, applies the configured argv, and caps linear-memory growth.
+    /// otherwise, applies the configured argv, caps each file or socket read
+    /// or write at [`RuntimeOptions::wasi_max_io_size`] when set, and caps
+    /// linear-memory growth.
     #[must_use]
     pub fn new(config: StoreConfig<'_>) -> Self {
         let mounts = config.mounts.unwrap_or_default();
@@ -146,6 +149,9 @@ impl StoreBase {
         }
         if let Some(args) = &config.args {
             wasi_builder.args(args.as_slice());
+        }
+        if let Some(size) = config.options.wasi_max_io_size {
+            wasi_builder.max_io_size(size);
         }
 
         // preopen each mount; one removed mid-run is skipped, with no ambient fallback

@@ -133,6 +133,21 @@ Manifest-relative resolution: `source.path` and `[[mount]] path` in a manifest *
 
 `GUEST_TIMEOUT_MS` (default 30000) caps each **server** invocation and each link-dispatch hop on a server-rooted chain. Raise it for legitimately long request work. A command-mode (`wasi:cli/run`) chain has no wall-clock cap — neither the run itself nor the link dispatches it makes — so if a CLI guest appears to time out, check a backend timeout (for example `CURSOR_TIMEOUT_SECS`) or an external process deadline.
 
+### The HTTP trigger answers `400 Bad Request` before any guest runs
+
+The request's target is malformed. The trigger refuses a request that:
+
+- carries no `Host` header, unless it is HTTP/2 with an `:authority`;
+- carries more than one `Host`, or one that does not parse;
+- names an authority with userinfo (`user@host`) or a non-numeric port (`host:http`), in its `Host`, its URI, or a `Forwarded` element's `host=`;
+- is HTTP/2 with an `:authority` other than its `Host`.
+
+An HTTP/1.1 request with an absolute-form URI still needs a `Host`. A conforming client always sends one, so the usual cause is a hand-built request, such as one a test passes to `HttpHandler::handle`. `omnia_test::host::send` sets a missing `Host` from the URI. The trigger logs each refusal at `debug` as `rejecting malformed request`, with its reason.
+
+### A streamed HTTP response fails part way
+
+The client got the head and part of the body, then the body was cut short: HTTP/1.1 closes the connection mid-body, and HTTP/2 resets the stream. Either the guest trapped while it wrote the body, which the host logs at `error`, or the body was still streaming when `HTTP_STREAM_TIMEOUT_MS` passed, which it logs at `warn` as `response body outlived HTTP_STREAM_TIMEOUT_MS`. Raise or unset the cap for a long-lived stream, such as server-sent events.
+
 ### `cannot block a synchronous task before returning`
 
 A guest export typed `func` in its WIT suspended before it returned. On `wasm32-wasip3`, `std::thread::sleep` and every async-typed import suspend the task, and a sync-typed export may not. Declare the export `async func` and implement it as an `async fn`. The exports behind the `export!` macros are already async-typed; the trap comes from a raw export, such as an interface one guest serves to another.

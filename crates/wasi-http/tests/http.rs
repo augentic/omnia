@@ -11,17 +11,17 @@
 use std::convert::Infallible;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use base64ct::{Base64, Encoding};
 use bytes::Bytes;
-use http::header::{AUTHORIZATION, CONTENT_TYPE, HOST};
-use http::{HeaderMap, Method, Request, Response, StatusCode};
+use http::header::{AUTHORIZATION, CONTENT_TYPE, FORWARDED, HOST};
+use http::{HeaderMap, Method, Request, Response, StatusCode, Version};
 use http_body_util::{BodyExt as _, Full};
 use hyper::body::Incoming;
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
-use omnia::{ExitStatus, GuestEntry};
+use omnia::{ExitStatus, GuestEntry, RuntimeOptions};
 use omnia_test::host::{Backends, Deployment};
 use omnia_wasi_config::WasiConfig;
 use omnia_wasi_http::{HttpHandler, WasiHttp};
@@ -425,12 +425,54 @@ async fn http_incoming_echo() {
 
     // http/2: authority and scheme arrive on the request URI with no `Host` header
     let request = Request::get("http://echo.test/echo?message=h2")
+        .version(Version::HTTP_2)
         .header("x-request-id", "req-h2")
         .body(Full::new(Bytes::new()))
         .expect("request");
     let response = handler.handle(request).await.expect("handled");
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(echoed(response).await.0, json!({ "message": "h2", "request_id": "req-h2" }));
+
+    // behind a proxy: a `Forwarded` element that names no host keeps the `Host`
+    let request = Request::get("/echo?message=proxied")
+        .header(HOST, "echo.test")
+        .header(FORWARDED, "for=192.0.2.60")
+        .header("x-request-id", "req-proxied")
+        .body(Full::new(Bytes::new()))
+        .expect("request");
+    let response = handler.handle(request).await.expect("handled");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        echoed(response).await.0,
+        json!({ "message": "proxied", "request_id": "req-proxied" })
+    );
+
+    // a malformed request target is refused before any guest is built
+    for (case, request) in [
+        ("two hosts", Request::get("/echo").header(HOST, "echo.test").header(HOST, "other.test")),
+        ("userinfo", Request::get("/echo").header(HOST, "user@echo.test")),
+        ("named port", Request::get("/echo").header(HOST, "echo.test:http")),
+        ("absolute form, no host", Request::get("http://echo.test/echo")),
+        (
+            "http/2 mismatch",
+            Request::get("http://echo.test/echo")
+                .version(Version::HTTP_2)
+                .header(HOST, "other.test"),
+        ),
+        (
+            "forwarded userinfo",
+            Request::get("/echo")
+                .header(HOST, "echo.test")
+                .header(FORWARDED, "host=user@echo.test"),
+        ),
+        ("no authority", Request::get("/echo")),
+    ] {
+        let built = runtime.stores_built();
+        let request = request.body(Full::new(Bytes::new())).expect("request");
+        let response = handler.handle(request).await.expect("handled");
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{case}");
+        assert_eq!(runtime.stores_built(), built, "{case}");
+    }
 
     // the declared routes drive the trigger: the longest prefix wins, matched
     // by whole segment, so `/echo/absentee` runs the echo guest (which has no
@@ -450,6 +492,55 @@ async fn http_incoming_echo() {
         assert_eq!(response.status(), status, "{path}");
         assert_eq!(runtime.stores_built() > built, ran, "{path}");
     }
+
+    runtime.shutdown();
+}
+
+#[tokio::test]
+async fn http_incoming_stream() {
+    const STREAM_TIMEOUT: Duration = Duration::from_millis(200);
+
+    let guest = std::fs::read(test_programs::HTTP_INCOMING_STREAM).expect("guest bytes");
+    let runtime = Deployment::new()
+        .entry(GuestEntry::new("guest", guest).route_http("/stream"))
+        .options(RuntimeOptions {
+            http_stream_timeout: Some(STREAM_TIMEOUT),
+            ..RuntimeOptions::default()
+        })
+        .boot(Backends::defaults().await, |deployment| {
+            deployment.host::<WasiHttp>()?;
+            deployment.host::<WasiOtel>()?;
+            Ok(())
+        })
+        .await
+        .expect("runtime boots");
+    let handler = HttpHandler::new(&runtime)
+        .expect("http routes consistent")
+        .expect("the guest exports the http handler");
+
+    // a guest that traps mid-body fails the body, rather than ending it clean
+    let request = Request::get("/stream/trap")
+        .header(HOST, "stream.test")
+        .body(Full::new(Bytes::new()))
+        .expect("request");
+    let response = handler.handle(request).await.expect("handled");
+    assert_eq!(response.status(), StatusCode::OK);
+    let (chunks, error) = drain(response).await;
+    assert_eq!(chunks.concat(), b"partial");
+    assert!(error.is_some(), "the trap fails the body");
+
+    // a body still streaming at the cap is cut short, and fails the same way
+    let request = Request::get("/stream/endless")
+        .header(HOST, "stream.test")
+        .body(Full::new(Bytes::new()))
+        .expect("request");
+    let started = Instant::now();
+    let response = handler.handle(request).await.expect("handled");
+    assert_eq!(response.status(), StatusCode::OK);
+    let (chunks, error) = drain(response).await;
+    assert!(started.elapsed() >= STREAM_TIMEOUT, "cut at {:?}", started.elapsed());
+    assert!(chunks.len() > 1, "{} chunks before the cut", chunks.len());
+    assert!(error.is_some(), "the cut fails the body");
 
     runtime.shutdown();
 }
@@ -498,6 +589,26 @@ async fn http_mcp_server() {
 async fn collect(response: Response<omnia_wasi_http::OutgoingBody>) -> Value {
     let body = response.into_body().collect().await.expect("body streams").to_bytes();
     serde_json::from_slice(&body).expect("JSON body")
+}
+
+// the data frames a body carried and the error it ended in, read under a
+// bound so a body that never ends fails the test rather than hanging it
+async fn drain(
+    response: Response<omnia_wasi_http::OutgoingBody>,
+) -> (Vec<Bytes>, Option<anyhow::Error>) {
+    let mut body = response.into_body();
+    let mut chunks = Vec::new();
+    let read = async {
+        while let Some(frame) = body.frame().await {
+            match frame {
+                Ok(frame) => chunks.extend(frame.into_data().ok()),
+                Err(error) => return Some(error),
+            }
+        }
+        None
+    };
+    let error = tokio::time::timeout(Duration::from_secs(10), read).await.expect("the body ends");
+    (chunks, error)
 }
 
 // the echo with its deadline split out, since the deadline differs per request

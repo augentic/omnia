@@ -54,13 +54,26 @@ The table and stack pools are mapped when the engine is built, four tables and t
 
 - `POOL_PAGEMAP_SCAN=auto` — uses the `PAGEMAP_SCAN` ioctl for cheaper memory reset on kernels that support it.
 
-### 5. Startup latency
+### 5. Streaming throughput
+
+A guest moves a large body or file in bounded steps:
+
+- `HTTP_BODY_BUFFER_CHUNKS` (default `1`) is how many body chunks, each up to 1 MiB, a guest may write ahead of the network. It applies to the responses a guest serves and the requests it sends. Raising it lets a guest run ahead of a slow peer, at up to that many chunks of memory per body in flight.
+- `WASI_MAX_IO_SIZE` (default 64 KiB) is the largest single file or socket read or write the host performs for a guest. Raising it lets a guest copy a large file in fewer calls.
+
+```bash
+HTTP_BODY_BUFFER_CHUNKS=4   # a guest runs up to four chunks ahead of its peer
+WASI_MAX_IO_SIZE=1048576    # file and socket I/O in 1 MiB steps
+```
+
+### 6. Startup latency
 
 Per-request tuning doesn't help cold starts. For those, pre-compile guests (`compile` → `.bin`) so startup skips Cranelift entirely — see [Deploying Omnia](deployment.md#ahead-of-time-compilation).
 
 ## Limits that interact with latency
 
 - `GUEST_TIMEOUT_MS` (default 30s) bounds each server invocation and each server-rooted link-dispatch hop wall-clock (a command-mode chain, including its link hops, is uncapped); `EPOCH_TICK_MS` (default 10ms) is the granularity at which CPU-bound guests yield and timeouts are enforced. Lowering the tick tightens timeout precision at slight overhead.
+- `GUEST_TIMEOUT_MS` stops at an HTTP response's head. The body that streams after it keeps its instance slot until it ends, so a slow or endless body holds pool capacity. `HTTP_STREAM_TIMEOUT_MS` (unset by default) caps it, counted from the head, and cuts a body still streaming at the cap.
 - `MAX_FUEL` adds per-instruction metering. Leave it at `0` (off) unless you need deterministic CPU budgets — metering has measurable overhead and is compile-affecting.
 - `MAX_MEMORY_BYTES` caps guest memory growth; `POOL_MAX_MEMORY_BYTES` must be at least the largest guest's requirement or instantiation falls back off the pool.
 

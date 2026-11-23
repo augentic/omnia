@@ -144,6 +144,11 @@ path = "programs/http/incoming_echo.rs"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "http_incoming_stream"
+path = "programs/http/incoming_stream.rs"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "http_mcp_server"
 path = "programs/http/mcp_server.rs"
 crate-type = ["cdylib"]

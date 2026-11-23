@@ -35,8 +35,10 @@ On the `run` grammar the flags are the host's, global to the command (`bin -v ru
 
 | Variable             | Default               | Meaning                                                               |
 | -------------------- | --------------------- | --------------------------------------------------------------------- |
-| `GUEST_TIMEOUT_MS`   | `30000`               | Wall-clock cap on a single server guest invocation and each link-dispatch hop on a server-rooted chain. A command-mode (`wasi:cli/run`) chain is uncapped, including its link hops. The HTTP and messaging hosts stamp its expiry on each invocation as the guest's `Metadata::deadline`. |
+| `GUEST_TIMEOUT_MS`   | `30000`               | Wall-clock cap on a single server guest invocation and each link-dispatch hop on a server-rooted chain. A command-mode (`wasi:cli/run`) chain is uncapped, including its link hops. The HTTP and messaging hosts stamp its expiry on each invocation as the guest's `Metadata::deadline`. For an HTTP guest it bounds the time to the response head, not the body that streams after it. |
+| `HTTP_STREAM_TIMEOUT_MS` | unset (no cap)    | Wall-clock cap on an HTTP response body, counted from when its head is sent. A body still streaming at the cap is cut, and the client sees it fail rather than end. Unset, a body streams for as long as the guest writes it. `0` is refused. |
 | `MAX_MEMORY_BYTES`   | `268435456` (256 MiB) | Maximum linear memory a guest may grow to.                            |
+| `WASI_MAX_IO_SIZE`   | unset (64 KiB)        | Largest single file or socket read or write the host performs for a guest. A larger value moves a large file in fewer calls. |
 | `MAX_FUEL`           | `0` (off)             | Per-invocation fuel budget; `0` disables metering. Compile-affecting. |
 | `MAX_DISPATCH_DEPTH` | `8`                   | Maximum nesting depth for host-mediated calls between guests.         |
 | `EPOCH_TICK_MS`      | `10`                  | Epoch-increment interval; the yield granularity for CPU-bound guests. |
@@ -81,6 +83,7 @@ Two further compile-affecting options trade artifact size against introspection:
 | -------------------------------------------------------------------- | ------------------------ | ----------------------------------------------------------- |
 | `HTTP_ADDR`                                                          | `0.0.0.0:8080`           | `HttpDefault` inbound server                                |
 | `HTTP_CONNECT_TIMEOUT`                                               | `10` (seconds)           | `HttpDefault` outbound client                               |
+| `HTTP_BODY_BUFFER_CHUNKS`                                            | `1`                      | `HttpDefault`: body chunks a guest may write ahead of the network, on the responses it serves and the requests it sends |
 | `WEBSOCKET_ADDR`                                                     | `0.0.0.0:80`             | `WebSocketDefault` server                                   |
 | `CONFIG_KEYS`                                                        | unset (serves none)      | `ConfigDefault`: the host variables served, comma-separated |
 | `KEYVALUE_BUCKETS`                                                   | `default`                | `KeyValueDefault`: the buckets served, comma-separated      |

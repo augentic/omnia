@@ -9,7 +9,7 @@
 //! ahead-of-time compiler goes through, [`CompileOptions::configure`], which
 //! is what lets the loading engine accept a pre-compiled artifact.
 
-use std::num::ParseIntError;
+use std::num::{NonZeroUsize, ParseIntError};
 use std::time::Duration;
 
 use anyhow::{Result, bail};
@@ -35,12 +35,18 @@ pub struct RuntimeOptions {
     /// Wall-clock cap on a server or server-rooted link-dispatch invocation (`GUEST_TIMEOUT_MS`, default 30s, min 1ms; a command-mode chain, including its link hops, is uncapped).
     #[env(from = "GUEST_TIMEOUT_MS", default = "30000", with = crate::env::millis)]
     pub guest_timeout: Duration,
+    /// Wall-clock cap on an HTTP response body still streaming after its head is sent (`HTTP_STREAM_TIMEOUT_MS`, unset: no cap, min 1ms).
+    #[env(from = "HTTP_STREAM_TIMEOUT_MS", with = crate::env::millis)]
+    pub http_stream_timeout: Option<Duration>,
     /// Epoch-increment interval, also the CPU-bound guest yield granularity (`EPOCH_TICK_MS`, default 10ms, min 1ms).
     #[env(from = "EPOCH_TICK_MS", default = "10", with = parse_tick)]
     pub epoch_tick: Duration,
     /// Maximum linear-memory size a guest may grow to, in bytes (`MAX_MEMORY_BYTES`, default 256 `MiB`).
     #[env(from = "MAX_MEMORY_BYTES", default = "268435456")]
     pub max_memory_bytes: usize,
+    /// Largest single file or socket read or write the host performs for a guest, in bytes (`WASI_MAX_IO_SIZE`, unset: Wasmtime default 64 `KiB`).
+    #[env(from = "WASI_MAX_IO_SIZE")]
+    pub wasi_max_io_size: Option<NonZeroUsize>,
     /// Virtual address space reserved per linear memory, in bytes; compile-affecting (`MEMORY_RESERVATION`, unset: Wasmtime default).
     #[env(from = "MEMORY_RESERVATION")]
     pub memory_reservation: Option<u64>,
@@ -166,6 +172,7 @@ impl RuntimeOptions {
     /// Returns an error when:
     /// - [`guest_timeout`](Self::guest_timeout) or [`epoch_tick`](Self::epoch_tick)
     ///   is zero;
+    /// - [`http_stream_timeout`](Self::http_stream_timeout) is set to zero;
     /// - with [`pooling`](Self::pooling) on,
     ///   [`pool_max_memories_per_module`](Self::pool_max_memories_per_module)
     ///   exceeds [`total_memories`](Self::total_memories);
@@ -180,6 +187,9 @@ impl RuntimeOptions {
         }
         if self.epoch_tick.is_zero() {
             bail!("EPOCH_TICK_MS must be at least 1");
+        }
+        if self.http_stream_timeout.is_some_and(|limit| limit.is_zero()) {
+            bail!("HTTP_STREAM_TIMEOUT_MS must be at least 1; unset it for no cap");
         }
         if !self.pooling {
             return Ok(());
@@ -436,6 +446,18 @@ mod tests {
 
         let error = options.validate().expect_err("a zero timeout is refused");
         assert!(error.to_string().contains("GUEST_TIMEOUT_MS"), "{error}");
+    }
+
+    #[test]
+    fn zero_stream_timeout() {
+        let options = RuntimeOptions {
+            pooling: false,
+            http_stream_timeout: Some(Duration::ZERO),
+            ..RuntimeOptions::default()
+        };
+
+        let error = options.validate().expect_err("a zero stream cap is refused");
+        assert!(error.to_string().contains("HTTP_STREAM_TIMEOUT_MS"), "{error}");
     }
 
     #[test]
