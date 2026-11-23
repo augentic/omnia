@@ -194,7 +194,7 @@ Every interface has a module, an example, and where it needs one a deep dive:
 
 ### Configuration and the environment
 
-A guest reads its settings through `config`, which the deployment's `omnia:config` backend answers. `ConfigDefault` serves every host variable. The guest's own WASI environment, what `std::env` reads, holds less:
+A guest reads its settings through `config`, which the deployment's `omnia:config` backend answers. `ConfigDefault` serves the host variables `CONFIG_KEYS` names. The guest's own WASI environment, what `std::env` reads, holds a separate list:
 
 - `RUST_LOG`, the run's tracing filter (see [Tracing](#tracing));
 - `NO_COLOR=1` when the host console is plain;

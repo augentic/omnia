@@ -12,7 +12,7 @@ Every capability Omnia exposes to guests, its interface crate, the zero-config d
 | Blob storage | `wasi-blobstore` | `WasiBlobStore` | `BlobStoreDefault` — in-memory | `omnia-azure-blob`, `omnia-mongodb`, `omnia-nats` |
 | SQL | `wasi-sql` | `WasiSql` | `SqlDefault` — SQLite, serving `default` (`SQL_DATABASE`, default shared in-memory) and the databases `SQL_DATABASES` declares | `omnia-postgres` |
 | Document store | `wasi-docstore` | `WasiDocStore` | `DocStoreDefault` — in-memory, serving the collections `DOCSTORE_COLLECTIONS` declares (default `default`) | `omnia-azure-table` |
-| Configuration | `wasi-config` | `WasiConfig` | `ConfigDefault` — host process environment snapshot | — |
+| Configuration | `wasi-config` | `WasiConfig` | `ConfigDefault` — a snapshot of the host variables `CONFIG_KEYS` names (default none) | — |
 | Secrets vault | `wasi-vault` | `WasiVault` | `VaultDefault` — in-memory, serving the lockers `VAULT_LOCKERS` declares (default `default`) | `omnia-azure-vault` |
 | Identity/OAuth | `wasi-identity` | `WasiIdentity` | `IdentityDefault` — OAuth2 client flow for the identity `default` (`IDENTITY_CLIENT_ID`, `IDENTITY_CLIENT_SECRET`, `IDENTITY_TOKEN_URL`) | `omnia-azure-id` |
 | Observability | `wasi-otel` | `WasiOtel` | `OtelDefault` — log-only, no export | `omnia-opentelemetry` |
