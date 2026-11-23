@@ -122,6 +122,16 @@ A guest export typed `func` in its WIT suspended before it returned. On `wasm32-
 
 No mount reached the guest. Check: a `[[mount]]` in the manifest or a `--mount` flag exists; the guest-visible `name` matches what the guest looks for (default `.`); and with both manifest and CLI mounts, remember CLI entries override manifest entries with the same name (last wins).
 
+### A host variable is missing in the guest
+
+A guest sees only the host variables its deployment names, beside the `RUST_LOG` and `NO_COLOR` the runtime sets. Name the variable, or a prefix of it ending in `*`, in one of:
+
+- the manifest's `[env] inherit`;
+- the `runtime!` invocation's `env: { inherit: [..] }`, the only way for a direct command;
+- a `--env` flag on `run`.
+
+Matching is case-sensitive against the name as the host spells it, so `PATH` does not pass a Windows host's `Path`. A value the guest reads through `config` is answered by the `omnia:config` backend, apart from this list.
+
 ### Guest writes to a mount fail
 
 Mounts are **read-only by default**. Add `writable = true` (manifest) or `,writable` (CLI spec).

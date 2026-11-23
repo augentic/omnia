@@ -12,7 +12,7 @@ use std::time::Duration;
 use anyhow::bail;
 use anyhow::{Context, Result};
 pub use manifest::{
-    GuestEntry, GuestRoutes, Manifest, Mount, PluginsConfig, RegistryConfig, Transport,
+    Env, GuestEntry, GuestRoutes, Manifest, Mount, PluginsConfig, RegistryConfig, Transport,
     TransportKind,
 };
 #[cfg(feature = "link")]
@@ -55,6 +55,7 @@ pub struct DeploymentBuilder {
     runtime_level: Option<LevelFilter>,
     allow_empty: bool,
     program_name: Option<String>,
+    options: Option<RuntimeOptions>,
     guest_timeout: Option<Duration>,
     max_dispatch_depth: Option<usize>,
     stdio: Option<Stdio>,
@@ -143,8 +144,33 @@ impl DeploymentBuilder {
         self
     }
 
+    /// Run the deployment under `options`, in place of the ones the
+    /// environment sets.
+    ///
+    /// None of the variables [`RuntimeOptions`] maps is read then. To combine
+    /// the two:
+    /// - [`RuntimeOptions::with_env`] applies an operator's variables over
+    ///   options built in code;
+    /// - a field set on what [`RuntimeOptions::load_env`] returns overrides
+    ///   the operator.
+    ///
+    /// [`guest_timeout`](Self::guest_timeout) and
+    /// [`max_dispatch_depth`](Self::max_dispatch_depth) still apply on top.
+    /// The result is [validated](RuntimeOptions::validate) before the engine
+    /// and its instance pool are built. An artifact compiled ahead of time
+    /// loads only under the [`compile_options`](RuntimeOptions::compile_options)
+    /// it was compiled with.
+    #[must_use]
+    pub const fn options(mut self, options: RuntimeOptions) -> Self {
+        self.options = Some(options);
+        self
+    }
+
     /// Override the wall-clock cap on server and server-rooted link-dispatch
-    /// invocations for this deployment. Unset defers to `GUEST_TIMEOUT_MS`.
+    /// invocations for this deployment.
+    ///
+    /// Unset defers to the deployment's options: those set with
+    /// [`options`](Self::options), else `GUEST_TIMEOUT_MS`.
     #[must_use]
     pub const fn guest_timeout(mut self, timeout: Duration) -> Self {
         self.guest_timeout = Some(timeout);
@@ -152,7 +178,10 @@ impl DeploymentBuilder {
     }
 
     /// Override the per-chain host-mediated dispatch depth bound for this
-    /// deployment. Unset defers to `MAX_DISPATCH_DEPTH`.
+    /// deployment.
+    ///
+    /// Unset defers to the deployment's options: those set with
+    /// [`options`](Self::options), else `MAX_DISPATCH_DEPTH`.
     #[must_use]
     pub const fn max_dispatch_depth(mut self, depth: usize) -> Self {
         self.max_dispatch_depth = Some(depth);
@@ -177,7 +206,8 @@ impl DeploymentBuilder {
     ///
     /// # Errors
     ///
-    /// Returns an error if no manifest resolves, the manifest is invalid, a
+    /// Returns an error if no manifest resolves, the manifest is invalid, the
+    /// runtime options do not load or [validate](RuntimeOptions::validate), a
     /// `~/` path has no `$HOME` to expand against, the package store lies
     /// beneath a writable mount, or the deployment cannot be built.
     pub async fn build<B: Backends>(self) -> Result<Deployment<B>> {
@@ -214,13 +244,20 @@ impl DeploymentBuilder {
             .context("initializing telemetry")?;
         tracing::debug!("initializing runtime");
 
-        let (engine, linker, mut options) = engine_and_linker()?;
+        // the options in code, else the environment's, checked once the overrides apply
+        let mut options = match self.options {
+            Some(options) => options,
+            None => RuntimeOptions::load_env()?,
+        };
         if let Some(timeout) = self.guest_timeout {
             options.guest_timeout = timeout;
         }
         if let Some(depth) = self.max_dispatch_depth {
             options.max_dispatch_depth = depth;
         }
+        options.validate()?;
+
+        let (engine, linker) = engine_and_linker(&options)?;
 
         // open every preopen once, so a misconfigured mount fails at startup
         let mounts = Arc::new(MountRegistry::open(manifest.preopens())?);
@@ -289,21 +326,23 @@ impl DeploymentBuilder {
                 registry: None,
             },
             rust_log,
+            inherit: manifest.env.inherit,
             stdio: self.stdio,
         })
     }
 }
 
-// Build the shared engine, WASI-linked linker, and runtime options.
-fn engine_and_linker<B: Send + 'static>() -> Result<(Engine, Linker<StoreCtx<B>>, RuntimeOptions)> {
-    let options = RuntimeOptions::load_env()?;
-    let engine = Engine::new(&Config::from(&options))?;
+// Build the shared engine and its WASI-linked linker.
+fn engine_and_linker<B: Send + 'static>(
+    options: &RuntimeOptions,
+) -> Result<(Engine, Linker<StoreCtx<B>>)> {
+    let engine = Engine::new(&Config::from(options))?;
 
     // register services with runtime's Linker
     let mut linker = Linker::new(&engine);
     omnia_core::wasmtime_wasi::p3::add_to_linker(&mut linker)?;
 
-    Ok((engine, linker, options))
+    Ok((engine, linker))
 }
 
 /// A compiled set of WebAssembly components with their shared Linker over the
@@ -333,6 +372,8 @@ pub struct Deployment<B: 'static> {
     loader: Loader,
     // every store's `RUST_LOG`
     rust_log: String,
+    // the host variables every store's environment holds
+    inherit: Vec<String>,
     stdio: Option<Stdio>,
 }
 
@@ -465,6 +506,7 @@ impl<B: Backends> Deployment<B> {
             },
             registry_config: deployment.registry_config.clone(),
             rust_log: deployment.rust_log.clone(),
+            inherit: deployment.inherit.clone(),
             stdio: deployment.stdio.clone(),
             command_guest: deployment.command_guest.clone(),
             backends,

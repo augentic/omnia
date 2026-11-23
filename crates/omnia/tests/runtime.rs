@@ -259,6 +259,9 @@ mod deployment_keys {
             { name: "project", path: project_root(), writable: true },
             { name: "store", path: store_root() },
         ],
+        env: {
+            inherit: ["SPECIFY_*", "HOME"],
+        },
         plugins: {
             store: "store",
         },
@@ -338,7 +341,8 @@ fn inline_deployment() {
         )
     );
 
-    // explicit guest names, expression-valued mounts, and store-only `plugins`
+    // explicit guest names, expression-valued mounts, the inherited
+    // environment, and store-only `plugins`
     let keyed = deployment_keys::manifest().into_manifest().expect("inline manifest");
     let [specify, mock] = keyed.guests.as_slice() else {
         panic!("two named guests: {:?}", keyed.guests);
@@ -366,6 +370,7 @@ fn inline_deployment() {
             },
         ]
     );
+    assert_eq!(keyed.env.inherit, ["SPECIFY_*", "HOME"]);
     assert_eq!(
         keyed.plugins,
         Some(PluginsConfig {

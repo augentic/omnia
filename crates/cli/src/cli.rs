@@ -43,11 +43,19 @@ pub enum Command {
 
         /// Preopen a host directory into the guest sandbox (repeatable).
         /// Format: `path=<host-path>[,name=<guest-name>][,writable]`; `name`
-        /// defaults to `.`. Layered on top of the manifest's mounts when
-        /// `--manifest` is also given; a matching guest-visible name overrides
+        /// defaults to `.`. Layered on top of the mounts of whichever
+        /// manifest the run selects; a matching guest-visible name overrides
         /// the manifest mount (last-wins).
         #[arg(long = "mount")]
         mounts: Vec<MountArg>,
+
+        /// Pass a host environment variable to every guest (repeatable). A
+        /// name ending in `*` passes every variable it prefixes, and `*`
+        /// alone passes them all. Quote a pattern so the shell does not
+        /// expand it. Added to the `[env] inherit` of whichever manifest the
+        /// run selects.
+        #[arg(long = "env", value_name = "NAME")]
+        env: Vec<String>,
 
         /// Arguments forwarded to the guest as its argv (everything after
         /// `--`). Empty for a long-lived server; a `wasi:cli` command reads

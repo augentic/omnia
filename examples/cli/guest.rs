@@ -35,7 +35,7 @@ struct AddInput {
     numbers: Vec<i64>,
 }
 
-/// Print the guest's environment.
+/// Print the guest's environment: `RUST_LOG`, and each host variable `run --env` names.
 #[derive(Args)]
 struct EnvInput;
 

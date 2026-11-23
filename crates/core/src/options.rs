@@ -9,20 +9,20 @@
 //! ahead-of-time compiler goes through, [`CompileOptions::configure`], which
 //! is what lets the loading engine accept a pre-compiled artifact.
 
-#![expect(missing_docs, reason = "`FromEnv` has no docs")]
-
+use std::num::ParseIntError;
 use std::time::Duration;
 
 use anyhow::{Result, bail};
-use fromenv::{FromEnv, ParseResult};
 use omnia_compile::CompileOptions;
 use wasmtime::{Config, Enabled, InstanceAllocationStrategy, PoolingAllocationConfig};
+
+use crate::FromEnv;
 
 /// Runtime configuration loaded from the environment.
 ///
 /// Read once at start-up and threaded through the runtime to every store.
-/// Each field maps to one environment variable (booleans use `true`/`false`);
-/// [`RuntimeOptions::requirements`] prints the full list with defaults.
+/// Each field maps to one environment variable (booleans use `true`/`false`),
+/// which its doc names with its default. [`Default`] holds those defaults.
 ///
 /// The fields marked compile-affecting are the [`CompileOptions`] this
 /// runtime loads artifacts under ([`compile_options`](Self::compile_options))
@@ -30,9 +30,10 @@ use wasmtime::{Config, Enabled, InstanceAllocationStrategy, PoolingAllocationCon
 /// only affect the engine or individual stores at runtime.
 #[expect(clippy::struct_excessive_bools, reason = "flat by design: one environment variable each")]
 #[derive(Clone, Debug, FromEnv)]
+#[env(crate = crate, validate = Self::validate)]
 pub struct RuntimeOptions {
     /// Wall-clock cap on a server or server-rooted link-dispatch invocation (`GUEST_TIMEOUT_MS`, default 30s, min 1ms; a command-mode chain, including its link hops, is uncapped).
-    #[env(from = "GUEST_TIMEOUT_MS", default = "30000", with = parse_timeout)]
+    #[env(from = "GUEST_TIMEOUT_MS", default = "30000", with = crate::env::millis)]
     pub guest_timeout: Duration,
     /// Epoch-increment interval, also the CPU-bound guest yield granularity (`EPOCH_TICK_MS`, default 10ms, min 1ms).
     #[env(from = "EPOCH_TICK_MS", default = "10", with = parse_tick)]
@@ -88,18 +89,18 @@ pub struct RuntimeOptions {
     /// Unused warm slots retained for fast reuse (`POOL_MAX_UNUSED_WARM_SLOTS`, default 100).
     #[env(from = "POOL_MAX_UNUSED_WARM_SLOTS", default = "100")]
     pub pool_max_unused_warm_slots: u32,
-    /// Maximum core instances held by the pooling allocator (`POOL_TOTAL_CORE_INSTANCES`, default 1000).
-    #[env(from = "POOL_TOTAL_CORE_INSTANCES", default = "1000")]
-    pub pool_total_core_instances: u32,
-    /// Maximum linear memories held by the pooling allocator (`POOL_TOTAL_MEMORIES`, default 1000).
-    #[env(from = "POOL_TOTAL_MEMORIES", default = "1000")]
-    pub pool_total_memories: u32,
-    /// Maximum tables held by the pooling allocator (`POOL_TOTAL_TABLES`, default 1000).
-    #[env(from = "POOL_TOTAL_TABLES", default = "1000")]
-    pub pool_total_tables: u32,
-    /// Maximum async stacks held by the pooling allocator (`POOL_TOTAL_STACKS`, default 1000).
-    #[env(from = "POOL_TOTAL_STACKS", default = "1000")]
-    pub pool_total_stacks: u32,
+    /// Maximum core instances held by the pooling allocator (`POOL_TOTAL_CORE_INSTANCES`, unset: four per `POOL_MAX_INSTANCES`); see [`total_core_instances`](Self::total_core_instances).
+    #[env(from = "POOL_TOTAL_CORE_INSTANCES")]
+    pub pool_total_core_instances: Option<u32>,
+    /// Maximum linear memories held by the pooling allocator (`POOL_TOTAL_MEMORIES`, unset: `POOL_MAX_INSTANCES`); see [`total_memories`](Self::total_memories).
+    #[env(from = "POOL_TOTAL_MEMORIES")]
+    pub pool_total_memories: Option<u32>,
+    /// Maximum tables held by the pooling allocator (`POOL_TOTAL_TABLES`, unset: four per `POOL_MAX_INSTANCES`); see [`total_tables`](Self::total_tables).
+    #[env(from = "POOL_TOTAL_TABLES")]
+    pub pool_total_tables: Option<u32>,
+    /// Maximum async stacks held by the pooling allocator (`POOL_TOTAL_STACKS`, unset: two per `POOL_MAX_INSTANCES`); see [`total_stacks`](Self::total_stacks).
+    #[env(from = "POOL_TOTAL_STACKS")]
+    pub pool_total_stacks: Option<u32>,
     /// Max core instances per component (`POOL_MAX_CORE_INSTANCES_PER_COMPONENT`, unset: Wasmtime default).
     #[env(from = "POOL_MAX_CORE_INSTANCES_PER_COMPONENT")]
     pub pool_max_core_instances_per_component: Option<u32>,
@@ -128,10 +129,10 @@ pub struct RuntimeOptions {
     #[env(from = "POOL_PAGEMAP_SCAN", default = "no", with = parse_enabled)]
     pub pool_pagemap_scan: Enabled,
     /// Interval between pooling-occupancy metric samples; `0` disables (`POOL_METRICS_INTERVAL_MS`, default 5000ms).
-    #[env(from = "POOL_METRICS_INTERVAL_MS", default = "5000", with = parse_millis)]
+    #[env(from = "POOL_METRICS_INTERVAL_MS", default = "5000", with = crate::env::millis)]
     pub pool_metrics_interval: Duration,
     /// Idle time, measured from the last guest invocation, after which unused warm pooled memory is released to the OS; `0` disables (`POOL_IDLE_RELEASE_MS`, default 0).
-    #[env(from = "POOL_IDLE_RELEASE_MS", default = "0", with = parse_millis)]
+    #[env(from = "POOL_IDLE_RELEASE_MS", default = "0", with = crate::env::millis)]
     pub pool_idle_release: Duration,
     /// Honour WebAssembly branch hints during compilation; compile-affecting (`BRANCH_HINTING`, default `false`).
     #[env(from = "BRANCH_HINTING", default = "false")]
@@ -139,18 +140,6 @@ pub struct RuntimeOptions {
 }
 
 impl RuntimeOptions {
-    /// Finalize the runtime configuration.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the runtime configuration cannot be loaded from the
-    /// environment or fails cross-field validation.
-    pub fn load_env() -> Result<Self> {
-        let options = Self::from_env().finalize().map_err(anyhow::Error::from)?;
-        options.validate()?;
-        Ok(options)
-    }
-
     /// The compile-affecting settings among these options, as the value an
     /// artifact this runtime loads must have been compiled under.
     #[must_use]
@@ -165,33 +154,96 @@ impl RuntimeOptions {
         }
     }
 
-    // Cross-field invariants `FromEnv` cannot express, checked before the
-    // engine is built where wasmtime's own rejection is less specific.
-    fn validate(&self) -> Result<()> {
+    /// Checks that a runtime can run under these options.
+    ///
+    /// [`load_env`](Self::load_env), [`with_env`](Self::with_env), and
+    /// [`load_from`](Self::load_from) run it on what they load. A deployment
+    /// runs it on the options it is given before it builds the engine, where
+    /// wasmtime's own rejection is less specific.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when:
+    /// - [`guest_timeout`](Self::guest_timeout) or [`epoch_tick`](Self::epoch_tick)
+    ///   is zero;
+    /// - with [`pooling`](Self::pooling) on,
+    ///   [`pool_max_memories_per_module`](Self::pool_max_memories_per_module)
+    ///   exceeds [`total_memories`](Self::total_memories);
+    /// - with [`pooling`](Self::pooling) on,
+    ///   [`pool_max_tables_per_module`](Self::pool_max_tables_per_module)
+    ///   exceeds [`total_tables`](Self::total_tables).
+    pub fn validate(&self) -> Result<()> {
+        if self.guest_timeout.is_zero() {
+            bail!(
+                "GUEST_TIMEOUT_MS must be at least 1 (a zero timeout would fail every invocation)"
+            );
+        }
+        if self.epoch_tick.is_zero() {
+            bail!("EPOCH_TICK_MS must be at least 1");
+        }
         if !self.pooling {
             return Ok(());
         }
 
         if let Some(per_module) = self.pool_max_memories_per_module
-            && per_module > self.pool_total_memories
+            && per_module > self.total_memories()
         {
             bail!(
                 "POOL_MAX_MEMORIES_PER_MODULE ({per_module}) exceeds POOL_TOTAL_MEMORIES ({})",
-                self.pool_total_memories
+                self.total_memories()
             );
         }
         if let Some(per_module) = self.pool_max_tables_per_module
-            && per_module > self.pool_total_tables
+            && per_module > self.total_tables()
         {
             bail!(
                 "POOL_MAX_TABLES_PER_MODULE ({per_module}) exceeds POOL_TOTAL_TABLES ({})",
-                self.pool_total_tables
+                self.total_tables()
             );
         }
 
         Ok(())
     }
+
+    /// The core instances the pool holds: `POOL_TOTAL_CORE_INSTANCES`, or
+    /// four for each of `POOL_MAX_INSTANCES`.
+    #[must_use]
+    pub fn total_core_instances(&self) -> u32 {
+        self.pool_total_core_instances
+            .unwrap_or_else(|| self.pool_max_instances.saturating_mul(CORE_INSTANCES_PER_INSTANCE))
+    }
+
+    /// The linear memories the pool holds: `POOL_TOTAL_MEMORIES`, or one for
+    /// each of `POOL_MAX_INSTANCES`.
+    #[must_use]
+    pub fn total_memories(&self) -> u32 {
+        self.pool_total_memories.unwrap_or(self.pool_max_instances)
+    }
+
+    /// The tables the pool holds: `POOL_TOTAL_TABLES`, or four for each of
+    /// `POOL_MAX_INSTANCES`.
+    #[must_use]
+    pub fn total_tables(&self) -> u32 {
+        self.pool_total_tables
+            .unwrap_or_else(|| self.pool_max_instances.saturating_mul(TABLES_PER_INSTANCE))
+    }
+
+    /// The async stacks the pool holds: `POOL_TOTAL_STACKS`, or two for each
+    /// of `POOL_MAX_INSTANCES`.
+    #[must_use]
+    pub fn total_stacks(&self) -> u32 {
+        self.pool_total_stacks
+            .unwrap_or_else(|| self.pool_max_instances.saturating_mul(STACKS_PER_INSTANCE))
+    }
 }
+
+// a typical guest takes three core instances, one memory and two tables
+const CORE_INSTANCES_PER_INSTANCE: u32 = 4;
+const TABLES_PER_INSTANCE: u32 = 4;
+
+// a guest blocked in a call keeps its stack while wasmtime completes another
+// of its calls on a second
+const STACKS_PER_INSTANCE: u32 = 2;
 
 // compile-affecting settings through `configure`, then the runtime-only ones
 impl From<&RuntimeOptions> for Config {
@@ -220,13 +272,11 @@ impl From<&RuntimeOptions> for Config {
         // matters most.
         let mut pool = PoolingAllocationConfig::new();
 
-        // totals stay independent of the instance count: one component can
-        // embed several core instances, memories and tables
         pool.total_component_instances(options.pool_max_instances)
-            .total_core_instances(options.pool_total_core_instances)
-            .total_memories(options.pool_total_memories)
-            .total_tables(options.pool_total_tables)
-            .total_stacks(options.pool_total_stacks)
+            .total_core_instances(options.total_core_instances())
+            .total_memories(options.total_memories())
+            .total_tables(options.total_tables())
+            .total_stacks(options.total_stacks())
             .max_memory_size(options.pool_max_memory_bytes.unwrap_or(options.max_memory_bytes))
             // keep-resident skips decommit and zeroing on slot reuse
             .linear_memory_keep_resident(options.pool_memory_keep_resident)
@@ -266,29 +316,137 @@ impl From<&RuntimeOptions> for Config {
     }
 }
 
-// a zero wall-clock bound would time out every invocation
-fn parse_timeout(value: &str) -> ParseResult<Duration> {
-    let millis = value.parse::<u64>()?;
-    if millis == 0 {
-        return Err("must be at least 1 (a zero timeout would fail every invocation)".into());
-    }
-    Ok(Duration::from_millis(millis))
-}
-
 // clamped so the ticker interval can never be zero
-fn parse_tick(value: &str) -> ParseResult<Duration> {
-    Ok(Duration::from_millis(value.parse::<u64>()?.max(1)))
+fn parse_tick(value: &str) -> Result<Duration, ParseIntError> {
+    crate::env::millis(value).map(|tick| tick.max(Duration::from_millis(1)))
 }
 
-fn parse_enabled(value: &str) -> ParseResult<Enabled> {
+fn parse_enabled(value: &str) -> Result<Enabled, &'static str> {
     match value.trim().to_ascii_lowercase().as_str() {
         "auto" => Ok(Enabled::Auto),
         "yes" | "true" | "on" | "1" => Ok(Enabled::Yes),
         "no" | "false" | "off" | "0" => Ok(Enabled::No),
-        other => Err(format!("expected one of `auto`/`yes`/`no`, got `{other}`").into()),
+        _ => Err("expected one of `auto`/`yes`/`no`"),
     }
 }
 
-fn parse_millis(value: &str) -> ParseResult<Duration> {
-    Ok(Duration::from_millis(value.parse::<u64>()?))
+// The totals and the refusals are pure over the options. The pool a runtime
+// builds from them is exercised by every suite that boots one.
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::RuntimeOptions;
+
+    fn options(instances: u32) -> RuntimeOptions {
+        RuntimeOptions {
+            pool_max_instances: instances,
+            ..RuntimeOptions::default()
+        }
+    }
+
+    #[test]
+    fn unset_totals() {
+        let options = options(10);
+
+        assert_eq!(options.total_core_instances(), 40);
+        assert_eq!(options.total_memories(), 10);
+        assert_eq!(options.total_tables(), 40);
+        assert_eq!(options.total_stacks(), 20);
+    }
+
+    #[test]
+    fn set_totals() {
+        let options = RuntimeOptions {
+            pool_total_core_instances: Some(7),
+            pool_total_memories: Some(8),
+            pool_total_tables: Some(9),
+            pool_total_stacks: Some(11),
+            ..options(10)
+        };
+
+        assert_eq!(options.total_core_instances(), 7);
+        assert_eq!(options.total_memories(), 8);
+        assert_eq!(options.total_tables(), 9);
+        assert_eq!(options.total_stacks(), 11);
+    }
+
+    #[test]
+    fn saturating_totals() {
+        let options = options(u32::MAX);
+
+        assert_eq!(options.total_core_instances(), u32::MAX);
+        assert_eq!(options.total_tables(), u32::MAX);
+        assert_eq!(options.total_stacks(), u32::MAX);
+    }
+
+    #[test]
+    fn per_module_over_derived_total() {
+        let options = RuntimeOptions {
+            pool_max_memories_per_module: Some(3),
+            ..options(2)
+        };
+
+        let error =
+            options.validate().expect_err("three memories per module exceed a total of two");
+        assert!(
+            error
+                .to_string()
+                .contains("POOL_MAX_MEMORIES_PER_MODULE (3) exceeds POOL_TOTAL_MEMORIES (2)"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn per_module_tables_over_total() {
+        let options = RuntimeOptions {
+            pool_total_tables: Some(8),
+            pool_max_tables_per_module: Some(16),
+            ..RuntimeOptions::default()
+        };
+
+        let error = options.validate().expect_err("tables per module exceed the total");
+        assert!(
+            error
+                .to_string()
+                .contains("POOL_MAX_TABLES_PER_MODULE (16) exceeds POOL_TOTAL_TABLES (8)"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn pooling_off() {
+        let options = RuntimeOptions {
+            pooling: false,
+            pool_total_memories: Some(8),
+            pool_max_memories_per_module: Some(16),
+            ..RuntimeOptions::default()
+        };
+
+        options.validate().expect("pool bounds are ignored with pooling off");
+    }
+
+    #[test]
+    fn zero_timeout() {
+        let options = RuntimeOptions {
+            pooling: false,
+            guest_timeout: Duration::ZERO,
+            ..RuntimeOptions::default()
+        };
+
+        let error = options.validate().expect_err("a zero timeout is refused");
+        assert!(error.to_string().contains("GUEST_TIMEOUT_MS"), "{error}");
+    }
+
+    #[test]
+    fn zero_tick() {
+        let options = RuntimeOptions {
+            pooling: false,
+            epoch_tick: Duration::ZERO,
+            ..RuntimeOptions::default()
+        };
+
+        let error = options.validate().expect_err("a zero tick is refused");
+        assert!(error.to_string().contains("EPOCH_TICK_MS"), "{error}");
+    }
 }

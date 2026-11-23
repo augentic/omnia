@@ -1,8 +1,10 @@
 //! The command façade's exit plumbing through the real runtime: the status a
-//! `command!` guest's `Response` carries is the status the host observes.
+//! `command!` guest's `Response` carries is the status the host observes. A
+//! guest that blocks on the host also runs in a pool of one instance.
 
 #![cfg(not(target_arch = "wasm32"))]
 
+use omnia::{ExitStatus, RuntimeOptions};
 use omnia_test::host::{Backends, Deployment};
 use omnia_wasi_otel::WasiOtel;
 
@@ -30,6 +32,38 @@ async fn command_exit_map() {
     assert_eq!(exit_of(&["taken"]).await, 5);
     assert_eq!(exit_of(&["bogus"]).await, 64, "an unknown verb is a usage error");
     assert_eq!(exit_of(&["--format", "json", "missing"]).await, 2, "the exit ignores the format");
+}
+
+// One instance derives a pool of two stacks, one memory, and four core
+// instances and tables. A core-instance total of one refuses the guest, so
+// the options set in code reach the pool.
+#[tokio::test]
+async fn command_blocking() {
+    async fn run(options: RuntimeOptions) -> anyhow::Result<ExitStatus> {
+        Deployment::new()
+            .guest("cli", test_programs::COMMAND_BLOCKING)
+            .args(["wait"])
+            .options(options)
+            .run(Backends::defaults().await, |deployment| {
+                deployment.host::<WasiOtel>()?;
+                Ok(())
+            })
+            .await
+    }
+
+    let one = RuntimeOptions {
+        pool_max_instances: 1,
+        ..RuntimeOptions::default()
+    };
+    let status = run(one.clone()).await.expect("the guest runs in a pool of one instance");
+    assert_eq!(status, ExitStatus::SUCCESS);
+
+    let starved = RuntimeOptions {
+        pool_total_core_instances: Some(1),
+        ..one
+    };
+    let err = run(starved).await.expect_err("one core instance is too few for the guest");
+    assert!(format!("{err:#}").contains("core instances"), "unexpected error: {err:#}");
 }
 
 // A captured deployment answers what the guest wrote beside its status: the

@@ -51,7 +51,7 @@ impl fmt::Debug for Stdio {
 ///
 /// `guest`, `options`, `dispatcher`, and `chain` say what the store is for.
 /// Each of the rest has a `None` or empty value a hand-built store context
-/// can pass: empty argv, no mounts, host env inheritance.
+/// can pass: empty argv, no mounts, an empty environment.
 pub struct StoreConfig<'a> {
     /// The guest the store is built for.
     pub guest: GuestId,
@@ -74,8 +74,7 @@ pub struct StoreConfig<'a> {
     /// Mount registry preopened into the guest sandbox; `None` for
     /// deployments without `[[mount]]`s.
     pub mounts: Option<Arc<MountRegistry>>,
-    /// Complete guest environment replacing host inheritance; `None` inherits
-    /// the host env.
+    /// The guest's complete environment; `None` gives the guest an empty one.
     pub env: Option<Arc<Vec<(String, String)>>>,
     /// Where the guest's stdout and stderr go; `None` inherits the process
     /// streams.
@@ -95,7 +94,8 @@ pub struct StoreBase {
     pub guest: GuestId,
     /// The store's WASI resource table.
     pub table: ResourceTable,
-    /// The store's WASI context (inherited env/stdin, host stdout/stderr).
+    /// The store's WASI context (the guest environment, inherited stdin,
+    /// host stdout/stderr).
     pub wasi: WasiCtx,
     /// The per-guest memory limiter the runtime installs on every [`Store`].
     ///
@@ -122,23 +122,17 @@ impl StoreBase {
     /// Build the fixed per-store state for a single guest invocation, applying
     /// the WASI construction policy shared by every deployment.
     ///
-    /// Applies the guest environment (the explicit [`env`](StoreConfig::env)
-    /// list when set, host inheritance otherwise), inherits stdin, wires
-    /// stdout/stderr to the [`stdio`](StoreConfig::stdio) pair when set and
-    /// the host streams otherwise, applies the configured argv, and caps
-    /// linear-memory growth.
+    /// Applies the guest environment (the [`env`](StoreConfig::env) pairs,
+    /// none when unset), inherits stdin, wires stdout/stderr to the
+    /// [`stdio`](StoreConfig::stdio) pair when set and the host streams
+    /// otherwise, applies the configured argv, and caps linear-memory growth.
     #[must_use]
     pub fn new(config: StoreConfig<'_>) -> Self {
         let mounts = config.mounts.unwrap_or_default();
 
         let mut wasi_builder = WasiCtxBuilder::new();
-        match &config.env {
-            Some(env) => {
-                wasi_builder.envs(env);
-            }
-            None => {
-                wasi_builder.inherit_env();
-            }
+        if let Some(env) = &config.env {
+            wasi_builder.envs(env);
         }
         wasi_builder.inherit_stdin();
         match config.stdio {
@@ -256,23 +250,30 @@ impl<B: Send + 'static> WasiView for StoreCtx<B> {
 const RUST_LOG: &str = "RUST_LOG";
 const NO_COLOR: &str = "NO_COLOR";
 
-/// The complete guest environment: every `host` pair, with `RUST_LOG` set to
-/// the run's tracing directives and `NO_COLOR` set when the console does not
-/// colour its lines.
+/// The complete guest environment: the `host` pairs `inherit` names, with
+/// `RUST_LOG` set to the run's tracing directives and `NO_COLOR` set when
+/// the console does not colour its lines.
+///
+/// Each `inherit` entry is a whole name, or a prefix that ends in `*`, so
+/// `*` alone keeps every pair.
 ///
 /// `rust_log` is the composition of the run's verbosity flag with the
 /// process `RUST_LOG` ([`telemetry::directives`](crate::telemetry::directives)),
-/// so it replaces the host's variable in place — the process value is already
-/// folded in — or is appended when the host carries none.
+/// so it replaces an inherited variable in place — the process value is
+/// already folded in — or is appended when none is inherited.
 ///
 /// `ansi` is whether the host console colours its lines. When it does not,
 /// `NO_COLOR=1` is appended so a guest's console — which cannot see the
-/// descriptor it shares — decides the same way; a host `NO_COLOR` already set
+/// descriptor it shares — decides the same way; an inherited `NO_COLOR` set
 /// to a non-empty value stands as it is.
 pub fn guest_env(
-    host: impl IntoIterator<Item = (String, String)>, rust_log: &str, ansi: bool,
+    host: impl IntoIterator<Item = (String, String)>, inherit: &[String], rust_log: &str,
+    ansi: bool,
 ) -> Vec<(String, String)> {
-    let mut env: Vec<(String, String)> = host.into_iter().collect();
+    let mut env: Vec<(String, String)> = host
+        .into_iter()
+        .filter(|(name, _)| inherit.iter().any(|pattern| crate::names::matches(pattern, name)))
+        .collect();
     match env.iter_mut().find(|(name, _)| name == RUST_LOG) {
         Some((_, value)) => rust_log.clone_into(value),
         None => env.push((RUST_LOG.to_owned(), rust_log.to_owned())),
@@ -297,27 +298,55 @@ mod tests {
         entries.iter().map(|(name, value)| ((*name).to_owned(), (*value).to_owned())).collect()
     }
 
-    // A console off a terminal tells the guest so; a host `NO_COLOR` already
-    // in force stands, and an empty one — no colour suppression, by the
-    // convention — is filled the way an absent one is.
+    fn names(patterns: &[&str]) -> Vec<String> {
+        patterns.iter().map(|pattern| (*pattern).to_owned()).collect()
+    }
+
+    // A console off a terminal tells the guest so; an inherited `NO_COLOR`
+    // already in force stands, and an empty one — no colour suppression, by
+    // the convention — is filled the way an absent one is.
     #[test]
     fn piped_stderr() {
+        let all = names(&["*"]);
         let host = pairs(&[("HOME", "/home/op")]);
         assert_eq!(
-            guest_env(host, "info", false),
+            guest_env(host, &all, "info", false),
             pairs(&[("HOME", "/home/op"), ("RUST_LOG", "info"), ("NO_COLOR", "1")])
         );
 
         let host = pairs(&[("NO_COLOR", "true"), ("RUST_LOG", "off")]);
         assert_eq!(
-            guest_env(host, "info", false),
+            guest_env(host, &all, "info", false),
             pairs(&[("NO_COLOR", "true"), ("RUST_LOG", "info")])
         );
 
         let host = pairs(&[("NO_COLOR", ""), ("RUST_LOG", "off")]);
         assert_eq!(
-            guest_env(host, "info", false),
+            guest_env(host, &all, "info", false),
             pairs(&[("NO_COLOR", "1"), ("RUST_LOG", "info")])
         );
+    }
+
+    // The runtime's own variables reach the guest whatever it inherits; a
+    // host `NO_COLOR` it does not inherit leaves the console's decision.
+    #[test]
+    fn named_variables() {
+        let host = pairs(&[
+            ("HOME", "/home/op"),
+            ("ORDERS_URL", "https://orders"),
+            ("ORDERS_KEY", "secret"),
+            ("PATH", "/bin"),
+            ("NO_COLOR", "true"),
+        ]);
+        assert_eq!(
+            guest_env(host.clone(), &names(&["ORDERS_*", "HOME"]), "warn", true),
+            pairs(&[
+                ("HOME", "/home/op"),
+                ("ORDERS_URL", "https://orders"),
+                ("ORDERS_KEY", "secret"),
+                ("RUST_LOG", "warn"),
+            ])
+        );
+        assert_eq!(guest_env(host, &[], "warn", true), pairs(&[("RUST_LOG", "warn")]));
     }
 }

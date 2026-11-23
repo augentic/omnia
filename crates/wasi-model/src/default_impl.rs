@@ -14,9 +14,9 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use anyhow::{Context as _, Result};
+use anyhow::Result;
 use futures::FutureExt as _;
-use omnia_core::Connect;
+use omnia_core::{Connect, FromEnv};
 use serde_json::json;
 
 use crate::{
@@ -24,45 +24,14 @@ use crate::{
     ToolHost,
 };
 
-#[expect(missing_docs, reason = "`FromEnv` has no docs")]
-mod config {
-    use fromenv::{FromEnv, ParseResult};
-
-    /// Options used to connect to the echo model backend.
-    ///
-    /// This struct is used to load connection options from environment variables.
-    #[derive(Debug, Clone, FromEnv)]
-    pub struct ConnectOptions {
-        /// The models a guest may open (`MODEL_NAMES`, comma-separated, default: `default`).
-        #[env(from = "MODEL_NAMES", default = "default", with = comma_separated)]
-        pub models: Vec<String>,
-    }
-
-    impl Default for ConnectOptions {
-        fn default() -> Self {
-            Self {
-                models: vec!["default".to_owned()],
-            }
-        }
-    }
-
-    #[expect(clippy::unnecessary_wraps, reason = "the signature `fromenv` parsers take")]
-    fn comma_separated(value: &str) -> ParseResult<Vec<String>> {
-        Ok(value
-            .split(',')
-            .map(str::trim)
-            .filter(|name| !name.is_empty())
-            .map(str::to_owned)
-            .collect())
-    }
-}
-pub use config::ConnectOptions;
-
-impl omnia_core::FromEnv for ConnectOptions {
-    fn load_env() -> Result<Self> {
-        // `Self::from_env()` is the builder the `FromEnv` derive emits
-        Self::from_env().finalize().context("issue loading connection options")
-    }
+/// Options used to connect to the echo model backend.
+///
+/// This struct is used to load connection options from environment variables.
+#[derive(Debug, Clone, FromEnv)]
+pub struct ConnectOptions {
+    /// The models a guest may open (`MODEL_NAMES`, comma-separated, default: `default`).
+    #[env(from = "MODEL_NAMES", default = "default", with = omnia_core::env::list)]
+    pub models: Vec<String>,
 }
 
 /// Echo default implementation of `omnia:model`: it answers every

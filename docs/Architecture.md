@@ -189,7 +189,7 @@ All of this is declared in the `omnia.toml` manifest ([reference](reference/conf
 
 ## Runtime Execution Flow
 
-1. **CLI parsing** — the generated `main` delegates to `omnia::main`, which parses the `run` subcommand (`omnia-cli` decides the source over `--manifest` / `OMNIA_MANIFEST` / positional `<wasm>` / compiled-in), materializes a `Manifest`, and appends CLI `--mount` entries onto it.
+1. **CLI parsing** — the generated `main` delegates to `omnia::main`, which parses the `run` subcommand (`omnia-cli` decides the source over `--manifest` / `OMNIA_MANIFEST` / positional `<wasm>` / compiled-in), materializes a `Manifest`, and appends CLI `--mount` and `--env` entries onto it.
 2. **Build** — `DeploymentBuilder` validates the manifest, expands `~/` paths against `$HOME`, resolves mounts, refuses a package store beneath a writable mount, reads the `registries` configuration, loads the guests compiled into the runtime (embedded bytes, the `run <component>` file — raw wasm or `omnia compile` output, either loads), carries every other `[[guest]]` as a declared `Source`, and returns a `Deployment` ready for host linking.
 3. **Assemble** — `run` connects backends, `Wiring::link` adds each host to the linker, `Deployment::assemble` links the guest loader host (with the `loader` feature), builds the `Runtime` from `RuntimeParts` — the registry client `source.package` guests are acquired through, over the `plugins.store` store and the `registries` routing, unless `Deployment::registry_source` selected one — and serves every loaded guest's linked exports.
 4. **Bootstrap** — starts epoch interruption and pool-metric sampling, then logs **`omnia ready`**.
@@ -208,15 +208,27 @@ Every invocation gets a **fresh instance in its own store** — no state survive
 
 ## Configuration
 
-All backends and runtime options use environment variables, parsed via the `FromEnv` derive:
+All backends and runtime options use environment variables, read through omnia's `FromEnv` derive. Each field names its variable, and a load fails once, naming every variable that is unset or does not parse:
 
 ```rust
+use omnia::FromEnv;
+
 #[derive(Debug, Clone, FromEnv)]
+#[env(crate = omnia)]
 pub struct ConnectOptions {
     #[env(from = "REDIS_URL", default = "redis://localhost:6379")]
     pub url: String,
+    #[env(from = "KEYVALUE_BUCKETS", default = "default", with = omnia::env::list)]
+    pub buckets: Vec<String>,
 }
 ```
+
+The derive emits:
+
+- `FromEnv`, which `Connect::connect()` calls;
+- `with_env`, which applies the variables an operator sets over options built in code;
+- `load_from`, which loads through a lookup in place of the environment;
+- `Default`, where every field has a `default` or is an `Option`.
 
 The consolidated list is in [Configuration](reference/configuration.md); individual backend READMEs document service-specific variables.
 

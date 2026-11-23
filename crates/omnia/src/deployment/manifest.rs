@@ -17,18 +17,24 @@
 //! path or package loads at its first use — the first time a route, the
 //! command drive, a link call, a host dispatch, or the guest loader names
 //! it. An entry may pin the `digest` its bytes must hash to; the format it
-//! admits follows from the source (see [`SourceSpec`]). Each guest's
-//! `routes` tables and the `[plugins]` table — the package store and the
-//! `registries` configuration that routes package sources — are consumed
-//! too. Distributed `[transport]` is not yet implemented: only the
-//! in-process default is accepted.
+//! admits follows from the source (see [`SourceSpec`]).
+//!
+//! The manifest also carries:
+//!
+//! - each guest's `routes` tables;
+//! - the `[env]` table, which names the host variables every guest sees;
+//! - the `[plugins]` table: the package store and the `registries`
+//!   configuration that routes package sources.
+//!
+//! Distributed `[transport]` is not yet implemented: only the in-process
+//! default is accepted.
 
 use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context as _, Result, bail};
+use anyhow::{Context as _, Result, anyhow, bail};
 use omnia_core::{
     CliRoutes, Digest, GuestId, HttpRoutes, PatternRoutes, ResolvedPreopen, Routes, Source,
     SourceSpec,
@@ -61,6 +67,8 @@ pub struct Manifest {
     /// Working-tree mounts preopened into the guest sandbox.
     #[serde(rename = "mount")]
     pub mounts: Vec<Mount>,
+    /// What of the host's environment every guest sees.
+    pub env: Env,
     /// The package store and the registry routing every package — a
     /// declared `source.package` or one a guest loads — is acquired through;
     /// absent, every package is refused.
@@ -127,6 +135,17 @@ impl Manifest {
         self
     }
 
+    /// Pass the host variables `names` to every guest (the manifest's
+    /// `[env] inherit`).
+    ///
+    /// Each name is whole, or a prefix that ends in `*`. `*` alone passes
+    /// every variable.
+    #[must_use]
+    pub fn inherit<S: Into<String>>(mut self, names: impl IntoIterator<Item = S>) -> Self {
+        self.env.inherit.extend(names.into_iter().map(Into::into));
+        self
+    }
+
     /// Set the `[plugins]` table: the package store and the registry routing.
     #[must_use]
     pub fn plugins(mut self, config: PluginsConfig) -> Self {
@@ -157,11 +176,16 @@ impl Manifest {
     ///
     /// # Errors
     ///
-    /// Returns an error if a `[[guest]]` entry names no guest or repeats a
-    /// name, no entry exists when `allow_empty` is false, more than one entry
-    /// is the command guest, the transport is not in-process, or the manifest
-    /// declares `[plugins]` or a package source that `features` lacks the
-    /// `loader` to serve.
+    /// Returns an error if:
+    ///
+    /// - a `[[guest]]` entry names no guest or repeats a name, or no entry
+    ///   exists when `allow_empty` is false;
+    /// - more than one entry is the command guest;
+    /// - an `[env] inherit` entry is not a variable name or a prefix of one
+    ///   that ends in `*`;
+    /// - the transport is not in-process;
+    /// - the manifest declares `[plugins]` or a package source that
+    ///   `features` lacks the `loader` to serve.
     pub fn validate(&self, allow_empty: bool, features: Features) -> Result<()> {
         let mut names = BTreeSet::new();
         for entry in &self.guests {
@@ -187,6 +211,10 @@ impl Manifest {
                  be the command guest",
                 marked.join(", ")
             );
+        }
+        for entry in &self.env.inherit {
+            omnia_core::env::pattern(entry)
+                .map_err(|error| anyhow!("`[env] inherit` entry {error}"))?;
         }
         if self.transport.default != TransportKind::InProcess {
             bail!(
@@ -376,6 +404,19 @@ fn source(entry: &GuestEntry) -> Source {
         Some(digest) => source.pinned(digest),
         None => source,
     }
+}
+
+/// The `[env]` table: what of the host's environment every guest sees.
+///
+/// A guest's environment holds the host variables `inherit` names, read once
+/// at startup. The runtime also sets `RUST_LOG` to the run's tracing
+/// directives, and `NO_COLOR` when the console does not colour its lines.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(default, deny_unknown_fields)]
+pub struct Env {
+    /// The host variables every guest sees, each a whole name or a prefix
+    /// that ends in `*`. `*` alone passes every variable.
+    pub inherit: Vec<String>,
 }
 
 /// The `[plugins]` table: where acquired packages are kept and how they are
@@ -661,5 +702,26 @@ mod tests {
             .expect_err("a package needs the loader feature");
         assert!(error.to_string().contains("without the `loader` feature"), "{error}");
         assert!(error.to_string().contains("acme:tool"), "{error}");
+    }
+
+    #[test]
+    fn env_table() {
+        let manifest: Manifest = toml::from_str(
+            "[env]\ninherit = [\"ORDERS_*\", \"HOME\", \"*\"]\n\n[[guest]]\nname = \
+             \"app\"\nsource.path = \"app.wasm\"\n",
+        )
+        .expect("the table parses");
+        assert_eq!(manifest.env.inherit, ["ORDERS_*", "HOME", "*"]);
+        manifest.validate(false, Features { loader: false }).expect("every entry is a pattern");
+
+        let unknown = toml::from_str::<Manifest>("[env]\npass = [\"HOME\"]\n");
+        assert!(unknown.is_err(), "an unknown key is refused");
+
+        let error = Manifest::new()
+            .guest(GuestEntry::new("app", "./app.wasm"))
+            .inherit(["ORDERS-URL"])
+            .validate(false, Features { loader: false })
+            .expect_err("not a variable pattern");
+        assert!(error.to_string().contains("`[env] inherit` entry `ORDERS-URL`"), "{error}");
     }
 }

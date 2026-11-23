@@ -11,8 +11,8 @@ use std::path::PathBuf;
 
 use anyhow::{Result, anyhow};
 
-use super::verbosity::{self, Levels};
-use crate::{DeploymentBuilder, Manifest, Mode};
+use super::{EntryPlan, verbosity};
+use crate::{Manifest, Mode};
 
 /// How a runtime's compiled-in deployment manifest is supplied.
 ///
@@ -92,28 +92,6 @@ impl MainOptions {
     }
 }
 
-/// The planner's outcome: every deployment decision, resolved.
-pub struct EntryPlan {
-    mode: Mode,
-    manifest: Option<Manifest>,
-    program_name: Option<String>,
-    args: Vec<String>,
-    levels: Levels,
-}
-
-impl EntryPlan {
-    /// Assemble the deployment builder this plan describes.
-    pub fn into_builder(self) -> DeploymentBuilder {
-        let builder =
-            DeploymentBuilder::new().manifest(self.manifest).args(self.args).mode(self.mode);
-        let builder = match self.program_name {
-            Some(name) => builder.program_name(name),
-            None => builder,
-        };
-        self.levels.apply(builder)
-    }
-}
-
 /// Plan a direct command: argv belongs to the guest verbatim, and the
 /// compiled-in manifest is the sole source.
 ///
@@ -159,6 +137,7 @@ pub fn plan_direct(
 mod tests {
     use super::*;
     use crate::GuestEntry;
+    use crate::entry::verbosity::Levels;
 
     fn argv(args: &[&str]) -> Vec<OsString> {
         args.iter().map(OsString::from).collect()

@@ -127,9 +127,46 @@ Unreleased
 - `Runtime::enter`, which instantiates a guest on a fresh store at a chain
   context. Every trigger and the command driver run a guest through it.
 - `StoreCtx::guest` and `StoreBase::guest`, the guest a store runs.
+- `#[derive(FromEnv)]`, from `omnia-core` and `omnia` under the trait's
+  name. Each field of an options struct takes `#[env(from = "NAME")]`,
+  with a `default` and a `with` parser where it needs them, a `default`
+  alone for a field set in code, or `nested`. The struct takes
+  `#[env(validate = path)]`, and `#[env(crate = omnia)]` where it reaches
+  the derive through `omnia`. The derive emits:
+  - `FromEnv`, which `Connect::connect` calls;
+  - inherent `load_env`, `with_env`, which applies the variables that are
+    set over options built in code, and `load_from`, which loads through a
+    lookup in place of the process environment;
+  - `Default`, where every field has a `default` or is an `Option`.
+- `omnia_core::env`, re-exported as `omnia::env`, with the `list`,
+  `millis`, and `paths` parsers a `with` names.
+- `omnia::env::pattern` and `omnia::env::matches`. `pattern` checks a
+  variable pattern, a whole name or a prefix that ends in `*`, and fails
+  with a `PatternError`. `matches` applies one to a name.
+- The host variables every guest sees, each a whole name or a prefix that
+  ends in `*`:
+  - `[env] inherit` in the manifest, and `Manifest::inherit` with the
+    `Env` table;
+  - `env: { inherit: [..] }` in `runtime!`;
+  - `--env NAME` on `run`, carried as `RunPlan::env`;
+  - `omnia_test::host::Deployment::inherit`.
+- `DeploymentBuilder::options` and `omnia_test::host::Deployment::options`
+  set the `RuntimeOptions` a deployment runs under, in place of the
+  environment's, before the engine and its instance pool are built.
+- `RuntimeOptions::validate`, and `total_core_instances`,
+  `total_memories`, `total_tables` and `total_stacks`, the pool totals a
+  runtime builds.
 
 ### Changed
 
+- A guest no longer sees the host's environment. Its `wasi:cli`
+  environment holds `RUST_LOG`, `NO_COLOR` when the console is plain, and
+  the host variables the deployment names. To keep a guest's variables,
+  name them in `[env] inherit` (`inherit = ["ORDERS_*"]`), in `runtime!`
+  as `env: { inherit: [..] }`, or with `run --env`.
+  `inherit = ["*"]` passes every variable, as before. The variables
+  `Metadata::from_env` reads, such as `CLI_REQUEST_ID`, arrive only when
+  their prefix is passed, as `inherit = ["CLI_*"]` passes it.
 - `omnia_sdk::api` is gone, and its items moved:
   - `Context`, `Metadata`, `Handler`, `Handlers`, and `Router` to the crate
     root;
@@ -229,7 +266,33 @@ Unreleased
   always sets.
 - `Endpoint::request` takes a `timeout: Option<Duration>` in place of an
   `Option<RequestOptions>`. The host never sends a zero `timeout`.
-- `StoreConfig` takes the `guest` the store is built for.
+- `StoreConfig` takes the `guest` the store is built for, and an `env` of
+  `None` gives the guest an empty environment, where it inherited the
+  host's.
+- `RuntimeParts` takes `inherit`, the host variables guests see. Empty, a
+  guest sees only `RUST_LOG`, and `NO_COLOR` when the console is plain.
+- `RuntimeOptions` and the `ConnectOptions` of `omnia-wasi-http`,
+  `omnia-wasi-keyvalue`, `omnia-wasi-vault`, `omnia-wasi-model`,
+  `omnia-wasi-docstore`, and `omnia-wasi-identity` derive omnia's
+  `FromEnv`:
+  - a load fails with one error naming every variable that is unset or
+    does not parse, and no error prints a value;
+  - a value that is not valid Unicode is invalid, where it read as unset;
+  - `RuntimeOptions` and `omnia_wasi_http::ConnectOptions` gain `Default`.
+- `POOL_TOTAL_CORE_INSTANCES` and `POOL_TOTAL_TABLES` default to four
+  times `POOL_MAX_INSTANCES`, `POOL_TOTAL_STACKS` to twice it, and
+  `POOL_TOTAL_MEMORIES` to `POOL_MAX_INSTANCES`, where each was a flat
+  `1000`. A guest holds three core instances and two tables, so the flat
+  totals filled near a third of `POOL_MAX_INSTANCES`. It takes a second
+  stack while it blocks in a call and the host completes another. The
+  `RuntimeOptions` fields are `Option<u32>`, `None` when unset.
+- The table and stack pools map more at the defaults: about 625 MiB of
+  tables, up from about 160 MiB, and 4 GiB of stacks, up from 2 GiB. A
+  page is backed only once it is touched, so only a host with strict
+  overcommit is charged for the whole mapping.
+- A deployment validates its runtime options once
+  `DeploymentBuilder::guest_timeout` and `max_dispatch_depth` apply, so
+  `guest_timeout(Duration::ZERO)` fails the build where it was accepted.
 - The re-exported `wasmtime` and `wasmtime_wasi` are 51.0.0, a new major
   version for embedders.
 - `omnia:sql` temporal parameters are validated with `jiff`. A fraction
@@ -281,6 +344,13 @@ Unreleased
 - `Runtime::store`, `store_in`, `build_store`, `instantiate`, and
   `store_factory`. A trigger calls `Runtime::enter`, and reads a client
   through `Provides::borrow` on a clone of `Runtime::backends`.
+- The `fromenv` builder of `RuntimeOptions` and the `omnia-wasi-*`
+  `ConnectOptions`: `from_env()`, the `*Builder` it returned with a setter
+  per field and `finalize()`, and `requirements()`. `with_env` applies the
+  environment over options built in code, and `load_from` loads through a
+  lookup.
+- The `fromenv` dependency, which the `oauth` feature of
+  `omnia-wasi-identity` no longer enables.
 
 ## 0.38.0
 

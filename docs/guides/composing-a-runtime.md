@@ -85,7 +85,7 @@ cargo run -- run
 
 Explicit sources always win; the compiled-in default is the lowest-precedence fallback.
 
-The manifest itself — guests, routes, mounts, the package store and registries — is covered in [Multi-Guest Deployments](multi-guest-deployments.md). A manifest can also be written inline in the macro instead of a TOML file, with the guests embedded in the binary; see [Inline manifest keys](../reference/runtime-macro.md#inline-manifest-keys-guests-mounts-plugins).
+The manifest itself — guests, routes, mounts, the package store and registries — is covered in [Multi-Guest Deployments](multi-guest-deployments.md). A manifest can also be written inline in the macro instead of a TOML file, with the guests embedded in the binary; see [Inline manifest keys](../reference/runtime-macro.md#inline-manifest-keys-guests-mounts-env-plugins).
 
 ## Choosing backends
 
@@ -103,15 +103,20 @@ See [WASI Interfaces](../reference/wasi-interfaces.md) for the full default/prod
 
 ## Backend configuration
 
-Backends read their configuration from environment variables when the runtime starts, via the `FromEnv` trait:
+Backends read their configuration from environment variables when the runtime starts, through the `FromEnv` trait, which `#[derive(FromEnv)]` implements:
 
 ```rust
+use omnia::FromEnv;
+
 #[derive(Debug, Clone, FromEnv)]
+#[env(crate = omnia)]
 pub struct ConnectOptions {
     #[env(from = "REDIS_URL", default = "redis://localhost:6379")]
     pub url: String,
 }
 ```
+
+A deployment that compiles a backend's options in passes them to `Connect::connect_with`, starting from `ConnectOptions::default()` or applying the environment over them with `with_env()`.
 
 Runtime-wide settings (guest timeout, memory limits, instance pooling) are environment variables as well — see [Configuration](../reference/configuration.md).
 
@@ -126,7 +131,7 @@ Most runtimes never need these. Each solves one specific deployment shape — re
 
 | Key | Reach for it when |
 | --- | ----------------- |
-| [`guests:`/`mounts:`/`plugins:`](../reference/runtime-macro.md#inline-manifest-keys-guests-mounts-plugins) | You want the deployment compiled into the binary instead of a TOML file — the guests embedded, named by their files unless you say otherwise, plus the mounts they see and the store and registries their `package:` guests are acquired through at first use. |
+| [`guests:`/`mounts:`/`env:`/`plugins:`](../reference/runtime-macro.md#inline-manifest-keys-guests-mounts-env-plugins) | You want the deployment compiled into the binary instead of a TOML file — the guests embedded, named by their files unless you say otherwise, plus the mounts and host variables they see and the store and registries their `package:` guests are acquired through at first use. |
 
 Shipping a product CLI whose argv belongs entirely to the guest needs no key: a command-mode runtime with a compiled-in deployment is a [direct command](../reference/runtime-macro.md#direct-commands-raw-argv-passthrough) — no host `run` grammar at all.
 
