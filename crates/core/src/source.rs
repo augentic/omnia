@@ -2,8 +2,9 @@
 //! how they become a guest.
 //!
 //! A [`Source`] is one `[[guest]]` entry resolved for loading: the identity
-//! it registers under, the [`SourceSpec`] naming its bytes, and the digest
-//! the bytes must hash to. Embedded bytes load at boot through
+//! it registers under, the [`SourceSpec`] naming its bytes, the digest the
+//! bytes must hash to, and the [`Grants`] the guest runs under. Embedded
+//! bytes load at boot through
 //! [`Source::load`]; a path or package loads at first use — acquired by the
 //! runtime, verified through [`Source::verified`], and admitted through the
 //! runtime's one admission body, which the guest loader and an embedder's
@@ -28,6 +29,7 @@ use serde::Deserialize;
 use wasmtime::Engine;
 use wasmtime::component::Component;
 
+use crate::Grants;
 use crate::artifact::component;
 use crate::digest::Digest;
 use crate::registry::GuestId;
@@ -40,6 +42,8 @@ pub struct LoadedGuest {
     pub component: Component,
     /// The digest of the bytes it was loaded from.
     pub digest: Digest,
+    /// What of the deployment the guest reaches.
+    pub grants: Grants,
 }
 
 /// Where a guest's component bytes come from.
@@ -140,22 +144,26 @@ impl From<Vec<u8>> for SourceSpec {
 }
 
 /// One declared guest, resolved for loading: its identity, where its bytes
-/// come from, and what the bytes must satisfy before they become a guest.
+/// come from, what the bytes must satisfy before they become a guest, and
+/// what the guest reaches once they do.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Source {
     id: GuestId,
     spec: SourceSpec,
     digest: Option<Digest>,
+    grants: Grants,
 }
 
 impl Source {
-    /// A source registering `spec`'s bytes under `id`, unpinned.
+    /// A source registering `spec`'s bytes under `id`, unpinned, reaching
+    /// everything the deployment has.
     #[must_use]
     pub fn new(id: impl Into<GuestId>, spec: impl Into<SourceSpec>) -> Self {
         Self {
             id: id.into(),
             spec: spec.into(),
             digest: None,
+            grants: Grants::all(),
         }
     }
 
@@ -164,6 +172,13 @@ impl Source {
     #[must_use]
     pub const fn pinned(mut self, digest: Digest) -> Self {
         self.digest = Some(digest);
+        self
+    }
+
+    /// Run the guest under `grants` in place of [`Grants::all`].
+    #[must_use]
+    pub fn granted(mut self, grants: Grants) -> Self {
+        self.grants = grants;
         self
     }
 
@@ -183,6 +198,12 @@ impl Source {
     #[must_use]
     pub const fn digest(&self) -> Option<Digest> {
         self.digest
+    }
+
+    /// What of the deployment the guest reaches.
+    #[must_use]
+    pub const fn grants(&self) -> &Grants {
+        &self.grants
     }
 
     /// Read the bytes a [`SourceSpec::Path`] or [`SourceSpec::Bytes`] source
@@ -257,6 +278,7 @@ impl Source {
             id: self.id.clone(),
             component,
             digest,
+            grants: self.grants.clone(),
         })
     }
 }

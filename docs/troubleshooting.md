@@ -88,6 +88,29 @@ Only `in-process` is a valid `[transport] default`. Remove `unix`/`nats`/`quic` 
 
 A manifest declares a `source.package` guest, but the runtime has no registry client to fetch it with. Packages are fetched through omnia's `loader` feature; enable it on the `omnia` dependency (`features = ["loader"]`), or give the guest a `source.path`. The run-time twin, `... has no registry to fetch it from`, is the same gap reached through an embedder's own `RuntimeParts` with `packages: None`.
 
+### `guest ... imports code from packages its grants do not reach: add ... to its interfaces`
+
+The guest declares grants, and its component imports code from packages its `interfaces` list leaves out. The message names every one, so add them all at once. A guest built on `omnia-sdk` imports `wasi:cli`, `wasi:clocks`, `wasi:random`, and `omnia:otel`, so `["wasi:*", "omnia:otel", ..]` is the usual start. An import with no function and no resource needs no entry. A guest loaded at boot is refused at startup, and any other guest at its first use, as `denied`.
+
+### `guest ... has invalid grants`
+
+A grants table holds an entry the deployment cannot honour, and the message names it:
+
+- an `env` entry that is not a variable name, or a prefix of one ending in `*`;
+- an `env` entry that reaches no variable `[env] inherit` or `--env` passes;
+- a `mounts` entry that names no `[[mount]]` of the deployment;
+- an `interfaces` entry that names an interface (`wasi:http/types`), a version (`wasi:http@0.3.0`), or a bare namespace (`wasi`), where a package (`wasi:http`) or a prefix such as `wasi:*` belongs.
+
+Startup refuses a manifest's table. `Runtime::register` and `Runtime::admit` refuse an embedder's as `invalid`.
+
+### `guest ... is active under other grants than this admission names`
+
+An embedder's `Runtime::register` or `Runtime::admit` named a guest already active under other grants. A name already active attests on the same bytes and the same grants alone, so a caller never believes narrower grants hold a guest that keeps its first ones. Register under the grants the guest runs under, or under another name.
+
+### `guest declares no grants: it reaches every variable, mount, and interface of the deployment`
+
+Not an error. Startup logs it for each guest without a grants table, at `info` while no guest declares grants and at `warn` once one does, so an operator sees what nothing narrows. Declare `[guest.grants]` to narrow it; see the [security model](security-model.md#per-guest-grants).
+
 ### `guest ... targets WASI 0.2 (wasm32-wasip2), importing ...; rebuild it for wasm32-wasip3`
 
 The guest was built for WASI 0.2, and the runtime serves WASI 0.3 alone. Rebuild it with `--target wasm32-wasip3` against an `omnia-sdk` of the runtime's release. A compiled-in guest is refused at startup, and a declared or dynamically registered one at its first use.
@@ -120,7 +143,7 @@ A guest export typed `func` in its WIT suspended before it returned. On `wasm32-
 
 ### `preopens.get_directories()` returns an empty list
 
-No mount reached the guest. Check: a `[[mount]]` in the manifest or a `--mount` flag exists; the guest-visible `name` matches what the guest looks for (default `.`); and with both manifest and CLI mounts, remember CLI entries override manifest entries with the same name (last wins).
+No mount reached the guest. Check: a `[[mount]]` in the manifest or a `--mount` flag exists; the guest-visible `name` matches what the guest looks for (default `.`); a guest that declares grants lists the mount in its `mounts`; and with both manifest and CLI mounts, remember CLI entries override manifest entries with the same name (last wins).
 
 ### A host variable is missing in the guest
 
@@ -129,6 +152,8 @@ A guest sees only the host variables its deployment names, beside the `RUST_LOG`
 - the manifest's `[env] inherit`;
 - the `runtime!` invocation's `env: { inherit: [..] }`, the only way for a direct command;
 - a `--env` flag on `run`.
+
+A guest that declares grants sees, of these, only those its `env` list names.
 
 Matching is case-sensitive against the name as the host spells it, so `PATH` does not pass a Windows host's `Path`. A value the guest reads through `config` is answered by the `omnia:config` backend, apart from this list; see [A config key reads as unset](#a-config-key-reads-as-unset).
 

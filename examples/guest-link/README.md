@@ -101,10 +101,12 @@ You should see two lines: one reply tagged `from extra`, and one from `responder
 
 ```rust
 let bytes = std::fs::read(extra_wasm)?;
-runtime.register("extra", bytes).await?;
+runtime.register("extra", bytes, Grants::all()).await?;
 ```
 
-The bytes may be a raw `.wasm`, compiled at registration, or `omnia compile` output, deserialized as native code — the runtime tells them apart the way wasmtime does. Verifying them (digest, signature, provenance) is the install pipeline's job, before they reach the runtime; the registry records their digest either way.
+The third argument is what `extra` reaches. `Grants::all()` reaches everything the deployment has. A narrower `Grants` holds the guest to the variables, mounts, and packages it lists.
+
+The bytes must be a raw `.wasm`, compiled at registration. `register` refuses `omnia compile` output, since deserializing native code is safe only for an artifact the embedder's own toolchain produced; such an artifact is admitted through `Runtime::admit` with an `unsafe` `Verified::trusted`. Verifying the bytes (digest, signature, provenance) is the install pipeline's job, before they reach the runtime; the registry records their digest either way.
 
 ## Also in this directory
 

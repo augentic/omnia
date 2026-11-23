@@ -14,7 +14,7 @@ use anyhow::{Context as _, Result, bail};
 use omnia::wasmtime::Enabled;
 use omnia::wasmtime::component::Val;
 use omnia::{
-    ChainCtx, ChainPolicy, CompileOptions, DeploymentBuilder, FirstArgSelector, GuestEntry,
+    ChainCtx, ChainPolicy, CompileOptions, DeploymentBuilder, FirstArgSelector, Grants, GuestEntry,
     GuestId, GuestSelector as _, Manifest, Runtime, RuntimeOptions, Transport, TransportKind,
     Verified,
 };
@@ -191,7 +191,7 @@ async fn late_registration() {
             .expect("deployment boots");
 
     let wasm = std::fs::read(test_programs::LINK_FULL).expect("reading full guest artifact");
-    runtime.register("full", wasm).await.expect("late registration");
+    runtime.register("full", wasm, Grants::all()).await.expect("late registration");
 
     let sync = call(&runtime, "full", "poke", "late").await.expect("sync dispatch");
     assert_eq!(sync, "echoer pong: late");
@@ -223,7 +223,10 @@ async fn register_precompiled() {
     .expect("compiling the full guest ahead of time");
     let bytes = std::fs::read(&artifact).expect("reading the compiled artifact");
 
-    let err = runtime.register("full", bytes.clone()).await.expect_err("pre-compiled is refused");
+    let err = runtime
+        .register("full", bytes.clone(), Grants::all())
+        .await
+        .expect_err("pre-compiled is refused");
     assert!(format!("{err:#}").contains("`Verified::wasm`"), "unexpected error: {err:#}");
     assert!(runtime.registry().get(&GuestId::from("full")).is_none(), "nothing was admitted");
 
@@ -231,7 +234,10 @@ async fn register_precompiled() {
     // SAFETY: the artifact was compiled two statements up by this process's
     // own `omnia::compile`, from a guest the test suite built.
     let trusted = unsafe { Verified::trusted(bytes) };
-    runtime.admit("full".into(), trusted).await.expect("the embedder's own artifact is admitted");
+    runtime
+        .admit("full".into(), trusted, Grants::all())
+        .await
+        .expect("the embedder's own artifact is admitted");
     let sync = call(&runtime, "full", "poke", "trusted").await.expect("sync dispatch");
     assert_eq!(sync, "echoer pong: trusted");
 }
@@ -247,15 +253,44 @@ async fn register_declared() {
         .guest(GuestEntry::new("echoer", test_programs::LINK_ECHOER));
     let runtime = assemble(manifest, |builder| builder).await.expect("deployment boots");
 
-    let err = runtime.register("echoer", full.clone()).await.expect_err("a declared name");
+    let err =
+        runtime.register("echoer", full.clone(), Grants::all()).await.expect_err("a declared name");
     assert!(format!("{err:#}").contains("declares"), "unexpected error: {err:#}");
     let verified = Verified::wasm(full).expect("the full guest is raw wasm");
-    let err = runtime.admit("echoer".into(), verified).await.expect_err("a declared name");
+    let err =
+        runtime.admit("echoer".into(), verified, Grants::all()).await.expect_err("a declared name");
     assert!(format!("{err:#}").contains("declares"), "unexpected error: {err:#}");
     assert!(runtime.registry().get(&GuestId::from("echoer")).is_none(), "nothing was admitted");
 
     let sync = call(&runtime, "full", "poke", "hi").await.expect("the entry loads at first use");
     assert_eq!(sync, "echoer pong: hi");
+}
+
+// Caller-named grants validate against the deployment before the bytes
+// load, and a name already active attests on the same digest and grants,
+// whatever order the grants list their entries in.
+#[tokio::test]
+async fn register_grants() {
+    let runtime = boot(&[("echoer", test_programs::LINK_ECHOER)]).await.expect("deployment boots");
+    let full = std::fs::read(test_programs::LINK_FULL).expect("reading the full guest");
+
+    let err = runtime
+        .register("full", full.clone(), Grants::all().mounts(["dta"]))
+        .await
+        .expect_err("a mount the deployment does not declare");
+    assert!(format!("{err:#}").contains("`mounts` entry `dta`"), "unexpected error: {err:#}");
+    assert!(runtime.registry().get(&GuestId::from("full")).is_none(), "nothing was admitted");
+
+    let grants = Grants::none().interfaces(["wasi:*", "omnia-test:*"]);
+    runtime.register("full", full.clone(), grants).await.expect("the grants reach every import");
+    let reordered = Grants::none().interfaces(["omnia-test:*", "wasi:*"]);
+    runtime.register("full", full.clone(), reordered).await.expect("the same grants attest");
+    let err =
+        runtime.register("full", full, Grants::all()).await.expect_err("other grants than its own");
+    assert!(format!("{err:#}").contains("active under other grants"), "unexpected error: {err:#}");
+
+    let sync = call(&runtime, "full", "poke", "granted").await.expect("sync dispatch");
+    assert_eq!(sync, "echoer pong: granted");
 }
 
 // The relay takes the id `echoer` because `full` hard-codes `ping("echoer",

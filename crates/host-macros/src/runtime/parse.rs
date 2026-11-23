@@ -408,7 +408,8 @@ fn parse_kv_block(
 }
 
 /// One `{ path: ..., name: ..., routes: { ... }, command: true }` (or
-/// `{ package: ..., digest: ... }`) guest entry.
+/// `{ package: ..., digest: ... }`) guest entry, with an optional
+/// `grants: { .. }` block.
 pub struct GuestSpec {
     pub source: GuestSource,
     pub routes: GuestRoutesSpec,
@@ -417,6 +418,8 @@ pub struct GuestSpec {
     pub command_span: Option<Span>,
     /// The `digest:` pin, decoded from its `sha256:<hex>` literal.
     pub digest: Option<[u8; DIGEST_LEN]>,
+    /// The `grants:` block; absent, the guest reaches everything.
+    pub grants: Option<GrantsSpec>,
 }
 
 impl Parse for GuestSpec {
@@ -428,6 +431,7 @@ impl Parse for GuestSpec {
         let mut command = false;
         let mut command_span = None;
         let mut digest = None;
+        let mut grants = None;
 
         let span = parse_kv_block(input, |key, value| {
             match key.to_string().as_str() {
@@ -441,12 +445,13 @@ impl Parse for GuestSpec {
                     command_span = command.then(|| key.span());
                 }
                 "digest" => digest = Some(parse_digest(value)?),
+                "grants" => grants = Some(value.parse()?),
                 other => {
                     return Err(syn::Error::new(
                         key.span(),
                         format!(
                             "unknown guest key `{other}`; expected `path` or `package`, `name`, \
-                             `routes`, `command`, or `digest`"
+                             `routes`, `command`, `digest`, or `grants`"
                         ),
                     ));
                 }
@@ -474,6 +479,7 @@ impl Parse for GuestSpec {
             command,
             command_span,
             digest,
+            grants,
         })
     }
 }
@@ -615,5 +621,44 @@ impl Parse for GuestRoutesSpec {
         })?;
 
         Ok(routes)
+    }
+}
+
+/// A guest's `grants: { env: [..], mounts: [..], interfaces: [..] }` block.
+///
+/// An omitted list grants nothing, as a manifest's grants table does.
+#[derive(Default)]
+pub struct GrantsSpec {
+    /// The host variables the guest sees.
+    pub env: Vec<Expr>,
+    /// The mounts preopened into the guest, by name.
+    pub mounts: Vec<Expr>,
+    /// The packages the guest may import code from.
+    pub interfaces: Vec<Expr>,
+}
+
+impl Parse for GrantsSpec {
+    fn parse(input: ParseStream) -> Result<Self> {
+        let mut grants = Self::default();
+
+        parse_kv_block(input, |key, value| {
+            match key.to_string().as_str() {
+                "env" => grants.env = parse_bracketed_list(value)?,
+                "mounts" => grants.mounts = parse_bracketed_list(value)?,
+                "interfaces" => grants.interfaces = parse_bracketed_list(value)?,
+                other => {
+                    return Err(syn::Error::new(
+                        key.span(),
+                        format!(
+                            "unknown grants key `{other}`; expected `env`, `mounts`, or \
+                             `interfaces`"
+                        ),
+                    ));
+                }
+            }
+            Ok(())
+        })?;
+
+        Ok(grants)
     }
 }

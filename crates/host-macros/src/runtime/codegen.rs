@@ -6,7 +6,7 @@ use proc_macro2::TokenStream;
 use quote::{ToTokens, format_ident, quote};
 use syn::{Expr, Ident, Path};
 
-use crate::runtime::parse::{Config, GuestSource, HostEntry, ManifestSpec, Mode};
+use crate::runtime::parse::{Config, GrantsSpec, GuestSource, HostEntry, ManifestSpec, Mode};
 
 // Token fragments needed to expand the runtime macro.
 pub struct Codegen {
@@ -192,6 +192,10 @@ fn emit_manifest_builder(manifest: &ManifestSpec) -> TokenStream {
             let bytes = bytes.iter();
             quote! { .digest(omnia::Digest::from([#(#bytes),*])) }
         });
+        let grants = guest.grants.as_ref().map(|grants| {
+            let grants = emit_grants(grants);
+            quote! { .grants(#grants) }
+        });
         quote! {
             .guest(
                 #entry
@@ -200,6 +204,7 @@ fn emit_manifest_builder(manifest: &ManifestSpec) -> TokenStream {
                     #(.route_websocket(#websocket))*
                     #command
                     #digest
+                    #grants
             )
         }
     });
@@ -228,6 +233,19 @@ fn emit_manifest_builder(manifest: &ManifestSpec) -> TokenStream {
             #(#guests)*
             #(#mounts)*
             #inherit
+    }
+}
+
+// one call per name, so an empty list infers no element type
+fn emit_grants(grants: &GrantsSpec) -> TokenStream {
+    let env = &grants.env;
+    let mounts = &grants.mounts;
+    let interfaces = &grants.interfaces;
+    quote! {
+        omnia::Grants::none()
+            #(.env([#env]))*
+            #(.mounts([#mounts]))*
+            #(.interfaces([#interfaces]))*
     }
 }
 

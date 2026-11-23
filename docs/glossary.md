@@ -26,11 +26,23 @@ A WASI host that runs a server and drives guest instances per inbound request: `
 
 ### Deployment manifest
 
-The `omnia.toml` file (or equivalent programmatic `omnia::Manifest`) declaring guests, mounts, routes, and the package store and registries. See [Configuration](reference/configuration.md#deployment-manifest-omniatoml).
+The `omnia.toml` file (or equivalent programmatic `omnia::Manifest`) declaring guests and their [grants](#grants), mounts, routes, and the package store and registries. See [Configuration](reference/configuration.md#deployment-manifest-omniatoml).
 
 ### Guest entry
 
-One guest a deployment declares: a `[[guest]]` table, a `runtime!` `guests:` entry, or an `omnia::GuestEntry`. Its `name` is the guest's identity (`GuestId`) — what routes and link dispatch address, and what a `load("name")` answers with; omitted, the component file's stem names it (`echo.wasm` is `echo`) or the package reference without its version does (`acme:tool@1.2.3` is `acme:tool`). A manifest file's entry reads its component from a file (`source.path`) or fetches a package (`source.package`); the macro's embeds it (`path:`) or names a package (`package:`). Embedded bytes load at boot; every other entry is a [first-use guest](#first-use-guest).
+One guest a deployment declares: a `[[guest]]` table, a `runtime!` `guests:` entry, or an `omnia::GuestEntry`. Its `name` is the guest's identity (`GuestId`) — what routes and link dispatch address, and what a `load("name")` answers with; omitted, the component file's stem names it (`echo.wasm` is `echo`) or the package reference without its version does (`acme:tool@1.2.3` is `acme:tool`). A manifest file's entry reads its component from a file (`source.path`) or fetches a package (`source.package`); the macro's embeds it (`path:`) or names a package (`package:`). Embedded bytes load at boot; every other entry is a [first-use guest](#first-use-guest). An entry's optional [grants](#grants) narrow what its guest reaches.
+
+### Grants
+
+A ceiling one party sets on what another may reach. Omnia sets one at two levels:
+
+- **Per guest**, a deployment's `omnia::Grants`: a manifest's `[guest.grants]`, the macro's `grants:`, or `GuestEntry::grants`. Its lists narrow the deployment for one guest:
+  - `env`, the inherited host variables the guest sees;
+  - `mounts`, the [mounts](#mount) preopened into it;
+  - `interfaces`, the packages it may import code from, checked when it is admitted.
+
+  A guest without grants reaches everything, and startup logs it. With them, an omitted list grants nothing. See the [security model](security-model.md#per-guest-grants).
+- **Per completion**, the `omnia:model` `grants` a guest lends one completion: a workspace beneath its own preopens, and the `worker-grant` bounding what the backend's worker reaches beyond it. See the [model reference](reference/model.md#grants).
 
 ### Registry
 
@@ -38,7 +50,7 @@ The runtime's map from each opaque guest identity (`GuestId`) to a pre-instantia
 
 ### Mount
 
-A host directory preopened into every guest sandbox (`[[mount]]` in the manifest, the macro's `mounts:` list, or `--mount` on the CLI). Read-only unless marked writable; the guest sees it under its guest-visible name via `wasi:filesystem` preopens. A read-only mount is also a root the [guest loader](#guest-loader) reads a component from when a guest names a path beneath it; a writable mount never is, and one that shares or nests a read-only mount's directory is refused at startup. Mounts dedup by name, last wins, before any directory opens — how a test overlays a binary's `.` root.
+A host directory preopened into every guest sandbox its [grants](#grants) reach (`[[mount]]` in the manifest, the macro's `mounts:` list, or `--mount` on the CLI). Read-only unless marked writable; the guest sees it under its guest-visible name via `wasi:filesystem` preopens. A read-only mount is also a root the [guest loader](#guest-loader) reads a component from when a guest names a path beneath it; a writable mount never is, and one that shares or nests a read-only mount's directory is refused at startup. Mounts dedup by name, last wins, before any directory opens — how a test overlays a binary's `.` root.
 
 ### Dispatch (host-mediated)
 

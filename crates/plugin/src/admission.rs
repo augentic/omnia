@@ -3,7 +3,7 @@
 
 use futures::FutureExt as _;
 use futures::future::BoxFuture;
-use omnia_core::{Backends, Digest, GuestError, GuestId, Policy, SourceSpec, WeakRuntime};
+use omnia_core::{Backends, Digest, Grants, GuestError, GuestId, Policy, SourceSpec, WeakRuntime};
 
 use crate::loader::{LoadConflict, Plugin};
 
@@ -37,7 +37,13 @@ pub trait Admission: Send + Sync + 'static {
 // Weak: a strong handle would cycle through the extension.
 impl<B: Backends> Admission for WeakRuntime<B> {
     fn admits(&self, id: &GuestId) -> Result<(), GuestError> {
-        live(self)?.admits(id, &Policy::CallerNamed { pin: None })
+        live(self)?.admits(
+            id,
+            &Policy::CallerNamed {
+                pin: None,
+                grants: &Grants::all(),
+            },
+        )
     }
 
     fn guest(&self, id: &GuestId) -> BoxFuture<'static, Result<Plugin, GuestError>> {
@@ -61,7 +67,9 @@ impl<B: Backends> Admission for WeakRuntime<B> {
         let weak = self.clone();
         async move {
             let runtime = live(&weak)?;
-            match runtime.admit_bytes(id.clone(), bytes, Policy::CallerNamed { pin }).await {
+            let grants = Grants::all();
+            let policy = Policy::CallerNamed { pin, grants: &grants };
+            match runtime.admit_bytes(id.clone(), bytes, policy).await {
                 Ok(guest) => Ok(Ok(Plugin::of(&guest))),
                 Err(GuestError::Conflict { found, .. }) => {
                     let current = runtime.registry().get(&id).map(|guest| Plugin::of(&guest));
