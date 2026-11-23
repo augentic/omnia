@@ -19,7 +19,7 @@ hey -z 30s -c 64 http://127.0.0.1:8080/
 
 Watch two signals while it runs:
 
-- **Pool occupancy gauges** — the host samples the pool onto its `pool_*` gauges every `POOL_METRICS_INTERVAL_MS` (default 5s; set `1000` while tuning). The gauges reach the collector `OTEL_EXPORTER_OTLP_ENDPOINT` names whatever `RUST_LOG` is. `RUST_LOG=omnia=trace` also prints each sample on the console, and the console line adds `pool_unused_warm_memories` and `pool_unused_memory_bytes_resident`, which the collector does not receive. If occupancy hits the pool ceilings, requests queue.
+- **Occupancy gauges** — the host samples the pool onto its `pool_*` gauges, and the concurrency gate onto its `invocations_*` gauges, every `POOL_METRICS_INTERVAL_MS` (default 5s; set `1000` while tuning). The gauges reach the collector `OTEL_EXPORTER_OTLP_ENDPOINT` names whatever `RUST_LOG` is. `RUST_LOG=omnia=trace` also prints each sample on the console, and the console line adds `pool_unused_warm_memories` and `pool_unused_memory_bytes_resident`, which the collector does not receive. When the gate is full, HTTP answers `503` and deliveries wait; [Pool sizing](#2-pool-sizing) reads the gauges.
 - **Resident memory** — `ps -o rss= -p $(pgrep -f 'my-runtime run')` while under load, since most pooling knobs trade memory for latency.
 
 ## Knobs, in the order to try them
@@ -43,6 +43,25 @@ POOL_IDLE_RELEASE_MS=60000          # release warm memory after a minute without
 ### 2. Pool sizing
 
 The defaults (1000 instances, 100 warm slots) suit moderate concurrency. The `POOL_TOTAL_*` ceilings follow `POOL_MAX_INSTANCES` unless set ([configuration reference](../reference/configuration.md#instance-pooling)), so it is the one knob to raise when occupancy gauges show saturation under your target load. Raise `POOL_MAX_UNUSED_WARM_SLOTS` if your steady-state concurrency exceeds 100 and you can spend the memory.
+
+The [concurrency gate](../reference/configuration.md#concurrency-gate) admits `MAX_CONCURRENT_INVOCATIONS` invocations at once, and each holds an instance. A call from one guest to another takes a further instance, outside the gate. Size the pool for both:
+
+```text
+POOL_MAX_INSTANCES >= MAX_CONCURRENT_INVOCATIONS x (1 + hops in flight per invocation)
+```
+
+The hops in flight are the calls between guests one invocation holds open at once: one for a guest that calls one other guest, two for A calling B calling C. Unset, the gate is as wide as the pool, which suits a deployment whose guests make no such calls. A call that finds the pool full fails at once, with `the instance pool is full`.
+
+The gate's gauges, and its one counter, read as follows:
+
+- `invocations_in_flight` is how many slots are held. Pinned at the gate's size, the gate is what limits throughput.
+- `invocations_waiting` is how many message deliveries and command runs wait for a slot. Waiters take freed slots in the order they arrived, ahead of any request, so HTTP and WebSocket are refused while it stays above zero.
+- `invocations_refused` counts the HTTP requests and WebSocket events refused at a full gate. HTTP answers each with `503`.
+
+A slot is held for as long as its invocation runs:
+
+- A command's run holds one from start to exit, so a long-running command leaves one fewer for the triggers serving beside it.
+- A guest that waits on another delivery in the same deployment, such as a reply its own messaging trigger handles, holds its slot while it waits. When every slot is held by such a guest, the deliveries they wait on queue until the guests time out.
 
 The table and stack pools are mapped when the engine is built, four tables and two stacks for each instance. A host with strict overcommit is charged for the whole mapping, about 625 MiB of tables and 4 GiB of stacks at the defaults.
 
@@ -73,10 +92,10 @@ Per-request tuning doesn't help cold starts. For those, pre-compile guests (`com
 ## Limits that interact with latency
 
 - `GUEST_TIMEOUT_MS` (default 30s) bounds each server invocation and each server-rooted link-dispatch hop wall-clock (a command-mode chain, including its link hops, is uncapped); `EPOCH_TICK_MS` (default 10ms) is the granularity at which CPU-bound guests yield and timeouts are enforced. Lowering the tick tightens timeout precision at slight overhead.
-- `GUEST_TIMEOUT_MS` stops at an HTTP response's head. The body that streams after it keeps its instance slot until it ends, so a slow or endless body holds pool capacity. `HTTP_STREAM_TIMEOUT_MS` (unset by default) caps it, counted from the head, and cuts a body still streaming at the cap.
+- `GUEST_TIMEOUT_MS` stops at an HTTP response's head. The body that streams after it keeps its instance and its slot of the gate until it ends, so a slow or endless body holds capacity. `HTTP_STREAM_TIMEOUT_MS` (unset by default) caps it, counted from the head, and cuts a body still streaming at the cap.
 - `MAX_FUEL` adds per-instruction metering. Leave it at `0` (off) unless you need deterministic CPU budgets — metering has measurable overhead and is compile-affecting.
 - `MAX_MEMORY_BYTES` caps guest memory growth; `POOL_MAX_MEMORY_BYTES` must be at least the largest guest's requirement or instantiation falls back off the pool.
 
 ## What not to tune
 
-Guest lookup, routing, and dispatch are in-process and effectively free relative to instantiation. If p99 is high, look at the pool gauges and the guest's own work (outbound calls, backend latency — visible in OTel traces via `OTEL_EXPORTER_OTLP_ENDPOINT`) before touching anything else.
+Guest lookup, routing, and dispatch are in-process and effectively free relative to instantiation. If p99 is high, look at the pool and gate gauges and the guest's own work (outbound calls, backend latency — visible in OTel traces via `OTEL_EXPORTER_OTLP_ENDPOINT`) before touching anything else.

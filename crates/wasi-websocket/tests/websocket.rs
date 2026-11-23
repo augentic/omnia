@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use futures::{FutureExt as _, SinkExt as _, StreamExt as _};
-use omnia::{ExitStatus, FutureResult, Provides};
+use omnia::{ExitStatus, FutureResult, Provides, RuntimeOptions};
 use omnia_test::host::Deployment;
 use omnia_wasi_otel::{OtelClient, OtelDefault, WasiOtel};
 use omnia_wasi_websocket::{
@@ -146,6 +146,46 @@ async fn websocket_handler_echo() {
 
     quiet(&mut first).await;
     quiet(&mut second).await;
+    runtime.shutdown();
+}
+
+#[tokio::test]
+async fn full_gate() {
+    let (server, addr, mut events) = serve().await;
+    let runtime = Deployment::new()
+        .guest("guest", test_programs::WEBSOCKET_HANDLER_ECHO)
+        .options(RuntimeOptions {
+            max_concurrent_invocations: Some(1),
+            ..RuntimeOptions::default()
+        })
+        .boot(Backends::new(server), |deployment| {
+            deployment.host::<WasiWebSocket>()?;
+            deployment.host::<WasiOtel>()?;
+            Ok(())
+        })
+        .await
+        .expect("runtime boots");
+    let handler = WebSocketHandler::new(&runtime)
+        .expect("websocket routes consistent")
+        .expect("the guest exports the websocket handler");
+
+    let mut peer = connect(addr).await;
+    peer.send(Message::text("ping")).await.expect("the peer sends");
+    let ping = next(&mut events).await;
+
+    // with the only slot held, the event fails before a store is built
+    let slot = runtime.try_slot().expect("the gate is empty");
+    let built = runtime.stores_built();
+    let refused = handler.handle(ping.clone()).await.expect_err("the gate is full");
+    assert!(format!("{refused:#}").contains("MAX_CONCURRENT_INVOCATIONS"), "{refused:#}");
+    assert_eq!(runtime.stores_built(), built);
+
+    // freed, the same event is handled
+    drop(slot);
+    handler.handle(ping).await.expect("handled");
+    assert_eq!(receive(&mut peer).await, Message::text("ping"));
+
+    quiet(&mut peer).await;
     runtime.shutdown();
 }
 

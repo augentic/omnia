@@ -15,7 +15,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use base64ct::{Base64, Encoding};
 use bytes::Bytes;
-use http::header::{AUTHORIZATION, CONTENT_TYPE, FORWARDED, HOST};
+use http::header::{AUTHORIZATION, CONTENT_TYPE, FORWARDED, HOST, RETRY_AFTER};
 use http::{HeaderMap, Method, Request, Response, StatusCode, Version};
 use http_body_util::{BodyExt as _, Full};
 use hyper::body::Incoming;
@@ -533,6 +533,69 @@ async fn health_path() {
     let response = handler.handle(request).await.expect("handled");
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
     assert!(runtime.stores_built() > built);
+
+    runtime.shutdown();
+}
+
+// A request holds its slot until hyper has its body, so a response whose body
+// is unread fills a gate of one.
+#[tokio::test]
+async fn full_gate() {
+    let guest = std::fs::read(test_programs::HTTP_INCOMING_ECHO).expect("guest bytes");
+    let runtime = Deployment::new()
+        .entry(GuestEntry::new("guest", guest).route_http("/echo"))
+        .options(RuntimeOptions {
+            max_concurrent_invocations: Some(1),
+            ..RuntimeOptions::default()
+        })
+        .boot(Backends::defaults().await, |deployment| {
+            deployment.host::<WasiHttp>()?;
+            deployment.host::<WasiOtel>()?;
+            Ok(())
+        })
+        .await
+        .expect("runtime boots");
+    let options = ServerOptions {
+        health_path: Some("/healthz".into()),
+        ..ServerOptions::default()
+    };
+    let handler = HttpHandler::with_options(&runtime, options)
+        .expect("http routes consistent")
+        .expect("the guest exports the http handler");
+    let echo = |message: &str| {
+        Request::get(format!("/echo?message={message}"))
+            .header(HOST, "echo.test")
+            .body(Full::new(Bytes::new()))
+            .expect("request")
+    };
+
+    // a served request whose body is unread holds the only slot
+    let held = handler.handle(echo("held")).await.expect("handled");
+    assert_eq!(held.status(), StatusCode::OK);
+    assert_eq!(runtime.invocations().in_flight, 1);
+
+    // the next request is refused before a store is built
+    let built = runtime.stores_built();
+    let refused = handler.handle(echo("refused")).await.expect("handled");
+    assert_eq!(refused.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(refused.headers()[RETRY_AFTER], "1");
+    assert_eq!(runtime.stores_built(), built);
+
+    // the probe takes no slot
+    let probe = Request::get("/healthz").body(Full::new(Bytes::new())).expect("request");
+    let response = handler.handle(probe).await.expect("handled");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(runtime.stores_built(), built);
+
+    // reading the body frees the slot, and the next request is served
+    assert_eq!(echoed(held).await.0["message"], "held");
+    let freed = tokio::time::timeout(Duration::from_secs(10), runtime.slot())
+        .await
+        .expect("the slot frees once the body is read");
+    drop(freed);
+    let served = handler.handle(echo("served")).await.expect("handled");
+    assert_eq!(served.status(), StatusCode::OK);
+    assert_eq!(echoed(served).await.0["message"], "served");
 
     runtime.shutdown();
 }

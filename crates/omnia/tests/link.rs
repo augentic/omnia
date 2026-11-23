@@ -340,6 +340,29 @@ async fn link_sleeper() {
     assert_eq!(answer, "echoer woke: awake");
 }
 
+// An unset gate is as wide as the pool, so a hop takes no slot yet can find
+// the pool full: here the caller's own instance fills a pool of one.
+#[tokio::test]
+async fn full_pool() {
+    let options = RuntimeOptions {
+        pool_max_instances: 1,
+        ..RuntimeOptions::default()
+    };
+    let runtime = boot_with(
+        &[("echoer", test_programs::LINK_ECHOER), ("full", test_programs::LINK_FULL)],
+        |builder| builder.options(options),
+    )
+    .await
+    .expect("deployment boots");
+    assert_eq!(runtime.invocations().limit, 1);
+
+    let err = call(&runtime, "full", "poke", "hi").await.expect_err("the callee finds no instance");
+    let text = format!("{err:#}");
+    for needle in ["MAX_CONCURRENT_INVOCATIONS", "POOL_MAX_INSTANCES"] {
+        assert!(text.contains(needle), "`{needle}` missing from: {text}");
+    }
+}
+
 // The skewed exporter takes the id `echoer` so `full`'s wired import of
 // `ping` is the one it is checked against; the mismatch is refused when the
 // exporter is served, so assembly fails before any call.

@@ -4,7 +4,7 @@
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, bail};
 use futures::StreamExt;
 use omnia_core::{ChainCtx, PatternRoutes, Provides, Runtime, TriggerRouter, telemetry};
 use tracing::{Instrument, info_span, instrument};
@@ -100,8 +100,10 @@ where
     /// # Errors
     ///
     /// Returns an error if the event names no connection or carries text that
-    /// is not UTF-8, if the guest cannot be loaded at its first use or
-    /// instantiated, traps, or times out, or if the guest returns an error.
+    /// is not UTF-8, if the guest cannot be loaded at its first use, if every
+    /// slot of the runtime's [concurrency gate](Runtime::try_slot) is held,
+    /// if the guest cannot be instantiated, traps, or times out, or if the
+    /// guest returns an error.
     pub async fn handle(&self, event: Event) -> Result<()> {
         // an event the guest could not answer is refused before routing
         let mut event = types::Event::try_from(event)
@@ -131,6 +133,14 @@ where
             )?;
 
         event.deadline = Some(deadline_millis(self.state.options().guest_timeout));
+
+        // a full gate fails the event; a slot is held until after the store drops
+        let Some(_slot) = self.state.try_slot() else {
+            bail!(
+                "refusing a websocket event: every slot of the concurrency gate \
+                 (MAX_CONCURRENT_INVOCATIONS) is held"
+            );
+        };
 
         let (mut store, instance) = self.state.enter(&guest, ChainCtx::server()).await?;
         let websocket = indices.load(&mut store, &instance)?;

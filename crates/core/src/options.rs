@@ -74,6 +74,9 @@ pub struct RuntimeOptions {
     /// Maximum host-mediated guest-to-guest dispatch nesting depth (`MAX_DISPATCH_DEPTH`, default 8).
     #[env(from = "MAX_DISPATCH_DEPTH", default = "8")]
     pub max_dispatch_depth: usize,
+    /// Most invocations the triggers and the command driver run at once, each holding one slot of the concurrency gate (`MAX_CONCURRENT_INVOCATIONS`, unset: `POOL_MAX_INSTANCES`, min 1).
+    #[env(from = "MAX_CONCURRENT_INVOCATIONS")]
+    pub max_concurrent_invocations: Option<u32>,
     /// Enable the pooling instance allocator (`POOLING`, default `true`).
     #[env(from = "POOLING", default = "true")]
     pub pooling: bool,
@@ -134,7 +137,7 @@ pub struct RuntimeOptions {
     /// Use the Linux `PAGEMAP_SCAN` ioctl for cheaper memory reset (`POOL_PAGEMAP_SCAN`, `auto`/`yes`/`no`, default `no`).
     #[env(from = "POOL_PAGEMAP_SCAN", default = "no", with = parse_enabled)]
     pub pool_pagemap_scan: Enabled,
-    /// Interval between pooling-occupancy metric samples; `0` disables (`POOL_METRICS_INTERVAL_MS`, default 5000ms).
+    /// Interval between occupancy samples of the instance pool and the concurrency gate; `0` disables (`POOL_METRICS_INTERVAL_MS`, default 5000ms).
     #[env(from = "POOL_METRICS_INTERVAL_MS", default = "5000", with = crate::env::millis)]
     pub pool_metrics_interval: Duration,
     /// Idle time, measured from the last guest invocation, after which unused warm pooled memory is released to the OS; `0` disables (`POOL_IDLE_RELEASE_MS`, default 0).
@@ -173,6 +176,11 @@ impl RuntimeOptions {
     /// - [`guest_timeout`](Self::guest_timeout) or [`epoch_tick`](Self::epoch_tick)
     ///   is zero;
     /// - [`http_stream_timeout`](Self::http_stream_timeout) is set to zero;
+    /// - [`max_concurrent_invocations`](Self::max_concurrent_invocations) is
+    ///   set to zero;
+    /// - with [`pooling`](Self::pooling) on,
+    ///   [`max_concurrent_invocations`](Self::max_concurrent_invocations)
+    ///   exceeds [`pool_max_instances`](Self::pool_max_instances);
     /// - with [`pooling`](Self::pooling) on,
     ///   [`pool_max_memories_per_module`](Self::pool_max_memories_per_module)
     ///   exceeds [`total_memories`](Self::total_memories);
@@ -191,10 +199,24 @@ impl RuntimeOptions {
         if self.http_stream_timeout.is_some_and(|limit| limit.is_zero()) {
             bail!("HTTP_STREAM_TIMEOUT_MS must be at least 1; unset it for no cap");
         }
+        if self.max_concurrent_invocations == Some(0) {
+            bail!(
+                "MAX_CONCURRENT_INVOCATIONS must be at least 1; unset it for one slot per pooled \
+                 instance"
+            );
+        }
         if !self.pooling {
             return Ok(());
         }
 
+        if let Some(gate) = self.max_concurrent_invocations
+            && gate > self.pool_max_instances
+        {
+            bail!(
+                "MAX_CONCURRENT_INVOCATIONS ({gate}) exceeds POOL_MAX_INSTANCES ({})",
+                self.pool_max_instances
+            );
+        }
         if let Some(per_module) = self.pool_max_memories_per_module
             && per_module > self.total_memories()
         {
@@ -458,6 +480,41 @@ mod tests {
 
         let error = options.validate().expect_err("a zero stream cap is refused");
         assert!(error.to_string().contains("HTTP_STREAM_TIMEOUT_MS"), "{error}");
+    }
+
+    #[test]
+    fn zero_gate() {
+        let options = RuntimeOptions {
+            pooling: false,
+            max_concurrent_invocations: Some(0),
+            ..RuntimeOptions::default()
+        };
+
+        let error = options.validate().expect_err("a zero gate is refused");
+        assert!(error.to_string().contains("MAX_CONCURRENT_INVOCATIONS"), "{error}");
+    }
+
+    // with pooling off the gate is the only bound, so any width stands
+    #[test]
+    fn wide_gate() {
+        let options = RuntimeOptions {
+            max_concurrent_invocations: Some(11),
+            ..options(10)
+        };
+
+        let error = options.validate().expect_err("a gate wider than the pool is refused");
+        assert!(
+            error
+                .to_string()
+                .contains("MAX_CONCURRENT_INVOCATIONS (11) exceeds POOL_MAX_INSTANCES (10)"),
+            "{error}"
+        );
+
+        let unpooled = RuntimeOptions {
+            pooling: false,
+            ..options
+        };
+        unpooled.validate().expect("a gate wider than an unused pool stands");
     }
 
     #[test]

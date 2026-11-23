@@ -61,6 +61,10 @@ async fn run_guest<B: Backends>(
 ) -> Result<ExitStatus> {
     tracing::debug!(guest = %guest_id, "running wasi:cli/run");
 
+    // the run competes with the triggers serving beside it, so it waits for a
+    // slot of the gate, held until after the store drops
+    let _slot = runtime.slot().await;
+
     // a command chain root: its link hops run uncapped, like the run itself
     let (mut store, instance) = runtime.enter(guest, ChainCtx::command()).await?;
     let command = Command::new(&mut store, &instance)?;

@@ -78,7 +78,7 @@ Everything is environment variables — backend connection strings, runtime limi
 Two variables deserve attention in production:
 
 - `RUST_LOG` — a server defaults to `warn`; set at least `info` (or start the binary with `-v`) so startup, readiness, and trigger-server logs are emitted.
-- `OTEL_EXPORTER_OTLP_ENDPOINT` — point at your collector; the host exports traces and metrics with no further wiring. The runtime's own metrics — the `pool_*` occupancy gauges, `message_counter`, `event_counter`, and `processing_errors` — export whatever `RUST_LOG` is. Unset (and no per-signal `OTEL_EXPORTER_OTLP_*_ENDPOINT`), nothing is exported — guest telemetry included.
+- `OTEL_EXPORTER_OTLP_ENDPOINT` — point at your collector; the host exports traces and metrics with no further wiring. The runtime's own metrics — the `pool_*` occupancy gauges, the concurrency gate's `invocations_*` gauges and counter, `message_counter`, `event_counter`, and `processing_errors` — export whatever `RUST_LOG` is. Unset (and no per-signal `OTEL_EXPORTER_OTLP_*_ENDPOINT`), nothing is exported — guest telemetry included.
 
 ## Readiness and health
 
@@ -92,7 +92,7 @@ with the mode and guest count attached. Orchestrators (or a log-watching startup
 
 An HTTP deployment can also answer a probe itself. Set [`HTTP_HEALTH_PATH`](../reference/configuration.md#http-trigger) (for example `/healthz`), and the HTTP trigger answers a request for exactly that path with `200`. The path:
 
-- enters no guest;
+- enters no guest and takes no slot of the [concurrency gate](../reference/configuration.md#concurrency-gate), so it stays `200` while HTTP answers `503` at capacity;
 - serves a liveness probe, so a busy pod is not restarted, or a readiness probe, so a busy pod stays in rotation rather than pushing its load onto peers that are just as full;
 - needs no `Host`, since it is answered before the request target is checked;
 - wins over a guest route that covers it, while a path below it goes to the guest;

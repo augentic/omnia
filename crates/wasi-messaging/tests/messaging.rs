@@ -11,10 +11,10 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use futures::{FutureExt as _, StreamExt as _};
-use omnia::{ExitStatus, GuestEntry, Host, Runtime};
+use omnia::{ExitStatus, GuestEntry, Host, Runtime, RuntimeOptions};
 use omnia_test::host::{Backends, Deployment};
 use omnia_wasi_messaging::{
     Endpoint, Error, FutureResult, HandleError, Handler, Message, MessagingClient,
@@ -250,6 +250,41 @@ async fn messaging_handle_sleep() {
         matches!(error, HandleError::TimedOut(timeout) if timeout == TIMEOUT),
         "unexpected error: {error}"
     );
+
+    runtime.shutdown();
+}
+
+// The guest's timeout counts from when its delivery takes a slot, so a delivery
+// that waited one timeout for the gate still runs a whole timeout after it.
+#[tokio::test]
+async fn queued_delivery() {
+    const TIMEOUT: Duration = Duration::from_millis(100);
+
+    let deployment = sole(test_programs::MESSAGING_HANDLE_SLEEP)
+        .options(RuntimeOptions {
+            max_concurrent_invocations: Some(1),
+            ..RuntimeOptions::default()
+        })
+        .guest_timeout(TIMEOUT);
+    let runtime = boot(&deployment, Backends::defaults().await).await;
+    let handler = handler(&runtime);
+
+    // the test holds the only slot for one timeout, and the delivery waits
+    let slot = runtime.try_slot().expect("the gate is empty");
+    let started = Instant::now();
+    let release = async {
+        tokio::time::sleep(TIMEOUT).await;
+        assert_eq!(runtime.invocations().waiting, 1);
+        drop(slot);
+    };
+    let ((), outcome) = tokio::join!(release, handler.handle(order("orders")));
+
+    let error = outcome.expect_err("a hung guest is an error");
+    assert!(
+        matches!(error, HandleError::TimedOut(timeout) if timeout == TIMEOUT),
+        "unexpected error: {error}"
+    );
+    assert!(started.elapsed() >= TIMEOUT * 2, "done after {:?}", started.elapsed());
 
     runtime.shutdown();
 }

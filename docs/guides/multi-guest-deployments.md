@@ -128,6 +128,7 @@ A few constraints:
 
 - Dispatch is deployment-wide. Any guest that imports an interface can call any guest that exports it; what a guest may reach is bounded by which guests the deployment runs, not by a list. A guest with [grants](#grants-what-each-guest-reaches) imports the interface only when its `interfaces` name the package. An import no guest exports fails when the deployment boots, not at the first call. The exporter does not have to be loaded at startup: a manifest file's guest loads when the first call names it (so above, `router`'s first `echo` is what loads `responder`), and a guest registered later — or loaded through `omnia:plugins/loader` — can serve the call too. A runtime built without Omnia's `link` feature leaves such imports unsatisfied, so the deployment fails at boot.
 - Calls can nest (A calls B calls C) up to `MAX_DISPATCH_DEPTH` (default 8), so accidental recursion cannot run forever.
+- Each call takes an instance from the pool but no slot of the [concurrency gate](../reference/configuration.md#concurrency-gate), so set `MAX_CONCURRENT_INVOCATIONS` below `POOL_MAX_INSTANCES` by the margin [Pool sizing](performance-tuning.md#2-pool-sizing) works out.
 - Today the call stays in-process. Declaring `unix`, `nats`, or `quic` under `[transport]` is rejected at load.
 
 The [`guest-link`](../../examples/guest-link/) example is a complete caller/callee pair.

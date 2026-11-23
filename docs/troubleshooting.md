@@ -144,6 +144,14 @@ The request's target is malformed. The trigger refuses a request that:
 
 An HTTP/1.1 request with an absolute-form URI still needs a `Host`. A conforming client always sends one, so the usual cause is a hand-built request, such as one a test passes to `HttpHandler::handle`. `omnia_test::host::send` sets a missing `Host` from the URI. The trigger logs each refusal at `debug` as `rejecting malformed request`, with its reason.
 
+### The HTTP trigger answers `503 Service Unavailable` with `Retry-After: 1`
+
+Every slot of the [concurrency gate](reference/configuration.md#concurrency-gate) is held, so the trigger refused the request before it instantiated a guest. It counts each refusal on `invocations_refused`. A WebSocket event is refused at the same point, and fails naming `MAX_CONCURRENT_INVOCATIONS`. Message deliveries waiting for a slot are served first, so a backlog of them keeps HTTP refused until it drains, which `invocations_waiting` shows. Raise `POOL_MAX_INSTANCES`, and `MAX_CONCURRENT_INVOCATIONS` with it where it is set, if the host has the memory. A probe of `HTTP_HEALTH_PATH` takes no slot, so it still answers `200`.
+
+### `the instance pool is full`
+
+A call from one guest to another, or an invocation an embedder entered without a slot, found every instance of the pool taken. Such a call takes an instance but no slot of the gate, and with `MAX_CONCURRENT_INVOCATIONS` unset the gate is as wide as the pool, so the triggers' own invocations can take every instance. Set `MAX_CONCURRENT_INVOCATIONS` below `POOL_MAX_INSTANCES` by the margin [Pool sizing](guides/performance-tuning.md#2-pool-sizing) works out, or raise `POOL_MAX_INSTANCES`.
+
 ### A streamed HTTP response fails part way
 
 The client got the head and part of the body, then the body was cut short: HTTP/1.1 closes the connection mid-body, and HTTP/2 resets the stream. Either the guest trapped while it wrote the body, which the host logs at `error`, or the body was still streaming when `HTTP_STREAM_TIMEOUT_MS` passed, which it logs at `warn` as `response body outlived HTTP_STREAM_TIMEOUT_MS`. Raise or unset the cap for a long-lived stream, such as server-sent events.
