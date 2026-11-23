@@ -122,7 +122,7 @@ impl Backends {
             docstore: DocStoreDefault::connect_with(DocStoreOptions::default())
                 .await
                 .expect("in-memory docstore"),
-            http: HttpDefault::connect_with(HttpOptions { connect_timeout: 10 })
+            http: HttpDefault::connect_with(HttpOptions::default())
                 .await
                 .expect("outbound http client"),
             identity: IdentityStub::default(),

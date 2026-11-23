@@ -10,10 +10,10 @@ use std::sync::Arc;
 use std::task::{Context as TaskContext, Poll};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, bail, ensure};
 use bytes::Bytes;
-use http::StatusCode;
-use http::uri::{PathAndQuery, Uri};
+use http::uri::{Authority, PathAndQuery, Uri};
+use http::{StatusCode, Version};
 use http_body_util::combinators::UnsyncBoxBody;
 use http_body_util::{BodyExt, Full};
 use hyper::body::{Body, Frame, SizeHint};
@@ -177,13 +177,27 @@ where
 
     /// Forward a request to the routed guest and return its response.
     ///
-    /// The request is normalised first (scheme and authority from `Forwarded`,
-    /// the URI, or `Host`). Its `x-deadline` header is set to the instant the
-    /// guest timeout expires, in milliseconds since the Unix epoch, replacing
-    /// any the client sent. Outcomes the handler can answer itself come back as
-    /// responses: a request with no authority `400`, an unrouted path `404`,
-    /// and a guest that times out, cannot be loaded at its first use, or is no
-    /// longer registered `500`.
+    /// The request is normalised first: its scheme and authority come from
+    /// `Forwarded` where it names them, else from the URI or `Host`. Its
+    /// `x-deadline` header is set to the instant the guest timeout expires, in
+    /// milliseconds since the Unix epoch, replacing any the client sent.
+    ///
+    /// Outcomes the handler can answer itself come back as responses:
+    /// - `400` for a malformed request target;
+    /// - `404` for an unrouted path;
+    /// - `500` for a guest that times out, cannot be loaded at its first use,
+    ///   or is no longer registered.
+    ///
+    /// A request target is malformed when the request:
+    /// - carries no `Host`, unless it is HTTP/2 with an `:authority`;
+    /// - carries more than one `Host`, or one that does not parse;
+    /// - names an authority with userinfo or a non-numeric port;
+    /// - is HTTP/2 with an `:authority` other than its `Host`.
+    ///
+    /// The response body streams on after `handle` returns. It fails part way
+    /// when the guest traps, or once
+    /// [`http_stream_timeout`](omnia_core::RuntimeOptions::http_stream_timeout)
+    /// has passed since the head was sent.
     ///
     /// # Errors
     ///
@@ -232,7 +246,8 @@ where
         let service = indices.load(&mut store, &instance)?;
 
         let (sender, receiver) = oneshot::channel::<Result<hyper::Response<OutgoingBody>>>();
-        let guest_task = spawn_guest(store, service, request, sender);
+        let stream_timeout = self.state.options().http_stream_timeout;
+        let guest_task = spawn_guest(store, service, request, sender, stream_timeout);
 
         // bound time-to-response (not the streaming body); cancel a hung guest
         let response = match timeout(self.state.options().guest_timeout, receiver).await {
@@ -253,10 +268,13 @@ where
 
 // Runs the guest's handler on a task of its own, which owns the store. The
 // response or the failure goes through `sender`, and the task lives on until
-// hyper has consumed the body.
+// hyper has consumed the body or `stream_timeout` has passed since the head
+// went out. Ending the task drops the store, which fails a body still
+// streaming.
 fn spawn_guest<B, T>(
     mut store: Store<StoreCtx<B>>, service: Service, request: http::Request<T>,
     sender: oneshot::Sender<Result<hyper::Response<OutgoingBody>>>,
+    stream_timeout: Option<Duration>,
 ) -> JoinHandle<()>
 where
     B: Provides<WasiHttp>,
@@ -308,7 +326,18 @@ where
                             .boxed_unsync()
                         });
                         if sender.send(Ok(resp)).is_ok() {
-                            _ = body_done_rx.await;
+                            let consumed = async { _ = body_done_rx.await };
+                            match stream_timeout {
+                                Some(limit) => {
+                                    if timeout(limit, consumed).await.is_err() {
+                                        tracing::warn!(
+                                            ?limit,
+                                            "response body outlived HTTP_STREAM_TIMEOUT_MS; cutting it"
+                                        );
+                                    }
+                                }
+                                None => consumed.await,
+                            }
                         }
                     }
                     Err(error) => {
@@ -362,48 +391,80 @@ where
 // rebuild the uri with scheme and authority set, so they reach the guest, and
 // stamp the guest's deadline over any the client sent
 fn fix_request<T>(request: http::Request<T>, timeout: Duration) -> Result<http::Request<T>> {
-    let p_and_q =
-        request.uri().path_and_query().map_or_else(|| PathAndQuery::from_static("/"), Clone::clone);
-    let mut uri_builder = Uri::builder().path_and_query(p_and_q);
+    let mut authority = request_target(&request)?;
+    let mut scheme = request.uri().scheme_str().unwrap_or("http");
 
+    // behind a proxy: the first RFC 7239 element is the client-facing hop
     if let Some(forwarded) = request.headers().get(FORWARDED) {
-        // behind a proxy: the first RFC 7239 element is the client-facing hop
         let element = forwarded.to_str()?.split(',').next().unwrap_or_default();
-        let mut scheme = "http";
+        scheme = "http";
         for parameter in element.split(';') {
             let Some((name, value)) = parameter.split_once('=') else {
                 continue;
             };
             let value = value.trim().trim_matches('"');
             match name.trim().to_ascii_lowercase().as_str() {
-                "host" => uri_builder = uri_builder.authority(value),
-                "proto" => {
-                    scheme = if value.eq_ignore_ascii_case("https") { "https" } else { "http" }
-                }
+                "host" => authority = checked(value.parse()?)?,
+                "proto" if value.eq_ignore_ascii_case("https") => scheme = "https",
                 _ => {}
             }
         }
-        uri_builder = uri_builder.scheme(scheme);
-    } else {
-        // running locally: authority from the URI (HTTP/2 `:authority` or
-        // absolute-form HTTP/1.1), falling back to the `Host` header
-        let scheme = request.uri().scheme_str().unwrap_or("http");
-        let authority = match request.uri().authority() {
-            Some(authority) => authority.as_str(),
-            None => match request.headers().get(HOST) {
-                Some(host) => host.to_str()?,
-                None => return Err(anyhow!("missing authority in URI and host header")),
-            },
-        };
-        uri_builder = uri_builder.authority(authority).scheme(scheme);
     }
 
+    let p_and_q =
+        request.uri().path_and_query().map_or_else(|| PathAndQuery::from_static("/"), Clone::clone);
+    let uri = Uri::builder().scheme(scheme).authority(authority).path_and_query(p_and_q).build()?;
     let (mut parts, body) = request.into_parts();
-    parts.uri = uri_builder.build()?;
+    parts.uri = uri;
     parts.headers.insert(DEADLINE, HeaderValue::from(deadline_millis(timeout)));
-    let request = http::Request::from_parts(parts, body);
 
-    Ok(request)
+    Ok(http::Request::from_parts(parts, body))
+}
+
+// `Host` is required and single (RFC 9112 §3.2). HTTP/2 may carry
+// `:authority` instead, and the two must agree when it sends both (RFC 9113
+// §8.3.1). An HTTP/1.1 absolute-form target outranks `Host` (RFC 9112 §3.2.2).
+fn request_target<T>(request: &http::Request<T>) -> Result<Authority> {
+    let mut hosts = request.headers().get_all(HOST).iter();
+    let host = hosts.next();
+    ensure!(hosts.next().is_none(), "more than one `Host` header");
+    let host = host.map(|host| checked(host.to_str()?.parse()?)).transpose()?;
+
+    let target = request.uri().authority().cloned().map(checked).transpose()?;
+    let http2 = request.version() == Version::HTTP_2;
+    match (target, host) {
+        (Some(target), Some(host)) => {
+            ensure!(
+                !http2 || target.as_str().eq_ignore_ascii_case(host.as_str()),
+                "`:authority` {target} differs from `Host` {host}"
+            );
+            Ok(target)
+        }
+        (Some(target), None) if http2 => Ok(target),
+        (None, Some(host)) => Ok(host),
+        _ => bail!("no `Host` header"),
+    }
+}
+
+// a request authority is `uri-host [ ":" port ]` (RFC 9110 §7.2), and userinfo
+// in one is an error (§4.2.4); `Authority` parses userinfo and reads a
+// malformed port as no port, so both are checked here
+fn checked(authority: Authority) -> Result<Authority> {
+    let text = authority.as_str();
+    ensure!(!text.contains('@'), "authority {text} carries userinfo");
+
+    let host = authority.host();
+    ensure!(!host.is_empty(), "authority {text} names no host");
+    let suffix = text.strip_prefix(host).unwrap_or(text);
+    ensure!(
+        suffix.is_empty()
+            || suffix.strip_prefix(':').is_some_and(|port| {
+                port.bytes().all(|b| b.is_ascii_digit()) && port.parse::<u16>().is_ok()
+            }),
+        "authority {text} has a malformed port"
+    );
+
+    Ok(authority)
 }
 
 // saturates rather than panics, so no configured timeout can fail a request

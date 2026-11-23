@@ -184,6 +184,18 @@ Unreleased
 - `Source::granted`, `Source::grants`, and `Guest::grants`.
 - A startup log naming each guest that declares no grants, at `info`, or
   at `warn` once another guest declares some.
+- Three variables that tune or bound streaming:
+  - `HTTP_BODY_BUFFER_CHUNKS`
+    (`omnia_wasi_http::ConnectOptions::body_buffer_chunks`, default `1`),
+    the body chunks a guest may write ahead of the network, on the
+    responses it serves and the requests it sends;
+  - `WASI_MAX_IO_SIZE` (`RuntimeOptions::wasi_max_io_size`, unset for
+    Wasmtime's 64 KiB), the largest file or socket read or write the host
+    performs for a guest;
+  - `HTTP_STREAM_TIMEOUT_MS` (`RuntimeOptions::http_stream_timeout`,
+    unset for no cap), a wall-clock cap on an HTTP response body, counted
+    from its head. A body still streaming at the cap is cut short, and
+    `0` is refused.
 
 ### Changed
 
@@ -339,6 +351,27 @@ Unreleased
   `guest_timeout(Duration::ZERO)` fails the build where it was accepted.
 - The re-exported `wasmtime` and `wasmtime_wasi` are 51.0.0, a new major
   version for embedders.
+- An HTTP response body whose guest traps part way fails on the client,
+  where it ended as if complete. A body `HTTP_STREAM_TIMEOUT_MS` cuts
+  short fails the same way.
+- The HTTP trigger answers `400` for a malformed request target, before
+  any guest runs. It refuses a request that:
+  - carries no `Host`, unless it is HTTP/2 with an `:authority`;
+  - carries more than one `Host`, or one that does not parse;
+  - names an authority with userinfo or a non-numeric port, in its
+    `Host`, its URI, or a `Forwarded` element's `host=`;
+  - is HTTP/2 with an `:authority` other than its `Host`.
+
+  An HTTP/1.1 request with an absolute-form URI and no `Host` was
+  accepted, and is refused.
+- A `Forwarded` element without `host=` keeps the request's own
+  authority, where the request was answered `400`.
+- `omnia_test::host::send` gives a request without `Host` one naming its
+  URI's authority, or `localhost` when the URI has none. It added one only
+  where the URI named no authority.
+- `RuntimeOptions` gains `http_stream_timeout` and `wasi_max_io_size`, and
+  `omnia_wasi_http::ConnectOptions` gains `body_buffer_chunks`, so a
+  struct literal of either spreads `..Default::default()`.
 - `omnia:sql` temporal parameters are validated with `jiff`. A fraction
   longer than nine digits and a Unicode minus sign in an offset no
   longer bind.

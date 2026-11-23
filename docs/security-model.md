@@ -94,6 +94,7 @@ Sandboxing without resource limits is denial-of-service waiting to happen. Each 
 | Limit | Variable | Default |
 | ----- | -------- | ------- |
 | Wall-clock time | `GUEST_TIMEOUT_MS` | 30 s (server invocations and server-rooted link hops; a command-mode chain, link hops included, is uncapped) |
+| Response streaming | `HTTP_STREAM_TIMEOUT_MS` | off (an HTTP response body streams on after its head, which `GUEST_TIMEOUT_MS` stops at) |
 | Linear memory | `MAX_MEMORY_BYTES` | 256 MiB |
 | Instruction budget | `MAX_FUEL` | off (`0`) |
 | Preemption granularity | `EPOCH_TICK_MS` | 10 ms |

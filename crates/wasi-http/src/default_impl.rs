@@ -1,6 +1,7 @@
 use std::error::Error;
 use std::fmt::Display;
 use std::io;
+use std::num::NonZeroUsize;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::task::{self, Poll, ready};
@@ -25,12 +26,15 @@ use super::{HttpBorrow, client_cert};
 
 pub type FutureResult<T> = Box<dyn Future<Output = Result<T, HttpError>> + Send>;
 
-/// Options for the default outbound `wasi:http` client.
+/// Options for the default `wasi:http` backend.
 #[derive(Debug, Clone, FromEnv)]
 pub struct ConnectOptions {
     /// Connect timeout in seconds (`HTTP_CONNECT_TIMEOUT`, default 10).
     #[env(from = "HTTP_CONNECT_TIMEOUT", default = "10")]
     pub connect_timeout: u64,
+    /// Body writes a guest may buffer ahead of the network, for the responses it serves and the requests it sends (`HTTP_BODY_BUFFER_CHUNKS`, default 1).
+    #[env(from = "HTTP_BODY_BUFFER_CHUNKS", default = "1")]
+    pub body_buffer_chunks: NonZeroUsize,
 }
 
 /// Default implementation for `wasi:http`.
@@ -59,7 +63,10 @@ impl Connect for HttpDefault {
         let clients = Clients::new(Duration::from_secs(options.connect_timeout))
             .context("building HTTP client")?;
         Ok(Self {
-            hooks: HttpHooks { clients },
+            hooks: HttpHooks {
+                clients,
+                body_buffer_chunks: options.body_buffer_chunks,
+            },
             ctx: WasiHttpCtx::default(),
         })
     }
@@ -77,12 +84,17 @@ fn ensure_crypto_provider() {
 #[derive(Debug, Clone)]
 struct HttpHooks {
     clients: Clients,
+    body_buffer_chunks: NonZeroUsize,
 }
 
 impl WasiHttpHooks for HttpHooks {
     // reqwest derives `Host` from the URL, and a guest can never supply one
     fn set_host_header(&mut self) -> bool {
         false
+    }
+
+    fn p3_outgoing_body_buffer_chunks(&mut self) -> usize {
+        self.body_buffer_chunks.get()
     }
 
     fn send_request(

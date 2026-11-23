@@ -4,6 +4,7 @@
 use anyhow::{Result, bail};
 use bytes::Bytes;
 use http::header::HOST;
+use http::uri::Authority;
 use http::{HeaderValue, Request, Response};
 use http_body_util::{BodyExt as _, Full};
 use omnia::{Provides, Runtime};
@@ -13,8 +14,9 @@ use omnia_wasi_messaging::{HandleError, Message, MessagingHandler, WasiMessaging
 /// Serve `request` through the guest `runtime` routes it to, and collect the
 /// reply's body.
 ///
-/// A request that names no authority is sent to `localhost`, since the host
-/// refuses one without. An unrouted path is a `404` reply, not an error.
+/// A request without a `Host` header is given one, since the host refuses a
+/// request without. It names the URI's authority, or `localhost` when the URI
+/// has none. An unrouted path is a `404` reply, not an error.
 ///
 /// # Errors
 ///
@@ -27,8 +29,10 @@ pub async fn send<B: Provides<WasiHttp>>(
     let Some(handler) = HttpHandler::new(runtime)? else {
         bail!("no guest exports `wasi:http/handler`");
     };
-    if request.uri().authority().is_none() && !request.headers().contains_key(HOST) {
-        request.headers_mut().insert(HOST, HeaderValue::from_static("localhost"));
+    if !request.headers().contains_key(HOST) {
+        let host = request.uri().authority().map_or("localhost", Authority::as_str);
+        let host = HeaderValue::from_str(host)?;
+        request.headers_mut().insert(HOST, host);
     }
 
     let response = handler.handle(request.map(Full::new)).await?;
