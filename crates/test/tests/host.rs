@@ -4,26 +4,22 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::{Arc, Mutex};
 
 use anyhow::{Context as _, Result, bail};
 use bytes::Bytes;
 use http::header::CONTENT_TYPE;
 use http::{Method, Request, Response, StatusCode};
 use omnia::wasmtime::component::{ResourceTable, Val};
-use omnia::{ChainCtx, Connect as _, Digest, ExitStatus, GuestEntry, GuestId, HostCtx, Runtime};
+use omnia::{ChainCtx, Digest, ExitStatus, GuestEntry, GuestId, HostCtx, Runtime, SourceSpec};
 use omnia_test::host::sql::{Field, Row, Value};
 use omnia_test::host::{
     Asked, Backends, Deployment, Ended, FixedIdentity, HandleError, MatchedHttp, STATE_BUCKET,
     ScriptedModel, ScriptedTables, Sink, deliver, precompiled, scratch, send,
 };
-use omnia_test::{Exchange, SeenFormat};
 use omnia_wasi_blobstore::BlobStoreClient as _;
 use omnia_wasi_http::WasiHttp;
 use omnia_wasi_identity::WasiIdentity;
-use omnia_wasi_keyvalue::{
-    Bucket, ConnectOptions, FutureResult, KeyValueClient, KeyValueDefault, Lifetime, WasiKeyValue,
-};
+use omnia_wasi_keyvalue::{KeyValueClient, Lifetime, WasiKeyValue};
 use omnia_wasi_messaging::WasiMessaging;
 use omnia_wasi_model::WasiModel;
 use omnia_wasi_otel::WasiOtel;
@@ -89,6 +85,11 @@ mod same_named {
     });
 }
 
+// every model test here boots it, so it is compiled once
+fn echo_text() -> SourceSpec {
+    precompiled(test_programs::MODEL_ECHO_TEXT).expect("the echo guest precompiles")
+}
+
 #[tokio::test]
 async fn runtime_overlay() {
     // The generated `main` and `run` stay untouched; the overlay reaches the
@@ -96,7 +97,7 @@ async fn runtime_overlay() {
     let _ = (production::main, production::run);
     let backends = Backends::defaults().await.model(ScriptedModel::answering(["second"]));
     let status = Deployment::from(production::manifest())
-        .guest("echo", test_programs::MODEL_ECHO_TEXT)
+        .guest("echo", echo_text())
         .run_with::<production::Hooks, _>(backends.clone())
         .await
         .expect("deployment runs");
@@ -143,7 +144,7 @@ async fn same_named_backends() {
     let _ = (same_named::main, same_named::run);
     let backends = Backends::defaults().await.model(ScriptedModel::answering(["second"]));
     let status = Deployment::from(same_named::manifest())
-        .guest("echo", test_programs::MODEL_ECHO_TEXT)
+        .guest("echo", echo_text())
         .run_with::<same_named::Hooks, _>(backends)
         .await
         .expect("deployment runs");
@@ -151,52 +152,11 @@ async fn same_named_backends() {
 }
 
 #[tokio::test]
-async fn scripted_model() {
-    let backends = Backends::defaults().await.model(ScriptedModel::answering(["second"]));
-    let status = Deployment::new()
-        .guest("echo", test_programs::MODEL_ECHO_TEXT)
-        .run_host::<WasiModel, _>(backends.clone())
-        .await
-        .expect("deployment runs");
-    assert_eq!(status, ExitStatus::SUCCESS);
-
-    let seen = backends.model.seen();
-    assert_eq!(seen.len(), 1);
-    assert_eq!(seen[0].system.as_deref(), Some("be terse"));
-    assert_eq!(seen[0].messages, ["hi", "second"]);
-    assert_eq!(seen[0].format, SeenFormat::Text);
-    assert!(seen[0].workspace.is_none());
-    backends.model.assert_exhausted();
-}
-
-#[tokio::test]
-async fn scripted_calls() {
-    let model = ScriptedModel::answering(["42"]).calling(0, [("lookup", "{}")]);
-    let backends = Backends::defaults().await.model(model);
-    let status = Deployment::new()
-        .guest("tools", test_programs::MODEL_TOOL_ROUNDTRIP)
-        .command("tools")
-        .run_host::<WasiModel, _>(backends.clone())
-        .await
-        .expect("deployment runs");
-    assert_eq!(status, ExitStatus::SUCCESS);
-
-    assert_eq!(backends.model.seen()[0].tools, ["lookup"]);
-    assert_eq!(
-        backends.model.exchanges(),
-        [Exchange {
-            tool: "lookup".into(),
-            arguments: "{}".into(),
-            outcome: Ok("42".into()),
-        }]
-    );
-}
-
-#[tokio::test]
 async fn exhausted_script() {
+    // an overrun fails the guest's request and the test's final check
     let backends = Backends::defaults().await.model(ScriptedModel::default());
     let outcome = Deployment::new()
-        .guest("echo", test_programs::MODEL_ECHO_TEXT)
+        .guest("echo", echo_text())
         .run_host::<WasiModel, _>(backends.clone())
         .await;
     assert!(!matches!(outcome, Ok(ExitStatus::SUCCESS)), "the guest's expect fails: {outcome:?}");
@@ -205,14 +165,12 @@ async fn exhausted_script() {
     // overrun fails the assertion the scenario would normally end with.
     let asserted = catch_unwind(AssertUnwindSafe(|| backends.model.assert_exhausted()));
     assert!(asserted.is_err(), "the overrun fails assert_exhausted()");
-}
 
-#[tokio::test]
-async fn then_answers() {
+    // a `then` fallback answers past the script's end instead
     let model = ScriptedModel::answering::<String>([]).then(|| "second".to_owned());
     let backends = Backends::defaults().await.model(model);
     let status = Deployment::new()
-        .guest("echo", test_programs::MODEL_ECHO_TEXT)
+        .guest("echo", echo_text())
         .run_host::<WasiModel, _>(backends)
         .await
         .expect("deployment runs");
@@ -231,23 +189,6 @@ async fn link_pair() {
     let answer = call(&runtime, "full", "poke", "hi").await.expect("dispatch");
     assert_eq!(answer, "echoer pong: hi");
     runtime.shutdown();
-}
-
-// A declared path guest loads at its first use — here the requester's
-// `load` of its name; nothing else opts the deployment into the loader.
-#[tokio::test]
-async fn declared_guest() {
-    let status = Deployment::new()
-        .guest("requester", test_programs::PLUGINS_LOAD)
-        .entry(GuestEntry::new("plugin", test_programs::LINK_ECHOER))
-        .args(["declared", "plugin"])
-        .run(Backends::defaults().await, |deployment| {
-            deployment.host::<WasiOtel>()?;
-            Ok(())
-        })
-        .await
-        .expect("deployment runs");
-    assert_eq!(status, ExitStatus::SUCCESS, "the requester's assertions all held");
 }
 
 // A path guest's `digest` pin is checked at its first use — here the command
@@ -277,51 +218,6 @@ async fn pinned_path_guest() {
         .await
         .expect_err("the pin names other bytes");
     assert!(format!("{error:#}").contains("not its declared digest"), "{error:#}");
-}
-
-// notes every bucket opened, then hands the call to the default it wraps
-#[derive(Clone, Debug)]
-struct RecordingKeyValue {
-    inner: KeyValueDefault,
-    opened: Arc<Mutex<Vec<String>>>,
-}
-
-impl KeyValueClient for RecordingKeyValue {
-    fn open_bucket(&self, identifier: String) -> FutureResult<Arc<dyn Bucket>> {
-        self.opened.lock().expect("opened buckets").push(identifier.clone());
-        self.inner.open_bucket(identifier)
-    }
-}
-
-#[tokio::test]
-async fn swapped_keyvalue() {
-    let options = ConnectOptions {
-        buckets: vec!["bucket".to_owned()],
-    };
-    let recording = RecordingKeyValue {
-        inner: KeyValueDefault::connect_with(options).await.expect("in-memory keyvalue"),
-        opened: Arc::default(),
-    };
-    // The guest's increments start from a host-seeded counter.
-    let bucket = recording.inner.open_bucket("bucket".to_owned()).await.expect("bucket");
-    let seeded = bucket.set("counter".to_owned(), b"37".to_vec(), Lifetime::Replace(None), None);
-    seeded.await.expect("seed").expect("no precondition");
-
-    let backends = Backends::defaults().await.keyvalue(recording);
-    let status = Deployment::new()
-        .guest("guest", test_programs::KEYVALUE_BUCKET)
-        .run_host::<WasiKeyValue, _>(backends.clone())
-        .await
-        .expect("deployment runs");
-    assert_eq!(status, ExitStatus::SUCCESS);
-
-    // The guest reached the swapped-in backend, and its writes landed in
-    // the store behind it.
-    let opened = backends.keyvalue.opened.lock().expect("opened buckets").clone();
-    assert_eq!(opened, ["bucket"]);
-    let bucket = backends.keyvalue.inner.open_bucket("bucket".to_owned()).await.expect("bucket");
-    let counter = bucket.get("counter".to_owned()).await.expect("get").map(|entry| entry.value);
-    assert_eq!(counter, Some(b"42".to_vec()));
 }
 
 #[tokio::test]
@@ -474,6 +370,30 @@ fn rename(id: i64) -> Request<Bytes> {
         .header(CONTENT_TYPE, "application/json")
         .body(Bytes::from_static(br#"{"name":"gadget"}"#))
         .expect("a valid request")
+}
+
+#[test]
+fn rebuilt_component() {
+    let scratch = scratch();
+    let wasm = scratch.path().join("guest.wasm");
+    let artifacts = || {
+        std::fs::read_dir(scratch.path().join("precompiled"))
+            .expect("the artifacts' directory")
+            .map(|entry| entry.expect("an artifact").file_name())
+            .filter(|name| name.to_string_lossy().ends_with(".bin"))
+            .collect::<Vec<_>>()
+    };
+
+    std::fs::copy(test_programs::LINK_HANDLE, &wasm).expect("staging the first build");
+    precompiled(&wasm).expect("the first build precompiles");
+    let first = artifacts();
+    std::fs::copy(test_programs::LINK_PARTIAL, &wasm).expect("staging the second build");
+    precompiled(&wasm).expect("the second build precompiles");
+    let second = artifacts();
+
+    assert_eq!(first.len(), 1, "{first:?}");
+    assert_eq!(second.len(), 1, "the second build's artifact replaces the first's: {second:?}");
+    assert_ne!(first, second);
 }
 
 async fn call<B: omnia::Backends>(

@@ -15,8 +15,9 @@ use omnia::{Digest, RuntimeOptions, SourceSpec};
 /// that boots a deployment per test. The artifact is cached in a
 /// `precompiled` directory beside the component, named for the component's
 /// content and the engine the runtime builds from the environment. Every
-/// later call, in any test process, reads it back instead. Pass the result
-/// to [`Deployment::guest`](super::Deployment::guest).
+/// later call, in any test process, reads it back instead. Writing a new
+/// artifact removes the ones older builds of the component left. Pass the
+/// result to [`Deployment::guest`](super::Deployment::guest).
 ///
 /// # Errors
 ///
@@ -36,20 +37,41 @@ pub fn precompiled(wasm: impl AsRef<Path>) -> Result<SourceSpec> {
     Digest::of(&component).hash(&mut hasher);
     engine.precompile_compatibility_hash().hash(&mut hasher);
     let stem = wasm.file_stem().map_or_default(|stem| stem.to_string_lossy().into_owned());
+    let generation = format!("{:016x}", hasher.finish());
     let dir = wasm.with_file_name("precompiled");
-    let artifact = dir.join(format!("{stem}-{:016x}.bin", hasher.finish()));
+    let artifact = dir.join(format!("{stem}-{generation}.bin"));
 
-    // compile under a lock, so concurrent test processes compile once
+    // compile under the component's lock, so concurrent test processes compile once
     fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
-    let lock = File::create(artifact.with_extension("lock"))?;
+    let lock = File::create(dir.join(format!("{stem}.lock")))?;
     lock.lock().context("locking the precompiled artifact")?;
     if !artifact.exists() {
         let staged = artifact.with_extension("partial");
         omnia::compile::compile(wasm, Some(staged.clone()), None, &options)?;
         fs::rename(&staged, &artifact)?;
+        prune(&dir, &stem, &generation);
     }
     let bytes = fs::read(&artifact).with_context(|| format!("reading {}", artifact.display()))?;
     drop(lock);
 
     Ok(bytes.into())
+}
+
+// Removes `stem`'s files from other generations. The caller holds the stem's
+// lock, which every reader of any generation takes, so none is mid-read.
+fn prune(dir: &Path, stem: &str, generation: &str) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for path in entries.flatten().map(|entry| entry.path()) {
+        let Some((name, other)) =
+            path.file_stem().and_then(|name| name.to_str()).and_then(|name| name.rsplit_once('-'))
+        else {
+            continue;
+        };
+        let generational = other.len() == 16 && other.bytes().all(|byte| byte.is_ascii_hexdigit());
+        if name == stem && generational && other != generation {
+            let _ = fs::remove_file(&path);
+        }
+    }
 }

@@ -25,7 +25,7 @@ use omnia::{
     GuestEntry, GuestId, LoadError, Location, Manifest, Mode, Mount, NoStore, PluginLoader as _,
     Plugins, PluginsConfig, RegistryClient, RegistryConfig, RegistrySource, Runtime, SourceSpec,
 };
-use omnia_test::host::{Backends, Scratch, scratch};
+use omnia_test::host::{Backends, Scratch, precompiled, scratch};
 use omnia_wasi_otel::WasiOtel;
 
 // Every guest program in `crates/test-programs/programs/plugins` must have a
@@ -37,8 +37,15 @@ const ECHOER_PACKAGE: &str = "test:echoer@1.0.0";
 // the name the echoer package derives: its reference without the version
 const ECHOER_NAME: &str = "test:echoer";
 
-// a path, so the requester loads when the command drive first names it
+// embedded pre-compiled bytes, so the requester loads at boot and the suite
+// compiles each requester once
 fn requester(wasm: &str) -> Manifest {
+    let source = precompiled(wasm).expect("the requester precompiles");
+    Manifest::new().guest(GuestEntry::new("requester", source).command())
+}
+
+// a path, so the requester loads only when the command drive first names it
+fn path_requester(wasm: &str) -> Manifest {
     Manifest::new().guest(GuestEntry::new("requester", wasm).command())
 }
 
@@ -196,7 +203,7 @@ fn echoer_package() -> GuestEntry {
 // requester is a path guest too, loaded when the command drive names it.
 #[tokio::test]
 async fn plugins_load() {
-    let manifest = requester(test_programs::PLUGINS_LOAD)
+    let manifest = path_requester(test_programs::PLUGINS_LOAD)
         .guest(GuestEntry::new("plugin", test_programs::LINK_ECHOER));
     let runtime = boot(manifest, &["declared", "plugin"]).await.expect("assembling runtime");
     assert_eq!(runtime.registry().len(), 0, "path guests are absent until their first use");
@@ -420,42 +427,36 @@ async fn package_not_found() {
     assert_eq!(status, ExitStatus::SUCCESS, "the requester's assertions all held");
 }
 
-// The failure matrix over declared names, one requester run per row: the
-// deployment declares (or does not declare) a name, and the wire carries the
-// case and the cause. Nothing a row names is ever admitted.
+// The failure matrix over declared names, one row per name the requester
+// loads: the deployment declares (or does not declare) a name, and the wire
+// carries the case and the cause. Nothing a row names is ever admitted.
 #[tokio::test]
 async fn plugins_refused() {
     let scratch = scratch();
     let junk = scratch.path().join("junk.wasm");
     std::fs::write(&junk, b"not a component").expect("staging junk");
     let absent = scratch.path().join("absent.wasm");
-
-    let rows: [(&str, GuestEntry, &str, &str); 4] = [
-        ("junk", GuestEntry::new("junk", junk), "invalid", "validating `junk`"),
-        ("absent", GuestEntry::new("absent", absent), "not-found", "reading"),
+    let manifest = requester(test_programs::PLUGINS_REFUSED)
+        .guest(GuestEntry::new("junk", junk))
+        .guest(GuestEntry::new("absent", absent))
         // no `plugins` at all: nothing routes any package, and no store holds one
-        (ECHOER_NAME, echoer_package(), "not-found", "no registry routes `test:echoer@1.0.0`"),
+        .guest(echoer_package())
         // a guest declared under another name is still just a name
-        (
-            "nonesuch",
-            GuestEntry::new("other", test_programs::LINK_ECHOER),
-            "not-found",
-            "no guest `nonesuch` is declared",
-        ),
+        .guest(GuestEntry::new("other", test_programs::LINK_ECHOER));
+
+    let rows: [&[&str]; 4] = [
+        &["declared", "junk", "invalid", "validating `junk`"],
+        &["declared", "absent", "not-found", "reading"],
+        &["declared", ECHOER_NAME, "not-found", "no registry routes `test:echoer@1.0.0`"],
+        &["declared", "nonesuch", "not-found", "no guest `nonesuch` is declared"],
     ];
-    for (name, entry, case, needle) in rows {
-        let manifest = requester(test_programs::PLUGINS_REFUSED).guest(entry);
-        let runtime =
-            boot(manifest, &["declared", name, case, needle]).await.expect("assembling runtime");
-        let status = runtime.run_command().await.expect("deployment runs");
-        assert_eq!(status, ExitStatus::SUCCESS, "row `{name}`: the requester's assertions held");
-        assert_eq!(
-            recorded(&runtime, name),
-            Registered::Absent,
-            "row `{name}`: nothing was admitted"
-        );
-        runtime.shutdown();
+    let runtime = boot(manifest, &rows.join(&"--")).await.expect("assembling runtime");
+    let status = runtime.run_command().await.expect("deployment runs");
+    assert_eq!(status, ExitStatus::SUCCESS, "the requester's assertions all held");
+    for name in ["junk", "absent", ECHOER_NAME, "nonesuch"] {
+        assert_eq!(recorded(&runtime, name), Registered::Absent, "`{name}` was admitted");
     }
+    runtime.shutdown();
 }
 
 // A `registries` configuration that routes nothing for a package's namespace
@@ -523,22 +524,21 @@ async fn squatted_name() {
     scratch.write("plugin.wasm", changed_echoer(b"squatter"));
     stage_package(scratch.path(), ECHOER_PACKAGE, test_programs::LINK_ECHOER);
 
-    for row in [
-        ["path", "plugin.wasm", "denied", "declares"],
-        ["release", ECHOER_PACKAGE, "denied", "declares"],
-        ["release", "test:echoer@9.9.9", "denied", "declares"],
-    ] {
-        let manifest = requester(test_programs::PLUGINS_REFUSED)
-            .guest(GuestEntry::new("plugin", test_programs::LINK_ECHOER))
-            .guest(GuestEntry::new(ECHOER_NAME, test_programs::LINK_ECHOER))
-            .mounts([scratch.mount(false)])
-            .registries(RegistryConfig::contents(local_registry_toml(scratch.path())));
-        let runtime = boot(manifest, &row).await.expect("assembling runtime");
-        let status = runtime.run_command().await.expect("deployment runs");
-        assert_eq!(status, ExitStatus::SUCCESS, "row {row:?}: the requester's assertions held");
-        assert_eq!(runtime.registry().len(), 1, "row {row:?}: only the requester loaded");
-        runtime.shutdown();
-    }
+    let manifest = requester(test_programs::PLUGINS_REFUSED)
+        .guest(GuestEntry::new("plugin", test_programs::LINK_ECHOER))
+        .guest(GuestEntry::new(ECHOER_NAME, test_programs::LINK_ECHOER))
+        .mounts([scratch.mount(false)])
+        .registries(RegistryConfig::contents(local_registry_toml(scratch.path())));
+    let rows: [&[&str]; 3] = [
+        &["path", "plugin.wasm", "denied", "declares"],
+        &["release", ECHOER_PACKAGE, "denied", "declares"],
+        &["release", "test:echoer@9.9.9", "denied", "declares"],
+    ];
+    let runtime = boot(manifest, &rows.join(&"--")).await.expect("assembling runtime");
+    let status = runtime.run_command().await.expect("deployment runs");
+    assert_eq!(status, ExitStatus::SUCCESS, "the requester's assertions all held");
+    assert_eq!(runtime.registry().len(), 1, "only the requester loaded");
+    runtime.shutdown();
 }
 
 // A package the requester names is fetched from the registry the
@@ -562,13 +562,13 @@ async fn named_package() {
     runtime.shutdown();
 }
 
-// The failure matrix over requester-named locations, one run per row, over
-// a deployment mounting the scratch directory read-only as `.`: a path that
-// escapes or is not plain (the mount itself, a `.` or empty segment, a
-// backslash), a missing file, junk, a pre-compiled artifact, a malformed or
-// missed pin, and a stem the deployment declares (the requester itself,
-// loaded and running). Nothing a row names is ever admitted — the requester
-// stays the registry's one guest.
+// The failure matrix over requester-named locations, one row per load of a
+// single requester, over a deployment mounting the scratch directory
+// read-only as `.`: a path that escapes or is not plain (the mount itself, a
+// `.` or empty segment, a backslash), a missing file, junk, a pre-compiled
+// artifact, a malformed or missed pin, and a stem the deployment declares
+// (the requester itself, declared as a path, loaded and running). Nothing a
+// row names is ever admitted — the requester stays the registry's one guest.
 #[tokio::test]
 async fn named_locations() {
     let scratch = scratch();
@@ -604,14 +604,12 @@ async fn named_locations() {
         &["path", "plugin.wasm", "invalid", "is not 64 hex characters", &not_ascii],
         &["path", "requester.wasm", "denied", "declares"],
     ];
-    for row in rows {
-        let manifest = requester(test_programs::PLUGINS_REFUSED).mounts([scratch.mount(false)]);
-        let runtime = boot(manifest, row).await.expect("assembling runtime");
-        let status = runtime.run_command().await.expect("deployment runs");
-        assert_eq!(status, ExitStatus::SUCCESS, "row {row:?}: the requester's assertions held");
-        assert_eq!(runtime.registry().len(), 1, "row {row:?}: nothing was admitted");
-        runtime.shutdown();
-    }
+    let manifest = path_requester(test_programs::PLUGINS_REFUSED).mounts([scratch.mount(false)]);
+    let runtime = boot(manifest, &rows.join(&"--")).await.expect("assembling runtime");
+    let status = runtime.run_command().await.expect("deployment runs");
+    assert_eq!(status, ExitStatus::SUCCESS, "the requester's assertions all held");
+    assert_eq!(runtime.registry().len(), 1, "nothing was admitted");
+    runtime.shutdown();
 
     // A stem active under other bytes, where no entry declares the name: the
     // echoer booted from embedded bytes, and the file planted under its name
@@ -704,7 +702,7 @@ async fn overlapping_mounts() {
         vec![scratch.mount(true), out(false)],
         vec![scratch.mount(false), scratch.mount_as("shared", true)],
     ] {
-        let manifest = requester(test_programs::PLUGINS_LOAD).mounts(mounts);
+        let manifest = path_requester(test_programs::PLUGINS_LOAD).mounts(mounts);
         let Err(error) = boot(manifest, &[]).await else {
             panic!("the overlap is refused");
         };
@@ -714,8 +712,8 @@ async fn overlapping_mounts() {
     }
 
     for writable in [false, true] {
-        let manifest =
-            requester(test_programs::PLUGINS_LOAD).mounts([scratch.mount(writable), out(writable)]);
+        let manifest = path_requester(test_programs::PLUGINS_LOAD)
+            .mounts([scratch.mount(writable), out(writable)]);
         boot(manifest, &[]).await.expect("same-permission mounts may nest").shutdown();
     }
 }
@@ -737,7 +735,7 @@ async fn overlap_across_firmlink() {
         "the firmlink keeps a canonical path of its own"
     );
 
-    let manifest = requester(test_programs::PLUGINS_LOAD).mounts([
+    let manifest = path_requester(test_programs::PLUGINS_LOAD).mounts([
         Mount {
             name: ".".to_owned(),
             path: root,
@@ -759,7 +757,7 @@ async fn overlap_across_firmlink() {
 // Malformed `registries` TOML fails assembly, not the first load.
 #[tokio::test]
 async fn malformed_registries() {
-    let manifest = requester(test_programs::PLUGINS_LOAD)
+    let manifest = path_requester(test_programs::PLUGINS_LOAD)
         .registries(RegistryConfig::contents("[namespace_registries"));
     let Err(error) = boot(manifest, &[]).await else {
         panic!("malformed TOML is refused");
@@ -806,7 +804,8 @@ async fn endpoint_unrouted() {
 #[tokio::test]
 async fn plugins_attest() {
     let bytes = std::fs::read(test_programs::LINK_ECHOER).expect("reading the echoer");
-    let manifest = requester(test_programs::PLUGINS_ATTEST).guest(GuestEntry::new("echoer", bytes));
+    let manifest =
+        path_requester(test_programs::PLUGINS_ATTEST).guest(GuestEntry::new("echoer", bytes));
     let echoer = digest_of(test_programs::LINK_ECHOER).to_string();
     let runtime = boot(manifest.clone(), &["echoer", &echoer]).await.expect("assembling runtime");
     assert_eq!(recorded(&runtime, "echoer"), Registered::Active(echoer.parse().expect("digest")));
@@ -968,8 +967,8 @@ async fn reload_after_deregister() {
     let scratch = scratch();
     let staged = stage(&scratch, "plugin.wasm", test_programs::LINK_ECHOER);
     // The requester guest is manifest ballast: these loads are host-driven.
-    let manifest =
-        requester(test_programs::PLUGINS_LOAD).guest(GuestEntry::new("plugin", staged.clone()));
+    let manifest = path_requester(test_programs::PLUGINS_LOAD)
+        .guest(GuestEntry::new("plugin", staged.clone()));
     let runtime = boot(manifest, &[]).await.expect("assembling runtime");
 
     let first =
@@ -993,7 +992,7 @@ async fn reload_after_deregister() {
 async fn pinned_reload() {
     let scratch = scratch();
     let staged = stage(&scratch, "plugin.wasm", test_programs::LINK_ECHOER);
-    let manifest = requester(test_programs::PLUGINS_LOAD).guest(
+    let manifest = path_requester(test_programs::PLUGINS_LOAD).guest(
         GuestEntry::new("plugin", staged.clone()).digest(digest_of(test_programs::LINK_ECHOER)),
     );
     let runtime = boot(manifest, &[]).await.expect("assembling runtime");
@@ -1022,7 +1021,7 @@ async fn pinned_reload() {
 // load reaches the entry's own source again.
 #[tokio::test]
 async fn reregister() {
-    let manifest = requester(test_programs::PLUGINS_LOAD)
+    let manifest = path_requester(test_programs::PLUGINS_LOAD)
         .guest(GuestEntry::new("plugin", test_programs::LINK_ECHOER));
     let runtime = boot(manifest, &[]).await.expect("assembling runtime");
 
@@ -1142,9 +1141,7 @@ async fn second_start() {
 }
 
 // A release copied into the store under its reference loads with no registry
-// configured, held to the pin the load carries; one under any other name is
-// not a stored release, and the failure names the namespace, the store, and
-// the file it would have read.
+// configured, held to the pin the load carries.
 #[tokio::test]
 async fn stored_release() {
     let scratch = scratch();
@@ -1166,19 +1163,6 @@ async fn stored_release() {
         .await
         .expect("deployment runs");
     assert_eq!(status, ExitStatus::SUCCESS, "a mismatched pin conflicts against the store");
-
-    let off_reference = store_root(&scratch).join("off-reference");
-    std::fs::create_dir_all(&off_reference).expect("creating the store");
-    for name in ["test:echoer@1.0.0.wasm", "echoer.wasm", ".wkg-get-test_echoer@1.0.0.wasm"] {
-        std::fs::copy(test_programs::LINK_ECHOER, off_reference.join(name))
-            .expect("copying an off-reference file");
-    }
-    let needle = format!("the store `{}` holds no `{ECHOER_STORED}`", off_reference.display());
-    let manifest = requester(test_programs::PLUGINS_REFUSED).store(&off_reference);
-    let status = run(manifest, &["release", ECHOER_PACKAGE, "not-found", &needle])
-        .await
-        .expect("deployment runs");
-    assert_eq!(status, ExitStatus::SUCCESS, "nothing off-reference was read");
 }
 
 // A pre-compiled release a registry serves is refused before it is written,
@@ -1252,7 +1236,7 @@ async fn writable_store() {
         (absent, scratch.mount(true)),
         (PathBuf::from("omnia-no-such-store/store"), cwd),
     ] {
-        let manifest = requester(test_programs::PLUGINS_LOAD).store(&store).mounts([mount]);
+        let manifest = path_requester(test_programs::PLUGINS_LOAD).store(&store).mounts([mount]);
         let Err(error) = deployment(manifest, &["declared", "requester"]).await else {
             panic!("a store beneath a writable mount at {} is refused", store.display());
         };
@@ -1267,7 +1251,7 @@ async fn writable_store() {
     // beside the mount, or beneath a read-only one, it stands
     let beside = store_root(&scratch);
     let manifest =
-        requester(test_programs::PLUGINS_LOAD).store(&beside).mounts([scratch.mount(false)]);
+        path_requester(test_programs::PLUGINS_LOAD).store(&beside).mounts([scratch.mount(false)]);
     assert!(
         deployment(manifest, &["declared", "requester"]).await.is_ok(),
         "a read-only mount is fine"

@@ -1,13 +1,14 @@
 //! The OpenTelemetry metrics API aggregates in the guest: an instrument of
-//! each synchronous kind records through `global::meter`, a mid-run `flush`
-//! exports the first collection, and the flush at the end of the run exports
-//! only what was recorded after it — a delta counter and a cumulative
-//! up-down counter, while the histograms and the gauge, which saw nothing
-//! new, stay out. Along the way: attribute sets match whatever order their
-//! keys arrive in, a counter drops a negative increment, a `u64` past the
-//! signed range saturates, values land in their explicit buckets (default
-//! and custom), and an instrument built with invalid boundaries records
-//! nothing.
+//! each synchronous kind records through `global::meter`, and a
+//! `monotonic_counter.*` tracing field through the guest's `MetricsLayer`. A
+//! mid-run `flush` exports the first collection, and the flush at the end of
+//! the run exports only what was recorded after it — a delta counter and a
+//! cumulative up-down counter, while the histograms and the gauge, which saw
+//! nothing new, stay out. Along the way: attribute sets match whatever order
+//! their keys arrive in, a counter drops a negative increment, a `u64` past
+//! the signed range saturates, values land in their explicit buckets
+//! (default and custom), and an instrument built with invalid boundaries
+//! records nothing.
 
 #![cfg(target_arch = "wasm32")]
 
@@ -50,6 +51,10 @@ async fn scenario() {
     inflight.add(-1, &[]);
     queue_depth.record(7, &[]);
     queue_depth.record(9, &[]);
+    // ERROR-level: the events must pass the guest's default `EnvFilter` (the
+    // test environment sets no `RUST_LOG`).
+    tracing::error!(monotonic_counter.hits = 1);
+    tracing::error!(monotonic_counter.hits = 1);
 
     omnia_sdk::otel::flush().await;
 

@@ -8,14 +8,15 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use omnia::{ExitStatus, LevelFilter, telemetry};
-use omnia_test::host::{Backends, Deployment};
+use omnia_test::host::{Backends, Deployment, precompiled};
 use omnia_wasi_otel::WasiOtel;
 
 test_programs::foreach_cli!();
 
+// each program here boots more than once, so it is compiled once
 async fn run(deployment: Deployment, program: &str, args: Vec<String>) -> ExitStatus {
     deployment
-        .guest("cli", program)
+        .guest("cli", precompiled(program).expect("the guest precompiles"))
         .args(args)
         .run(Backends::defaults().await, |deployment| {
             deployment.host::<WasiOtel>()?;

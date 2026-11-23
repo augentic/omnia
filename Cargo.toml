@@ -131,8 +131,19 @@ lto = true
 opt-level = "s"
 strip = true
 
-# Unoptimized cranelift is ~10x slower.
+# The guest compile path and component digests run in nearly every e2e test;
+# unoptimized, Cranelift alone is ~10x slower.
 [profile.dev.package]
+cranelift-bforest = { opt-level = 3 }
+cranelift-bitset = { opt-level = 3 }
 cranelift-codegen = { opt-level = 3 }
+cranelift-control = { opt-level = 3 }
+cranelift-entity = { opt-level = 3 }
+cranelift-frontend = { opt-level = 3 }
+gimli = { opt-level = 3 }
+object = { opt-level = 3 }
 regalloc2 = { opt-level = 3 }
+sha2 = { opt-level = 3 }
+wasmparser = { opt-level = 3 }
+wasmtime-environ = { opt-level = 3 }
 wasmtime-internal-cranelift = { opt-level = 3 }

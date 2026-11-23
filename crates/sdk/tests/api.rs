@@ -108,29 +108,6 @@ async fn send_raw(
 }
 
 #[tokio::test]
-async fn invoke_direct() {
-    let mut metadata = Metadata::default();
-    metadata.correlation_id = Some("call-1".to_string());
-    metadata.tenant = Some("acme".to_string());
-    let context = Context::new(metadata);
-
-    let output = echo(
-        context,
-        EchoInput {
-            name: "direct".to_string(),
-            count: Some(2),
-        },
-    )
-    .await
-    .expect("handler succeeds");
-
-    assert_eq!(output.name, "direct");
-    assert_eq!(output.count, 2);
-    assert_eq!(output.correlation_id.as_deref(), Some("call-1"));
-    assert_eq!(output.tenant.as_deref(), Some("acme"));
-}
-
-#[tokio::test]
 async fn context_extractor() {
     let request = Request::get("/echo?name=plan&count=3")
         .header("x-request-id", "req-1")

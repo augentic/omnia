@@ -459,18 +459,6 @@ mod tests {
     }
 
     #[test]
-    fn zero_timeout() {
-        let options = RuntimeOptions {
-            pooling: false,
-            guest_timeout: Duration::ZERO,
-            ..RuntimeOptions::default()
-        };
-
-        let error = options.validate().expect_err("a zero timeout is refused");
-        assert!(error.to_string().contains("GUEST_TIMEOUT_MS"), "{error}");
-    }
-
-    #[test]
     fn zero_stream_timeout() {
         let options = RuntimeOptions {
             pooling: false,

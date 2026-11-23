@@ -6,34 +6,42 @@
 
 use std::time::Duration;
 
-use omnia::{ExitStatus, RuntimeOptions};
-use omnia_test::host::{Backends, Deployment};
+use omnia::{ExitStatus, RuntimeOptions, SourceSpec};
+use omnia_test::host::{Backends, Deployment, Run, precompiled};
 use omnia_wasi_otel::WasiOtel;
 
 test_programs::foreach_command!();
 
-async fn exit_of(args: &[&str]) -> u8 {
+// booted by most tests here, so compiled once
+fn exit_map() -> SourceSpec {
+    precompiled(test_programs::COMMAND_EXIT_MAP).expect("the exit-map guest precompiles")
+}
+
+async fn captured(args: &[&str]) -> Run {
     Deployment::new()
-        .guest("cli", test_programs::COMMAND_EXIT_MAP)
+        .guest("cli", exit_map())
         .args(args.iter().copied())
+        .captured()
         .run(Backends::defaults().await, |deployment| {
             deployment.host::<WasiOtel>()?;
             Ok(())
         })
         .await
         .expect("deployment runs")
-        .code_u8()
 }
 
+async fn exit_of(args: &[&str]) -> u8 {
+    captured(args).await.status.code_u8()
+}
+
+// `ok` and a JSON-formatted refusal are `captured_run`'s.
 #[tokio::test]
 async fn command_exit_map() {
-    assert_eq!(exit_of(&["ok"]).await, 0);
     assert_eq!(exit_of(&["bad"]).await, 1);
     assert_eq!(exit_of(&["missing"]).await, 2);
     assert_eq!(exit_of(&["upstream"]).await, 4);
     assert_eq!(exit_of(&["taken"]).await, 5);
     assert_eq!(exit_of(&["bogus"]).await, 64, "an unknown verb is a usage error");
-    assert_eq!(exit_of(&["--format", "json", "missing"]).await, 2, "the exit ignores the format");
 }
 
 // One instance derives a pool of two stacks, one memory, and four core
@@ -73,7 +81,7 @@ async fn command_blocking() {
 #[tokio::test]
 async fn queued_command() {
     let runtime = Deployment::new()
-        .guest("cli", test_programs::COMMAND_EXIT_MAP)
+        .guest("cli", exit_map())
         .args(["ok"])
         .options(RuntimeOptions {
             max_concurrent_invocations: Some(1),
@@ -104,26 +112,13 @@ async fn queued_command() {
 // stream empty where the guest wrote nothing to it.
 #[tokio::test]
 async fn captured_run() {
-    async fn captured(args: &[&str]) -> omnia_test::host::Run {
-        Deployment::new()
-            .guest("cli", test_programs::COMMAND_EXIT_MAP)
-            .args(args.iter().copied())
-            .captured()
-            .run(Backends::defaults().await, |deployment| {
-                deployment.host::<WasiOtel>()?;
-                Ok(())
-            })
-            .await
-            .expect("deployment runs")
-    }
-
     let run = captured(&["ok"]).await;
     assert_eq!(run.status.code_u8(), 0);
     assert_eq!(run.stdout, "ok\n");
     assert_eq!(run.stderr, "", "a success writes nothing to stderr");
 
     let run = captured(&["--format", "json", "missing"]).await;
-    assert_eq!(run.status.code_u8(), 2);
+    assert_eq!(run.status.code_u8(), 2, "the exit ignores the format");
     assert_eq!(run.stdout, "", "a refusal writes nothing to stdout");
     assert!(run.stderr.contains("refused as not found"), "the envelope: {}", run.stderr);
 }
@@ -132,19 +127,6 @@ async fn captured_run() {
 // the router set none; `test-programs` shares the workspace version.
 #[tokio::test]
 async fn package_defaults() {
-    async fn captured(args: &[&str]) -> omnia_test::host::Run {
-        Deployment::new()
-            .guest("cli", test_programs::COMMAND_EXIT_MAP)
-            .args(args.iter().copied())
-            .captured()
-            .run(Backends::defaults().await, |deployment| {
-                deployment.host::<WasiOtel>()?;
-                Ok(())
-            })
-            .await
-            .expect("deployment runs")
-    }
-
     let run = captured(&["--version"]).await;
     assert_eq!(run.status.code_u8(), 0);
     assert_eq!(run.stdout, format!("exit-map {}\n", env!("CARGO_PKG_VERSION")));
