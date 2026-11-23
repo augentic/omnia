@@ -150,6 +150,9 @@ Unreleased
   - `env: { inherit: [..] }` in `runtime!`;
   - `--env NAME` on `run`, carried as `RunPlan::env`;
   - `omnia_test::host::Deployment::inherit`.
+- `omnia_wasi_config::ConnectOptions`, whose `keys` are the host variables
+  `ConfigDefault` serves, loaded from `CONFIG_KEYS`. Each entry is a whole
+  name or a prefix that ends in `*`, as in `[env] inherit`.
 - `DeploymentBuilder::options` and `omnia_test::host::Deployment::options`
   set the `RuntimeOptions` a deployment runs under, in place of the
   environment's, before the engine and its instance pool are built.
@@ -167,6 +170,14 @@ Unreleased
   `inherit = ["*"]` passes every variable, as before. The variables
   `Metadata::from_env` reads, such as `CLI_REQUEST_ID`, arrive only when
   their prefix is passed, as `inherit = ["CLI_*"]` passes it.
+- `ConfigDefault` serves only the host variables `CONFIG_KEYS` names,
+  comma-separated, and none when it is unset. To keep a guest's
+  `omnia:config` reads, set `CONFIG_KEYS` (`CONFIG_KEYS="ORDERS_*"`), or
+  compile the keys in as
+  `WasiConfig: ConfigDefault(ConnectOptions { keys: vec![..] })`.
+  `CONFIG_KEYS=*` serves every variable, as before. The first `get` of each
+  variable the host sets and the backend does not serve logs a warning.
+- `ConfigDefault`'s connect options are `ConnectOptions`, not `NoOptions`.
 - `omnia_sdk::api` is gone, and its items moved:
   - `Context`, `Metadata`, `Handler`, `Handlers`, and `Router` to the crate
     root;

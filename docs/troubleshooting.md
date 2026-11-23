@@ -130,7 +130,11 @@ A guest sees only the host variables its deployment names, beside the `RUST_LOG`
 - the `runtime!` invocation's `env: { inherit: [..] }`, the only way for a direct command;
 - a `--env` flag on `run`.
 
-Matching is case-sensitive against the name as the host spells it, so `PATH` does not pass a Windows host's `Path`. A value the guest reads through `config` is answered by the `omnia:config` backend, apart from this list.
+Matching is case-sensitive against the name as the host spells it, so `PATH` does not pass a Windows host's `Path`. A value the guest reads through `config` is answered by the `omnia:config` backend, apart from this list; see [A config key reads as unset](#a-config-key-reads-as-unset).
+
+### A config key reads as unset
+
+`ConfigDefault` serves only the host variables `CONFIG_KEYS` names, or the keys the runtime compiles in, and answers any other key as unset. `config::require` and `Settings::load` then fail the key as a server error with the code `not-found`. The first read of each variable the host sets but `ConfigDefault` does not serve logs a warning naming the variable. Name it, or a prefix of it ending in `*`, in `CONFIG_KEYS`, as `CONFIG_KEYS="ORDERS_*,TZ"` does.
 
 ### Guest writes to a mount fail
 

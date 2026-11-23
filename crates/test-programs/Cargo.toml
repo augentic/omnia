@@ -84,6 +84,11 @@ path = "programs/config/seeded.rs"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "config_served"
+path = "programs/config/served.rs"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "config_settings"
 path = "programs/config/settings.rs"
 crate-type = ["cdylib"]

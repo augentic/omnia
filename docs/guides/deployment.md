@@ -99,3 +99,4 @@ with the mode and guest count attached. Orchestrators (or a log-watching startup
 - [ ] Readiness keyed on the `omnia ready` log line (or TCP on `HTTP_ADDR`)
 - [ ] Mounts limited to the directories guests actually need, read-only unless writes are required ([security model](../security-model.md))
 - [ ] `[env] inherit` (or `--env`) names each host variable guests read, since they see no other ([configuration](../reference/configuration.md#deployment-manifest-omniatoml))
+- [ ] `CONFIG_KEYS`, or the keys the runtime compiles in, names each host variable guests read through `omnia:config`, since `ConfigDefault` serves no other ([configuration](../reference/configuration.md#default-backends))

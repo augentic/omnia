@@ -2449,6 +2449,7 @@ dependencies = [
  "test-programs",
  "tokio",
  "tracing",
+ "tracing-subscriber",
  "wasmtime",
 ]
 
