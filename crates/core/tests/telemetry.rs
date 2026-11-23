@@ -52,8 +52,6 @@ async fn installed_subscriber() {
             "gauge pool_memories{} 0",
             "gauge pool_stacks{} 0",
             "gauge pool_tables{} 0",
-            "gauge pool_unused_memory_bytes_resident{} 0",
-            "gauge pool_unused_warm_memories{} 0",
         ]
     );
 }

@@ -473,8 +473,7 @@ pub fn resource() -> Option<&'static Resource> {
 /// Records one sample of the instance pool's occupancy on the `pool_*` gauges.
 ///
 /// The gauges are `pool_core_instances`, `pool_component_instances`,
-/// `pool_memories`, `pool_tables`, `pool_stacks`,
-/// `pool_unused_warm_memories` and `pool_unused_memory_bytes_resident`.
+/// `pool_memories`, `pool_tables`, and `pool_stacks`.
 pub fn record_pool(sample: &PoolingAllocatorMetrics) {
     if let Some(metrics) = METRICS.get() {
         metrics.pool(sample);
@@ -512,8 +511,6 @@ struct Metrics {
     pool_memories: Gauge<u64>,
     pool_tables: Gauge<u64>,
     pool_stacks: Gauge<u64>,
-    pool_unused_warm_memories: Gauge<u64>,
-    pool_unused_memory_bytes_resident: Gauge<u64>,
     message_counter: Counter<u64>,
     event_counter: Counter<u64>,
     processing_errors: Counter<u64>,
@@ -544,14 +541,6 @@ impl Metrics {
             pool_memories: gauge("pool_memories", "Linear memories allocated from the pool"),
             pool_tables: gauge("pool_tables", "Tables allocated from the pool"),
             pool_stacks: gauge("pool_stacks", "Fiber stacks allocated from the pool"),
-            pool_unused_warm_memories: gauge(
-                "pool_unused_warm_memories",
-                "Unused memory slots the pool keeps warm",
-            ),
-            pool_unused_memory_bytes_resident: gauge(
-                "pool_unused_memory_bytes_resident",
-                "Resident bytes of the pool's unused memory slots",
-            ),
             message_counter: counter("message_counter", "Messages delivered to the runtime"),
             event_counter: counter("event_counter", "Websocket events delivered to the runtime"),
             processing_errors: counter(
@@ -567,9 +556,6 @@ impl Metrics {
         self.pool_memories.record(sample.memories() as u64, &[]);
         self.pool_tables.record(sample.tables() as u64, &[]);
         self.pool_stacks.record(sample.stacks() as u64, &[]);
-        self.pool_unused_warm_memories.record(u64::from(sample.unused_warm_memories()), &[]);
-        self.pool_unused_memory_bytes_resident
-            .record(sample.unused_memory_bytes_resident() as u64, &[]);
     }
 
     fn message(&self, service: &str) {

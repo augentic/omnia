@@ -376,6 +376,9 @@ Unreleased
   lookup.
 - The `fromenv` dependency, which the `oauth` feature of
   `omnia-wasi-identity` no longer enables.
+- The `pool_unused_warm_memories` and `pool_unused_memory_bytes_resident`
+  metrics, which reached the exporter at `RUST_LOG=omnia=trace`. The
+  console's pool sample at that level still shows both.
 
 ## 0.38.0
 
