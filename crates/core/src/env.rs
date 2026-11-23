@@ -6,7 +6,7 @@
 //! share.
 //!
 //! A pattern is a whole variable name, or a prefix of one that ends in `*`.
-//! [`pattern`] checks one, and [`matches`](crate::names::matches) applies it to a name.
+//! [`pattern`] checks one, and [`matches`](fn@crate::names::matches) applies it to a name.
 
 #[doc(hidden)]
 pub mod derive;
