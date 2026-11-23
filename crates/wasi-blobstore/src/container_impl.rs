@@ -2,7 +2,6 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use futures::channel::oneshot;
 use omnia_core::HostView;
 use wasmtime::component::{Access, Accessor, FutureReader, Resource, StreamReader};
 
@@ -12,7 +11,7 @@ use crate::generated::omnia::blobstore::container::{
 use crate::generated::omnia::blobstore::types::{
     self, Attributes, Conflict, ObjectEntry, Precondition, Stored,
 };
-use crate::transfer::{Collect, Commit, Staging};
+use crate::transfer::StagedPut;
 use crate::{BlobStoreClient, Container, Error, ObjectMetadata, Result, WasiBlobStore};
 
 const PAGE_LIMIT: u32 = 1_000;
@@ -189,17 +188,7 @@ impl<T> HostContainerWithStore<T> for WasiBlobStore {
             return FutureReader::new(&mut host, reply);
         }
 
-        // stage the bytes, then commit them when `finished` resolves
-        let staging = Staging::default();
-        let (reply, stored) = oneshot::channel();
-        data.pipe(&mut host, Collect(staging.clone()))?;
-        finished.pipe(&mut host, Commit::new(container, name, size, staging, reply))?;
-        FutureReader::new(&mut host, async move {
-            let stored = stored.await.unwrap_or_else(|_| {
-                Err(Error::Other("the write ended before `finished` resolved".to_owned()))
-            });
-            Ok::<_, wasmtime::Error>(stored.map(Ok))
-        })
+        StagedPut::new(container, name, size).pipe(&mut host, data, finished)
     }
 
     async fn stat(

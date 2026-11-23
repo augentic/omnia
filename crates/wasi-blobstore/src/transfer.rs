@@ -1,48 +1,116 @@
-//! The plumbing that carries a guest's `put` into a backend's whole-object
-//! write.
+//! Stages a guest's `put` stream in memory and writes the object once
+//! `finished` resolves.
 
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll, ready};
 
-use bytes::BytesMut;
-use futures::FutureExt as _;
+use bytes::{Bytes, BytesMut};
 use futures::channel::oneshot;
-use futures::future::BoxFuture;
 use parking_lot::Mutex;
-use wasmtime::StoreContextMut;
-use wasmtime::component::{FutureConsumer, Source, StreamConsumer, StreamResult};
+use wasmtime::component::{
+    FutureConsumer, FutureReader, Source, StreamConsumer, StreamReader, StreamResult,
+};
+use wasmtime::{AsContextMut, StoreContextMut};
 
 use crate::container_impl::ContainerHandle;
-use crate::generated::omnia::blobstore::types::Stored;
+use crate::generated::omnia::blobstore::types::{Conflict, Stored};
 use crate::{Error, Result};
 
-// The bytes one `put` has received. It empties to `None` once `finished`
-// resolves, which refuses any later write.
-#[derive(Clone)]
-pub struct Staging(Arc<Mutex<Option<BytesMut>>>);
+type PutOutcome = Result<std::result::Result<Stored, Conflict>>;
+type SharedBuffer = Arc<Mutex<Option<BytesMut>>>;
+type WriteFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
 
-impl Default for Staging {
-    fn default() -> Self {
-        Self(Arc::new(Mutex::new(Some(BytesMut::new()))))
+pub struct StagedPut {
+    container: ContainerHandle,
+    name: String,
+    expected_size: Option<u64>,
+}
+
+impl StagedPut {
+    pub const fn new(container: ContainerHandle, name: String, expected_size: Option<u64>) -> Self {
+        Self {
+            container,
+            name,
+            expected_size,
+        }
+    }
+
+    pub fn pipe<S: AsContextMut>(
+        self, mut store: S, data: StreamReader<u8>, mut finished: FutureReader<Result<()>>,
+    ) -> wasmtime::Result<FutureReader<PutOutcome>> {
+        let (collector, body) = StagedBody::pair();
+        let (reply, outcome) = Reply::pair();
+
+        if let Err(error) = data.pipe(&mut store, collector) {
+            finished.close(&mut store)?;
+            return Err(error);
+        }
+        finished.pipe(&mut store, PutCommitter::new(self, body, reply))?;
+
+        FutureReader::new(&mut store, async move {
+            let stored = outcome.await.unwrap_or_else(|_| {
+                Err(Error::Other("the write ended before `finished` resolved".to_owned()))
+            });
+            Ok::<_, wasmtime::Error>(stored.map(Ok))
+        })
+    }
+
+    fn write(self, data: Bytes, reply: Reply) -> Option<WriteFuture> {
+        if let Some(expected) = self.expected_size
+            && expected != data.len() as u64
+        {
+            let error = Error::Invalid(format!(
+                "`{}` was put as {expected} bytes, and its stream held {}",
+                self.name,
+                data.len()
+            ));
+            reply.send(Err(error));
+            return None;
+        }
+
+        Some(Box::pin(async move {
+            let stored = self.container.write(self.name, data).await;
+            reply.send(stored);
+        }))
     }
 }
 
-impl Staging {
-    // `false` once `finished` has resolved
-    fn extend(&self, bytes: &[u8]) -> bool {
-        self.0.lock().as_mut().map(|buffer| buffer.extend_from_slice(bytes)).is_some()
+// Paired write and read halves over one staged buffer. Dropping `StagedBody`
+// clears the buffer so any later stream write sees `StreamResult::Dropped`.
+struct StagedBody(SharedBuffer);
+
+impl StagedBody {
+    fn pair() -> (StreamCollector, Self) {
+        let buffer = Arc::new(Mutex::new(Some(BytesMut::new())));
+        (StreamCollector(Arc::clone(&buffer)), Self(buffer))
     }
 
-    fn take(&self) -> BytesMut {
-        self.0.lock().take().unwrap_or_default()
+    fn take(self) -> Bytes {
+        let buffer = self.0.lock().take();
+        buffer.unwrap_or_default().freeze()
     }
 }
 
-// Takes a guest's `data` stream into its staging.
-pub struct Collect(pub Staging);
+impl Drop for StagedBody {
+    fn drop(&mut self) {
+        let buffer = self.0.lock().take();
+        drop(buffer);
+    }
+}
 
-impl<D> StreamConsumer<D> for Collect {
+struct StreamCollector(SharedBuffer);
+
+impl StreamCollector {
+    fn append(&self, bytes: &[u8]) -> bool {
+        self.0.lock().as_mut().is_some_and(|buffer| {
+            buffer.extend_from_slice(bytes);
+            true
+        })
+    }
+}
+
+impl<D> StreamConsumer<D> for StreamCollector {
     type Item = u8;
 
     fn poll_consume(
@@ -50,108 +118,100 @@ impl<D> StreamConsumer<D> for Collect {
         source: Source<'_, Self::Item>, finish: bool,
     ) -> Poll<wasmtime::Result<StreamResult>> {
         let mut source = source.as_direct(store);
-        let bytes = source.remaining();
-        let count = bytes.len();
-        if count == 0 && finish {
+        let bytes = source.remaining()?;
+        if bytes.is_empty() && finish {
             return Poll::Ready(Ok(StreamResult::Cancelled));
         }
-        if !self.0.extend(bytes) {
+        if !self.append(bytes) {
             return Poll::Ready(Ok(StreamResult::Dropped));
         }
+        let count = bytes.len();
         source.mark_read(count);
         Poll::Ready(Ok(StreamResult::Completed))
     }
 }
 
-// Commits one `put` when the guest resolves its `finished` future, whether or
-// not the guest awaits the reply.
-pub struct Commit {
-    write: Option<Write>,
-    writing: Option<BoxFuture<'static, Result<Stored>>>,
-    reply: Option<oneshot::Sender<Result<Stored>>>,
+// Driven by `finished` rather than the reply future, so dropping the reply
+// still commits the write.
+enum PutCommitter {
+    AwaitingVerdict(PendingPut),
+    Writing(WriteFuture),
+    Done,
 }
 
-impl Commit {
-    pub fn new(
-        container: ContainerHandle, name: String, size: Option<u64>, staging: Staging,
-        reply: oneshot::Sender<Result<Stored>>,
-    ) -> Self {
-        Self {
-            write: Some(Write {
-                container,
-                name,
-                size,
-                staging,
-            }),
-            writing: None,
-            reply: Some(reply),
-        }
-    }
-
-    fn answer(&mut self, stored: Result<Stored>) {
-        if let Some(reply) = self.reply.take() {
-            // a guest that dropped the reply no longer waits for it
-            drop(reply.send(stored));
-        }
+impl PutCommitter {
+    const fn new(put: StagedPut, body: StagedBody, reply: Reply) -> Self {
+        Self::AwaitingVerdict(PendingPut { put, body, reply })
     }
 }
 
-impl<D> FutureConsumer<D> for Commit {
+impl<D> FutureConsumer<D> for PutCommitter {
     type Item = Result<()>;
 
     fn poll_consume(
         self: Pin<&mut Self>, cx: &mut Context<'_>, mut store: StoreContextMut<D>,
-        mut source: Source<'_, Self::Item>, _finish: bool,
+        mut source: Source<'_, Self::Item>, finish: bool,
     ) -> Poll<wasmtime::Result<()>> {
         let this = self.get_mut();
 
-        // take the guest's verdict
-        if let Some(write) = this.write.take() {
+        // resolve the guest's verdict
+        if let Self::AwaitingVerdict(_) = this
+            && finish
+        {
+            return Poll::Ready(Ok(()));
+        }
+        if let Self::AwaitingVerdict(pending) = std::mem::replace(this, Self::Done) {
             let mut verdict = None;
             source.read(&mut store, &mut verdict)?;
             match verdict {
-                // a cancelled write leaves the guest free to resolve `finished` later
-                None => this.write = Some(write),
-                Some(Ok(())) => this.writing = Some(write.commit()),
-                Some(Err(error)) => {
-                    write.staging.take();
-                    this.answer(Err(error));
+                None => *this = Self::AwaitingVerdict(pending),
+                Some(Ok(())) => {
+                    if let Some(writing) = pending.commit() {
+                        *this = Self::Writing(writing);
+                    }
                 }
+                Some(Err(error)) => pending.abort(error),
             }
         }
 
-        // store the object
-        if let Some(writing) = &mut this.writing {
-            let stored = ready!(writing.poll_unpin(cx));
-            this.writing = None;
-            this.answer(stored);
+        // drive the backend write
+        if let Self::Writing(writing) = this {
+            ready!(writing.as_mut().poll(cx));
+            *this = Self::Done;
         }
+
         Poll::Ready(Ok(()))
     }
 }
 
-struct Write {
-    container: ContainerHandle,
-    name: String,
-    size: Option<u64>,
-    staging: Staging,
+struct PendingPut {
+    put: StagedPut,
+    body: StagedBody,
+    reply: Reply,
 }
 
-impl Write {
-    fn commit(self) -> BoxFuture<'static, Result<Stored>> {
-        let data = self.staging.take().freeze();
-        async move {
-            if let Some(size) = self.size
-                && size != data.len() as u64
-            {
-                return Err(Error::Invalid(format!(
-                    "`{}` was put as {size} bytes, and its stream held {}",
-                    self.name,
-                    data.len()
-                )));
-            }
-            self.container.write(self.name, data).await
-        }
-        .boxed()
+impl PendingPut {
+    fn commit(self) -> Option<WriteFuture> {
+        let data = self.body.take();
+        self.put.write(data, self.reply)
+    }
+
+    fn abort(self, error: Error) {
+        drop(self.body);
+        self.reply.send(Err(error));
+    }
+}
+
+struct Reply(oneshot::Sender<Result<Stored>>);
+
+impl Reply {
+    fn pair() -> (Self, oneshot::Receiver<Result<Stored>>) {
+        let (sender, receiver) = oneshot::channel();
+        (Self(sender), receiver)
+    }
+
+    // A guest that dropped its reply future no longer waits for the answer.
+    fn send(self, outcome: Result<Stored>) {
+        drop(self.0.send(outcome));
     }
 }

@@ -293,6 +293,11 @@ Unreleased
 - A deployment validates its runtime options once
   `DeploymentBuilder::guest_timeout` and `max_dispatch_depth` apply, so
   `guest_timeout(Duration::ZERO)` fails the build where it was accepted.
+- The re-exported `wasmtime` and `wasmtime_wasi` are 51.0.0, a new major
+  version for embedders.
+- `omnia:sql` temporal parameters are validated with `jiff`. A fraction
+  longer than nine digits and a Unicode minus sign in an offset no
+  longer bind.
 
 ### Removed
 

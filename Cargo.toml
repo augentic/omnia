@@ -47,7 +47,6 @@ bon = "3.10.3"
 bytes = "1.12.1"
 cap-fs-ext = "4.0.3"
 cap-std = "4.0.3"
-chrono = "0.4.45"
 clap = { version = "4.6.7", default-features = false, features = ["derive", "error-context", "help", "std", "usage"] }
 clap_complete = { version = "4.6.11", default-features = false }
 dashmap = "6.2.1"
@@ -60,6 +59,7 @@ http-body = "1.1.0"
 http-body-util = "0.1.5"
 hyper = "1.12.0"
 hyper-util = "0.1.21"
+jiff = { version = "1.0.2", default-features = false, features = ["std"] }
 moka = { version = "0.12.16", features = ["sync"] }
 opentelemetry = { version = "0.33.1", default-features = false }
 opentelemetry-otlp = { version = "0.33.1", default-features = false }
@@ -90,9 +90,9 @@ trybuild = "1"
 wasip3 = { version = "0.10.0", features = ["http-compat"] }
 wasm-metadata = { version = "0.263.0", default-features = false, features = ["oci"] }
 wasm-pkg-client = "0.16.2"
-wasmtime = { version = "50.0.2", default-features = false, features = ["anyhow", "component-model-bytes", "parallel-compilation"] }
-wasmtime-wasi = { version = "50.0.2", default-features = false, features = ["p3"] }
-wasmtime-wasi-http = { version = "50.0.2", default-features = false, features = ["p3"] }
+wasmtime = { version = "51.0.0", default-features = false, features = ["anyhow", "component-model-bytes", "parallel-compilation"] }
+wasmtime-wasi = { version = "51.0.0", default-features = false, features = ["p3"] }
+wasmtime-wasi-http = { version = "51.0.0", default-features = false, features = ["p3"] }
 wit-bindgen = { version = "0.63.0", features = ["async-spawn"] }
 wit-bindgen-core = "0.63.0"
 wit-bindgen-rust = "0.63.0"

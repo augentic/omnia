@@ -116,6 +116,10 @@ async fn scenario() {
         Value::Time("24:00:00".to_owned()),
         Value::Timestamp("2024-02-29T23:59:58".to_owned()),
         Value::TimestampTz(STAMP.to_owned()),
+        Value::TimestampTz("2024-02-29T23:59:58+00".to_owned()),
+        Value::TimestampTz("2024-02-29T23:59+00:00".to_owned()),
+        Value::TimestampTz("20240229T235958Z".to_owned()),
+        Value::TimestampTz("2024-02-29T23:59:58+24:00".to_owned()),
     ] {
         let update = "UPDATE items SET c_text = $2 WHERE id = $1";
         let params = vec![Some(Value::Int64(1)), Some(value.clone())];
@@ -124,6 +128,18 @@ async fn scenario() {
             matches!(&bound, Err(Error::Invalid(message)) if message.contains("`$2`")),
             "{value:?} bound: {bound:?}"
         );
+    }
+
+    // the edges of each format still bind
+    for value in [
+        Value::Time("23:59:60".to_owned()),
+        Value::TimestampTz("2024-02-29t23:59:58.123456z".to_owned()),
+        Value::TimestampTz("2024-02-29 23:59:58-23:59".to_owned()),
+    ] {
+        let update = "UPDATE items SET c_stamptz = $2 WHERE id = $1";
+        let params = vec![Some(Value::Int64(1)), Some(value.clone())];
+        let bound = database.execute(update.to_owned(), params).await;
+        assert!(matches!(bound, Ok(1)), "{value:?} did not bind: {bound:?}");
     }
 
     // `TEXT` that is not valid UTF-8 does not read

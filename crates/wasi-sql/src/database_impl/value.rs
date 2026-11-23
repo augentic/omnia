@@ -1,4 +1,4 @@
-use chrono::{DateTime, NaiveDate, NaiveTime};
+use jiff::civil::{Date, Time};
 
 use crate::generated::omnia::sql::types::Value as WitValue;
 use crate::{Error, Result, Value};
@@ -44,13 +44,13 @@ pub fn read(value: Value) -> Option<WitValue> {
         Value::Boolean(b) => b.map(WitValue::Boolean),
         Value::Date(s) => s.map(WitValue::Date),
         Value::Time(s) => s.map(WitValue::Time),
-        Value::Timestamp(s) => s.map(|s| {
-            if DateTime::parse_from_rfc3339(&s).is_ok() {
-                WitValue::TimestampTz(s)
-            } else {
-                WitValue::Timestamp(s)
-            }
-        }),
+        Value::Timestamp(s) => {
+            s.map(
+                |s| {
+                    if is_rfc3339(&s) { WitValue::TimestampTz(s) } else { WitValue::Timestamp(s) }
+                },
+            )
+        }
         Value::Binary(b) => b.map(WitValue::Binary),
     }
 }
@@ -84,14 +84,14 @@ impl Format {
             Self::Timestamp => {
                 text.split_once(' ').is_some_and(|(date, time)| is_date(date) && is_time(time))
             }
-            Self::TimestampTz => DateTime::parse_from_rfc3339(text).is_ok(),
+            Self::TimestampTz => is_rfc3339(text),
         }
     }
 }
 
-// chrono checks the ranges, and the shape pins the digits its parser lets vary
+// jiff checks the ranges, and the shape pins the digits its parser lets vary
 fn is_date(text: &str) -> bool {
-    shaped(text, "9999-99-99") && NaiveDate::parse_from_str(text, "%Y-%m-%d").is_ok()
+    shaped(text, "9999-99-99") && Date::strptime("%Y-%m-%d", text).is_ok()
 }
 
 fn is_time(text: &str) -> bool {
@@ -99,7 +99,36 @@ fn is_time(text: &str) -> bool {
     shaped(whole, "99:99:99")
         && !fraction.is_empty()
         && fraction.bytes().all(|byte| byte.is_ascii_digit())
-        && NaiveTime::parse_from_str(text, "%H:%M:%S%.f").is_ok()
+        && Time::strptime("%H:%M:%S%.f", text).is_ok()
+}
+
+// jiff's own timestamp grammar is wider than RFC 3339, so the shape narrows it
+fn is_rfc3339(text: &str) -> bool {
+    let Some((date, rest)) = text.split_at_checked(10) else {
+        return false;
+    };
+    let Some(rest) = rest.strip_prefix(['T', 't', ' ']) else {
+        return false;
+    };
+    let time = if let Some(time) = rest.strip_suffix(['Z', 'z']) {
+        time
+    } else {
+        let Some((time, offset)) =
+            rest.len().checked_sub(6).and_then(|at| rest.split_at_checked(at))
+        else {
+            return false;
+        };
+        if !is_offset(offset) {
+            return false;
+        }
+        time
+    };
+    is_date(date) && is_time(time)
+}
+
+fn is_offset(text: &str) -> bool {
+    (shaped(text, "+99:99") || shaped(text, "-99:99"))
+        && Time::strptime("%H:%M", &text[1..]).is_ok()
 }
 
 // `9` in the layout stands for any ASCII digit.

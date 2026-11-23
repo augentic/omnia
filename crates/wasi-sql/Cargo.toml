@@ -24,8 +24,8 @@ sqlite = ["dep:futures", "dep:parking_lot", "dep:rusqlite"]
 
 [dependencies]
 anyhow.workspace = true
-chrono.workspace = true
 futures = { workspace = true, optional = true }
+jiff.workspace = true
 omnia-core.workspace = true
 omnia-wasi-types.workspace = true
 parking_lot = { workspace = true, optional = true }
