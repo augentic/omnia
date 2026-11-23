@@ -12,7 +12,8 @@ use wasmtime_wasi::cli::StdoutStream;
 use wasmtime_wasi::{FsPerms, ResourceTable, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 
 use crate::{
-    ChainCtx, Dispatcher, Extensions, GuestId, HostCtx, MountRegistry, Provides, RuntimeOptions,
+    ChainCtx, Dispatcher, Extensions, Grants, GuestId, HostCtx, MountRegistry, Provides,
+    RuntimeOptions,
 };
 
 /// Where every guest's stdout and stderr go when a deployment redirects
@@ -107,10 +108,10 @@ pub struct StoreBase {
     /// The dispatch-chain context this store's guest runs at. A link relay
     /// reads it to derive the callee's.
     pub chain: ChainCtx,
-    /// Mount registry: the startup-validated mounts also preopened into
-    /// [`wasi`](Self::wasi). A consuming host crate reads it to match a lent
-    /// `descriptor` back to its mount by directory identity. Empty unless the
-    /// deployment configures `[[mount]]`s.
+    /// Mount registry: the startup-validated mounts the guest's grants reach,
+    /// also preopened into [`wasi`](Self::wasi). A consuming host crate reads
+    /// it to match a lent `descriptor` back to its mount by directory
+    /// identity. Empty unless the deployment configures `[[mount]]`s.
     pub mounts: Arc<MountRegistry>,
     /// Handle to the runtime's installed extensions, the state slot a
     /// capability crate's host binding reaches for. Empty in hand-built
@@ -288,6 +289,15 @@ pub fn guest_env(
     }
 
     env
+}
+
+// the pairs of `env` that `grants` reach; the runtime's own `RUST_LOG` and
+// `NO_COLOR` reach every guest
+pub fn granted_env(env: &[(String, String)], grants: &Grants) -> Vec<(String, String)> {
+    env.iter()
+        .filter(|(name, _)| name == RUST_LOG || name == NO_COLOR || grants.allows_env(name))
+        .cloned()
+        .collect()
 }
 
 #[cfg(test)]

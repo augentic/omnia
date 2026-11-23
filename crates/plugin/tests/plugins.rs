@@ -21,9 +21,9 @@ use omnia::futures::future::BoxFuture;
 use omnia::wasmtime::Engine;
 use omnia::wasmtime::component::Val;
 use omnia::{
-    AcquireError, ChainCtx, CompileOptions, DeploymentBuilder, Digest, ExitStatus, GuestEntry,
-    GuestId, LoadError, Location, Manifest, Mode, Mount, NoStore, PluginLoader as _, Plugins,
-    PluginsConfig, RegistryClient, RegistryConfig, RegistrySource, Runtime, SourceSpec,
+    AcquireError, ChainCtx, CompileOptions, DeploymentBuilder, Digest, ExitStatus, Grants,
+    GuestEntry, GuestId, LoadError, Location, Manifest, Mode, Mount, NoStore, PluginLoader as _,
+    Plugins, PluginsConfig, RegistryClient, RegistryConfig, RegistrySource, Runtime, SourceSpec,
 };
 use omnia_test::host::{Backends, Scratch, scratch};
 use omnia_wasi_otel::WasiOtel;
@@ -988,7 +988,7 @@ async fn reregister() {
         runtime.load(declared("plugin"), None).await.expect("first load").expect("no conflict");
     runtime.deregister(first.id()).expect("deregistering the loaded plugin");
     let refused = runtime
-        .register("plugin", changed_echoer(b"reregister"))
+        .register("plugin", changed_echoer(b"reregister"), Grants::all())
         .await
         .expect_err("a declared name is its entry's alone");
     assert!(format!("{refused:#}").contains("declares"), "{refused:#}");

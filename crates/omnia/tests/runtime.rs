@@ -8,8 +8,8 @@ use std::sync::atomic::Ordering;
 
 use omnia::wasmtime::component::Linker;
 use omnia::{
-    DeploymentBuilder, ExitStatus, Host, HostCtx, Manifest, ManifestSource, Mount, PluginsConfig,
-    Provides, Runtime, SourceSpec, StoreCtx,
+    DeploymentBuilder, ExitStatus, Grants, Host, HostCtx, Manifest, ManifestSource, Mount,
+    PluginsConfig, Provides, Runtime, SourceSpec, StoreCtx,
 };
 
 trait TagClient: Send + Sync + 'static {
@@ -252,8 +252,17 @@ mod deployment_keys {
     omnia::runtime!({
         mode: command,
         guests: [
-            { name: "specify", path: "../Cargo.toml", command: true },
-            { name: "target:mock", path: "runtime.rs" },
+            {
+                name: "specify",
+                path: "../Cargo.toml",
+                command: true,
+                grants: {
+                    env: ["SPECIFY_*"],
+                    mounts: ["project"],
+                    interfaces: ["wasi:*", "omnia:otel"],
+                },
+            },
+            { name: "target:mock", path: "runtime.rs", grants: {} },
         ],
         mounts: [
             { name: "project", path: project_root(), writable: true },
@@ -331,6 +340,7 @@ fn inline_deployment() {
     assert_eq!(cargo.name, "Cargo");
     assert!(cargo.command);
     assert_eq!(cargo.source, SourceSpec::from(include_bytes!("../Cargo.toml").as_slice()));
+    assert_eq!(cargo.grants, Grants::all());
 
     assert_eq!(readme.name, "README");
     assert!(!readme.command);
@@ -340,9 +350,10 @@ fn inline_deployment() {
             include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/README.md")).as_slice()
         )
     );
+    assert_eq!(readme.grants, Grants::all());
 
-    // explicit guest names, expression-valued mounts, the inherited
-    // environment, and store-only `plugins`
+    // explicit guest names and grants, expression-valued mounts, the
+    // inherited environment, and store-only `plugins`
     let keyed = deployment_keys::manifest().into_manifest().expect("inline manifest");
     let [specify, mock] = keyed.guests.as_slice() else {
         panic!("two named guests: {:?}", keyed.guests);
@@ -350,10 +361,15 @@ fn inline_deployment() {
     assert_eq!(specify.name, "specify");
     assert!(specify.command);
     assert_eq!(specify.source, SourceSpec::from(include_bytes!("../Cargo.toml").as_slice()));
+    assert_eq!(
+        specify.grants,
+        Grants::none().env(["SPECIFY_*"]).mounts(["project"]).interfaces(["wasi:*", "omnia:otel"])
+    );
 
     assert_eq!(mock.name, "target:mock");
     assert!(!mock.command);
     assert_eq!(mock.source, SourceSpec::from(include_bytes!("runtime.rs").as_slice()));
+    assert_eq!(mock.grants, Grants::none());
 
     assert_eq!(
         keyed.mounts,

@@ -114,6 +114,11 @@ path = "programs/docstore/error_codes.rs"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "grants_reach"
+path = "programs/grants/reach.rs"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "harness_flow"
 path = "programs/harness/flow.rs"
 crate-type = ["cdylib"]

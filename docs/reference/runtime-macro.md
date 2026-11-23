@@ -86,6 +86,14 @@ omnia::runtime!({
                 http: ["/"],
                 websocket: ["chat.*"],
             },
+            grants: {                                // optional: present, it reaches only these
+                env: ["ORDERS_*"],
+                mounts: ["."],
+                interfaces: [                        // the packages it imports code from
+                    "wasi:cli", "wasi:clocks", "wasi:random", "omnia:otel",
+                    "wasi:filesystem", "wasi:http", "omnia:websocket",
+                ],
+            },
         },
     ],
     mounts: [
@@ -104,16 +112,16 @@ omnia::runtime!({
 });
 ```
 
-- `guests:` is a list of entries `{ path | package, name?, routes?, command?, digest? }` — see [Guest entries](#guest-entries-pathpackage-name-routes-command-digest).
+- `guests:` is a list of entries `{ path | package, name?, routes?, command?, digest?, grants? }` — see [Guest entries](#guest-entries-pathpackage-name-routes-command-digest-grants).
 - `plugins:` is where a package comes from — the store every one is kept in and the registries one the store lacks is fetched through — see [`plugins:`](#plugins-store-registries).
-- `mounts:` are the directories preopened into every guest sandbox; each entry is `{ name, path, writable? }` (`writable` a literal bool, `false` by default). A read-only mount is also a root the guest loader reads a component from when a guest names a path beneath it; a writable mount never is, and one that shares or nests a read-only mount's directory is refused at startup. A relative mount path resolves against the process working directory at run time, so anchor it with `env!("CARGO_MANIFEST_DIR")` as with `manifest:`.
-- `env: { inherit: [..] }` names the host variables every guest sees, each a whole name or a prefix that ends in `*`; `*` alone passes every variable. A guest sees no other host variable, beyond the `RUST_LOG` and `NO_COLOR` the runtime sets. An empty block is a compile error; `inherit: []` passes none. A malformed entry fails startup, naming it. On the `run` grammar, `--env` adds to the list of whichever manifest the run selects; a [direct command](#direct-commands-raw-argv-passthrough) has no `--env`, so this list is all its guests see.
-- Every value other than a guest's `path:` is any Rust expression evaluating to the field's type (strings for names, route patterns, and inherited variables, paths for mounts and the store, a `&'static str` or `String` of TOML for `registries`).
+- `mounts:` are the directories preopened into the sandbox of every guest that declares no grants, and of each guest whose `mounts` grant names them; each entry is `{ name, path, writable? }` (`writable` a literal bool, `false` by default). A read-only mount is also a root the guest loader reads a component from when a guest names a path beneath it; a writable mount never is, and one that shares or nests a read-only mount's directory is refused at startup. A relative mount path resolves against the process working directory at run time, so anchor it with `env!("CARGO_MANIFEST_DIR")` as with `manifest:`.
+- `env: { inherit: [..] }` names the host variables every guest sees, each a whole name or a prefix that ends in `*`; `*` alone passes every variable. A guest sees no other host variable, beyond the `RUST_LOG` and `NO_COLOR` the runtime sets, and a guest that declares grants sees only those its `env` grant names. An empty block is a compile error; `inherit: []` passes none. A malformed entry fails startup, naming it. On the `run` grammar, `--env` adds to the list of whichever manifest the run selects; a [direct command](#direct-commands-raw-argv-passthrough) has no `--env`, so this list is all its guests see.
+- Every value other than a guest's `path:` is any Rust expression evaluating to the field's type (strings for names, route patterns, inherited variables, and grants, paths for mounts and the store, a `&'static str` or `String` of TOML for `registries`).
 - `manifest:` and the inline keys are mutually exclusive; a manifest file declares the same things as `[[guest]]`, `[[mount]]`, `[env]`, and `[plugins]` — see [Configuration](configuration.md).
 
-Nothing declares what guests call between themselves. Every import a guest makes outside the runtime's own namespaces (`wasi:`, `omnia:`) is relayed to the guest exporting it, whichever it is, and an import no guest exports fails at boot — see [Multi-Guest Deployments](../guides/multi-guest-deployments.md#guests-calling-guests).
+Nothing declares what guests call between themselves. Every import a guest makes outside the runtime's own namespaces (`wasi:`, `omnia:`) is relayed to the guest exporting it, whichever it is, and an import no guest exports fails at boot — see [Multi-Guest Deployments](../guides/multi-guest-deployments.md#guests-calling-guests). A guest that declares grants imports a linked interface only when its `interfaces` grant names the package.
 
-### Guest entries (`path`/`package`, `name`, `routes`, `command`, `digest`)
+### Guest entries (`path`/`package`, `name`, `routes`, `command`, `digest`, `grants`)
 
 - **`path: <literal or macro>`** — the component, embedded with `include_bytes!` and loaded at boot. Because `include_bytes!` takes a string literal (or a macro expanding to one), so does `path:`: `"guest.wasm"` reads relative to the invoking source file, `concat!(env!("CARGO_MANIFEST_DIR"), "/guests/app.wasm")` anchors a path in the crate, and `env!("APP_WASM")` reads a path a `build.rs` emitted with `cargo:rustc-env`. A computed path (`engine_component_path()`) is refused at compile time; a component read at run time is a `manifest:` file's `[[guest]]`. The artifact must exist when the host crate compiles; it may be raw `.wasm`, compiled at startup, or `omnia compile` output, deserialized at startup — embedded bytes were in the binary before any guest ran, so they load in either format (see the [security model](../security-model.md)). The repository's `examples` package compiles the guests its `cli-static` and `guest-link` hosts embed in a `build.rs` (through `omnia_test::build::Components`), so `cargo run --example cli-static` needs no guest build first.
 - **`package: <expr>`** — instead of `path:`, an exact `namespace:name@version` package reference the runtime acquires through [`plugins:`](#plugins-store-registries) at the guest's first use — the first time a route, the command drive, a link call, a host dispatch, or a guest's `loader.load(declared(..))` names it. It takes `routes:`, `command:`, and `digest:` like any other entry, and is named by the reference without its version (`acme:tool@1.2.3` is `acme:tool`) unless `name:` says otherwise. A package admits raw `.wasm` alone: it is read while guests run, so `omnia compile` output is refused however it hashes, and never written to the store. `path:` and `package:` together are a compile error.
@@ -121,8 +129,9 @@ Nothing declares what guests call between themselves. Every import a guest makes
 - **`routes: { http: [..], messaging: [..], websocket: [..] }`** — the guest's inbound routes, one pattern list per trigger (`http` prefixes, `messaging` topics, `websocket` routes), with the declaring guest as the implicit target. There is no top-level `routes:` key.
 - **`command: true`** (a literal bool) — marks the guest as the command-mode target — see [Command routing](#command-routing-command-true).
 - **`digest: "sha256:<64 hex>"`** (a string literal) — the digest the guest's bytes must hash to, checked before wasmtime sees them; a malformed pin is a compile error. Embedded bytes cannot change after the build, so a pin on a `path:` entry is a build-time check of the artifact; a pin on a `package:` entry holds the fetched bytes to the ones the invocation named. A `declared` load takes no digest of its own — the entry's pin is the one that holds.
+- **`grants: { env, mounts, interfaces }`** — what of the deployment the guest reaches, each key a list of expressions. Without the block the guest reaches everything, and startup logs its name. With it, a key the block omits grants nothing, `interfaces` included. The keys mean what a manifest's `[guest.grants]` keys mean — see [Configuration](configuration.md#deployment-manifest-omniatoml). A malformed entry fails startup, naming it, and a key outside the three is a compile error.
 
-Any other guest key is a compile error naming the six; the retired `on_demand:` and `wasm_only:` keys are unknown keys.
+Any other guest key is a compile error naming the seven; the retired `on_demand:` and `wasm_only:` keys are unknown keys.
 
 ### `plugins: { store, registries }`
 

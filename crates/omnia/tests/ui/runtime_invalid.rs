@@ -86,4 +86,10 @@ mod case_env_unknown_key {
     });
 }
 
+mod case_grants_unknown_key {
+    omnia::runtime!({
+        guests: [{ path: "app.wasm", grants: { network: ["api"] } }],
+    });
+}
+
 fn main() {}

@@ -22,7 +22,9 @@
 //! The manifest also carries:
 //!
 //! - each guest's `routes` tables;
-//! - the `[env]` table, which names the host variables every guest sees;
+//! - each guest's `grants` table: what of the deployment it reaches (see
+//!   [`Grants`]);
+//! - the `[env]` table, which names the host variables guests see;
 //! - the `[plugins]` table: the package store and the `registries`
 //!   configuration that routes package sources.
 //!
@@ -36,7 +38,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result, anyhow, bail};
 use omnia_core::{
-    CliRoutes, Digest, GuestId, HttpRoutes, PatternRoutes, ResolvedPreopen, Routes, Source,
+    CliRoutes, Digest, Grants, GuestId, HttpRoutes, PatternRoutes, ResolvedPreopen, Routes, Source,
     SourceSpec,
 };
 use serde::Deserialize;
@@ -64,10 +66,11 @@ pub struct Manifest {
     /// Registry population: each entry maps an identity to a source.
     #[serde(rename = "guest")]
     pub guests: Vec<GuestEntry>,
-    /// Working-tree mounts preopened into the guest sandbox.
+    /// Working-tree mounts, each preopened into the sandbox of every guest
+    /// whose grants reach it.
     #[serde(rename = "mount")]
     pub mounts: Vec<Mount>,
-    /// What of the host's environment every guest sees.
+    /// What of the host's environment guests see.
     pub env: Env,
     /// The package store and the registry routing every package — a
     /// declared `source.package` or one a guest loads — is acquired through;
@@ -135,8 +138,8 @@ impl Manifest {
         self
     }
 
-    /// Pass the host variables `names` to every guest (the manifest's
-    /// `[env] inherit`).
+    /// Pass the host variables `names` to every guest whose grants reach
+    /// them (the manifest's `[env] inherit`).
     ///
     /// Each name is whole, or a prefix that ends in `*`. `*` alone passes
     /// every variable.
@@ -183,6 +186,8 @@ impl Manifest {
     /// - more than one entry is the command guest;
     /// - an `[env] inherit` entry is not a variable name or a prefix of one
     ///   that ends in `*`;
+    /// - a guest's grants do not [validate](Grants::validate) against the
+    ///   deployment's `[[mount]]`s and `[env] inherit`;
     /// - the transport is not in-process;
     /// - the manifest declares `[plugins]` or a package source that
     ///   `features` lacks the `loader` to serve.
@@ -215,6 +220,13 @@ impl Manifest {
         for entry in &self.env.inherit {
             omnia_core::env::pattern(entry)
                 .map_err(|error| anyhow!("`[env] inherit` entry {error}"))?;
+        }
+        let mounts: Vec<&str> = self.mounts.iter().map(|mount| mount.name.as_str()).collect();
+        for entry in &self.guests {
+            entry
+                .grants
+                .validate(&mounts, &self.env.inherit)
+                .with_context(|| format!("guest `{}` has invalid grants", entry.name))?;
         }
         if self.transport.default != TransportKind::InProcess {
             bail!(
@@ -399,23 +411,25 @@ fn is_home_relative(path: &Path) -> bool {
 
 // The one resolution from a `[[guest]]` entry to its loadable source.
 fn source(entry: &GuestEntry) -> Source {
-    let source = Source::new(entry.name.as_str(), entry.source.clone());
+    let source =
+        Source::new(entry.name.as_str(), entry.source.clone()).granted(entry.grants.clone());
     match entry.digest {
         Some(digest) => source.pinned(digest),
         None => source,
     }
 }
 
-/// The `[env]` table: what of the host's environment every guest sees.
+/// The `[env]` table: what of the host's environment guests see.
 ///
-/// A guest's environment holds the host variables `inherit` names, read once
-/// at startup. The runtime also sets `RUST_LOG` to the run's tracing
-/// directives, and `NO_COLOR` when the console does not colour its lines.
+/// A guest's environment holds the host variables `inherit` names that its
+/// grants reach, read once at startup. The runtime also sets `RUST_LOG` to
+/// the run's tracing directives, and `NO_COLOR` when the console does not
+/// colour its lines.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
 #[serde(default, deny_unknown_fields)]
 pub struct Env {
-    /// The host variables every guest sees, each a whole name or a prefix
-    /// that ends in `*`. `*` alone passes every variable.
+    /// The host variables guests see, each a whole name or a prefix that
+    /// ends in `*`. `*` alone passes every variable.
     pub inherit: Vec<String>,
 }
 
@@ -547,6 +561,10 @@ pub struct GuestEntry {
     /// output only when pinned.
     #[serde(default)]
     pub digest: Option<Digest>,
+    /// What of the deployment the guest reaches (its `[guest.grants]`
+    /// table); absent, [`Grants::all`].
+    #[serde(default = "Grants::all")]
+    pub grants: Grants,
 }
 
 impl GuestEntry {
@@ -560,6 +578,7 @@ impl GuestEntry {
             routes: GuestRoutes::default(),
             command: false,
             digest: None,
+            grants: Grants::all(),
         }
     }
 
@@ -615,6 +634,13 @@ impl GuestEntry {
     #[must_use]
     pub const fn digest(mut self, digest: Digest) -> Self {
         self.digest = Some(digest);
+        self
+    }
+
+    /// Run the guest under `grants` in place of [`Grants::all`].
+    #[must_use]
+    pub fn grants(mut self, grants: Grants) -> Self {
+        self.grants = grants;
         self
     }
 }
@@ -723,5 +749,74 @@ mod tests {
             .validate(false, Features { loader: false })
             .expect_err("not a variable pattern");
         assert!(error.to_string().contains("`[env] inherit` entry `ORDERS-URL`"), "{error}");
+    }
+
+    #[test]
+    fn grants_tables() {
+        let manifest: Manifest = toml::from_str(
+            r#"
+            [env]
+            inherit = ["ORDERS_*"]
+
+            [[mount]]
+            name = "data"
+            path = "data"
+
+            [[guest]]
+            name = "app"
+            source.path = "app.wasm"
+
+            [guest.grants]
+            env = ["ORDERS_*"]
+            mounts = ["data"]
+            interfaces = ["wasi:*", "omnia:otel"]
+
+            [[guest]]
+            name = "closed"
+            source.path = "closed.wasm"
+
+            [guest.grants]
+
+            [[guest]]
+            name = "open"
+            source.path = "open.wasm"
+            "#,
+        )
+        .expect("the tables parse");
+        assert_eq!(
+            manifest.guests[0].grants,
+            Grants::none().env(["ORDERS_*"]).mounts(["data"]).interfaces(["wasi:*", "omnia:otel"])
+        );
+        assert_eq!(manifest.guests[1].grants, Grants::none());
+        assert!(manifest.guests[2].grants.is_all(), "no table reaches everything");
+        manifest.validate(false, Features { loader: false }).expect("the grants are valid");
+
+        let error = toml::from_str::<Manifest>(
+            "[[guest]]\nname = \"app\"\nsource.path = \"app.wasm\"\n\n[guest.grants]\nhosts = \
+             [\"api.example.com\"]\n",
+        )
+        .expect_err("an unknown key is refused");
+        assert!(error.to_string().contains("unknown field `hosts`"), "{error}");
+    }
+
+    #[test]
+    fn invalid_grants() {
+        let refusals = [
+            (Grants::none().env(["PATH"]), "`env` entry `PATH` reaches no variable"),
+            (Grants::none().mounts(["data"]), "`mounts` entry `data` names no mount"),
+            (
+                Grants::none().interfaces(["wasi:http/types"]),
+                "`interfaces` entry `wasi:http/types`",
+            ),
+        ];
+        for (grants, needle) in refusals {
+            let error = Manifest::new()
+                .guest(GuestEntry::new("app", "./app.wasm").grants(grants))
+                .inherit(["ORDERS_*"])
+                .validate(false, Features { loader: false })
+                .expect_err("the guest's grants are invalid");
+            assert!(format!("{error:#}").contains("guest `app` has invalid grants"), "{error:#}");
+            assert!(format!("{error:#}").contains(needle), "{error:#}");
+        }
     }
 }

@@ -163,6 +163,27 @@ Unreleased
   and `count_error`, re-exported through `omnia::telemetry`. They record
   the runtime's own metrics on OpenTelemetry instruments, and the pool
   sampler and the triggers record through them.
+- Per-guest grants. `omnia::Grants` is what of the deployment one guest
+  reaches, as three lists:
+  - `env`, the inherited host variables the guest sees;
+  - `mounts`, the mounts preopened into it;
+  - `interfaces`, the packages it may import code from. Admission refuses
+    a guest that imports code from any other as `GuestError::Denied`,
+    naming every such package.
+
+  A guest that declares none runs under `Grants::all()` and reaches
+  everything, as before. In `Grants::none()` or a declared table, a list
+  left out grants nothing, `interfaces` included.
+- A guest's grants are declared as:
+  - `[guest.grants]` in the manifest, and `GuestEntry::grants`;
+  - `grants: { env: [..], mounts: [..], interfaces: [..] }` on a
+    `runtime!` guest.
+- `Grants::validate`, which checks grants against a deployment's mounts and
+  inherited variables. Startup, `Runtime::register`, and `Runtime::admit`
+  refuse grants it fails.
+- `Source::granted`, `Source::grants`, and `Guest::grants`.
+- A startup log naming each guest that declares no grants, at `info`, or
+  at `warn` once another guest declares some.
 
 ### Changed
 
@@ -286,6 +307,14 @@ Unreleased
   host's.
 - `RuntimeParts` takes `inherit`, the host variables guests see. Empty, a
   guest sees only `RUST_LOG`, and `NO_COLOR` when the console is plain.
+- `Runtime::register` and `Runtime::admit` take the `Grants` their guest
+  runs under, and `Policy::CallerNamed` carries them. Pass `Grants::all()`
+  to keep a guest's reach.
+- `Guest::local` takes the guest's grants, and `LoadedGuest` gains a
+  `grants` field.
+- A second `register` or `admit` of a standing guest's bytes under other
+  grants is `GuestError::Denied`. The same bytes under the same grants
+  attest, as before.
 - `RuntimeOptions` and the `ConnectOptions` of `omnia-wasi-http`,
   `omnia-wasi-keyvalue`, `omnia-wasi-vault`, `omnia-wasi-model`,
   `omnia-wasi-docstore`, and `omnia-wasi-identity` derive omnia's

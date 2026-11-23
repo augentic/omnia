@@ -7,6 +7,7 @@ mod digest;
 mod dispatch;
 pub mod env;
 mod extensions;
+mod grants;
 mod host;
 mod invoke;
 mod mount;
@@ -30,6 +31,7 @@ pub use self::chain::{ChainCtx, ChainPolicy};
 pub use self::digest::Digest;
 pub use self::dispatch::Dispatcher;
 pub use self::extensions::Extensions;
+pub use self::grants::Grants;
 pub use self::host::{
     Backends, Connect, FromEnv, FutureResult, HasTable, Host, HostCtx, HostView, NoOptions,
     Provides, Proxy, get_cloned,

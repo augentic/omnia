@@ -2,15 +2,17 @@
 //! backend bundle and instantiating it, and assembling one host's view of the
 //! store.
 //!
-//! The runtime links twelve hosts over the in-memory defaults, for one
-//! guest. Run with `cargo bench -p omnia-test --features host --bench store`.
+//! The runtime links twelve hosts over the in-memory defaults, for two
+//! guests over one component. One declares no grants. The other's grants
+//! narrow the environment and mounts its store is built with. Run with
+//! `cargo bench -p omnia-test --features host --bench store`.
 
 use std::hint::black_box;
 use std::time::Instant;
 
-use anyhow::{Context as _, Result};
-use omnia::{ChainCtx, DeploymentBuilder, Guest, Manifest, Runtime};
-use omnia_test::host::Backends;
+use anyhow::Result;
+use omnia::{ChainCtx, DeploymentBuilder, Grants, Guest, GuestEntry, GuestId, Manifest, Runtime};
+use omnia_test::host::{Backends, Scratch, scratch};
 use omnia_wasi_blobstore::WasiBlobStore;
 use omnia_wasi_config::WasiConfig;
 use omnia_wasi_docstore::WasiDocStore;
@@ -31,31 +33,43 @@ const VIEWS_PER_ROUND: u32 = 2_000_000;
 #[tokio::main]
 #[expect(clippy::print_stdout, reason = "a bench reports on stdout")]
 async fn main() -> Result<()> {
-    let runtime = boot(Backends::defaults().await).await?;
-    let guest = runtime.registry().guests().next().context("the deployment runs a guest")?;
+    let data = scratch();
+    let runtime = boot(Backends::defaults().await, &data).await?;
+    let plain = runtime.guest(&GuestId::from("plain")).await?;
+    let granted = runtime.guest(&GuestId::from("granted")).await?;
 
     let mut entry = Samples::default();
+    let mut granted_entry = Samples::default();
     let mut view = Samples::default();
     for round in 0..=ROUNDS {
-        let entry_nanos = time_enter(&runtime, &guest).await?;
-        let view_nanos = time_view(&runtime, &guest).await?;
+        let entry_nanos = time_enter(&runtime, &plain).await?;
+        let granted_nanos = time_enter(&runtime, &granted).await?;
+        let view_nanos = time_view(&runtime, &plain).await?;
         // the first round warms the allocator and the caches
         if round > 0 {
             entry.0.push(entry_nanos);
+            granted_entry.0.push(granted_nanos);
             view.0.push(view_nanos);
         }
     }
 
     println!("nanoseconds per operation, median of {ROUNDS} rounds (fastest round)");
-    println!("guest entered and dropped  {entry}");
-    println!("view of `omnia:keyvalue`   {view}");
+    println!("guest entered and dropped          {entry}");
+    println!("granted guest entered and dropped  {granted_entry}");
+    println!("view of `omnia:keyvalue`           {view}");
 
     runtime.shutdown();
     Ok(())
 }
 
-async fn boot(backends: Backends) -> Result<Runtime<Backends>> {
-    let manifest = Manifest::from_wasm(test_programs::LINK_ECHOER)?;
+async fn boot(backends: Backends, data: &Scratch) -> Result<Runtime<Backends>> {
+    let bytes = std::fs::read(test_programs::LINK_ECHOER)?;
+    let grants = Grants::all().env(["CARGO_PKG_*"]).mounts(["data"]);
+    let manifest = Manifest::new()
+        .guest(GuestEntry::new("plain", bytes.clone()))
+        .guest(GuestEntry::new("granted", bytes).grants(grants))
+        .mounts([data.mount_as("data", false)])
+        .inherit(["*"]);
     let mut deployment = DeploymentBuilder::new().manifest(manifest).build::<Backends>().await?;
     deployment
         .host::<WasiBlobStore>()?

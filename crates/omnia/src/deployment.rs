@@ -496,6 +496,22 @@ impl<B: Backends> Deployment<B> {
         #[cfg(feature = "loader")]
         let registry = loader.registry(deployment.registry_config.as_deref())?;
 
+        // name what reaches everything, so an operator sees what grants would
+        // narrow, warning once another guest declares some
+        let boot = deployment.guests.iter().map(|guest| (&guest.id, &guest.grants));
+        let first_use = deployment.declared.iter().map(|source| (source.id(), source.grants()));
+        let guests = boot.chain(first_use);
+        let granted = guests.clone().any(|(_, grants)| !grants.is_all());
+        for (id, _) in guests.filter(|(_, grants)| grants.is_all()) {
+            let reach = "guest declares no grants: it reaches every variable, mount, and \
+                         interface of the deployment";
+            if granted {
+                tracing::warn!(guest = %id, "{reach}");
+            } else {
+                tracing::info!(guest = %id, "{reach}");
+            }
+        }
+
         let runtime = Runtime::from_parts(RuntimeParts {
             name: Arc::from(deployment.name.as_str()),
             args: deployment.args.to_vec(),
