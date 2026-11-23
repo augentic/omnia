@@ -159,6 +159,10 @@ Unreleased
 - `RuntimeOptions::validate`, and `total_core_instances`,
   `total_memories`, `total_tables` and `total_stacks`, the pool totals a
   runtime builds.
+- `omnia_core::telemetry::record_pool`, `count_message`, `count_event`,
+  and `count_error`, re-exported through `omnia::telemetry`. They record
+  the runtime's own metrics on OpenTelemetry instruments, and the pool
+  sampler and the triggers record through them.
 
 ### Changed
 
@@ -309,6 +313,16 @@ Unreleased
 - `omnia:sql` temporal parameters are validated with `jiff`. A fraction
   longer than nine digits and a Unicode minus sign in an offset no
   longer bind.
+- The runtime's own metrics are OpenTelemetry instruments, so they export
+  whatever `RUST_LOG` is. As `tracing` events the `pool_*` gauges needed
+  `trace`, and `message_counter` and `event_counter` needed `info`.
+  `RUST_LOG=omnia=trace` still prints each pool sample on the console.
+- The instruments differ from the events they replace:
+  - their scope is `omnia`, not `tracing/tracing-opentelemetry`;
+  - `processing_errors` carries `service`, and `topic` for a message, but
+    no error text;
+  - under a subscriber the process installed first, they record on the
+    meter provider the process made global before `Telemetry::build`.
 
 ### Removed
 

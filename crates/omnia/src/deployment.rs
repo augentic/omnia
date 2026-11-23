@@ -111,7 +111,7 @@ impl DeploymentBuilder {
     /// guests keep the run's [level](Self::level). Unset, they sit at the process
     /// `RUST_LOG`'s bare level as written, else at `warn`. A `RUST_LOG` directive
     /// naming one stands. The refinement is the console layer's alone
-    /// ([`Telemetry::runtime_level`]): spans, the exporters, and every guest
+    /// ([`Telemetry::runtime_level`]): spans, exported events, and every guest
     /// follow the run's level.
     #[must_use]
     pub const fn runtime_level(mut self, level: LevelFilter) -> Self {
@@ -231,8 +231,8 @@ impl DeploymentBuilder {
         let program_name = self.program_name.unwrap_or_else(|| "omnia".to_owned());
         let name = env::var("COMPONENT").unwrap_or_else(|_| program_name.clone());
 
-        // the run's directives, decided once for every span, exporter, and
-        // guest; the console alone shows the runtime's crates from a server's
+        // the run's directives, decided once for every span, exported event,
+        // and guest; the console alone shows the runtime's crates from a server's
         // default, and exporters follow OpenTelemetry's own endpoint resolution
         let process = env::var("RUST_LOG").ok();
         let rust_log = telemetry::directives(self.level, self.mode.level(), process.as_deref());

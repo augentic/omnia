@@ -6,7 +6,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow};
 use futures::StreamExt;
-use omnia_core::{ChainCtx, PatternRoutes, Provides, Runtime, TriggerRouter};
+use omnia_core::{ChainCtx, PatternRoutes, Provides, Runtime, TriggerRouter, telemetry};
 use tracing::{Instrument, info_span, instrument};
 
 use crate::WasiWebSocket;
@@ -33,14 +33,11 @@ where
         let handler = handler.clone();
 
         tokio::spawn(async move {
-            tracing::info!(monotonic_counter.event_counter = 1, service = %handler.component);
+            telemetry::count_event(&handler.component);
 
             if let Err(e) = handler.handle(event).await {
-                tracing::error!(
-                    monotonic_counter.processing_errors = 1,
-                    service = %handler.component,
-                    error = %e,
-                );
+                telemetry::count_error(&handler.component, None);
+                tracing::error!(service = %handler.component, error = %e);
             }
         });
     }

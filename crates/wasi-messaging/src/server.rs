@@ -7,7 +7,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use anyhow::{Result, anyhow};
 use futures::FutureExt as _;
 use futures::future::BoxFuture;
-use omnia_core::{ChainCtx, PatternRoutes, Provides, Runtime, TriggerRouter};
+use omnia_core::{ChainCtx, PatternRoutes, Provides, Runtime, TriggerRouter, telemetry};
 use tokio::sync::Semaphore;
 use tracing::{Instrument, info_span, instrument};
 
@@ -102,13 +102,13 @@ where
     /// [`HandleError::Trapped`] if it traps, and [`HandleError::TimedOut`] if
     /// it runs past the guest timeout.
     pub async fn handle(&self, message: Message) -> Result<(), HandleError> {
-        tracing::info!(monotonic_counter.message_counter = 1, service = %self.component);
+        telemetry::count_message(&self.component);
 
         let topic = message.topic.clone();
         let outcome = self.deliver(message).await;
         if let Err(error) = &outcome {
+            telemetry::count_error(&self.component, Some(topic.as_str()));
             tracing::error!(
-                monotonic_counter.processing_errors = 1,
                 service = %self.component,
                 topic = %topic,
                 error = %error,
