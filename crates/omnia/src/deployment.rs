@@ -8,9 +8,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-#[cfg(feature = "loader")]
-use anyhow::bail;
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 pub use manifest::{
     Env, GuestEntry, GuestRoutes, Manifest, Mount, PluginsConfig, RegistryConfig, Transport,
     TransportKind,
@@ -75,7 +73,11 @@ impl DeploymentBuilder {
         self
     }
 
-    /// Set CLI arguments forwarded to the guest (everything after `--`).
+    /// Set the command's arguments, everything after `--`.
+    ///
+    /// The command run receives them after the [program name](Self::program_name)
+    /// as `argv[0]`. No other guest sees them. A [`Mode::Server`] deployment
+    /// takes none, so [`build`](Self::build) refuses any.
     #[must_use]
     pub fn args(mut self, args: impl Into<Vec<String>>) -> Self {
         self.args = args.into();
@@ -134,7 +136,7 @@ impl DeploymentBuilder {
     }
 
     /// Set the deployment's program name: the telemetry component name and,
-    /// in command mode, the `argv[0]` prepended to the guest's arguments.
+    /// in command mode, the `argv[0]` prepended to the command's arguments.
     ///
     /// The `runtime!` macro sets the invoking crate's package name; unset,
     /// the name is `omnia`.
@@ -206,11 +208,15 @@ impl DeploymentBuilder {
     ///
     /// # Errors
     ///
-    /// Returns an error if no manifest resolves, the manifest is invalid, the
+    /// Returns an error if a [`Mode::Server`] deployment is given
+    /// [arguments](Self::args), no manifest resolves, the manifest is invalid, the
     /// runtime options do not load or [validate](RuntimeOptions::validate), a
     /// `~/` path has no `$HOME` to expand against, the package store lies
     /// beneath a writable mount, or the deployment cannot be built.
     pub async fn build<B: Backends>(self) -> Result<Deployment<B>> {
+        let program_name = self.program_name.unwrap_or_else(|| "omnia".to_owned());
+        let args = argv(self.mode, &program_name, self.args)?;
+
         let mut manifest = if let Some(manifest) = self.manifest {
             manifest
         } else if self.allow_empty {
@@ -228,8 +234,7 @@ impl DeploymentBuilder {
         let registry_config = manifest.registry_config()?;
 
         // an operator `COMPONENT` override wins over the program name
-        let program_name = self.program_name.unwrap_or_else(|| "omnia".to_owned());
-        let name = env::var("COMPONENT").unwrap_or_else(|_| program_name.clone());
+        let name = env::var("COMPONENT").unwrap_or(program_name);
 
         // the run's directives, decided once for every span, exported event,
         // and guest; the console alone shows the runtime's crates from a server's
@@ -289,13 +294,6 @@ impl DeploymentBuilder {
             futures::future::try_join_all(embedded.iter().map(|source| source.load(&engine)))
                 .await?;
 
-        // command mode prepends the program name as `argv[0]`
-        let args = if self.mode.is_command() {
-            std::iter::once(program_name).chain(self.args).collect()
-        } else {
-            self.args
-        };
-
         // host-mediated dispatch only with `link`
         let seam: Arc<dyn LinkSeam<B>> = cfg_select! {
             feature = "link" => Arc::new(InProcessLinks::new(
@@ -331,6 +329,18 @@ impl DeploymentBuilder {
             stdio: self.stdio,
         })
     }
+}
+
+// the command run's argv, the program name first; a server runs no command, so
+// it refuses any argument
+fn argv(mode: Mode, program_name: &str, args: Vec<String>) -> Result<Vec<String>> {
+    if mode.is_command() {
+        return Ok(std::iter::once(program_name.to_owned()).chain(args).collect());
+    }
+    if !args.is_empty() {
+        bail!("a server runs no command, so it takes no arguments: {} given", args.len());
+    }
+    Ok(args)
 }
 
 // Build the shared engine and its WASI-linked linker.
@@ -435,7 +445,9 @@ impl<B: Backends> Deployment<B> {
         self.mode
     }
 
-    /// Borrow the guest argv.
+    /// Borrow the argv the command run receives, `argv[0]` the program name.
+    ///
+    /// Empty for a [`Mode::Server`] deployment.
     #[must_use]
     pub fn args(&self) -> &[String] {
         &self.args

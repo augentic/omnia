@@ -44,6 +44,10 @@ The `run` subcommand needs either a positional `.wasm`/`.bin` path or a manifest
 
 The embedder-path variant — `no deployment manifest supplied and OMNIA_MANIFEST is unset` — means a `DeploymentBuilder` was built without `.manifest(...)` and no `OMNIA_MANIFEST` fallback was available.
 
+### `a server runs no command, so it takes no arguments: ... given`
+
+The runtime is built with `mode: server`, and its command line carries arguments after `--`, or an embedder passed them to `DeploymentBuilder::args`. A server runs no `wasi:cli/run`, so nothing would receive them, and the runtime refuses to start rather than drop them. The message counts the arguments and never prints them, since one can hold a secret. Drop them, or build the runtime with `mode: command` when the guest is a command. A guest a trigger serves takes its input another way; see [A guest's `get-arguments` is empty](#a-guests-get-arguments-is-empty).
+
 ### `no guest ... is declared by this deployment`
 
 A guest called `omnia:plugins/loader.load` with a `declared` name the manifest does not declare. A `declared` load names only `[[guest]]` entries (the macro's `guests:`); add one for the name — a manifest file's entry loads at that first `load` — or, for a component the deployment does not declare, have the guest name its `path` beneath a read-only mount or its `release` instead. A runtime built without omnia's `loader` feature has no loader at all: a guest importing it fails at instantiation, and a manifest declaring `plugins` or a `source.package` guest is refused at startup until the feature is enabled.
@@ -202,6 +206,13 @@ Matching is case-sensitive against the name as the host spells it, so `PATH` doe
 
 `ConfigDefault` serves only the host variables `CONFIG_KEYS` names, or the keys the runtime compiles in, and answers any other key as unset. `config::require` and `Settings::load` then fail the key as a server error with the code `not-found`. The first read of each variable the host sets but `ConfigDefault` does not serve logs a warning naming the variable. Name it, or a prefix of it ending in `*`, in `CONFIG_KEYS`, as `CONFIG_KEYS="ORDERS_*,TZ"` does.
 
+### A guest's `get-arguments` is empty
+
+Only the command run receives the command's arguments (see the [security model](security-model.md#the-trust-boundary)). Every other guest sees an empty argv, whatever its grants, so it takes its input another way:
+
+- A guest the command calls over a link, or loads through `omnia:plugins`, takes it in the call.
+- A guest a trigger serves has no caller to pass it. It reads a host variable named in `[env] inherit` (see [A host variable is missing in the guest](#a-host-variable-is-missing-in-the-guest)) or a key from `omnia:config` (see [A config key reads as unset](#a-config-key-reads-as-unset)).
+
 ### Guest writes to a mount fail
 
 Mounts are **read-only by default**. Add `writable = true` (manifest) or `,writable` (CLI spec).
@@ -226,11 +237,11 @@ Host-mediated guest-to-guest calls are nested more than 8 deep — usually accid
 
 ### `mybin run ...` fails with an argument error / `--manifest` is rejected
 
-A `runtime!` binary with `mode: command` and a compiled-in deployment is a [direct command](reference/runtime-macro.md#direct-commands-raw-argv-passthrough) with **no host CLI**: no `run` subcommand, no `--manifest`/`OMNIA_MANIFEST` override, no positional wasm path. Its argv goes to the guest verbatim, so `mybin greet Ada` is correct and `mybin run -- greet Ada` hands the guest a literal `run` argument. The deployment is fixed at compile time (the compiled-in manifest), by design.
+A `runtime!` binary with `mode: command` and a compiled-in deployment is a [direct command](reference/runtime-macro.md#direct-commands-raw-argv-passthrough) with **no host CLI**: no `run` subcommand, no `--manifest`/`OMNIA_MANIFEST` override, no positional wasm path. Its argv goes to the command guest verbatim, so `mybin greet Ada` is correct and `mybin run -- greet Ada` hands the command guest a literal `run` argument. The deployment is fixed at compile time (the compiled-in manifest), by design.
 
 ### A direct-command binary logs nothing (or too much)
 
-One filter governs the host console and every guest: its bare level is a `-v`/`-q` flag in argv, else `RUST_LOG`'s, else the command-mode default `info`, and `RUST_LOG`'s targeted directives (`my_sdk=debug`, `tower=off`) apply on top whichever decided the level (see [Verbosity flags](reference/configuration.md#verbosity-flags)). On the console alone, the runtime's own crates (`omnia`, `omnia_core`, `omnia_link`, `omnia_plugin`) sit one rung below the command's level — a server's ladder, in either mode — so `-v` is where the runtime's `guest loaded` and `wasi:cli/run exited` lines appear and `-vv` where its `debug` does; `RUST_LOG=omnia_core=debug` names one directly under any flag. Argv still reaches the guest verbatim, so a guest whose grammar does not flatten `omnia_sdk::command::Verbosity` rejects `-v` as an unknown flag *after* the host has applied the level — declare the flags. A bare run that logs too much has a process `RUST_LOG=debug` (or similar) set: `-q` steps the bare level down and keeps the variable's targets, as does any flag; a run that is still loud under `-q` has a *targeted* directive in `RUST_LOG` doing the talking, which no flag touches. Guest tracing is the guest's own subscriber reading the `RUST_LOG` its WASI environment carries — the decided filter — and nothing in the guest changes it at run time.
+One filter governs the host console and every guest: its bare level is a `-v`/`-q` flag in argv, else `RUST_LOG`'s, else the command-mode default `info`, and `RUST_LOG`'s targeted directives (`my_sdk=debug`, `tower=off`) apply on top whichever decided the level (see [Verbosity flags](reference/configuration.md#verbosity-flags)). On the console alone, the runtime's own crates (`omnia`, `omnia_core`, `omnia_link`, `omnia_plugin`) sit one rung below the command's level — a server's ladder, in either mode — so `-v` is where the runtime's `guest loaded` and `wasi:cli/run exited` lines appear and `-vv` where its `debug` does; `RUST_LOG=omnia_core=debug` names one directly under any flag. Argv still reaches the command guest verbatim, so one whose grammar does not flatten `omnia_sdk::command::Verbosity` rejects `-v` as an unknown flag *after* the host has applied the level — declare the flags. A bare run that logs too much has a process `RUST_LOG=debug` (or similar) set: `-q` steps the bare level down and keeps the variable's targets, as does any flag; a run that is still loud under `-q` has a *targeted* directive in `RUST_LOG` doing the talking, which no flag touches. Guest tracing is the guest's own subscriber reading the `RUST_LOG` its WASI environment carries — the decided filter — and nothing in the guest changes it at run time.
 
 ## Model completions
 

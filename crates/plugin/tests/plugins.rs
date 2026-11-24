@@ -938,6 +938,18 @@ async fn plugins_mixed() {
     runtime.shutdown();
 }
 
+// The command guest loads the guest its arguments name and calls it over the
+// link. The loaded guest answers with the argv it sees, and the requester
+// asserts that argv is empty.
+#[tokio::test]
+async fn plugins_arguments() {
+    let scratch = scratch();
+    stage(&scratch, "adapter.wasm", test_programs::LINK_ARGUMENTS);
+    let manifest = requester(test_programs::PLUGINS_ARGUMENTS).mounts([scratch.mount(false)]);
+    let status = run(manifest, &["adapter.wasm"]).await.expect("deployment runs");
+    assert_eq!(status, ExitStatus::SUCCESS, "the requester's assertions all held");
+}
+
 // The requester's grants reach one of the deployment's two read-only mounts,
 // and every guest it loads but the declared `secret`. `[plugins.grants]`
 // reaches both mounts and the `omnia-test:` packages, so only the requester's

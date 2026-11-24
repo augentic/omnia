@@ -73,8 +73,8 @@ pub struct StoreConfig<'a> {
     ///
     /// [`ChainPolicy::enter`]: crate::ChainPolicy::enter
     pub chain: ChainCtx,
-    /// Guest argv (`args[0]` is the program name); `None` for reactor
-    /// deployments that do not model a CLI invocation.
+    /// The command's argv (`args[0]` is the program name), for the command
+    /// run's store; `None`, an empty argv, for every other store.
     pub args: Option<Arc<Vec<String>>>,
     /// Mount registry preopened into the guest sandbox; `None` for
     /// deployments without `[[mount]]`s.

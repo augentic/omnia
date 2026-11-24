@@ -8,7 +8,6 @@ use wasmtime_wasi::I32Exit;
 use wasmtime_wasi::p3::bindings::{Command, CommandPre};
 
 use super::{ExitStatus, Runtime};
-use crate::chain::ChainCtx;
 use crate::host::Backends;
 use crate::registry::{Guest, GuestId, TriggerRouter};
 
@@ -66,7 +65,7 @@ async fn run_guest<B: Backends>(
     let _slot = runtime.slot().await;
 
     // a command chain root: its link hops run uncapped, like the run itself
-    let (mut store, instance) = runtime.enter(guest, ChainCtx::command()).await?;
+    let (mut store, instance) = runtime.enter_command(guest).await?;
     let command = Command::new(&mut store, &instance)?;
 
     // the host span a guest's root spans join through `omnia:otel`

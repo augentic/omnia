@@ -123,7 +123,8 @@ impl Deployment {
         self
     }
 
-    /// The operator's arguments (the runtime supplies `argv[0]`).
+    /// The operator's arguments, which the command run alone receives (the
+    /// runtime supplies `argv[0]`).
     #[must_use]
     pub fn args<S: Into<String>>(mut self, args: impl IntoIterator<Item = S>) -> Self {
         self.args.extend(args.into_iter().map(Into::into));

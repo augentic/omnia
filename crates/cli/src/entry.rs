@@ -69,7 +69,7 @@ pub fn plan(
 }
 
 /// The planner's outcome: source, CLI mounts and environment, verbosity,
-/// and guest argv.
+/// and the command's arguments.
 #[derive(Debug, PartialEq, Eq)]
 pub struct RunPlan {
     /// Which source the precedence ladder selected.
@@ -85,7 +85,7 @@ pub struct RunPlan {
     /// one step. Never non-zero together with `verbose`: clap refuses the
     /// pair.
     pub quiet: u8,
-    /// Arguments forwarded to the guest as its argv (everything after `--`).
+    /// The arguments for the command guest's run (everything after `--`).
     pub args: Vec<String>,
 }
 
