@@ -13,11 +13,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
-use wit_bindgen_core::wit_parser::{
-    PackageId, PackageName, Resolve, SourceMap, UnresolvedPackageGroup,
-};
-use wit_bindgen_core::{Files, WorldGenerator};
+use wit_bindgen_core::{Files, WorldGenerator, wit_parser as bindgen_parser};
 use wit_bindgen_rust::{Opts, WithOption};
+use wit_parser::{PackageId, PackageName, Resolve, SourceMap, UnresolvedPackageGroup};
 
 use crate::package::Package;
 use crate::workspace::{Workspace, wit_files};
@@ -25,15 +23,18 @@ use crate::workspace::{Workspace, wit_files};
 pub struct Sdk {
     resolve: Resolve,
     id: PackageId,
+    bindgen: Bindgen,
 }
 
 impl Sdk {
     pub fn new(workspace: &Workspace, packages: &[Package], all_features: bool) -> Result<Self> {
+        let wasi = wit_files(&workspace.wasi)?;
+
         // each WASI package, then each published package alone
         let mut deps = Vec::new();
-        for file in wit_files(&workspace.wasi)? {
+        for file in &wasi {
             let mut map = SourceMap::default();
-            map.push_file(&file)?;
+            map.push_file(file)?;
             deps.push(map.parse().map_err(|(map, err)| anyhow!(err.render(&map)))?);
         }
         for package in packages {
@@ -52,7 +53,8 @@ impl Sdk {
         let id = resolve
             .push_groups(main, deps)
             .map_err(|err| anyhow!(resolve.render_error(&err.into())))?;
-        Ok(Self { resolve, id })
+        let bindgen = Bindgen::parse(&wasi, packages, &wit, all_features)?;
+        Ok(Self { resolve, id, bindgen })
     }
 
     pub fn bindings(&self) -> Result<Bindings> {
@@ -64,7 +66,7 @@ impl Sdk {
 
         let filesystem = find(&names, "wasi", "filesystem")?;
         let clocks = find(&names, "wasi", "clocks")?;
-        self.generate(
+        self.bindgen.generate(
             "imports",
             Opts {
                 generate_all: true,
@@ -81,7 +83,7 @@ impl Sdk {
 
         let types = find(&names, "omnia", "types")?;
         for world in ["messaging", "websocket"] {
-            self.generate(
+            self.bindgen.generate(
                 world,
                 Opts {
                     with: vec![
@@ -108,6 +110,39 @@ impl Sdk {
         let world = self.resolve.select_world(&[self.id], Some("command"))?;
         wit_component::targets(&self.resolve, world, guest, false)
             .context("the guest does not target `omnia:sdk/command`")
+    }
+}
+
+// `wit-bindgen` stays pinned to `wasip3` while `wit-component` moves with `wasm-tools`,
+// so bindings generate from `wit-bindgen-core`'s own `wit_parser`
+struct Bindgen {
+    resolve: bindgen_parser::Resolve,
+    id: bindgen_parser::PackageId,
+}
+
+impl Bindgen {
+    fn parse(
+        wasi: &[PathBuf], packages: &[Package], wit: &str, all_features: bool,
+    ) -> Result<Self> {
+        let mut deps = Vec::new();
+        for file in wasi {
+            let mut map = bindgen_parser::SourceMap::default();
+            map.push_file(file)?;
+            deps.push(map.parse().map_err(|(map, err)| anyhow!(err.render(&map)))?);
+        }
+        for package in packages {
+            deps.push(bindgen_parser::UnresolvedPackageGroup::parse_dir(&package.dir)?);
+        }
+        let main = bindgen_parser::UnresolvedPackageGroup::parse("sdk.wit", wit)
+            .map_err(|(map, err)| anyhow!(err.render(&map)))?;
+        let mut resolve = bindgen_parser::Resolve {
+            all_features,
+            ..bindgen_parser::Resolve::default()
+        };
+        let id = resolve
+            .push_groups(main, deps)
+            .map_err(|err| anyhow!(resolve.render_error(&err.into())))?;
+        Ok(Self { resolve, id })
     }
 
     // `world` as `wit-bindgen rust --format --runtime-path wasip3::wit_bindgen::rt` generates it

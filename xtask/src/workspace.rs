@@ -11,7 +11,7 @@ use std::{env, fs};
 
 use anyhow::{Context, Result, anyhow, bail};
 use serde::Deserialize;
-use wit_bindgen_core::wit_parser::{PackageName, UnresolvedPackageGroup};
+use wit_parser::{PackageName, UnresolvedPackageGroup};
 
 use crate::package::Package;
 
