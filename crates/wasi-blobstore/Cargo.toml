@@ -30,7 +30,7 @@ wasmtime = { workspace = true, features = ["component-model-async"] }
 # which cargo keeps in the published manifest, and these crates depend back
 # on this one, so a versioned dev-dep would make the first publish of a
 # fresh version unresolvable. Path-only dev-deps are stripped on publish.
-omnia = { path = "../omnia" }
-omnia-test = { path = "../test", default-features = false, features = ["host"] }
+omnia.workspace = true
+omnia-test = { workspace = true, default-features = false, features = ["host"] }
 test-programs.workspace = true
 tokio = { workspace = true, features = ["macros", "rt"] }

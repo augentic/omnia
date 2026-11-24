@@ -28,8 +28,8 @@ wasmtime-wasi.workspace = true
 [dev-dependencies]
 cap-std.workspace = true
 futures.workspace = true
-omnia = { path = "../omnia" }
-omnia-test = { path = "../test", default-features = false, features = ["host"] }
+omnia.workspace = true
+omnia-test = { workspace = true, default-features = false, features = ["host"] }
 parking_lot.workspace = true
 test-programs.workspace = true
 tokio = { workspace = true, features = ["macros", "rt"] }

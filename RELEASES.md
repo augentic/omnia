@@ -11,10 +11,12 @@ Unreleased
 - **Host views take the guest's grants:** `HostCtx::view` and `omnia_wasi_http::HttpBorrow::as_view` take `&Arc<Grants>`, so a hand-written host or HTTP backend adds the parameter, and `#[derive(HostCtx)]` leaves it unused ([#423](https://github.com/augentic/omnia/issues/423)).
 - **Grants tables without `hosts`:** a 0.38 `[guest.grants]` or `[plugins.grants]` table that leaves out `hosts` reaches no host, so its guests' outbound HTTP and worker egress fail when a request is made, not at boot. Emery's `[plugins.grants]` is the first such table. Add `hosts` to every table whose guests call out ([#423](https://github.com/augentic/omnia/issues/423)).
 - **Worker egress and test doubles:** an `omnia:model` worker `egress` entry ending in a numeric label (`2130706433`, `example.1`) is `invalid`, since it reads as an IP address, and `omnia_test::host::MatchedHttp` refuses a request outside the guest's `hosts` with `http-request-denied`, recording none ([#423](https://github.com/augentic/omnia/issues/423)).
+- **Hand-bound handlers import `omnia:otel`:** `omnia_sdk::exports::messaging::export!` and `omnia_sdk::exports::websocket::export!` run each delivery or event inside the guest telemetry scope, so a guest that binds either imports `omnia:otel` and its deployment links `WasiOtel`. The no-op `OtelDefault` suffices.
 
 ### Fixed
 
 - Record a `tracing` event's `monotonic_counter.`, `counter.`, `histogram.`, or `gauge.` metric whatever `RUST_LOG` is, in a guest and on the host. Below the run's level such an event was dropped, so a guest's `info!` counter never reached a server running at its default `warn`. `RUST_LOG` still governs the console and spans, and under `tracing-log` a `log` record still dispatches only at the run's level ([#426](https://github.com/augentic/omnia/issues/426)).
+- Compile `#[omnia_sdk::otel::instrument]` on an `async fn`, `otel::scope`, `otel::flush`, `command::execute`, `http::serve`, and `messaging::handle` on a native target. Each was `wasm32`-only, so a guest crate that instrumented a handler did not build natively. On a native target `scope` installs no telemetry, so an instrumented handler's span reaches the test's own subscriber.
 
 ---
 

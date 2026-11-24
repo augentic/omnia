@@ -42,6 +42,7 @@ http.workspace = true
 http-body.workspace = true
 http-body-util.workspace = true
 omnia-guest-macros.workspace = true
+opentelemetry = { workspace = true, features = ["metrics", "trace"] }
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -49,13 +50,9 @@ sha2 = { workspace = true, optional = true }
 thiserror.workspace = true
 tower = { workspace = true, optional = true }
 tracing.workspace = true
-wasip3.workspace = true
-
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-opentelemetry = { workspace = true, features = ["metrics", "trace"] }
 tracing-opentelemetry = { workspace = true, features = ["metrics"] }
 tracing-subscriber = { workspace = true, features = ["ansi"] }
+wasip3.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }
-tracing-subscriber.workspace = true

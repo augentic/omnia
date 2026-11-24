@@ -1,4 +1,4 @@
-//! The tracing recorder the suites read the `handler` span through.
+//! The tracing recorder the suites read their spans through.
 
 use std::sync::{Arc, Mutex};
 
@@ -25,13 +25,20 @@ impl Spans {
 
     /// The fields of the first `handler` span opened.
     pub fn handler(&self) -> Vec<(String, String)> {
-        self.0
+        self.span("handler")
+    }
+
+    /// The fields of the first span named `name` opened.
+    pub fn span(&self, name: &str) -> Vec<(String, String)> {
+        let (_, fields) = self
+            .0
             .lock()
             .unwrap()
             .iter()
-            .find(|(name, _)| name == "handler")
-            .map(|(_, fields)| fields.clone())
-            .expect("a `handler` span is opened")
+            .find(|(opened, _)| opened == name)
+            .cloned()
+            .unwrap_or_else(|| panic!("a `{name}` span is opened"));
+        fields
     }
 }
 

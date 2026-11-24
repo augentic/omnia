@@ -39,7 +39,7 @@ use wasip3::http::client;
 use wasip3::http_compat::{IncomingMessage as _, http_from_wasi_response, http_into_wasi_request};
 
 pub use self::request::{RequestBuilder, delete, get, patch, post, put};
-#[cfg(all(feature = "http", target_arch = "wasm32"))]
+#[cfg(feature = "http")]
 pub use self::server::serve;
 #[cfg(feature = "http")]
 pub use self::server::trace;

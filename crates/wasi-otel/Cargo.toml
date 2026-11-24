@@ -29,7 +29,9 @@ tracing-opentelemetry.workspace = true
 wasmtime.workspace = true
 
 [dev-dependencies]
-omnia = { path = "../omnia" }
-omnia-test = { path = "../test", default-features = false, features = ["host"] }
+omnia.workspace = true
+omnia-test = { workspace = true, default-features = false, features = ["host"] }
+omnia-wasi-messaging.workspace = true
+omnia-wasi-websocket.workspace = true
 test-programs.workspace = true
 tokio = { workspace = true, features = ["macros", "rt", "time"] }

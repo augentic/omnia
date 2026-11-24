@@ -19,10 +19,8 @@ use std::time::Duration;
 
 use serde::Serialize;
 
-pub use self::router::Delivery;
 pub(crate) use self::router::Topics;
-#[cfg(target_arch = "wasm32")]
-pub use self::router::handle;
+pub use self::router::{Delivery, handle};
 pub use crate::bindings::imports::omnia::messaging::*;
 use crate::keyvalue::ttl_ms;
 pub use crate::messaging::types::{Client, Message};

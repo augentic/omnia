@@ -25,7 +25,7 @@ tracing.workspace = true
 wasmtime = { workspace = true, features = ["component-model-async"] }
 
 [dev-dependencies]
-omnia = { path = "../omnia" }
-omnia-test = { path = "../test", default-features = false, features = ["host"] }
+omnia.workspace = true
+omnia-test = { workspace = true, default-features = false, features = ["host"] }
 test-programs.workspace = true
 tokio = { workspace = true, features = ["macros", "rt"] }

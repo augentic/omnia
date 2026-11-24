@@ -181,7 +181,6 @@ impl Delivery {
 /// # Errors
 ///
 /// Returns how a delivery the router failed to handle settles.
-#[cfg(target_arch = "wasm32")]
 #[crate::otel::instrument(name = "messaging_guest_handle")]
 pub async fn handle(
     router: &crate::Router, delivery: crate::messaging::types::Delivery,

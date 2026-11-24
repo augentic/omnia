@@ -12,7 +12,7 @@ A guest is a handler compiled to a `wasm32-wasip3` component and run by a host r
 | Contract | `contract` | The behaviour rows every backend of an interface meets, inside a guest | The host the guest runs over, and its backend |
 | Fixture | `build` | The nested cargo build a `build.rs` runs to produce those components | `std` only |
 
-There is no default feature: a consumer names the rung it uses. A guest crate takes the component and fixture rungs: its `build.rs` compiles its component, and its tests boot it. A backend crate adds the contract rows. A handler that reaches no host interface also runs natively, through `Router::handle`, `Router::run`, or the `axum::Router` a `Router` converts into.
+There is no default feature: a consumer names the rung it uses. A guest crate takes the component and fixture rungs: its `build.rs` compiles its component, and its tests boot it. A backend crate adds the contract rows. A handler that reaches no host interface also runs natively, through `Router::handle`, `Router::run`, or the `axum::Router` a `Router` converts into. An `#[omnia_sdk::otel::instrument]` handler does too, and its span reaches the test's own subscriber.
 
 ## Depending on the crate
 

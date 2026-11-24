@@ -19,7 +19,8 @@ static TELEMETRY: OnceLock<Option<Telemetry>> = OnceLock::new();
 ///
 /// The first `scope` in an instance initializes telemetry before calling the
 /// wrapped `inner` function. Exports every span and metric once the returned
-/// future completes.
+/// future completes, as [`flush`] does. On a native target it installs and
+/// exports nothing, so the spans `inner` opens reach the caller's subscriber.
 ///
 /// `RUST_LOG` filters console output and spans, falling back to `error` when
 /// it is unset. Metrics record whatever it is, whether an instrument's or a
@@ -29,6 +30,9 @@ pub async fn scope<F: Future>(inner: impl FnOnce() -> F) -> F::Output {
     let mut owner = false;
     TELEMETRY.get_or_init(|| {
         owner = true;
+        if cfg!(not(target_arch = "wasm32")) {
+            return None;
+        }
         init().inspect_err(report).ok()
     });
 

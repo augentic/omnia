@@ -218,7 +218,7 @@ messaging::export!(messaging_router);
 
 A handler that answers a request registers with `request`, which sends its output back as JSON, or with `request_with`, whose handler returns the reply `Message` (see [Messaging § Request-reply](messaging.md#request-reply)).
 
-For guests that need direct control over the raw `omnia:messaging/incoming-handler` export (for example, `examples/messaging` demonstrating request-reply and fan-out, or a guest that sets a release delay), implement `omnia_sdk::exports::messaging::incoming_handler::Guest`, bind it with `omnia_sdk::exports::messaging::export!`, and dispatch through `omnia_sdk::messaging::handle`, which opens the guest telemetry scope around the delivery and settles a failure:
+For guests that need direct control over the raw `omnia:messaging/incoming-handler` export (for example, `examples/messaging` demonstrating request-reply and fan-out, or a guest that sets a release delay), implement `omnia_sdk::exports::messaging::incoming_handler::Guest` and bind it with `omnia_sdk::exports::messaging::export!`, which runs each delivery inside the guest telemetry scope. Dispatch through `omnia_sdk::messaging::handle`, which settles a failure:
 
 ```rust,noplayground
 use omnia_sdk::messaging::types::{Delivery, Settle};
@@ -319,14 +319,14 @@ Annotate handlers with `#[omnia_sdk::otel::instrument]`, or `#[tracing::instrume
 pub(crate) async fn place(Path(id): Path<String>) -> omnia_sdk::Result<Json<Option<Place>>> { /* ... */ }
 ```
 
-A guest that binds its WASI export by hand annotates the export's `handle` with `#[omnia_sdk::otel::instrument]`, which opens that scope itself. `omnia_sdk::http::serve` and `omnia_sdk::messaging::handle` already do:
+`omnia_sdk::exports::messaging::export!` and `omnia_sdk::exports::websocket::export!` open that scope around the handler they bind. A guest that binds a WASI export through `wasip3` annotates the export's `handle` with `#[omnia_sdk::otel::instrument]`, which opens the scope itself. `omnia_sdk::http::serve` and `omnia_sdk::messaging::handle` already do:
 
 ```rust
 #[omnia_sdk::otel::instrument(name = "guest_handle", level = Level::INFO)]
 async fn handle(request: Request) -> Result<Response, ErrorCode> { /* ... */ }
 ```
 
-Only the outermost scope initializes and exports. A nested instrumented `async fn` adds its span to the same run, and on a sync function the attribute only opens a span.
+Only the outermost scope initializes and exports. A nested instrumented `async fn` adds its span to the same run, and on a sync function the attribute only opens a span. On a native target an instrumented `async fn` runs with no telemetry installed, so a test's own subscriber sees its span.
 
 The OpenTelemetry API works directly too: `global::tracer(..)` and `global::meter(..)` return Omnia's own providers, which record straight into the `omnia:otel` records the flush exports — no OpenTelemetry SDK is linked into the guest. Counters, histograms, and gauges export delta series (one instance per invocation); up-down counters are cumulative. Observable (callback) instruments are no-ops: record through a synchronous instrument instead.
 
