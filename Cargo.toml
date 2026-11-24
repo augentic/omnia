@@ -40,7 +40,7 @@ print_stdout = "warn"
 unused_result_ok = "warn"
 
 [workspace.dependencies]
-anyhow = "1.0.104"
+anyhow = "1.0.105"
 axum = { version = "0.8.9", default-features = false, features = ["json"] }
 base64ct = { version = "1.8.3", features = ["std"] }
 bon = "3.10.3"
@@ -57,7 +57,7 @@ getrandom = "0.4.3"
 http = "1.5.0"
 http-body = "1.1.0"
 http-body-util = "0.1.5"
-hyper = "1.12.0"
+hyper = "1.13.0"
 hyper-util = "0.1.21"
 jiff = { version = "1.0.2", default-features = false, features = ["std"] }
 moka = { version = "0.12.16", features = ["sync"] }
@@ -96,7 +96,8 @@ wasmtime-wasi-http = { version = "51.0.0", default-features = false, features = 
 wit-bindgen = { version = "0.63.0", features = ["async-spawn"] }
 wit-bindgen-core = "0.63.0"
 wit-bindgen-rust = "0.63.0"
-wit-component = "0.262.0"
+wit-component = "0.263.0"
+wit-parser = "0.263.0"
 x509-cert = { version = "0.3.0", default-features = false, features = ["std"] }
 
 # internally referenced crates

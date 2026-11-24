@@ -12,8 +12,8 @@ use futures::TryStreamExt;
 use futures::future::try_join_all;
 use tokio::runtime::Runtime;
 use wasm_pkg_client::{Client, Config, Error, PackageRef, PublishOpts};
-use wit_bindgen_core::wit_parser::PackageName;
 use wit_component::WitPrinter;
+use wit_parser::PackageName;
 
 const CONFIG: &str = ".wkg-config.toml";
 
