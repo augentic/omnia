@@ -5,6 +5,7 @@ use std::sync::OnceLock;
 use anyhow::{Context, Result};
 use opentelemetry::global;
 use opentelemetry::trace::TracerProvider as _;
+use tracing::Metadata;
 use tracing_opentelemetry::{MetricsLayer, layer as tracing_layer};
 use tracing_subscriber::filter::filter_fn;
 use tracing_subscriber::layer::SubscriberExt;
@@ -72,7 +73,7 @@ fn init() -> Result<Telemetry> {
 
     Registry::default()
         .with(console.and_then(exporter).with_filter(mute(EnvFilter::from_default_env())))
-        .with(MetricsLayer::new(meter_provider.clone()))
+        .with(MetricsLayer::new(meter_provider.clone()).with_filter(filter_fn(metric)))
         .try_init()
         .context("issue initializing subscriber")?;
 
@@ -87,6 +88,15 @@ fn init() -> Result<Telemetry> {
 
 fn mute(filter: EnvFilter) -> EnvFilter {
     filter.add_directive("opentelemetry=off".parse().expect("opentelemetry=off"))
+}
+
+fn metric(meta: &Metadata<'_>) -> bool {
+    const PREFIXES: [&str; 4] = ["monotonic_counter.", "counter.", "histogram.", "gauge."];
+    meta.is_event()
+        && meta
+            .fields()
+            .iter()
+            .any(|field| PREFIXES.iter().any(|prefix| field.name().starts_with(prefix)))
 }
 
 #[expect(clippy::print_stderr, reason = "the subscriber that would carry this failed to install")]
