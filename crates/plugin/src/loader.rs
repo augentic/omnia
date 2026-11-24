@@ -53,7 +53,9 @@ impl<B: Backends> PluginLoader for Runtime<B> {
 /// reached through the runtime's first-use seam; its read-only mounts; and
 /// the registry source its packages are fetched through.
 ///
-/// The grant is fixed at install. `load` resolves a location inside it:
+/// The grant is fixed at install. `load` refuses a location that derives a
+/// name outside the loading guest's [`guests`](Grants::guests), and resolves
+/// any other inside the grant:
 ///
 /// - a declared name to the deployment's own entry;
 /// - a path to the read-only mount beneath which it lies, of those the
@@ -112,9 +114,12 @@ impl Plugins {
     /// Ensure the guest `from` names is active and return its handle, loading
     /// it for a guest that runs under `caller`.
     ///
+    /// The name the location derives must be one of `caller`'s
+    /// [`guests`](Grants::guests), whatever the location.
+    ///
     /// - A declared name goes through the runtime's first-use seam. The
-    ///   deployment's entry is its source, its pin, and its grants, so the
-    ///   load is not held to `caller`. A guest already loaded is attested.
+    ///   deployment's entry is its source, its pin, and its grants. A guest
+    ///   already loaded is attested.
     /// - A path or package is acquired inside the deployment's grant: a path
     ///   beneath a mount `caller` reaches, and a package from a registry the
     ///   load names only when `caller`'s [`hosts`](Grants::hosts) reach that
@@ -134,6 +139,8 @@ impl Plugins {
     /// - [`LoadError::NotFound`] for an undeclared name, a path beneath no
     ///   mount or with no file, or a package nothing routes or holds.
     /// - [`LoadError::Denied`] for:
+    ///   - a location deriving a name outside `caller`'s
+    ///     [`guests`](Grants::guests);
     ///   - a path or package deriving a name the deployment declares, or one
     ///     active under other grants;
     ///   - a path beneath a mount `caller` does not reach, beneath a writable
@@ -154,7 +161,13 @@ impl Plugins {
     pub async fn load(
         &self, from: Location, pin: Option<Digest>, caller: &Grants,
     ) -> Result<Result<Plugin, LoadConflict>, LoadError> {
+        // hold the name the location derives to the caller's guests
         let id = from.id();
+        if !caller.allows_guest(id.as_str()) {
+            return Err(LoadError::Denied(format!(
+                "the loading guest's grants reach no guest `{id}`, which `{from}` names"
+            )));
+        }
 
         // acquire the bytes the location names, inside the grant; a name the
         // runtime refuses caller-named bytes under is refused before any read
@@ -250,8 +263,8 @@ impl Plugins {
     }
 }
 
-// The registry a load names is parsed before the caller's grants are read,
-// so a malformed one is invalid whatever the grants list.
+// The registry a load names is parsed before the caller's `hosts` are read,
+// so a malformed one is invalid whatever that list holds.
 fn check_registry(endpoint: &str, caller: &Grants) -> Result<(), LoadError> {
     let registry = endpoint.parse::<Registry>().map_err(|error| {
         LoadError::Invalid(format!("registry `{endpoint}` is not a valid name: {error}"))

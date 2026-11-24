@@ -1,8 +1,9 @@
 //! Loads by a requester whose grants reach one of two read-only mounts. A
-//! declared guest loads under its own grants. A path beneath the mount the
-//! grants reach loads, and one beneath the other mount is denied. A component
-//! importing a package outside the grants it would run under is denied,
-//! naming the package.
+//! declared guest loads under its own grants, and one the requester's grants
+//! do not name is denied. A path beneath the mount the grants reach loads,
+//! and one beneath the other mount is denied. A component importing a
+//! package outside the grants it would run under is denied, naming the
+//! package.
 
 #![cfg(target_arch = "wasm32")]
 
@@ -34,6 +35,7 @@ async fn scenario() {
     let plugin = loader::load(Source::Declared("plugin".to_owned())).await;
     let plugin = plugin.expect("the deployment declares `plugin`").expect("no conflict");
     assert_eq!(plugin.name, "plugin");
+    denied(Source::Declared("secret".to_owned()), "reach no guest `secret`").await;
 
     let tool = loader::load(path("store/tool.wasm")).await;
     let tool = tool.expect("the grants reach `store`").expect("no conflict");

@@ -6,7 +6,9 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::{Context as _, Result, anyhow, bail, ensure};
-use omnia_core::{ChainCtx, ChainPolicy, Dispatcher, GuestId, InvokeError, StoreCtx, handle_kind};
+use omnia_core::{
+    ChainCtx, ChainPolicy, Dispatcher, Grants, GuestId, InvokeError, StoreCtx, handle_kind,
+};
 use wasmtime::Engine;
 use wasmtime::component::{Linker, Type, Val, types};
 
@@ -56,12 +58,13 @@ pub struct Caller {
 /// polyfilled with `func_new_async`, an `async func` with
 /// `func_new_concurrent` — the sync-typed registration would fail the
 /// pre-instantiation asyncness typecheck. Both share one body ([`relay`]),
-/// whose only read of the caller's store is a snapshot of its chain context
-/// and dispatcher, taken before the dispatch. A function an earlier guest wired with the
-/// *other* asyncness is a cross-guest interface disagreement, rejected here
-/// with both views named. A signature carrying a store-bound handle
-/// (resource, future, stream, error-context) is refused before it is wired:
-/// only plain values cross the seam.
+/// whose only read of the caller's store is a snapshot of its identity,
+/// grants, chain context, and dispatcher, taken before the dispatch. A
+/// function an earlier guest wired with the *other* asyncness is a
+/// cross-guest interface disagreement, rejected here with both views named.
+/// A signature carrying a store-bound handle (resource, future, stream,
+/// error-context) is refused before it is wired: only plain values cross the
+/// seam.
 ///
 /// # Errors
 ///
@@ -167,6 +170,8 @@ pub fn polyfill_component<B: Send + 'static>(
 // Read from the calling store before the future is built, so no store borrow
 // crosses the dispatch.
 struct Origin {
+    guest: GuestId,
+    grants: Arc<Grants>,
     chain: ChainCtx,
     dispatcher: Arc<dyn Dispatcher>,
 }
@@ -174,26 +179,39 @@ struct Origin {
 impl Origin {
     fn of<B>(data: &StoreCtx<B>) -> Self {
         Self {
+            guest: data.guest().clone(),
+            grants: data.grants(),
             chain: data.chain(),
             dispatcher: data.dispatcher(),
         }
     }
 }
 
-// One call: select the target, reject crossing handles, take a depth slot,
-// resolve the live route (loading a declared target at first use), and run a
-// fresh callee instance on its own task.
+// One call: select the target, hold the caller to its grants, reject
+// crossing handles, take a depth slot, resolve the live route (loading a
+// declared target at first use), and run a fresh callee instance on its own
+// task.
 async fn relay(
     caller: &Caller, origin: Origin, interface: &str, func: &str, ty: &types::ComponentFunc,
     params: &[Val], results: &mut [Val],
 ) -> Result<()> {
     let start = Instant::now();
-    let Origin { chain, dispatcher } = origin;
+    let Origin {
+        guest,
+        grants,
+        chain,
+        dispatcher,
+    } = origin;
 
     let (target, forwarded) = caller
         .selector
         .select(interface, func, params)
         .with_context(|| format!("selecting target for `{interface}/{func}`"))?;
+    ensure!(
+        grants.allows_guest(target.as_str()),
+        "guest `{guest}` may not call `{target}` (call to `{interface}/{func}`): its grants \
+         reach no such guest"
+    );
 
     // Plain records cross by value; a live handle never crosses.
     if let Some(kind) = forwarded.iter().find_map(handle_kind) {

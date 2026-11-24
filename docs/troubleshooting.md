@@ -60,6 +60,10 @@ A guest named a `release` with a `registry` other than the one the deployment's 
 
 A guest named a `release` with a `registry` whose host its `hosts` grant does not reach, so the load is `denied` before anything is fetched. Add the registry's host to the loading guest's `hosts`, or drop the registry and let the deployment's routing pick one. A registry spelled as an address, or ending in a `.`, is refused under any list, `*` included. A `registry` that is not a host name with an optional `:port` is `invalid`, as `registry ... is not a valid name`, whatever the grants.
 
+### `the loading guest's grants reach no guest ..., which ... names`
+
+A guest called `omnia:plugins/loader.load`, and its grants table's `guests` list leaves out the name the source registers under: the declared name, a path's file stem, or a release's reference without its version. The load is `denied` before anything is read or fetched, whatever the source. A table that leaves out `guests` reaches no guest. Add the name, or a prefix of it that ends in `*`, to the loading guest's `guests`. A loading guest that was itself loaded by path or release runs under `[plugins.grants]` within its own loader's grants, so add the name to both.
+
 ### `path ... is beneath the writable mount ...`
 
 A guest named a component `path` beneath a mount the deployment marks `writable`. A component loads from a read-only mount alone — what a guest can write, it cannot run. Mount the code directory read-only and keep the guest's state under a mount of its own; the two may not share or nest directories (`writable mount ... shares its directory with the read-only mount ...` at startup, judged by directory identity, so a bind mount or firmlink of the code directory counts as it).
@@ -106,6 +110,7 @@ A grants table holds an entry the deployment cannot honour, and the message name
 - an `env` entry that reaches no variable `[env] inherit` or `--env` passes;
 - a `mounts` entry that names no `[[mount]]` of the deployment;
 - a `hosts` entry that carries a scheme, a port, or a path, is an IP literal, or ends in a numeric label (`2130706433`, `example.1`), which reads as an IP address, where a host name, `*.suffix`, or `*` belongs;
+- a `guests` entry that is empty or holds a `*` before its end, where a guest name or a prefix of one ending in `*` belongs;
 - an `interfaces` entry that names an interface (`wasi:http/types`), a version (`wasi:http@0.3.0`), or a bare namespace (`wasi`), where a package (`wasi:http`) or a prefix such as `wasi:*` belongs.
 
 Startup refuses a manifest's table, and refuses `[plugins.grants]` for the same entries as `` `[plugins.grants]` is invalid ``. `Runtime::register` and `Runtime::admit` refuse an embedder's as `invalid`, and `Plugins::install` refuses the loader's.
@@ -204,6 +209,10 @@ Mounts are **read-only by default**. Add `writable = true` (manifest) or `,writa
 ### An outbound request fails with `http-request-denied`
 
 The guest declares grants, and the request's host, or the host a redirect leads to, is outside its `hosts` list. The host refuses it before anything connects. A table that leaves out `hosts`, `[plugins.grants]` included, reaches no host at all. Add the host: a whole name, `*.suffix` for a domain and every host beneath it, or `*` for every host name. A host spelled as an address (`127.0.0.1`, `2130706433`, `[::1]`), or one ending in a `.`, is refused under any list, `*` included, so name the host instead. Only a guest without a grants table reaches an address. In a test, `MatchedHttp` refuses the same requests and records none of them.
+
+### `guest ... may not call ... (call to ...): its grants reach no such guest`
+
+The calling guest declares grants, and the guest its link call names is outside its `guests` list. The relay refuses the call before the target loads, so nothing of the target is read or run. A table that leaves out `guests`, `[plugins.grants]` included, reaches no guest at all. Add the target's name, or a prefix of it that ends in `*`, to the caller's `guests`; `*` reaches every guest. The caller also needs the package it calls through in its `interfaces`, or it is refused at admission instead.
 
 ### Outbound HTTP or spawned work inside a handler deadlocks
 

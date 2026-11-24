@@ -281,9 +281,9 @@ async fn register_grants() {
     assert!(format!("{err:#}").contains("`mounts` entry `dta`"), "unexpected error: {err:#}");
     assert!(runtime.registry().get(&GuestId::from("full")).is_none(), "nothing was admitted");
 
-    let grants = Grants::none().interfaces(["wasi:*", "omnia-test:*"]);
+    let grants = Grants::none().guests(["echoer"]).interfaces(["wasi:*", "omnia-test:*"]);
     runtime.register("full", full.clone(), grants).await.expect("the grants reach every import");
-    let reordered = Grants::none().interfaces(["omnia-test:*", "wasi:*"]);
+    let reordered = Grants::none().guests(["echoer"]).interfaces(["omnia-test:*", "wasi:*"]);
     runtime.register("full", full.clone(), reordered).await.expect("the same grants attest");
     let err =
         runtime.register("full", full, Grants::all()).await.expect_err("other grants than its own");
@@ -503,6 +503,42 @@ fn runtime_options() {
         format!("{err:#}").contains("expected one of `auto`/`yes`/`no`"),
         "unexpected error: {err:#}"
     );
+}
+
+// The relay forwards to whichever guest its first argument names, so one
+// program reaches a granted target and an ungranted one. The ungranted target
+// is declared by path, so a refusal that came after its first use would load
+// it.
+#[tokio::test]
+async fn caller_grants() {
+    let relay = std::fs::read(test_programs::LINK_RELAY).expect("reading the relay");
+    let echoer = std::fs::read(test_programs::LINK_ECHOER).expect("reading the echoer");
+    let grants = Grants::none().guests(["echoer"]).interfaces(["wasi:*", "omnia-test:*"]);
+    let manifest = Manifest::new()
+        .guest(GuestEntry::new("relay", relay).grants(grants))
+        .guest(GuestEntry::new("echoer", echoer))
+        .guest(GuestEntry::new("other", test_programs::LINK_ECHOER));
+    let runtime = assemble(manifest, |builder| builder).await.expect("deployment boots");
+
+    let relay_to = |target: &str| {
+        runtime.dispatcher().invoke(
+            ChainCtx::server(),
+            GuestId::from("relay"),
+            Some("omnia-test:link/ops".into()),
+            "ping".into(),
+            vec![Val::String(target.to_owned()), Val::String("1".into())],
+        )
+    };
+
+    let answer = relay_to("echoer").await.expect("the relay's grants reach `echoer`");
+    assert_eq!(answer, vec![Val::String("echoer pong: 0".into())]);
+
+    let err = relay_to("other").await.expect_err("the relay's grants reach no `other`");
+    assert!(
+        format!("{err:#}").contains("guest `relay` may not call `other`"),
+        "unexpected error: {err:#}"
+    );
+    assert!(runtime.registry().get(&GuestId::from("other")).is_none(), "nothing was loaded");
 }
 
 // The host→guest hop is entered from a root, so it is depth 1 and with a bound

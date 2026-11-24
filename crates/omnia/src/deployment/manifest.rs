@@ -806,6 +806,7 @@ mod tests {
             env = ["ORDERS_*"]
             mounts = ["data"]
             hosts = ["api.example.com", "*.cdn.example.com"]
+            guests = ["pricing", "acme:*"]
             interfaces = ["wasi:*", "omnia:otel"]
 
             [[guest]]
@@ -826,6 +827,7 @@ mod tests {
                 .env(["ORDERS_*"])
                 .mounts(["data"])
                 .hosts(["api.example.com", "*.cdn.example.com"])
+                .guests(["pricing", "acme:*"])
                 .interfaces(["wasi:*", "omnia:otel"])
         );
         assert_eq!(manifest.guests[1].grants, Grants::none());
@@ -850,6 +852,7 @@ mod tests {
             (Grants::none().env(["PATH"]), "`env` entry `PATH` reaches no variable"),
             (Grants::none().mounts(["data"]), "`mounts` entry `data` names no mount"),
             (Grants::none().hosts(["2130706433"]), "`hosts` entry `2130706433` ends in a numeric"),
+            (Grants::none().guests(["a*b"]), "`guests` entry `a*b` is not a guest name"),
             (
                 Grants::none().interfaces(["wasi:http/types"]),
                 "`interfaces` entry `wasi:http/types`",

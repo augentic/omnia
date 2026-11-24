@@ -637,7 +637,7 @@ impl Parse for GuestRoutesSpec {
     }
 }
 
-/// A guest's `grants: { env: [..], mounts: [..], hosts: [..], interfaces: [..] }` block.
+/// A guest's `grants: { .. }` block of `env`, `mounts`, `hosts`, `guests`, and `interfaces` lists.
 ///
 /// An omitted list grants nothing, as a manifest's grants table does.
 #[derive(Default)]
@@ -648,6 +648,8 @@ pub struct GrantsSpec {
     pub mounts: Vec<Expr>,
     /// The hosts the guest's outbound requests reach, by host pattern.
     pub hosts: Vec<Expr>,
+    /// The guests the guest calls over a link or loads, by name.
+    pub guests: Vec<Expr>,
     /// The packages the guest may import code from.
     pub interfaces: Vec<Expr>,
 }
@@ -661,13 +663,14 @@ impl Parse for GrantsSpec {
                 "env" => grants.env = parse_bracketed_list(value)?,
                 "mounts" => grants.mounts = parse_bracketed_list(value)?,
                 "hosts" => grants.hosts = parse_bracketed_list(value)?,
+                "guests" => grants.guests = parse_bracketed_list(value)?,
                 "interfaces" => grants.interfaces = parse_bracketed_list(value)?,
                 other => {
                     return Err(syn::Error::new(
                         key.span(),
                         format!(
                             "unknown grants key `{other}`; expected `env`, `mounts`, `hosts`, \
-                             or `interfaces`"
+                             `guests`, or `interfaces`"
                         ),
                     ));
                 }

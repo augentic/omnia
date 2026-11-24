@@ -260,6 +260,7 @@ mod deployment_keys {
                     env: ["SPECIFY_*"],
                     mounts: ["project"],
                     hosts: ["api.example.com", "*.cdn.example.com"],
+                    guests: ["target:*"],
                     interfaces: ["wasi:*", "omnia:otel"],
                 },
             },
@@ -369,6 +370,7 @@ fn inline_deployment() {
             .env(["SPECIFY_*"])
             .mounts(["project"])
             .hosts(["api.example.com", "*.cdn.example.com"])
+            .guests(["target:*"])
             .interfaces(["wasi:*", "omnia:otel"])
     );
 

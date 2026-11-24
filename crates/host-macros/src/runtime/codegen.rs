@@ -246,12 +246,14 @@ fn emit_grants(grants: &GrantsSpec) -> TokenStream {
     let env = &grants.env;
     let mounts = &grants.mounts;
     let hosts = &grants.hosts;
+    let guests = &grants.guests;
     let interfaces = &grants.interfaces;
     quote! {
         omnia::Grants::none()
             #(.env([#env]))*
             #(.mounts([#mounts]))*
             #(.hosts([#hosts]))*
+            #(.guests([#guests]))*
             #(.interfaces([#interfaces]))*
     }
 }
