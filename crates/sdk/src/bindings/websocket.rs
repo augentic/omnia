@@ -3,7 +3,7 @@
 //   * runtime_path: "wasip3::wit_bindgen::rt"
 //   * with "omnia:types/types@0.1.0" = "crate::bindings::imports::omnia::types::types"
 //   * with "omnia:websocket/types@0.1.0" = "crate::bindings::imports::omnia::websocket::types"
-//   * type_section_suffix: "rust-omnia-sdk-0.38.0-websocket-world"
+//   * type_section_suffix: "rust-omnia-sdk-0.38.1-websocket-world"
 //   * default-bindings-module: "$crate"
 //   * export-macro-name: _export_websocket
 //   * pub-export-macro
@@ -324,7 +324,7 @@ macro_rules! __export_websocket_impl {
         with_types_in $($path_to_types_root)*::
         exports::omnia::websocket::incoming_handler); const _ : () = { #[rustfmt::skip]
         #[cfg(target_arch = "wasm32")] #[unsafe (link_section =
-        "component-type:wit-bindgen:0.63.0:omnia:sdk@0.38.0:websocket:imports and exportsrust-omnia-sdk-0.38.0-websocket-world")]
+        "component-type:wit-bindgen:0.63.0:omnia:sdk@0.38.1:websocket:imports and exportsrust-omnia-sdk-0.38.1-websocket-world")]
         #[doc(hidden)] #[allow(clippy::octal_escapes)] pub static
         __WIT_BINDGEN_COMPONENT_TYPE : [u8; 786] = *
         b"\
@@ -344,7 +344,7 @@ nt.connect\x01\x17\x03\0\x1bomnia:websocket/types@0.1.0\x05\x03\x02\x03\0\x01\x0
 error\x02\x03\0\x01\x05event\x01B\x07\x02\x03\x02\x01\x04\x04\0\x05error\x03\0\0\
 \x02\x03\x02\x01\x05\x04\0\x05event\x03\0\x02\x01j\0\x01\x01\x01C\x01\x05event\x03\
 \0\x04\x04\0\x06handle\x01\x05\x04\0&omnia:websocket/incoming-handler@0.1.0\x05\x06\
-\x04\0\x1aomnia:sdk/websocket@0.38.0\x04\0\x0b\x0f\x01\0\x09websocket\x03\0\0\0G\
+\x04\0\x1aomnia:sdk/websocket@0.38.1\x04\0\x0b\x0f\x01\0\x09websocket\x03\0\0\0G\
 \x09producers\x01\x0cprocessed-by\x02\x0dwit-component\x070.262.0\x10wit-bindgen\
 -rust\x060.63.0";
         };
@@ -355,7 +355,7 @@ pub use __export_websocket_impl as _export_websocket;
 #[rustfmt::skip]
 #[cfg(target_arch = "wasm32")]
 #[unsafe(
-    link_section = "component-type:wit-bindgen:0.63.0:omnia:sdk@0.38.0:websocket-with-all-of-its-exports-removed:encoded worldrust-omnia-sdk-0.38.0-websocket-world"
+    link_section = "component-type:wit-bindgen:0.63.0:omnia:sdk@0.38.1:websocket-with-all-of-its-exports-removed:encoded worldrust-omnia-sdk-0.38.1-websocket-world"
 )]
 #[doc(hidden)]
 #[allow(clippy::octal_escapes)]
@@ -373,7 +373,7 @@ ame\x03\0\x0e\x04\0\x06client\x03\x01\x01k\x07\x01k\x03\x01r\x05\x0aconnection\x
 \x05route\x11\x07message\x0d\x08metadata\x0a\x08deadline\x12\x04\0\x05event\x03\0\
 \x13\x01i\x10\x01j\x01\x15\x01\x01\x01C\x01\x04names\0\x16\x04\0\x16[static]clie\
 nt.connect\x01\x17\x03\0\x1bomnia:websocket/types@0.1.0\x05\x03\x04\0:omnia:sdk/\
-websocket-with-all-of-its-exports-removed@0.38.0\x04\0\x0b/\x01\0)websocket-with\
+websocket-with-all-of-its-exports-removed@0.38.1\x04\0\x0b/\x01\0)websocket-with\
 -all-of-its-exports-removed\x03\0\0\0G\x09producers\x01\x0cprocessed-by\x02\x0dw\
 it-component\x070.262.0\x10wit-bindgen-rust\x060.63.0";
 #[inline(never)]

@@ -4,7 +4,7 @@
 //   * with "wasi:filesystem/types@0.3.2" = "wasip3::filesystem::types"
 //   * with "wasi:clocks/system-clock@0.3.2" = "wasip3::clocks::system_clock"
 //   * with "wasi:clocks/types@0.3.2" = "wasip3::clocks::types"
-//   * type_section_suffix: "rust-omnia-sdk-0.38.0"
+//   * type_section_suffix: "rust-omnia-sdk-0.38.1"
 #[allow(unfulfilled_lint_expectations, unused_imports)]
 use wasip3::clocks::types as __with_name0;
 #[allow(unfulfilled_lint_expectations, unused_imports)]
@@ -56859,7 +56859,7 @@ pub mod wit_stream {
 #[rustfmt::skip]
 #[cfg(target_arch = "wasm32")]
 #[unsafe(
-    link_section = "component-type:wit-bindgen:0.63.0:omnia:sdk@0.38.0:imports:encoded worldrust-omnia-sdk-0.38.0"
+    link_section = "component-type:wit-bindgen:0.63.0:omnia:sdk@0.38.1:imports:encoded worldrust-omnia-sdk-0.38.1"
 )]
 #[doc(hidden)]
 #[allow(clippy::octal_escapes)]
@@ -57348,7 +57348,7 @@ lict\x03\0\x10\x03\0\x19omnia:plugins/types@0.1.0\x05}\x02\x03\01\x08conflict\x0
 \x02\x01\x80\x01\x04\0\x06plugin\x03\0\x04\x02\x03\x02\x01\x81\x01\x04\0\x06sour\
 ce\x03\0\x06\x01j\x01\x05\x01\x01\x01j\x01\x08\x01\x03\x01C\x01\x06source\x07\0\x09\
 \x04\0\x04load\x01\x0a\x03\0\x1aomnia:plugins/loader@0.1.0\x05\x82\x01\x04\0\x18\
-omnia:sdk/imports@0.38.0\x04\0\x0b\x0d\x01\0\x07imports\x03\0\0\0G\x09producers\x01\
+omnia:sdk/imports@0.38.1\x04\0\x0b\x0d\x01\0\x07imports\x03\0\0\0G\x09producers\x01\
 \x0cprocessed-by\x02\x0dwit-component\x070.262.0\x10wit-bindgen-rust\x060.63.0";
 #[inline(never)]
 #[doc(hidden)]

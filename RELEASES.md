@@ -4,12 +4,11 @@ Unreleased
 
 ### Fixed
 
-<!-- Release notes generated using configuration in .github/release.yaml at 35c6a1677384982a25127095fc910b67e3fa910c -->
+- Preserve pending `omnia-wasi-blobstore` `put` writes across polls instead of dropping `Container::write_data` futures that do not complete on their first poll ([#455](https://github.com/augentic/omnia/pull/455)).
 
-## What's Changed
-* Update dependencies and decouple xtask wit-parser by @andrew-goldie in https://github.com/augentic/omnia/pull/454
-* Preserve pending blobstore put writes across polls by @andrew-goldie in https://github.com/augentic/omnia/pull/455
+### Changed
 
+- Updated dependencies: `anyhow` `1.0.105`, `hyper` `1.13.0`, and `rusqlite` `0.43.0` in `omnia-wasi-sql` ([#454](https://github.com/augentic/omnia/pull/454)).
 
 **Full Changelog**: https://github.com/augentic/omnia/compare/v0.38.0...v0.38.1
 
