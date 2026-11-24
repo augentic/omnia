@@ -1,10 +1,11 @@
 //! # Telemetry
 //!
-//! The host's observability stack: the `tracing` subscriber (the run's
-//! `EnvFilter`, `fmt` to stderr) with the OTLP span and metric exporters
-//! layered beneath it, and the process-wide OpenTelemetry providers they
-//! publish. The run's filter is its [`directives`]; the console alone may
-//! refine the runtime's own crates beneath it
+//! The host's observability stack: the `tracing` subscriber (`fmt` to
+//! stderr, with the OTLP span and metric exporters beside it) and the
+//! process-wide OpenTelemetry providers they publish. The run's filter is its
+//! [`directives`]. It governs the console and the span exporter, never a
+//! metric ([`filter`](Telemetry::filter)), and the console alone may refine
+//! the runtime's own crates beneath it
 //! ([`runtime_level`](Telemetry::runtime_level)). A signal's exporter
 //! attaches only when an OTLP endpoint is configured for it, so a run with no
 //! collector exports nothing rather than retrying against one.
@@ -15,14 +16,13 @@
 //! telemetry, so call [`flush`] before a fast process exit; the runtime does
 //! this at the end of every drive.
 //!
-//! The runtime's own metrics are OpenTelemetry instruments, so they record
-//! whatever the run's filter is. [`record_pool`] samples the instance pool
-//! and [`record_invocations`] the concurrency gate. [`count_message`],
-//! [`count_event`], and [`count_error`] count what the triggers handle. They
-//! bind once, when [`Telemetry::build`] settles, to the
-//! global meter provider as it then stands. That is omnia's own when the
-//! build installs it, and the one the process published otherwise. A metric
-//! recorded before then is dropped.
+//! The runtime records its own metrics on OpenTelemetry instruments.
+//! [`record_pool`] samples the instance pool and [`record_invocations`] the
+//! concurrency gate. [`count_message`], [`count_event`], and [`count_error`]
+//! count what the triggers handle. They bind once, when [`Telemetry::build`]
+//! settles, to the global meter provider as it then stands. That is omnia's
+//! own when the build installs it, and the one the process published
+//! otherwise. A metric recorded before then is dropped.
 
 use std::env;
 use std::io::IsTerminal;
@@ -39,14 +39,14 @@ use opentelemetry_otlp::{
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
 use opentelemetry_sdk::metrics::SdkMeterProvider;
-use opentelemetry_sdk::trace::SdkTracerProvider;
-use tracing::Subscriber;
+use opentelemetry_sdk::trace::{SdkTracer, SdkTracerProvider};
+use tracing::{Metadata, Subscriber};
 use tracing_opentelemetry::MetricsLayer;
-use tracing_subscriber::filter::{Directive, LevelFilter, ParseError};
+use tracing_subscriber::filter::{Directive, LevelFilter, ParseError, filter_fn};
 use tracing_subscriber::fmt::MakeWriter;
 use tracing_subscriber::layer::{Layer, SubscriberExt};
 use tracing_subscriber::registry::LookupSpan;
-use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::util::{SubscriberInitExt, TryInitError};
 use tracing_subscriber::{EnvFilter, Registry};
 use wasmtime::PoolingAllocatorMetrics;
 
@@ -101,10 +101,12 @@ impl Telemetry {
     ///
     /// `directives` is a `RUST_LOG` string (`info`, `omnia_core=debug`) —
     /// typically the run's [`directives`], composed from its verbosity flag
-    /// and the process `RUST_LOG`. It governs every span and event, on the
-    /// console and through the exporters, and the `RUST_LOG` every guest
-    /// receives. The runtime's own metrics are instruments, not events, so it
-    /// does not govern them. The always-on noisy-dependency mutes still apply.
+    /// and the process `RUST_LOG`. It governs every span and event on the
+    /// console and through the span exporter, and the `RUST_LOG` every guest
+    /// receives. Metrics record whatever it is, whether an instrument's or a
+    /// `tracing` event's with a `monotonic_counter.`, `counter.`,
+    /// `histogram.`, or `gauge.` field. The always-on noisy-dependency mutes
+    /// still apply.
     #[must_use]
     pub fn filter(mut self, directives: impl Into<String>) -> Self {
         self.filter = Some(directives.into());
@@ -160,20 +162,12 @@ impl Telemetry {
         // console to stderr, since stdout is the guest's; plain text off a terminal or under `NO_COLOR`
         let console = console(&directives, self.runtime, std::io::stderr, ansi())?;
 
-        // every layer filtered: an unfiltered one beside the console's per-layer
-        // filter drops the level hint, and `log` records flood in unfiltered
-        let subscriber = Registry::default()
-            .with(filter(&directives)?)
-            .with(console)
-            .with(
-                tracing_opentelemetry::layer()
-                    .with_tracer(tracer)
-                    .with_filter(filter(&directives)?),
-            )
-            .with(MetricsLayer::new(providers.meter.clone()).with_filter(filter(&directives)?));
+        let run = filter(&directives)?;
+        let level = run.max_level_hint().unwrap_or(LevelFilter::TRACE);
+        let subscriber = subscriber(run, console, tracer, providers.meter.clone());
 
         // publish the providers only once the subscriber referencing them is installed
-        match subscriber.try_init() {
+        match install(subscriber, level) {
             Ok(()) => {
                 providers.publish()?;
                 if exports != Exports::ALL {
@@ -345,6 +339,54 @@ fn filter(directives: &str) -> Result<EnvFilter> {
         .add_directive("opentelemetry=off".parse()?)
         .add_directive("opentelemetry_sdk=off".parse()?)
         .add_directive("omnia_wasi_otel=off".parse()?))
+}
+
+// The metrics layer sits beside the run's filter, not beneath it, so a metric
+// event records whatever the run's level. It takes a filter of its own: an
+// unfiltered layer would leave every callsite the run disables to be checked
+// again at each hit.
+fn subscriber<C>(
+    run: EnvFilter, console: C, tracer: SdkTracer, meter: SdkMeterProvider,
+) -> impl Subscriber + Send + Sync + 'static
+where
+    C: Layer<Registry> + Send + Sync + 'static,
+{
+    let exporter = tracing_opentelemetry::layer().with_tracer(tracer);
+    Registry::default()
+        .with(console.and_then(exporter).with_filter(run))
+        .with(MetricsLayer::new(meter).with_filter(filter_fn(metric)))
+}
+
+// the events `MetricsLayer` records, by the field prefixes it keeps private
+fn metric(meta: &Metadata<'_>) -> bool {
+    const PREFIXES: [&str; 4] = ["monotonic_counter.", "counter.", "histogram.", "gauge."];
+    meta.is_event()
+        && meta
+            .fields()
+            .iter()
+            .any(|field| PREFIXES.iter().any(|prefix| field.name().starts_with(prefix)))
+}
+
+// Under `tracing-log`, `try_init` hands `log` the subscriber's level hint,
+// which metric events lift to `trace`. A `log` record carries no metric, so
+// when `try_init` moves `log`'s level it goes back to the run's. At `trace`,
+// every record Cranelift logs would dispatch.
+fn install(
+    subscriber: impl Subscriber + Send + Sync + 'static, level: LevelFilter,
+) -> Result<(), TryInitError> {
+    let before = log::max_level();
+    subscriber.try_init()?;
+    if log::max_level() != before {
+        log::set_max_level(match level {
+            LevelFilter::OFF => log::LevelFilter::Off,
+            LevelFilter::ERROR => log::LevelFilter::Error,
+            LevelFilter::WARN => log::LevelFilter::Warn,
+            LevelFilter::INFO => log::LevelFilter::Info,
+            LevelFilter::DEBUG => log::LevelFilter::Debug,
+            _ => log::LevelFilter::Trace,
+        });
+    }
+    Ok(())
 }
 
 /// The run's tracing directives: the verbosity flag composed with `RUST_LOG`.
@@ -617,7 +659,8 @@ impl Metrics {
 }
 
 // private rules over the run's directives and environment, which no public
-// boundary reaches
+// boundary reaches, and the subscriber `build` installs, whose metrics none
+// observes without a collector
 #[cfg(test)]
 mod tests {
     // `NO_COLOR` is honoured on a terminal by its convention — any non-empty
@@ -757,6 +800,84 @@ mod tests {
                     metrics: true
                 }
             );
+        }
+    }
+
+    // a metric event records whatever the run's level, which the console keeps to
+    mod subscriber {
+        use std::io;
+        use std::sync::{Arc, Mutex, PoisonError};
+
+        use opentelemetry::trace::TracerProvider as _;
+        use opentelemetry_sdk::metrics::data::{ResourceMetrics, ScopeMetrics};
+        use opentelemetry_sdk::metrics::{InMemoryMetricExporter, SdkMeterProvider};
+        use opentelemetry_sdk::trace::SdkTracerProvider;
+        use tracing_subscriber::fmt::MakeWriter;
+
+        use super::super::{console, filter, subscriber};
+
+        #[test]
+        fn below_level() {
+            let out = Console::default();
+            let exporter = InMemoryMetricExporter::default();
+            let meter =
+                SdkMeterProvider::builder().with_periodic_exporter(exporter.clone()).build();
+            let tracer = SdkTracerProvider::builder().build().tracer("test");
+            let console = console("warn", None, out.clone(), false).expect("directives parse");
+            let run = filter("warn").expect("directives parse");
+            let stack = subscriber(run, console, tracer, meter.clone());
+
+            tracing::subscriber::with_default(stack, || {
+                tracing::info!(monotonic_counter.published = 1, topic = "orders");
+                tracing::debug!(counter.queued = -1);
+                tracing::trace!(histogram.latency = 2.5);
+                tracing::info!(gauge.depth = 7);
+                tracing::warn!("shown");
+            });
+            meter.force_flush().expect("the provider flushes");
+
+            let finished = exporter.get_finished_metrics().expect("the exporter reads back");
+            let mut names: Vec<_> = finished
+                .last()
+                .into_iter()
+                .flat_map(ResourceMetrics::scope_metrics)
+                .flat_map(ScopeMetrics::metrics)
+                .map(|metric| metric.name().to_owned())
+                .collect();
+            names.sort();
+            assert_eq!(names, ["depth", "latency", "published", "queued"]);
+
+            let shown = out.text();
+            assert_eq!(shown.lines().count(), 1, "{shown}");
+            assert!(shown.contains("shown"), "{shown}");
+        }
+
+        #[derive(Clone, Default)]
+        struct Console(Arc<Mutex<Vec<u8>>>);
+
+        impl Console {
+            fn text(&self) -> String {
+                let bytes = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+                String::from_utf8_lossy(&bytes).into_owned()
+            }
+        }
+
+        impl io::Write for Console {
+            fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+                self.0.lock().unwrap_or_else(PoisonError::into_inner).write(buf)
+            }
+
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+
+        impl<'a> MakeWriter<'a> for Console {
+            type Writer = Self;
+
+            fn make_writer(&'a self) -> Self::Writer {
+                self.clone()
+            }
         }
     }
 }

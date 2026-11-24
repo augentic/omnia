@@ -12,6 +12,10 @@ Unreleased
 - **Grants tables without `hosts`:** a 0.38 `[guest.grants]` or `[plugins.grants]` table that leaves out `hosts` reaches no host, so its guests' outbound HTTP and worker egress fail when a request is made, not at boot. Emery's `[plugins.grants]` is the first such table. Add `hosts` to every table whose guests call out ([#423](https://github.com/augentic/omnia/issues/423)).
 - **Worker egress and test doubles:** an `omnia:model` worker `egress` entry ending in a numeric label (`2130706433`, `example.1`) is `invalid`, since it reads as an IP address, and `omnia_test::host::MatchedHttp` refuses a request outside the guest's `hosts` with `http-request-denied`, recording none ([#423](https://github.com/augentic/omnia/issues/423)).
 
+### Fixed
+
+- Record a `tracing` event's `monotonic_counter.`, `counter.`, `histogram.`, or `gauge.` metric whatever `RUST_LOG` is, in a guest and on the host. Below the run's level such an event was dropped, so a guest's `info!` counter never reached a server running at its default `warn`. `RUST_LOG` still governs the console and spans, and under `tracing-log` a `log` record still dispatches only at the run's level ([#426](https://github.com/augentic/omnia/issues/426)).
+
 ---
 
 Release notes for previous releases can be found on the respective release branches of the repository.

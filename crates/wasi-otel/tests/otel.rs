@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use futures::FutureExt as _;
-use omnia::{ExitStatus, FutureResult, Provides, Telemetry};
+use omnia::{ExitStatus, FutureResult, LevelFilter, Provides, Telemetry};
 use omnia_test::host::Deployment;
 use omnia_wasi_otel::{Error, OtelClient, WasiOtel};
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
@@ -127,20 +127,25 @@ impl OtelClient for Recording {
 
 async fn run_guest(wasm: &str) -> Recording {
     let recording = Recording::default();
-    run(wasm, recording.clone()).await;
+    run(wasm, None, recording.clone()).await;
     recording
 }
 
 // the deadline turns a telemetry-flush deadlock into a failure, not a hung suite
-async fn run<C: OtelClient + Clone>(wasm: &str, client: C) {
+async fn run<C: OtelClient + Clone>(wasm: &str, level: Option<LevelFilter>, client: C) {
     // guest spans join the runtime's own `cli-run` span at `info`, so
     // providers install at that level and the suite adds no span of its own
     Telemetry::new("otel-e2e").filter("info").build().expect("telemetry installs");
 
+    let mut deployment = Deployment::new().guest("guest", wasm);
+    if let Some(level) = level {
+        deployment = deployment.level(level);
+    }
+
     // linked by hand: `run_host` would add a second `WasiOtel` beside the one under test
     let status = tokio::time::timeout(
         Duration::from_secs(300),
-        Deployment::new().guest("guest", wasm).run(Backends(client), |deployment| {
+        deployment.run(Backends(client), |deployment| {
             deployment.host::<WasiOtel>()?;
             Ok(())
         }),
@@ -476,9 +481,11 @@ fn raw_metrics(resource: &ResourceMetrics) {
     assert_eq!(counts(&point.negative), Some((-1, vec![2])));
 }
 
+// A server's default level, above the guest's `info` metric events.
 #[tokio::test]
 async fn otel_metrics_instruments() {
-    let recording = run_guest(test_programs::OTEL_METRICS_INSTRUMENTS).await;
+    let recording = Recording::default();
+    run(test_programs::OTEL_METRICS_INSTRUMENTS, Some(LevelFilter::WARN), recording.clone()).await;
 
     let exports = recording.metric_exports();
     let [first, second] = exports.as_slice() else {
@@ -632,7 +639,7 @@ impl OtelClient for Faulting {
 async fn otel_error_codes() {
     let faulting = Faulting::default();
 
-    run(test_programs::OTEL_ERROR_CODES, faulting.clone()).await;
+    run(test_programs::OTEL_ERROR_CODES, None, faulting.clone()).await;
 
     // the telemetry the host refused never reached the backend
     let exported = faulting.exported.lock().expect("exported names").clone();
