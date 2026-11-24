@@ -267,7 +267,9 @@ fn meet(
     let mut list = None;
     add(
         &mut list,
-        met.iter().copied().filter(|entry| !met.iter().any(|other| other != entry && covers(other, entry))),
+        met.iter()
+            .copied()
+            .filter(|entry| !met.iter().any(|other| other != entry && covers(other, entry))),
     );
     list
 }
