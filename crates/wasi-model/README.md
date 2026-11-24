@@ -33,6 +33,8 @@ Implements `omnia:model`, the interface the SDK's `model` module binds, over one
   fails an `other` level it does not know with `invalid`.
 - A workspace lend carries the `worker` grant, so a worker grant cannot
   be given without a lend.
+- A guest whose deployment grants list `hosts` may state only the worker
+  `egress` those cover, and a request reaching past them is `denied`.
 
 ## Backend
 

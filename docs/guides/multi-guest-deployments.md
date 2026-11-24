@@ -145,10 +145,11 @@ routes.http = ["/adapter"]
 [guest.grants]
 env = ["ADAPTER_*"]                    # of the variables [env] inherit passes
 mounts = ["data"]                      # the [[mount]]s it sees, by name
+hosts = ["api.example.com"]            # the hosts it calls out to
 interfaces = [                         # the packages it imports code from
     "wasi:cli", "wasi:clocks", "wasi:random", "omnia:otel",  # what every omnia-sdk guest imports
     "wasi:filesystem",                 # to use its mount
-    "wasi:http",                       # to serve /adapter, which lets it call out too
+    "wasi:http",                       # to serve /adapter and call its hosts
     "acme:ledger",                     # a package it calls another guest through
 ]
 ```
@@ -156,7 +157,8 @@ interfaces = [                         # the packages it imports code from
 Once a guest has a table, a list the table leaves out grants nothing, `interfaces` included. Each list is held where the access happens:
 
 - `env` filters the guest's environment, and `mounts` its preopens and the paths it may load a component from, so it never sees what it was not granted.
-- `interfaces` refuses a component that imports code from a package outside it when the guest is admitted, naming every such package at once. Name each package rather than writing `wasi:*`, which would grant `wasi:http`, and with it outbound requests, to a guest that serves no HTTP.
+- `hosts` refuses an outbound `wasi:http` request, or a redirect, to a host outside it before anything connects. It holds a model worker's `egress`, and the registry a plugin load names, the same way. It matches host names alone, so `*` reaches every name and never an address.
+- `interfaces` refuses a component that imports code from a package outside it when the guest is admitted, naming every such package at once. Name each package rather than writing `wasi:*`, which would grant `wasi:http`, and with it outbound requests to its `hosts`, to a guest that serves no HTTP.
 
 In Rust, `GuestEntry::grants(Grants::none().mounts(["data"]))` declares a table, and `grants: { .. }` does in `runtime!`. Startup logs each guest without one, so what nothing narrows stays visible. A guest loaded at run time through `omnia:plugins/loader` by path or release runs under `[plugins.grants]` within the grants of the guest that loaded it, or under its loader's grants when the deployment declares none. A declared guest a load names keeps its own table. The [security model](../security-model.md#per-guest-grants) has the full rules.
 

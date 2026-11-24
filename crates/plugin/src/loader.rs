@@ -7,6 +7,7 @@ use std::sync::Arc;
 use anyhow::{Context as _, bail, ensure};
 use cap_std::fs::Dir;
 use omnia_core::{Backends, Digest, Grants, Guest, GuestError, GuestId, MountRegistry, Runtime};
+use wasm_pkg_client::Registry;
 
 use crate::admission::Admission;
 use crate::error::LoadError;
@@ -57,7 +58,8 @@ impl<B: Backends> PluginLoader for Runtime<B> {
 /// - a declared name to the deployment's own entry;
 /// - a path to the read-only mount beneath which it lies, of those the
 ///   loading guest reaches;
-/// - a package to the registry the deployment routes it to.
+/// - a package to the registry the deployment routes it to, or to the one
+///   the load names when the loading guest's grants reach its host.
 ///
 /// It admits the bytes it finds there through the runtime's one admission
 /// body. A guest loaded by path or package runs under the grants
@@ -113,14 +115,15 @@ impl Plugins {
     /// - A declared name goes through the runtime's first-use seam. The
     ///   deployment's entry is its source, its pin, and its grants, so the
     ///   load is not held to `caller`. A guest already loaded is attested.
-    /// - A path or package is acquired inside the deployment's grant, and a
-    ///   path beneath a mount `caller` reaches. It is admitted through the
-    ///   runtime's one admission body as caller-named bytes: held to `pin`
-    ///   when one is given, raw wasm alone, under the name the location
-    ///   derives, which no entry of the deployment may declare. The guest
-    ///   runs under the grants [`install`](Self::install) named, within
-    ///   `caller`. A name already active under the same bytes and grants is
-    ///   attested.
+    /// - A path or package is acquired inside the deployment's grant: a path
+    ///   beneath a mount `caller` reaches, and a package from a registry the
+    ///   load names only when `caller`'s [`hosts`](Grants::hosts) reach that
+    ///   registry's host. It is admitted through the runtime's one admission
+    ///   body as caller-named bytes: held to `pin` when one is given, raw
+    ///   wasm alone, under the name the location derives, which no entry of
+    ///   the deployment may declare. The guest runs under the grants
+    ///   [`install`](Self::install) named, within `caller`. A name already
+    ///   active under the same bytes and grants is attested.
     ///
     /// Idempotent on (name, digest). A path or package whose bytes miss
     /// `pin`, or whose name is active under other bytes, loads nothing and
@@ -136,6 +139,7 @@ impl Plugins {
     ///   - a path beneath a mount `caller` does not reach, beneath a writable
     ///     mount, or one the filesystem refuses to read;
     ///   - a registry named for a package the deployment routes elsewhere;
+    ///   - a registry named whose host `caller` does not reach;
     ///   - a component importing code from a package its grants do not
     ///     reach.
     /// - [`LoadError::Invalid`] for a declared name with a pin, a malformed
@@ -172,6 +176,9 @@ impl Plugins {
             }
             Location::Registry { package, endpoint } => {
                 self.admission.admits(&id)?;
+                if let Some(endpoint) = endpoint {
+                    check_registry(endpoint, caller)?;
+                }
                 self.admission.acquire(package, endpoint.as_deref()).await?
             }
         };
@@ -240,6 +247,21 @@ impl Plugins {
         }
         check_subpath(path, subpath)?;
         Ok((Arc::clone(&root.dir), subpath.to_owned()))
+    }
+}
+
+// The registry a load names is parsed before the caller's grants are read,
+// so a malformed one is invalid whatever the grants list.
+fn check_registry(endpoint: &str, caller: &Grants) -> Result<(), LoadError> {
+    let registry = endpoint.parse::<Registry>().map_err(|error| {
+        LoadError::Invalid(format!("registry `{endpoint}` is not a valid name: {error}"))
+    })?;
+    if caller.allows_host(registry.host()) {
+        Ok(())
+    } else {
+        Err(LoadError::Denied(format!(
+            "registry `{endpoint}` is a host the loading guest's grants do not reach"
+        )))
     }
 }
 

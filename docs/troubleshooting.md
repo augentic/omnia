@@ -56,6 +56,10 @@ A `source.package` guest (the macro's `package:`) was first used, or a guest nam
 
 A guest named a `release` with a `registry` other than the one the deployment's `registries` routes its namespace to. The deployment's routing outranks the load's: drop the registry, or route the namespace to it in the configuration.
 
+### `registry ... is a host the loading guest's grants do not reach`
+
+A guest named a `release` with a `registry` whose host its `hosts` grant does not reach, so the load is `denied` before anything is fetched. Add the registry's host to the loading guest's `hosts`, or drop the registry and let the deployment's routing pick one. A registry spelled as an address, or ending in a `.`, is refused under any list, `*` included. A `registry` that is not a host name with an optional `:port` is `invalid`, as `registry ... is not a valid name`, whatever the grants.
+
 ### `path ... is beneath the writable mount ...`
 
 A guest named a component `path` beneath a mount the deployment marks `writable`. A component loads from a read-only mount alone — what a guest can write, it cannot run. Mount the code directory read-only and keep the guest's state under a mount of its own; the two may not share or nest directories (`writable mount ... shares its directory with the read-only mount ...` at startup, judged by directory identity, so a bind mount or firmlink of the code directory counts as it).
@@ -101,6 +105,7 @@ A grants table holds an entry the deployment cannot honour, and the message name
 - an `env` entry that is not a variable name, or a prefix of one ending in `*`;
 - an `env` entry that reaches no variable `[env] inherit` or `--env` passes;
 - a `mounts` entry that names no `[[mount]]` of the deployment;
+- a `hosts` entry that carries a scheme, a port, or a path, is an IP literal, or ends in a numeric label (`2130706433`, `example.1`), which reads as an IP address, where a host name, `*.suffix`, or `*` belongs;
 - an `interfaces` entry that names an interface (`wasi:http/types`), a version (`wasi:http@0.3.0`), or a bare namespace (`wasi`), where a package (`wasi:http`) or a prefix such as `wasi:*` belongs.
 
 Startup refuses a manifest's table, and refuses `[plugins.grants]` for the same entries as `` `[plugins.grants]` is invalid ``. `Runtime::register` and `Runtime::admit` refuse an embedder's as `invalid`, and `Plugins::install` refuses the loader's.
@@ -196,6 +201,10 @@ Matching is case-sensitive against the name as the host spells it, so `PATH` doe
 
 Mounts are **read-only by default**. Add `writable = true` (manifest) or `,writable` (CLI spec).
 
+### An outbound request fails with `http-request-denied`
+
+The guest declares grants, and the request's host, or the host a redirect leads to, is outside its `hosts` list. The host refuses it before anything connects. A table that leaves out `hosts`, `[plugins.grants]` included, reaches no host at all. Add the host: a whole name, `*.suffix` for a domain and every host beneath it, or `*` for every host name. A host spelled as an address (`127.0.0.1`, `2130706433`, `[::1]`), or one ending in a `.`, is refused under any list, `*` included, so name the host instead. Only a guest without a grants table reaches an address. In a test, `MatchedHttp` refuses the same requests and records none of them.
+
 ### Outbound HTTP or spawned work inside a handler deadlocks
 
 Almost always a `wit-bindgen` version mismatch between your guest's dependencies and the workspace's pinned version: tasks spawned by `wasip3` land in a different executor queue than the one running. Align your guest's `wit-bindgen`/`wasip3` versions with the workspace `Cargo.toml`.
@@ -222,7 +231,11 @@ The runtime is serving `wasi-model` with the echo `ModelDefault`, which answers 
 
 ### `invalid` errors
 
-The host rejected the request, or the guest's side of its session: messages with no text, a guest tool named after a reserved name (`read`, `list`, or `write`), a tool name given twice, a tool `input-schema` that is not valid JSON, a `format` schema that is not JSON, or a tool result or check correction over the host's per-result size cap. The message names the violation. A `Question<T>` also reports `invalid` when a candidate never deserialized as `T` and nothing was accepted — the steering schema and the type disagree.
+The host rejected the request, or the guest's side of its session: messages with no text, a `worker` grant entry that breaks its shape (such as an `egress` entry that is an IP address or ends in a numeric label, like `2130706433`), a guest tool named after a reserved name (`read`, `list`, or `write`), a tool name given twice, a tool `input-schema` that is not valid JSON, a `format` schema that is not JSON, or a tool result or check correction over the host's per-result size cap. The message names the violation. A `Question<T>` also reports `invalid` when a candidate never deserialized as `T` and nothing was accepted — the steering schema and the type disagree.
+
+### `worker egress ... reaches hosts the guest's grants do not`
+
+The completion is `denied`: its worker `egress` names a host the guest's `hosts` grant does not cover. Each entry must lie within the list. `*.example.com` covers `api.example.com` and `*.api.example.com`, and `api.example.com` covers itself alone. Add the host to the guest's `hosts`, or narrow the egress.
 
 ### `no local tree on this node` (cursor backend)
 

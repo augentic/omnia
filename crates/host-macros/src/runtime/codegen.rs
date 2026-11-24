@@ -245,11 +245,13 @@ fn emit_manifest_builder(manifest: &ManifestSpec) -> TokenStream {
 fn emit_grants(grants: &GrantsSpec) -> TokenStream {
     let env = &grants.env;
     let mounts = &grants.mounts;
+    let hosts = &grants.hosts;
     let interfaces = &grants.interfaces;
     quote! {
         omnia::Grants::none()
             #(.env([#env]))*
             #(.mounts([#mounts]))*
+            #(.hosts([#hosts]))*
             #(.interfaces([#interfaces]))*
     }
 }

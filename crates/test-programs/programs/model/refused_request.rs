@@ -85,6 +85,7 @@ async fn scenario() {
         ("registry.npmjs.org:443", "carries a port"),
         ("https://registry.npmjs.org", "carries a scheme"),
         ("registry.npmjs.org/path", "carries a path"),
+        ("2130706433", "ends in a numeric label"),
         ("*", "is not a host name"),
         ("bad_host", "is not a host name"),
         ("", "is not a host name"),

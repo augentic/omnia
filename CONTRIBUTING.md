@@ -28,6 +28,7 @@ Pull requests should be targeted at the `main` branch. Before creating a pull re
 2. [Rebase](https://git-scm.com/book/en/Git-Branching-Rebasing) your local changes against `main`.
 3. Run `make ci` and confirm that it passes: exactly the CI jobs, in order.
 4. Accept the Developer's Certificate of Origin on all commits (see above).
+5. Link the issue the pull request resolves in its description: `Closes #<n>`, or `Part of #<n>` when it is one of several. GitHub closes the issue when the pull request that says `Closes` merges. When the issue has a milestone, a maintainer gives the pull request the same one.
 
 All contributions are made via pull request. All patches from all contributors get reviewed. At least one review from a maintainer is required for all patches (even patches from maintainers). When CI fails, authors are expected to update the pull request until it passes.
 

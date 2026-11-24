@@ -798,6 +798,42 @@ async fn endpoint_unrouted() {
     assert_eq!(status, ExitStatus::SUCCESS, "the requester's assertions all held");
 }
 
+// The registry a load names is held to the loading guest's `hosts` before
+// anything is fetched. A malformed one is invalid whether or not the grants
+// list hosts, and `*` reaches no address however it is spelled.
+#[tokio::test]
+async fn endpoint_hosts() {
+    let scratch = scratch();
+    stage_package(scratch.path(), ECHOER_PACKAGE, test_programs::LINK_ECHOER);
+    let registries = RegistryConfig::contents(local_backend_toml(scratch.path()));
+    let requester = |wasm: &str, grants: Grants| {
+        let source = precompiled(wasm).expect("the requester precompiles");
+        let entry = GuestEntry::new("requester", source).command().grants(grants);
+        Manifest::new().guest(entry).registries(registries.clone())
+    };
+
+    let manifest = requester(test_programs::PLUGINS_LOAD, Grants::all().hosts(["registry.test"]));
+    let status =
+        run(manifest, &["release@registry.test", ECHOER_PACKAGE]).await.expect("deployment runs");
+    assert_eq!(status, ExitStatus::SUCCESS, "the requester's assertions all held");
+
+    let outside: &[&str] =
+        &["release@other.test", ECHOER_PACKAGE, "denied", "registry `other.test` is a host"];
+    let malformed: &[&str] =
+        &["release@bad name", ECHOER_PACKAGE, "invalid", "registry `bad name` is not a valid name"];
+    let address: &[&str] =
+        &["release@127.0.0.1.", ECHOER_PACKAGE, "denied", "registry `127.0.0.1.` is a host"];
+    for (grants, rows) in [
+        (Grants::all().hosts(["registry.test"]), vec![outside, malformed]),
+        (Grants::all(), vec![malformed]),
+        (Grants::all().hosts(["*"]), vec![address]),
+    ] {
+        let manifest = requester(test_programs::PLUGINS_REFUSED, grants);
+        let status = run(manifest, &rows.join(&"--")).await.expect("deployment runs");
+        assert_eq!(status, ExitStatus::SUCCESS, "the requester's assertions all held");
+    }
+}
+
 // Loading a name that is already active attests it — a boot guest from
 // embedded bytes, the requester the command drive loaded — with the digest
 // its registration recorded for its bytes.

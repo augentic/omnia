@@ -805,6 +805,7 @@ mod tests {
             [guest.grants]
             env = ["ORDERS_*"]
             mounts = ["data"]
+            hosts = ["api.example.com", "*.cdn.example.com"]
             interfaces = ["wasi:*", "omnia:otel"]
 
             [[guest]]
@@ -821,7 +822,11 @@ mod tests {
         .expect("the tables parse");
         assert_eq!(
             manifest.guests[0].grants,
-            Grants::none().env(["ORDERS_*"]).mounts(["data"]).interfaces(["wasi:*", "omnia:otel"])
+            Grants::none()
+                .env(["ORDERS_*"])
+                .mounts(["data"])
+                .hosts(["api.example.com", "*.cdn.example.com"])
+                .interfaces(["wasi:*", "omnia:otel"])
         );
         assert_eq!(manifest.guests[1].grants, Grants::none());
         assert!(manifest.guests[2].grants.is_all(), "no table reaches everything");
@@ -832,11 +837,11 @@ mod tests {
         manifest.validate(false, Features { loader: true }).expect("the grants are valid");
 
         let error = toml::from_str::<Manifest>(
-            "[[guest]]\nname = \"app\"\nsource.path = \"app.wasm\"\n\n[guest.grants]\nhosts = \
+            "[[guest]]\nname = \"app\"\nsource.path = \"app.wasm\"\n\n[guest.grants]\nnetwork = \
              [\"api.example.com\"]\n",
         )
         .expect_err("an unknown key is refused");
-        assert!(error.to_string().contains("unknown field `hosts`"), "{error}");
+        assert!(error.to_string().contains("unknown field `network`"), "{error}");
     }
 
     #[test]
@@ -844,6 +849,7 @@ mod tests {
         let refusals = [
             (Grants::none().env(["PATH"]), "`env` entry `PATH` reaches no variable"),
             (Grants::none().mounts(["data"]), "`mounts` entry `data` names no mount"),
+            (Grants::none().hosts(["2130706433"]), "`hosts` entry `2130706433` ends in a numeric"),
             (
                 Grants::none().interfaces(["wasi:http/types"]),
                 "`interfaces` entry `wasi:http/types`",

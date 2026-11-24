@@ -39,6 +39,7 @@ A ceiling one party sets on what another may reach. Omnia sets one at two levels
 - **Per guest**, a deployment's `omnia::Grants`: a manifest's `[guest.grants]`, the macro's `grants:`, or `GuestEntry::grants`. Its lists narrow the deployment for one guest:
   - `env`, the inherited host variables the guest sees;
   - `mounts`, the [mounts](#mount) preopened into it, and the ones a path it loads may lie beneath;
+  - `hosts`, the host names its outbound `wasi:http` requests, its model workers' egress, and the registries it names to the [guest loader](#guest-loader) may reach;
   - `interfaces`, the packages it may import code from, checked when it is admitted.
 
   A guest without grants reaches everything, and startup logs it. With them, an omitted list grants nothing. A guest the [guest loader](#guest-loader) admits by path or release runs under the deployment's `[plugins.grants]` within the grants of the guest that loaded it. See the [security model](security-model.md#per-guest-grants).
