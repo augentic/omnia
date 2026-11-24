@@ -1,5 +1,22 @@
 ## 0.38.1
 
+Unreleased
+
+### Fixed
+
+<!-- Release notes generated using configuration in .github/release.yaml at 35c6a1677384982a25127095fc910b67e3fa910c -->
+
+## What's Changed
+* Update dependencies and decouple xtask wit-parser by @andrew-goldie in https://github.com/augentic/omnia/pull/454
+* Preserve pending blobstore put writes across polls by @andrew-goldie in https://github.com/augentic/omnia/pull/455
+
+
+**Full Changelog**: https://github.com/augentic/omnia/compare/v0.38.0...v0.38.1
+
+---
+
+## 0.38.0
+
 Released 2026-11-23
 
 ### Added
