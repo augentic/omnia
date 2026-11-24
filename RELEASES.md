@@ -1,6 +1,6 @@
 ## 0.38.1
 
-Unreleased
+Released 2026-11-24
 
 ### Fixed
 
