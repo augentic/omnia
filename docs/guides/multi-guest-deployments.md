@@ -126,7 +126,7 @@ When `router` calls `echo`, the host starts a fresh `responder` instance, runs t
 
 A few constraints:
 
-- Dispatch is deployment-wide. Any guest that imports an interface can call any guest that exports it; what a guest may reach is bounded by which guests the deployment runs, not by a list. A guest with [grants](#grants-what-each-guest-reaches) imports the interface only when its `interfaces` name the package. An import no guest exports fails when the deployment boots, not at the first call. The exporter does not have to be loaded at startup: a manifest file's guest loads when the first call names it (so above, `router`'s first `echo` is what loads `responder`), and a guest registered later — or loaded through `omnia:plugins/loader` — can serve the call too. A runtime built without Omnia's `link` feature leaves such imports unsatisfied, so the deployment fails at boot.
+- Dispatch is deployment-wide. A guest without grants that imports an interface can call any guest that exports it, so what it may reach is bounded by which guests the deployment runs. A guest with [grants](#grants-what-each-guest-reaches) imports the interface only when its `interfaces` name the package, and calls only the guests its `guests` name. An import no guest exports fails when the deployment boots, not at the first call. The exporter does not have to be loaded at startup: a manifest file's guest loads when the first call names it (so above, `router`'s first `echo` is what loads `responder`), and a guest registered later — or loaded through `omnia:plugins/loader` — can serve the call too. A runtime built without Omnia's `link` feature leaves such imports unsatisfied, so the deployment fails at boot.
 - Calls can nest (A calls B calls C) up to `MAX_DISPATCH_DEPTH` (default 8), so accidental recursion cannot run forever.
 - Each call takes an instance from the pool but no slot of the [concurrency gate](../reference/configuration.md#concurrency-gate), so set `MAX_CONCURRENT_INVOCATIONS` below `POOL_MAX_INSTANCES` by the margin [Pool sizing](performance-tuning.md#2-pool-sizing) works out.
 - Today the call stays in-process. Declaring `unix`, `nats`, or `quic` under `[transport]` is rejected at load.
@@ -146,11 +146,12 @@ routes.http = ["/adapter"]
 env = ["ADAPTER_*"]                    # of the variables [env] inherit passes
 mounts = ["data"]                      # the [[mount]]s it sees, by name
 hosts = ["api.example.com"]            # the hosts it calls out to
+guests = ["ledger"]                    # the guests it calls or loads
 interfaces = [                         # the packages it imports code from
     "wasi:cli", "wasi:clocks", "wasi:random", "omnia:otel",  # what every omnia-sdk guest imports
     "wasi:filesystem",                 # to use its mount
     "wasi:http",                       # to serve /adapter and call its hosts
-    "acme:ledger",                     # a package it calls another guest through
+    "acme:ledger",                     # a package it calls `ledger` through
 ]
 ```
 
@@ -158,6 +159,7 @@ Once a guest has a table, a list the table leaves out grants nothing, `interface
 
 - `env` filters the guest's environment, and `mounts` its preopens and the paths it may load a component from, so it never sees what it was not granted.
 - `hosts` refuses an outbound `wasi:http` request, or a redirect, to a host outside it before anything connects. It holds a model worker's `egress`, and the registry a plugin load names, the same way. It matches host names alone, so `*` reaches every name and never an address.
+- `guests` refuses a link call to a guest outside it before that guest loads, and an `omnia:plugins` load that registers under a name outside it before anything is read.
 - `interfaces` refuses a component that imports code from a package outside it when the guest is admitted, naming every such package at once. Name each package rather than writing `wasi:*`, which would grant `wasi:http`, and with it outbound requests to its `hosts`, to a guest that serves no HTTP.
 
 In Rust, `GuestEntry::grants(Grants::none().mounts(["data"]))` declares a table, and `grants: { .. }` does in `runtime!`. Startup logs each guest without one, so what nothing narrows stays visible. A guest loaded at run time through `omnia:plugins/loader` by path or release runs under `[plugins.grants]` within the grants of the guest that loaded it, or under its loader's grants when the deployment declares none. A declared guest a load names keeps its own table. The [security model](../security-model.md#per-guest-grants) has the full rules.

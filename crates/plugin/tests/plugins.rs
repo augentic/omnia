@@ -938,24 +938,31 @@ async fn plugins_mixed() {
     runtime.shutdown();
 }
 
-// The requester's grants reach one of the deployment's two read-only mounts.
-// `[plugins.grants]` reaches both mounts and the `omnia-test:` packages, so
-// only the requester's grants refuse the linked `full`.
+// The requester's grants reach one of the deployment's two read-only mounts,
+// and every guest it loads but the declared `secret`. `[plugins.grants]`
+// reaches both mounts and the `omnia-test:` packages, so only the requester's
+// grants refuse the linked `full`.
 #[tokio::test]
 async fn plugins_grants() {
     let (store, vault) = (scratch(), scratch());
     stage(&store, "tool.wasm", test_programs::LINK_ECHOER);
     stage(&store, "full.wasm", test_programs::LINK_FULL);
     stage(&vault, "tool.wasm", test_programs::LINK_ECHOER);
-    let requester =
-        Grants::none().mounts(["store"]).interfaces(["wasi:*", "omnia:otel", "omnia:plugins"]);
-    let loaded = Grants::none().mounts(["store", "vault"]).interfaces(["wasi:*", "omnia-test:*"]);
+    let requester = Grants::none()
+        .mounts(["store"])
+        .guests(["plugin", "tool", "full"])
+        .interfaces(["wasi:*", "omnia:otel", "omnia:plugins"]);
+    let loaded = Grants::none()
+        .mounts(["store", "vault"])
+        .guests(["plugin"])
+        .interfaces(["wasi:*", "omnia-test:*"]);
 
     let manifest = Manifest::new()
         .guest(
             GuestEntry::new("requester", test_programs::PLUGINS_GRANTS).command().grants(requester),
         )
         .guest(GuestEntry::new("plugin", test_programs::LINK_ECHOER))
+        .guest(GuestEntry::new("secret", test_programs::LINK_ECHOER))
         .mounts([store.mount_as("store", false), vault.mount_as("vault", false)])
         .plugin_grants(loaded);
     let runtime = boot(manifest, &[]).await.expect("assembling runtime");
@@ -966,9 +973,10 @@ async fn plugins_grants() {
         runtime.registry().get(&GuestId::from(guest)).map(|entry| Grants::clone(entry.grants()))
     };
     assert_eq!(grants("plugin"), Some(Grants::all()), "a declared guest keeps its own grants");
+    assert_eq!(grants("secret"), None, "the denied guest was not loaded");
     assert_eq!(
         grants("tool"),
-        Some(Grants::none().mounts(["store"]).interfaces(["wasi:*"])),
+        Some(Grants::none().mounts(["store"]).guests(["plugin"]).interfaces(["wasi:*"])),
         "a guest loaded by path runs under `[plugins.grants]` within the requester's"
     );
     assert_eq!(grants("full"), None, "the refused component was not admitted");

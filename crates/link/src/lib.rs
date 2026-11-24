@@ -5,15 +5,17 @@
 //! on the shared `Linker` so invoking it:
 //!
 //! 1. extracts a target identity from the call via a [`GuestSelector`],
-//! 2. rejects any resource handle attempting to cross the seam,
-//! 3. enforces a dispatch-depth bound,
-//! 4. resolves the target from the live route table and instantiates it
+//! 2. refuses a target outside the caller's
+//!    [`guests`](omnia_core::Grants::guests) grant, before the target loads,
+//! 3. rejects any resource handle attempting to cross the seam,
+//! 4. enforces a dispatch-depth bound,
+//! 5. resolves the target from the live route table and instantiates it
 //!    *fresh* on a new store, driving the matching export on its own task
 //!    through `omnia_core::call_fresh`, and
-//! 5. moves the typed results back into the caller, discarding the callee
+//! 6. moves the typed results back into the caller, discarding the callee
 //!    instance.
 //!
-//! Because step 4 is always a fresh instance, a dispatched call cannot
+//! Because step 5 is always a fresh instance, a dispatched call cannot
 //! recursively re-enter its caller. The runtime core stays generic: nothing
 //! declares the seam. Each component says what it imports and what it
 //! exports; every import outside the runtime's own namespaces
@@ -25,9 +27,9 @@
 //! those lifted values, so it sees typed parameters. Sync-typed functions are
 //! registered with `func_new_async`; async-typed (`async func`) ones with
 //! `func_new_concurrent`; both share one body whose only read of the caller's
-//! store is a snapshot of its chain context, which the callee's store is
-//! built from. See `docs/Architecture.md` (The Guest Registry) for the full
-//! design.
+//! store is a snapshot of its identity, grants, and chain context. The
+//! callee's store is built from that chain context. See
+//! `docs/Architecture.md` (The Guest Registry) for the full design.
 //!
 //! [`InProcessLinks`] is the [`LinkSeam`] the registry drives when omnia is
 //! built with its `link` feature.

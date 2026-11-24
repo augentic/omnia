@@ -40,6 +40,7 @@ A ceiling one party sets on what another may reach. Omnia sets one at two levels
   - `env`, the inherited host variables the guest sees;
   - `mounts`, the [mounts](#mount) preopened into it, and the ones a path it loads may lie beneath;
   - `hosts`, the host names its outbound `wasi:http` requests, its model workers' egress, and the registries it names to the [guest loader](#guest-loader) may reach;
+  - `guests`, the guests it may call over a link or load through the [guest loader](#guest-loader), by name;
   - `interfaces`, the packages it may import code from, checked when it is admitted.
 
   A guest without grants reaches everything, and startup logs it. With them, an omitted list grants nothing. A guest the [guest loader](#guest-loader) admits by path or release runs under the deployment's `[plugins.grants]` within the grants of the guest that loaded it. See the [security model](security-model.md#per-guest-grants).
@@ -55,7 +56,7 @@ A host directory preopened into every guest sandbox its [grants](#grants) reach 
 
 ### Dispatch (host-mediated)
 
-Guest-to-guest calls carried through the host: a guest imports an interface outside the runtime's own namespaces, and the host routes the call to whichever guest exports it. Nothing declares the seam — the [namespace rule](#namespace-rule) decides what crosses. Nesting is bounded by `MAX_DISPATCH_DEPTH`. Distinct from the host→guest `Dispatcher`, which names its target explicitly. Both paths drive a fresh callee through `call_fresh`.
+Guest-to-guest calls carried through the host: a guest imports an interface outside the runtime's own namespaces, and the host routes the call to whichever guest exports it. Nothing declares the seam — the [namespace rule](#namespace-rule) decides what crosses. A caller under [grants](#grants) reaches only the guests its `guests` list names. Nesting is bounded by `MAX_DISPATCH_DEPTH`. Distinct from the host→guest `Dispatcher`, which names its target explicitly. Both paths drive a fresh callee through `call_fresh`.
 
 ### Namespace rule
 

@@ -5,7 +5,8 @@ use serde::Deserialize;
 
 use crate::{egress, names};
 
-/// What of the deployment one guest reaches: host variables, mounts, hosts, and the packages it imports.
+/// What of the deployment one guest reaches: host variables, mounts, hosts,
+/// other guests, and the packages it imports.
 ///
 /// Each list either reaches everything of its kind or holds the entries it
 /// reaches. A [`hosts`](Self::hosts) entry is a host pattern. Any other
@@ -29,6 +30,7 @@ use crate::{egress, names};
 /// let grants = Grants::none().env(["ORDERS_*"]).mounts(["data"]);
 /// assert!(grants.allows_env("ORDERS_URL"));
 /// assert!(!grants.allows_env("HOME"));
+/// assert!(!grants.allows_guest("pricing"));
 /// assert!(!grants.allows_interface("wasi:http"));
 ///
 /// let grants = grants.interfaces(["wasi:*"]);
@@ -40,6 +42,7 @@ pub struct Grants {
     env: Option<Vec<String>>,
     mounts: Option<Vec<String>>,
     hosts: Option<Vec<String>>,
+    guests: Option<Vec<String>>,
     interfaces: Option<Vec<String>>,
 }
 
@@ -51,17 +54,19 @@ impl Grants {
             env: None,
             mounts: None,
             hosts: None,
+            guests: None,
             interfaces: None,
         }
     }
 
-    /// Grants that reach no host variable, no mount, no host, and no package.
+    /// Grants that reach no host variable, no mount, no host, no guest, and no package.
     #[must_use]
     pub const fn none() -> Self {
         Self {
             env: Some(Vec::new()),
             mounts: Some(Vec::new()),
             hosts: Some(Vec::new()),
+            guests: Some(Vec::new()),
             interfaces: Some(Vec::new()),
         }
     }
@@ -111,6 +116,19 @@ impl Grants {
         self
     }
 
+    /// Lists `names` among the guests these grants reach.
+    ///
+    /// An entry is `*`, a guest name such as `pricing`, or a prefix of one
+    /// that ends in `*`. The list holds the guest named by:
+    ///
+    /// - each link call the guest makes, before its target loads;
+    /// - each guest loader load, by the name the loaded guest runs under.
+    #[must_use]
+    pub fn guests<S: Into<String>>(mut self, names: impl IntoIterator<Item = S>) -> Self {
+        add(&mut self.guests, names);
+        self
+    }
+
     /// Lists `packages` among the packages these grants reach.
     ///
     /// An entry is `*`, a package such as `wasi:http` or `acme:pricing`, or
@@ -153,6 +171,12 @@ impl Grants {
             .is_none_or(|hosts| hosts.iter().any(|pattern| egress::covers_host(pattern, entry)))
     }
 
+    /// Whether these grants reach the guest `name`, such as a link call's target.
+    #[must_use]
+    pub fn allows_guest(&self, name: &str) -> bool {
+        allows(self.guests.as_deref(), name)
+    }
+
     /// Whether these grants reach the package `package`, such as `wasi:http`.
     #[must_use]
     pub fn allows_interface(&self, package: &str) -> bool {
@@ -165,6 +189,7 @@ impl Grants {
         self.env.is_none()
             && self.mounts.is_none()
             && self.hosts.is_none()
+            && self.guests.is_none()
             && self.interfaces.is_none()
     }
 
@@ -187,6 +212,7 @@ impl Grants {
                 egress::narrower_host,
                 egress::covers_host,
             ),
+            guests: meet_names(&self.guests, &outer.guests),
             interfaces: meet_names(&self.interfaces, &outer.interfaces),
         }
     }
@@ -205,6 +231,8 @@ impl Grants {
     ///   or reaches no variable `inherit` names;
     /// - in [`mounts`](Self::mounts), names none of `mounts`;
     /// - in [`hosts`](Self::hosts), is not `*` or a [host pattern](crate::host_pattern);
+    /// - in [`guests`](Self::guests), is not `*`, a guest name, or a prefix of
+    ///   one that ends in `*`;
     /// - in [`interfaces`](Self::interfaces), is not `*`, a package such as
     ///   `wasi:http`, or a prefix of one that ends in `*`.
     pub fn validate(&self, mounts: &[&str], inherit: &[String]) -> Result<()> {
@@ -221,6 +249,14 @@ impl Grants {
         }
         for entry in self.hosts.iter().flatten().filter(|entry| *entry != "*") {
             egress::host_pattern(entry).map_err(|why| anyhow!("`hosts` entry `{entry}` {why}"))?;
+        }
+        for entry in self.guests.iter().flatten() {
+            if !is_guest_pattern(entry) {
+                bail!(
+                    "`guests` entry `{entry}` is not a guest name, or a prefix of one that ends \
+                     in `*`"
+                );
+            }
         }
         for entry in self.interfaces.iter().flatten() {
             if is_label(entry) {
@@ -274,6 +310,12 @@ fn meet(
     list
 }
 
+// `*`, a guest name, or a prefix of one that ends in `*`, with no other `*`
+fn is_guest_pattern(entry: &str) -> bool {
+    let name = entry.strip_suffix('*').unwrap_or(entry);
+    entry == "*" || !(name.is_empty() || name.contains('*'))
+}
+
 // `*`, a package of two WIT labels (`wasi:http`), or a prefix of one that
 // ends in `*`
 fn is_package_pattern(entry: &str) -> bool {
@@ -321,6 +363,8 @@ struct Table {
     #[serde(default)]
     hosts: Vec<String>,
     #[serde(default)]
+    guests: Vec<String>,
+    #[serde(default)]
     interfaces: Vec<String>,
 }
 
@@ -330,6 +374,7 @@ impl From<Table> for Grants {
             .env(table.env)
             .mounts(table.mounts)
             .hosts(table.hosts)
+            .guests(table.guests)
             .interfaces(table.interfaces)
     }
 }
@@ -349,6 +394,7 @@ mod tests {
             .env(["ORDERS_URL", "ORD*", "HOME", "*"])
             .mounts(["data", "lo*"])
             .hosts(["*", "*.example.com", "api.example.net", "localhost"])
+            .guests(["*", "pricing", "acme:*", "acme:tool"])
             .interfaces(["*", "wasi:*", "wasi:http", "omnia-test:*", "acme:pri*", "wasi*"])
             .validate(&mounts, &inherit)
             .expect("every entry is valid");
@@ -372,6 +418,17 @@ mod tests {
                 .expect_err("not a package pattern");
             assert!(
                 error.to_string().starts_with(&format!("`interfaces` entry `{entry}` is not")),
+                "{error}"
+            );
+        }
+
+        for entry in ["", "**", "a*b", "*a"] {
+            let error = Grants::none()
+                .guests([entry])
+                .validate(&mounts, &inherit)
+                .expect_err("not a guest pattern");
+            assert!(
+                error.to_string().starts_with(&format!("`guests` entry `{entry}` is not")),
                 "{error}"
             );
         }
@@ -400,8 +457,11 @@ mod tests {
 
     #[test]
     fn within_all() {
-        let declared =
-            Grants::none().env(["ORDERS_*"]).hosts(["*.example.com"]).interfaces(["wasi:*"]);
+        let declared = Grants::none()
+            .env(["ORDERS_*"])
+            .hosts(["*.example.com"])
+            .guests(["acme:*"])
+            .interfaces(["wasi:*"]);
         assert_eq!(declared.within(&Grants::all()), declared);
         assert_eq!(Grants::all().within(&declared), declared);
         assert!(Grants::all().within(&Grants::all()).is_all());
@@ -413,11 +473,13 @@ mod tests {
             .env(["ORDERS_*", "HOME", "PATH"])
             .mounts(["data"])
             .hosts(["*.example.com", "api.example.net"])
+            .guests(["acme:*", "pricing"])
             .interfaces(["wasi:*"]);
         let outer = Grants::none()
             .env(["ORDERS_URL", "ORD*", "HOME*"])
             .mounts(["logs"])
             .hosts(["api.example.com", "*.cdn.example.com", "*.example.net", "example.org"])
+            .guests(["acme:tool", "billing"])
             .interfaces(["wasi:http", "omnia:otel"]);
         let met = inner.within(&outer);
 
@@ -428,6 +490,7 @@ mod tests {
             Grants::none()
                 .env(["ORDERS_*", "HOME"])
                 .hosts(["api.example.com", "*.cdn.example.com", "api.example.net"])
+                .guests(["acme:tool"])
                 .interfaces(["wasi:http"])
         );
         assert_eq!(outer.within(&inner), met);
