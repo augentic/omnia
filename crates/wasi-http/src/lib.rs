@@ -9,9 +9,11 @@ mod client_cert;
 mod default_impl;
 mod server;
 
+use std::sync::Arc;
+
 use anyhow::Result;
 pub use default_impl::{ConnectOptions, HttpDefault};
-use omnia_core::{Host, HostCtx, Provides, Runtime, StoreCtx};
+use omnia_core::{Grants, Host, HostCtx, Provides, Runtime, StoreCtx};
 pub use server::{HttpHandler, OutgoingBody, ServerOptions};
 use wasmtime::component::{HasData, Linker, ResourceTable};
 use wasmtime_wasi_http::p3::bindings::http::{client, types};
@@ -26,8 +28,15 @@ pub use wasmtime_wasi_http::{
 /// its own [`WasiHttpHooks`].
 pub trait HttpBorrow: Send {
     /// Borrow the `wasi:http` context as the linker-facing view, threading in
-    /// the store's [`ResourceTable`].
-    fn as_view<'a>(&'a mut self, table: &'a mut ResourceTable) -> WasiHttpCtxView<'a>;
+    /// the store's [`ResourceTable`] and the [`Grants`] of the store's guest.
+    ///
+    /// A backend that sends requests refuses one, and each redirect it
+    /// follows, whose host [`Grants::allows_host`] refuses. The request
+    /// fails with [`ErrorCode::HttpRequestDenied`] before it connects, as
+    /// [`HttpDefault`]'s do.
+    fn as_view<'a>(
+        &'a mut self, table: &'a mut ResourceTable, grants: &'a Arc<Grants>,
+    ) -> WasiHttpCtxView<'a>;
 }
 
 /// Host-side service for `wasi:http`.
@@ -41,8 +50,10 @@ impl HasData for WasiHttp {
 impl HostCtx for WasiHttp {
     type Borrow<'a> = &'a mut dyn HttpBorrow;
 
-    fn view<'a>(borrow: Self::Borrow<'a>, table: &'a mut ResourceTable) -> WasiHttpCtxView<'a> {
-        borrow.as_view(table)
+    fn view<'a>(
+        borrow: Self::Borrow<'a>, table: &'a mut ResourceTable, grants: &'a Arc<Grants>,
+    ) -> WasiHttpCtxView<'a> {
+        borrow.as_view(table, grants)
     }
 }
 

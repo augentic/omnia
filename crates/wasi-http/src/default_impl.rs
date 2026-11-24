@@ -1,9 +1,9 @@
 use std::error::Error;
-use std::fmt::Display;
+use std::fmt::{self, Display};
 use std::io;
 use std::num::NonZeroUsize;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 use std::task::{self, Poll, ready};
 use std::time::Duration;
 
@@ -14,7 +14,8 @@ use futures::{Future, TryStreamExt};
 use http::{Request, Response};
 use http_body::{Body, Frame, SizeHint};
 use http_body_util::BodyExt;
-use omnia_core::{Connect, FromEnv};
+use omnia_core::{Connect, FromEnv, Grants};
+use reqwest::redirect;
 use tokio::time::Sleep;
 use tracing::instrument;
 use wasmtime::component::ResourceTable;
@@ -45,7 +46,10 @@ pub struct HttpDefault {
 }
 
 impl HttpBorrow for HttpDefault {
-    fn as_view<'a>(&'a mut self, table: &'a mut ResourceTable) -> WasiHttpCtxView<'a> {
+    fn as_view<'a>(
+        &'a mut self, table: &'a mut ResourceTable, grants: &'a Arc<Grants>,
+    ) -> WasiHttpCtxView<'a> {
+        self.hooks.hold_to(grants);
         WasiHttpCtxView {
             hooks: &mut self.hooks,
             ctx: &mut self.ctx,
@@ -60,11 +64,13 @@ impl Connect for HttpDefault {
     #[instrument]
     async fn connect_with(options: Self::ConnectOptions) -> Result<Self> {
         ensure_crypto_provider();
-        let clients = Clients::new(Duration::from_secs(options.connect_timeout))
+        let clients = Clients::new(Duration::from_secs(options.connect_timeout), None)
             .context("building HTTP client")?;
         Ok(Self {
             hooks: HttpHooks {
                 clients,
+                held: Arc::default(),
+                grants: Arc::new(Grants::all()),
                 body_buffer_chunks: options.body_buffer_chunks,
             },
             ctx: WasiHttpCtx::default(),
@@ -81,10 +87,49 @@ fn ensure_crypto_provider() {
     }
 }
 
+// A clone serves one store, so `grants` are one guest's. Every clone shares
+// `held`.
 #[derive(Debug, Clone)]
 struct HttpHooks {
     clients: Clients,
+    held: Arc<Held>,
+    grants: Arc<Grants>,
     body_buffer_chunks: NonZeroUsize,
+}
+
+// One set of clients per guest's grants, each following redirects only to a
+// host those grants reach. An entry is keyed by the address of the guest's
+// `Arc`, and owns a copy of the grants, so it never keeps a guest's alive.
+type Held = Mutex<Vec<(Weak<Grants>, Clients)>>;
+
+impl HttpHooks {
+    // `as_view` runs on every host call, and a store's grants are one `Arc`,
+    // so the handle changes once per store
+    fn hold_to(&mut self, grants: &Arc<Grants>) {
+        if !Arc::ptr_eq(&self.grants, grants) {
+            self.grants = Arc::clone(grants);
+        }
+    }
+
+    // A held `Weak` keeps its allocation, so no other grants take the address
+    // while the entry lives. The entries of dropped grants are pruned on
+    // every lookup.
+    fn clients(&self) -> reqwest::Result<Clients> {
+        if self.grants.is_all() {
+            return Ok(self.clients.clone());
+        }
+        let mut held = self.held.lock().expect("clients lock");
+        held.retain(|(grants, _)| grants.strong_count() > 0);
+        let key = Arc::as_ptr(&self.grants);
+        if let Some((_, clients)) = held.iter().find(|(grants, _)| grants.as_ptr() == key) {
+            return Ok(clients.clone());
+        }
+        let grants = Arc::new(Grants::clone(&self.grants));
+        let clients = Clients::new(self.clients.connect_timeout, Some(grants))?;
+        held.push((Arc::downgrade(&self.grants), clients.clone()));
+        drop(held);
+        Ok(clients)
+    }
 }
 
 impl WasiHttpHooks for HttpHooks {
@@ -102,7 +147,8 @@ impl WasiHttpHooks for HttpHooks {
         fut: FutureResult<()>,
     ) -> Box<dyn Future<Output = Result<(Response<WasiBody>, FutureResult<()>), HttpError>> + Send>
     {
-        let clients = self.clients.clone();
+        let grants = Arc::clone(&self.grants);
+        let clients = self.clients();
 
         // guest-supplied timeouts from `wasi:http/types.request-options`
         let opt_connect = options.and_then(|o| o.connect_timeout);
@@ -112,6 +158,14 @@ impl WasiHttpHooks for HttpHooks {
         Box::new(async move {
             let (mut parts, body) = request.into_parts();
 
+            // the URL is parsed once, so the host checked is the host dialled
+            let url = reqwest::Url::parse(&parts.uri.to_string())
+                .map_err(|_parse| HttpError::HttpRequestUriInvalid)?;
+            if url.host_str().is_some_and(|host| !grants.allows_host(host)) {
+                return Err(HttpError::HttpRequestDenied);
+            }
+
+            let clients = clients.map_err(internal_err)?;
             let client = match parts.headers.remove("Client-Cert") {
                 Some(encoded_cert) => {
                     tracing::debug!("using client certificate");
@@ -130,8 +184,7 @@ impl WasiHttpHooks for HttpHooks {
             );
 
             // make request
-            let url = parts.uri.to_string();
-            let send = client.request(parts.method, &url).headers(parts.headers).body(body).send();
+            let send = client.request(parts.method, url).headers(parts.headers).body(body).send();
 
             // the first byte is awaited on top of the connect, which reqwest
             // bounds itself; the streamed body is paced by `between_bytes`
@@ -165,11 +218,13 @@ impl WasiHttpHooks for HttpHooks {
 // The shared client and the ones built for a guest's own `connect-timeout`,
 // one per distinct value, so a guest that sets one on every request keeps a
 // connection pool rather than opening a connection per request. A client is
-// `Arc`-backed, so a clone per store shares the pools.
+// `Arc`-backed, so a clone per store shares the pools. Under `grants`, every
+// client follows a redirect only to a host they reach.
 #[derive(Debug, Clone)]
 struct Clients {
     shared: reqwest::Client,
     connect_timeout: Duration,
+    grants: Option<Arc<Grants>>,
     by_timeout: Arc<Mutex<Vec<(Duration, reqwest::Client)>>>,
 }
 
@@ -177,18 +232,23 @@ impl Clients {
     // distinct guest `connect-timeout` values kept; past it a request builds its own
     const CAP: usize = 8;
 
-    fn new(connect_timeout: Duration) -> reqwest::Result<Self> {
+    fn new(connect_timeout: Duration, grants: Option<Arc<Grants>>) -> reqwest::Result<Self> {
         Ok(Self {
-            shared: Self::builder(connect_timeout).build()?,
+            shared: Self::builder(connect_timeout, grants.as_ref()).build()?,
             connect_timeout,
+            grants,
             by_timeout: Arc::default(),
         })
     }
 
     // what every client starts from, so one built for a request differs from
     // the shared one only in what the request asked for
-    fn builder(connect_timeout: Duration) -> reqwest::ClientBuilder {
-        reqwest::Client::builder().connect_timeout(connect_timeout)
+    fn builder(connect_timeout: Duration, grants: Option<&Arc<Grants>>) -> reqwest::ClientBuilder {
+        let builder = reqwest::Client::builder().connect_timeout(connect_timeout);
+        match grants {
+            Some(grants) => builder.redirect(held_redirects(Arc::clone(grants))),
+            None => builder,
+        }
     }
 
     // the client for a request's `connect-timeout`: the shared one when the
@@ -203,7 +263,7 @@ impl Clients {
         if let Some((_, client)) = by_timeout.iter().find(|(kept, _)| *kept == timeout) {
             return Ok(client.clone());
         }
-        let client = Self::builder(timeout).build()?;
+        let client = Self::builder(timeout, self.grants.as_ref()).build()?;
         if by_timeout.len() < Self::CAP {
             by_timeout.push((timeout, client.clone()));
         }
@@ -215,9 +275,33 @@ impl Clients {
     fn with_identity(
         &self, connect_timeout: Option<Duration>, identity: reqwest::Identity,
     ) -> reqwest::Result<reqwest::Client> {
-        Self::builder(connect_timeout.unwrap_or(self.connect_timeout)).identity(identity).build()
+        let connect_timeout = connect_timeout.unwrap_or(self.connect_timeout);
+        Self::builder(connect_timeout, self.grants.as_ref()).identity(identity).build()
     }
 }
+
+// reqwest's default policy past the host check, so its ten-hop limit holds
+fn held_redirects(grants: Arc<Grants>) -> redirect::Policy {
+    redirect::Policy::custom(move |attempt| {
+        let host = attempt.url().host_str().unwrap_or_default().to_owned();
+        if grants.allows_host(&host) {
+            redirect::Policy::default().redirect(attempt)
+        } else {
+            attempt.error(RedirectDenied(host))
+        }
+    })
+}
+
+#[derive(Debug)]
+struct RedirectDenied(String);
+
+impl Display for RedirectDenied {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "a redirect to `{}` is a host the guest's grants do not reach", self.0)
+    }
+}
+
+impl Error for RedirectDenied {}
 
 // A response body held to the guest's `between-bytes-timeout`: the deadline
 // restarts at every frame, and a body silent past it fails as a read timeout.
@@ -275,6 +359,9 @@ fn internal_err(e: impl Display) -> HttpError {
 // wasmtime's own classification (dns, unreachable, timed out, terminated,
 // ...) rather than flattening every connection failure to `connection-refused`
 fn reqwest_err(e: &reqwest::Error) -> HttpError {
+    if e.is_redirect() && cause::<RedirectDenied>(e).is_some() {
+        return HttpError::HttpRequestDenied;
+    }
     if e.is_timeout() {
         return if e.is_connect() {
             HttpError::ConnectionTimeout

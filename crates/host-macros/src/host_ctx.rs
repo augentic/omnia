@@ -27,6 +27,7 @@ pub fn expand(input: &DeriveInput) -> Result<TokenStream> {
             fn view<'a>(
                 borrow: Self::Borrow<'a>,
                 table: &'a mut #root::wasmtime_wasi::ResourceTable,
+                _grants: &'a ::std::sync::Arc<#root::Grants>,
             ) -> Self::Data<'a> {
                 #root::HostView { client: borrow, table }
             }

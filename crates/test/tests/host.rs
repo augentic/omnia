@@ -4,13 +4,16 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::sync::Arc;
 
 use anyhow::{Context as _, Result, bail};
 use bytes::Bytes;
 use http::header::CONTENT_TYPE;
 use http::{Method, Request, Response, StatusCode};
 use omnia::wasmtime::component::{ResourceTable, Val};
-use omnia::{ChainCtx, Digest, ExitStatus, GuestEntry, GuestId, HostCtx, Runtime, SourceSpec};
+use omnia::{
+    ChainCtx, Digest, ExitStatus, Grants, GuestEntry, GuestId, HostCtx, Runtime, SourceSpec,
+};
 use omnia_test::host::sql::{Field, Row, Value};
 use omnia_test::host::{
     Asked, Backends, Deployment, Ended, FixedIdentity, HandleError, MatchedHttp, STATE_BUCKET,
@@ -256,8 +259,8 @@ struct WasiEcho;
 // resolves here only under `crate = omnia`.
 #[test]
 fn facade_host() {
-    let mut table = ResourceTable::new();
-    let view = WasiEcho::view(&Named, &mut table);
+    let (mut table, grants) = (ResourceTable::new(), Arc::new(Grants::all()));
+    let view = WasiEcho::view(&Named, &mut table, &grants);
     assert_eq!(view.client.name(), "named");
 }
 
@@ -370,6 +373,28 @@ fn rename(id: i64) -> Request<Bytes> {
         .header(CONTENT_TYPE, "application/json")
         .body(Bytes::from_static(br#"{"name":"gadget"}"#))
         .expect("a valid request")
+}
+
+#[tokio::test]
+async fn harness_http_hosts() {
+    let price = Response::new(Bytes::from_static(br#"{"price":12}"#));
+    let http = MatchedHttp::default().on(Method::GET, "https://prices.test/items/7", price);
+    let grants = Grants::none().hosts(["prices.test"]).interfaces(["*"]);
+    let guest = GuestEntry::new("hosts", test_programs::HARNESS_HTTP_HOSTS).command();
+
+    let status = Deployment::new()
+        .entry(guest.grants(grants))
+        .run(Backends::defaults().await.http(http.clone()), |deployment| {
+            deployment.host::<WasiHttp>()?;
+            deployment.host::<WasiOtel>()?;
+            Ok(())
+        })
+        .await
+        .expect("deployment runs");
+    assert_eq!(status, ExitStatus::SUCCESS, "the guest's assertions held");
+
+    let [priced] = http.requests().try_into().expect("one request recorded");
+    assert_eq!(priced.uri, "https://prices.test/items/7");
 }
 
 #[test]

@@ -89,6 +89,7 @@ omnia::runtime!({
             grants: {                                // optional: present, it reaches only these
                 env: ["ORDERS_*"],
                 mounts: ["."],
+                hosts: ["api.example.com"],          // the hosts it calls out to
                 interfaces: [                        // the packages it imports code from
                     "wasi:cli", "wasi:clocks", "wasi:random", "omnia:otel",
                     "wasi:filesystem", "wasi:http", "omnia:websocket",
@@ -132,7 +133,7 @@ Nothing declares what guests call between themselves. Every import a guest makes
 - **`routes: { http: [..], messaging: [..], websocket: [..] }`** — the guest's inbound routes, one pattern list per trigger (`http` prefixes, `messaging` topics, `websocket` routes), with the declaring guest as the implicit target. There is no top-level `routes:` key.
 - **`command: true`** (a literal bool) — marks the guest as the command-mode target — see [Command routing](#command-routing-command-true).
 - **`digest: "sha256:<64 hex>"`** (a string literal) — the digest the guest's bytes must hash to, checked before wasmtime sees them; a malformed pin is a compile error. Embedded bytes cannot change after the build, so a pin on a `path:` entry is a build-time check of the artifact; a pin on a `package:` entry holds the fetched bytes to the ones the invocation named. A `declared` load takes no digest of its own — the entry's pin is the one that holds.
-- **`grants: { env, mounts, interfaces }`** — what of the deployment the guest reaches, each key a list of expressions. Without the block the guest reaches everything, and startup logs its name. With it, a key the block omits grants nothing, `interfaces` included. The keys mean what a manifest's `[guest.grants]` keys mean — see [Configuration](configuration.md#deployment-manifest-omniatoml). A malformed entry fails startup, naming it, and a key outside the three is a compile error.
+- **`grants: { env, mounts, hosts, interfaces }`** — what of the deployment the guest reaches, each key a list of expressions. Without the block the guest reaches everything, and startup logs its name. With it, a key the block omits grants nothing, `interfaces` included, and an omitted `hosts` leaves the guest no outbound host. The keys mean what a manifest's `[guest.grants]` keys mean — see [Configuration](configuration.md#deployment-manifest-omniatoml). A malformed entry fails startup, naming it, and a key outside the four is a compile error.
 
 Any other guest key is a compile error naming the seven; the retired `on_demand:` and `wasm_only:` keys are unknown keys.
 

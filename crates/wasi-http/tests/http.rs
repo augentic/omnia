@@ -15,13 +15,13 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use base64ct::{Base64, Encoding};
 use bytes::Bytes;
-use http::header::{AUTHORIZATION, CONTENT_TYPE, FORWARDED, HOST, RETRY_AFTER};
+use http::header::{AUTHORIZATION, CONTENT_TYPE, FORWARDED, HOST, LOCATION, RETRY_AFTER};
 use http::{HeaderMap, Method, Request, Response, StatusCode, Version};
 use http_body_util::{BodyExt as _, Full};
 use hyper::body::Incoming;
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
-use omnia::{ExitStatus, GuestEntry, RuntimeOptions};
+use omnia::{ExitStatus, Grants, GuestEntry, RuntimeOptions};
 use omnia_test::host::{Backends, Deployment};
 use omnia_wasi_config::WasiConfig;
 use omnia_wasi_http::{HttpHandler, ServerOptions, WasiHttp};
@@ -54,7 +54,8 @@ struct Hit {
 
 // a loopback origin answering every request with `200`, a marker header, and
 // the request's own body where it has one or `BODY` where not, honouring
-// nothing conditional, and recording each hit
+// nothing conditional, and recording each hit; `/redirect?to=<url>` alone is
+// answered `303` to `<url>`, the status a client follows whatever the body
 #[derive(Clone, Debug, Default)]
 struct Origin {
     hits: Arc<Mutex<Vec<Hit>>>,
@@ -88,12 +89,23 @@ impl Origin {
     async fn answer(&self, request: Request<Incoming>) -> Response<Full<Bytes>> {
         let (parts, body) = request.into_parts();
         let body = body.collect().await.expect("the request body streams").to_bytes();
+        let location = match (parts.uri.path(), parts.uri.query()) {
+            ("/redirect", Some(query)) => query.strip_prefix("to=").map(str::to_owned),
+            _ => None,
+        };
         self.hits.lock().expect("hits lock").push(Hit {
             method: parts.method,
             path: parts.uri.path().to_owned(),
             headers: parts.headers,
             body: body.clone(),
         });
+        if let Some(location) = location {
+            return Response::builder()
+                .status(StatusCode::SEE_OTHER)
+                .header(LOCATION, location)
+                .body(Full::default())
+                .expect("origin redirect");
+        }
         let reply = if body.is_empty() { Bytes::from_static(BODY) } else { body };
         Response::builder()
             .header("x-mock", "origin")
@@ -107,9 +119,12 @@ impl Origin {
 }
 
 async fn run_guest(wasm: &str, backends: Backends) {
+    run_deployment(Deployment::new().guest("guest", wasm), backends).await;
+}
+
+async fn run_deployment(deployment: Deployment, backends: Backends) {
     // linked by hand: the guest reads the origin from `omnia:config`
-    let status = Deployment::new()
-        .guest("guest", wasm)
+    let status = deployment
         .run(backends, |deployment| {
             deployment.host::<WasiHttp>()?;
             deployment.host::<WasiConfig>()?;
@@ -118,7 +133,30 @@ async fn run_guest(wasm: &str, backends: Backends) {
         })
         .await
         .expect("guest runs");
-    assert_eq!(status, ExitStatus::SUCCESS, "guest `{wasm}` failed");
+    assert_eq!(status, ExitStatus::SUCCESS, "the guest's assertions held");
+}
+
+// The origin listens on `127.0.0.1`, so one origin answers both names the
+// guest uses, and a refusal shows as a hit that never arrives. `*` reaches
+// every host name, and no more of the address than `localhost` alone does.
+#[tokio::test]
+async fn http_outgoing_hosts() {
+    for hosts in ["localhost", "*"] {
+        let (origin, url) = Origin::serve().await;
+        let (_, port) = url.rsplit_once(':').expect("the origin's port");
+        let backends = Backends::defaults().await.config([("PORT", port.to_owned())]);
+        let grants = Grants::none().hosts([hosts]).interfaces(["*"]);
+
+        let guest =
+            GuestEntry::new("guest", test_programs::HTTP_OUTGOING_HOSTS).command().grants(grants);
+        run_deployment(Deployment::new().entry(guest), backends).await;
+
+        // the address, however spelled, and the hop to it were refused before
+        // any connection
+        let hits = origin.hits();
+        let paths: Vec<_> = hits.iter().map(|hit| hit.path.as_str()).collect();
+        assert_eq!(paths, ["/resource", "/redirect", "/resource", "/redirect"], "under `{hosts}`");
+    }
 }
 
 // rcgen's defaults: no EKU, no key usage, no basic constraints

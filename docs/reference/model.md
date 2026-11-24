@@ -130,7 +130,7 @@ The model calls a tool through the session's `calls`, and the guest runs it.
 
 `worker` is what a backend's worker may reach beyond the `location`, an `option<worker-grant>`. A worker is a process the backend runs for the completion, such as a command the model asks for. The guest states the grant, because it knows the toolchain the completion runs:
 
-- `egress` lists the host names the worker may connect to through the backend's proxy. Each is a whole name, or `*.suffix` for a domain and every host beneath it. None is an IP literal, and none carries a port, a scheme, or a path.
+- `egress` lists the host names the worker may connect to through the backend's proxy. Each is a whole name, or `*.suffix` for a domain and every host beneath it. None is an IP literal, none ends in a numeric label (`2130706433`, `example.1`), which reads as an IP address, and none carries a port, a scheme, or a path. Every entry lies within the guest's [`hosts` grant](configuration.md#deployment-manifest-omniatoml), when its deployment lists one.
 - `read` lists the directories the worker may read beside the workspace. Each is `~/<path>` beneath the operator's home, where `<path>` follows the rule of `location.subpath` and is not empty. A directory the machine lacks grants nothing.
 - `env` lists the environment variables set for the worker. A name matches `[A-Za-z_][A-Za-z0-9_]*`, and a leading `~/` in a value stands for the operator's home.
 
@@ -151,6 +151,7 @@ The host makes these checks whatever the backend. Each fails the call it applies
 - A tool named `read`, `list`, or `write` is `invalid`, and so is a name given twice or an `input-schema` that is not JSON.
 - A `format::schema` whose schema is not JSON is `invalid`.
 - A `worker` grant entry that breaks its shape is `invalid`.
+- A `worker` `egress` entry the guest's `hosts` grant does not cover is `denied`, naming the entry.
 - A `workspace` whose root is not one of the guest's mounts, or is not a directory, is `denied`.
 - A `workspace` subpath with an empty, `.`, or `..` segment, or a `\`, is `invalid`, and one that does not exist is `not-found`.
 
@@ -196,7 +197,7 @@ A completion that spent a budget before it had an answer resolves `reply` to `ok
 | Case | Meaning |
 | ---- | ------- |
 | `not-found` | The deployment does not declare the model, or the place lent does not exist. |
-| `denied` | The provider refused the caller, or the guest lends a place it does not hold. |
+| `denied` | The provider refused the caller, the guest lends a place it does not hold, or its worker `egress` reaches past its `hosts`. |
 | `invalid` | The request was rejected, such as a reserved tool name or a schema that is not JSON. The guest's side of the session fails this way too (see [Host checks](#host-checks)). |
 | `unsupported` | A valid request this backend cannot serve, such as a `generation` field or a `format` it cannot carry. |
 | `unavailable` | The provider did not answer, or turned the call away for now as a rate limit does. |

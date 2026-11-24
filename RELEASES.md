@@ -2,6 +2,16 @@
 
 Unreleased
 
+### Added
+
+- Per-guest outbound host grants via `Grants::hosts` in `[guest.grants]`, `[plugins.grants]`, and `runtime!` `grants: { hosts }`, with `Grants::{allows_host, covers_host}` and `omnia_core::host_pattern` for capability crates. A list holds outbound `wasi:http` requests and the redirects `HttpDefault` follows (`http-request-denied`), `omnia:model` worker `egress` (`denied`), and the `registry` an `omnia:plugins` `release` load names (`denied`). It matches plain host names alone, so `*` never reaches an address ([#423](https://github.com/augentic/omnia/issues/423)).
+
+### Changed
+
+- **Host views take the guest's grants:** `HostCtx::view` and `omnia_wasi_http::HttpBorrow::as_view` take `&Arc<Grants>`, so a hand-written host or HTTP backend adds the parameter, and `#[derive(HostCtx)]` leaves it unused ([#423](https://github.com/augentic/omnia/issues/423)).
+- **Grants tables without `hosts`:** a 0.38 `[guest.grants]` or `[plugins.grants]` table that leaves out `hosts` reaches no host, so its guests' outbound HTTP and worker egress fail when a request is made, not at boot. Emery's `[plugins.grants]` is the first such table. Add `hosts` to every table whose guests call out ([#423](https://github.com/augentic/omnia/issues/423)).
+- **Worker egress and test doubles:** an `omnia:model` worker `egress` entry ending in a numeric label (`2130706433`, `example.1`) is `invalid`, since it reads as an IP address, and `omnia_test::host::MatchedHttp` refuses a request outside the guest's `hosts` with `http-request-denied`, recording none ([#423](https://github.com/augentic/omnia/issues/423)).
+
 ---
 
 Release notes for previous releases can be found on the respective release branches of the repository.

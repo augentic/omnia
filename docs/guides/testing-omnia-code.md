@@ -70,7 +70,7 @@ async fn rename() {
 
 The `export!` macros open the guest's telemetry scope, which imports `omnia:otel`, so a deployment links `WasiOtel` beside the hosts its handlers reach. The scripted and recording backends each serve one host:
 
-- `MatchedHttp` answers outbound `wasi:http` by method and URL, and records every request.
+- `MatchedHttp` answers outbound `wasi:http` by method and URL, and records every request. It holds a guest to its `hosts` grant as `HttpDefault` does: a request outside the list fails with `http-request-denied` and is not recorded.
 - `ScriptedTables` answers `omnia:sql` statements by predicate, and records each statement and transaction.
 - `Sink` records every message and WebSocket send.
 - `FixedIdentity` answers a fixed token for every identity, and records the scopes asked for.

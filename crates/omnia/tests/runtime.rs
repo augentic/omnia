@@ -259,6 +259,7 @@ mod deployment_keys {
                 grants: {
                     env: ["SPECIFY_*"],
                     mounts: ["project"],
+                    hosts: ["api.example.com", "*.cdn.example.com"],
                     interfaces: ["wasi:*", "omnia:otel"],
                 },
             },
@@ -364,7 +365,11 @@ fn inline_deployment() {
     assert_eq!(specify.source, SourceSpec::from(include_bytes!("../Cargo.toml").as_slice()));
     assert_eq!(
         specify.grants,
-        Grants::none().env(["SPECIFY_*"]).mounts(["project"]).interfaces(["wasi:*", "omnia:otel"])
+        Grants::none()
+            .env(["SPECIFY_*"])
+            .mounts(["project"])
+            .hosts(["api.example.com", "*.cdn.example.com"])
+            .interfaces(["wasi:*", "omnia:otel"])
     );
 
     assert_eq!(mock.name, "target:mock");

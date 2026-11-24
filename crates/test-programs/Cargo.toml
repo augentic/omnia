@@ -124,6 +124,11 @@ path = "programs/harness/flow.rs"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "harness_http_hosts"
+path = "programs/harness/http_hosts.rs"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "http_builder"
 path = "programs/http/builder.rs"
 crate-type = ["cdylib"]
@@ -156,6 +161,11 @@ crate-type = ["cdylib"]
 [[example]]
 name = "http_outgoing_client_cert"
 path = "programs/http/outgoing_client_cert.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "http_outgoing_hosts"
+path = "programs/http/outgoing_hosts.rs"
 crate-type = ["cdylib"]
 
 [[example]]
@@ -356,6 +366,11 @@ crate-type = ["cdylib"]
 [[example]]
 name = "model_undeclared_tool"
 path = "programs/model/undeclared_tool.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "model_worker_hosts"
+path = "programs/model/worker_hosts.rs"
 crate-type = ["cdylib"]
 
 [[example]]

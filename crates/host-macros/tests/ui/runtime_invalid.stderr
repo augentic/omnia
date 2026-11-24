@@ -82,7 +82,7 @@ error: unknown env key `pass`; expected `inherit`
 85 |         env: { pass: ["HOME"] },
    |                ^^^^
 
-error: unknown grants key `network`; expected `env`, `mounts`, or `interfaces`
+error: unknown grants key `network`; expected `env`, `mounts`, `hosts`, or `interfaces`
   --> tests/ui/runtime_invalid.rs:91:48
    |
 91 |         guests: [{ path: "app.wasm", grants: { network: ["api"] } }],

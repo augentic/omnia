@@ -5,6 +5,7 @@ mod artifact;
 mod chain;
 mod digest;
 mod dispatch;
+mod egress;
 pub mod env;
 mod extensions;
 mod grants;
@@ -30,6 +31,7 @@ pub use {anyhow, futures, tokio, wasmtime, wasmtime_wasi};
 pub use self::chain::{ChainCtx, ChainPolicy};
 pub use self::digest::Digest;
 pub use self::dispatch::Dispatcher;
+pub use self::egress::host_pattern;
 pub use self::extensions::Extensions;
 pub use self::grants::Grants;
 pub use self::host::{

@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use bytes::Bytes;
 use http::{HeaderMap, Method, Request, Response, StatusCode, Uri};
 use http_body_util::{BodyExt as _, Full};
+use omnia::Grants;
 use omnia::wasmtime::component::ResourceTable;
 use omnia_wasi_http::{
     ErrorCode, HttpBorrow, RequestOptions, WasiBody, WasiHttpCtx, WasiHttpCtxView, WasiHttpHooks,
@@ -36,7 +37,10 @@ impl Recorded {
 /// Outbound `wasi:http` answered by the first route matching method, URL,
 /// and optionally body.
 ///
-/// Every request is recorded, matched or not. One no route matches fails the
+/// A request to a host the guest's grants do not reach fails with
+/// [`HttpRequestDenied`](ErrorCode::HttpRequestDenied), as it does over
+/// [`HttpDefault`](omnia_wasi_http::HttpDefault), and is not recorded. Every
+/// other request is recorded, matched or not. One no route matches fails the
 /// guest's send with an [`InternalError`](ErrorCode::InternalError) naming
 /// its method and URL, which the guest sees as a transport failure. Clones
 /// share one set of routes and one record.
@@ -88,7 +92,10 @@ impl MatchedHttp {
 }
 
 impl HttpBorrow for MatchedHttp {
-    fn as_view<'a>(&'a mut self, table: &'a mut ResourceTable) -> WasiHttpCtxView<'a> {
+    fn as_view<'a>(
+        &'a mut self, table: &'a mut ResourceTable, grants: &'a Arc<Grants>,
+    ) -> WasiHttpCtxView<'a> {
+        self.hooks.grants = Some(Arc::clone(grants));
         WasiHttpCtxView {
             hooks: &mut self.hooks,
             ctx: &mut self.ctx,
@@ -110,9 +117,12 @@ impl fmt::Debug for MatchedHttp {
 type BodyPredicate = Arc<dyn Fn(&[u8]) -> bool + Send + Sync>;
 type Settled = Box<dyn Future<Output = Result<(), ErrorCode>> + Send>;
 
+// A clone serves one store, so `grants` are one guest's, and none before the
+// store's first view.
 #[derive(Clone, Default)]
 struct Hooks {
     inner: Arc<Inner>,
+    grants: Option<Arc<Grants>>,
 }
 
 impl WasiHttpHooks for Hooks {
@@ -120,7 +130,13 @@ impl WasiHttpHooks for Hooks {
         &mut self, request: Request<WasiBody>, _options: Option<RequestOptions>, settled: Settled,
     ) -> Box<dyn Future<Output = Result<(Response<WasiBody>, Settled), ErrorCode>> + Send> {
         let inner = Arc::clone(&self.inner);
+        let denied = request.uri().host().is_some_and(|host| {
+            self.grants.as_ref().is_some_and(|grants| !grants.allows_host(host))
+        });
         Box::new(async move {
+            if denied {
+                return Err(ErrorCode::HttpRequestDenied);
+            }
             let (parts, body) = request.into_parts();
             let recorded = Recorded {
                 method: parts.method,

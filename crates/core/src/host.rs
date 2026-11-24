@@ -12,6 +12,7 @@ use anyhow::Result;
 use futures::future::BoxFuture;
 use wasmtime::component::{Accessor, HasData, Linker, Resource, ResourceTable, ResourceTableError};
 
+use crate::grants::Grants;
 use crate::runtime::Runtime;
 use crate::store::StoreCtx;
 
@@ -55,7 +56,8 @@ pub trait Host<B: Backends>: Send + Sync {
 ///
 /// [`Borrow`](Self::Borrow) is what the host borrows from the deployment's
 /// backend bundle; [`view`](Self::view) assembles the linker-facing
-/// [`HasData::Data`] view from that borrow plus the store's resource table.
+/// [`HasData::Data`] view from that borrow, the store's resource table, and
+/// the [`Grants`] of the guest the store runs.
 /// The `runtime!` macro never derives names from the host type — everything
 /// it needs rides these associated items.
 ///
@@ -97,9 +99,14 @@ pub trait HostCtx: HasData {
     /// What this host borrows from the backend bundle.
     type Borrow<'a>;
 
-    /// Assemble the linker-facing view from the borrow and the store's
-    /// resource table.
-    fn view<'a>(borrow: Self::Borrow<'a>, table: &'a mut ResourceTable) -> Self::Data<'a>;
+    /// Assemble the linker-facing view from the borrow, the store's resource
+    /// table, and the grants of the guest the store runs.
+    ///
+    /// A host whose backend reaches past the store, such as `WasiHttp`'s
+    /// outbound requests, holds that reach to `grants`.
+    fn view<'a>(
+        borrow: Self::Borrow<'a>, table: &'a mut ResourceTable, grants: &'a Arc<Grants>,
+    ) -> Self::Data<'a>;
 }
 
 /// The one bundle-accessor trait: a [`Backends`] bundle that yields host `H`'s

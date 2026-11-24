@@ -203,7 +203,8 @@ pub struct StoreCtx<B> {
 
 impl<B> StoreCtx<B> {
     /// Assemble host `H`'s linker-facing view: the host's borrow of the
-    /// bundle plus the store's resource table.
+    /// bundle, the store's resource table, and the grants its guest runs
+    /// under.
     ///
     /// A host passes `StoreCtx::view::<Self>` as the accessor of its
     /// bindgen `add_to_linker`; a trigger server calls it on the store it
@@ -212,7 +213,7 @@ impl<B> StoreCtx<B> {
     where
         B: Provides<H>,
     {
-        H::view(self.backends.borrow(), &mut self.base.table)
+        H::view(self.backends.borrow(), &mut self.base.table, &self.base.grants)
     }
 
     /// The guest this store runs.

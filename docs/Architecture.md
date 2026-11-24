@@ -270,7 +270,7 @@ Redis: Connect + KeyValueClient          the backend the deployment connects
    v
 StoreCtx<Backends>                       one per guest store
    |  StoreCtx::view::<WasiKeyValue>():
-   |  WasiKeyValue::view(backends.borrow(), &mut base.table)
+   |  WasiKeyValue::view(backends.borrow(), &mut base.table, &base.grants)
    v
 HostView<'_, dyn KeyValueClient>         #[host_ctx(client = KeyValueClient)]: the host's HasData::Data
    |  bindgen Host* impls on the view; Host::add_to_linker(linker, StoreCtx::view::<Self>)
