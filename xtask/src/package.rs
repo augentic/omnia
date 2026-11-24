@@ -12,7 +12,7 @@ use wasm_metadata::{
     AddMetadata, AddMetadataField, Authors, Description, Homepage, Licenses, Revision, Source,
     Version,
 };
-use wit_bindgen_core::wit_parser::{PackageId, PackageName, Resolve};
+use wit_parser::{PackageId, PackageName, Resolve};
 
 use crate::workspace::{Workspace, wit_files};
 
