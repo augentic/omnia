@@ -3,7 +3,7 @@
 //   * runtime_path: "wasip3::wit_bindgen::rt"
 //   * with "omnia:types/types@0.1.0" = "crate::bindings::imports::omnia::types::types"
 //   * with "omnia:messaging/types@0.1.0" = "crate::bindings::imports::omnia::messaging::types"
-//   * type_section_suffix: "rust-omnia-sdk-0.38.0-messaging-world"
+//   * type_section_suffix: "rust-omnia-sdk-0.39.0-messaging-world"
 //   * default-bindings-module: "$crate"
 //   * export-macro-name: _export_messaging
 //   * pub-export-macro
@@ -490,7 +490,7 @@ macro_rules! __export_messaging_impl {
         with_types_in $($path_to_types_root)*::
         exports::omnia::messaging::incoming_handler); const _ : () = { #[rustfmt::skip]
         #[cfg(target_arch = "wasm32")] #[unsafe (link_section =
-        "component-type:wit-bindgen:0.63.0:omnia:sdk@0.38.0:messaging:imports and exportsrust-omnia-sdk-0.38.0-messaging-world")]
+        "component-type:wit-bindgen:0.63.0:omnia:sdk@0.39.0:messaging:imports and exportsrust-omnia-sdk-0.39.0-messaging-world")]
         #[doc(hidden)] #[allow(clippy::octal_escapes)] pub static
         __WIT_BINDGEN_COMPONENT_TYPE : [u8; 893] = *
         b"\
@@ -512,7 +512,7 @@ ms\x17\x04\0\x07release\x03\0\x18\x01q\x02\x06reject\x01s\0\x07release\x01\x19\0
 \x03\x02\x03\0\x01\x08delivery\x02\x03\0\x01\x06settle\x01B\x07\x02\x03\x02\x01\x04\
 \x04\0\x08delivery\x03\0\0\x02\x03\x02\x01\x05\x04\0\x06settle\x03\0\x02\x01j\0\x01\
 \x03\x01C\x01\x08delivery\x01\0\x04\x04\0\x06handle\x01\x05\x04\0&omnia:messagin\
-g/incoming-handler@0.1.0\x05\x06\x04\0\x1aomnia:sdk/messaging@0.38.0\x04\0\x0b\x0f\
+g/incoming-handler@0.1.0\x05\x06\x04\0\x1aomnia:sdk/messaging@0.39.0\x04\0\x0b\x0f\
 \x01\0\x09messaging\x03\0\0\0G\x09producers\x01\x0cprocessed-by\x02\x0dwit-compo\
 nent\x070.262.0\x10wit-bindgen-rust\x060.63.0";
         };
@@ -523,7 +523,7 @@ pub use __export_messaging_impl as _export_messaging;
 #[rustfmt::skip]
 #[cfg(target_arch = "wasm32")]
 #[unsafe(
-    link_section = "component-type:wit-bindgen:0.63.0:omnia:sdk@0.38.0:messaging-with-all-of-its-exports-removed:encoded worldrust-omnia-sdk-0.38.0-messaging-world"
+    link_section = "component-type:wit-bindgen:0.63.0:omnia:sdk@0.39.0:messaging-with-all-of-its-exports-removed:encoded worldrust-omnia-sdk-0.39.0-messaging-world"
 )]
 #[doc(hidden)]
 #[allow(clippy::octal_escapes)]
@@ -543,7 +543,7 @@ tadata\x0a\x04\0\x07message\x03\0\x10\x01k\x0c\x01ky\x01k\x03\x01r\x07\x05topic\
 ms\x17\x04\0\x07release\x03\0\x18\x01q\x02\x06reject\x01s\0\x07release\x01\x19\0\
 \x04\0\x06settle\x03\0\x1a\x01i\x0d\x01j\x01\x1c\x01\x01\x01C\x01\x04names\0\x1d\
 \x04\0\x16[static]client.connect\x01\x1e\x03\0\x1bomnia:messaging/types@0.1.0\x05\
-\x03\x04\0:omnia:sdk/messaging-with-all-of-its-exports-removed@0.38.0\x04\0\x0b/\
+\x03\x04\0:omnia:sdk/messaging-with-all-of-its-exports-removed@0.39.0\x04\0\x0b/\
 \x01\0)messaging-with-all-of-its-exports-removed\x03\0\0\0G\x09producers\x01\x0c\
 processed-by\x02\x0dwit-component\x070.262.0\x10wit-bindgen-rust\x060.63.0";
 #[inline(never)]
