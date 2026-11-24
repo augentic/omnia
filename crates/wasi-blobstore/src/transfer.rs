@@ -132,7 +132,9 @@ impl<D> StreamConsumer<D> for StreamCollector {
 }
 
 // Driven by `finished` rather than the reply future, so dropping the reply
-// still commits the write.
+// still commits the write. Once the verdict is taken from `source`,
+// cancelling `finished` cannot put it back, so `Writing` still runs to
+// completion when `finish` is set.
 enum PutCommitter {
     AwaitingVerdict(PendingPut),
     Writing(WriteFuture),
@@ -155,22 +157,22 @@ impl<D> FutureConsumer<D> for PutCommitter {
         let this = self.get_mut();
 
         // resolve the guest's verdict
-        if let Self::AwaitingVerdict(_) = this
-            && finish
-        {
-            return Poll::Ready(Ok(()));
-        }
-        if let Self::AwaitingVerdict(pending) = std::mem::replace(this, Self::Done) {
-            let mut verdict = None;
-            source.read(&mut store, &mut verdict)?;
-            match verdict {
-                None => *this = Self::AwaitingVerdict(pending),
-                Some(Ok(())) => {
-                    if let Some(writing) = pending.commit() {
-                        *this = Self::Writing(writing);
+        if matches!(this, Self::AwaitingVerdict(_)) {
+            if finish {
+                return Poll::Ready(Ok(()));
+            }
+            if let Self::AwaitingVerdict(pending) = std::mem::replace(this, Self::Done) {
+                let mut verdict = None;
+                source.read(&mut store, &mut verdict)?;
+                match verdict {
+                    None => *this = Self::AwaitingVerdict(pending),
+                    Some(Ok(())) => {
+                        if let Some(writing) = pending.commit() {
+                            *this = Self::Writing(writing);
+                        }
                     }
+                    Some(Err(error)) => pending.abort(error),
                 }
-                Some(Err(error)) => pending.abort(error),
             }
         }
 
