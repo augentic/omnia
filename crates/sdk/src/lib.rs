@@ -1,7 +1,6 @@
 #![doc = include_str!("../README.md")]
 
 // the `#[instrument]` expansion names `::omnia_sdk`, inside this crate too
-#[cfg(target_arch = "wasm32")]
 extern crate self as omnia_sdk;
 
 mod bindings;
@@ -47,13 +46,31 @@ pub mod exports {
         #[macro_export]
         macro_rules! __export_messaging_guest {
             ($ty:ident) => {
-                $crate::_export_messaging!($ty);
+                const _: () = {
+                    struct Scoped;
+
+                    impl $crate::exports::messaging::incoming_handler::Guest for Scoped {
+                        async fn handle(
+                            delivery: $crate::messaging::types::Delivery,
+                        ) -> ::core::result::Result<(), $crate::messaging::types::Settle> {
+                            $crate::otel::scope(|| {
+                                <$ty as $crate::exports::messaging::incoming_handler::Guest>::handle(
+                                    delivery,
+                                )
+                            })
+                            .await
+                        }
+                    }
+
+                    $crate::_export_messaging!(Scoped);
+                };
             };
         }
 
         /// Export a type as the guest's `omnia:messaging/incoming-handler`.
         ///
-        /// The type implements [`Guest`](incoming_handler::Guest).
+        /// The type implements [`Guest`](incoming_handler::Guest), and each
+        /// delivery runs inside the guest telemetry scope.
         #[doc(inline)]
         pub use crate::__export_messaging_guest as export;
     }
@@ -67,13 +84,31 @@ pub mod exports {
         #[macro_export]
         macro_rules! __export_websocket_guest {
             ($ty:ident) => {
-                $crate::_export_websocket!($ty);
+                const _: () = {
+                    struct Scoped;
+
+                    impl $crate::exports::websocket::incoming_handler::Guest for Scoped {
+                        async fn handle(
+                            event: $crate::websocket::types::Event,
+                        ) -> ::core::result::Result<(), $crate::websocket::types::Error> {
+                            $crate::otel::scope(|| {
+                                <$ty as $crate::exports::websocket::incoming_handler::Guest>::handle(
+                                    event,
+                                )
+                            })
+                            .await
+                        }
+                    }
+
+                    $crate::_export_websocket!(Scoped);
+                };
             };
         }
 
         /// Export a type as the guest's `omnia:websocket/incoming-handler`.
         ///
-        /// The type implements [`Guest`](incoming_handler::Guest).
+        /// The type implements [`Guest`](incoming_handler::Guest), and each
+        /// event runs inside the guest telemetry scope.
         #[doc(inline)]
         pub use crate::__export_websocket_guest as export;
     }

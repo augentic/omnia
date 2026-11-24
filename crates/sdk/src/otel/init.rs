@@ -5,6 +5,7 @@ use std::sync::OnceLock;
 use anyhow::{Context, Result};
 use opentelemetry::global;
 use opentelemetry::trace::TracerProvider as _;
+use tracing::Metadata;
 use tracing_opentelemetry::{MetricsLayer, layer as tracing_layer};
 use tracing_subscriber::filter::filter_fn;
 use tracing_subscriber::layer::SubscriberExt;
@@ -18,13 +19,21 @@ static TELEMETRY: OnceLock<Option<Telemetry>> = OnceLock::new();
 /// Wrap the provided `inner` function with telemetry support.
 ///
 /// The first `scope` in an instance initializes telemetry before calling the
-/// wrapped `inner` function: the subscriber follows `RUST_LOG`, falling back
-/// to `error` when it is unset. Exports every span and metric once the
-/// returned future completes.
+/// wrapped `inner` function. Exports every span and metric once the returned
+/// future completes, as [`flush`] does. On a native target it installs and
+/// exports nothing, so the spans `inner` opens reach the caller's subscriber.
+///
+/// `RUST_LOG` filters console output and spans, falling back to `error` when
+/// it is unset. Metrics record whatever it is, whether an instrument's or a
+/// `tracing` event's with a `monotonic_counter.`, `counter.`, `histogram.`,
+/// or `gauge.` field.
 pub async fn scope<F: Future>(inner: impl FnOnce() -> F) -> F::Output {
     let mut owner = false;
     TELEMETRY.get_or_init(|| {
         owner = true;
+        if cfg!(not(target_arch = "wasm32")) {
+            return None;
+        }
         init().inspect_err(report).ok()
     });
 
@@ -52,23 +61,19 @@ struct Telemetry {
 }
 
 fn init() -> Result<Telemetry> {
-    let filter_layer = mute(EnvFilter::from_default_env());
-    let fmt_layer = tracing_subscriber::fmt::layer()
+    let console = tracing_subscriber::fmt::layer()
         .with_writer(std::io::stderr)
         .with_filter(filter_fn(|meta| !meta.is_span()));
 
     let (tracer_provider, spans) = tracer::TracerProvider::new();
-    let tracing_layer =
+    let exporter =
         tracing_layer().with_tracer(tracer_provider.tracer("global")).with_threads(false);
 
     let meter_provider = meter::MeterProvider::default();
-    let metrics_layer = MetricsLayer::new(meter_provider.clone());
 
     Registry::default()
-        .with(filter_layer)
-        .with(fmt_layer)
-        .with(tracing_layer)
-        .with(metrics_layer)
+        .with(console.and_then(exporter).with_filter(mute(EnvFilter::from_default_env())))
+        .with(MetricsLayer::new(meter_provider.clone()).with_filter(filter_fn(metric)))
         .try_init()
         .context("issue initializing subscriber")?;
 
@@ -83,6 +88,15 @@ fn init() -> Result<Telemetry> {
 
 fn mute(filter: EnvFilter) -> EnvFilter {
     filter.add_directive("opentelemetry=off".parse().expect("opentelemetry=off"))
+}
+
+fn metric(meta: &Metadata<'_>) -> bool {
+    const PREFIXES: [&str; 4] = ["monotonic_counter.", "counter.", "histogram.", "gauge."];
+    meta.is_event()
+        && meta
+            .fields()
+            .iter()
+            .any(|field| PREFIXES.iter().any(|prefix| field.name().starts_with(prefix)))
 }
 
 #[expect(clippy::print_stderr, reason = "the subscriber that would carry this failed to install")]

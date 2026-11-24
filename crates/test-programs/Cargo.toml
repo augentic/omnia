@@ -414,6 +414,11 @@ path = "programs/otel/error_codes.rs"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "otel_incoming_handlers"
+path = "programs/otel/incoming_handlers.rs"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "otel_metrics_instruments"
 path = "programs/otel/metrics_instruments.rs"
 crate-type = ["cdylib"]

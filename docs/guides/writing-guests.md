@@ -218,7 +218,7 @@ messaging::export!(messaging_router);
 
 A handler that answers a request registers with `request`, which sends its output back as JSON, or with `request_with`, whose handler returns the reply `Message` (see [Messaging § Request-reply](messaging.md#request-reply)).
 
-For guests that need direct control over the raw `omnia:messaging/incoming-handler` export (for example, `examples/messaging` demonstrating request-reply and fan-out, or a guest that sets a release delay), implement `omnia_sdk::exports::messaging::incoming_handler::Guest`, bind it with `omnia_sdk::exports::messaging::export!`, and dispatch through `omnia_sdk::messaging::handle`, which opens the guest telemetry scope around the delivery and settles a failure:
+For guests that need direct control over the raw `omnia:messaging/incoming-handler` export (for example, `examples/messaging` demonstrating request-reply and fan-out, or a guest that sets a release delay), implement `omnia_sdk::exports::messaging::incoming_handler::Guest` and bind it with `omnia_sdk::exports::messaging::export!`, which runs each delivery inside the guest telemetry scope. Dispatch through `omnia_sdk::messaging::handle`, which settles a failure:
 
 ```rust,noplayground
 use omnia_sdk::messaging::types::{Delivery, Settle};
@@ -319,18 +319,18 @@ Annotate handlers with `#[omnia_sdk::otel::instrument]`, or `#[tracing::instrume
 pub(crate) async fn place(Path(id): Path<String>) -> omnia_sdk::Result<Json<Option<Place>>> { /* ... */ }
 ```
 
-A guest that binds its WASI export by hand annotates the export's `handle` with `#[omnia_sdk::otel::instrument]`, which opens that scope itself. `omnia_sdk::http::serve` and `omnia_sdk::messaging::handle` already do:
+`omnia_sdk::exports::messaging::export!` and `omnia_sdk::exports::websocket::export!` open that scope around the handler they bind. A guest that binds a WASI export through `wasip3` annotates the export's `handle` with `#[omnia_sdk::otel::instrument]`, which opens the scope itself. `omnia_sdk::http::serve` and `omnia_sdk::messaging::handle` already do:
 
 ```rust
 #[omnia_sdk::otel::instrument(name = "guest_handle", level = Level::INFO)]
 async fn handle(request: Request) -> Result<Response, ErrorCode> { /* ... */ }
 ```
 
-Only the outermost scope initializes and exports. A nested instrumented `async fn` adds its span to the same run, and on a sync function the attribute only opens a span.
+Only the outermost scope initializes and exports. A nested instrumented `async fn` adds its span to the same run, and on a sync function the attribute only opens a span. On a native target an instrumented `async fn` runs with no telemetry installed, so a test's own subscriber sees its span.
 
 The OpenTelemetry API works directly too: `global::tracer(..)` and `global::meter(..)` return Omnia's own providers, which record straight into the `omnia:otel` records the flush exports — no OpenTelemetry SDK is linked into the guest. Counters, histograms, and gauges export delta series (one instance per invocation); up-down counters are cumulative. Observable (callback) instruments are no-ops: record through a synchronous instrument instead.
 
-Console output (events, never a span prefix) goes to stderr, so stdout stays the guest's own; it follows the guest's `RUST_LOG`, defaulting to `error`. Spans and metrics are exported whatever the filter admits: a span below the filter's level is never created, so an `#[instrument]` at `INFO` needs `RUST_LOG=info` to reach the host. A guest's `RUST_LOG` is the one its WASI environment carries: the runtime's tracing filter — a `-v`/`-q` flag's level, else the process `RUST_LOG`'s, else `info` for a command and `warn` for a server, with the process `RUST_LOG`'s targeted directives (`my_guest=debug`) on top (see [Verbosity flags](../reference/configuration.md#verbosity-flags)) — so every guest a runtime dispatches opens at the same level without naming another's, and an operator's `RUST_LOG=my_guest=trace` refines one guest under any flag. A command guest declares the flags by flattening `omnia_sdk::command::Verbosity` into its grammar; it never acts on them.
+Console output (events, never a span prefix) goes to stderr, so stdout stays the guest's own; it follows the guest's `RUST_LOG`, defaulting to `error`. Spans follow it too: a span below the filter's level is never created, so an `#[instrument]` at `INFO` needs `RUST_LOG=info` to reach the host. Metrics record whatever the filter is, whether through a `global::meter` instrument or a `tracing` event with a `monotonic_counter.`, `counter.`, `histogram.`, or `gauge.` field. Below the filter's level such an event records its metric and nothing else, so `tracing::info!(monotonic_counter.orders = 1)` counts under a server's default `warn` without printing. A guest's `RUST_LOG` is the one its WASI environment carries: the runtime's tracing filter — a `-v`/`-q` flag's level, else the process `RUST_LOG`'s, else `info` for a command and `warn` for a server, with the process `RUST_LOG`'s targeted directives (`my_guest=debug`) on top (see [Verbosity flags](../reference/configuration.md#verbosity-flags)) — so every guest a runtime dispatches opens at the same level without naming another's, and an operator's `RUST_LOG=my_guest=trace` refines one guest under any flag. A command guest declares the flags by flattening `omnia_sdk::command::Verbosity` into its grammar; it never acts on them.
 
 ## Serving MCP tools
 

@@ -1,29 +1,25 @@
 //! `omnia:otel`, and the guest telemetry library over it.
 //!
-//! On `wasm32`, `scope` installs a `tracing` subscriber whose spans and
-//! metrics reach the host through [`traces`] and [`metrics`], and
-//! [`instrument`] runs an `async fn` inside that scope.
+//! [`scope`] installs a `tracing` subscriber whose spans and metrics reach
+//! the host through [`traces`] and [`metrics`], and [`flush`] exports what
+//! it has buffered. [`instrument`] runs an `async fn` inside that scope. On a
+//! native target `scope` installs nothing, so spans reach whatever subscriber
+//! the caller set.
 //!
 //! The unstable [`logs`] interface is the raw binding. Every host links it,
 //! and answers `unsupported` today.
 
-pub use crate::bindings::imports::omnia::otel::*;
-
-cfg_select! {
-    target_arch = "wasm32" => {
-        mod aggregate;
-        mod convert;
-        mod init;
-        mod meter;
-        mod tracer;
-
-        pub use self::init::*;
-    }
-    _ => {}
-}
+mod aggregate;
+mod convert;
+mod init;
+mod meter;
+mod tracer;
 
 /// Opens a span around a fn, and runs an `async fn` inside the telemetry scope.
 pub use omnia_guest_macros::instrument;
+
+pub use self::init::{flush, scope};
+pub use crate::bindings::imports::omnia::otel::*;
 
 // Implementation detail of the `#[instrument]` expansion: the macro emits
 // paths through this module so callers need no direct `tracing` dependency.

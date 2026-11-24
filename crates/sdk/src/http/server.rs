@@ -56,7 +56,6 @@ macro_rules! __export_http {
 ///
 /// Returns the WASI error code when the request or the router's response
 /// does not convert.
-#[cfg(target_arch = "wasm32")]
 #[crate::otel::instrument(name = "http_guest_handle")]
 pub async fn serve(
     router: impl Into<axum::Router>, request: wasip3::http::types::Request,

@@ -132,7 +132,6 @@ pub use crate::__export_command as export;
 /// the process with any non-zero status the entry reports. [`export!`] runs
 /// its entry through it, and a hand-written `wasi:cli/run` export calls it
 /// directly.
-#[cfg(target_arch = "wasm32")]
 pub async fn execute<E: IntoExit>(entry: impl Future<Output = E>) {
     // `scope` exports telemetry before an `exit-with-code`, which never returns.
     let result = crate::otel::scope(|| entry).await.into_exit();
@@ -158,7 +157,6 @@ pub trait Export<M> {
     fn run(self, package: Package) -> impl Future<Output = ()>;
 }
 
-#[cfg(target_arch = "wasm32")]
 impl<F, Fut, E> Export<()> for F
 where
     F: FnOnce() -> Fut,
@@ -170,7 +168,7 @@ where
     }
 }
 
-#[cfg(all(target_arch = "wasm32", feature = "command"))]
+#[cfg(feature = "command")]
 impl<F> Export<crate::Router> for F
 where
     F: FnOnce() -> crate::Router,

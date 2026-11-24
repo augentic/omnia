@@ -60,6 +60,7 @@ http-body-util = "0.1.5"
 hyper = "1.13.0"
 hyper-util = "0.1.21"
 jiff = { version = "1.0.2", default-features = false, features = ["std"] }
+log = "0.4.35"
 moka = { version = "0.12.16", features = ["sync"] }
 opentelemetry = { version = "0.33.1", default-features = false }
 opentelemetry-otlp = { version = "0.33.1", default-features = false }

@@ -10,9 +10,11 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use futures::FutureExt as _;
-use omnia::{ExitStatus, FutureResult, Provides, Telemetry};
-use omnia_test::host::Deployment;
+use omnia::{ExitStatus, FutureResult, LevelFilter, Provides, Telemetry};
+use omnia_test::host::{Deployment, deliver};
+use omnia_wasi_messaging::WasiMessaging;
 use omnia_wasi_otel::{Error, OtelClient, WasiOtel};
+use omnia_wasi_websocket::{Event, WasiWebSocket, WebSocketHandler};
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
 use opentelemetry_proto::tonic::common::v1::any_value::Value as AnyValue;
@@ -127,20 +129,29 @@ impl OtelClient for Recording {
 
 async fn run_guest(wasm: &str) -> Recording {
     let recording = Recording::default();
-    run(wasm, recording.clone()).await;
+    run(wasm, None, recording.clone()).await;
     recording
 }
 
-// the deadline turns a telemetry-flush deadlock into a failure, not a hung suite
-async fn run<C: OtelClient + Clone>(wasm: &str, client: C) {
-    // guest spans join the runtime's own `cli-run` span at `info`, so
-    // providers install at that level and the suite adds no span of its own
+// guest spans join the runtime's own span for a run or a trigger at `info`,
+// so providers install at that level and the suite adds no span of its own
+fn install_telemetry() {
     Telemetry::new("otel-e2e").filter("info").build().expect("telemetry installs");
+}
+
+// the deadline turns a telemetry-flush deadlock into a failure, not a hung suite
+async fn run<C: OtelClient + Clone>(wasm: &str, level: Option<LevelFilter>, client: C) {
+    install_telemetry();
+
+    let mut deployment = Deployment::new().guest("guest", wasm);
+    if let Some(level) = level {
+        deployment = deployment.level(level);
+    }
 
     // linked by hand: `run_host` would add a second `WasiOtel` beside the one under test
     let status = tokio::time::timeout(
         Duration::from_secs(300),
-        Deployment::new().guest("guest", wasm).run(Backends(client), |deployment| {
+        deployment.run(Backends(client), |deployment| {
             deployment.host::<WasiOtel>()?;
             Ok(())
         }),
@@ -164,6 +175,36 @@ async fn otel_axum_handler() {
     assert_eq!(recording.span_names(), ["traced"]);
     // no metrics recorded, so the flush skips the export rather than send an empty one
     assert!(recording.metrics.lock().expect("metrics lock").is_empty());
+}
+
+// The guest's handlers open no telemetry scope, so their spans arrive only
+// through their bindings' scopes.
+#[tokio::test]
+async fn otel_incoming_handlers() {
+    install_telemetry();
+    let recording = Recording::default();
+    let backends = omnia_test::host::Backends::defaults().await.otel(recording.clone());
+    let runtime = Deployment::new()
+        .guest("guest", test_programs::OTEL_INCOMING_HANDLERS)
+        .boot(backends, |deployment| {
+            deployment.host::<WasiMessaging>()?;
+            deployment.host::<WasiWebSocket>()?;
+            deployment.host::<WasiOtel>()?;
+            Ok(())
+        })
+        .await
+        .expect("runtime boots");
+
+    deliver(&runtime, "orders", "order-1").await.expect("the delivery is handled");
+    let websocket = WebSocketHandler::new(&runtime)
+        .expect("websocket routes consistent")
+        .expect("the guest exports the websocket handler");
+    let mut event = Event::new(b"ping".to_vec());
+    event.socket_addr = Some("peer-1".to_owned());
+    websocket.handle(event).await.expect("the event is handled");
+
+    assert_eq!(recording.span_names(), ["messaging", "websocket"]);
+    runtime.shutdown();
 }
 
 #[tokio::test]
@@ -476,9 +517,11 @@ fn raw_metrics(resource: &ResourceMetrics) {
     assert_eq!(counts(&point.negative), Some((-1, vec![2])));
 }
 
+// A server's default level, above the guest's `info` metric events.
 #[tokio::test]
 async fn otel_metrics_instruments() {
-    let recording = run_guest(test_programs::OTEL_METRICS_INSTRUMENTS).await;
+    let recording = Recording::default();
+    run(test_programs::OTEL_METRICS_INSTRUMENTS, Some(LevelFilter::WARN), recording.clone()).await;
 
     let exports = recording.metric_exports();
     let [first, second] = exports.as_slice() else {
@@ -632,7 +675,7 @@ impl OtelClient for Faulting {
 async fn otel_error_codes() {
     let faulting = Faulting::default();
 
-    run(test_programs::OTEL_ERROR_CODES, faulting.clone()).await;
+    run(test_programs::OTEL_ERROR_CODES, None, faulting.clone()).await;
 
     // the telemetry the host refused never reached the backend
     let exported = faulting.exported.lock().expect("exported names").clone();

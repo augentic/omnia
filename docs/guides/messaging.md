@@ -38,7 +38,7 @@ fn router() -> Router {
 messaging::export!(router);
 ```
 
-A handler that reads the delivery's metadata takes a `Context` first, as `async fn(Context, I)`. A guest that writes the raw export implements `omnia_sdk::exports::messaging::incoming_handler::Guest`, binds it with `omnia_sdk::exports::messaging::export!`, and dispatches through `omnia_sdk::messaging::handle` (see [Writing Guests](writing-guests.md#handling-incoming-messages)).
+A handler that reads the delivery's metadata takes a `Context` first, as `async fn(Context, I)`. A guest that writes the raw export implements `omnia_sdk::exports::messaging::incoming_handler::Guest`, binds it with `omnia_sdk::exports::messaging::export!`, which runs each delivery inside the guest telemetry scope, and dispatches through `omnia_sdk::messaging::handle` (see [Writing Guests](writing-guests.md#handling-incoming-messages)).
 
 The guest router matches registered topics exactly; broker subscription patterns remain host configuration (`KAFKA_TOPICS`, `NATS_TOPICS`). `topic` decodes JSON and drops the handler's output. `Router::handle` answers a request route's reply, and reports a failure as an `omnia_sdk::Error`, whose code names it. A payload that does not decode is a `BadRequest` with the code `undecodable`. A delivery with no topic is a `BadRequest` with the code `missing-topic`, and one no route takes is a `NotFound` with the code `unhandled-topic`. A handler's failure takes its class and code from the first `omnia_sdk::Error`, binding error, or typed outcome such as `model::Exhausted` in its source chain, and anything else is a `ServerError`.
 
@@ -127,6 +127,6 @@ impl omnia_sdk::exports::websocket::incoming_handler::Guest for WebSocket {
 }
 ```
 
-The host sets each event's `deadline` to when it stops waiting for `handle`.
+`omnia_sdk::exports::websocket::export!` runs each event inside the guest telemetry scope. The host sets each event's `deadline` to when it stops waiting for `handle`.
 
 The [`websocket`](../../examples/websocket/) example pairs an HTTP control endpoint (POST a message) with a WebSocket broadcast to all connected clients. In manifests, `routes.websocket` entries use the same pattern syntax as messaging routes.

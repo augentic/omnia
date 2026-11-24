@@ -31,5 +31,7 @@ wasmtime.workspace = true
 [dev-dependencies]
 omnia = { path = "../omnia" }
 omnia-test = { path = "../test", default-features = false, features = ["host"] }
+omnia-wasi-messaging = { path = "../wasi-messaging" }
+omnia-wasi-websocket = { path = "../wasi-websocket" }
 test-programs.workspace = true
 tokio = { workspace = true, features = ["macros", "rt", "time"] }

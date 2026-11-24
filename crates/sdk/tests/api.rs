@@ -64,8 +64,16 @@ async fn echo_route(
     echo(context, input).await.map(Json)
 }
 
+#[omnia_sdk::otel::instrument]
+async fn instrumented() -> Json<&'static str> {
+    Json("instrumented")
+}
+
 fn handlers() -> Handlers {
-    Handlers::from([Handlers::new().route("/echo", get(echo_route)).topic("echo", echo)])
+    Handlers::from([Handlers::new()
+        .route("/echo", get(echo_route))
+        .route("/instrumented", get(instrumented))
+        .topic("echo", echo)])
 }
 
 fn router() -> Router {
@@ -218,6 +226,20 @@ async fn trace_unmatched_path() {
         spans.handler(),
         fields([("request_id", "req-1"), ("correlation_id", "corr-1"), ("method", "GET")])
     );
+}
+
+// The route's `Handler` bound holds the instrumented future to `Send` on a
+// native target.
+#[tokio::test]
+async fn instrumented_handler() {
+    let (spans, _guard) = Spans::install();
+    let request = Request::get("/instrumented").body(Body::empty()).expect("build request");
+
+    let (status, value) = send(router(), request).await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(value, "instrumented");
+    assert_eq!(spans.span("instrumented"), fields([]));
 }
 
 async fn lookup(Path(id): Path<String>) -> Result<Json<String>, omnia_sdk::Error> {

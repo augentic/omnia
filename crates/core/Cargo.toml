@@ -28,6 +28,7 @@ cap-fs-ext.workspace = true
 cap-std.workspace = true
 futures.workspace = true
 http.workspace = true
+log.workspace = true
 omnia-compile.workspace = true
 omnia-host-macros.workspace = true
 opentelemetry = { workspace = true, features = ["metrics", "trace"] }
