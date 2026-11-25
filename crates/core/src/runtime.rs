@@ -218,7 +218,9 @@ impl<B: Backends> Runtime<B> {
             return Err(GuestError::Unregistered(id.clone()));
         }
 
-        self.load_declared(id).await
+        let (runtime, owned) = (self.clone(), id.clone());
+        let start = move || async move { runtime.load_declared(&owned).await }.boxed();
+        self.inner.loads.join(id, start).await
     }
 
     // The load every first use of a declared guest joins while it runs. It
