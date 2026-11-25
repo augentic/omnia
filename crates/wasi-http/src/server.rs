@@ -26,7 +26,7 @@ use omnia_core::{
 };
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
-use tokio::task::{JoinHandle, JoinSet};
+use tokio::task::JoinSet;
 use tokio::time::timeout;
 use tracing::{Instrument, info_span, instrument};
 use wasmtime::AsContextMut as _;
@@ -265,6 +265,11 @@ where
     /// - names an authority with userinfo or a non-numeric port;
     /// - is HTTP/2 with an `:authority` other than its `Host`.
     ///
+    /// The [guest timeout](omnia_core::RuntimeOptions::guest_timeout) counts
+    /// from when the request takes its slot, so it bounds instantiation as well
+    /// as the wait for the response head. Dropping the future before it
+    /// resolves stops the guest and frees its slot.
+    ///
     /// The response body streams on after `handle` returns. It fails part way
     /// when the guest traps, or once
     /// [`http_stream_timeout`](omnia_core::RuntimeOptions::http_stream_timeout)
@@ -322,47 +327,54 @@ where
             return Ok(unavailable());
         };
 
-        // instantiate the selected guest fresh (instance-per-call)
-        let (mut entered, instance) = self.state.enter(&guest, ChainCtx::server(), slot).await?;
-        let service = indices.load(&mut entered, &instance)?;
+        // dropping the set aborts the guest's task, so a request dropped or
+        // timed out before its head frees its slot
+        let mut guest_task = JoinSet::new();
 
-        let (sender, receiver) = oneshot::channel::<Result<hyper::Response<OutgoingBody>>>();
-        let stream_timeout = self.state.options().http_stream_timeout;
-        let guest_task = spawn_guest(entered, service, request, sender, stream_timeout);
+        // instantiate the selected guest fresh (instance-per-call), bounding
+        // the time from the slot to the head (not the streaming body)
+        let invoked = timeout(self.state.options().guest_timeout, async {
+            let (mut entered, instance) =
+                self.state.enter(&guest, ChainCtx::server(), slot).await?;
+            let service = indices.load(&mut entered, &instance)?;
 
-        // bound time-to-response (not the streaming body); cancel a hung guest
-        let response = match timeout(self.state.options().guest_timeout, receiver).await {
-            Ok(delivered) => {
-                delivered.map_err(|_canceled| anyhow!("guest produced no response"))??
-            }
+            let (sender, receiver) = oneshot::channel::<Result<hyper::Response<OutgoingBody>>>();
+            let stream_timeout = self.state.options().http_stream_timeout;
+            spawn_guest(&mut guest_task, entered, service, request, sender, stream_timeout);
+            receiver.await.map_err(|_canceled| anyhow!("guest produced no response"))?
+        })
+        .await;
+        let response = match invoked {
+            Ok(response) => response?,
             Err(_elapsed) => {
-                guest_task.abort();
                 tracing::error!(service = %self.component, "guest handler timed out");
                 return Ok(internal_error());
             }
         };
+
+        // the body's drop ends the task from here on
+        guest_task.detach_all();
         tracing::debug!("received response: {response:?}");
 
         Ok(response)
     }
 }
 
-// Runs the guest's handler on a task of its own, which owns the store and
-// the request's slot of the gate. The response or the failure goes through
-// `sender`, and the task lives on until hyper has consumed the body or
+// Runs the guest's handler on a task of its own in `tasks`, which owns the
+// store and the request's slot of the gate. The response or the failure goes
+// through `sender`, and the task lives on until hyper has consumed the body or
 // `stream_timeout` has passed since the head went out. Ending the task drops
 // the store, which fails a body still streaming, and then frees the slot.
 fn spawn_guest<B, T>(
-    mut entered: Entered<B>, service: Service, request: http::Request<T>,
+    tasks: &mut JoinSet<()>, mut entered: Entered<B>, service: Service, request: http::Request<T>,
     sender: oneshot::Sender<Result<hyper::Response<OutgoingBody>>>,
     stream_timeout: Option<Duration>,
-) -> JoinHandle<()>
-where
+) where
     B: Provides<WasiHttp>,
     T: Body<Data = Bytes> + Send + 'static,
     T::Error: Into<wasmtime_wasi_http::Error>,
 {
-    tokio::spawn(async move {
+    tasks.spawn(async move {
         let result = entered
             .as_context_mut()
             .run_concurrent(async |store| {
@@ -437,7 +449,7 @@ where
             Ok(Err(e)) => tracing::error!("http guest task error: {e:#}"),
             Err(e) => tracing::error!("run_concurrent error: {e:?}"),
         }
-    })
+    });
 }
 
 // The sender drops once the body is consumed (or the wrapper dropped); its

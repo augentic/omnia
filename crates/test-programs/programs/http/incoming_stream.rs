@@ -1,6 +1,7 @@
-//! A `wasi:http/handler` guest whose response bodies stream on after its
-//! handler returns. `/stream/endless` writes a chunk every 10ms and never
-//! ends, and `/stream/trap` writes one chunk, then traps.
+//! A `wasi:http/handler` guest whose handler stalls, or whose response bodies
+//! stream on after its handler returns. `/stream/stall` never answers,
+//! `/stream/endless` writes a chunk every 10ms and never ends, and
+//! `/stream/trap` writes one chunk, then traps.
 
 #![cfg(target_arch = "wasm32")]
 
@@ -16,14 +17,23 @@ use bytes::Bytes;
 use futures::{StreamExt as _, stream};
 use omnia_sdk::http;
 
-// `thread::sleep` suspends the guest, so the host has sent the head and every
-// chunk before the next is made
+// `thread::sleep` suspends the guest, so the host can abort it between sleeps,
+// and has sent the head and every chunk before the next is made
 const TICK: Duration = Duration::from_millis(10);
 
 http::export!(router);
 
 fn router() -> Router {
-    Router::new().route("/stream/endless", get(endless)).route("/stream/trap", get(trap))
+    Router::new()
+        .route("/stream/stall", get(stall))
+        .route("/stream/endless", get(endless))
+        .route("/stream/trap", get(trap))
+}
+
+async fn stall() {
+    loop {
+        thread::sleep(TICK);
+    }
 }
 
 async fn endless() -> Body {
