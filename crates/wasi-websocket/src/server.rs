@@ -2,11 +2,10 @@
 //! guest.
 
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow, bail};
 use futures::StreamExt;
-use omnia_core::{ChainCtx, PatternRoutes, Provides, Runtime, TriggerRouter, telemetry};
+use omnia_core::{LeaseError, PatternRoutes, Provides, Runtime, TriggerRouter, telemetry};
 use tracing::{Instrument, info_span, instrument};
 use wasmtime::AsContextMut as _;
 
@@ -96,13 +95,14 @@ where
     ///
     /// An event with no matching route is dropped silently. The guest
     /// receives the event with its `deadline` set to the instant the guest
-    /// timeout expires. A guest's error leaves the connection open.
+    /// timeout expires, counted from when the event took its slot of the
+    /// gate. A guest's error leaves the connection open.
     ///
     /// # Errors
     ///
     /// Returns an error if the event names no connection or carries text that
     /// is not UTF-8, if the guest cannot be loaded at its first use, if every
-    /// slot of the runtime's [concurrency gate](Runtime::try_slot) is held,
+    /// slot of the runtime's [concurrency gate](Runtime::try_lease) is held,
     /// if the guest cannot be instantiated, traps, or times out, or if the
     /// guest returns an error.
     pub async fn handle(&self, event: Event) -> Result<()> {
@@ -133,32 +133,39 @@ where
                 || format!("routed guest `{guest_id}` does not export the websocket handler"),
             )?;
 
-        event.deadline = Some(deadline_millis(self.state.options().guest_timeout));
-
-        // a full gate fails the event
-        let Some(slot) = self.state.try_slot() else {
+        // a full gate fails the event, and its deadline counts from the slot
+        let Some(lease) = self.state.try_lease(guest) else {
             bail!(
                 "refusing a websocket event: every slot of the concurrency gate \
                  (MAX_CONCURRENT_INVOCATIONS) is held"
             );
         };
+        event.deadline = lease.deadline_millis();
 
-        let (mut entered, instance) = self.state.enter(&guest, ChainCtx::server(), slot).await?;
-        let websocket = indices.load(&mut entered, &instance)?;
-
-        let run = entered
-            .as_context_mut()
-            .run_concurrent(async |store| {
-                websocket.omnia_websocket_incoming_handler().call_handle(store, event).await
+        let handled = lease
+            .invoke(async |mut entered, instance, _bound| {
+                let websocket = indices.load(&mut entered, &instance)?;
+                let called = entered
+                    .as_context_mut()
+                    .run_concurrent(async |store| {
+                        websocket.omnia_websocket_incoming_handler().call_handle(store, event).await
+                    })
+                    .await;
+                let returned = called
+                    .flatten()
+                    .map_err(anyhow::Error::from)
+                    .context("issue handling event")?;
+                returned.map_err(|error| anyhow!("the guest returned an error: {error}"))
             })
-            .instrument(info_span!("websocket-handle"));
-
-        let called = tokio::time::timeout(self.state.options().guest_timeout, run)
-            .await
-            .context("websocket handler timed out")?;
-        let returned =
-            called.flatten().map_err(anyhow::Error::from).context("issue handling event")?;
-        returned.map_err(|error| anyhow!("the guest returned an error: {error}"))
+            .instrument(info_span!("websocket-handle"))
+            .await;
+        match handled {
+            Ok(handled) => handled,
+            Err(LeaseError::Enter(error)) => Err(error),
+            Err(timeout @ LeaseError::Timeout(_)) => {
+                Err(anyhow::Error::from(timeout).context("websocket handler timed out"))
+            }
+        }
     }
 
     async fn events(&self) -> Result<Events> {
@@ -166,10 +173,4 @@ where
         let endpoint = Provides::<WasiWebSocket>::borrow(&mut backends).endpoint();
         endpoint.await?.events().await
     }
-}
-
-// saturates rather than panics, so no configured timeout can fail an event
-fn deadline_millis(timeout: Duration) -> u64 {
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
-    u64::try_from(now.saturating_add(timeout).as_millis()).unwrap_or(u64::MAX)
 }

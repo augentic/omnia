@@ -11,10 +11,14 @@
 
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use futures::future::BoxFuture;
 use futures::{FutureExt as _, SinkExt as _, StreamExt as _};
-use omnia::{ExitStatus, FutureResult, Provides, RuntimeOptions};
+use omnia::{
+    AcquireError, ExitStatus, FutureResult, GuestEntry, GuestId, Provides, RegistrySource,
+    RuntimeOptions,
+};
 use omnia_test::host::Deployment;
 use omnia_wasi_otel::{OtelClient, OtelDefault, WasiOtel};
 use omnia_wasi_websocket::{
@@ -174,19 +178,92 @@ async fn full_gate() {
     let ping = next(&mut events).await;
 
     // with the only slot held, the event fails before a store is built
-    let slot = runtime.try_slot().expect("the gate is empty");
+    let guest = runtime.guest(&GuestId::from("guest")).await.expect("the guest loads");
+    let lease = runtime.try_lease(guest).expect("the gate is empty");
     let built = runtime.stores_built();
     let refused = handler.handle(ping.clone()).await.expect_err("the gate is full");
     assert!(format!("{refused:#}").contains("MAX_CONCURRENT_INVOCATIONS"), "{refused:#}");
     assert_eq!(runtime.stores_built(), built);
 
     // freed, the same event is handled
-    drop(slot);
+    drop(lease);
     handler.handle(ping).await.expect("handled");
     assert_eq!(receive(&mut peer).await, Message::text("ping"));
 
     quiet(&mut peer).await;
     runtime.shutdown();
+}
+
+const DEADLINE_ECHO_PACKAGE: &str = "test:deadline-echo@1.0.0";
+
+// a registry holding one release, the deadline echo guest's, which it
+// answers `delay` after it is asked
+struct SlowRegistry {
+    bytes: Vec<u8>,
+    delay: Duration,
+}
+
+impl RegistrySource for SlowRegistry {
+    fn acquire<'a>(
+        &'a self, package: &'a str, endpoint: Option<&'a str>,
+    ) -> BoxFuture<'a, Result<Vec<u8>, AcquireError>> {
+        Box::pin(async move {
+            assert_eq!(package, DEADLINE_ECHO_PACKAGE);
+            assert_eq!(endpoint, None, "a declared package names no registry of its own");
+            tokio::time::sleep(self.delay).await;
+            Ok(self.bytes.clone())
+        })
+    }
+}
+
+// A declared guest loads at its first event, and the registry takes `LOAD` to
+// answer, so a deadline counted from the slot lies at least `LOAD` past the
+// event's arrival.
+#[tokio::test]
+async fn websocket_deadline_echo() {
+    const LOAD: Duration = Duration::from_millis(300);
+    const GUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
+    let (server, addr, mut events) = serve().await;
+    let bytes = std::fs::read(test_programs::WEBSOCKET_DEADLINE_ECHO).expect("guest bytes");
+    let runtime = Deployment::new()
+        .entry(GuestEntry::package(DEADLINE_ECHO_PACKAGE).route_websocket("deadline"))
+        .guest_timeout(GUEST_TIMEOUT)
+        .boot(Backends::new(server), |deployment| {
+            deployment.registry_source(SlowRegistry { bytes, delay: LOAD });
+            deployment.host::<WasiWebSocket>()?;
+            deployment.host::<WasiOtel>()?;
+            Ok(())
+        })
+        .await
+        .expect("runtime boots");
+    let handler = WebSocketHandler::new(&runtime)
+        .expect("websocket routes consistent")
+        .expect("a guest takes the websocket route");
+
+    // the default backend sets no route, so the test names the guest's
+    let mut peer = connect(addr).await;
+    peer.send(Message::text("deadline")).await.expect("the peer sends");
+    let mut event = next(&mut events).await;
+    event.route = Some("deadline".to_owned());
+
+    let earliest = epoch_millis(SystemTime::now() + LOAD + GUEST_TIMEOUT);
+    handler.handle(event).await.expect("handled");
+    let latest = epoch_millis(SystemTime::now() + GUEST_TIMEOUT);
+
+    let Message::Text(deadline) = receive(&mut peer).await else {
+        panic!("the deadline reaches the peer as text");
+    };
+    let deadline: u64 = deadline.as_str().parse().expect("milliseconds since the epoch");
+    assert!((earliest..=latest).contains(&deadline), "{deadline}");
+
+    quiet(&mut peer).await;
+    runtime.shutdown();
+}
+
+fn epoch_millis(instant: SystemTime) -> u64 {
+    let since_epoch = instant.duration_since(UNIX_EPOCH).expect("after the epoch");
+    u64::try_from(since_epoch.as_millis()).expect("fits in u64 milliseconds")
 }
 
 #[tokio::test]

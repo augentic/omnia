@@ -46,7 +46,8 @@ pub use self::registry::{
     TriggerRouter,
 };
 pub use self::runtime::{
-    Entered, ExitStatus, GuestError, Invocations, Policy, Runtime, RuntimeParts, Slot, WeakRuntime,
+    Bound, Entered, ExitStatus, GuestError, Invocations, Lease, LeaseError, Policy, Runtime,
+    RuntimeParts, WeakRuntime,
 };
 pub use self::seam::{LinkSeam, NoLinks, StoreFactory};
 pub use self::source::{AcquireError, LoadedGuest, RegistrySource, Source, SourceSpec, Verified};

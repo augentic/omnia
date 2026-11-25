@@ -114,20 +114,23 @@ async fn call_export(
         .registry()
         .get(&GuestId::from(guest))
         .with_context(|| format!("guest `{guest}` is not registered"))?;
-    let slot = runtime.slot().await;
-    let (mut entered, instance) = runtime
-        .enter(&entry, ChainCtx::server(), slot)
+    let results = runtime
+        .lease(entry)
         .await
-        .with_context(|| format!("instantiating `{guest}`"))?;
-    let export = instance
-        .get_func(&mut entered, func)
-        .with_context(|| format!("guest `{guest}` exports `{func}`"))?;
-    let mut results = vec![Val::Bool(false)];
-    export
-        .call_async(&mut entered, &[Val::String(message.to_owned())], &mut results)
+        .invoke(async |mut entered, instance, _bound| {
+            let export = instance
+                .get_func(&mut entered, func)
+                .with_context(|| format!("guest `{guest}` exports `{func}`"))?;
+            let mut results = vec![Val::Bool(false)];
+            export
+                .call_async(&mut entered, &[Val::String(message.to_owned())], &mut results)
+                .await
+                .map_err(anyhow::Error::from)
+                .with_context(|| format!("calling `{guest}`'s `{func}`"))?;
+            anyhow::Ok(results)
+        })
         .await
-        .map_err(anyhow::Error::from)
-        .with_context(|| format!("calling `{guest}`'s `{func}`"))?;
+        .with_context(|| format!("instantiating `{guest}`"))??;
     match results.into_iter().next() {
         Some(Val::String(answer)) => Ok(answer),
         other => bail!("`{guest}`'s `{func}` returned a non-string result: {other:?}"),

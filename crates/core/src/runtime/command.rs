@@ -64,19 +64,21 @@ async fn run_guest<B: Backends>(
     tracing::debug!(guest = %guest_id, "running wasi:cli/run");
 
     // the run competes with the triggers serving beside it, so it waits for a
-    // slot of the gate
-    let slot = runtime.slot().await;
-
-    // a command chain root: its link hops run uncapped, like the run itself
-    let (mut entered, instance) = runtime.enter_command(guest, slot).await?;
-    let command = Command::new(&mut entered, &instance)?;
+    // slot of the gate, and as a command chain root its link hops run
+    // uncapped, like the run itself
+    let lease = runtime.command_lease(Arc::clone(guest)).await;
 
     // the host span a guest's root spans join through `omnia:otel`
-    let outcome = entered
-        .as_context_mut()
-        .run_concurrent(async move |store| command.wasi_cli_run().call_run(store).await)
+    let outcome = lease
+        .invoke(async |mut entered, instance, _bound| {
+            let command = Command::new(&mut entered, &instance)?;
+            entered
+                .as_context_mut()
+                .run_concurrent(async move |store| command.wasi_cli_run().call_run(store).await)
+                .await
+        })
         .instrument(tracing::info_span!("cli-run"))
-        .await;
+        .await?;
 
     let status = match outcome {
         Ok(Ok(Ok(()))) => ExitStatus::SUCCESS,

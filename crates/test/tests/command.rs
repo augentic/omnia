@@ -6,7 +6,7 @@
 
 use std::time::Duration;
 
-use omnia::{ExitStatus, RuntimeOptions, SourceSpec};
+use omnia::{ExitStatus, GuestId, RuntimeOptions, SourceSpec};
 use omnia_test::host::{Backends, Deployment, Run, precompiled};
 use omnia_wasi_otel::WasiOtel;
 
@@ -95,11 +95,12 @@ async fn queued_command() {
         .expect("runtime boots");
 
     // with the only slot held, the run waits for it
-    let slot = runtime.try_slot().expect("the gate is empty");
+    let guest = runtime.guest(&GuestId::from("cli")).await.expect("the guest loads");
+    let lease = runtime.try_lease(guest).expect("the gate is empty");
     let release = async {
         tokio::time::sleep(Duration::from_millis(100)).await;
         assert_eq!(runtime.invocations().waiting, 1);
-        drop(slot);
+        drop(lease);
     };
     let ((), status) = tokio::join!(release, runtime.run_command());
     assert_eq!(status.expect("command runs"), ExitStatus::SUCCESS);

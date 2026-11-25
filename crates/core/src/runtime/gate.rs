@@ -41,10 +41,6 @@ impl Gate {
         Some(Slot(Arc::clone(&self.slots)))
     }
 
-    pub(super) fn issued(&self, slot: &Slot) -> bool {
-        Arc::ptr_eq(&self.slots, &slot.0)
-    }
-
     pub(super) fn occupancy(&self) -> Invocations {
         Invocations {
             in_flight: self.size - self.slots.available_permits(),
@@ -54,16 +50,9 @@ impl Gate {
     }
 }
 
-/// One slot of the concurrency gate, held by a root invocation and freed on drop.
-///
-/// [`Runtime::slot`](super::Runtime::slot) and
-/// [`Runtime::try_slot`](super::Runtime::try_slot) take one, and
-/// [`Runtime::enter`](super::Runtime::enter) holds it in the
-/// [`Entered`](super::Entered) it returns, so it frees only after the
-/// invocation's store has dropped. A slot admits an invocation only on the
-/// runtime whose gate issued it.
-// not a tokio permit, whose `#[clippy::has_significant_drop]` would flag
-// every site that holds a slot for as long as its store
+// One slot of the gate, freed on drop, and held until its invocation's store
+// has dropped. Not a tokio permit, whose `#[clippy::has_significant_drop]`
+// would flag every site that holds a slot for as long as its store.
 #[derive(Debug)]
 #[must_use = "a slot admits an invocation only while it is held"]
 pub struct Slot(Arc<Semaphore>);

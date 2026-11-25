@@ -11,9 +11,7 @@ use bytes::Bytes;
 use http::header::CONTENT_TYPE;
 use http::{Method, Request, Response, StatusCode};
 use omnia::wasmtime::component::{ResourceTable, Val};
-use omnia::{
-    ChainCtx, Digest, ExitStatus, Grants, GuestEntry, GuestId, HostCtx, Runtime, SourceSpec,
-};
+use omnia::{Digest, ExitStatus, Grants, GuestEntry, GuestId, HostCtx, Runtime, SourceSpec};
 use omnia_test::host::sql::{Field, Row, Value};
 use omnia_test::host::{
     Asked, Backends, Deployment, Ended, FixedIdentity, HandleError, MatchedHttp, STATE_BUCKET,
@@ -192,20 +190,6 @@ async fn link_pair() {
     let answer = call(&runtime, "full", "poke", "hi").await.expect("dispatch");
     assert_eq!(answer, "echoer pong: hi");
     runtime.shutdown();
-}
-
-#[tokio::test]
-#[should_panic(expected = "another runtime's gate")]
-async fn foreign_slot() {
-    let deployment = Deployment::new().guest("echoer", test_programs::LINK_ECHOER);
-    let runtime =
-        deployment.boot(Backends::defaults().await, |_| Ok(())).await.expect("deployment boots");
-    let other =
-        deployment.boot(Backends::defaults().await, |_| Ok(())).await.expect("deployment boots");
-    let guest = runtime.guest(&GuestId::from("echoer")).await.expect("the guest loads");
-
-    let slot = other.slot().await;
-    _ = runtime.enter(&guest, ChainCtx::server(), slot).await;
 }
 
 // A path guest's `digest` pin is checked at its first use — here the command
@@ -442,16 +426,21 @@ async fn call<B: omnia::Backends>(
         .registry()
         .get(&GuestId::from(guest))
         .with_context(|| format!("guest `{guest}` is not registered"))?;
-    let slot = runtime.slot().await;
-    let (mut entered, instance) = runtime.enter(&entry, ChainCtx::server(), slot).await?;
-    let export = instance
-        .get_func(&mut entered, func)
-        .with_context(|| format!("guest `{guest}` exports `{func}`"))?;
-    let mut results = vec![Val::Bool(false)];
-    export
-        .call_async(&mut entered, &[Val::String(message.to_owned())], &mut results)
+    let results = runtime
+        .lease(entry)
         .await
-        .map_err(anyhow::Error::from)?;
+        .invoke(async |mut entered, instance, _bound| {
+            let export = instance
+                .get_func(&mut entered, func)
+                .with_context(|| format!("guest `{guest}` exports `{func}`"))?;
+            let mut results = vec![Val::Bool(false)];
+            export
+                .call_async(&mut entered, &[Val::String(message.to_owned())], &mut results)
+                .await
+                .map_err(anyhow::Error::from)?;
+            anyhow::Ok(results)
+        })
+        .await??;
     match results.into_iter().next() {
         Some(Val::String(answer)) => Ok(answer),
         other => bail!("`{guest}`'s `{func}` returned a non-string result: {other:?}"),

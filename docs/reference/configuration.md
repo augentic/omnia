@@ -35,7 +35,7 @@ On the `run` grammar the flags are the host's, global to the command (`bin -v ru
 
 | Variable             | Default               | Meaning                                                               |
 | -------------------- | --------------------- | --------------------------------------------------------------------- |
-| `GUEST_TIMEOUT_MS`   | `30000`               | Wall-clock cap on a single server guest invocation and each link-dispatch hop on a server-rooted chain. A command-mode (`wasi:cli/run`) chain is uncapped, including its link hops. The HTTP and messaging hosts stamp its expiry on each invocation as the guest's `Metadata::deadline`. For an HTTP guest, the expiry is stamped when the request takes its slot of the [concurrency gate](#concurrency-gate), and the timeout counts from then, so it bounds instantiation and the wait for the response head. It does not bound the body that streams after the head, which [`HTTP_STREAM_TIMEOUT_MS`](#http-trigger) caps. |
+| `GUEST_TIMEOUT_MS`   | `30000`               | Wall-clock cap on a single server guest invocation and each link-dispatch hop on a server-rooted chain. A command-mode (`wasi:cli/run`) chain is uncapped, including its link hops. The HTTP, messaging, and WebSocket hosts count it from when an invocation takes its slot of the [concurrency gate](#concurrency-gate), so it bounds instantiation as well as the call. Each stamps the expiry it enforces on the invocation. An HTTP or messaging guest reads it as `Metadata::deadline`, and a WebSocket guest as its event's `deadline`. An HTTP guest's cap ends when its response head is sent. It does not bound the body that streams after the head, which [`HTTP_STREAM_TIMEOUT_MS`](#http-trigger) caps. |
 | `MAX_MEMORY_BYTES`   | `268435456` (256 MiB) | Maximum linear memory a guest may grow to.                            |
 | `WASI_MAX_IO_SIZE`   | unset (64 KiB)        | Largest single file or socket read or write the host performs for a guest. A larger value moves a large file in fewer calls. |
 | `MAX_FUEL`           | `0` (off)             | Per-invocation fuel budget; `0` disables metering. Compile-affecting. |
@@ -85,13 +85,13 @@ Further tunables mirror wasmtime's pooling configuration one-to-one: `POOL_MEMOR
 | Variable                     | Default              | Meaning                                                            |
 | ---------------------------- | -------------------- | ------------------------------------------------------------------ |
 | `MAX_CONCURRENT_INVOCATIONS` | `POOL_MAX_INSTANCES` | Most invocations the triggers, the command driver, and calls through `Runtime::dispatcher` run at once. `0` is refused, and so is a value above `POOL_MAX_INSTANCES` while pooling is on. |
-| `MESSAGING_MAX_IN_FLIGHT`    | half the gate, rounded up | Most message deliveries that hold or wait for a slot at once. `0` is refused, and so is a value above the gate. |
+| `MESSAGING_MAX_IN_FLIGHT`    | half the gate, rounded up | Most message deliveries that load their guest, wait for a slot, or hold one at once. `0` is refused, and so is a value above the gate. |
 
-Each invocation a trigger runs holds one slot of the gate, from before its guest is instantiated until its instance is back in the pool. That includes a trigger an embedder runs itself, since `Runtime::enter` takes the slot. A command's run holds one for as long as it runs, and a call an embedder makes through `Runtime::dispatcher` holds one until its callee's instance is back in the pool. When every slot is held:
+Each invocation a trigger runs holds one slot of the gate, from before its guest is instantiated until its instance is back in the pool. That includes a trigger an embedder runs itself, since `Runtime::lease` and `Runtime::try_lease` take the slot. A guest loads before its invocation takes one, so a guest's first load holds no slot. A command's run holds one for as long as it runs, and a call an embedder makes through `Runtime::dispatcher` holds one until its callee's instance is back in the pool. When every slot is held:
 
 - HTTP answers `503` with `Retry-After: 1`. A probe of [`HTTP_HEALTH_PATH`](#http-trigger) takes no slot, so it still answers `200`.
 - A WebSocket event fails before its guest is instantiated.
-- A message delivery waits for a slot, and its guest timeout counts from when it takes one. No more than `MESSAGING_MAX_IN_FLIGHT` deliveries hold or wait for a slot at once. One past them waits its turn off the gate, so HTTP and WebSocket keep the rest of it.
+- A message delivery waits for a slot, and its guest timeout counts from when it takes one. No more than `MESSAGING_MAX_IN_FLIGHT` deliveries load their guest, wait for a slot, or hold one at once. One past them waits its turn off the gate, so HTTP and WebSocket keep the rest of it.
 - A command's run waits for a slot.
 - A call through `Runtime::dispatcher` waits for a slot.
 
