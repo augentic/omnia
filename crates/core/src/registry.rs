@@ -14,7 +14,7 @@ mod routing;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::path::Path;
-use std::sync::{Arc, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::{Arc, PoisonError, RwLock};
 
 use anyhow::{Context as _, Result, bail, ensure};
 pub use routing::{HttpRoutes, PatternRoutes, Resolver, Routes, TriggerRouter};
@@ -166,8 +166,8 @@ impl<B: 'static> Guest<B> {
         }
     }
 
-    /// Returns the underlying component, used to introspect a guest's exported
-    /// interfaces when wiring the host-mediated link serve side.
+    /// Returns the underlying component, used to introspect the guest's
+    /// imports and exports.
     #[must_use]
     pub fn component(&self) -> &Component {
         self.instance_pre().component()
@@ -224,10 +224,6 @@ pub struct Registry<B: 'static> {
     options: RuntimeOptions,
     linker: Linker<StoreCtx<B>>,
     guests: RwLock<BTreeMap<GuestId, Arc<Guest<B>>>>,
-    // gates lifecycle transitions so the guest map and the seam's live
-    // endpoints change as one step; lock order is this gate, then one inner
-    // map, never across an await
-    lifecycle: RwLock<()>,
     // assemble-time identities, which deregistration refuses to remove
     static_ids: BTreeSet<GuestId>,
     // not loaded at boot: each loads from its source at first use
@@ -320,7 +316,6 @@ impl<B: 'static> Registry<B> {
             options,
             linker,
             guests: RwLock::new(guests),
-            lifecycle: RwLock::new(()),
             static_ids,
             declared: sources,
             routes,
@@ -360,23 +355,11 @@ impl<B: 'static> Registry<B> {
         &self.options
     }
 
-    // lookups under this guard never observe a half-applied transition
-    fn lifecycle_read(&self) -> RwLockReadGuard<'_, ()> {
-        self.lifecycle.read().unwrap_or_else(PoisonError::into_inner)
-    }
-
-    /// Enter a lifecycle write section: the holder may mutate the guest map
-    /// and the seam's live endpoints as one atomic transition.
-    pub(crate) fn lifecycle_write(&self) -> RwLockWriteGuard<'_, ()> {
-        self.lifecycle.write().unwrap_or_else(PoisonError::into_inner)
-    }
-
     /// Look up a registered guest by identity; a declared guest not yet
     /// loaded is `None` here and loads through
     /// [`Runtime::guest`](crate::Runtime::guest).
     #[must_use]
     pub fn get(&self, id: &GuestId) -> Option<Arc<Guest<B>>> {
-        let _lifecycle = self.lifecycle_read();
         self.guests.read().unwrap_or_else(PoisonError::into_inner).get(id).cloned()
     }
 
@@ -400,56 +383,42 @@ impl<B: 'static> Registry<B> {
     /// The order falls out of the [`BTreeMap`] keying; no per-call sort.
     pub fn guests(&self) -> impl ExactSizeIterator<Item = Arc<Guest<B>>> {
         let snapshot: Vec<Arc<Guest<B>>> = {
-            let _lifecycle = self.lifecycle_read();
-            self.guests.read().unwrap_or_else(PoisonError::into_inner).values().cloned().collect()
+            let guests = self.guests.read().unwrap_or_else(PoisonError::into_inner);
+            guests.values().cloned().collect()
         };
         snapshot.into_iter()
     }
 
-    /// Publish a late guest and its pending link endpoint (parked by the serve
-    /// side) as one lifecycle transition. Refuses an identity that is already
-    /// registered (static entries can never be shadowed; a dynamic upgrade is
+    /// Publish a late guest. Refuses an identity that is already registered
+    /// (static entries can never be shadowed; a dynamic upgrade is
     /// deregister + register), and a guest the seam's
-    /// [`check`](LinkSeam::check) refuses against every registered guest,
-    /// discarding the pending endpoint either way; on refusal the registry map
-    /// is untouched, so a failed registration leaves no partial state.
+    /// [`check`](LinkSeam::check) refuses against every registered guest; on
+    /// refusal the registry map is untouched, so a failed registration leaves
+    /// no partial state.
     pub(crate) fn publish(&self, guest: Arc<Guest<B>>) -> Result<(), PublishError> {
         let id = guest.id().clone();
-
-        // lifecycle write first, then the inner maps
-        let _lifecycle = self.lifecycle_write();
         let mut guests = self.guests.write().unwrap_or_else(PoisonError::into_inner);
         if guests.contains_key(&id) {
-            self.seam.discard(&id);
             return Err(PublishError::Occupied);
         }
 
-        // under the guards, so of two guests seated at once the later checks against the earlier
+        // under the write lock, so of two guests seated at once the later checks against the earlier
         let standing: Vec<&Guest<B>> = guests.values().map(Arc::as_ref).collect();
-        if let Err(error) = self.seam.check(&guest, &standing) {
-            self.seam.discard(&id);
-            return Err(PublishError::Skew(error));
-        }
-
-        // seam before entry, so a refused publish leaves the map untouched
-        self.seam.publish(&id).map_err(PublishError::Transport)?;
+        self.seam.check(&guest, &standing).map_err(PublishError::Skew)?;
         guests.insert(id, guest);
         drop(guests);
         Ok(())
     }
 
-    /// Remove a dynamically registered guest and its link endpoint as one
-    /// lifecycle transition. Refuses static (assemble-time) entries and
-    /// unregistered identities.
+    /// Remove a dynamically registered guest. Refuses static (assemble-time)
+    /// entries and unregistered identities.
     pub(crate) fn remove(&self, id: &GuestId) -> Result<()> {
         if self.static_ids.contains(id) {
             bail!("guest `{id}` is a static deployment entry and cannot be deregistered");
         }
 
-        let _lifecycle = self.lifecycle_write();
         let removed = self.guests.write().unwrap_or_else(PoisonError::into_inner).remove(id);
         ensure!(removed.is_some(), "guest `{id}` is not registered");
-        self.seam.remove(id);
         Ok(())
     }
 
@@ -460,23 +429,15 @@ impl<B: 'static> Registry<B> {
         &self.routes
     }
 
-    /// Returns the guest→guest link seam the registry drives.
-    #[must_use]
-    pub(crate) const fn seam(&self) -> &Arc<dyn LinkSeam<B>> {
-        &self.seam
-    }
-
     /// Returns the number of registered guests.
     #[must_use]
     pub fn len(&self) -> usize {
-        let _lifecycle = self.lifecycle_read();
         self.guests.read().unwrap_or_else(PoisonError::into_inner).len()
     }
 
     /// Returns `true` if the registry has no guests.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        let _lifecycle = self.lifecycle_read();
         self.guests.read().unwrap_or_else(PoisonError::into_inner).is_empty()
     }
 }
@@ -567,8 +528,6 @@ pub enum PublishError {
     Occupied,
     /// A linked function's signature differs from a registered guest's.
     Skew(anyhow::Error),
-    /// Link-endpoint installation failed.
-    Transport(anyhow::Error),
 }
 
 // a private rule over import names, since no guest pipeline builds for

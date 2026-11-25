@@ -7,10 +7,9 @@
 //! and `GUEST_LINK_ROUTER_WASM`; each entry gives its `name:` because the
 //! router dispatches to `responder`, not to the file's stem. The router's
 //! import is unsatisfied by its own component and lies outside the runtime's
-//! own namespaces, so the host polyfills it on the shared linker, and
-//! `Deployment::assemble` serves every guest's linked exports at bootstrap,
-//! so a dispatched call always finds the responder's live route. Nothing
-//! declares the seam.
+//! own namespaces, so the host polyfills it on the shared linker, and each
+//! call runs the responder's export of the same name on a fresh instance.
+//! Nothing declares the seam.
 //!
 //! The router exports a plain `run` rather than an HTTP/messaging trigger;
 //! running this binary starts the host and wires the link. See `README.md`.

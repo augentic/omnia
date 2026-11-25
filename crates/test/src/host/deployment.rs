@@ -260,8 +260,7 @@ impl Deployment {
 
     /// Assembles the runtime by hand: builds the deployment, links the
     /// caller's hosts through `link`, and assembles — which links the guest
-    /// loader, tables the guests that load at first use, and serves every
-    /// boot guest's linked exports.
+    /// loader and tables the guests that load at first use.
     ///
     /// # Errors
     ///

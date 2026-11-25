@@ -38,7 +38,7 @@ pub use self::host::{
     Backends, Connect, FromEnv, FutureResult, HasTable, Host, HostCtx, HostView, NoOptions,
     Provides, Proxy, get_cloned,
 };
-pub use self::invoke::{FreshCall, InvokeError, call_fresh};
+pub use self::invoke::InvokeError;
 pub use self::mount::{MountRegistry, ResolvedPreopen};
 pub use self::options::RuntimeOptions;
 pub use self::registry::{
@@ -49,7 +49,7 @@ pub use self::runtime::{
     Bound, Entered, ExitStatus, GuestError, Invocations, Lease, LeaseError, Policy, Runtime,
     RuntimeParts, WeakRuntime,
 };
-pub use self::seam::{LinkSeam, NoLinks, StoreFactory};
+pub use self::seam::{LinkSeam, NoLinks};
 pub use self::source::{AcquireError, LoadedGuest, RegistrySource, Source, SourceSpec, Verified};
 pub use self::store::{Stdio, StoreBase, StoreCtx};
 pub use self::telemetry::Telemetry;

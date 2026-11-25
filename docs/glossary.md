@@ -56,15 +56,15 @@ A host directory preopened into every guest sandbox its [grants](#grants) reach 
 
 ### Dispatch (host-mediated)
 
-Guest-to-guest calls carried through the host: a guest imports an interface outside the runtime's own namespaces, and the host routes the call to whichever guest exports it. Nothing declares the seam — the [namespace rule](#namespace-rule) decides what crosses. A caller under [grants](#grants) reaches only the guests its `guests` list names. Nesting is bounded by `MAX_DISPATCH_DEPTH`. Distinct from the host→guest `Dispatcher`, which names its target explicitly. Both paths drive a fresh callee through `call_fresh`.
+Guest-to-guest calls carried through the host: a guest imports an interface outside the runtime's own namespaces, and the host routes each call to the guest its leading string argument names. Nothing declares the seam — the [namespace rule](#namespace-rule) decides what crosses. A caller under [grants](#grants) reaches only the guests its `guests` list names. Nesting is bounded by `MAX_DISPATCH_DEPTH`. The call goes through the calling store's `Dispatcher`, the one a host binding calls a guest through, and runs the target's export of the same name on a fresh instance.
 
 ### Namespace rule
 
-How the runtime tells its own interfaces from the ones guests share: an import or export under `wasi:` or `omnia:` is the host's (WASI, and omnia's capability hosts such as `omnia:plugins/loader`); every other interface crosses between guests — the host polyfills the import on the caller and serves the export on whichever guest carries it. `omnia::is_host(interface)` is the predicate. A guest's own package (`example:link/echo`, `emery:adapter/source`) therefore never collides with the host's. An import no guest exports is relayed too, so the deployment boots and the call fails.
+How the runtime tells its own interfaces from the ones guests share: an import or export under `wasi:` or `omnia:` is the host's (WASI, and omnia's capability hosts such as `omnia:plugins/loader`); every other interface crosses between guests — the host polyfills the import on the caller and calls the export of the same name on the guest the call names. `omnia::is_host(interface)` is the predicate. A guest's own package (`example:link/echo`, `emery:adapter/source`) therefore never collides with the host's. An import no guest exports is relayed too, so the deployment boots and the call fails.
 
 ### Link seam
 
-The `LinkSeam` trait the registry drives for guest-to-guest dispatch: polyfill every guest import the [namespace rule](#namespace-rule) leaves to guests, serve the matching exports, refuse a guest that disagrees with a registered one on a linked function's signature, and publish or discard endpoints as guests enter and leave. A runtime built without the [`link` feature](#link-feature) installs `NoLinks` (every method a no-op); one built with it installs `InProcessLinks` from `omnia-link`. Endpoints move through two stages — `serve` parks pending state outside the registry's lifecycle gate; `publish`/`discard`/`remove` run under the gate — and a call never reads pending state.
+The `LinkSeam` trait the registry drives for guest-to-guest dispatch: polyfill every guest import the [namespace rule](#namespace-rule) leaves to guests, and refuse a guest that disagrees with a registered one on a linked function's signature. A runtime built without the [`link` feature](#link-feature) installs `NoLinks` (every method a no-op); one built with it installs `InProcessLinks` from `omnia-link`, whose polyfilled imports call through the calling store's `Dispatcher`.
 
 ### Link feature
 

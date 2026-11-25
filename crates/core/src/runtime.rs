@@ -24,9 +24,9 @@ pub use self::lease::{Bound, Lease, LeaseError};
 use crate::artifact::component;
 use crate::digest::Digest;
 use crate::extensions::Extensions;
+use crate::invoke::StoreFactory;
 use crate::mount::MountRegistry;
 use crate::registry::{Guest, GuestId, PublishError, ensure_granted};
-use crate::seam::StoreFactory;
 use crate::source::{AcquireError, RegistrySource, Source, SourceSpec, Verified};
 use crate::store::{Stdio, StoreConfig};
 use crate::{
@@ -122,9 +122,6 @@ impl<B: Backends> Runtime<B> {
     }
 
     /// Build a runtime from already-assembled parts.
-    ///
-    /// The guests' linked exports are not served yet: run
-    /// [`serve_links`](Self::serve_links) before the first dispatch.
     #[doc(hidden)]
     #[must_use]
     pub fn from_parts(parts: RuntimeParts<B>) -> Self {
@@ -334,15 +331,13 @@ impl<B: Backends> Runtime<B> {
     /// and run under the grants the policy names. Either way the component
     /// may import code only from packages its grants reach, and the bytes
     /// are loaded as a boot guest's are, pre-instantiated against the shared
-    /// host set, wired into the host-mediated link serve side, and
-    /// published with their endpoint as one lifecycle transition, the digest
-    /// and grants recorded on the entry ([`Guest::digest`],
-    /// [`Guest::grants`]). A name already active, including one a concurrent
-    /// admission seats first, stands for a declared entry and attests
-    /// caller-named bytes on the same digest and grants alone. Whether the
-    /// component exports a linked interface is not checked: a guest that
-    /// exports none is still reachable through the host [`Dispatcher`], and
-    /// a link call to it fails at the call site.
+    /// host set, and published with the digest and grants recorded on the
+    /// entry ([`Guest::digest`], [`Guest::grants`]). A name already active,
+    /// including one a concurrent admission seats first, stands for a
+    /// declared entry and attests caller-named bytes on the same digest and
+    /// grants alone. Whether the component exports a linked interface is not
+    /// checked: a guest that exports none is still reachable through the host
+    /// [`Dispatcher`], and a link call to it fails at the call site.
     ///
     /// Every admitter passes here — [`guest`](Self::guest), the guest
     /// loader, [`register`](Self::register) — so the rule that a declared
@@ -361,7 +356,9 @@ impl<B: Backends> Runtime<B> {
     ///   linked function's signature.
     /// - [`GuestError::Conflict`] when caller-named bytes miss the pin, or
     ///   the name is active under other bytes.
-    /// - [`GuestError::Internal`] on a serve or publication failure.
+    /// - [`GuestError::Internal`] for a declared policy whose entry is not
+    ///   the deployment's own, or when a racing admission seated the name and
+    ///   it was deregistered before it could be attested.
     pub async fn admit_bytes(
         &self, id: GuestId, bytes: Vec<u8>, policy: Policy<'_>,
     ) -> Result<Arc<Guest<B>>, GuestError> {
@@ -544,9 +541,7 @@ impl<B: Backends> Runtime<B> {
         store
     }
 
-    // A shareable factory for fresh, fully configured stores for `guest` at a
-    // given chain context: what the link serve side and host dispatch
-    // instantiate the guest on, per call.
+    // what each dispatched call instantiates `guest` on
     #[must_use]
     pub(crate) fn store_factory(&self, guest: &Arc<Guest<B>>) -> StoreFactory<B> {
         let runtime = self.clone();
@@ -614,9 +609,8 @@ impl<B: Backends> Runtime<B> {
     /// grants, `grants` do not [validate](Grants::validate), the component
     /// imports code from a package `grants` do not reach, the bytes cannot
     /// be loaded, the component imports an interface that no linked host
-    /// serves and the link seam does not relay, its linked exports cannot be
-    /// served, or it disagrees with a registered guest on a linked
-    /// function's signature.
+    /// serves and the link seam does not relay, or it disagrees with a
+    /// registered guest on a linked function's signature.
     pub async fn register(
         &self, id: impl Into<GuestId>, bytes: Vec<u8>, grants: Grants,
     ) -> Result<()> {
@@ -645,7 +639,6 @@ impl<B: Backends> Runtime<B> {
     ///   [validate](Grants::validate), or bytes that do not load as a
     ///   component against the deployment's host set or that disagree with a
     ///   registered guest on a linked function's signature.
-    /// - [`GuestError::Internal`] on a serve or publication failure.
     pub async fn admit(
         &self, id: GuestId, verified: Verified, grants: Grants,
     ) -> Result<(), GuestError> {
@@ -666,13 +659,10 @@ impl<B: Backends> Runtime<B> {
 
     // Seat verified bytes as the guest `id` under `grants`: load them as a
     // boot guest's are loaded, check their imports against the grants,
-    // pre-instantiate against the shared host set, wire the host-mediated
-    // link serve side, then publish entry and endpoint as one lifecycle
-    // transition, so no dispatch resolves the entry and misses the endpoint
-    // or vice versa. `None` means an earlier or racing registration holds the
-    // identity. Seats of one identity run one at a time, so a seat that races
-    // another returns `None` once the other publishes, or seats its own bytes
-    // when the other fails.
+    // pre-instantiate against the shared host set, then publish. `None` means
+    // an earlier or racing registration holds the identity. Seats of one
+    // identity run one at a time, so a seat that races another returns `None`
+    // once the other publishes, or seats its own bytes when the other fails.
     async fn seat(
         &self, id: GuestId, verified: Verified, grants: Grants,
     ) -> Result<Option<Arc<Guest<B>>>, GuestError> {
@@ -695,10 +685,6 @@ impl<B: Backends> Runtime<B> {
             .map_err(|error| GuestError::Invalid(format!("pre-instantiating `{id}`: {error:#}")))?;
         let guest = Arc::new(Guest::local(id.clone(), instance_pre, digest, grants));
 
-        // serve as a pending endpoint, then publish endpoint and entry as one step
-        registry.seam().serve(self.store_factory(&guest), &guest).await.map_err(|error| {
-            GuestError::Internal(format!("serving `{id}` seam exports: {error:#}"))
-        })?;
         match registry.publish(Arc::clone(&guest)) {
             Ok(()) => {
                 tracing::debug!(guest = %id, "guest registered");
@@ -706,9 +692,6 @@ impl<B: Backends> Runtime<B> {
             }
             Err(PublishError::Occupied) => Ok(None),
             Err(PublishError::Skew(error)) => Err(GuestError::Invalid(format!("{error:#}"))),
-            Err(PublishError::Transport(error)) => {
-                Err(GuestError::Internal(format!("publishing `{id}`: {error:#}")))
-            }
         }
     }
 
@@ -739,56 +722,10 @@ impl<B: Backends> Runtime<B> {
         let _ = rx.wait_for(|&stopped| stopped).await;
     }
 
-    /// Call [`stop`](Self::stop), then drop every link route and the
-    /// `Runtime` clones the routes hold.
-    ///
-    /// The clones pin the engine and its pooling reservation, so a runtime
-    /// whose guests export a linked interface keeps both until this runs.
-    ///
-    /// A link call in flight holds its route and completes. A new link call
-    /// fails, and a call through [`dispatcher`](Self::dispatcher) still runs.
+    /// Signal long-lived trigger servers to stop accepting new work and
+    /// drain, the same as [`stop`](Self::stop).
     pub fn shutdown(&self) {
         self.stop();
-        self.registry().seam().shutdown();
-    }
-
-    /// Serve every registered guest's linked exports, then publish them in one
-    /// lifecycle transition so polyfilled imports can reach them.
-    ///
-    /// A no-op under [`NoLinks`](crate::NoLinks).
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if a guest's export cannot be served, or a served guest
-    /// already has an endpoint (`serve_links` ran twice).
-    #[doc(hidden)]
-    pub async fn serve_links(&self) -> Result<()> {
-        let registry = self.registry();
-        let seam = registry.seam();
-        let guests: Vec<_> = registry.guests().collect();
-
-        // on failure, release what is still parked so a failed bootstrap pins nothing
-        let discard_from = |first_unpublished: usize| {
-            for guest in &guests[first_unpublished..] {
-                seam.discard(guest.id());
-            }
-        };
-
-        for guest in &guests {
-            if let Err(error) = seam.serve(self.store_factory(guest), guest).await {
-                discard_from(0);
-                return Err(error);
-            }
-        }
-
-        let _lifecycle = registry.lifecycle_write();
-        for (published, guest) in guests.iter().enumerate() {
-            if let Err(error) = seam.publish(guest.id()) {
-                discard_from(published + 1);
-                return Err(error);
-            }
-        }
-        Ok(())
     }
 }
 

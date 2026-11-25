@@ -13,8 +13,6 @@ pub use manifest::{
     Env, GuestEntry, GuestRoutes, Manifest, Mount, PluginsConfig, RegistryConfig, Transport,
     TransportKind,
 };
-#[cfg(feature = "link")]
-use omnia_core::ChainPolicy;
 use omnia_core::wasmtime::component::Linker;
 use omnia_core::wasmtime::{Config, Engine};
 use omnia_core::{
@@ -297,7 +295,7 @@ impl DeploymentBuilder {
 
         // host-mediated dispatch only with `link`
         let seam: Arc<dyn LinkSeam<B>> = cfg_select! {
-            feature = "link" => Arc::new(InProcessLinks::new(ChainPolicy::from(&options))),
+            feature = "link" => Arc::new(InProcessLinks::new()),
             _ => Arc::new(omnia_core::NoLinks),
         };
 
@@ -439,8 +437,7 @@ impl<B: Backends> Deployment<B> {
 
     /// Assemble this deployment into a [`Runtime`]: the guest loader host
     /// joins the linked hosts, the registry pre-instantiates the boot guests
-    /// and tables the declared ones, the loader's grant installs, then the
-    /// serve side of every boot guest's linked exports is wired.
+    /// and tables the declared ones, then the loader's grant installs.
     ///
     /// Assembly consumes the deployment, so every host is linked before a
     /// guest pre-instantiates. A declared guest pre-instantiates against the
@@ -464,9 +461,13 @@ impl<B: Backends> Deployment<B> {
     /// # Errors
     ///
     /// Returns an error if the loader host cannot be linked, the registry
-    /// cannot be assembled, the `registries` configuration does not parse, a
-    /// writable mount shares or nests a read-only mount's directory, or a
-    /// guest's linked exports cannot be served.
+    /// cannot be assembled, the `registries` configuration does not parse, or
+    /// a writable mount shares or nests a read-only mount's directory.
+    #[expect(
+        clippy::unused_async,
+        clippy::unused_async_trait_impl,
+        reason = "embedders and the `runtime!` expansion await assembly"
+    )]
     pub async fn assemble(self, backends: B) -> Result<Runtime<B>> {
         let deployment = self;
         #[cfg(feature = "loader")]
@@ -515,8 +516,6 @@ impl<B: Backends> Deployment<B> {
 
         #[cfg(feature = "loader")]
         Plugins::install(&runtime, loader.grants).context("installing the guest loader")?;
-
-        runtime.serve_links().await.context("serving the guests' linked exports")?;
         Ok(runtime)
     }
 

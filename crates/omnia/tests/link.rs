@@ -118,10 +118,10 @@ async fn unserved_import() {
     assert!(format!("{err:#}").contains("`echoer` is not registered"), "unexpected error: {err:#}");
 }
 
-// A path guest loads at its first use, and a link call is one: the relay
-// finds `echoer` unregistered, loads it through the runtime's first-use
-// seam, and the call lands on the freshly served route. The importer boots
-// from bytes, so the seam it imports was polyfilled at bootstrap.
+// A path guest loads at its first use, and a link call is one: the call loads
+// `echoer` through the runtime's first-use seam and runs on a fresh instance
+// of it. The importer boots from bytes, so the seam it imports was polyfilled
+// at bootstrap.
 #[tokio::test]
 async fn declared_exporter() {
     let full = std::fs::read(test_programs::LINK_FULL).expect("reading the full guest");
@@ -146,9 +146,8 @@ async fn declared_exporter() {
     assert!(format!("{err:#}").contains("/nonexistent/echoer.wasm"), "unexpected error: {err:#}");
 }
 
-// A guest that exports no interface outside the host's namespaces parks no
-// route, so a call dispatched to it names the missing export rather than a
-// missing guest.
+// The target is registered but does not export the interface the call names,
+// so the call names the missing export rather than a missing guest.
 #[tokio::test]
 async fn unlinked_target() {
     let runtime = boot(&[("echoer", test_programs::LINK_FULL), ("full", test_programs::LINK_FULL)])
@@ -157,7 +156,7 @@ async fn unlinked_target() {
 
     let err = call(&runtime, "full", "poke", "hi").await.expect_err("`echoer` exports no `ops`");
     assert!(
-        format!("{err:#}").contains("registered but exports no linked interface"),
+        format!("{err:#}").contains("guest `echoer` exports no interface `omnia-test:link/ops`"),
         "unexpected error: {err:#}"
     );
 }
@@ -425,6 +424,26 @@ async fn full_pool() {
     }
 }
 
+// The caller holds the gate's only slot for as long as it runs, so a hop that
+// waited for a slot would wait on its own caller.
+#[tokio::test]
+async fn full_gate() {
+    let options = RuntimeOptions {
+        max_concurrent_invocations: Some(1),
+        ..RuntimeOptions::default()
+    };
+    let runtime = boot_with(
+        &[("echoer", test_programs::LINK_ECHOER), ("full", test_programs::LINK_FULL)],
+        |builder| builder.options(options),
+    )
+    .await
+    .expect("deployment boots");
+
+    let poke = tokio::time::timeout(Duration::from_secs(5), call(&runtime, "full", "poke", "hi"));
+    let answer = poke.await.expect("the hop waits on no slot").expect("sync dispatch");
+    assert_eq!(answer, "echoer pong: hi");
+}
+
 // Whichever of the two seats second is refused, in every order, so no call
 // crosses the skew. The skewed exporter takes the id `echoer`, the target
 // `full` hard-codes, so under path guests `full`'s call is what loads it.
@@ -438,7 +457,7 @@ async fn link_skewed() {
     let Err(err) =
         boot(&[("echoer", test_programs::LINK_SKEWED), ("full", test_programs::LINK_FULL)]).await
     else {
-        panic!("skewed exporter was served");
+        panic!("skewed exporter booted");
     };
     names_skew(&format!("{err:#}"), ["echoer", "full"]);
 
@@ -447,7 +466,7 @@ async fn link_skewed() {
     names_skew(&refused_seat(&runtime, "echoer", &skewed).await, ["echoer", "full"]);
     assert!(seated(&runtime, "echoer").is_none(), "nothing was seated");
 
-    // the importer after a boot exporter, twice, so the first refusal left nothing parked
+    // the importer after a boot exporter, twice, so the first refusal left nothing behind
     let runtime = boot(&[("echoer", test_programs::LINK_SKEWED)]).await.expect("deployment boots");
     for _ in 0..2 {
         names_skew(&refused_seat(&runtime, "full", &full).await, ["echoer", "full"]);
@@ -505,6 +524,32 @@ async fn link_skewed_importer() {
     let skewed = std::fs::read(test_programs::LINK_SKEWED_IMPORTER).expect("reading the importer");
     names_skew(&refused_seat(&runtime, "skewed", &skewed).await, ["full", "skewed"]);
     assert!(runtime.registry().get(&GuestId::from("skewed")).is_none(), "nothing was seated");
+}
+
+// `versioned` imports `ops` at 0.1.0 and exports it at 0.1.1, which
+// wasmtime's semver-compatible lookup takes for one interface.
+#[tokio::test]
+async fn link_versioned() {
+    let runtime =
+        boot(&[("versioned", test_programs::LINK_VERSIONED)]).await.expect("deployment boots");
+    let dispatch = |version: &str| {
+        runtime.dispatcher().invoke(
+            ChainCtx::server(),
+            GuestId::from("versioned"),
+            Some(format!("omnia-test:versioned/ops@{version}")),
+            "ping".into(),
+            vec![Val::String("versioned".into()), Val::String("hi".into())],
+        )
+    };
+    let refused = "guest `versioned` exports no interface `omnia-test:versioned/ops@0.1.0`";
+
+    let answer = dispatch("0.1.1").await.expect("the exported name");
+    assert_eq!(answer, vec![Val::String("versioned pong: hi".into())]);
+    let err = dispatch("0.1.0").await.expect_err("a compatible name is another interface");
+    assert!(format!("{err:#}").contains(refused), "unexpected error: {err:#}");
+
+    let err = call(&runtime, "versioned", "poke", "hi").await.expect_err("the import is 0.1.0");
+    assert!(format!("{err:#}").contains(refused), "unexpected error: {err:#}");
 }
 
 // `take` nests its resource in an optional record, so the refusal must walk
@@ -764,6 +809,41 @@ async fn relay_via_dispatcher() {
     assert!(format!("{err:#}").contains("exceeds maximum"), "unexpected error: {err:#}");
 }
 
+// `echoer` is declared by path, so a hop refused for depth after its first use
+// would load it. The relay runs at the bound, so its own hop is over it.
+#[tokio::test]
+async fn over_bound_hop() {
+    let relay = std::fs::read(test_programs::LINK_RELAY).expect("reading the relay");
+    let manifest = Manifest::new()
+        .guest(GuestEntry::new("relay", relay))
+        .guest(GuestEntry::new("echoer", test_programs::LINK_ECHOER));
+    let runtime = assemble(manifest, |builder| builder.max_dispatch_depth(1))
+        .await
+        .expect("deployment boots");
+    let echoer = GuestId::from("echoer");
+    let dispatch = |caller: ChainCtx, target: &str, message: &str| {
+        runtime.dispatcher().invoke(
+            caller,
+            GuestId::from(target),
+            Some("omnia-test:link/ops".into()),
+            "ping".into(),
+            vec![Val::String("echoer".into()), Val::String(message.to_owned())],
+        )
+    };
+
+    let err = dispatch(ChainCtx::server(), "relay", "1").await.expect_err("the relay's hop");
+    assert!(format!("{err:#}").contains("exceeds maximum 1"), "unexpected error: {err:#}");
+    assert!(runtime.registry().get(&echoer).is_none(), "the link call loaded its target");
+
+    let deep = ChainCtx {
+        depth: 1,
+        ..ChainCtx::server()
+    };
+    let err = dispatch(deep, "echoer", "hi").await.expect_err("a host call from the bound");
+    assert!(format!("{err:#}").contains("exceeds maximum 1"), "unexpected error: {err:#}");
+    assert!(runtime.registry().get(&echoer).is_none(), "the host call loaded its target");
+}
+
 // A call through the runtime's dispatcher is a root invocation, so it waits on
 // a full gate as a trigger does rather than running beside the slot's holder.
 #[tokio::test]
@@ -795,4 +875,20 @@ async fn queued_dispatch() {
     let ((), answer) = tokio::join!(release, dispatch);
     assert_eq!(answer.expect("host dispatch"), vec![Val::String("echoer pong: hi".into())]);
     assert_eq!(runtime.invocations().in_flight, 0);
+}
+
+// Nothing calls `shutdown`, so once a link call has run the runtime must hold
+// no handle to itself.
+#[tokio::test]
+async fn dropped_runtime() {
+    let runtime =
+        boot(&[("echoer", test_programs::LINK_ECHOER), ("full", test_programs::LINK_FULL)])
+            .await
+            .expect("deployment boots");
+    let answer = call(&runtime, "full", "poke", "hi").await.expect("sync dispatch");
+    assert_eq!(answer, "echoer pong: hi");
+
+    let weak = runtime.downgrade();
+    drop(runtime);
+    assert!(weak.upgrade().is_none(), "the runtime outlived its last handle");
 }

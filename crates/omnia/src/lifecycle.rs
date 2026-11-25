@@ -202,8 +202,7 @@ where
         idle.abort();
     }
 
-    // the link routes hold runtime clones that would pin the engine
-    runtime.shutdown();
+    runtime.stop();
 
     // batch-queued telemetry must survive a fast command-mode exit
     telemetry::flush();

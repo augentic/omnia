@@ -1,0 +1,6 @@
+package omnia-test:versioned@0.1.0;
+
+interface ops {
+    /// Echo `message` tagged with `target`.
+    ping: func(target: string, message: string) -> string;
+}
