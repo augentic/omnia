@@ -56,18 +56,19 @@ async fn call(runtime: &Runtime<()>, guest: &str, func: &str, message: &str) -> 
         .guest(&GuestId::from(guest))
         .await
         .with_context(|| format!("resolving guest `{guest}`"))?;
-    let (mut store, instance) = runtime
-        .enter(&entry, ChainCtx::server())
+    let slot = runtime.slot().await;
+    let (mut entered, instance) = runtime
+        .enter(&entry, ChainCtx::server(), slot)
         .await
         .with_context(|| format!("instantiating `{guest}`"))?;
     let export = instance
-        .get_func(&mut store, func)
+        .get_func(&mut entered, func)
         .with_context(|| format!("guest `{guest}` exports `{func}`"))?;
 
     // `call_async` drives sync- and async-lifted exports alike.
     let mut results = vec![Val::Bool(false)];
     export
-        .call_async(&mut store, &[Val::String(message.to_owned())], &mut results)
+        .call_async(&mut entered, &[Val::String(message.to_owned())], &mut results)
         .await
         .map_err(anyhow::Error::from)
         .with_context(|| format!("calling `{guest}`'s `{func}`"))?;
@@ -422,15 +423,19 @@ async fn link_arguments() {
     assert_eq!(answer, unseen);
 
     let entry = runtime.guest(&GuestId::from("arguments")).await.expect("resolving the guest");
-    let (mut store, instance) =
-        runtime.enter(&entry, ChainCtx::command()).await.expect("entering at the command root");
+    let slot = runtime.slot().await;
+    let (mut entered, instance) = runtime
+        .enter(&entry, ChainCtx::command(), slot)
+        .await
+        .expect("entering at the command root");
     let ops = instance
-        .get_export_index(&mut store, None, "omnia-test:link/ops")
+        .get_export_index(&mut entered, None, "omnia-test:link/ops")
         .expect("the guest exports `ops`");
-    let ping = instance.get_export_index(&mut store, Some(&ops), "ping").expect("`ops` has `ping`");
-    let ping = instance.get_func(&mut store, ping).expect("`ping` is a function");
+    let ping =
+        instance.get_export_index(&mut entered, Some(&ops), "ping").expect("`ops` has `ping`");
+    let ping = instance.get_func(&mut entered, ping).expect("`ping` is a function");
     let mut results = vec![Val::Bool(false)];
-    ping.call_async(&mut store, &params, &mut results).await.expect("calling `ping`");
+    ping.call_async(&mut entered, &params, &mut results).await.expect("calling `ping`");
     assert_eq!(results, unseen);
 }
 

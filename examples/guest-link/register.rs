@@ -61,15 +61,18 @@ cfg_select! {
                 .guest(&GuestId::from("router"))
                 .await
                 .context("resolving the router guest")?;
-            let (mut store, instance) =
-                runtime.enter(&guest, ChainCtx::server()).await.context("instantiating router")?;
+            let slot = runtime.slot().await;
+            let (mut entered, instance) = runtime
+                .enter(&guest, ChainCtx::server(), slot)
+                .await
+                .context("instantiating router")?;
             let run_to =
-                instance.get_func(&mut store, "run-to").context("router exports `run-to`")?;
+                instance.get_func(&mut entered, "run-to").context("router exports `run-to`")?;
 
             let mut results = vec![Val::Bool(false)];
             run_to
                 .call_async(
-                    &mut store,
+                    &mut entered,
                     &[Val::String(target.to_owned()), Val::String(message.to_owned())],
                     &mut results,
                 )

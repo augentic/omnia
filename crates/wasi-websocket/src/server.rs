@@ -8,6 +8,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use futures::StreamExt;
 use omnia_core::{ChainCtx, PatternRoutes, Provides, Runtime, TriggerRouter, telemetry};
 use tracing::{Instrument, info_span, instrument};
+use wasmtime::AsContextMut as _;
 
 use crate::WasiWebSocket;
 use crate::generated::WebsocketIndices;
@@ -134,18 +135,19 @@ where
 
         event.deadline = Some(deadline_millis(self.state.options().guest_timeout));
 
-        // a full gate fails the event; a slot is held until after the store drops
-        let Some(_slot) = self.state.try_slot() else {
+        // a full gate fails the event
+        let Some(slot) = self.state.try_slot() else {
             bail!(
                 "refusing a websocket event: every slot of the concurrency gate \
                  (MAX_CONCURRENT_INVOCATIONS) is held"
             );
         };
 
-        let (mut store, instance) = self.state.enter(&guest, ChainCtx::server()).await?;
-        let websocket = indices.load(&mut store, &instance)?;
+        let (mut entered, instance) = self.state.enter(&guest, ChainCtx::server(), slot).await?;
+        let websocket = indices.load(&mut entered, &instance)?;
 
-        let run = store
+        let run = entered
+            .as_context_mut()
             .run_concurrent(async |store| {
                 websocket.omnia_websocket_incoming_handler().call_handle(store, event).await
             })

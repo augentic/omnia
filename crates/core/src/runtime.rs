@@ -1,5 +1,6 @@
 //! Connected runtime: [`Runtime`], [`RuntimeParts`], [`WeakRuntime`],
-//! [`ExitStatus`], and the concurrency gate's [`Slot`] and [`Invocations`].
+//! [`ExitStatus`], the [`Entered`] guard, and the concurrency gate's [`Slot`]
+//! and [`Invocations`].
 
 mod command;
 mod enter;
@@ -14,6 +15,7 @@ use tokio::sync::watch;
 use wasmtime::Store;
 use wasmtime::component::InstancePre;
 
+pub use self::enter::Entered;
 use self::gate::Gate;
 pub use self::gate::{Invocations, Slot};
 use crate::artifact::component;

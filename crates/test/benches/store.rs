@@ -1,6 +1,6 @@
-//! What entering a guest costs: building its store over the deployment's
-//! backend bundle and instantiating it, and assembling one host's view of the
-//! store.
+//! What entering a guest costs: taking a slot of the concurrency gate,
+//! building its store over the deployment's backend bundle and instantiating
+//! it, and assembling one host's view of the store.
 //!
 //! The runtime links twelve hosts over the in-memory defaults, for two
 //! guests over one component. One declares no grants. The other's grants
@@ -11,6 +11,7 @@ use std::hint::black_box;
 use std::time::Instant;
 
 use anyhow::Result;
+use omnia::wasmtime::AsContextMut as _;
 use omnia::{ChainCtx, DeploymentBuilder, Grants, Guest, GuestEntry, GuestId, Manifest, Runtime};
 use omnia_test::host::{Backends, Scratch, scratch};
 use omnia_wasi_blobstore::WasiBlobStore;
@@ -90,13 +91,16 @@ async fn boot(backends: Backends, data: &Scratch) -> Result<Runtime<Backends>> {
 async fn time_enter(runtime: &Runtime<Backends>, guest: &Guest<Backends>) -> Result<f64> {
     let start = Instant::now();
     for _ in 0..ENTRIES_PER_ROUND {
-        drop(black_box(runtime.enter(guest, ChainCtx::server()).await?));
+        let slot = runtime.slot().await;
+        drop(black_box(runtime.enter(guest, ChainCtx::server(), slot).await?));
     }
     Ok(nanos_per(start, ENTRIES_PER_ROUND))
 }
 
 async fn time_view(runtime: &Runtime<Backends>, guest: &Guest<Backends>) -> Result<f64> {
-    let (mut store, _instance) = runtime.enter(guest, ChainCtx::server()).await?;
+    let slot = runtime.slot().await;
+    let (mut entered, _instance) = runtime.enter(guest, ChainCtx::server(), slot).await?;
+    let mut store = entered.as_context_mut();
     Ok(time(VIEWS_PER_ROUND, || {
         let view = black_box(store.data_mut()).view::<WasiKeyValue>();
         black_box(view.client);
