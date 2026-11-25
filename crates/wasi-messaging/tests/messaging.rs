@@ -14,11 +14,14 @@
 
 use std::num::NonZeroUsize;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use futures::future::{self, BoxFuture};
 use futures::{FutureExt as _, StreamExt as _, stream};
-use omnia::{ExitStatus, GuestEntry, Host, Runtime, RuntimeOptions, SourceSpec};
+use omnia::{
+    AcquireError, ExitStatus, GuestEntry, GuestId, Host, RegistrySource, Runtime, RuntimeOptions,
+    SourceSpec,
+};
 use omnia_test::host::{Backends, Deployment, precompiled};
 use omnia_wasi_messaging::{
     Endpoint, Error, FutureResult, HandleError, Handler, Message, MessagingClient,
@@ -263,6 +266,22 @@ async fn messaging_handle_sleep() {
     runtime.shutdown();
 }
 
+// The guest sleeps two seconds, its guest timeout here, and the paused clock
+// fires its sleep and its deadline on one tick. A call that returns as its
+// deadline passes has returned in time.
+#[tokio::test(start_paused = true)]
+async fn sleep_to_deadline() {
+    const SLEEP: Duration = Duration::from_secs(2);
+
+    let deployment = sole(test_programs::MESSAGING_HANDLE_SLEEP).guest_timeout(SLEEP);
+    let runtime = boot(&deployment, Backends::defaults().await).await;
+    let handler = handler(&runtime);
+
+    handler.handle(order("orders")).await.expect("the guest returns at its deadline");
+
+    runtime.shutdown();
+}
+
 // The guest's timeout counts from when its delivery takes a slot, so a delivery
 // that waited one timeout for the gate still runs a whole timeout after it.
 #[tokio::test]
@@ -279,12 +298,13 @@ async fn queued_delivery() {
     let handler = handler(&runtime);
 
     // the test holds the only slot for one timeout, and the delivery waits
-    let slot = runtime.try_slot().expect("the gate is empty");
+    let guest = runtime.guest(&GuestId::from("guest")).await.expect("the guest loads");
+    let lease = runtime.try_lease(guest).expect("the gate is empty");
     let started = Instant::now();
     let release = async {
         tokio::time::sleep(TIMEOUT).await;
         assert_eq!(runtime.invocations().waiting, 1);
-        drop(slot);
+        drop(lease);
     };
     let ((), outcome) = tokio::join!(release, handler.handle(order("orders")));
 
@@ -313,6 +333,7 @@ async fn delivery_burst() {
     let runtime = boot(&deployment, Backends::defaults().await).await;
     let handler = handler(&runtime);
     assert_eq!(handler.max_in_flight().get(), 2);
+    let guest = runtime.guest(&GuestId::from("guest")).await.expect("the guest loads");
 
     // the check lands midway through the first two deliveries
     let burst = future::join_all((0..5).map(|_| handler.handle(order("orders"))));
@@ -320,7 +341,7 @@ async fn delivery_burst() {
         tokio::time::sleep(TIMEOUT / 2).await;
         let gate = runtime.invocations();
         assert_eq!((gate.in_flight, gate.waiting), (2, 0), "{gate:?}");
-        assert!(runtime.try_slot().is_some(), "a request finds a slot");
+        assert!(runtime.try_lease(guest).is_some(), "a request finds a slot");
     };
     let (outcomes, ()) = tokio::join!(burst, check);
 
@@ -332,6 +353,77 @@ async fn delivery_burst() {
     }
 
     runtime.shutdown();
+}
+
+const REPLYING_PACKAGE: &str = "test:replying@1.0.0";
+
+// a registry holding one release, the replying guest's, which it answers
+// `delay` after it is asked
+struct SlowRegistry {
+    bytes: Vec<u8>,
+    delay: Duration,
+}
+
+impl RegistrySource for SlowRegistry {
+    fn acquire<'a>(
+        &'a self, package: &'a str, endpoint: Option<&'a str>,
+    ) -> BoxFuture<'a, Result<Vec<u8>, AcquireError>> {
+        Box::pin(async move {
+            assert_eq!(package, REPLYING_PACKAGE);
+            assert_eq!(endpoint, None, "a declared package names no registry of its own");
+            tokio::time::sleep(self.delay).await;
+            Ok(self.bytes.clone())
+        })
+    }
+}
+
+// A declared guest loads at its first delivery, and the registry takes `LOAD`
+// to answer. The delivery holds no slot while its guest loads, so a deadline
+// counted from the slot lies at least `LOAD` past the delivery's arrival.
+#[tokio::test]
+async fn slow_load() {
+    const LOAD: Duration = Duration::from_millis(300);
+    const GUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
+    let bytes = std::fs::read(test_programs::MESSAGING_REPLYING).expect("guest bytes");
+    let backends = Backends::defaults().await;
+    let mut stream = backends.messaging.subscribe();
+    let runtime = Deployment::new()
+        .entry(GuestEntry::package(REPLYING_PACKAGE).route_messaging("deadline"))
+        .guest_timeout(GUEST_TIMEOUT)
+        .boot(backends, |deployment| {
+            deployment.registry_source(SlowRegistry { bytes, delay: LOAD });
+            deployment.host::<WasiMessaging>()?;
+            deployment.host::<WasiOtel>()?;
+            Ok(())
+        })
+        .await
+        .expect("runtime boots");
+    let handler = handler(&runtime);
+
+    // the check lands midway through the load
+    let earliest = epoch_millis(SystemTime::now() + LOAD + GUEST_TIMEOUT);
+    let delivered = handler.handle(request("deadline", b"", Some("deadline.reply")));
+    let check = async {
+        tokio::time::sleep(LOAD / 2).await;
+        assert_eq!(runtime.invocations().in_flight, 0, "a loading guest holds no slot");
+    };
+    let (outcome, ()) = tokio::join!(delivered, check);
+    outcome.expect("handled");
+    let latest = epoch_millis(SystemTime::now() + GUEST_TIMEOUT);
+
+    let reply = next(&mut stream).await;
+    assert_eq!(reply.topic, "deadline.reply");
+    let deadline = std::str::from_utf8(&reply.payload).expect("the deadline is text");
+    let deadline: u64 = deadline.parse().expect("milliseconds since the epoch");
+    assert!((earliest..=latest).contains(&deadline), "{deadline}");
+
+    runtime.shutdown();
+}
+
+fn epoch_millis(instant: SystemTime) -> u64 {
+    let since_epoch = instant.duration_since(UNIX_EPOCH).expect("after the epoch");
+    u64::try_from(since_epoch.as_millis()).expect("fits in u64 milliseconds")
 }
 
 // A topic no route matches has nothing to run: the message is dropped with `Ok`.

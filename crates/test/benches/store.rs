@@ -1,4 +1,4 @@
-//! What entering a guest costs: taking a slot of the concurrency gate,
+//! What entering a guest costs: leasing a slot of the concurrency gate,
 //! building its store over the deployment's backend bundle and instantiating
 //! it, and assembling one host's view of the store.
 //!
@@ -8,11 +8,12 @@
 //! `cargo bench -p omnia-test --features host --bench store`.
 
 use std::hint::black_box;
+use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::Result;
 use omnia::wasmtime::AsContextMut as _;
-use omnia::{ChainCtx, DeploymentBuilder, Grants, Guest, GuestEntry, GuestId, Manifest, Runtime};
+use omnia::{DeploymentBuilder, Grants, Guest, GuestEntry, GuestId, Manifest, Runtime};
 use omnia_test::host::{Backends, Scratch, scratch};
 use omnia_wasi_blobstore::WasiBlobStore;
 use omnia_wasi_config::WasiConfig;
@@ -88,23 +89,29 @@ async fn boot(backends: Backends, data: &Scratch) -> Result<Runtime<Backends>> {
     deployment.assemble(backends).await
 }
 
-async fn time_enter(runtime: &Runtime<Backends>, guest: &Guest<Backends>) -> Result<f64> {
+async fn time_enter(runtime: &Runtime<Backends>, guest: &Arc<Guest<Backends>>) -> Result<f64> {
     let start = Instant::now();
     for _ in 0..ENTRIES_PER_ROUND {
-        let slot = runtime.slot().await;
-        drop(black_box(runtime.enter(guest, ChainCtx::server(), slot).await?));
+        let lease = runtime.lease(Arc::clone(guest)).await;
+        lease
+            .invoke(async |entered, instance, _bound| drop(black_box((entered, instance))))
+            .await?;
     }
     Ok(nanos_per(start, ENTRIES_PER_ROUND))
 }
 
-async fn time_view(runtime: &Runtime<Backends>, guest: &Guest<Backends>) -> Result<f64> {
-    let slot = runtime.slot().await;
-    let (mut entered, _instance) = runtime.enter(guest, ChainCtx::server(), slot).await?;
-    let mut store = entered.as_context_mut();
-    Ok(time(VIEWS_PER_ROUND, || {
-        let view = black_box(store.data_mut()).view::<WasiKeyValue>();
-        black_box(view.client);
-    }))
+async fn time_view(runtime: &Runtime<Backends>, guest: &Arc<Guest<Backends>>) -> Result<f64> {
+    let lease = runtime.lease(Arc::clone(guest)).await;
+    let nanos = lease
+        .invoke(async |mut entered, _instance, _bound| {
+            let mut store = entered.as_context_mut();
+            time(VIEWS_PER_ROUND, || {
+                let view = black_box(store.data_mut()).view::<WasiKeyValue>();
+                black_box(view.client);
+            })
+        })
+        .await?;
+    Ok(nanos)
 }
 
 fn time(operations: u32, mut operation: impl FnMut()) -> f64 {

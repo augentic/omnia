@@ -17,7 +17,7 @@ cfg_select! {
 
         use anyhow::{Context as _, Result, bail};
         use omnia::wasmtime::component::Val;
-        use omnia::{ChainCtx, DeploymentBuilder, Grants, GuestEntry, GuestId, Manifest, Runtime};
+        use omnia::{DeploymentBuilder, Grants, GuestEntry, GuestId, Manifest, Runtime};
 
         #[tokio::main]
         async fn main() -> Result<()> {
@@ -61,24 +61,28 @@ cfg_select! {
                 .guest(&GuestId::from("router"))
                 .await
                 .context("resolving the router guest")?;
-            let slot = runtime.slot().await;
-            let (mut entered, instance) = runtime
-                .enter(&guest, ChainCtx::server(), slot)
+            let results = runtime
+                .lease(guest)
                 .await
-                .context("instantiating router")?;
-            let run_to =
-                instance.get_func(&mut entered, "run-to").context("router exports `run-to`")?;
+                .invoke(async |mut entered, instance, _bound| {
+                    let run_to = instance
+                        .get_func(&mut entered, "run-to")
+                        .context("router exports `run-to`")?;
 
-            let mut results = vec![Val::Bool(false)];
-            run_to
-                .call_async(
-                    &mut entered,
-                    &[Val::String(target.to_owned()), Val::String(message.to_owned())],
-                    &mut results,
-                )
+                    let mut results = vec![Val::Bool(false)];
+                    run_to
+                        .call_async(
+                            &mut entered,
+                            &[Val::String(target.to_owned()), Val::String(message.to_owned())],
+                            &mut results,
+                        )
+                        .await
+                        .map_err(anyhow::Error::from)
+                        .context("calling router.run-to")?;
+                    anyhow::Ok(results)
+                })
                 .await
-                .map_err(anyhow::Error::from)
-                .context("calling router.run-to")?;
+                .context("instantiating router")??;
 
             match results.into_iter().next() {
                 Some(Val::String(echoed)) => Ok(echoed),

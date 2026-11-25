@@ -22,7 +22,9 @@ use http_body_util::{BodyExt as _, Full};
 use hyper::body::Incoming;
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
-use omnia::{AcquireError, ExitStatus, Grants, GuestEntry, RegistrySource, RuntimeOptions};
+use omnia::{
+    AcquireError, ExitStatus, Grants, GuestEntry, GuestId, RegistrySource, RuntimeOptions,
+};
 use omnia_test::host::{Backends, Deployment};
 use omnia_wasi_config::WasiConfig;
 use omnia_wasi_http::{HttpHandler, ServerOptions, WasiHttp};
@@ -616,7 +618,8 @@ async fn full_gate() {
 
     // reading the body frees the slot, and the next request is served
     assert_eq!(echoed(held).await.0["message"], "held");
-    let freed = tokio::time::timeout(Duration::from_secs(10), runtime.slot())
+    let guest = runtime.guest(&GuestId::from("guest")).await.expect("the guest loads");
+    let freed = tokio::time::timeout(Duration::from_secs(10), runtime.lease(guest))
         .await
         .expect("the slot frees once the body is read");
     drop(freed);
@@ -700,6 +703,7 @@ async fn stalled_guest() {
     let handler = HttpHandler::new(&runtime)
         .expect("http routes consistent")
         .expect("the guest exports the http handler");
+    let guest = runtime.guest(&GuestId::from("guest")).await.expect("the guest loads");
     let stall = || {
         Request::get("/stream/stall")
             .header(HOST, "stream.test")
@@ -710,7 +714,7 @@ async fn stalled_guest() {
     // a request dropped before its head frees the slot well inside the timeout
     let dropped = tokio::time::timeout(Duration::from_millis(200), handler.handle(stall())).await;
     assert!(dropped.is_err(), "the guest never answers");
-    let freed = tokio::time::timeout(GUEST_TIMEOUT / 2, runtime.slot())
+    let freed = tokio::time::timeout(GUEST_TIMEOUT / 2, runtime.lease(Arc::clone(&guest)))
         .await
         .expect("the slot frees once the request is dropped");
     drop(freed);
@@ -720,7 +724,7 @@ async fn stalled_guest() {
     let response = handler.handle(stall()).await.expect("handled");
     assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
     assert!(started.elapsed() >= GUEST_TIMEOUT, "answered at {:?}", started.elapsed());
-    let freed = tokio::time::timeout(Duration::from_secs(10), runtime.slot())
+    let freed = tokio::time::timeout(Duration::from_secs(10), runtime.lease(guest))
         .await
         .expect("the slot frees once the guest times out");
     drop(freed);

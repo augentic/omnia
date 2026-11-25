@@ -15,13 +15,9 @@ permissions:
   contents: read
 
 jobs:
-  deploy:
-    name: Publish
+  build:
+    name: Build
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pages: write
-      id-token: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -36,13 +32,24 @@ jobs:
       - name: Build book (HTML + linkcheck)
         run: mdbook build docs
 
-      - name: Setup Pages
-        uses: actions/configure-pages@v6
-
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v5
         with:
           path: ./docs/book/html
+
+  # Deploy from its own job: deploy-pages lists the run's artifacts, and a
+  # listing made right after an upload in the same job can miss it.
+  deploy:
+    name: Publish
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    steps:
+      - name: Setup Pages
+        uses: actions/configure-pages@v6
 
       - name: Deploy to GitHub Pages
         id: deployment

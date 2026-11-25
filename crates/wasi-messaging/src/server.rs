@@ -3,12 +3,11 @@
 
 use std::num::NonZeroUsize;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Result, anyhow};
 use futures::FutureExt as _;
 use futures::future::BoxFuture;
-use omnia_core::{ChainCtx, PatternRoutes, Provides, Runtime, TriggerRouter, telemetry};
+use omnia_core::{LeaseError, PatternRoutes, Provides, Runtime, TriggerRouter, telemetry};
 use tokio::sync::Semaphore;
 use tracing::{Instrument, info_span, instrument};
 use wasmtime::AsContextMut as _;
@@ -96,13 +95,13 @@ where
     /// A topic with no route is dropped silently with `Ok`; the message has
     /// no handler in this deployment. Every message is counted, and every
     /// failure logged and counted, before it is returned. A routed message
-    /// waits for a slot of the runtime's [concurrency gate](Runtime::slot)
-    /// before its guest loads, however long that takes. No more than
-    /// [`max_in_flight`](Handler::max_in_flight) messages hold or wait for a
-    /// slot at once, and one past them waits its turn off the gate. The
-    /// guest receives the delivery with its `deadline` set to the instant the
-    /// guest timeout expires, counted from when the slot was taken, and its
-    /// metadata as the backend delivered it.
+    /// loads its guest, then waits for a slot of the runtime's
+    /// [concurrency gate](Runtime::lease), however long that takes. No more
+    /// than [`max_in_flight`](Handler::max_in_flight) messages load, wait for
+    /// a slot, or hold one at once, and one past them waits its turn off the
+    /// gate. The guest receives the delivery with its `deadline` set to the
+    /// instant the guest timeout expires, counted from when the slot was
+    /// taken, and its metadata as the backend delivered it.
     ///
     /// # Errors
     ///
@@ -110,7 +109,7 @@ where
     /// its first use or instantiated, [`HandleError::Rejected`] or
     /// [`HandleError::Released`] as the guest settles the message,
     /// [`HandleError::Trapped`] if it traps, and [`HandleError::TimedOut`] if
-    /// it runs past the guest timeout.
+    /// its instantiation and run outlast the guest timeout.
     pub async fn handle(&self, message: Message) -> Result<(), HandleError> {
         telemetry::count_message(&self.component);
 
@@ -135,9 +134,8 @@ where
             return Ok(());
         };
 
-        // wait for a place in messaging's share, then a slot of the gate
+        // wait for a place in messaging's share, off the gate
         let _place = self.share.acquire().await.expect("the share is never closed");
-        let slot = self.state.slot().await;
 
         // a routed guest that fails to load is an error, never a panic
         let guest = self.state.guest(guest_id).await.map_err(|error| {
@@ -151,35 +149,43 @@ where
             ))
         })?;
 
+        // a loaded guest waits for a slot of the gate, and its deadline counts
+        // from the slot
+        let lease = self.state.lease(guest).await;
         let delivery = Delivery {
-            deadline: Some(deadline_millis(self.state.options().guest_timeout)),
+            deadline: lease.deadline_millis(),
             ..Delivery::from(message)
         };
 
-        let (mut entered, instance) =
-            self.state.enter(&guest, ChainCtx::server(), slot).await.map_err(|error| {
-                HandleError::Unavailable(format!("instantiating `{guest_id}`: {error:#}"))
-            })?;
-        let messaging = indices
-            .load(&mut entered, &instance)
-            .map_err(|error| HandleError::Unavailable(format!("{error:#}")))?;
-
-        let run = entered
-            .as_context_mut()
-            .run_concurrent(async |store| {
-                messaging.omnia_messaging_incoming_handler().call_handle(store, delivery).await
+        // the guest's own `Err` is one outcome and a trap on either side of the
+        // call another, and a hung guest is cancelled with its store
+        let handled = lease
+            .invoke(async |mut entered, instance, _bound| {
+                let messaging = indices
+                    .load(&mut entered, &instance)
+                    .map_err(|error| HandleError::Unavailable(format!("{error:#}")))?;
+                let called = entered
+                    .as_context_mut()
+                    .run_concurrent(async |store| {
+                        messaging
+                            .omnia_messaging_incoming_handler()
+                            .call_handle(store, delivery)
+                            .await
+                    })
+                    .await;
+                let returned =
+                    called.flatten().map_err(|trap| HandleError::Trapped(format!("{trap:#}")))?;
+                returned.map_err(HandleError::from)
             })
-            .instrument(info_span!("messaging-handle"));
-
-        // the guest's own `Err` is one outcome; a trap on either side of the
-        // call is another; a hung guest is cancelled with its store
-        let timeout = self.state.options().guest_timeout;
-        let called = tokio::time::timeout(timeout, run)
-            .await
-            .map_err(|_elapsed| HandleError::TimedOut(timeout))?;
-        let returned =
-            called.flatten().map_err(|trap| HandleError::Trapped(format!("{trap:#}")))?;
-        returned.map_err(HandleError::from)
+            .instrument(info_span!("messaging-handle"))
+            .await;
+        match handled {
+            Ok(handled) => handled,
+            Err(LeaseError::Enter(error)) => {
+                Err(HandleError::Unavailable(format!("instantiating `{guest_id}`: {error:#}")))
+            }
+            Err(LeaseError::Timeout(limit)) => Err(HandleError::TimedOut(limit)),
+        }
     }
 
     async fn client(&self) -> Result<Arc<dyn Endpoint>> {
@@ -201,10 +207,4 @@ where
     fn max_in_flight(&self) -> NonZeroUsize {
         self.in_flight
     }
-}
-
-// saturates rather than panics, so no configured timeout can fail a delivery
-fn deadline_millis(timeout: Duration) -> u64 {
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
-    u64::try_from(now.saturating_add(timeout).as_millis()).unwrap_or(u64::MAX)
 }

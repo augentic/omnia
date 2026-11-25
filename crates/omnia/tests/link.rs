@@ -56,22 +56,25 @@ async fn call(runtime: &Runtime<()>, guest: &str, func: &str, message: &str) -> 
         .guest(&GuestId::from(guest))
         .await
         .with_context(|| format!("resolving guest `{guest}`"))?;
-    let slot = runtime.slot().await;
-    let (mut entered, instance) = runtime
-        .enter(&entry, ChainCtx::server(), slot)
+    let results = runtime
+        .lease(entry)
         .await
-        .with_context(|| format!("instantiating `{guest}`"))?;
-    let export = instance
-        .get_func(&mut entered, func)
-        .with_context(|| format!("guest `{guest}` exports `{func}`"))?;
+        .invoke(async |mut entered, instance, _bound| {
+            let export = instance
+                .get_func(&mut entered, func)
+                .with_context(|| format!("guest `{guest}` exports `{func}`"))?;
 
-    // `call_async` drives sync- and async-lifted exports alike.
-    let mut results = vec![Val::Bool(false)];
-    export
-        .call_async(&mut entered, &[Val::String(message.to_owned())], &mut results)
+            // `call_async` drives sync- and async-lifted exports alike.
+            let mut results = vec![Val::Bool(false)];
+            export
+                .call_async(&mut entered, &[Val::String(message.to_owned())], &mut results)
+                .await
+                .map_err(anyhow::Error::from)
+                .with_context(|| format!("calling `{guest}`'s `{func}`"))?;
+            anyhow::Ok(results)
+        })
         .await
-        .map_err(anyhow::Error::from)
-        .with_context(|| format!("calling `{guest}`'s `{func}`"))?;
+        .with_context(|| format!("instantiating `{guest}`"))??;
     match results.into_iter().next() {
         Some(Val::String(answer)) => Ok(answer),
         other => bail!("`{guest}`'s `{func}` returned a non-string result: {other:?}"),
@@ -535,7 +538,7 @@ async fn link_anonymous() {
 
 // A command deployment's arguments reach the command run alone. No command
 // runs here: a host dispatch builds its store through the store factory, and
-// `Runtime::enter` is how every trigger builds one, even at the command root.
+// a lease is how every trigger builds one.
 #[tokio::test]
 async fn link_arguments() {
     let runtime = boot_with(&[("arguments", test_programs::LINK_ARGUMENTS)], |builder| {
@@ -560,19 +563,23 @@ async fn link_arguments() {
     assert_eq!(answer, unseen);
 
     let entry = runtime.guest(&GuestId::from("arguments")).await.expect("resolving the guest");
-    let slot = runtime.slot().await;
-    let (mut entered, instance) = runtime
-        .enter(&entry, ChainCtx::command(), slot)
+    let results = runtime
+        .lease(entry)
         .await
-        .expect("entering at the command root");
-    let ops = instance
-        .get_export_index(&mut entered, None, "omnia-test:link/ops")
-        .expect("the guest exports `ops`");
-    let ping =
-        instance.get_export_index(&mut entered, Some(&ops), "ping").expect("`ops` has `ping`");
-    let ping = instance.get_func(&mut entered, ping).expect("`ping` is a function");
-    let mut results = vec![Val::Bool(false)];
-    ping.call_async(&mut entered, &params, &mut results).await.expect("calling `ping`");
+        .invoke(async |mut entered, instance, _bound| {
+            let ops = instance
+                .get_export_index(&mut entered, None, "omnia-test:link/ops")
+                .expect("the guest exports `ops`");
+            let ping = instance
+                .get_export_index(&mut entered, Some(&ops), "ping")
+                .expect("`ops` has `ping`");
+            let ping = instance.get_func(&mut entered, ping).expect("`ping` is a function");
+            let mut results = vec![Val::Bool(false)];
+            ping.call_async(&mut entered, &params, &mut results).await.expect("calling `ping`");
+            results
+        })
+        .await
+        .expect("entering the guest");
     assert_eq!(results, unseen);
 }
 
@@ -771,11 +778,12 @@ async fn queued_dispatch() {
             .expect("deployment boots");
 
     // with the only slot held, the dispatch waits for it
-    let slot = runtime.try_slot().expect("the gate is empty");
+    let echoer = runtime.guest(&GuestId::from("echoer")).await.expect("resolving the guest");
+    let lease = runtime.try_lease(echoer).expect("the gate is empty");
     let release = async {
         tokio::time::sleep(Duration::from_millis(100)).await;
         assert_eq!(runtime.invocations().waiting, 1);
-        drop(slot);
+        drop(lease);
     };
     let dispatch = runtime.dispatcher().invoke(
         ChainCtx::server(),

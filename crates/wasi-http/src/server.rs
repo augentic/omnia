@@ -7,7 +7,7 @@ use std::future::Future;
 use std::pin::{Pin, pin};
 use std::sync::Arc;
 use std::task::{Context as TaskContext, Poll};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use bytes::Bytes;
@@ -21,13 +21,12 @@ use hyper::service::service_fn;
 use hyper_util::rt::TokioExecutor;
 use hyper_util::server::conn::auto;
 use omnia_core::{
-    Backends, ChainCtx, FromEnv, Guest, HttpRoutes, Provides, Runtime, Slot, StoreCtx,
-    TriggerRouter, telemetry,
+    Backends, FromEnv, HttpRoutes, Lease, LeaseError, Provides, Runtime, StoreCtx, TriggerRouter,
+    telemetry,
 };
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio::task::JoinSet;
-use tokio::time::{Sleep, sleep, timeout};
 use tracing::{Instrument, info_span, instrument};
 use wasmtime::AsContextMut as _;
 use wasmtime_wasi_http::io::TokioIo;
@@ -260,7 +259,7 @@ where
     /// - `500` for a guest that times out, cannot be loaded at its first use,
     ///   or is no longer registered;
     /// - `503`, with `Retry-After: 1`, when every slot of the runtime's
-    ///   [concurrency gate](Runtime::try_slot) is held.
+    ///   [concurrency gate](Runtime::try_lease) is held.
     ///
     /// A request target is malformed when the request:
     /// - carries no `Host`, unless it is HTTP/2 with an `:authority`;
@@ -327,29 +326,28 @@ where
             )?;
 
         // a full gate is a 503, answered before a store is built
-        let Some(slot) = self.state.try_slot() else {
+        let Some(lease) = self.state.try_lease(guest) else {
             return Ok(unavailable());
         };
 
-        // one deadline from the slot: the guest reads it as `x-deadline`, over
-        // any the client sent, and its task runs to it
-        let guest_timeout = self.state.options().guest_timeout;
-        let deadline = sleep(guest_timeout);
-        request.headers_mut().insert(DEADLINE, HeaderValue::from(deadline_millis(guest_timeout)));
+        // the guest reads the deadline its lease enforces as `x-deadline`,
+        // never one the client sent
+        request.headers_mut().remove(DEADLINE);
+        if let Some(millis) = lease.deadline_millis() {
+            request.headers_mut().insert(DEADLINE, HeaderValue::from(millis));
+        }
 
         // dropping the set aborts the guest's task, so a request dropped
         // before its head frees its slot
         let mut guest_task = JoinSet::new();
         let (sender, receiver) = oneshot::channel();
         let invocation = Invocation {
-            runtime: self.state.clone(),
-            guest,
+            lease,
             indices,
-            slot,
             request,
         };
         let stream_timeout = self.state.options().http_stream_timeout;
-        invocation.spawn(&mut guest_task, deadline, stream_timeout, sender);
+        invocation.spawn(&mut guest_task, stream_timeout, sender);
 
         let response = match receiver.await {
             Ok(Head::Sent(response)) => response,
@@ -377,10 +375,8 @@ enum Head {
 }
 
 struct Invocation<B: 'static, T> {
-    runtime: Runtime<B>,
-    guest: Arc<Guest<B>>,
+    lease: Lease<B>,
     indices: ServiceIndices,
-    slot: Slot,
     request: http::Request<T>,
 }
 
@@ -391,26 +387,28 @@ where
     T::Error: Into<wasmtime_wasi_http::Error>,
 {
     // Runs the invocation on a task of its own in `tasks`, reporting its head
-    // through `sender`. The head is due by `deadline`, and the body then has
-    // `stream_timeout`, or as long as hyper takes while that is unset. Both
-    // bounds wrap the whole invocation, since wasmtime does not reliably fire a
-    // timer raced inside `run_concurrent`. Ending the task drops the store,
-    // which fails a body still streaming, and then frees the slot.
+    // through `sender`. The head is due by the lease's deadline, and the body
+    // then has `stream_timeout`, or as long as hyper takes while that is
+    // unset. Ending the task drops the store, which fails a body still
+    // streaming, and then frees the slot.
     fn spawn(
-        self, tasks: &mut JoinSet<()>, deadline: Sleep, stream_timeout: Option<Duration>,
+        self, tasks: &mut JoinSet<()>, stream_timeout: Option<Duration>,
         sender: oneshot::Sender<Head>,
     ) {
         tasks.spawn(async move {
             let (head_tx, mut head_rx) = oneshot::channel();
-            let mut invocation = Box::pin(self.run(head_tx).instrument(info_span!("http-request")));
-            let mut deadline = pin!(deadline);
+            let mut invocation =
+                Box::pin(self.run(head_tx, stream_timeout).instrument(info_span!("http-request")));
 
             // enter and call the guest to its head, before the deadline
             let head = tokio::select! {
                 biased;
                 Ok(response) = &mut head_rx => Head::Sent(response),
-                ended = &mut invocation => Head::Failed(ended.err().unwrap_or_else(no_response)),
-                () = &mut deadline => Head::TimedOut,
+                ended = &mut invocation => match ended {
+                    Ok(Ok(())) => Head::Failed(no_response()),
+                    Ok(Err(error)) | Err(LeaseError::Enter(error)) => Head::Failed(error),
+                    Err(LeaseError::Timeout(_)) => Head::TimedOut,
+                },
             };
             if !matches!(head, Head::Sent(_)) {
                 // the store and the slot go before `handle` answers
@@ -423,21 +421,17 @@ where
             }
 
             // the body, bounded from its head while `HTTP_STREAM_TIMEOUT_MS` is set
-            let ended = match stream_timeout {
-                Some(limit) => {
-                    let Ok(ended) = timeout(limit, invocation).await else {
-                        tracing::warn!(
-                            ?limit,
-                            "response body outlived HTTP_STREAM_TIMEOUT_MS; cutting it"
-                        );
-                        return;
-                    };
-                    ended
+            match invocation.await {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) | Err(LeaseError::Enter(error)) => {
+                    tracing::error!("http guest task error: {error:#}");
                 }
-                None => invocation.await,
-            };
-            if let Err(error) = ended {
-                tracing::error!("http guest task error: {error:#}");
+                Err(LeaseError::Timeout(limit)) => {
+                    tracing::warn!(
+                        ?limit,
+                        "response body outlived HTTP_STREAM_TIMEOUT_MS; cutting it"
+                    );
+                }
             }
         });
     }
@@ -445,59 +439,74 @@ where
     // Enters the guest and calls its handler, sending the response through
     // `head`. Returns once hyper is done with the body, or with the error that
     // stopped it first.
-    async fn run(self, head: oneshot::Sender<hyper::Response<OutgoingBody>>) -> Result<()> {
-        let (mut entered, instance) =
-            self.runtime.enter(&self.guest, ChainCtx::server(), self.slot).await?;
-        let service = self.indices.load(&mut entered, &instance)?;
-        let request = self.request;
+    async fn run(
+        self, head: oneshot::Sender<hyper::Response<OutgoingBody>>,
+        stream_timeout: Option<Duration>,
+    ) -> Result<Result<()>, LeaseError> {
+        let Self {
+            lease,
+            indices,
+            request,
+        } = self;
+        lease
+            .invoke(async move |mut entered, instance, bound| {
+                let service = indices.load(&mut entered, &instance)?;
+                entered
+                    .as_context_mut()
+                    .run_concurrent(async |store| {
+                        let response = async move {
+                            let (request, io) = store.with(|mut access| {
+                                let mut cx = access.as_context_mut();
+                                wasi::Request::from_http(view(cx.data_mut()).hooks, request)
+                            });
+                            let req = store
+                                .with(|mut store| {
+                                    view(store.as_context_mut().data_mut()).table.push(request)
+                                })
+                                .context("failed to push request to table")?;
 
-        entered
-            .as_context_mut()
-            .run_concurrent(async |store| {
-                let response = async move {
-                    let (request, io) = store.with(|mut access| {
-                        let mut cx = access.as_context_mut();
-                        wasi::Request::from_http(view(cx.data_mut()).hooks, request)
-                    });
-                    let req = store
-                        .with(|mut store| {
-                            view(store.as_context_mut().data_mut()).table.push(request)
-                        })
-                        .context("failed to push request to table")?;
+                            let res = service
+                                .wasi_http_handler()
+                                .call_handle(store, req)
+                                .await
+                                .map_err(anyhow::Error::from)
+                                .context("guest trap")?
+                                .map_err(|e| anyhow!("guest error: {e}"))?;
+                            let wasi_resp = store
+                                .with(|mut store| {
+                                    view(store.as_context_mut().data_mut()).table.delete(res)
+                                })
+                                .context("failed to delete response from table")?;
+                            store
+                                .with(|mut store| {
+                                    wasi_resp.into_http_with_getter(&mut store, io, view)
+                                })
+                                .map_err(|e| anyhow!("converting guest response: {e}"))
+                        }
+                        .await?;
 
-                    let res = service
-                        .wasi_http_handler()
-                        .call_handle(store, req)
-                        .await
-                        .map_err(anyhow::Error::from)
-                        .context("guest trap")?
-                        .map_err(|e| anyhow!("guest error: {e}"))?;
-                    let wasi_resp = store
-                        .with(|mut store| view(store.as_context_mut().data_mut()).table.delete(res))
-                        .context("failed to delete response from table")?;
-                    store
-                        .with(|mut store| wasi_resp.into_http_with_getter(&mut store, io, view))
-                        .map_err(|e| anyhow!("converting guest response: {e}"))
-                }
-                .await?;
+                        // keep `run_concurrent` alive until hyper has consumed the
+                        // body, so the wasi pipe resources stay valid
+                        let (body_done_tx, body_done_rx) = oneshot::channel::<()>();
+                        let response = response.map(|body| {
+                            BodyDoneWrapper {
+                                body: body.map_err(Into::into),
+                                _tx: body_done_tx,
+                            }
+                            .boxed_unsync()
+                        });
 
-                // keep `run_concurrent` alive until hyper has consumed the
-                // body, so the wasi pipe resources stay valid
-                let (body_done_tx, body_done_rx) = oneshot::channel::<()>();
-                let response = response.map(|body| {
-                    BodyDoneWrapper {
-                        body: body.map_err(Into::into),
-                        _tx: body_done_tx,
-                    }
-                    .boxed_unsync()
-                });
-                if head.send(response).is_ok() {
-                    _ = body_done_rx.await;
-                }
+                        // re-armed before the head goes, so a sent head never times out
+                        bound.reset(stream_timeout);
+                        if head.send(response).is_ok() {
+                            _ = body_done_rx.await;
+                        }
 
-                anyhow::Ok(())
+                        anyhow::Ok(())
+                    })
+                    .await?
             })
-            .await?
+            .await
     }
 }
 
@@ -611,13 +620,6 @@ fn checked(authority: Authority) -> Result<Authority> {
 
     Ok(authority)
 }
-
-// saturates rather than panics, so no configured timeout can fail a request
-fn deadline_millis(timeout: Duration) -> u64 {
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
-    u64::try_from(now.saturating_add(timeout).as_millis()).unwrap_or(u64::MAX)
-}
-
 fn healthy() -> hyper::Response<OutgoingBody> {
     let body = Full::new(Bytes::from_static(b"OK")).map_err(Into::into).boxed_unsync();
 

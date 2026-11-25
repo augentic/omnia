@@ -1,6 +1,6 @@
-//! A messaging guest whose `incoming-handler` export sleeps well past the
-//! deployment's guest timeout for every delivery, so the host side can pin
-//! the wall-clock bound on a hung handler.
+//! A messaging guest whose `incoming-handler` export sleeps two seconds for
+//! every delivery, so the host side can pin the wall-clock bound on a hung
+//! handler and on one that returns as the bound expires.
 
 #![cfg(target_arch = "wasm32")]
 

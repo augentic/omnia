@@ -579,6 +579,11 @@ path = "programs/websocket/close.rs"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "websocket_deadline_echo"
+path = "programs/websocket/deadline_echo.rs"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "websocket_error_codes"
 path = "programs/websocket/error_codes.rs"
 crate-type = ["cdylib"]

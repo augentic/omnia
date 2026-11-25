@@ -1,11 +1,12 @@
 //! Connected runtime: [`Runtime`], [`RuntimeParts`], [`WeakRuntime`],
-//! [`ExitStatus`], the [`Entered`] guard, and the concurrency gate's [`Slot`]
-//! and [`Invocations`].
+//! [`ExitStatus`], a root invocation's [`Lease`] and the [`Entered`] guard
+//! its call runs on, and the concurrency gate's [`Invocations`].
 
 mod admission;
 mod command;
 mod enter;
 mod gate;
+mod lease;
 
 use std::io;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -19,6 +20,7 @@ use self::admission::{Loads, Seats};
 pub use self::enter::Entered;
 use self::gate::Gate;
 pub use self::gate::{Invocations, Slot};
+pub use self::lease::{Bound, Lease, LeaseError};
 use crate::artifact::component;
 use crate::digest::Digest;
 use crate::extensions::Extensions;
@@ -467,11 +469,10 @@ impl<B: Backends> Runtime<B> {
 
     /// A host→guest dispatch capability for a caller outside any guest.
     ///
-    /// Each call through it is a root invocation. It waits for a
-    /// [slot](Self::slot) of the concurrency gate, as a trigger does, and
-    /// frees it once the callee's store has dropped. The handle a store
-    /// context carries serves calls beneath a root that holds a slot, so it
-    /// takes none.
+    /// Each call through it is a root invocation. It waits for a slot of the
+    /// concurrency gate, as a [lease](Self::lease) does, and frees it once
+    /// the callee's store has dropped. The handle a store context carries
+    /// serves calls beneath a root that holds a slot, so it takes none.
     #[must_use]
     pub fn dispatcher(&self) -> Arc<dyn Dispatcher> {
         Arc::new(RuntimeDispatcher {
@@ -584,8 +585,9 @@ impl<B: Backends> Runtime<B> {
     /// The run's store is the only one given the command's argv. A guest it
     /// calls or loads sees none.
     ///
-    /// The run waits for a [slot](Self::slot) of the concurrency gate, as a
-    /// message delivery does, and holds it for as long as it runs.
+    /// The run waits for a slot of the concurrency gate, as a
+    /// [lease](Self::lease) does, and holds it for as long as it runs. No
+    /// guest timeout bounds it.
     ///
     /// # Errors
     ///
