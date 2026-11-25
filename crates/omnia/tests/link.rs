@@ -14,9 +14,9 @@ use anyhow::{Context as _, Result, bail};
 use omnia::wasmtime::Enabled;
 use omnia::wasmtime::component::Val;
 use omnia::{
-    ChainCtx, ChainPolicy, CompileOptions, DeploymentBuilder, FirstArgSelector, Grants, GuestEntry,
-    GuestId, GuestSelector as _, Manifest, Mode, Runtime, RuntimeOptions, Transport, TransportKind,
-    Verified,
+    ChainCtx, ChainPolicy, CompileOptions, DeploymentBuilder, Digest, FirstArgSelector, Grants,
+    GuestEntry, GuestError, GuestId, GuestSelector as _, Manifest, Mode, Runtime, RuntimeOptions,
+    Transport, TransportKind, Verified,
 };
 
 // Every guest program in `crates/test-programs` must have a matching test
@@ -292,6 +292,64 @@ async fn register_grants() {
 
     let sync = call(&runtime, "full", "poke", "granted").await.expect("sync dispatch");
     assert_eq!(sync, "echoer pong: granted");
+}
+
+// Racing registrations of one identity, each pair on tasks of their own so the
+// two seats overlap: other bytes conflict, the same bytes and grants attest,
+// and the loser of two `admit`s conflicts.
+#[tokio::test(flavor = "multi_thread")]
+async fn racing_registration() {
+    let runtime = boot(&[("echoer", test_programs::LINK_ECHOER)]).await.expect("deployment boots");
+    let full = std::fs::read(test_programs::LINK_FULL).expect("reading the full guest");
+    let partial = std::fs::read(test_programs::LINK_PARTIAL).expect("reading the partial guest");
+    let (full_digest, partial_digest) = (Digest::of(&full), Digest::of(&partial));
+    let id = GuestId::from("full");
+    let seated = || runtime.registry().get(&id).map(|guest| guest.digest());
+    let register = |bytes: Vec<u8>| {
+        let runtime = runtime.clone();
+        async move { runtime.register("full", bytes, Grants::all()).await }
+    };
+
+    // other bytes: one seats, and the other conflicts
+    let outcomes = race([full.clone(), partial].map(&register)).await;
+    let (winner, lost) = match &outcomes {
+        [Ok(()), Err(error)] => (full_digest, error),
+        [Err(error), Ok(())] => (partial_digest, error),
+        outcomes => panic!("one registration seats and the other conflicts: {outcomes:?}"),
+    };
+    assert!(format!("{lost:#}").contains("active under other bytes"), "unexpected error: {lost:#}");
+    assert_eq!(seated(), Some(winner));
+
+    // the same bytes and grants: both attest one registration
+    runtime.deregister(&id).expect("deregistering the late guest");
+    let [first, second] = race([full.clone(), full.clone()].map(&register)).await;
+    first.expect("the first registration attests");
+    second.expect("the second registration attests");
+    assert_eq!(seated(), Some(full_digest));
+
+    // two `admit`s: one seats, and the other conflicts
+    runtime.deregister(&id).expect("deregistering the late guest");
+    let admit = |bytes: Vec<u8>| {
+        let (runtime, id) = (runtime.clone(), id.clone());
+        let verified = Verified::wasm(bytes).expect("the full guest is raw wasm");
+        async move { runtime.admit(id, verified, Grants::all()).await }
+    };
+    let outcomes = race([full.clone(), full].map(admit)).await;
+    let admitted = outcomes.iter().filter(|outcome| outcome.is_ok()).count();
+    let conflicts = outcomes
+        .iter()
+        .filter(|outcome| matches!(outcome, Err(GuestError::Conflict { .. })))
+        .count();
+    assert_eq!((admitted, conflicts), (1, 1), "{outcomes:?}");
+    assert_eq!(seated(), Some(full_digest));
+}
+
+// runs both at once, each on a task of its own
+async fn race<T: Send + 'static>(
+    contenders: [impl Future<Output = T> + Send + 'static; 2],
+) -> [T; 2] {
+    let [first, second] = contenders.map(tokio::spawn);
+    [first.await.expect("the first completes"), second.await.expect("the second completes")]
 }
 
 // The relay takes the id `echoer` because `full` hard-codes `ping("echoer",

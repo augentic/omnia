@@ -83,7 +83,7 @@ pub struct RuntimeOptions {
     /// Enable the pooling instance allocator (`POOLING`, default `true`).
     #[env(from = "POOLING", default = "true")]
     pub pooling: bool,
-    /// Maximum component instances held by the pooling allocator (`POOL_MAX_INSTANCES`, default 1000).
+    /// Maximum component instances held by the pooling allocator (`POOL_MAX_INSTANCES`, default 1000, min 1).
     #[env(from = "POOL_MAX_INSTANCES", default = "1000")]
     pub pool_max_instances: u32,
     /// Linear-memory size reserved per pooled memory, in bytes (`POOL_MAX_MEMORY_BYTES`, unset: inherits `max_memory_bytes`).
@@ -184,6 +184,8 @@ impl RuntimeOptions {
     /// - [`messaging_max_in_flight`](Self::messaging_max_in_flight) is set to
     ///   zero, or exceeds the [gate](Self::concurrent_invocations);
     /// - with [`pooling`](Self::pooling) on,
+    ///   [`pool_max_instances`](Self::pool_max_instances) is zero;
+    /// - with [`pooling`](Self::pooling) on,
     ///   [`max_concurrent_invocations`](Self::max_concurrent_invocations)
     ///   exceeds [`pool_max_instances`](Self::pool_max_instances);
     /// - with [`pooling`](Self::pooling) on,
@@ -212,6 +214,9 @@ impl RuntimeOptions {
         }
         if self.messaging_max_in_flight == Some(0) {
             bail!("MESSAGING_MAX_IN_FLIGHT must be at least 1; unset it for half the gate");
+        }
+        if self.pooling && self.pool_max_instances == 0 {
+            bail!("POOL_MAX_INSTANCES must be at least 1; set POOLING=false to disable pooling");
         }
         if let Some(share) = self.messaging_max_in_flight
             && share > self.concurrent_invocations()
@@ -254,10 +259,10 @@ impl RuntimeOptions {
     }
 
     /// The slots the concurrency gate holds: `MAX_CONCURRENT_INVOCATIONS`, or
-    /// one for each of `POOL_MAX_INSTANCES`.
+    /// one for each of `POOL_MAX_INSTANCES`, at least one.
     #[must_use]
     pub fn concurrent_invocations(&self) -> u32 {
-        self.max_concurrent_invocations.unwrap_or(self.pool_max_instances)
+        self.max_concurrent_invocations.unwrap_or(self.pool_max_instances).max(1)
     }
 
     /// The message deliveries that hold or wait for a slot of the gate at
@@ -494,6 +499,36 @@ mod tests {
         };
 
         options.validate().expect("pool bounds are ignored with pooling off");
+    }
+
+    // a zero pool has no instances when pooling is on, while with pooling off
+    // the gate still holds one slot
+    #[test]
+    fn zero_pool() {
+        let options = options(0);
+
+        let error = options.validate().expect_err("a zero pool is refused");
+        assert!(error.to_string().contains("POOL_MAX_INSTANCES"), "{error}");
+
+        let unpooled = RuntimeOptions {
+            pooling: false,
+            messaging_max_in_flight: Some(1),
+            ..options
+        };
+        assert_eq!(unpooled.concurrent_invocations(), 1);
+        unpooled.validate().expect("the gate holds at least one slot with pooling off");
+
+        let over = RuntimeOptions {
+            messaging_max_in_flight: Some(2),
+            ..unpooled
+        };
+        let error = over.validate().expect_err("a share wider than the one-slot gate is refused");
+        assert!(
+            error
+                .to_string()
+                .contains("MESSAGING_MAX_IN_FLIGHT (2) exceeds the concurrency gate (1)"),
+            "{error}"
+        );
     }
 
     #[test]

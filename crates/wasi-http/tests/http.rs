@@ -731,10 +731,11 @@ async fn stalled_guest() {
 const ECHO_PACKAGE: &str = "test:echo@1.0.0";
 
 // a registry holding one release, the echo guest's, which it answers `delay`
-// after it is asked
+// after it is asked, counting each ask
 struct SlowRegistry {
     bytes: Vec<u8>,
     delay: Duration,
+    asked: Arc<AtomicUsize>,
 }
 
 impl RegistrySource for SlowRegistry {
@@ -744,6 +745,7 @@ impl RegistrySource for SlowRegistry {
         Box::pin(async move {
             assert_eq!(package, ECHO_PACKAGE);
             assert_eq!(endpoint, None, "a declared package names no registry of its own");
+            self.asked.fetch_add(1, Ordering::SeqCst);
             tokio::time::sleep(self.delay).await;
             Ok(self.bytes.clone())
         })
@@ -763,7 +765,11 @@ async fn slow_load() {
         .entry(GuestEntry::package(ECHO_PACKAGE).route_http("/echo"))
         .guest_timeout(GUEST_TIMEOUT)
         .boot(Backends::defaults().await, |deployment| {
-            deployment.registry_source(SlowRegistry { bytes, delay: LOAD });
+            deployment.registry_source(SlowRegistry {
+                bytes,
+                delay: LOAD,
+                asked: Arc::default(),
+            });
             deployment.host::<WasiHttp>()?;
             deployment.host::<WasiOtel>()?;
             Ok(())
@@ -788,6 +794,54 @@ async fn slow_load() {
         deadline.is_some_and(|deadline| (earliest..=latest).contains(&deadline)),
         "{deadline:?}"
     );
+
+    runtime.shutdown();
+}
+
+// Two requests arrive before a declared guest has loaded, and the first is
+// dropped while the registry answers: the second still loads the guest, from
+// the one acquisition the first began.
+#[tokio::test]
+async fn dropped_load() {
+    const LOAD: Duration = Duration::from_millis(300);
+
+    let bytes = std::fs::read(test_programs::HTTP_INCOMING_ECHO).expect("guest bytes");
+    let asked = Arc::new(AtomicUsize::new(0));
+    let registry = SlowRegistry {
+        bytes,
+        delay: LOAD,
+        asked: Arc::clone(&asked),
+    };
+    let runtime = Deployment::new()
+        .entry(GuestEntry::package(ECHO_PACKAGE).route_http("/echo"))
+        .boot(Backends::defaults().await, |deployment| {
+            deployment.registry_source(registry);
+            deployment.host::<WasiHttp>()?;
+            deployment.host::<WasiOtel>()?;
+            Ok(())
+        })
+        .await
+        .expect("runtime boots");
+    let handler = HttpHandler::new(&runtime)
+        .expect("http routes consistent")
+        .expect("the guest exports the http handler");
+    let request = |message: &str| {
+        Request::get(format!("/echo?message={message}"))
+            .header(HOST, "echo.test")
+            .body(Full::new(Bytes::new()))
+            .expect("request")
+    };
+
+    let (dropped, kept) = tokio::join!(
+        tokio::time::timeout(LOAD / 3, handler.handle(request("dropped"))),
+        handler.handle(request("kept"))
+    );
+    assert!(dropped.is_err(), "the first request is dropped while the guest loads");
+    let response = kept.expect("handled");
+    assert_eq!(response.status(), StatusCode::OK);
+    let (echo, _) = echoed(response).await;
+    assert_eq!(echo["message"], "kept");
+    assert_eq!(asked.load(Ordering::SeqCst), 1, "the guest was acquired once");
 
     runtime.shutdown();
 }

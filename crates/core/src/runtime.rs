@@ -2,6 +2,7 @@
 //! [`ExitStatus`], the [`Entered`] guard, and the concurrency gate's [`Slot`]
 //! and [`Invocations`].
 
+mod admission;
 mod command;
 mod enter;
 mod gate;
@@ -15,6 +16,7 @@ use tokio::sync::watch;
 use wasmtime::Store;
 use wasmtime::component::InstancePre;
 
+use self::admission::{Loads, Seats};
 pub use self::enter::Entered;
 use self::gate::Gate;
 pub use self::gate::{Invocations, Slot};
@@ -154,6 +156,8 @@ impl<B: Backends> Runtime<B> {
             extensions: Extensions::new(),
             stores_built: AtomicU64::new(0),
             gate: Gate::new(gate as usize),
+            loads: Loads::default(),
+            seats: Seats::default(),
             hop_warning: Once::new(),
             stop: watch::channel(false).0,
         }))
@@ -178,11 +182,17 @@ impl<B: Backends> Runtime<B> {
     ///
     /// A registered guest is returned as it stands. One the deployment
     /// declares but has not loaded is [acquired](Self::acquire) and
-    /// [admitted](Self::admit_bytes) under its entry's policy; when a racing
-    /// first use admitted it first, that registration stands and is
-    /// returned. Every way into a guest resolves through here, so a declared
-    /// guest loads the first time a route, the command drive, a link call, a
-    /// host dispatch, or the guest loader names it.
+    /// [admitted](Self::admit_bytes) under its entry's policy. Every way into
+    /// a guest resolves through here, so a declared guest loads the first
+    /// time a route, the command drive, a link call, a host dispatch, or the
+    /// guest loader names it.
+    ///
+    /// First uses that arrive while a declared guest loads share that one
+    /// load:
+    ///
+    /// - Each returns its outcome, its error included.
+    /// - Dropping one fails none of the others.
+    /// - A failed load is not kept, so the next first use loads afresh.
     ///
     /// # Errors
     ///
@@ -197,8 +207,26 @@ impl<B: Backends> Runtime<B> {
     /// - [`GuestError::Invalid`] when the bytes miss the pin, are a
     ///   pre-compiled artifact where raw wasm alone is admitted, or do not
     ///   load as a component.
-    /// - [`GuestError::Internal`] when the registration failed.
+    /// - [`GuestError::Internal`] when the registration failed, or the load
+    ///   panicked.
     pub async fn guest(&self, id: &GuestId) -> Result<Arc<Guest<B>>, GuestError> {
+        let registry = self.registry();
+        if let Some(guest) = registry.get(id) {
+            return Ok(guest);
+        }
+        if registry.declared(id).is_none() {
+            return Err(GuestError::Unregistered(id.clone()));
+        }
+
+        let (runtime, owned) = (self.clone(), id.clone());
+        let load = async move { runtime.load_declared(&owned).await };
+        self.inner.loads.join(id, load).await
+    }
+
+    // The load every first use of a declared guest joins while it runs. It
+    // looks again first, since a load that ended after its caller looked has
+    // registered the guest.
+    async fn load_declared(&self, id: &GuestId) -> Result<Arc<Guest<B>>, GuestError> {
         let registry = self.registry();
         if let Some(guest) = registry.get(id) {
             return Ok(guest);
@@ -318,8 +346,8 @@ impl<B: Backends> Runtime<B> {
     /// host set, wired into the host-mediated link serve side, and
     /// published with their endpoint as one lifecycle transition, the digest
     /// and grants recorded on the entry ([`Guest::digest`],
-    /// [`Guest::grants`]). A name already active when the bytes arrive
-    /// stands for a declared entry (a racing first use) and attests
+    /// [`Guest::grants`]). A name already active, including one a concurrent
+    /// admission seats first, stands for a declared entry and attests
     /// caller-named bytes on the same digest and grants alone. Whether the
     /// component exports a linked interface is not checked: a guest that
     /// exports none is still reachable through the host [`Dispatcher`], and
@@ -673,13 +701,16 @@ impl<B: Backends> Runtime<B> {
     // pre-instantiate against the shared host set, wire the host-mediated
     // link serve side, then publish entry and endpoint as one lifecycle
     // transition, so no dispatch resolves the entry and misses the endpoint
-    // or vice versa.
+    // or vice versa. Seats of one identity run one at a time, so a seat that
+    // races another settles as occupied once the other publishes, or seats
+    // its own bytes when the other fails.
     async fn seat(
         &self, id: GuestId, verified: Verified, grants: Grants,
     ) -> Result<Arc<Guest<B>>, SeatError> {
         let registry = self.registry();
 
-        // early occupancy check; the publish below re-checks transactionally
+        // hold the identity, then check it is free; the publish below re-checks transactionally
+        let _seating = self.inner.seats.hold(&id).await;
         if registry.get(&id).is_some() {
             return Err(SeatError::Occupied);
         }
@@ -822,6 +853,8 @@ struct RuntimeInner<B: 'static> {
     // whose guests finished between its looks
     stores_built: AtomicU64,
     gate: Gate,
+    loads: Loads<B>,
+    seats: Seats,
     hop_warning: Once,
     stop: watch::Sender<bool>,
 }
@@ -881,8 +914,8 @@ impl<B: 'static> Clone for WeakRuntime<B> {
 pub enum Policy<'a> {
     /// The deployment's entry is the authority: the bytes hash to its pin,
     /// a pre-compiled artifact is admitted as its source kind allows, the
-    /// guest runs under its grants, and a racing first use that seated the
-    /// name first stands.
+    /// guest runs under its grants, and a guest already active under the
+    /// name stands.
     Declared(&'a Source),
     /// A caller named the bytes: raw wasm alone, hashing to `pin` when one
     /// is given, under a name the deployment does not declare, running under
@@ -933,7 +966,7 @@ pub enum GuestError {
         /// What did not hold.
         detail: String,
     },
-    /// The registration itself failed.
+    /// The registration itself failed, or a first-use load panicked.
     #[error("{0}")]
     Internal(String),
 }

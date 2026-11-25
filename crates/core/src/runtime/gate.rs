@@ -100,6 +100,6 @@ pub struct Invocations {
     /// The invocations waiting for a slot to free.
     pub waiting: usize,
     /// The slots the gate holds: `MAX_CONCURRENT_INVOCATIONS`, or
-    /// `POOL_MAX_INSTANCES` when it is unset.
+    /// `POOL_MAX_INSTANCES` when it is unset, at least one.
     pub limit: usize,
 }

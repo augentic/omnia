@@ -2,9 +2,9 @@
 //!
 //! The registry owns guest lifecycle; how a guest's linked imports are
 //! satisfied and its linked exports served is behind [`LinkSeam`]. A
-//! deployment that declares no link interfaces installs [`NoLinks`]; one that
-//! does installs an implementation that polyfills, serves, and routes calls
-//! over a transport.
+//! deployment built without omnia's `link` feature installs [`NoLinks`]. One
+//! built with it installs an implementation that polyfills, serves, and
+//! routes calls over a transport, whatever link interfaces it declares.
 
 use std::sync::Arc;
 
@@ -76,7 +76,7 @@ pub trait LinkSeam<B: 'static>: Send + Sync + 'static {
     fn shutdown(&self);
 }
 
-/// The seam of a deployment that declares no link interfaces.
+/// The seam of a deployment built without omnia's `link` feature.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct NoLinks;
 

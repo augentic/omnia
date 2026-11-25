@@ -56,7 +56,7 @@ wasmtime = { workspace = true, features = ["pooling-allocator", "runtime"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 test-programs.workspace = true
-tokio = { workspace = true, features = ["macros", "rt"] }
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread"] }
 
 [[test]]
 name = "link"
