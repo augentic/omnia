@@ -61,7 +61,7 @@ The pooling allocator recycles instance slots so per-request instantiation stays
 | Variable                     | Default                     | Meaning                                                       |
 | ---------------------------- | --------------------------- | ------------------------------------------------------------- |
 | `POOLING`                    | `true`                      | Enable the pooling instance allocator.                        |
-| `POOL_MAX_INSTANCES`         | `1000`                      | Maximum component instances held by the pool.                 |
+| `POOL_MAX_INSTANCES`         | `1000`                      | Maximum component instances held by the pool. `0` is refused while pooling is on. |
 | `POOL_MAX_MEMORY_BYTES`      | inherits `MAX_MEMORY_BYTES` | Linear-memory size reserved per pooled memory.                |
 | `POOL_MAX_UNUSED_WARM_SLOTS` | `100`                       | Unused warm slots retained for fast reuse.                    |
 | `POOL_METRICS_INTERVAL_MS`   | `5000`                      | Interval between occupancy samples of the pool and the [concurrency gate](#concurrency-gate); `0` disables. |
