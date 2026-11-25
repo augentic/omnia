@@ -249,6 +249,11 @@ path = "programs/link/skewed.rs"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "link_skewed_importer"
+path = "programs/link/skewed_importer.rs"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "link_sleeper"
 path = "programs/link/sleeper.rs"
 crate-type = ["cdylib"]
