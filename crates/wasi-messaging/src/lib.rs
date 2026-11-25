@@ -15,9 +15,9 @@ mod resource;
 mod server;
 mod types_impl;
 
+#[expect(missing_docs, reason = "bindgen documents not every method of the world struct")]
+#[expect(clippy::empty_enums, reason = "bindgen writes the unremapped `lease` as an empty enum")]
 mod generated {
-    #![allow(missing_docs, clippy::empty_enums, reason = "wasmtime bindgen output")]
-
     pub use omnia_wasi_types::Error;
 
     pub use crate::resource::ClientProxy;

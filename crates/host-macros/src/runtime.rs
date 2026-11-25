@@ -11,7 +11,6 @@ use quote::quote;
 use crate::runtime::codegen::Codegen;
 pub use crate::runtime::parse::Config;
 
-/// Generate the runtime module from a parsed [`Config`].
 pub fn expand(config: &Config) -> TokenStream {
     let Codegen {
         mode,

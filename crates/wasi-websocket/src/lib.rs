@@ -12,9 +12,8 @@ mod resource;
 mod server;
 mod types_impl;
 
+#[expect(missing_docs, reason = "bindgen documents not every method of the world struct")]
 mod generated {
-    #![allow(missing_docs, reason = "wasmtime bindgen output")]
-
     pub use omnia_wasi_types::Error;
 
     pub use crate::resource::ClientProxy;
