@@ -21,18 +21,18 @@ use hyper::service::service_fn;
 use hyper_util::rt::TokioExecutor;
 use hyper_util::server::conn::auto;
 use omnia_core::{
-    Backends, ChainCtx, Entered, FromEnv, HttpRoutes, Provides, Runtime, StoreCtx, TriggerRouter,
-    telemetry,
+    Backends, ChainCtx, FromEnv, Guest, HttpRoutes, Provides, Runtime, Slot, StoreCtx,
+    TriggerRouter, telemetry,
 };
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio::task::JoinSet;
-use tokio::time::timeout;
+use tokio::time::{Sleep, sleep, timeout};
 use tracing::{Instrument, info_span, instrument};
 use wasmtime::AsContextMut as _;
 use wasmtime_wasi_http::io::TokioIo;
+use wasmtime_wasi_http::p3::bindings::ServiceIndices;
 use wasmtime_wasi_http::p3::bindings::http::types as wasi;
-use wasmtime_wasi_http::p3::bindings::{Service, ServiceIndices};
 
 use super::{WasiHttp, WasiHttpCtxView};
 
@@ -246,9 +246,7 @@ where
     /// at once, before its target is checked, so a probe needs no `Host` and
     /// takes no slot of the runtime's concurrency gate. Any other request is
     /// normalised first: its scheme and authority come from `Forwarded` where
-    /// it names them, else from the URI or `Host`. Its `x-deadline` header is
-    /// set to the instant the guest timeout expires, in milliseconds since the
-    /// Unix epoch, replacing any the client sent.
+    /// it names them, else from the URI or `Host`.
     ///
     /// Outcomes the handler can answer itself come back as responses:
     /// - `200` for the health path;
@@ -265,9 +263,11 @@ where
     /// - names an authority with userinfo or a non-numeric port;
     /// - is HTTP/2 with an `:authority` other than its `Host`.
     ///
-    /// The [guest timeout](omnia_core::RuntimeOptions::guest_timeout) counts
-    /// from when the request takes its slot, so it bounds instantiation as well
-    /// as the wait for the response head. Dropping the future before it
+    /// When the request takes its slot, its `x-deadline` header is set to the
+    /// instant the [guest timeout](omnia_core::RuntimeOptions::guest_timeout)
+    /// expires, in milliseconds since the Unix epoch, replacing any the client
+    /// sent. The guest must send its response head by then, so the timeout
+    /// bounds instantiation as well as the call. Dropping the future before it
     /// resolves stops the guest and frees its slot.
     ///
     /// The response body streams on after `handle` returns. It fails part way
@@ -292,9 +292,8 @@ where
             return Ok(healthy());
         }
 
-        // normalise the request and stamp the guest's deadline; a bad `Host`
-        // header is a 400, not a 500
-        let request = match fix_request(request, self.state.options().guest_timeout) {
+        // normalise the request; a bad `Host` header is a 400, not a 500
+        let mut request = match fix_request(request) {
             Ok(request) => request,
             Err(error) => {
                 tracing::debug!(%error, "rejecting malformed request");
@@ -327,29 +326,34 @@ where
             return Ok(unavailable());
         };
 
-        // dropping the set aborts the guest's task, so a request dropped or
-        // timed out before its head frees its slot
+        // one deadline from the slot: the guest reads it as `x-deadline`, over
+        // any the client sent, and its task runs to it
+        let guest_timeout = self.state.options().guest_timeout;
+        let deadline = sleep(guest_timeout);
+        request.headers_mut().insert(DEADLINE, HeaderValue::from(deadline_millis(guest_timeout)));
+
+        // dropping the set aborts the guest's task, so a request dropped
+        // before its head frees its slot
         let mut guest_task = JoinSet::new();
+        let (sender, receiver) = oneshot::channel();
+        let invocation = Invocation {
+            runtime: self.state.clone(),
+            guest,
+            indices,
+            slot,
+            request,
+        };
+        let stream_timeout = self.state.options().http_stream_timeout;
+        invocation.spawn(&mut guest_task, deadline, stream_timeout, sender);
 
-        // instantiate the selected guest fresh (instance-per-call), bounding
-        // the time from the slot to the head (not the streaming body)
-        let invoked = timeout(self.state.options().guest_timeout, async {
-            let (mut entered, instance) =
-                self.state.enter(&guest, ChainCtx::server(), slot).await?;
-            let service = indices.load(&mut entered, &instance)?;
-
-            let (sender, receiver) = oneshot::channel::<Result<hyper::Response<OutgoingBody>>>();
-            let stream_timeout = self.state.options().http_stream_timeout;
-            spawn_guest(&mut guest_task, entered, service, request, sender, stream_timeout);
-            receiver.await.map_err(|_canceled| anyhow!("guest produced no response"))?
-        })
-        .await;
-        let response = match invoked {
-            Ok(response) => response?,
-            Err(_elapsed) => {
+        let response = match receiver.await {
+            Ok(Head::Sent(response)) => response,
+            Ok(Head::Failed(error)) => return Err(error),
+            Ok(Head::TimedOut) => {
                 tracing::error!(service = %self.component, "guest handler timed out");
                 return Ok(internal_error());
             }
+            Err(_canceled) => return Err(no_response()),
         };
 
         // the body's drop ends the task from here on
@@ -360,27 +364,92 @@ where
     }
 }
 
-// Runs the guest's handler on a task of its own in `tasks`, which owns the
-// store and the request's slot of the gate. The response or the failure goes
-// through `sender`, and the task lives on until hyper has consumed the body or
-// `stream_timeout` has passed since the head went out. Ending the task drops
-// the store, which fails a body still streaming, and then frees the slot.
-fn spawn_guest<B, T>(
-    tasks: &mut JoinSet<()>, mut entered: Entered<B>, service: Service, request: http::Request<T>,
-    sender: oneshot::Sender<Result<hyper::Response<OutgoingBody>>>,
-    stream_timeout: Option<Duration>,
-) where
+// The one report a guest's task makes to `handle`, before its body streams.
+enum Head {
+    Sent(hyper::Response<OutgoingBody>),
+    Failed(anyhow::Error),
+    TimedOut,
+}
+
+struct Invocation<B: 'static, T> {
+    runtime: Runtime<B>,
+    guest: Arc<Guest<B>>,
+    indices: ServiceIndices,
+    slot: Slot,
+    request: http::Request<T>,
+}
+
+impl<B, T> Invocation<B, T>
+where
     B: Provides<WasiHttp>,
     T: Body<Data = Bytes> + Send + 'static,
     T::Error: Into<wasmtime_wasi_http::Error>,
 {
-    tasks.spawn(async move {
-        let result = entered
+    // Runs the invocation on a task of its own in `tasks`, reporting its head
+    // through `sender`. The head is due by `deadline`, and the body then has
+    // `stream_timeout`, or as long as hyper takes while that is unset. Both
+    // bounds wrap the whole invocation, since wasmtime does not reliably fire a
+    // timer raced inside `run_concurrent`. Ending the task drops the store,
+    // which fails a body still streaming, and then frees the slot.
+    fn spawn(
+        self, tasks: &mut JoinSet<()>, deadline: Sleep, stream_timeout: Option<Duration>,
+        sender: oneshot::Sender<Head>,
+    ) {
+        tasks.spawn(async move {
+            let (head_tx, mut head_rx) = oneshot::channel();
+            let mut invocation = Box::pin(self.run(head_tx).instrument(info_span!("http-request")));
+            let mut deadline = pin!(deadline);
+
+            // enter and call the guest to its head, before the deadline
+            let head = tokio::select! {
+                biased;
+                Ok(response) = &mut head_rx => Head::Sent(response),
+                ended = &mut invocation => Head::Failed(ended.err().unwrap_or_else(no_response)),
+                () = &mut deadline => Head::TimedOut,
+            };
+            if !matches!(head, Head::Sent(_)) {
+                // the store and the slot go before `handle` answers
+                drop(invocation);
+                _ = sender.send(head);
+                return;
+            }
+            if sender.send(head).is_err() {
+                return;
+            }
+
+            // the body, bounded from its head while `HTTP_STREAM_TIMEOUT_MS` is set
+            let ended = match stream_timeout {
+                Some(limit) => {
+                    let Ok(ended) = timeout(limit, invocation).await else {
+                        tracing::warn!(
+                            ?limit,
+                            "response body outlived HTTP_STREAM_TIMEOUT_MS; cutting it"
+                        );
+                        return;
+                    };
+                    ended
+                }
+                None => invocation.await,
+            };
+            if let Err(error) = ended {
+                tracing::error!("http guest task error: {error:#}");
+            }
+        });
+    }
+
+    // Enters the guest and calls its handler, sending the response through
+    // `head`. Returns once hyper is done with the body, or with the error that
+    // stopped it first.
+    async fn run(self, head: oneshot::Sender<hyper::Response<OutgoingBody>>) -> Result<()> {
+        let (mut entered, instance) =
+            self.runtime.enter(&self.guest, ChainCtx::server(), self.slot).await?;
+        let service = self.indices.load(&mut entered, &instance)?;
+        let request = self.request;
+
+        entered
             .as_context_mut()
             .run_concurrent(async |store| {
-                // one error path through `sender`, so the caller never
-                // mistakes a real error for a panicked task
-                let built = async move {
+                let response = async move {
                     let (request, io) = store.with(|mut access| {
                         let mut cx = access.as_context_mut();
                         wasi::Request::from_http(view(cx.data_mut()).hooks, request)
@@ -405,51 +474,30 @@ fn spawn_guest<B, T>(
                         .with(|mut store| wasi_resp.into_http_with_getter(&mut store, io, view))
                         .map_err(|e| anyhow!("converting guest response: {e}"))
                 }
-                .await;
+                .await?;
 
-                match built {
-                    Ok(resp) => {
-                        // keep `run_concurrent` alive until hyper has consumed
-                        // the body, so the wasi pipe resources stay valid
-                        let (body_done_tx, body_done_rx) = oneshot::channel::<()>();
-                        let resp = resp.map(|body| {
-                            BodyDoneWrapper {
-                                body: body.map_err(Into::into),
-                                _tx: body_done_tx,
-                            }
-                            .boxed_unsync()
-                        });
-                        if sender.send(Ok(resp)).is_ok() {
-                            let consumed = async { _ = body_done_rx.await };
-                            match stream_timeout {
-                                Some(limit) => {
-                                    if timeout(limit, consumed).await.is_err() {
-                                        tracing::warn!(
-                                            ?limit,
-                                            "response body outlived HTTP_STREAM_TIMEOUT_MS; cutting it"
-                                        );
-                                    }
-                                }
-                                None => consumed.await,
-                            }
-                        }
+                // keep `run_concurrent` alive until hyper has consumed the
+                // body, so the wasi pipe resources stay valid
+                let (body_done_tx, body_done_rx) = oneshot::channel::<()>();
+                let response = response.map(|body| {
+                    BodyDoneWrapper {
+                        body: body.map_err(Into::into),
+                        _tx: body_done_tx,
                     }
-                    Err(error) => {
-                        _ = sender.send(Err(error));
-                    }
+                    .boxed_unsync()
+                });
+                if head.send(response).is_ok() {
+                    _ = body_done_rx.await;
                 }
 
                 anyhow::Ok(())
             })
-            .instrument(info_span!("http-request"))
-            .await;
+            .await?
+    }
+}
 
-        match result {
-            Ok(Ok(())) => {}
-            Ok(Err(e)) => tracing::error!("http guest task error: {e:#}"),
-            Err(e) => tracing::error!("run_concurrent error: {e:?}"),
-        }
-    });
+fn no_response() -> anyhow::Error {
+    anyhow!("guest produced no response")
 }
 
 // The sender drops once the body is consumed (or the wrapper dropped); its
@@ -482,9 +530,8 @@ where
     }
 }
 
-// rebuild the uri with scheme and authority set, so they reach the guest, and
-// stamp the guest's deadline over any the client sent
-fn fix_request<T>(request: http::Request<T>, timeout: Duration) -> Result<http::Request<T>> {
+// rebuild the uri with scheme and authority set, so they reach the guest
+fn fix_request<T>(request: http::Request<T>) -> Result<http::Request<T>> {
     let mut authority = request_target(&request)?;
     let mut scheme = request.uri().scheme_str().unwrap_or("http");
 
@@ -510,7 +557,6 @@ fn fix_request<T>(request: http::Request<T>, timeout: Duration) -> Result<http::
     let uri = Uri::builder().scheme(scheme).authority(authority).path_and_query(p_and_q).build()?;
     let (mut parts, body) = request.into_parts();
     parts.uri = uri;
-    parts.headers.insert(DEADLINE, HeaderValue::from(deadline_millis(timeout)));
 
     Ok(http::Request::from_parts(parts, body))
 }

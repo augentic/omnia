@@ -17,7 +17,7 @@ A trigger host sets each invocation's metadata before the guest's router reads i
 
 ### HTTP
 
-The `wasi:http` host stamps `x-deadline` on every request and enforces the budget itself, with a timeout around each request. In the guest, `http::export!` serves the request inside the `handler` span `http::trace` opens, which reads the stamped header.
+The `wasi:http` host stamps `x-deadline` on a request when it takes its slot of the [concurrency gate](configuration.md#concurrency-gate), and enforces that same deadline itself. In the guest, `http::export!` serves the request inside the `handler` span `http::trace` opens, which reads the stamped header.
 
 ### Messaging
 
