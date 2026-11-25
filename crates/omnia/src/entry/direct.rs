@@ -73,7 +73,7 @@ impl MainOptions {
 
     /// Set the program name (the macro passes the invoking crate's
     /// `CARGO_PKG_NAME`): telemetry's component name and, in command mode,
-    /// the guest's `argv[0]`.
+    /// the command guest's `argv[0]`.
     #[must_use]
     pub fn program_name(mut self, name: impl Into<String>) -> Self {
         self.program_name = Some(name.into());
@@ -93,7 +93,7 @@ impl MainOptions {
     }
 }
 
-/// Plan a direct command: argv belongs to the guest verbatim, and the
+/// Plan a direct command: argv belongs to the command guest verbatim, and the
 /// compiled-in manifest is the sole source.
 ///
 /// The plan always carries that manifest, so the builder never falls through

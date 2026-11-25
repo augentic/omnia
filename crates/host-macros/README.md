@@ -54,7 +54,7 @@ omnia::runtime!({
 ```
 
 - **`mode: server`** — trigger hosts (`WasiHttp`, `WasiMessaging`, `WasiWebSocket`) run servers and drive guests per request.
-- **`mode: command`** — the runtime drives the guest's `wasi:cli/run` export once and exits with its status. A backend-less command runtime is valid: `omnia::runtime!({ mode: command });` With a compiled-in deployment (`manifest:` or inline manifest keys), the binary is a *direct command*: no host `run` grammar, argv passes to the guest verbatim. Command mode routes to the sole static `wasi:cli/run` exporter, or to the guest entry marked `command: true`.
+- **`mode: command`** — the runtime drives the guest's `wasi:cli/run` export once and exits with its status. A backend-less command runtime is valid: `omnia::runtime!({ mode: command });` With a compiled-in deployment (`manifest:` or inline manifest keys), the binary is a *direct command*: no host `run` grammar, argv passes to the command guest verbatim. Command mode routes to the sole static `wasi:cli/run` exporter, or to the guest entry marked `command: true`.
 - **`manifest:`** — a path expression compiled into the generated `main` as the default manifest, used only when the command line supplies no positional wasm, `--manifest`, or `OMNIA_MANIFEST`. Anchor it with `env!("CARGO_MANIFEST_DIR")` to make it absolute at compile time.
 
 ### Inline manifest keys
@@ -115,13 +115,13 @@ For each `hosts:` row, the macro emits one uniform `omnia::Provides<Ctx>` impl e
 
 ### `main` entry point
 
-A `#[tokio::main]` `main` that delegates to `omnia::main::<Backends, Hooks>` with the invoking crate's package name as the program name (telemetry's component name and, in command mode, the guest's `argv[0]`), where `Hooks` is a generated `pub struct` implementing `omnia::Wiring<B>` for every bundle `B` that `Provides` each declared host's context (the generated `Backends` among them): `Wiring::link` runs inside `omnia::Runtime::new` to link hosts before backends connect and the registry assembles; `Wiring::serve` launches each trigger host's `run`. The guest loader is not wired by the macro: `omnia::Deployment::assemble` links its host and installs the deployment's policy for every runtime alike. The host runtime is the library `omnia::Runtime<Backends>`; the macro does not emit a runtime type of its own.
+A `#[tokio::main]` `main` that delegates to `omnia::main::<Backends, Hooks>` with the invoking crate's package name as the program name (telemetry's component name and, in command mode, the command guest's `argv[0]`), where `Hooks` is a generated `pub struct` implementing `omnia::Wiring<B>` for every bundle `B` that `Provides` each declared host's context (the generated `Backends` among them): `Wiring::link` runs inside `omnia::Runtime::new` to link hosts before backends connect and the registry assembles; `Wiring::serve` launches each trigger host's `run`. The guest loader is not wired by the macro: `omnia::Deployment::assemble` links its host and installs the deployment's policy for every runtime alike. The host runtime is the library `omnia::Runtime<Backends>`; the macro does not emit a runtime type of its own.
 
 The generated `main` handles the `run` subcommand only; to expose `compile`, write a custom `main` that calls `omnia::compile`.
 
 ### `run` callable
 
-A blocking `pub fn run(builder: omnia::DeploymentBuilder) -> Result<omnia::ExitStatus>` beside `main`. It applies the declared mode, builds the deployment, and delegates to `omnia::run::<Backends, Hooks>`. A binary with its own argument surface mounts the runtime in-process through `run` instead of being the generated `main` — it supplies the deployment as an `omnia::Manifest` (loaded with `Manifest::load(path)?`, synthesized with `Manifest::from_wasm(path)?`, or built fluently with `Manifest::new()`, mounts, the store, and registries included) via `omnia::DeploymentBuilder::new().manifest(manifest)`, plus argv, and maps the returned `ExitStatus` onto its own exit contract.
+A blocking `pub fn run(builder: omnia::DeploymentBuilder) -> Result<omnia::ExitStatus>` beside `main`. It applies the declared mode, builds the deployment, and delegates to `omnia::run::<Backends, Hooks>`. A binary with its own argument surface mounts the runtime in-process through `run` instead of being the generated `main` — it supplies the deployment as an `omnia::Manifest` (loaded with `Manifest::load(path)?`, synthesized with `Manifest::from_wasm(path)?`, or built fluently with `Manifest::new()`, mounts, the store, and registries included) via `omnia::DeploymentBuilder::new().manifest(manifest)`, plus the command's arguments for a `mode: command` runtime, and maps the returned `ExitStatus` onto its own exit contract.
 
 ### `manifest` and `run_with`
 

@@ -54,7 +54,7 @@ omnia::runtime!({
 });
 ```
 
-In command mode, arguments after `--` on the command line are forwarded to the guest as its argv:
+In command mode, arguments after `--` on the command line are forwarded to the command guest as its argv. No other guest sees them:
 
 ```bash
 cargo run --example cli -- run ./target/wasm32-wasip3/debug/examples/cli_wasm.wasm -- greet omnia

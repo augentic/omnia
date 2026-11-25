@@ -18,7 +18,7 @@ use crate::{ConnectAll, DeploymentBuilder, Manifest, Mode, Mount, Wiring};
 ///
 /// `options` carries the deployment the `runtime!` macro compiled in: mode
 /// and manifest source. Command mode with a compiled-in deployment is a
-/// direct command: argv passes to the guest verbatim. Every other shape
+/// direct command: argv passes to the command guest verbatim. Every other shape
 /// takes the standard `run [wasm] [--manifest] -- args…` grammar.
 #[doc(hidden)]
 pub async fn main<B, H>(options: MainOptions) -> ExitCode

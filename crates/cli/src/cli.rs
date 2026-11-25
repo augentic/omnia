@@ -57,10 +57,10 @@ pub enum Command {
         #[arg(long = "env", value_name = "NAME")]
         env: Vec<String>,
 
-        /// Arguments forwarded to the guest as its argv (everything after
-        /// `--`). Empty for a long-lived server; a `wasi:cli` command reads
-        /// them as `wasi:cli/environment`'s `get-arguments`. `args[0]` is the
-        /// program name, which the runtime core supplies.
+        /// Arguments for the command guest (everything after `--`). Its
+        /// `wasi:cli/run` reads them as `wasi:cli/environment`'s
+        /// `get-arguments`, after the program name the runtime supplies as
+        /// `args[0]`. No other guest sees them, and a server refuses them.
         #[arg(last = true)]
         args: Vec<String>,
     },

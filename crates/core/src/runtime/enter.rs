@@ -1,6 +1,8 @@
 //! How a trigger or the command driver runs a guest: it takes a slot of the
-//! concurrency gate ([`Runtime::slot`] or [`Runtime::try_slot`]), then
-//! [`Runtime::enter`]s the guest.
+//! concurrency gate ([`Runtime::slot`] or [`Runtime::try_slot`]), then enters
+//! the guest on a fresh store, a trigger through [`Runtime::enter`].
+
+use std::sync::Arc;
 
 use anyhow::Result;
 use wasmtime::Store;
@@ -16,14 +18,16 @@ use crate::store::StoreCtx;
 use crate::telemetry;
 
 impl<B: Backends> Runtime<B> {
-    /// Instantiate `guest` on a fresh store at `chain`: how a trigger or the
-    /// command driver runs a guest.
+    /// Instantiate `guest` on a fresh store at `chain`: how a trigger runs a
+    /// guest.
     ///
     /// The store is built for `guest` alone and drops with the invocation
-    /// (instance-per-call). `enter` takes no slot of the concurrency gate. A
-    /// root invocation takes one first, through [`slot`](Self::slot) or
-    /// [`try_slot`](Self::try_slot), and holds it until the store has
-    /// dropped.
+    /// (instance-per-call). Its guest sees no arguments at any chain context,
+    /// [`ChainCtx::command`] included. A command's run receives them through
+    /// [`run_command`](Self::run_command). `enter` takes no slot of the
+    /// concurrency gate. A root invocation takes one first, through
+    /// [`slot`](Self::slot) or [`try_slot`](Self::try_slot), and holds it until
+    /// the store has dropped.
     ///
     /// # Errors
     ///
@@ -37,7 +41,21 @@ impl<B: Backends> Runtime<B> {
     pub async fn enter(
         &self, guest: &Guest<B>, chain: ChainCtx,
     ) -> Result<(Store<StoreCtx<B>>, Instance)> {
-        let mut store = self.build_store(self.store_ctx(guest, chain));
+        self.instantiate(guest, self.store_ctx(guest, chain, None)).await
+    }
+
+    // the only store given the command's arguments
+    pub(super) async fn enter_command(
+        &self, guest: &Guest<B>,
+    ) -> Result<(Store<StoreCtx<B>>, Instance)> {
+        let args = Some(Arc::clone(&self.inner.args));
+        self.instantiate(guest, self.store_ctx(guest, ChainCtx::command(), args)).await
+    }
+
+    async fn instantiate(
+        &self, guest: &Guest<B>, data: StoreCtx<B>,
+    ) -> Result<(Store<StoreCtx<B>>, Instance)> {
+        let mut store = self.build_store(data);
         let instance =
             guest.instance_pre().instantiate_async(&mut store).await.map_err(explain_full_pool)?;
         tracing::debug!(guest = %guest.id(), "component instantiated");

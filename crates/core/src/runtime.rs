@@ -68,7 +68,8 @@ pub struct RuntimeParts<B: 'static> {
     pub name: Arc<str>,
     /// Assembled guest registry.
     pub registry: Arc<Registry<B>>,
-    /// Guest argv.
+    /// The argv of the command [`run_command`](Runtime::run_command) drives,
+    /// `args[0]` the program name.
     pub args: Vec<String>,
     /// Mount registry opened from the deployment's preopens. Each store
     /// preopens the mounts its guest's grants reach.
@@ -98,7 +99,7 @@ pub struct RuntimeParts<B: 'static> {
     pub command_guest: Option<GuestId>,
 }
 
-/// Connected host runtime: registry, argv, mounts, and backend bundle.
+/// Connected host runtime: registry, the command's argv, mounts, and backend bundle.
 ///
 /// A thin handle over shared state: `clone()` bumps two reference counts, so
 /// the per-request and per-message handler clones never copy the backend
@@ -497,8 +498,11 @@ impl<B: Backends> Runtime<B> {
     // is the inherited host variables its grants reach, as they stood when
     // the runtime was assembled, with `RUST_LOG` set to the run's tracing
     // directives and `NO_COLOR` set when the console the guest shares does
-    // not colour its lines. Its preopens are the mounts its grants reach.
-    fn store_ctx(&self, guest: &Guest<B>, chain: ChainCtx) -> StoreCtx<B> {
+    // not colour its lines. Its preopens are the mounts its grants reach. Its
+    // argv is `args`, which only the command run passes.
+    fn store_ctx(
+        &self, guest: &Guest<B>, chain: ChainCtx, args: Option<Arc<Vec<String>>>,
+    ) -> StoreCtx<B> {
         let grants = guest.grants();
         let (mounts, env) = if grants.is_all() {
             (Arc::clone(&self.inner.mounts), Arc::clone(&self.inner.env))
@@ -513,7 +517,7 @@ impl<B: Backends> Runtime<B> {
                 options: self.options(),
                 dispatcher: Arc::clone(&self.dispatcher),
                 chain,
-                args: Some(Arc::clone(&self.inner.args)),
+                args,
                 mounts: Some(mounts),
                 env: Some(env),
                 stdio: self.inner.stdio.clone(),
@@ -552,7 +556,7 @@ impl<B: Backends> Runtime<B> {
         let guest = Arc::clone(guest);
         Arc::new(move |chain| {
             runtime.warn_unsized_gate();
-            runtime.build_store(runtime.store_ctx(&guest, chain))
+            runtime.build_store(runtime.store_ctx(&guest, chain, None))
         })
     }
 
@@ -575,6 +579,9 @@ impl<B: Backends> Runtime<B> {
 
     /// Drive the deployment's `wasi:cli/run` command once, returning the
     /// guest's exit status.
+    ///
+    /// The run's store is the only one given the command's argv,
+    /// [`RuntimeParts::args`]. A guest it calls or loads sees none.
     ///
     /// The run waits for a [slot](Self::slot) of the concurrency gate, as a
     /// message delivery does, and holds it for as long as it runs.
@@ -795,6 +802,7 @@ struct RuntimeInner<B: 'static> {
     // carried state, never a process environment variable
     name: Arc<str>,
     registry: Arc<Registry<B>>,
+    // the command's argv, which only the command run's store is given
     args: Arc<Vec<String>>,
     mounts: Arc<MountRegistry>,
     backends: B,

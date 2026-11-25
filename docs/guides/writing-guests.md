@@ -302,7 +302,7 @@ A decode or handler error becomes a `Failure` envelope on stderr, in the same `F
 
 As text the envelope is `error[<code>]: <message>` followed by `hint: <hint>` when a hint is attached; as JSON it is flat: `{"error","message","exit-code","hint"?}` (the hint key is omitted when absent). `error` and `message` are the transport-neutral `ErrorBody` — `Error::into_response` emits the same two fields as an `application/json` body at its kind's status — so a client reads one discriminant whether it reached the handler over HTTP or a shell. Usage errors exit 64 rather than clap's default 2, so exit 2 always means a `NotFound` envelope.
 
-- Arguments after `--` on the host command line arrive as the guest's argv (`args[0]` is the program name, supplied by the runtime).
+- Arguments after `--` on the host command line arrive as the command guest's argv (`args[0]` is the program name, supplied by the runtime). A guest the command calls or loads sees none, so it takes its input in the call.
 - The host runtime must be built with `mode: command` — see [Composing a Runtime](composing-a-runtime.md).
 - The telemetry lifecycle imports `omnia:otel`, so the deployment links `WasiOtel` (the no-op `OtelDefault` suffices).
 

@@ -214,6 +214,11 @@ path = "programs/keyvalue/update_raced.rs"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "link_arguments"
+path = "programs/link/arguments.rs"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "link_echoer"
 path = "programs/link/echoer.rs"
 crate-type = ["cdylib"]
@@ -436,6 +441,11 @@ crate-type = ["cdylib"]
 [[example]]
 name = "otel_spawned_task_pending"
 path = "programs/otel/spawned_task_pending.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "plugins_arguments"
+path = "programs/plugins/arguments.rs"
 crate-type = ["cdylib"]
 
 [[example]]

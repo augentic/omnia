@@ -38,14 +38,19 @@ impl ConnectAll for () {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Mode {
     /// Await trigger servers until shutdown.
+    ///
+    /// A server runs no command, so it takes no arguments.
     #[default]
     Server,
     /// Drive `wasi:cli/run` once; trigger servers run in the background.
+    ///
+    /// The run alone receives the command's arguments.
     Command,
 }
 
 impl Mode {
-    /// Whether guest argv is shaped for a one-shot `wasi:cli` command.
+    /// Whether this mode drives a one-shot `wasi:cli` command, the one mode
+    /// that takes arguments.
     #[must_use]
     pub const fn is_command(self) -> bool {
         matches!(self, Self::Command)

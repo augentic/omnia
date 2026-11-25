@@ -15,7 +15,7 @@ use omnia::wasmtime::Enabled;
 use omnia::wasmtime::component::Val;
 use omnia::{
     ChainCtx, ChainPolicy, CompileOptions, DeploymentBuilder, FirstArgSelector, Grants, GuestEntry,
-    GuestId, GuestSelector as _, Manifest, Runtime, RuntimeOptions, Transport, TransportKind,
+    GuestId, GuestSelector as _, Manifest, Mode, Runtime, RuntimeOptions, Transport, TransportKind,
     Verified,
 };
 
@@ -395,6 +395,45 @@ async fn link_handle() {
     }
 }
 
+// A command deployment's arguments reach the command run alone. No command
+// runs here: a host dispatch builds its store through the store factory, and
+// `Runtime::enter` is how every trigger builds one, even at the command root.
+#[tokio::test]
+async fn link_arguments() {
+    let runtime = boot_with(&[("arguments", test_programs::LINK_ARGUMENTS)], |builder| {
+        builder.mode(Mode::Command).args(vec!["--secret".to_owned()])
+    })
+    .await
+    .expect("deployment boots");
+    let params = [Val::String("arguments".into()), Val::String("hi".into())];
+    let unseen = vec![Val::String("arguments argv: []".into())];
+
+    let answer = runtime
+        .dispatcher()
+        .invoke(
+            ChainCtx::server(),
+            GuestId::from("arguments"),
+            Some("omnia-test:link/ops".into()),
+            "ping".into(),
+            params.to_vec(),
+        )
+        .await
+        .expect("host dispatch");
+    assert_eq!(answer, unseen);
+
+    let entry = runtime.guest(&GuestId::from("arguments")).await.expect("resolving the guest");
+    let (mut store, instance) =
+        runtime.enter(&entry, ChainCtx::command()).await.expect("entering at the command root");
+    let ops = instance
+        .get_export_index(&mut store, None, "omnia-test:link/ops")
+        .expect("the guest exports `ops`");
+    let ping = instance.get_export_index(&mut store, Some(&ops), "ping").expect("`ops` has `ping`");
+    let ping = instance.get_func(&mut store, ping).expect("`ping` is a function");
+    let mut results = vec![Val::Bool(false)];
+    ping.call_async(&mut store, &params, &mut results).await.expect("calling `ping`");
+    assert_eq!(results, unseen);
+}
+
 // The manifest is validated before any guest loads, so no row's source need
 // exist. Two files of one stem collide on the name each derives.
 #[tokio::test]
@@ -451,6 +490,20 @@ async fn zero_guest_timeout() {
         panic!("a zero guest timeout was accepted");
     };
     assert!(format!("{err:#}").contains("GUEST_TIMEOUT_MS"), "unexpected error: {err:#}");
+}
+
+// The refusal counts the arguments and never echoes one, since an argument
+// can hold a secret and a server's stderr lands in its logs.
+#[tokio::test]
+async fn server_arguments() {
+    let Err(err) =
+        assemble(Manifest::new(), |builder| builder.dynamic().args(vec!["stray".to_owned()])).await
+    else {
+        panic!("a server took arguments");
+    };
+    let text = format!("{err:#}");
+    assert!(text.contains("takes no arguments: 1 given"), "unexpected error: {text}");
+    assert!(!text.contains("stray"), "the refusal echoes an argument: {text}");
 }
 
 #[test]
