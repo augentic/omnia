@@ -8,7 +8,7 @@
 # exports it. Nothing declares the seam — each component says what it
 # imports and exports.
 #
-# The runtime core stays domain-agnostic: the selector sees only the opaque
+# The runtime core stays domain-agnostic: the relay sees only the opaque
 # interface string `example:link/echo` and opaque guest names.
 #
 # Build the guests first (see README.md), then run:

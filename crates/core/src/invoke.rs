@@ -7,10 +7,11 @@ use std::time::Duration;
 use anyhow::Context as _;
 use tokio::task::JoinHandle;
 use tracing::Instrument as _;
-use wasmtime::PoolConcurrencyLimitError;
 use wasmtime::component::{ComponentExportIndex, InstancePre, Val};
+use wasmtime::{PoolConcurrencyLimitError, Store};
 
 use crate::chain::ChainCtx;
+use crate::runtime::Slot;
 use crate::seam::StoreFactory;
 use crate::store::StoreCtx;
 use crate::value::handle_kind;
@@ -79,18 +80,32 @@ impl std::error::Error for InvokeError {
 pub async fn call_fresh<B: Send + 'static>(
     call: FreshCall<B>, args: Vec<Val>, ctx: ChainCtx, bound: Option<Duration>,
 ) -> Result<Vec<Val>, InvokeError> {
+    call_admitted(call, None, args, ctx, bound).await
+}
+
+// `call_fresh` for a root call, which `slot` admits for as long as the
+// callee's store lives, however the callee task ends
+pub async fn call_admitted<B: Send + 'static>(
+    call: FreshCall<B>, slot: Option<Slot>, args: Vec<Val>, ctx: ChainCtx, bound: Option<Duration>,
+) -> Result<Vec<Val>, InvokeError> {
     // own task, so the caller cannot starve the callee and an abandoned caller
     // aborts it; the bound wraps the whole call, as wasmtime's `run_concurrent`
     // docs recommend; the span `spawn` drops is re-entered for otel parenting
     let callee = async move {
-        let mut store = (call.factory)(ctx);
-        let instance =
-            call.instance_pre.instantiate_async(&mut store).await.map_err(explain_full_pool)?;
+        let mut callee = Callee {
+            store: (call.factory)(ctx),
+            _slot: slot,
+        };
+        let instance = call
+            .instance_pre
+            .instantiate_async(&mut callee.store)
+            .await
+            .map_err(explain_full_pool)?;
         let func = instance
-            .get_func(&mut store, call.export)
+            .get_func(&mut callee.store, call.export)
             .context("export resolved at serve time vanished")?;
         let mut out = vec![Val::Bool(false); call.results];
-        func.call_async(&mut store, &args, &mut out).await.map_err(explain_full_pool)?;
+        func.call_async(&mut callee.store, &args, &mut out).await.map_err(explain_full_pool)?;
         Ok::<_, anyhow::Error>(out)
     }
     .in_current_span();
@@ -111,6 +126,13 @@ pub async fn call_fresh<B: Send + 'static>(
     }
 
     Ok(out)
+}
+
+struct Callee<B: 'static> {
+    // fields drop in declaration order, so the pool has the store's instance
+    // back before the slot admits the next invocation
+    store: Store<StoreCtx<B>>,
+    _slot: Option<Slot>,
 }
 
 // A full pool is a sizing fault, so its error names the two variables that

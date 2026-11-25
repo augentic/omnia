@@ -6,4 +6,4 @@ mod entry;
 pub use clap::Parser;
 
 pub use self::cli::{Cli, Command, MountArg};
-pub use self::entry::{PlanError, RunPlan, RunSource, plan};
+pub use self::entry::{CompilePlan, Plan, PlanError, RunPlan, RunSource, plan};

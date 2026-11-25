@@ -7,7 +7,7 @@
 use std::ffi::OsString;
 use std::path::PathBuf;
 
-use omnia_cli::{MountArg, PlanError, RunPlan, RunSource};
+use omnia_cli::{MountArg, Plan, PlanError, RunPlan, RunSource};
 
 #[test]
 fn run_mounts() {
@@ -93,21 +93,22 @@ fn run_sources() {
 
 fn run(
     argv: &[&str], omnia_manifest: Option<&str>, has_compiled_in: bool,
-) -> Result<RunPlan, PlanError> {
+) -> Result<Plan, PlanError> {
     let argv = argv.iter().map(OsString::from);
     omnia_cli::plan(argv, omnia_manifest.map(OsString::from), has_compiled_in)
 }
 
 // `PlanError` is not `Debug`, so each outcome is unpacked by hand
-fn planned(result: Result<RunPlan, PlanError>) -> RunPlan {
+fn planned(result: Result<Plan, PlanError>) -> RunPlan {
     match result {
-        Ok(plan) => plan,
+        Ok(Plan::Run(plan)) => plan,
+        Ok(plan) => panic!("expected a run plan, got {plan:?}"),
         Err(PlanError::Usage(error)) => panic!("expected a plan, got usage: {error}"),
         Err(PlanError::Fatal(error)) => panic!("expected a plan, got fatal: {error:#}"),
     }
 }
 
-fn usage(result: Result<RunPlan, PlanError>) -> String {
+fn usage(result: Result<Plan, PlanError>) -> String {
     match result {
         Err(PlanError::Usage(error)) => error.to_string(),
         Err(PlanError::Fatal(error)) => panic!("expected a usage error, got fatal: {error:#}"),
@@ -115,7 +116,7 @@ fn usage(result: Result<RunPlan, PlanError>) -> String {
     }
 }
 
-fn fatal(result: Result<RunPlan, PlanError>) -> String {
+fn fatal(result: Result<Plan, PlanError>) -> String {
     match result {
         Err(PlanError::Fatal(error)) => format!("{error:#}"),
         Err(PlanError::Usage(error)) => panic!("expected a fatal error, got usage: {error}"),

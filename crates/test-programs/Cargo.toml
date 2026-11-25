@@ -214,6 +214,11 @@ path = "programs/keyvalue/update_raced.rs"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "link_anonymous"
+path = "programs/link/anonymous.rs"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "link_arguments"
 path = "programs/link/arguments.rs"
 crate-type = ["cdylib"]

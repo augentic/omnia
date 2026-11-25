@@ -103,14 +103,4 @@ pub trait ModelClient: Debug + Send + Sync + 'static {
     fn limits(&self) -> Limits;
 }
 
-impl ModelClient for Box<dyn ModelClient> {
-    fn complete(&self, request: Request, tool_host: Arc<dyn ToolHost>) -> FutureResult<Answer> {
-        (**self).complete(request, tool_host)
-    }
-
-    fn limits(&self) -> Limits {
-        (**self).limits()
-    }
-}
-
 impl TypesHost for HostView<'_, dyn ModelClient> {}

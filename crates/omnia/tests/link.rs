@@ -14,9 +14,9 @@ use anyhow::{Context as _, Result, bail};
 use omnia::wasmtime::Enabled;
 use omnia::wasmtime::component::Val;
 use omnia::{
-    ChainCtx, ChainPolicy, CompileOptions, DeploymentBuilder, Digest, FirstArgSelector, Grants,
-    GuestEntry, GuestError, GuestId, GuestSelector as _, Manifest, Mode, Runtime, RuntimeOptions,
-    Transport, TransportKind, Verified,
+    ChainCtx, ChainPolicy, CompileOptions, DeploymentBuilder, Digest, Grants, GuestEntry,
+    GuestError, GuestId, Manifest, Mode, Runtime, RuntimeOptions, Transport, TransportKind,
+    Verified,
 };
 
 // Every guest program in `crates/test-programs` must have a matching test
@@ -353,7 +353,7 @@ async fn race<T: Send + 'static>(
 }
 
 // The relay takes the id `echoer` because `full` hard-codes `ping("echoer",
-// ..)` and the default selector routes on that argument; every relay hop then
+// ..)` and a call routes on its leading argument; every relay hop then
 // re-dispatches to itself, consuming one depth unit per hop.
 #[tokio::test]
 async fn link_relay() {
@@ -519,6 +519,20 @@ async fn link_handle() {
     }
 }
 
+// Unlike `take`, `count` is a plain signature, so the importer boots and its
+// call is what is refused, before any target is resolved.
+#[tokio::test]
+async fn link_anonymous() {
+    let runtime =
+        boot(&[("anonymous", test_programs::LINK_ANONYMOUS)]).await.expect("deployment boots");
+
+    let err = call(&runtime, "anonymous", "poke", "hi").await.expect_err("`count` names no guest");
+    let text = format!("{err:#}");
+    for needle in ["omnia-test:link/counter", "count", "leading string identity"] {
+        assert!(text.contains(needle), "`{needle}` missing from: {text}");
+    }
+}
+
 // A command deployment's arguments reach the command run alone. No command
 // runs here: a host dispatch builds its store through the store factory, and
 // `Runtime::enter` is how every trigger builds one, even at the command root.
@@ -634,17 +648,6 @@ async fn server_arguments() {
     assert!(!text.contains("stray"), "the refusal echoes an argument: {text}");
 }
 
-#[test]
-fn selector_no_identity() {
-    let calls: [&[Val]; 2] = [&[Val::U32(7)], &[]];
-    for params in calls {
-        let err = FirstArgSelector
-            .select("omnia-test:link/ops", "ping", params)
-            .expect_err("the call names no target");
-        assert!(err.to_string().contains("leading string identity"), "unexpected error: {err}");
-    }
-}
-
 // A command root's wall-clock policy is carried to every hop beneath it.
 #[test]
 fn command_chain() {
@@ -752,4 +755,36 @@ async fn relay_via_dispatcher() {
     // back through every fresh callee to the dispatcher's caller.
     let err = dispatch("3").await.expect_err("chain exceeds the bound");
     assert!(format!("{err:#}").contains("exceeds maximum"), "unexpected error: {err:#}");
+}
+
+// A call through the runtime's dispatcher is a root invocation, so it waits on
+// a full gate as a trigger does rather than running beside the slot's holder.
+#[tokio::test]
+async fn queued_dispatch() {
+    let options = RuntimeOptions {
+        max_concurrent_invocations: Some(1),
+        ..RuntimeOptions::default()
+    };
+    let runtime =
+        boot_with(&[("echoer", test_programs::LINK_ECHOER)], |builder| builder.options(options))
+            .await
+            .expect("deployment boots");
+
+    // with the only slot held, the dispatch waits for it
+    let slot = runtime.try_slot().expect("the gate is empty");
+    let release = async {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(runtime.invocations().waiting, 1);
+        drop(slot);
+    };
+    let dispatch = runtime.dispatcher().invoke(
+        ChainCtx::server(),
+        GuestId::from("echoer"),
+        Some("omnia-test:link/ops".into()),
+        "ping".into(),
+        vec![Val::String("echoer".into()), Val::String("hi".into())],
+    );
+    let ((), answer) = tokio::join!(release, dispatch);
+    assert_eq!(answer.expect("host dispatch"), vec![Val::String("echoer pong: hi".into())]);
+    assert_eq!(runtime.invocations().in_flight, 0);
 }

@@ -151,4 +151,4 @@ host::run(DeploymentBuilder::new().manifest(manifest))?;
 
 The [`guest-link-dynamic`](../../examples/guest-link/dynamic.rs) example is a complete host built this way. For still deeper control, implement the `omnia::Wiring` trait yourself, build a `Deployment`, and call `omnia::run(deployment)`, or `deployment.assemble(backends)` to obtain an `omnia::Runtime<B>`. The [`crates/omnia` README](../../crates/omnia/README.md) lists the public API surface; [Architecture](../Architecture.md) explains how the pieces fit together.
 
-One case that requires this today: the generated `main` handles only the `run` subcommand. To expose ahead-of-time compilation (`compile`, available with the default `jit` feature), parse the standard grammar yourself with `omnia::Cli` (it re-exports the `omnia-cli` crate) and call `omnia::compile` from your own `main`.
+No subcommand needs this: the generated `main` runs `compile` as well as `run`, under the compile-affecting settings its environment sets, and a build without the default `jit` feature refuses `compile`.

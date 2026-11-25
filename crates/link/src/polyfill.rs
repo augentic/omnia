@@ -14,7 +14,6 @@ use wasmtime::component::{Linker, Type, Val, types};
 
 use super::is_host;
 use super::route::Routes;
-use super::selector::GuestSelector;
 
 /// The functions polyfilled onto a linker — the union across guests at
 /// function granularity, since components import only the functions they use
@@ -25,10 +24,9 @@ use super::selector::GuestSelector;
 /// typecheck with no cross-guest context.
 pub type WiredLinks = BTreeMap<Box<str>, BTreeMap<Box<str>, bool>>;
 
-/// The caller-side state every polyfilled import shares: the selector
-/// strategy, the chain policy, and the live route table.
+/// The caller-side state every polyfilled import shares: the chain policy
+/// and the live route table.
 pub struct Caller {
-    pub selector: Arc<dyn GuestSelector>,
     pub policy: ChainPolicy,
     pub routes: Routes,
 }
@@ -120,25 +118,25 @@ pub fn polyfill_component<B: Send + 'static>(
             let func_name = Arc::clone(func);
             // the caller's store is read before the future is built
             let registered = if ty.async_() {
-                interface.func_new_concurrent(func, move |accessor, ty, params, results| {
+                interface.func_new_concurrent(func, move |accessor, _, params, results| {
                     let caller = Arc::clone(&caller);
                     let iface_name = Arc::clone(&iface_name);
                     let func_name = Arc::clone(&func_name);
                     let origin = accessor.with(|mut access| Origin::of(access.data_mut()));
                     Box::pin(async move {
-                        relay(&caller, origin, &iface_name, &func_name, &ty, params, results)
+                        relay(&caller, origin, &iface_name, &func_name, params, results)
                             .await
                             .map_err(wasmtime::Error::from_anyhow)
                     })
                 })
             } else {
-                interface.func_new_async(func, move |store, ty, params, results| {
+                interface.func_new_async(func, move |store, _, params, results| {
                     let caller = Arc::clone(&caller);
                     let iface_name = Arc::clone(&iface_name);
                     let func_name = Arc::clone(&func_name);
                     let origin = Origin::of(store.data());
                     Box::new(async move {
-                        relay(&caller, origin, &iface_name, &func_name, &ty, params, results)
+                        relay(&caller, origin, &iface_name, &func_name, params, results)
                             .await
                             .map_err(wasmtime::Error::from_anyhow)
                     })
@@ -173,13 +171,14 @@ impl Origin {
     }
 }
 
-// One call: select the target, hold the caller to its grants, reject
-// crossing handles, take a depth slot, resolve the live route (loading a
-// declared target at first use), and run a fresh callee instance on its own
-// task.
+// One call: read the target from the leading argument, hold the caller to
+// its grants, reject crossing handles, take a depth slot, resolve the live
+// route (loading a declared target at first use), and run a fresh callee
+// instance on its own task. Every argument, the target's included, is
+// forwarded unchanged, since caller and callee share one interface.
 async fn relay(
-    caller: &Caller, origin: Origin, interface: &str, func: &str, ty: &types::ComponentFunc,
-    params: &[Val], results: &mut [Val],
+    caller: &Caller, origin: Origin, interface: &str, func: &str, params: &[Val],
+    results: &mut [Val],
 ) -> Result<()> {
     let start = Instant::now();
     let Origin {
@@ -189,10 +188,14 @@ async fn relay(
         dispatcher,
     } = origin;
 
-    let (target, forwarded) = caller
-        .selector
-        .select(interface, func, params)
-        .with_context(|| format!("selecting target for `{interface}/{func}`"))?;
+    let Some(Val::String(target)) = params.first() else {
+        bail!(
+            "call to `{interface}/{func}` must carry a leading string identity argument, found \
+             {:?}",
+            params.first()
+        );
+    };
+    let target = GuestId::from(target.as_str());
     ensure!(
         grants.allows_guest(target.as_str()),
         "guest `{guest}` may not call `{target}` (call to `{interface}/{func}`): its grants \
@@ -200,7 +203,7 @@ async fn relay(
     );
 
     // Plain records cross by value; a live handle never crosses.
-    if let Some(kind) = forwarded.iter().find_map(handle_kind) {
+    if let Some(kind) = params.iter().find_map(handle_kind) {
         bail!(
             "a {kind} handle cannot cross the link seam (call to `{interface}/{func}`, \
              target `{target}`)"
@@ -208,13 +211,6 @@ async fn relay(
     }
 
     let ctx = caller.policy.enter(&chain, &target)?;
-
-    let expected = ty.params().len();
-    ensure!(
-        forwarded.len() == expected,
-        "selector forwarded {} arguments but `{interface}/{func}` expects {expected}",
-        forwarded.len(),
-    );
 
     let route = if let Some(route) = caller.routes.lookup(&target, interface)? {
         route
@@ -226,15 +222,14 @@ async fn relay(
 
     // a server-rooted chain is wall-clock bounded; a command-rooted one runs uncapped
     let bound = (!ctx.uncapped).then_some(caller.policy.timeout);
-    let out =
-        route.invoke(interface, func, forwarded.into_owned(), ctx, bound).await.map_err(|err| {
-            match err.downcast_ref::<InvokeError>() {
-                Some(InvokeError::Timeout(bound)) => anyhow!(
-                    "link dispatch to `{target}` for `{interface}/{func}` timed out after {bound:?}"
-                ),
-                _ => err,
-            }
-        })?;
+    let out = route.invoke(interface, func, params.to_vec(), ctx, bound).await.map_err(|err| {
+        match err.downcast_ref::<InvokeError>() {
+            Some(InvokeError::Timeout(bound)) => anyhow!(
+                "link dispatch to `{target}` for `{interface}/{func}` timed out after {bound:?}"
+            ),
+            _ => err,
+        }
+    })?;
     ensure!(
         out.len() == results.len(),
         "`{target}` returned {} results for `{interface}/{func}`, which expects {}",

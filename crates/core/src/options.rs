@@ -74,7 +74,7 @@ pub struct RuntimeOptions {
     /// Maximum host-mediated guest-to-guest dispatch nesting depth (`MAX_DISPATCH_DEPTH`, default 8).
     #[env(from = "MAX_DISPATCH_DEPTH", default = "8")]
     pub max_dispatch_depth: usize,
-    /// Most invocations the triggers and the command driver run at once, each holding one slot of the concurrency gate (`MAX_CONCURRENT_INVOCATIONS`, unset: `POOL_MAX_INSTANCES`, min 1).
+    /// Most invocations the triggers, the command driver, and calls through [`Runtime::dispatcher`](crate::Runtime::dispatcher) run at once, each holding one slot of the concurrency gate (`MAX_CONCURRENT_INVOCATIONS`, unset: `POOL_MAX_INSTANCES`, min 1).
     #[env(from = "MAX_CONCURRENT_INVOCATIONS")]
     pub max_concurrent_invocations: Option<u32>,
     /// Most message deliveries holding or waiting for a slot of the concurrency gate at once (`MESSAGING_MAX_IN_FLIGHT`, unset: half the gate, rounded up, min 1); see [`messaging_in_flight`](Self::messaging_in_flight).

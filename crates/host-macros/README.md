@@ -117,7 +117,7 @@ For each `hosts:` row, the macro emits one uniform `omnia::Provides` impl exposi
 
 A `#[tokio::main]` `main` that delegates to `omnia::main::<Backends, Hooks>` with the invoking crate's package name as the program name (telemetry's component name and, in command mode, the command guest's `argv[0]`), where `Hooks` is a generated `pub struct` implementing `omnia::Wiring<B>` for every bundle `B` that `Provides` each declared host (the generated `Backends` among them): `Wiring::link` links every declared host into the deployment's linker before `omnia::Deployment::assemble`; `Wiring::serve` runs every declared host's `run`, which only a trigger host overrides. The guest loader is not wired by the macro: `omnia::Deployment::assemble` links its host and installs the deployment's policy for every runtime alike. The host runtime is the library `omnia::Runtime<Backends>`; the macro does not emit a runtime type of its own.
 
-The generated `main` handles the `run` subcommand only; to expose `compile`, write a custom `main` that calls `omnia::compile`.
+The generated `main` handles the `run` and `compile` subcommands. `compile` runs under the compile-affecting settings its environment sets, and a runtime built without omnia's `jit` feature refuses it.
 
 ### `run` callable
 

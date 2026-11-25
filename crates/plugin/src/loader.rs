@@ -64,9 +64,9 @@ impl<B: Backends> PluginLoader for Runtime<B> {
 ///   the load names when the loading guest's grants reach its host.
 ///
 /// It admits the bytes it finds there through the runtime's one admission
-/// body. A guest loaded by path or package runs under the grants
-/// [`install`](Self::install) named, within the loading guest's. Nothing a
-/// caller passes widens the grant.
+/// body. A guest loaded by path or package runs under the deployment's
+/// `[plugins.grants]`, else [`Grants::all`], within the loading guest's.
+/// Nothing a caller passes widens the grant.
 pub struct Plugins {
     mounts: Vec<Root>,
     grants: Grants,
@@ -97,6 +97,7 @@ impl Plugins {
     /// - a writable mount and a read-only mount share or nest their
     ///   directories;
     /// - the capability is already installed.
+    #[doc(hidden)]
     pub fn install<B: Backends>(runtime: &Runtime<B>, grants: Grants) -> anyhow::Result<()> {
         runtime.validate_grants(&grants).context("the guest loader's grants are invalid")?;
         let plugins = Self {
@@ -126,8 +127,8 @@ impl Plugins {
     ///   registry's host. It is admitted through the runtime's one admission
     ///   body as caller-named bytes: held to `pin` when one is given, raw
     ///   wasm alone, under the name the location derives, which no entry of
-    ///   the deployment may declare. The guest runs under the grants
-    ///   [`install`](Self::install) named, within `caller`. A name already
+    ///   the deployment may declare. The guest runs under the deployment's
+    ///   `[plugins.grants]`, within `caller`. A name already
     ///   active under the same bytes and grants is attested.
     ///
     /// Idempotent on (name, digest). A path or package whose bytes miss

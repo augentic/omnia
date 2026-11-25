@@ -77,8 +77,8 @@ impl<B: Backends> Runtime<B> {
     ///
     /// A root invocation, a trigger's or the command driver's, passes the
     /// slot to [`enter`](Self::enter), which holds it while the store lives.
-    /// A link hop or a host dispatch takes none, since its root holds one.
-    /// Waiters are served in the order they arrive.
+    /// A link hop or a dispatch from inside a store takes none, since its
+    /// root holds one. Waiters are served in the order they arrive.
     pub async fn slot(&self) -> Slot {
         self.inner.gate.take().await
     }

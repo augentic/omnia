@@ -1,4 +1,4 @@
-//! Generated `main`: direct-command planning and the `run` grammar.
+//! Generated `main`: direct-command planning and the standard grammar.
 
 mod direct;
 mod verbosity;
@@ -8,7 +8,7 @@ use std::ffi::OsString;
 use std::process::ExitCode;
 
 use anyhow::anyhow;
-use omnia_cli::{PlanError, RunSource};
+use omnia_cli::{CompilePlan, Plan, PlanError, RunSource};
 
 pub use self::direct::{MainOptions, ManifestSource};
 use self::verbosity::Levels;
@@ -18,28 +18,61 @@ use crate::{ConnectAll, DeploymentBuilder, Manifest, Mode, Mount, Wiring};
 ///
 /// `options` carries the deployment the `runtime!` macro compiled in: mode
 /// and manifest source. Command mode with a compiled-in deployment is a
-/// direct command: argv passes to the command guest verbatim. Every other shape
-/// takes the standard `run [wasm] [--manifest] -- args…` grammar.
+/// direct command: argv passes to the command guest verbatim. Every other
+/// shape takes the standard grammar:
+///
+/// - `run [wasm] [--manifest] -- args…` runs a deployment.
+/// - `compile <wasm>` compiles a component under the compile-affecting
+///   settings of the [`RuntimeOptions`](crate::RuntimeOptions) the
+///   environment sets. A runtime built without omnia's `jit` feature refuses
+///   it.
 #[doc(hidden)]
 pub async fn main<B, H>(options: MainOptions) -> ExitCode
 where
     B: ConnectAll,
     H: Wiring<B>,
 {
-    match builder(options) {
-        Ok(builder) => crate::lifecycle::drive_main::<B, H>(builder).await,
+    match plan(options) {
+        Ok(Planned::Run(plan)) => crate::lifecycle::drive_main::<B, H>(plan.into_builder()).await,
+        Ok(Planned::Compile(plan)) => match compile(plan) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => crate::lifecycle::report(&error),
+        },
         Err(error) => crate::lifecycle::report(&error),
     }
 }
 
-fn builder(options: MainOptions) -> anyhow::Result<DeploymentBuilder> {
+fn plan(options: MainOptions) -> anyhow::Result<Planned> {
     if options.is_direct() {
-        return Ok(direct::plan_direct(options, env::args_os())?.into_builder());
+        return Ok(Planned::Run(Box::new(direct::plan_direct(options, env::args_os())?)));
     }
     match materialize(options, env::args_os(), env::var_os("OMNIA_MANIFEST")) {
-        Ok(plan) => Ok(plan.into_builder()),
+        Ok(planned) => Ok(planned),
         Err(PlanError::Usage(error)) => error.exit(),
         Err(PlanError::Fatal(error)) => Err(error),
+    }
+}
+
+enum Planned {
+    Run(Box<EntryPlan>),
+    Compile(CompilePlan),
+}
+
+cfg_select! {
+    feature = "jit" => {
+        // the environment's settings, so the artifact loads into a runtime
+        // started with the same environment
+        fn compile(plan: CompilePlan) -> anyhow::Result<()> {
+            let options = crate::RuntimeOptions::load_env()?.compile_options();
+            crate::compile::compile(&plan.wasm, plan.output, plan.target.as_deref(), &options)
+        }
+    }
+    _ => {
+        fn compile(_: CompilePlan) -> anyhow::Result<()> {
+            anyhow::bail!(
+                "`compile` needs omnia's `jit` feature, which this runtime was built without"
+            )
+        }
     }
 }
 
@@ -48,9 +81,12 @@ fn builder(options: MainOptions) -> anyhow::Result<DeploymentBuilder> {
 fn materialize(
     options: MainOptions, argv: impl IntoIterator<Item = OsString>,
     omnia_manifest: Option<OsString>,
-) -> Result<EntryPlan, PlanError> {
+) -> Result<Planned, PlanError> {
     let (mode, compiled_in, program_name) = options.into_parts();
-    let plan = omnia_cli::plan(argv, omnia_manifest, compiled_in.is_some())?;
+    let plan = match omnia_cli::plan(argv, omnia_manifest, compiled_in.is_some())? {
+        Plan::Run(plan) => plan,
+        Plan::Compile(plan) => return Ok(Planned::Compile(plan)),
+    };
     for entry in &plan.env {
         omnia_core::env::pattern(entry).map_err(|error| {
             anyhow!("`--env` {error}; quote a pattern so the shell does not expand it")
@@ -66,13 +102,13 @@ fn materialize(
         path: arg.host_path,
         writable: arg.writable,
     });
-    Ok(EntryPlan {
+    Ok(Planned::Run(Box::new(EntryPlan {
         mode,
         manifest: Some(manifest.mounts(mounts).inherit(plan.env)),
         program_name,
         args: plan.args,
         levels: verbosity::levels(mode, plan.verbose, plan.quiet),
-    })
+    })))
 }
 
 /// The planner's outcome: every deployment decision, resolved.
@@ -102,6 +138,8 @@ impl EntryPlan {
 // spawning a binary.
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use super::*;
     use crate::GuestEntry;
 
@@ -113,17 +151,41 @@ mod tests {
         MainOptions::new(Mode::Server).manifest(ManifestSource::Inline(manifest))
     }
 
+    // `PlanError` is not `Debug`, so each outcome is unpacked by hand
+    fn planned(manifest: Manifest, args: &[&str]) -> Planned {
+        match materialize(server(manifest), argv(args), None) {
+            Ok(planned) => planned,
+            Err(PlanError::Usage(error)) => panic!("expected a plan, got usage: {error}"),
+            Err(PlanError::Fatal(error)) => panic!("expected a plan, got fatal: {error:#}"),
+        }
+    }
+
     #[test]
     fn run_env() {
         let manifest = Manifest::new().guest(GuestEntry::new("app", "app.wasm")).inherit(["HOME"]);
-        let plan =
-            match materialize(server(manifest), argv(&["bin", "run", "--env", "ORDERS_*"]), None) {
-                Ok(plan) => plan,
-                Err(PlanError::Usage(error)) => panic!("expected a plan, got usage: {error}"),
-                Err(PlanError::Fatal(error)) => panic!("expected a plan, got fatal: {error:#}"),
-            };
+        let Planned::Run(plan) = planned(manifest, &["bin", "run", "--env", "ORDERS_*"]) else {
+            panic!("`run` plans a run");
+        };
         let manifest = plan.manifest.expect("the plan carries the compiled-in manifest");
         assert_eq!(manifest.env.inherit, ["HOME", "ORDERS_*"]);
+    }
+
+    // The compiled-in manifest is no source for `compile`, which names its
+    // component outright.
+    #[test]
+    fn compile() {
+        let manifest = Manifest::new().guest(GuestEntry::new("app", "app.wasm"));
+        let args =
+            ["bin", "compile", "guest.wasm", "-o", "guest.bin", "-t", "aarch64-unknown-linux-gnu"];
+        let Planned::Compile(plan) = planned(manifest, &args) else {
+            panic!("`compile` plans a compile");
+        };
+        let expected = CompilePlan {
+            wasm: PathBuf::from("guest.wasm"),
+            output: Some(PathBuf::from("guest.bin")),
+            target: Some("aarch64-unknown-linux-gnu".to_owned()),
+        };
+        assert_eq!(plan, expected);
     }
 
     // `Cargo.toml` is what an unquoted `*` becomes in a crate's directory.

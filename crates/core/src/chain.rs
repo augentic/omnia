@@ -11,7 +11,7 @@ use crate::registry::GuestId;
 /// to each hop dispatched beneath.
 ///
 /// Every guest store is built at a context (see
-/// [`StoreBase::chain`](crate::StoreBase::chain)): a trigger or the command
+/// [`StoreCtx::chain`](crate::StoreCtx::chain)): a trigger or the command
 /// driver builds the root at [`server`](Self::server) or
 /// [`command`](Self::command), and a link dispatch builds the callee at the
 /// context [`ChainPolicy::enter`] derives from the caller's.

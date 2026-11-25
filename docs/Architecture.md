@@ -84,14 +84,14 @@ Layers 1 and 2 form the **runtime core** — domain-agnostic infrastructure that
 
 `omnia-core` is the live-runtime SDK a capability crate targets. Depend on it directly only when building another capability crate. It provides:
 
-- **Runtime handle**: `Runtime<B>` over `StoreCtx<B>`, assembled from `RuntimeParts`; `Registry` holds pre-instantiated guests beside the declared sources not yet loaded, and `Runtime::guest` is the one seam every use resolves through — a declared guest loads there on its first use
+- **Runtime handle**: `Runtime<B>` over `StoreCtx<B>`, which `Deployment::assemble` builds; `Registry` holds pre-instantiated guests beside the declared sources not yet loaded, and `Runtime::guest` is the one seam every use resolves through — a declared guest loads there on its first use
 - **Core traits**: `Host`, `Connect`; `Backends`, the shape of the bundle every runtime type is generic over; `HostCtx`, `Provides`, and the `HostView` a host over one client reaches its backend through, the seam between a host and the bundle that serves it, joined by `StoreCtx::view` (see [Extending Omnia](#extending-omnia))
 - **Link seam**: the `LinkSeam` trait and `NoLinks` no-op the registry drives; guest→guest linking itself lives in `omnia-link` (`InProcessLinks`)
 - **Host→guest dispatch**: `Dispatcher`, a named-target call through `call_fresh` (the same primitive guest→guest links use)
 - **Telemetry**: `Telemetry`, the host's `tracing` subscriber — console logging with the OTLP span and metric exporters beneath it — and `telemetry::{flush, resource}` over the providers it publishes
 - **Admission seam**: `Runtime::admit_bytes` under a `Policy` (`Declared` for the deployment's own entries, `CallerNamed` for bytes a caller names) is the one body every admitter passes — the first-use seam `Runtime::guest`, `Runtime::register`, and the loader — so a declared name is bound by its entry alone wherever bytes arrive, and every guest is seated under the `Grants` its entry or its caller names; `Runtime::acquire` fetches a package through the `RegistrySource` trait, which lives here; `Extensions` is where `omnia-plugin` installs the loader's grant, the runtime's mounts as path roots and the grants a guest loaded by path or package runs under
 
-`omnia-cli` is a leaf grammar crate: clap plus argv-precedence over paths and strings, with no `omnia-*` dependencies. `omnia` materializes a `RunPlan` into a `Manifest` and drives the runtime. `omnia-compile` is a leaf over wasmtime alone: `CompileOptions`, the compile-affecting settings `omnia-core` applies to the runtime's engine so a pre-compiled artifact loads, and `compile`, the ahead-of-time compiler behind its `cranelift` feature, which omnia's `jit` feature forwards to and `omnia::compile` re-exports. A build pipeline that pre-compiles a guest depends on `omnia-compile` and links the compiler without the runtime.
+`omnia-cli` is a leaf grammar crate: clap plus argv-precedence over paths and strings, with no `omnia-*` dependencies. `omnia` materializes a `RunPlan` into a `Manifest` and drives the runtime, and compiles a `CompilePlan` with `omnia::compile`. `omnia-compile` is a leaf over wasmtime alone: `CompileOptions`, the compile-affecting settings `omnia-core` applies to the runtime's engine so a pre-compiled artifact loads, and `compile`, the ahead-of-time compiler behind its `cranelift` feature, which omnia's `jit` feature forwards to and `omnia::compile` re-exports. A build pipeline that pre-compiles a guest depends on `omnia-compile` and links the compiler without the runtime.
 
 Key traits:
 
@@ -175,9 +175,9 @@ All of this is declared in the `omnia.toml` manifest ([reference](reference/conf
 
 ## Runtime Execution Flow
 
-1. **CLI parsing** — the generated `main` delegates to `omnia::main`, which parses the `run` subcommand (`omnia-cli` decides the source over `--manifest` / `OMNIA_MANIFEST` / positional `<wasm>` / compiled-in), materializes a `Manifest`, and appends CLI `--mount` and `--env` entries onto it.
+1. **CLI parsing** — the generated `main` delegates to `omnia::main`, which parses the standard grammar. A `compile` compiles its component under the environment's compile-affecting settings and exits. A `run` (`omnia-cli` decides the source over `--manifest` / `OMNIA_MANIFEST` / positional `<wasm>` / compiled-in) materializes a `Manifest` and appends CLI `--mount` and `--env` entries onto it.
 2. **Build** — `DeploymentBuilder` validates the manifest, expands `~/` paths against `$HOME`, resolves mounts, refuses a package store beneath a writable mount, reads the `registries` configuration, loads the guests compiled into the runtime (embedded bytes, the `run <component>` file — raw wasm or `omnia compile` output, either loads), carries every other `[[guest]]` as a declared `Source`, and returns a `Deployment` ready for host linking.
-3. **Assemble** — `run` connects backends, `Wiring::link` adds each host to the linker, `Deployment::assemble` links the guest loader host (with the `loader` feature), builds the `Runtime` from `RuntimeParts` — the registry client `source.package` guests are acquired through, over the `plugins.store` store and the `registries` routing, unless `Deployment::registry_source` selected one — and serves every loaded guest's linked exports.
+3. **Assemble** — `run` connects backends, `Wiring::link` adds each host to the linker, `Deployment::assemble` links the guest loader host (with the `loader` feature), builds the `Runtime` with the registry client `source.package` guests are acquired through — over the `plugins.store` store and the `registries` routing, unless `Deployment::registry_source` selected one — and serves every loaded guest's linked exports.
 4. **Bootstrap** — starts epoch interruption and pool-metric sampling, then logs **`omnia ready`**.
 5. **Drive** — command mode invokes the guest's `wasi:cli/run` once and exits with its status; server mode awaits every trigger server.
 6. **Request handling** (server mode) — trigger hosts (`WasiHttp`, `WasiMessaging`, `WasiWebSocket`) accept requests, route to a guest, resolve it through `Runtime::guest` (a declared guest loads here on its first request), instantiate it in a fresh store, and return the response.
@@ -225,12 +225,12 @@ omnia/
 ├── crates/
 │   ├── omnia/                  # Composition root (assembly, lifecycle, optional crates, runtime!)
 │   ├── core/                   # Live-runtime SDK (engine, registry, dispatch, stores, subscriber)
-│   ├── link/                   # Guest-to-guest dispatch (InProcessLinks; re-exported by omnia behind `link`)
+│   ├── link/                   # Guest-to-guest dispatch (InProcessLinks; installed by omnia behind `link`)
 │   ├── sdk/                    # Guest SDK (Handler/Context/Handlers, HTTP/messaging/command adapters, errors, capabilities, MCP, the generated bindings)
 │   ├── guest-macros/           # #[instrument], #[derive(Settings)], #[derive(FromRow)]
 │   ├── host-macros/            # runtime!, #[derive(HostCtx)], #[derive(FromEnv)]
 │   ├── plugin/                 # Plugins capability (loader host + acquisition; re-exported by omnia)
-│   ├── cli/                    # Leaf `run` grammar (re-exported by omnia)
+│   ├── cli/                    # Leaf `run`/`compile` grammar (parsed by omnia's generated `main`)
 │   ├── compile/                # Ahead-of-time guest compiler (the compile-affecting settings and the artifact the runtime deserializes)
 │   ├── test/                   # Test doubles, runtime harness, and wasm fixture pipeline
 │   ├── test-programs/          # Guest scenario programs driven by the e2e test suites

@@ -5,9 +5,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use tokio::sync::Semaphore;
 
-// One slot per invocation a trigger or the command driver runs. A link hop
-// or a host dispatch takes none, since the root it serves holds one and
-// would deadlock a full gate waiting on its own hop.
+// One slot per root invocation: a trigger's, the command driver's, or a call
+// through `Runtime::dispatcher`. A link hop or a dispatch from inside a store
+// takes none, since the root it serves holds one and would deadlock a full
+// gate waiting on its own hop.
 pub(super) struct Gate {
     slots: Arc<Semaphore>,
     size: usize,

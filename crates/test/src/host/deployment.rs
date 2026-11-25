@@ -90,8 +90,8 @@ impl Deployment {
     }
 
     /// Marks the guest `name` as the `wasi:cli/run` target (unmarking any
-    /// the base manifest marked); without it the sole exporter is the
-    /// catch-all.
+    /// the base manifest marked); without it the sole exporter loaded at boot
+    /// runs.
     #[must_use]
     pub fn command(mut self, name: impl Into<String>) -> Self {
         self.command = Some(name.into());

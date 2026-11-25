@@ -1,9 +1,9 @@
 //! Host-originated dynamic dispatch into guest exports.
 //!
 //! The host→guest counterpart of guest→guest linking: a host binding invokes a
-//! *known* guest's export by identity, with no selector involved. The hop is
-//! depth-counted and wall-clock-bounded exactly like a guest→guest hop, and is
-//! driven by the same [`call_fresh`] primitive.
+//! *known* guest's export by an identity it names beside the arguments. The
+//! hop is depth-counted and wall-clock-bounded exactly like a guest→guest hop,
+//! and runs its callee the way [`call_fresh`](crate::call_fresh) does.
 
 use anyhow::{Context as _, Result, bail};
 use futures::FutureExt as _;
@@ -11,13 +11,13 @@ use wasmtime::component::{Val, types};
 
 use crate::chain::{ChainCtx, ChainPolicy};
 use crate::host::{Backends, FutureResult};
-use crate::invoke::{FreshCall, call_fresh};
+use crate::invoke::{FreshCall, call_admitted};
 use crate::registry::{Guest, GuestId};
 use crate::runtime::Runtime;
 use crate::value::handle_kind;
 
 /// Host-originated dynamic dispatch into a *known* guest export — the host→guest
-/// counterpart of the selector-driven guest→guest `dispatch`.
+/// counterpart of a relayed guest→guest call.
 ///
 /// Shares the depth bound (`ChainPolicy::enter`), the wall-clock bound on
 /// server-rooted chains and the handle rejection with guest→guest dispatch: the
@@ -29,6 +29,10 @@ use crate::value::handle_kind;
 /// `args` and the returned values are plain `Val`s; a store-bound handle on
 /// either side is rejected.
 ///
+/// A `root` call is a root invocation: once the target resolves it waits for
+/// a slot of the concurrency gate, which frees after the callee's store has
+/// dropped.
+///
 /// # Errors
 ///
 /// Returns an error if the depth bound is exceeded, an argument or result carries
@@ -38,7 +42,7 @@ use crate::value::handle_kind;
 /// the wall-clock bound, or the guest call traps.
 pub async fn dispatch<B>(
     runtime: &Runtime<B>, caller: &ChainCtx, target: &GuestId, interface: &str, func: &str,
-    args: Vec<Val>,
+    args: Vec<Val>, root: bool,
 ) -> Result<Vec<Val>>
 where
     B: Backends,
@@ -78,7 +82,8 @@ where
         export: func_idx,
         results: func_ty.results().count(),
     };
-    call_fresh(call, args, ctx, bound)
+    let slot = if root { Some(runtime.slot().await) } else { None };
+    call_admitted(call, slot, args, ctx, bound)
         .await
         .with_context(|| format!("dispatching `{interface}/{func}` to guest `{target}`"))
 }
@@ -119,6 +124,7 @@ impl<B: Backends> Dispatcher for crate::runtime::RuntimeDispatcher<B> {
         args: Vec<Val>,
     ) -> FutureResult<Vec<Val>> {
         let runtime = self.runtime();
+        let root = self.root();
         async move {
             let interface: Box<str> = if let Some(name) = interface {
                 Box::from(name)
@@ -129,7 +135,7 @@ impl<B: Backends> Dispatcher for crate::runtime::RuntimeDispatcher<B> {
                     .with_context(|| format!("dispatching `{func}` to guest `{target}`"))?;
                 find_interface(&guest, &func)?
             };
-            dispatch(&runtime, &caller, &target, &interface, &func, args).await
+            dispatch(&runtime, &caller, &target, &interface, &func, args, root).await
         }
         .boxed()
     }

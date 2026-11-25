@@ -2,12 +2,11 @@
 //!
 //! Imports the host-mediated `example:link/echo` and exposes a plain `run(message)`
 //! entry. The import is *not* satisfied by this component: the host has
-//! polyfilled it onto the shared linker, so calling it dispatches — via the
-//! runtime core's `GuestSelector` and in-memory routing — to whichever guest
-//! exports `echo` (here, `responder`).
+//! polyfilled it onto the shared linker, so calling it dispatches by in-memory
+//! routing to the guest that exports `echo` (here, `responder`).
 //!
 //! The router names its target with the leading argument (`"responder"`), which
-//! the default `FirstArgSelector` reads and forwards through.
+//! the host reads and forwards through.
 
 #![cfg(target_arch = "wasm32")]
 
@@ -21,7 +20,7 @@ struct Router;
 export!(Router);
 
 impl Guest for Router {
-    // the host runs the selector, dispatches to a fresh responder, returns its result
+    // the host reads the target, dispatches to a fresh responder, returns its result
     fn run(message: String) -> String {
         example::link::echo::echo("responder", &message)
     }

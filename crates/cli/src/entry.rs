@@ -1,5 +1,5 @@
-//! Entry planning for the `run` grammar: process argv and environment resolve
-//! into a [`RunPlan`] over paths and strings.
+//! Entry planning for the standard grammar: process argv and environment
+//! resolve into a [`Plan`] over paths and strings.
 //!
 //! [`plan`] is pure with respect to the process — argv and `OMNIA_MANIFEST`
 //! are parameters — so source precedence is testable without spawning a
@@ -13,21 +13,22 @@ use clap::Parser as _;
 
 use crate::cli::{Cli, Command, MountArg};
 
-/// Plan the standard `run [wasm] [--manifest] -- args…` grammar, resolving
-/// the source by the `--manifest` › `OMNIA_MANIFEST` › positional wasm ›
-/// compiled-in ladder.
+/// Plan the standard grammar: `run [wasm] [--manifest] -- args…` or
+/// `compile <wasm> [--output] [--target]`.
 ///
-/// `has_compiled_in` is whether the generated `main` compiled a manifest in;
-/// this function does not load it.
+/// A `run` resolves its source by the `--manifest` › `OMNIA_MANIFEST` ›
+/// positional wasm › compiled-in ladder. `has_compiled_in` is whether the
+/// generated `main` compiled a manifest in; this function does not load it.
+/// A `compile` names its component outright, so the ladder does not apply.
 ///
 /// # Errors
 ///
 /// Returns [`PlanError::Usage`] when clap rejects argv, or [`PlanError::Fatal`]
-/// when no source is available or the subcommand is not `run`.
+/// when a `run` has no source available.
 pub fn plan(
     argv: impl IntoIterator<Item = OsString>, omnia_manifest: Option<OsString>,
     has_compiled_in: bool,
-) -> Result<RunPlan, PlanError> {
+) -> Result<Plan, PlanError> {
     let Cli {
         command,
         verbose,
@@ -53,23 +54,32 @@ pub fn plan(
                     )));
                 }
             };
-            Ok(RunPlan {
+            Ok(Plan::Run(RunPlan {
                 source,
                 mounts,
                 env,
                 verbose,
                 quiet,
                 args,
-            })
+            }))
         }
-        Command::Compile { .. } => Err(PlanError::Fatal(anyhow!(
-            "the generated `main` only supports `run`; supply a custom `main` for other subcommands"
-        ))),
+        Command::Compile { wasm, output, target } => {
+            Ok(Plan::Compile(CompilePlan { wasm, output, target }))
+        }
     }
 }
 
-/// The planner's outcome: source, CLI mounts and environment, verbosity,
-/// and the command's arguments.
+/// The planner's outcome: the subcommand argv selects, with its arguments resolved.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Plan {
+    /// Run a deployment.
+    Run(RunPlan),
+    /// Compile a component ahead of time.
+    Compile(CompilePlan),
+}
+
+/// A `run` plan: source, CLI mounts and environment, verbosity, and the
+/// command's arguments.
 #[derive(Debug, PartialEq, Eq)]
 pub struct RunPlan {
     /// Which source the precedence ladder selected.
@@ -89,6 +99,19 @@ pub struct RunPlan {
     pub args: Vec<String>,
 }
 
+/// A `compile` plan: the component, where its artifact goes, and the target.
+#[derive(Debug, PartialEq, Eq)]
+pub struct CompilePlan {
+    /// The `wasm32-wasip3` component to compile.
+    pub wasm: PathBuf,
+    /// Where to write the artifact: a file path, or an existing directory
+    /// the artifact lands in as `<input stem>.bin`. Unset, the artifact is
+    /// written to stdout.
+    pub output: Option<PathBuf>,
+    /// The target triple the artifact runs on; the host's when unset.
+    pub target: Option<String>,
+}
+
 /// Where the deployment comes from — the `--manifest` › `OMNIA_MANIFEST` ›
 /// `<wasm>` › compiled-in ladder, decided over plain data.
 #[derive(Debug, PartialEq, Eq)]
@@ -101,7 +124,7 @@ pub enum RunSource {
     CompiledIn,
 }
 
-/// Why entry planning stopped before a run plan could be produced.
+/// Why entry planning stopped before a plan could be produced.
 pub enum PlanError {
     /// A clap-level outcome (usage error, `--help`, `--version`); the caller
     /// delegates to [`clap::Error::exit`] so stream and exit code match the

@@ -225,7 +225,12 @@ where
 
         // a guest is capable exactly when its `ServiceIndices` resolve; a
         // declared guest is probed when its first request loads it
-        let routing = runtime.http_trigger_router(ServiceIndices::new)?;
+        let routing = TriggerRouter::build(
+            runtime.registry(),
+            "http",
+            runtime.registry().routes().http().clone(),
+            ServiceIndices::new,
+        )?;
         if routing.is_inert() {
             if let Some(path) = &options.health_path {
                 tracing::warn!(%path, "HTTP_HEALTH_PATH is set, but no guest serves http to answer it");

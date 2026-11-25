@@ -38,8 +38,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result, anyhow, bail};
 use omnia_core::{
-    CliRoutes, Digest, Grants, GuestId, HttpRoutes, PatternRoutes, ResolvedPreopen, Routes, Source,
-    SourceSpec,
+    Digest, Grants, GuestId, HttpRoutes, PatternRoutes, ResolvedPreopen, Routes, Source, SourceSpec,
 };
 use serde::Deserialize;
 
@@ -401,8 +400,7 @@ impl Manifest {
         let http = HttpRoutes::new(pairs(|routes| &routes.http));
         let messaging = PatternRoutes::new(pairs(|routes| &routes.messaging));
         let websocket = PatternRoutes::new(pairs(|routes| &routes.websocket));
-        // cli routes are not yet parsed; empty makes a sole `wasi:cli/run` exporter the catch-all
-        Routes::new(http, messaging, websocket, CliRoutes::default())
+        Routes::new(http, messaging, websocket)
     }
 
     /// The identity of the guest marked `command = true`, if any.

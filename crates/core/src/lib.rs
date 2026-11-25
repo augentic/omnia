@@ -42,14 +42,14 @@ pub use self::invoke::{FreshCall, InvokeError, call_fresh};
 pub use self::mount::{MountRegistry, ResolvedPreopen};
 pub use self::options::RuntimeOptions;
 pub use self::registry::{
-    CliRoutes, Guest, GuestId, HttpRoutes, PatternRoutes, Registry, RegistryParts, Resolver,
-    Routes, TriggerRouter,
+    Guest, GuestId, HttpRoutes, PatternRoutes, Registry, RegistryParts, Resolver, Routes,
+    TriggerRouter,
 };
 pub use self::runtime::{
     Entered, ExitStatus, GuestError, Invocations, Policy, Runtime, RuntimeParts, Slot, WeakRuntime,
 };
 pub use self::seam::{LinkSeam, NoLinks, StoreFactory};
 pub use self::source::{AcquireError, LoadedGuest, RegistrySource, Source, SourceSpec, Verified};
-pub use self::store::{Stdio, StoreBase, StoreConfig, StoreCtx};
+pub use self::store::{Stdio, StoreBase, StoreCtx};
 pub use self::telemetry::Telemetry;
 pub use self::value::handle_kind;
