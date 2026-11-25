@@ -8,8 +8,9 @@
 //! asserts internally (handles, digests, dispatch answers, and every typed
 //! failure and conflict); the host side declares the deployment and checks
 //! the exit and the registry. Lifecycle scenarios the WASI surface cannot
-//! reach (deregistration, embedder re-registration) drive [`PluginLoader`]
-//! host-side over the same runtime.
+//! reach (deregistration, embedder re-registration) and racing loads, whose
+//! interleaving a host caller controls, drive [`PluginLoader`] host-side over
+//! the same runtime.
 
 #![cfg(not(target_arch = "wasm32"))]
 
@@ -22,8 +23,9 @@ use omnia::wasmtime::Engine;
 use omnia::wasmtime::component::Val;
 use omnia::{
     AcquireError, ChainCtx, CompileOptions, DeploymentBuilder, Digest, ExitStatus, Grants,
-    GuestEntry, GuestId, LoadError, Location, Manifest, Mode, Mount, NoStore, PluginLoader as _,
-    Plugins, PluginsConfig, RegistryClient, RegistryConfig, RegistrySource, Runtime, SourceSpec,
+    GuestEntry, GuestId, LoadConflict, LoadError, Location, Manifest, Mode, Mount, NoStore, Plugin,
+    PluginLoader as _, Plugins, PluginsConfig, RegistryClient, RegistryConfig, RegistrySource,
+    Runtime, SourceSpec,
 };
 use omnia_test::host::{Backends, Scratch, precompiled, scratch};
 use omnia_wasi_otel::WasiOtel;
@@ -1102,6 +1104,53 @@ async fn reregister() {
     runtime.shutdown();
 }
 
+// Two callers load one path at once, then two paths of one stem: the same
+// bytes attest the registration the first seat made, and other bytes answer
+// a conflict naming it, whichever load seats first.
+#[tokio::test(flavor = "multi_thread")]
+async fn racing_paths() {
+    let scratch = scratch();
+    stage(&scratch, "a/plugin.wasm", test_programs::LINK_ECHOER);
+    scratch.write("b/plugin.wasm", changed_echoer(b"racing"));
+    let manifest = path_requester(test_programs::PLUGINS_LOAD).mounts([scratch.mount(false)]);
+    let runtime = boot(manifest, &[]).await.expect("assembling runtime");
+
+    let [first, second] = race(&runtime, ["./a/plugin.wasm", "./a/plugin.wasm"]).await;
+    let first = first.expect("the first load runs").expect("the first load attests");
+    let second = second.expect("the racing load runs").expect("the racing load attests");
+    assert_eq!(first.digest(), digest_of(test_programs::LINK_ECHOER));
+    assert_eq!(second.digest(), first.digest(), "both loads attest one registration");
+    runtime.deregister(first.id()).expect("deregistering the loaded plugin");
+
+    let mut seated = Vec::new();
+    let mut conflicts = Vec::new();
+    for load in race(&runtime, ["./a/plugin.wasm", "./b/plugin.wasm"]).await {
+        match load.expect("each load runs") {
+            Ok(plugin) => seated.push(plugin),
+            Err(conflict) => conflicts.push(conflict),
+        }
+    }
+    let ([winner], [conflict]) = (seated.as_slice(), conflicts.as_slice()) else {
+        panic!("one load seats and the other conflicts: {seated:?}, {conflicts:?}");
+    };
+    assert_eq!(conflict.current().map(Plugin::digest), Some(winner.digest()));
+    assert_ne!(conflict.found(), winner.digest(), "the conflict names the other bytes");
+    assert_eq!(recorded(&runtime, "plugin"), Registered::Active(winner.digest()));
+    runtime.shutdown();
+}
+
+// loads `paths` at once, each from a task of its own
+async fn race(
+    runtime: &Runtime<Backends>, paths: [&str; 2],
+) -> [Result<Result<Plugin, LoadConflict>, LoadError>; 2] {
+    let [first, second] = paths.map(|path| {
+        let runtime = runtime.clone();
+        let from = Location::Path(path.to_owned());
+        tokio::spawn(async move { runtime.load(from, None).await })
+    });
+    [first.await.expect("the first completes"), second.await.expect("the second completes")]
+}
+
 // Compile-time proof that the macro's inline keys lower into the manifest
 // data this crate consumes: a `package` guest with a `digest` and a route
 // list per trigger, named by its reference; a named package pinned in
@@ -1404,32 +1453,20 @@ async fn home_relative_store() {
 }
 
 // `RegistrySource` stays the seam an embedder fills: a source of its own is
-// reached exactly as the built-in client is.
+// reached exactly as the built-in client is, and the requester's two racing
+// loads of the declared package acquire it once.
 #[tokio::test]
 async fn custom_registry_trait() {
-    struct Fixed(Vec<u8>);
-
-    impl RegistrySource for Fixed {
-        fn acquire<'a>(
-            &'a self, package: &'a str, endpoint: Option<&'a str>,
-        ) -> BoxFuture<'a, Result<Vec<u8>, AcquireError>> {
-            Box::pin(async move {
-                assert_eq!(package, ECHOER_PACKAGE);
-                assert_eq!(endpoint, None, "a declared package names no registry of its own");
-                Ok(self.0.clone())
-            })
-        }
-    }
-
-    let bytes = std::fs::read(test_programs::LINK_ECHOER).expect("reading the echoer");
+    let source = Faulting::default();
     let manifest = requester(test_programs::PLUGINS_LOAD).guest(echoer_package());
     let mut deployment =
         deployment(manifest, &["declared", ECHOER_NAME]).await.expect("building deployment");
-    deployment.registry_source(Fixed(bytes));
+    deployment.registry_source(source.clone());
     let runtime =
         deployment.assemble(Backends::defaults().await).await.expect("assembling runtime");
     let status = runtime.run_command().await.expect("deployment runs");
     assert_eq!(status, ExitStatus::SUCCESS, "the requester's assertions all held");
+    assert_eq!(source.asked(), [ECHOER_PACKAGE], "the racing loads acquired the package once");
     runtime.shutdown();
 }
 
@@ -1470,7 +1507,8 @@ async fn faulted(wasm: &str, args: &[&str]) -> Vec<String> {
 
 // A registry source scripted per package: `fault:<case>@1.0.0` fails with
 // that case, whose detail is the case's name, and the echoer package serves
-// the echoer. It records every package it is asked for.
+// the echoer. It records every package it is asked for, then yields before
+// it answers, so a load racing another arrives while the first acquires.
 #[derive(Clone, Default)]
 struct Faulting {
     asked: Arc<Mutex<Vec<String>>>,
@@ -1489,6 +1527,7 @@ impl RegistrySource for Faulting {
         Box::pin(async move {
             assert_eq!(endpoint, None, "the loads name no registry");
             self.asked.lock().expect("the record is whole").push(package.to_owned());
+            tokio::task::yield_now().await;
             let case = package.strip_prefix("fault:").and_then(|rest| rest.strip_suffix("@1.0.0"));
             let detail = case.unwrap_or_default().to_owned();
             match case {
@@ -1514,4 +1553,29 @@ async fn unsupported_release() {
     let args = ["release", reference, "unsupported", "unsupported"];
     let asked = faulted(test_programs::PLUGINS_REFUSED, &args).await;
     assert_eq!(asked, [reference]);
+}
+
+// Two first uses of a declared package race while its source fails: they
+// share the one acquisition, and each reports the source's error.
+#[tokio::test]
+async fn racing_failure() {
+    const PACKAGE: &str = "fault:unavailable@1.0.0";
+
+    let source = Faulting::default();
+    let manifest = path_requester(test_programs::PLUGINS_LOAD).guest(GuestEntry::package(PACKAGE));
+    let mut deployment = deployment(manifest, &[]).await.expect("building deployment");
+    deployment.registry_source(source.clone());
+    let runtime =
+        deployment.assemble(Backends::defaults().await).await.expect("assembling runtime");
+
+    let (first, second) = tokio::join!(
+        runtime.load(declared("fault:unavailable"), None),
+        runtime.load(declared("fault:unavailable"), None)
+    );
+    for loaded in [first, second] {
+        assert!(matches!(&loaded, Err(LoadError::Unavailable(_))), "{loaded:?}");
+    }
+    assert_eq!(source.asked(), [PACKAGE], "the racing loads shared one acquisition");
+    assert_eq!(recorded(&runtime, "fault:unavailable"), Registered::Absent);
+    runtime.shutdown();
 }
