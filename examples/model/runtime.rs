@@ -9,7 +9,9 @@ cfg_select! {
     not(target_arch = "wasm32") => {
         use std::sync::Arc;
 
-        use omnia_wasi_model::{Answer, FutureResult, ModelClient, Request, ToolHost, WasiModel};
+        use omnia_wasi_model::{
+            Answer, FutureResult, Limits, ModelClient, Request, ToolHost, WasiModel,
+        };
         use omnia_wasi_otel::{OtelDefault, WasiOtel};
 
         #[derive(Clone, Copy, Debug)]
@@ -32,6 +34,10 @@ cfg_select! {
                 let answer =
                     Answer::from(r#"{"verdict":"pass","reason":"the bounds check is correct"}"#);
                 Box::pin(async move { Ok(answer) })
+            }
+
+            fn limits(&self) -> Limits {
+                Limits::default()
             }
         }
 

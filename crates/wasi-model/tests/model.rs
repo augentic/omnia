@@ -77,6 +77,10 @@ impl ModelClient for ParallelLookups {
         }
         .boxed()
     }
+
+    fn limits(&self) -> Limits {
+        Limits::default()
+    }
 }
 
 // Calls an undeclared tool, ignores the hard failure and still answers: host
@@ -94,6 +98,10 @@ impl ModelClient for IgnoringToolFailure {
             Ok("should not reach the guest".into())
         }
         .boxed()
+    }
+
+    fn limits(&self) -> Limits {
+        Limits::default()
     }
 }
 
@@ -121,6 +129,10 @@ impl ModelClient for Faulting {
         };
         async move { Err(fault) }.boxed()
     }
+
+    fn limits(&self) -> Limits {
+        self.inner.limits()
+    }
 }
 
 // answers the script with `check` stripped, so no candidate reaches the
@@ -138,6 +150,10 @@ impl ModelClient for Unchecked {
             tool_host,
         )
     }
+
+    fn limits(&self) -> Limits {
+        self.0.limits()
+    }
 }
 
 // offers one candidate the check rejects, then answers with it anyway. By
@@ -153,6 +169,10 @@ impl ModelClient for Heedless {
             Ok(FAIL.into())
         }
         .boxed()
+    }
+
+    fn limits(&self) -> Limits {
+        Limits::default()
     }
 }
 
@@ -478,7 +498,7 @@ async fn model_undeclared_tool() {
 async fn model_tool_budget() {
     let model = ScriptedModel::answering(["42"])
         .calling(0, [("lookup", "{}"), ("lookup", "{}")])
-        .limits(Limits {
+        .limited(Limits {
             max_tool_calls: 1,
             ..Limits::default()
         });
@@ -488,7 +508,7 @@ async fn model_tool_budget() {
 
 #[tokio::test]
 async fn model_tool_timeout() {
-    let model = lookup_turn("42").limits(Limits {
+    let model = lookup_turn("42").limited(Limits {
         tool_timeout: Duration::from_millis(50),
         ..Limits::default()
     });
@@ -504,7 +524,7 @@ async fn model_oversize() {
     let model = ScriptedModel::answering(["42", "42", FAIL])
         .calling(0, [("lookup", "{}")])
         .calling(1, [("lookup", "{}")])
-        .limits(Limits {
+        .limited(Limits {
             max_result_bytes: 4,
             ..Limits::default()
         });

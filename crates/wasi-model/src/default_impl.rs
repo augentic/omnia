@@ -20,8 +20,8 @@ use omnia_core::{Connect, FromEnv};
 use serde_json::json;
 
 use crate::{
-    Answer, Budget, Error, Exhausted, Format, FutureResult, Generation, ModelClient, Request,
-    ToolHost,
+    Answer, Budget, Error, Exhausted, Format, FutureResult, Generation, Limits, ModelClient,
+    Request, ToolHost,
 };
 
 /// Options used to connect to the echo model backend.
@@ -70,6 +70,10 @@ impl ModelClient for ModelDefault {
             Ok(Answer::from(answer))
         }
         .boxed()
+    }
+
+    fn limits(&self) -> Limits {
+        Limits::default()
     }
 }
 
