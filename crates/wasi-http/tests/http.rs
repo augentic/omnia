@@ -675,6 +675,58 @@ async fn http_incoming_stream() {
     runtime.shutdown();
 }
 
+// The guest never answers, so only a dropped request or the guest timeout
+// frees the slot it holds, and a gate of one shows when.
+#[tokio::test]
+async fn stalled_guest() {
+    const GUEST_TIMEOUT: Duration = Duration::from_secs(1);
+
+    let guest = std::fs::read(test_programs::HTTP_INCOMING_STREAM).expect("guest bytes");
+    let runtime = Deployment::new()
+        .entry(GuestEntry::new("guest", guest).route_http("/stream"))
+        .options(RuntimeOptions {
+            max_concurrent_invocations: Some(1),
+            ..RuntimeOptions::default()
+        })
+        .guest_timeout(GUEST_TIMEOUT)
+        .boot(Backends::defaults().await, |deployment| {
+            deployment.host::<WasiHttp>()?;
+            deployment.host::<WasiOtel>()?;
+            Ok(())
+        })
+        .await
+        .expect("runtime boots");
+    let handler = HttpHandler::new(&runtime)
+        .expect("http routes consistent")
+        .expect("the guest exports the http handler");
+    let stall = || {
+        Request::get("/stream/stall")
+            .header(HOST, "stream.test")
+            .body(Full::new(Bytes::new()))
+            .expect("request")
+    };
+
+    // a request dropped before its head frees the slot well inside the timeout
+    let dropped = tokio::time::timeout(Duration::from_millis(200), handler.handle(stall())).await;
+    assert!(dropped.is_err(), "the guest never answers");
+    let freed = tokio::time::timeout(GUEST_TIMEOUT / 2, runtime.slot())
+        .await
+        .expect("the slot frees once the request is dropped");
+    drop(freed);
+
+    // a request left waiting is answered `500` at the timeout, and frees the slot
+    let started = Instant::now();
+    let response = handler.handle(stall()).await.expect("handled");
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert!(started.elapsed() >= GUEST_TIMEOUT, "answered at {:?}", started.elapsed());
+    let freed = tokio::time::timeout(Duration::from_secs(10), runtime.slot())
+        .await
+        .expect("the slot frees once the guest times out");
+    drop(freed);
+
+    runtime.shutdown();
+}
+
 // An MCP tool awaits a capability before it answers, served through the
 // guest's `wasi:http` handler.
 #[tokio::test]
