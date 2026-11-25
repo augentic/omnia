@@ -206,7 +206,7 @@ impl<B> StoreCtx<B> {
     /// bundle, the store's resource table, and the grants its guest runs
     /// under.
     ///
-    /// A host passes `StoreCtx::view::<Self>` as the accessor of its
+    /// A host passes `StoreCtx::view::<Self>` as the getter of its
     /// bindgen `add_to_linker`; a trigger server calls it on the store it
     /// builds for a guest.
     pub fn view<H: HostCtx>(&mut self) -> H::Data<'_>

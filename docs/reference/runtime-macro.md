@@ -125,7 +125,7 @@ omnia::runtime!({
 - Every value other than a guest's `path:` is any Rust expression evaluating to the field's type (strings for names, route patterns, inherited variables, and grants, paths for mounts and the store, a `&'static str` or `String` of TOML for `registries`).
 - `manifest:` and the inline keys are mutually exclusive; a manifest file declares the same things as `[[guest]]`, `[[mount]]`, `[env]`, and `[plugins]` — see [Configuration](configuration.md).
 
-Nothing needs to declare what guests call between themselves. Every import a guest makes outside the runtime's own namespaces (`wasi:`, `omnia:`) is relayed to the guest exporting it, whichever it is, and an import no guest exports fails at boot — see [Multi-Guest Deployments](../guides/multi-guest-deployments.md#guests-calling-guests). A guest that declares grants imports a linked interface only when its `interfaces` grant names the package, and calls only the guests its `guests` grant names.
+Nothing needs to declare what guests call between themselves. Every import a guest makes outside the runtime's own namespaces (`wasi:`, `omnia:`) is relayed to the guest exporting it, whichever it is. An import no guest exports is relayed too, so the deployment boots and the call fails — see [Multi-Guest Deployments](../guides/multi-guest-deployments.md#guests-calling-guests). A guest that declares grants imports a linked interface only when its `interfaces` grant names the package, and calls only the guests its `guests` grant names.
 
 ### Guest entries (`path`/`package`, `name`, `routes`, `command`, `digest`, `grants`)
 
@@ -217,7 +217,7 @@ The invocation expands to a private `runtime` module and re-exports five items f
 | ---- | ----- | --- |
 | `main` | `#[tokio::main] fn main() -> ExitCode` | The binary's entry point: connects the declared backends from the environment and drives the compiled-in deployment. |
 | `run` | blocking `fn run(DeploymentBuilder) -> Result<ExitStatus>` | Build the builder, then mount the runtime in-process from a binary with its own argument surface. |
-| `Hooks` | `pub struct Hooks` implementing `omnia::Wiring<B>` | The generated wiring — `link`, `serve` — generic over any bundle `B` that `Provides` each declared host's context. |
+| `Hooks` | `pub struct Hooks` implementing `omnia::Wiring<B>` | The generated wiring — `link`, `serve` — generic over any bundle `B` that `Provides` each declared host. |
 | `manifest` | `fn manifest() -> ManifestSource` | The compiled-in deployment (`manifest:` path or inline keys), for a test to overlay. |
 | `run_with` | `async fn run_with<B>(DeploymentBuilder, B) -> Result<ExitStatus>` | Build the builder, then drive the deployment through `Hooks` over a bundle already in hand; nothing connects. |
 

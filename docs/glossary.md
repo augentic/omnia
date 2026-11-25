@@ -60,7 +60,7 @@ Guest-to-guest calls carried through the host: a guest imports an interface outs
 
 ### Namespace rule
 
-How the runtime tells its own interfaces from the ones guests share: an import or export under `wasi:` or `omnia:` is the host's (WASI, and omnia's capability hosts such as `omnia:plugins/loader`); every other interface crosses between guests — the host polyfills the import on the caller and serves the export on whichever guest carries it. `omnia::is_host(interface)` is the predicate. A guest's own package (`example:link/echo`, `emery:adapter/source`) therefore never collides with the host's, and an import no guest exports fails at boot rather than at the first call.
+How the runtime tells its own interfaces from the ones guests share: an import or export under `wasi:` or `omnia:` is the host's (WASI, and omnia's capability hosts such as `omnia:plugins/loader`); every other interface crosses between guests — the host polyfills the import on the caller and serves the export on whichever guest carries it. `omnia::is_host(interface)` is the predicate. A guest's own package (`example:link/echo`, `emery:adapter/source`) therefore never collides with the host's. An import no guest exports is relayed too, so the deployment boots and the call fails.
 
 ### Link seam
 

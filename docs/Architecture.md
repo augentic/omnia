@@ -85,7 +85,7 @@ Layers 1 and 2 form the **runtime core** — domain-agnostic infrastructure that
 `omnia-core` is the live-runtime SDK a capability crate targets. Depend on it directly only when building another capability crate. It provides:
 
 - **Runtime handle**: `Runtime<B>` over `StoreCtx<B>`, assembled from `RuntimeParts`; `Registry` holds pre-instantiated guests beside the declared sources not yet loaded, and `Runtime::guest` is the one seam every use resolves through — a declared guest loads there on its first use
-- **Core traits**: `Host`, `Connect`; `Backends`, the shape of the bundle every runtime type is generic over; `HostCtx`, `Provides`, and the `HostView` a host over one client implements its bindings on, the seam between a host and the bundle that serves it, joined by `StoreCtx::view` (see [Extending Omnia](#extending-omnia))
+- **Core traits**: `Host`, `Connect`; `Backends`, the shape of the bundle every runtime type is generic over; `HostCtx`, `Provides`, and the `HostView` a host over one client reaches its backend through, the seam between a host and the bundle that serves it, joined by `StoreCtx::view` (see [Extending Omnia](#extending-omnia))
 - **Link seam**: the `LinkSeam` trait and `NoLinks` no-op the registry drives; guest→guest linking itself lives in `omnia-link` (`InProcessLinks`)
 - **Host→guest dispatch**: `Dispatcher`, a named-target call through `call_fresh` (the same primitive guest→guest links use)
 - **Telemetry**: `Telemetry`, the host's `tracing` subscriber — console logging with the OTLP span and metric exporters beneath it — and `telemetry::{flush, resource}` over the providers it publishes
@@ -119,7 +119,7 @@ pub trait Connect: Sized + Sync + Send {
 
 ### WASI Interface Crates (`crates/wasi-*`)
 
-Each interface crate provides a host implementation and, with one exception, a default backend. Its guest bindings live in `omnia-sdk`:
+Each interface crate is host-only: it provides a host implementation and, with one exception, a default backend. Its guest bindings live in `omnia-sdk`:
 
 | Crate            | Interface         | Purpose                            | Default backend                           |
 | ---------------- | ----------------- | ---------------------------------- | ----------------------------------------- |
@@ -132,25 +132,10 @@ Each interface crate provides a host implementation and, with one exception, a d
 | `wasi-config`    | `omnia:config`    | Runtime configuration              | `ConfigDefault` — the variables `CONFIG_KEYS` names |
 | `wasi-vault`     | `omnia:vault`     | Secrets management                 | `VaultDefault` — in-memory                |
 | `wasi-identity`  | `omnia:identity`  | Identity/OAuth tokens              | `IdentityDefault` — OAuth2 client flow    |
-| `wasi-otel`      | Custom            | Guest OpenTelemetry export         | `OtelDefault` — log-only                  |
+| `wasi-otel`      | `omnia:otel`      | Guest OpenTelemetry export         | `OtelDefault` — log-only                  |
 | `wasi-websocket` | `omnia:websocket` | WebSocket connections (trigger)    | `WebSocketDefault` — tungstenite server   |
 | `wasi-model`     | `omnia:model`     | Model completions with grants      | `ModelDefault` — deterministic echo       |
 | `wasi-vcs`       | `omnia:vcs`       | Version control over lent mounts   | none — `omnia-git` in `omnia-backends`    |
-
-Conditional compilation lets one crate serve both sides — guests get bindings on `wasm32`, hosts get the implementation on native:
-
-```rust
-cfg_select! {
-    target_arch = "wasm32" => {
-        mod guest;
-        pub use guest::*;
-    }
-    _ => {
-        mod host;
-        pub use host::*;
-    }
-}
-```
 
 Each crate's `wit/` directory holds the [WIT](https://component-model.bytecodealliance.org/design/wit.html) interface definitions, with a copy of each package they use under `wit/deps/` that `mise run wit-sync` keeps in step with its owner. Every `omnia:*` package is also published to the `omnia.host` wasm-pkg registry, as the [WIT Packages](reference/wit-packages.md) reference describes.
 
@@ -238,24 +223,29 @@ The consolidated list is in [Configuration](reference/configuration.md); individ
 ```text
 omnia/
 ├── crates/
-│   ├── omnia/              # Composition root (assembly, lifecycle, optional crates, runtime!)
-│   ├── core/         # Live-runtime SDK (engine, registry, dispatch, stores, subscriber)
-│   ├── link/         # Guest-to-guest dispatch (InProcessLinks; re-exported by omnia behind `link`)
-│   ├── sdk/          # Guest SDK (Handler/Context/Handlers, HTTP/messaging/command adapters, errors, capabilities, MCP)
-│   ├── guest-macros/       # #[instrument] proc macro
-│   ├── host-macros/        # runtime! proc-macro
-│   ├── plugin/       # Plugins capability (loader host + acquisition; re-exported by omnia)
-│   ├── cli/          # Leaf `run` grammar (re-exported by omnia)
-│   └── wasi-*/             # WASI interface implementations
+│   ├── omnia/                  # Composition root (assembly, lifecycle, optional crates, runtime!)
+│   ├── core/                   # Live-runtime SDK (engine, registry, dispatch, stores, subscriber)
+│   ├── link/                   # Guest-to-guest dispatch (InProcessLinks; re-exported by omnia behind `link`)
+│   ├── sdk/                    # Guest SDK (Handler/Context/Handlers, HTTP/messaging/command adapters, errors, capabilities, MCP, the generated bindings)
+│   ├── guest-macros/           # #[instrument], #[derive(Settings)], #[derive(FromRow)]
+│   ├── host-macros/            # runtime!, #[derive(HostCtx)], #[derive(FromEnv)]
+│   ├── plugin/                 # Plugins capability (loader host + acquisition; re-exported by omnia)
+│   ├── cli/                    # Leaf `run` grammar (re-exported by omnia)
+│   ├── compile/                # Ahead-of-time guest compiler (the compile-affecting settings and the artifact the runtime deserializes)
+│   ├── test/                   # Test doubles, runtime harness, and wasm fixture pipeline
+│   ├── test-programs/          # Guest scenario programs driven by the e2e test suites
+│   └── wasi-*/                 # WASI interface implementations
 │       ├── src/
-│       │   ├── guest.rs    # Guest bindings (wasm32)
-│       │   └── host/       # Host implementation + default backend (native)
-│       └── wit/            # WIT interface definitions
-├── examples/               # One guest + runtime pair per capability
+│       │   ├── lib.rs          # bindgen!, the <Name>Client trait, the Wasi<Name> host
+│       │   ├── *_impl.rs       # Host*WithStore impls on Wasi<Name>, one file per WIT interface
+│       │   └── default_impl.rs # <Name>Default, the in-tree backend
+│       └── wit/                # WIT interface definitions
+├── examples/                   # One guest + runtime pair per capability
 │   └── <example>/
-│       ├── guest.rs        # Guest code (→ .wasm)
-│       └── runtime.rs      # Host code (→ native binary)
-└── docs/                   # This documentation
+│       ├── guest.rs            # Guest code (→ .wasm)
+│       └── runtime.rs          # Host code (→ native binary)
+├── xtask/                      # Keeps the omnia:* WIT in step with its copies, the omnia-sdk bindings, and the registry
+└── docs/                       # This documentation
 ```
 
 Production backends live in the sibling [`omnia-backends`](https://github.com/augentic/omnia-backends) repository, one crate per service, each implementing `Connect` plus the relevant `XxxClient` traits.
@@ -273,18 +263,20 @@ StoreCtx<Backends>                       one per guest store
    |  WasiKeyValue::view(backends.borrow(), &mut base.table, &base.grants)
    v
 HostView<'_, dyn KeyValueClient>         #[host_ctx(client = KeyValueClient)]: the host's HasData::Data
-   |  bindgen Host* impls on the view; Host::add_to_linker(linker, StoreCtx::view::<Self>)
+   |  Host::add_to_linker(linker, StoreCtx::view::<Self>);
+   |  the host's Host*WithStore impls borrow the view through Accessor::with
    v
 wasmtime Linker                          omnia:keyvalue/* resolved for the guest
 ```
 
-A backend implements the `<Name>Client` contract and never sees the view; a host implements the WIT functions on the view and never sees the bundle. `runtime!` supplies the bundle's `Provides` impl per row, `#[derive(HostCtx)]` supplies the host's borrow and view, and `StoreCtx::view` joins them.
+A backend implements the `<Name>Client` contract and never sees the view; a host's WIT functions borrow the view and never see the bundle. `runtime!` supplies the bundle's `Provides` impl per row, `#[derive(HostCtx)]` supplies the host's borrow and view, and `StoreCtx::view` joins them.
 
 **Adding a WASI interface**: create `crates/wasi-<name>/` with the standard layout and define the WIT world in `wit/`. Then, in the crate:
 
 - `wit/<name>.wit` opens with package docs, whose summary sentence is the published release's description. `wit/deps/types.wit` is a copy of `crates/wasi-types/wit/types.wit`, which `mise run wit-sync` keeps in step once it exists. The package joins the published packages and the `omnia:sdk` `imports` world by its place under `crates/wasi-*/wit`, with no list to edit.
-- `src/lib.rs` binds the world with `wasmtime::component::bindgen!`, mapping `omnia:types/types` onto `omnia_wasi_types::types` with `with` and its `error` onto the shared `omnia_wasi_types::Error` with `trappable_error_type`. It defines the `<Name>Client` trait (plus any resource traits), declares `#[derive(Debug, HostCtx)] #[host_ctx(client = <Name>Client)] pub struct Wasi<Name>;`, and implements `Host<B>` as `impl<B: Provides<Self>>` to call each generated `add_to_linker(linker, StoreCtx::view::<Self>)` (a trigger host also overrides `run`).
-- `src/*_impl.rs` implement the generated `Host*` traits on `HostView<'_, dyn <Name>Client>`, reaching the backend through `.client` and WIT resources through `.table`.
+- `src/lib.rs` binds the world with `wasmtime::component::bindgen!` under `imports: { default: store | tracing | trappable }`, mapping `omnia:types/types` onto `omnia_wasi_types::types` with `with` and its `error` onto the shared `omnia_wasi_types::Error` with `trappable_error_type`. It defines the `<Name>Client` trait, declares `#[derive(Debug, HostCtx)] #[host_ctx(client = <Name>Client)] pub struct Wasi<Name>;`, and implements `Host<B>` as `impl<B: Provides<Self>>` to call each generated `add_to_linker(linker, StoreCtx::view::<Self>)` (a trigger host also overrides `run`).
+- `src/resource.rs` holds the traits a backend implements for the interface's resources, such as key-value's `Bucket`.
+- `src/*_impl.rs`, one per WIT interface, implement the generated `Host*WithStore` traits on `Wasi<Name>`, where `store` puts every function. A function borrows `HostView<'_, dyn <Name>Client>` through `Accessor::with`, reaching the backend through `.client` and WIT resources through `.table`. The view takes the interface's `Host*` traits as empty impls.
 - `src/default_impl.rs` is `<Name>Default`, the in-tree backend. The guest bindings are generated into `omnia-sdk` by `mise run bindgen`.
 - A `test-programs` program and its paired e2e row prove the interface from a real guest (see the [testing policy](guides/testing-policy.md)); unit tests cover only deterministic logic no guest boundary reaches.
 

@@ -40,7 +40,7 @@ Three things surprise people coming from HTTP services:
 2. **A new instance every time.** The responder is created for this call and thrown away afterwards, like a Lambda invocation. Nothing in its memory survives for the next call. Put durable state in key-value or SQL.
 3. **Only copyable data.** Strings, numbers, records, lists — fine. File handles, streams, and other live resources cannot cross, because they belong to the caller's instance, not the callee's.
 
-The host does not parse what `echo` means, and nothing declares it. `example:link/echo` lies outside the runtime's own `wasi:` and `omnia:` namespaces, so the host relays it: any guest importing it reaches whichever guest exports it, and an import nothing exports fails at start.
+The host does not parse what `echo` means, and nothing declares it. `example:link/echo` lies outside the runtime's own `wasi:` and `omnia:` namespaces, so the host relays it: any guest importing it reaches whichever guest exports it. An import nothing exports is relayed too, so the deployment starts and the call fails.
 
 ## Quick start
 

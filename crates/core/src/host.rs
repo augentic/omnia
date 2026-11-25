@@ -129,13 +129,14 @@ pub trait HasTable {
 }
 
 /// The linker-facing view of a host over one client: its backend and the
-/// store's resource table, borrowed for one host call.
+/// store's resource table.
 ///
 /// A host that names its client in [`#[derive(HostCtx)]`](derive@crate::HostCtx)
-/// has `HostView<'a, dyn XClient>` as its [`HasData::Data`], and implements
-/// its bindgen `Host*` traits on it: a host function reaches the backend
+/// has `HostView<'a, dyn XClient>` as its [`HasData::Data`]. A host function
+/// borrows the view inside [`Accessor::with`], then reaches the backend
 /// through [`client`](Self::client) and WIT resources through
-/// [`table`](Self::table). [`StoreCtx::view`] assembles one per host call.
+/// [`table`](Self::table). [`StoreCtx::view`] assembles the view for each
+/// borrow.
 // `C: 'a` is not redundant: it makes `HostView<'a, dyn XClient>` default the
 // object lifetime to `'a`, the same as the `&'a dyn XClient` it is built
 // from, for a client trait with or without a `'static` bound.

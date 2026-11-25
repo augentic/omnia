@@ -334,8 +334,8 @@ impl<B: 'static> Registry<B> {
     /// Link functions the bootstrap did not polyfill (no static guest imports
     /// them) are polyfilled by the seam on a clone of the retained linker,
     /// from this component's own import types — the shared linker is never
-    /// mutated after bootstrap. Imports outside the linked host set and the
-    /// declared link interfaces fail here, exactly as at bootstrap.
+    /// mutated after bootstrap. An import that no linked host serves and the
+    /// seam does not relay fails here, exactly as at bootstrap.
     pub(crate) fn instantiate_late(
         &self, id: &GuestId, component: &Component,
     ) -> Result<InstancePre<StoreCtx<B>>> {

@@ -11,13 +11,20 @@ use syn::{DeriveInput, parse_macro_input};
 
 /// Generates the runtime infrastructure based on the configuration.
 ///
-/// # Example
+/// # Examples
 ///
 /// ```rust,ignore
+/// use omnia_redis::Client as Redis;
+/// use omnia_wasi_http::{HttpDefault, WasiHttp};
+/// use omnia_wasi_keyvalue::WasiKeyValue;
+/// use omnia_wasi_otel::{OtelDefault, WasiOtel};
+///
 /// omnia::runtime!({
-///     omnia_wasi_http: WasiHttp,
-///     omnia_wasi_otel: DefaultOtel,
-///     omnia_wasi_blobstore: MongoDb,
+///     hosts: {
+///         WasiHttp: HttpDefault,
+///         WasiOtel: OtelDefault,
+///         WasiKeyValue: Redis,
+///     }
 /// });
 /// ```
 #[proc_macro]
@@ -31,8 +38,8 @@ pub fn runtime(input: TokenStream) -> TokenStream {
 ///
 /// The derive emits `wasmtime::component::HasData` with
 /// `Data<'a> = omnia_core::HostView<'a, dyn Client>` and `omnia_core::HostCtx`
-/// with `Borrow<'a> = &'a dyn Client`. The host implements its bindgen
-/// `Host*` traits on `HostView<'_, dyn Client>`.
+/// with `Borrow<'a> = &'a dyn Client`. The host's bindgen `Host*WithStore`
+/// functions borrow that view inside `Accessor::with`.
 ///
 /// The type must be non-generic and name exactly one `client`.
 ///

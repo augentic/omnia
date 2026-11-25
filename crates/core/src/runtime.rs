@@ -124,9 +124,8 @@ impl<B: Backends> Runtime<B> {
 
     /// Build a runtime from already-assembled parts.
     ///
-    /// Does not wire the host-mediated link serve side — a caller whose
-    /// deployment declares link interfaces must run
-    /// [`serve_links`](Self::serve_links) itself before dispatching.
+    /// The guests' linked exports are not served yet: run
+    /// [`serve_links`](Self::serve_links) before the first dispatch.
     #[must_use]
     pub fn from_parts(parts: RuntimeParts<B>) -> Self {
         // the environment as it stands; a non-UTF-8 pair cannot cross `wasi:cli`
@@ -646,8 +645,8 @@ impl<B: Backends> Runtime<B> {
     /// name the deployment declares or is active under other bytes or other
     /// grants, `grants` do not [validate](Grants::validate), the component
     /// imports code from a package `grants` do not reach, the bytes cannot
-    /// be loaded, the component's imports exceed the deployment's linked
-    /// host set and declared link interfaces, its linked exports cannot be
+    /// be loaded, the component imports an interface that no linked host
+    /// serves and the link seam does not relay, its linked exports cannot be
     /// served, or it disagrees with a registered guest on a linked
     /// function's signature.
     pub async fn register(
@@ -773,23 +772,23 @@ impl<B: Backends> Runtime<B> {
         let _ = rx.wait_for(|&stopped| stopped).await;
     }
 
-    /// Release every link-serve endpoint, aborting the drain tasks that pin
-    /// `Runtime` clones (and with them the engine's pooling reservation).
+    /// Call [`stop`](Self::stop), then drop every link route and the
+    /// `Runtime` clones the routes hold.
     ///
-    /// `run` does this as the drive completes; an embedder holding a
-    /// [`from_parts`](Self::from_parts) runtime calls it when the deployment
-    /// is finished. In-flight invocations hold their own server handles and
-    /// complete; only new dispatches are cut off.
+    /// The clones pin the engine and its pooling reservation, so a runtime
+    /// whose guests export a linked interface keeps both until this runs.
+    ///
+    /// A link call in flight holds its route and completes. A new link call
+    /// fails, and a call through [`dispatcher`](Self::dispatcher) still runs.
     pub fn shutdown(&self) {
         self.stop();
         self.registry().seam().shutdown();
     }
 
-    /// Wire the serve side of every registered guest's linked exports, then
-    /// publish them all under one lifecycle transition so polyfilled imports
-    /// can reach them. `Deployment::assemble` calls this during bootstrap; only
-    /// a runtime assembled through [`from_parts`](Self::from_parts) wires it
-    /// explicitly. A no-op for a deployment that declares no link interfaces.
+    /// Serve every registered guest's linked exports, then publish them in one
+    /// lifecycle transition so polyfilled imports can reach them.
+    ///
+    /// A no-op under [`NoLinks`](crate::NoLinks).
     ///
     /// # Errors
     ///
