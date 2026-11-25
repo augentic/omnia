@@ -15,13 +15,14 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use base64ct::{Base64, Encoding};
 use bytes::Bytes;
+use futures::future::BoxFuture;
 use http::header::{AUTHORIZATION, CONTENT_TYPE, FORWARDED, HOST, LOCATION, RETRY_AFTER};
 use http::{HeaderMap, Method, Request, Response, StatusCode, Version};
 use http_body_util::{BodyExt as _, Full};
 use hyper::body::Incoming;
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
-use omnia::{ExitStatus, Grants, GuestEntry, RuntimeOptions};
+use omnia::{AcquireError, ExitStatus, Grants, GuestEntry, RegistrySource, RuntimeOptions};
 use omnia_test::host::{Backends, Deployment};
 use omnia_wasi_config::WasiConfig;
 use omnia_wasi_http::{HttpHandler, ServerOptions, WasiHttp};
@@ -723,6 +724,70 @@ async fn stalled_guest() {
         .await
         .expect("the slot frees once the guest times out");
     drop(freed);
+
+    runtime.shutdown();
+}
+
+const ECHO_PACKAGE: &str = "test:echo@1.0.0";
+
+// a registry holding one release, the echo guest's, which it answers `delay`
+// after it is asked
+struct SlowRegistry {
+    bytes: Vec<u8>,
+    delay: Duration,
+}
+
+impl RegistrySource for SlowRegistry {
+    fn acquire<'a>(
+        &'a self, package: &'a str, endpoint: Option<&'a str>,
+    ) -> BoxFuture<'a, Result<Vec<u8>, AcquireError>> {
+        Box::pin(async move {
+            assert_eq!(package, ECHO_PACKAGE);
+            assert_eq!(endpoint, None, "a declared package names no registry of its own");
+            tokio::time::sleep(self.delay).await;
+            Ok(self.bytes.clone())
+        })
+    }
+}
+
+// A declared guest loads at its first request, and the registry takes `LOAD`
+// to answer, so a deadline counted from the slot lies at least `LOAD` past
+// the request's arrival.
+#[tokio::test]
+async fn slow_load() {
+    const LOAD: Duration = Duration::from_millis(300);
+    const GUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
+    let bytes = std::fs::read(test_programs::HTTP_INCOMING_ECHO).expect("guest bytes");
+    let runtime = Deployment::new()
+        .entry(GuestEntry::package(ECHO_PACKAGE).route_http("/echo"))
+        .guest_timeout(GUEST_TIMEOUT)
+        .boot(Backends::defaults().await, |deployment| {
+            deployment.registry_source(SlowRegistry { bytes, delay: LOAD });
+            deployment.host::<WasiHttp>()?;
+            deployment.host::<WasiOtel>()?;
+            Ok(())
+        })
+        .await
+        .expect("runtime boots");
+    let handler = HttpHandler::new(&runtime)
+        .expect("http routes consistent")
+        .expect("the guest exports the http handler");
+
+    let request = Request::get("/echo?message=late")
+        .header(HOST, "echo.test")
+        .body(Full::new(Bytes::new()))
+        .expect("request");
+    let earliest = epoch_millis(SystemTime::now() + LOAD + GUEST_TIMEOUT);
+    let response = handler.handle(request).await.expect("handled");
+    let latest = epoch_millis(SystemTime::now() + GUEST_TIMEOUT);
+    assert_eq!(response.status(), StatusCode::OK);
+    let (echo, deadline) = echoed(response).await;
+    assert_eq!(echo["message"], "late");
+    assert!(
+        deadline.is_some_and(|deadline| (earliest..=latest).contains(&deadline)),
+        "{deadline:?}"
+    );
 
     runtime.shutdown();
 }
