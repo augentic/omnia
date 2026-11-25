@@ -1568,11 +1568,12 @@ async fn racing_failure() {
     let runtime =
         deployment.assemble(Backends::defaults().await).await.expect("assembling runtime");
 
-    let (first, second) = tokio::join!(
+    let loads: [_; 2] = tokio::join!(
         runtime.load(declared("fault:unavailable"), None),
         runtime.load(declared("fault:unavailable"), None)
-    );
-    for loaded in [first, second] {
+    )
+    .into();
+    for loaded in loads {
         assert!(matches!(&loaded, Err(LoadError::Unavailable(_))), "{loaded:?}");
     }
     assert_eq!(source.asked(), [PACKAGE], "the racing loads shared one acquisition");
