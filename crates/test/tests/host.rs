@@ -194,6 +194,20 @@ async fn link_pair() {
     runtime.shutdown();
 }
 
+#[tokio::test]
+#[should_panic(expected = "another runtime's gate")]
+async fn foreign_slot() {
+    let deployment = Deployment::new().guest("echoer", test_programs::LINK_ECHOER);
+    let runtime =
+        deployment.boot(Backends::defaults().await, |_| Ok(())).await.expect("deployment boots");
+    let other =
+        deployment.boot(Backends::defaults().await, |_| Ok(())).await.expect("deployment boots");
+    let guest = runtime.guest(&GuestId::from("echoer")).await.expect("the guest loads");
+
+    let slot = other.slot().await;
+    _ = runtime.enter(&guest, ChainCtx::server(), slot).await;
+}
+
 // A path guest's `digest` pin is checked at its first use — here the command
 // drive, which names it as the marked command guest: the bytes' own digest
 // runs, any other fails the run before the guest loads.
@@ -428,13 +442,14 @@ async fn call<B: omnia::Backends>(
         .registry()
         .get(&GuestId::from(guest))
         .with_context(|| format!("guest `{guest}` is not registered"))?;
-    let (mut store, instance) = runtime.enter(&entry, ChainCtx::server()).await?;
+    let slot = runtime.slot().await;
+    let (mut entered, instance) = runtime.enter(&entry, ChainCtx::server(), slot).await?;
     let export = instance
-        .get_func(&mut store, func)
+        .get_func(&mut entered, func)
         .with_context(|| format!("guest `{guest}` exports `{func}`"))?;
     let mut results = vec![Val::Bool(false)];
     export
-        .call_async(&mut store, &[Val::String(message.to_owned())], &mut results)
+        .call_async(&mut entered, &[Val::String(message.to_owned())], &mut results)
         .await
         .map_err(anyhow::Error::from)?;
     match results.into_iter().next() {

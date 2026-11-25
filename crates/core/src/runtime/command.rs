@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use anyhow::{Context as _, Result, bail};
 use tracing::Instrument;
+use wasmtime::AsContextMut as _;
 use wasmtime_wasi::I32Exit;
 use wasmtime_wasi::p3::bindings::{Command, CommandPre};
 
@@ -61,15 +62,16 @@ async fn run_guest<B: Backends>(
     tracing::debug!(guest = %guest_id, "running wasi:cli/run");
 
     // the run competes with the triggers serving beside it, so it waits for a
-    // slot of the gate, held until after the store drops
-    let _slot = runtime.slot().await;
+    // slot of the gate
+    let slot = runtime.slot().await;
 
     // a command chain root: its link hops run uncapped, like the run itself
-    let (mut store, instance) = runtime.enter_command(guest).await?;
-    let command = Command::new(&mut store, &instance)?;
+    let (mut entered, instance) = runtime.enter_command(guest, slot).await?;
+    let command = Command::new(&mut entered, &instance)?;
 
     // the host span a guest's root spans join through `omnia:otel`
-    let outcome = store
+    let outcome = entered
+        .as_context_mut()
         .run_concurrent(async move |store| command.wasi_cli_run().call_run(store).await)
         .instrument(tracing::info_span!("cli-run"))
         .await;

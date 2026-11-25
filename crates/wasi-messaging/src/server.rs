@@ -9,6 +9,7 @@ use futures::FutureExt as _;
 use futures::future::BoxFuture;
 use omnia_core::{ChainCtx, PatternRoutes, Provides, Runtime, TriggerRouter, telemetry};
 use tracing::{Instrument, info_span, instrument};
+use wasmtime::AsContextMut as _;
 
 use crate::WasiMessaging;
 use crate::generated::MessagingIndices;
@@ -123,8 +124,8 @@ where
             return Ok(());
         };
 
-        // wait for a slot of the gate, held until after the store drops
-        let _slot = self.state.slot().await;
+        // wait for a slot of the gate
+        let slot = self.state.slot().await;
 
         // a routed guest that fails to load is an error, never a panic
         let guest = self.state.guest(guest_id).await.map_err(|error| {
@@ -143,15 +144,16 @@ where
             ..Delivery::from(message)
         };
 
-        let (mut store, instance) =
-            self.state.enter(&guest, ChainCtx::server()).await.map_err(|error| {
+        let (mut entered, instance) =
+            self.state.enter(&guest, ChainCtx::server(), slot).await.map_err(|error| {
                 HandleError::Unavailable(format!("instantiating `{guest_id}`: {error:#}"))
             })?;
         let messaging = indices
-            .load(&mut store, &instance)
+            .load(&mut entered, &instance)
             .map_err(|error| HandleError::Unavailable(format!("{error:#}")))?;
 
-        let run = store
+        let run = entered
+            .as_context_mut()
             .run_concurrent(async |store| {
                 messaging.omnia_messaging_incoming_handler().call_handle(store, delivery).await
             })

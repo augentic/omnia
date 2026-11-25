@@ -21,7 +21,7 @@ use hyper::service::service_fn;
 use hyper_util::rt::TokioExecutor;
 use hyper_util::server::conn::auto;
 use omnia_core::{
-    Backends, ChainCtx, FromEnv, HttpRoutes, Provides, Runtime, Slot, StoreCtx, TriggerRouter,
+    Backends, ChainCtx, Entered, FromEnv, HttpRoutes, Provides, Runtime, StoreCtx, TriggerRouter,
     telemetry,
 };
 use tokio::net::TcpListener;
@@ -29,7 +29,7 @@ use tokio::sync::oneshot;
 use tokio::task::{JoinHandle, JoinSet};
 use tokio::time::timeout;
 use tracing::{Instrument, info_span, instrument};
-use wasmtime::{AsContextMut as _, Store};
+use wasmtime::AsContextMut as _;
 use wasmtime_wasi_http::io::TokioIo;
 use wasmtime_wasi_http::p3::bindings::http::types as wasi;
 use wasmtime_wasi_http::p3::bindings::{Service, ServiceIndices};
@@ -323,12 +323,12 @@ where
         };
 
         // instantiate the selected guest fresh (instance-per-call)
-        let (mut store, instance) = self.state.enter(&guest, ChainCtx::server()).await?;
-        let service = indices.load(&mut store, &instance)?;
+        let (mut entered, instance) = self.state.enter(&guest, ChainCtx::server(), slot).await?;
+        let service = indices.load(&mut entered, &instance)?;
 
         let (sender, receiver) = oneshot::channel::<Result<hyper::Response<OutgoingBody>>>();
         let stream_timeout = self.state.options().http_stream_timeout;
-        let guest_task = spawn_guest(store, slot, service, request, sender, stream_timeout);
+        let guest_task = spawn_guest(entered, service, request, sender, stream_timeout);
 
         // bound time-to-response (not the streaming body); cancel a hung guest
         let response = match timeout(self.state.options().guest_timeout, receiver).await {
@@ -353,7 +353,7 @@ where
 // `stream_timeout` has passed since the head went out. Ending the task drops
 // the store, which fails a body still streaming, and then frees the slot.
 fn spawn_guest<B, T>(
-    store: Store<StoreCtx<B>>, slot: Slot, service: Service, request: http::Request<T>,
+    mut entered: Entered<B>, service: Service, request: http::Request<T>,
     sender: oneshot::Sender<Result<hyper::Response<OutgoingBody>>>,
     stream_timeout: Option<Duration>,
 ) -> JoinHandle<()>
@@ -362,16 +362,9 @@ where
     T: Body<Data = Bytes> + Send + 'static,
     T::Error: Into<wasmtime_wasi_http::Error>,
 {
-    // HACK: the store and the slot move into the task as one tuple, rebound
-    // whole inside it, since an `async` block captures only the fields it
-    // touches. A tuple drops its fields in order however the task ends, so
-    // the pool has the store's instance back before the slot frees.
-    let held = (store, slot);
-
     tokio::spawn(async move {
-        let mut held = held;
-        let store = &mut held.0;
-        let result = store
+        let result = entered
+            .as_context_mut()
             .run_concurrent(async |store| {
                 // one error path through `sender`, so the caller never
                 // mistakes a real error for a panicked task

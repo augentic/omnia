@@ -172,7 +172,7 @@ Every slot of the [concurrency gate](reference/configuration.md#concurrency-gate
 
 ### `the instance pool is full`
 
-A call from one guest to another, or an invocation an embedder entered without a slot, found every instance of the pool taken. Such a call takes an instance but no slot of the gate, and with `MAX_CONCURRENT_INVOCATIONS` unset the gate is as wide as the pool, so the triggers' own invocations can take every instance. Set `MAX_CONCURRENT_INVOCATIONS` below `POOL_MAX_INSTANCES` by the margin [Pool sizing](guides/performance-tuning.md#2-pool-sizing) works out, or raise `POOL_MAX_INSTANCES`.
+A call from one guest to another found every instance of the pool taken. Such a call takes an instance but no slot of the gate, and with `MAX_CONCURRENT_INVOCATIONS` unset the gate is as wide as the pool, so the triggers' own invocations can take every instance. Set `MAX_CONCURRENT_INVOCATIONS` below `POOL_MAX_INSTANCES` by the margin [Pool sizing](guides/performance-tuning.md#2-pool-sizing) works out, or raise `POOL_MAX_INSTANCES`.
 
 ### A streamed HTTP response fails part way
 
