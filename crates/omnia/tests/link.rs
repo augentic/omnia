@@ -422,21 +422,86 @@ async fn full_pool() {
     }
 }
 
-// The skewed exporter takes the id `echoer` so `full`'s wired import of
-// `ping` is the one it is checked against; the mismatch is refused when the
-// exporter is served, so assembly fails before any call.
+// Whichever of the two seats second is refused, in every order, so no call
+// crosses the skew. The skewed exporter takes the id `echoer`, the target
+// `full` hard-codes, so under path guests `full`'s call is what loads it.
 #[tokio::test]
 async fn link_skewed() {
+    let full = std::fs::read(test_programs::LINK_FULL).expect("reading the full guest");
+    let skewed = std::fs::read(test_programs::LINK_SKEWED).expect("reading the skewed guest");
+    let seated = |runtime: &Runtime<()>, id: &str| runtime.registry().get(&GuestId::from(id));
+
+    // both at boot
     let Err(err) =
         boot(&[("echoer", test_programs::LINK_SKEWED), ("full", test_programs::LINK_FULL)]).await
     else {
         panic!("skewed exporter was served");
     };
+    names_skew(&format!("{err:#}"), ["echoer", "full"]);
 
-    let text = format!("{err:#}");
-    for needle in ["echoer", "full", "omnia-test:link/ops", "ping"] {
+    // the exporter after a boot importer
+    let runtime = boot(&[("full", test_programs::LINK_FULL)]).await.expect("deployment boots");
+    names_skew(&refused_seat(&runtime, "echoer", &skewed).await, ["echoer", "full"]);
+    assert!(seated(&runtime, "echoer").is_none(), "nothing was seated");
+
+    // the importer after a boot exporter, twice, so the first refusal left nothing parked
+    let runtime = boot(&[("echoer", test_programs::LINK_SKEWED)]).await.expect("deployment boots");
+    for _ in 0..2 {
+        names_skew(&refused_seat(&runtime, "full", &full).await, ["echoer", "full"]);
+    }
+    assert!(seated(&runtime, "full").is_none(), "nothing was seated");
+
+    // the exporter after a late importer
+    let manifest = Manifest::new().guest(GuestEntry::new("full", test_programs::LINK_FULL));
+    let runtime = assemble(manifest, |builder| builder).await.expect("deployment boots");
+    runtime.guest(&GuestId::from("full")).await.expect("`full` loads at first use");
+    names_skew(&refused_seat(&runtime, "echoer", &skewed).await, ["echoer", "full"]);
+    assert!(seated(&runtime, "echoer").is_none(), "nothing was seated");
+
+    // path guests, where the call loads the exporter
+    let manifest = Manifest::new()
+        .guest(GuestEntry::new("full", test_programs::LINK_FULL))
+        .guest(GuestEntry::new("echoer", test_programs::LINK_SKEWED));
+    let runtime = assemble(manifest, |builder| builder).await.expect("deployment boots");
+    let err = call(&runtime, "full", "poke", "hi").await.expect_err("the exporter is refused");
+    names_skew(&format!("{err:#}"), ["echoer", "full"]);
+    assert!(seated(&runtime, "echoer").is_none(), "nothing was seated");
+}
+
+// admits `bytes` as `id`, which must be refused as invalid
+async fn refused_seat(runtime: &Runtime<()>, id: &str, bytes: &[u8]) -> String {
+    let verified = Verified::wasm(bytes.to_vec()).expect("the guest is raw wasm");
+    match runtime.admit(GuestId::from(id), verified, Grants::all()).await {
+        Err(GuestError::Invalid(reason)) => reason,
+        outcome => panic!("`{id}` was not refused as invalid: {outcome:?}"),
+    }
+}
+
+fn names_skew(text: &str, guests: [&str; 2]) {
+    let guests = guests.map(|guest| format!("guest `{guest}`"));
+    for needle in guests.iter().map(String::as_str).chain(["omnia-test:link/ops", "ping"]) {
         assert!(text.contains(needle), "`{needle}` missing from: {text}");
     }
+}
+
+// `full` and the skewed importer agree on `ping`'s parameters but not on its
+// result, so whichever of the two seats second is refused, at boot or late.
+#[tokio::test]
+async fn link_skewed_importer() {
+    let Err(err) = boot(&[
+        ("full", test_programs::LINK_FULL),
+        ("skewed", test_programs::LINK_SKEWED_IMPORTER),
+    ])
+    .await
+    else {
+        panic!("two importers that disagree both booted");
+    };
+    names_skew(&format!("{err:#}"), ["full", "skewed"]);
+
+    let runtime = boot(&[("full", test_programs::LINK_FULL)]).await.expect("deployment boots");
+    let skewed = std::fs::read(test_programs::LINK_SKEWED_IMPORTER).expect("reading the importer");
+    names_skew(&refused_seat(&runtime, "skewed", &skewed).await, ["full", "skewed"]);
+    assert!(runtime.registry().get(&GuestId::from("skewed")).is_none(), "nothing was seated");
 }
 
 // `take` nests its resource in an optional record, so the refusal must walk

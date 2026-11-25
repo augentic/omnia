@@ -40,6 +40,7 @@ mod polyfill;
 mod route;
 mod selector;
 mod serve;
+mod signature;
 
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -127,15 +128,13 @@ impl<B: Send + 'static> LinkSeam<B> for InProcessLinks {
 
     fn serve(&self, factory: StoreFactory<B>, guest: &Guest<B>) -> FutureResult<()> {
         // pure introspection: the route is built here, the future only carries its outcome
-        let wired = self.wired.lock().unwrap_or_else(PoisonError::into_inner).clone();
-        let parked = serve::serve_guest(
-            &self.routes,
-            &wired,
-            factory,
-            guest.id(),
-            guest.instance_pre().clone(),
-        );
+        let parked =
+            serve::serve_guest(&self.routes, factory, guest.id(), guest.instance_pre().clone());
         ready(parked).boxed()
+    }
+
+    fn check(&self, guest: &Guest<B>, standing: &[&Guest<B>]) -> Result<()> {
+        signature::check(guest, standing)
     }
 
     fn publish(&self, id: &GuestId) -> Result<()> {

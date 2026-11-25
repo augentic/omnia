@@ -59,6 +59,20 @@ pub trait LinkSeam<B: 'static>: Send + Sync + 'static {
     /// published or discarded.
     fn serve(&self, factory: StoreFactory<B>, guest: &Guest<B>) -> FutureResult<()>;
 
+    /// Refuse `guest` when a linked function it shares with a guest in
+    /// `standing` has another signature.
+    ///
+    /// The registry calls it as a late guest is published, passing every
+    /// guest then registered, under the gate's write guard. It must not call
+    /// back into the registry. At assembly, each boot guest is checked
+    /// against the boot guests before it.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error naming both guests and the function when the two
+    /// signatures differ.
+    fn check(&self, guest: &Guest<B>, standing: &[&Guest<B>]) -> Result<()>;
+
     /// Move `id`'s pending endpoint live; a no-op when nothing is pending.
     ///
     /// # Errors
@@ -96,6 +110,10 @@ impl<B: 'static> LinkSeam<B> for NoLinks {
 
     fn serve(&self, _factory: StoreFactory<B>, _guest: &Guest<B>) -> FutureResult<()> {
         Box::pin(async { Ok(()) })
+    }
+
+    fn check(&self, _guest: &Guest<B>, _standing: &[&Guest<B>]) -> Result<()> {
+        Ok(())
     }
 
     fn publish(&self, _id: &GuestId) -> Result<()> {

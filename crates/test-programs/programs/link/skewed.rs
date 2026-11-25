@@ -1,6 +1,6 @@
 //! Exports `omnia-test:link/ops` from `wit-skew`, whose `ping` returns `u32`
 //! where every importer expects `string`, so the link suite can pin the
-//! serve-time signature check.
+//! publish-time signature check.
 
 #![cfg(target_arch = "wasm32")]
 

@@ -64,7 +64,7 @@ How the runtime tells its own interfaces from the ones guests share: an import o
 
 ### Link seam
 
-The `LinkSeam` trait the registry drives for guest-to-guest dispatch: polyfill every guest import the [namespace rule](#namespace-rule) leaves to guests, serve the matching exports, and publish or discard endpoints as guests enter and leave. A runtime built without the [`link` feature](#link-feature) installs `NoLinks` (every method a no-op); one built with it installs `InProcessLinks` from `omnia-link`. Endpoints move through two stages — `serve` parks pending state outside the registry's lifecycle gate; `publish`/`discard`/`remove` run under the gate — and a call never reads pending state.
+The `LinkSeam` trait the registry drives for guest-to-guest dispatch: polyfill every guest import the [namespace rule](#namespace-rule) leaves to guests, serve the matching exports, refuse a guest that disagrees with a registered one on a linked function's signature, and publish or discard endpoints as guests enter and leave. A runtime built without the [`link` feature](#link-feature) installs `NoLinks` (every method a no-op); one built with it installs `InProcessLinks` from `omnia-link`. Endpoints move through two stages — `serve` parks pending state outside the registry's lifecycle gate; `publish`/`discard`/`remove` run under the gate — and a call never reads pending state.
 
 ### Link feature
 

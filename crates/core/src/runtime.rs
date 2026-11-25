@@ -205,8 +205,9 @@ impl<B: Backends> Runtime<B> {
     /// - [`GuestError::Denied`] when the component imports code from a
     ///   package its entry's grants do not reach.
     /// - [`GuestError::Invalid`] when the bytes miss the pin, are a
-    ///   pre-compiled artifact where raw wasm alone is admitted, or do not
-    ///   load as a component.
+    ///   pre-compiled artifact where raw wasm alone is admitted, do not load
+    ///   as a component, or disagree with a registered guest on a linked
+    ///   function's signature.
     /// - [`GuestError::Internal`] when the registration failed, or the load
     ///   panicked.
     pub async fn guest(&self, id: &GuestId) -> Result<Arc<Guest<B>>, GuestError> {
@@ -366,7 +367,8 @@ impl<B: Backends> Runtime<B> {
     /// - [`GuestError::Invalid`] when a declared entry's bytes miss its pin,
     ///   caller-named grants do not [validate](Grants::validate), or the
     ///   bytes are a pre-compiled artifact where raw wasm alone is admitted,
-    ///   or do not load as a component.
+    ///   do not load as a component, or disagree with a registered guest on a
+    ///   linked function's signature.
     /// - [`GuestError::Conflict`] when caller-named bytes miss the pin, or
     ///   the name is active under other bytes.
     /// - [`GuestError::Internal`] on a serve or publication failure.
@@ -645,8 +647,9 @@ impl<B: Backends> Runtime<B> {
     /// grants, `grants` do not [validate](Grants::validate), the component
     /// imports code from a package `grants` do not reach, the bytes cannot
     /// be loaded, the component's imports exceed the deployment's linked
-    /// host set and declared link interfaces, or its linked exports cannot
-    /// be served.
+    /// host set and declared link interfaces, its linked exports cannot be
+    /// served, or it disagrees with a registered guest on a linked
+    /// function's signature.
     pub async fn register(
         &self, id: impl Into<GuestId>, bytes: Vec<u8>, grants: Grants,
     ) -> Result<()> {
@@ -673,7 +676,8 @@ impl<B: Backends> Runtime<B> {
     ///   earlier or a racing registration.
     /// - [`GuestError::Invalid`] for `grants` that do not
     ///   [validate](Grants::validate), or bytes that do not load as a
-    ///   component against the deployment's host set.
+    ///   component against the deployment's host set or that disagree with a
+    ///   registered guest on a linked function's signature.
     /// - [`GuestError::Internal`] on a serve or publication failure.
     pub async fn admit(
         &self, id: GuestId, verified: Verified, grants: Grants,
@@ -732,6 +736,7 @@ impl<B: Backends> Runtime<B> {
         })?;
         registry.publish(Arc::clone(&guest)).map_err(|error| match error {
             PublishError::Occupied => SeatError::Occupied,
+            PublishError::Skew(error) => SeatError::Invalid(format!("{error:#}")),
             PublishError::Transport(error) => {
                 SeatError::Internal(format!("publishing `{id}`: {error:#}"))
             }
@@ -946,8 +951,9 @@ pub enum GuestError {
     Denied(String),
     /// The request or the bytes are invalid. The bytes miss the
     /// deployment's pin, are a pre-compiled artifact where raw wasm alone is
-    /// admitted, or do not load as a component against the deployment's
-    /// host set.
+    /// admitted, do not load as a component against the deployment's host
+    /// set, or disagree with a registered guest on a linked function's
+    /// signature.
     #[error("{0}")]
     Invalid(String),
     /// The runtime cannot serve the request, such as a package with no

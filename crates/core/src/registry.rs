@@ -11,7 +11,7 @@
 
 mod routing;
 
-use std::collections::{BTreeMap, BTreeSet, btree_map};
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::path::Path;
 use std::sync::{Arc, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -239,9 +239,9 @@ pub struct Registry<B: 'static> {
 
 impl<B: 'static> Registry<B> {
     /// Assemble a registry from a linked deployment's parts: polyfill link
-    /// imports through the seam, pre-instantiate every loaded guest, table
-    /// the declared ones, validate that routes name guests, and freeze the
-    /// static set.
+    /// imports through the seam, pre-instantiate every loaded guest, check
+    /// their linked signatures against each other, table the declared ones,
+    /// validate that routes name guests, and freeze the static set.
     ///
     /// # Errors
     ///
@@ -249,7 +249,8 @@ impl<B: 'static> Registry<B> {
     /// a guest was built for WASI 0.2 (`wasm32-wasip2`), a guest imports code
     /// from a package its grants do not reach, link imports cannot be
     /// polyfilled, a component cannot be pre-instantiated, an identity
-    /// repeats, or a route targets a guest that is neither loaded nor
+    /// repeats, the seam's [`check`](LinkSeam::check) refuses a pair of
+    /// loaded guests, or a route targets a guest that is neither loaded nor
     /// declared.
     pub fn assemble(parts: RegistryParts<B>) -> Result<Self> {
         let RegistryParts {
@@ -289,6 +290,14 @@ impl<B: 'static> Registry<B> {
                 bail!("duplicate guest id `{id}`: guest identities must be unique");
             }
         }
+
+        // each loaded guest against those before it, so every pair is checked once
+        let mut checked: Vec<&Guest<B>> = Vec::with_capacity(guests.len());
+        for guest in guests.values().map(Arc::as_ref) {
+            seam.check(guest, &checked)?;
+            checked.push(guest);
+        }
+
         let mut sources = BTreeMap::new();
         for source in declared {
             let id = source.id().clone();
@@ -400,26 +409,31 @@ impl<B: 'static> Registry<B> {
     /// Publish a late guest and its pending link endpoint (parked by the serve
     /// side) as one lifecycle transition. Refuses an identity that is already
     /// registered (static entries can never be shadowed; a dynamic upgrade is
-    /// deregister + register), discarding the pending endpoint; on refusal the
-    /// registry map is untouched, so a failed registration leaves no partial
-    /// state.
+    /// deregister + register), and a guest the seam's
+    /// [`check`](LinkSeam::check) refuses against every registered guest,
+    /// discarding the pending endpoint either way; on refusal the registry map
+    /// is untouched, so a failed registration leaves no partial state.
     pub(crate) fn publish(&self, guest: Arc<Guest<B>>) -> Result<(), PublishError> {
         let id = guest.id().clone();
 
         // lifecycle write first, then the inner maps
         let _lifecycle = self.lifecycle_write();
         let mut guests = self.guests.write().unwrap_or_else(PoisonError::into_inner);
-        match guests.entry(id.clone()) {
-            btree_map::Entry::Occupied(_) => {
-                self.seam.discard(&id);
-                return Err(PublishError::Occupied);
-            }
-            btree_map::Entry::Vacant(slot) => {
-                // seam before entry, so a refused publish leaves the map untouched
-                self.seam.publish(&id).map_err(PublishError::Transport)?;
-                slot.insert(guest);
-            }
+        if guests.contains_key(&id) {
+            self.seam.discard(&id);
+            return Err(PublishError::Occupied);
         }
+
+        // under the guards, so of two guests seated at once the later checks against the earlier
+        let standing: Vec<&Guest<B>> = guests.values().map(Arc::as_ref).collect();
+        if let Err(error) = self.seam.check(&guest, &standing) {
+            self.seam.discard(&id);
+            return Err(PublishError::Skew(error));
+        }
+
+        // seam before entry, so a refused publish leaves the map untouched
+        self.seam.publish(&id).map_err(PublishError::Transport)?;
+        guests.insert(id, guest);
         drop(guests);
         Ok(())
     }
@@ -551,6 +565,8 @@ fn package(import: &str) -> &str {
 pub enum PublishError {
     /// The identity is already registered.
     Occupied,
+    /// A linked function's signature differs from a registered guest's.
+    Skew(anyhow::Error),
     /// Link-endpoint installation failed.
     Transport(anyhow::Error),
 }

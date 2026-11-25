@@ -1,7 +1,7 @@
 // A skewed copy of `omnia-test:link/ops`: the same package and interface
-// name, so the export resolves as the linked interface, but a different
-// result type from what every importer in `wit/link.wit` expects. Kept in
-// its own directory because one WIT package cannot define `ops` twice.
+// name, so it links as the same interface, but a different result type from
+// the one every guest built from `wit/link.wit` declares. Kept in its own
+// directory because one WIT package cannot define `ops` twice.
 package omnia-test:link;
 
 interface ops {
@@ -10,8 +10,15 @@ interface ops {
     ping-async: async func(target: string, message: string) -> u32;
 }
 
-/// Serves the skewed `ops`, so serving it against a `wit/link.wit` importer
+/// Serves the skewed `ops`, so seating it beside a `wit/link.wit` importer
 /// must be refused.
 world skewed {
     export ops;
+}
+
+/// Imports the skewed `ping`, so seating it beside a `wit/link.wit` importer
+/// must be refused.
+world skewed-importer {
+    import ops;
+    export poke: func(message: string) -> u32;
 }

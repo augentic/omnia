@@ -19,19 +19,11 @@ use super::selector::GuestSelector;
 /// The functions polyfilled onto a linker — the union across guests at
 /// function granularity, since components import only the functions they use
 /// and so per-guest imports of one interface are arbitrary subsets. Keyed by
-/// interface then function name; the value records how the first importer
-/// declared the function, so a later guest whose import disagrees on
+/// interface then function name; the value is whether the linker defines the
+/// function as an `async func`, so a later guest whose import disagrees on
 /// asyncness is rejected instead of failing wasmtime's pre-instantiation
-/// typecheck with no cross-guest context, and an exporter's signature can be
-/// checked against the importer's when it is served.
-pub type WiredLinks = BTreeMap<Box<str>, BTreeMap<Box<str>, Wired>>;
-
-/// One polyfilled function as its first importer declared it.
-#[derive(Clone)]
-pub struct Wired {
-    pub ty: types::ComponentFunc,
-    pub importer: GuestId,
-}
+/// typecheck with no cross-guest context.
+pub type WiredLinks = BTreeMap<Box<str>, BTreeMap<Box<str>, bool>>;
 
 /// The caller-side state every polyfilled import shares: the selector
 /// strategy, the chain policy, and the live route table.
@@ -95,12 +87,12 @@ pub fn polyfill_component<B: Send + 'static>(
             };
             let is_async = ty.async_();
             match wired_funcs.get(func) {
-                Some(earlier) if earlier.ty.async_() == is_async => {}
-                Some(earlier) => bail!(
+                Some(&wired_async) if wired_async == is_async => {}
+                Some(&wired_async) => bail!(
                     "guest `{id}` imports `{name}/{func}` as {}, but an earlier guest wired it \
                      as {}; every importer of a host-mediated function must agree on asyncness",
                     describe(is_async),
-                    describe(earlier.ty.async_()),
+                    describe(wired_async),
                 ),
                 None => {
                     if let Err(kind) = plain_signature(&ty) {
@@ -156,13 +148,7 @@ pub fn polyfill_component<B: Send + 'static>(
                 .map_err(anyhow::Error::from)
                 .with_context(|| format!("polyfilling `{name}` function `{func}`"))?;
         }
-        wired_funcs.extend(funcs.into_iter().map(|(func, ty)| {
-            let wired = Wired {
-                ty,
-                importer: id.clone(),
-            };
-            (Box::from(&*func), wired)
-        }));
+        wired_funcs.extend(funcs.into_iter().map(|(func, ty)| (Box::from(&*func), ty.async_())));
     }
     Ok(())
 }
@@ -249,6 +235,12 @@ async fn relay(
                 _ => err,
             }
         })?;
+    ensure!(
+        out.len() == results.len(),
+        "`{target}` returned {} results for `{interface}/{func}`, which expects {}",
+        out.len(),
+        results.len(),
+    );
     for (slot, value) in zip(results, out) {
         *slot = value;
     }

@@ -3,12 +3,11 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use anyhow::{Context as _, Result, ensure};
+use anyhow::{Context as _, Result};
 use omnia_core::{GuestId, StoreCtx, StoreFactory};
 use wasmtime::component::{InstancePre, types};
 
 use super::is_host;
-use super::polyfill::WiredLinks;
 use super::route::{Linked, Route, RouteInvoke, Routes};
 
 /// Resolve one guest's exports outside the runtime's own namespaces
@@ -18,19 +17,15 @@ use super::route::{Linked, Route, RouteInvoke, Routes};
 ///
 /// Pure introspection: every export index is resolved on the component here,
 /// once, and each call then instantiates the guest fresh on a store from
-/// `factory`. Every linked export an importer `wired` is checked against that
-/// importer's signature, so a WIT skew between the two fails here rather than
-/// mid-call. The registry's transactional publish moves the pending route live
-/// together with the registry entry.
+/// `factory`. The registry's transactional publish moves the pending route
+/// live together with the registry entry.
 ///
 /// # Errors
 ///
 /// Returns an error if a linked export cannot be resolved on the component,
-/// its signature differs from what an importer wired, or the guest already
-/// has a pending route.
+/// or the guest already has a pending route.
 pub fn serve_guest<B: Send + 'static>(
-    routes: &Routes, wired: &WiredLinks, factory: StoreFactory<B>, id: &GuestId,
-    instance_pre: InstancePre<StoreCtx<B>>,
+    routes: &Routes, factory: StoreFactory<B>, id: &GuestId, instance_pre: InstancePre<StoreCtx<B>>,
 ) -> Result<()> {
     let engine = instance_pre.engine();
     let component = instance_pre.component();
@@ -52,21 +47,6 @@ pub fn serve_guest<B: Send + 'static>(
             let types::ComponentItem::ComponentFunc(func_ty) = ty else {
                 continue;
             };
-            // element-wise, since `ComponentFunc` does not compare structurally
-            // across components; a late importer's skew is refused at lower time
-            if let Some(import) = wired.get(interface).and_then(|funcs| funcs.get(func)) {
-                let same = func_ty.async_() == import.ty.async_()
-                    && func_ty.params().eq(import.ty.params())
-                    && func_ty.results().eq(import.ty.results());
-                ensure!(
-                    same,
-                    "guest `{id}` exports `{interface}/{func}` with a signature that differs \
-                     from what guest `{}` imports: exported `{}`, imported `{}`",
-                    import.importer,
-                    render(&func_ty),
-                    render(&import.ty),
-                );
-            }
             let (_, export) = component
                 .get_export(Some(&iface_idx), func)
                 .with_context(|| format!("resolving `{interface}/{func}` on guest `{id}`"))?;
@@ -88,11 +68,4 @@ pub fn serve_guest<B: Send + 'static>(
         }) as Arc<dyn RouteInvoke>
     });
     routes.park(id, route)
-}
-
-fn render(ty: &types::ComponentFunc) -> String {
-    let params: Vec<String> = ty.params().map(|(name, ty)| format!("{name}: {ty:?}")).collect();
-    let results: Vec<types::Type> = ty.results().collect();
-    let prefix = if ty.async_() { "async " } else { "" };
-    format!("{prefix}func({}) -> {results:?}", params.join(", "))
 }
