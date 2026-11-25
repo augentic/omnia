@@ -14,6 +14,8 @@ Unreleased
 - **Worker egress and test doubles:** an `omnia:model` worker `egress` entry ending in a numeric label (`2130706433`, `example.1`) is `invalid`, since it reads as an IP address, and `omnia_test::host::MatchedHttp` refuses a request outside the guest's `hosts` with `http-request-denied`, recording none ([#423](https://github.com/augentic/omnia/issues/423)).
 - **Hand-bound handlers import `omnia:otel`:** `omnia_sdk::exports::messaging::export!` and `omnia_sdk::exports::websocket::export!` run each delivery or event inside the guest telemetry scope, so a guest that binds either imports `omnia:otel` and its deployment links `WasiOtel`. The no-op `OtelDefault` suffices.
 - **Only the command run receives the command's arguments:** a guest the run calls or loads, a guest a host dispatch reaches, and a guest a trigger serves see an empty argv, whatever their grants. A `mode: server` deployment given arguments fails at startup. A guest that read the arguments outside the run takes its input in the call, or from `[env] inherit` or `omnia:config` ([#437](https://github.com/augentic/omnia/issues/437)).
+- **`ModelClient::limits` has no default:** every backend states the session limits the host holds it to. A backend that took the default returns `Limits::default()`, and a client that wraps another returns the wrapped client's ([#435](https://github.com/augentic/omnia/issues/435)).
+- **`ScriptedModel::limited` sets a script's limits:** `omnia_test::host::ScriptedModel::limits(self, Limits)` is renamed, so a double that wraps a `ScriptedModel` forwards its limits as `self.inner.limits()` ([#435](https://github.com/augentic/omnia/issues/435)).
 
 ### Fixed
 

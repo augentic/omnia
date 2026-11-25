@@ -176,9 +176,9 @@ impl ScriptedModel {
         self.stepping(index, [Step::List { path: path.into() }])
     }
 
-    /// The session limits this backend reports to the host.
+    /// Reports `limits` to the host in place of [`Limits::default`].
     #[must_use]
-    pub const fn limits(mut self, limits: Limits) -> Self {
+    pub const fn limited(mut self, limits: Limits) -> Self {
         self.limits = limits;
         self
     }

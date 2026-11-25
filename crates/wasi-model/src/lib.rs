@@ -97,9 +97,10 @@ pub trait ModelClient: Debug + Send + Sync + 'static {
     fn complete(&self, request: Request, tool_host: Arc<dyn ToolHost>) -> FutureResult<Answer>;
 
     /// Session bounds the host enforces for this backend's completions.
-    fn limits(&self) -> Limits {
-        Limits::default()
-    }
+    ///
+    /// A backend with no bounds of its own returns [`Limits::default`]. A
+    /// client that wraps another returns the wrapped client's.
+    fn limits(&self) -> Limits;
 }
 
 impl ModelClient for Box<dyn ModelClient> {
