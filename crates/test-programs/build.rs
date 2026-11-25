@@ -16,6 +16,7 @@ fn main() {
         .track([
             "crates/test-programs/wit",
             "crates/test-programs/wit-skew",
+            "crates/test-programs/wit-versioned",
             "crates/test-programs/src",
             "crates/test-programs/Cargo.toml",
         ])

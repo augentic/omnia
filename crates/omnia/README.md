@@ -45,7 +45,7 @@ The runtime is built around a set of traits that allow services to be plugged in
 `omnia` exposes the composition-root surface a deployment author, a host-server crate, or a hand-written runtime needs; dispatch and routing internals stay crate-private.
 
 - **Macros:** `runtime!`
-- **Lifecycle:** `run` — takes a built `Deployment`, assembles the `Runtime` (installing epoch interruption, pool-metric sampling, and the guest loader's policy, and serving every guest's linked exports), then drives command mode or the trigger servers
+- **Lifecycle:** `run` — takes a built `Deployment`, assembles the `Runtime` (installing epoch interruption, pool-metric sampling, and the guest loader's policy), then drives command mode or the trigger servers
 - **Runtime + store:** `Runtime`, `Wiring`, `Backends`, `ConnectAll`, `StoreCtx`, `StoreBase`, `Host`, `HostCtx`, `Provides`, `HostView`, `Connect`, `FromEnv` (the trait and its derive), `env` (the parsers a `FromEnv` field's `with` names), `Dispatcher`, `FutureResult`
 - **Registry pipeline:** `Manifest` (with `GuestEntry`, `Mount`, `RegistryConfig`, `SourceSpec`, route/transport types), `Source` (an entry resolved for loading, at boot for embedded bytes and at first use for a path or package), `DeploymentBuilder`, `Deployment`, `Registry`, `Guest`, `GuestId`, `RuntimeOptions`, `CompileOptions`
 - **Trigger routing (host servers):** `HttpRoutes`, `PatternRoutes`, `Routes`, `TriggerRouter`

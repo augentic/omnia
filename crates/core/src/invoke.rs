@@ -1,7 +1,7 @@
-//! The one primitive that drives a fresh callee instance, for host→guest and
-//! guest→guest dispatch alike.
+//! The primitive that drives a fresh callee instance for every dispatched call.
 
 use std::fmt;
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context as _;
@@ -12,24 +12,24 @@ use wasmtime::{PoolConcurrencyLimitError, Store};
 
 use crate::chain::ChainCtx;
 use crate::runtime::Slot;
-use crate::seam::StoreFactory;
 use crate::store::StoreCtx;
 use crate::value::handle_kind;
 
-/// Everything needed to instantiate a callee over the backend bundle `B` and
-/// invoke one of its exports.
+// builds a fresh, fully configured store for one guest at the chain context
+// its call runs at
+pub type StoreFactory<B> = Arc<dyn Fn(ChainCtx) -> Store<StoreCtx<B>> + Send + Sync>;
+
 pub struct FreshCall<B: 'static> {
-    /// Builds the callee's store.
     pub factory: StoreFactory<B>,
-    /// The callee's pre-instantiated component.
     pub instance_pre: InstancePre<StoreCtx<B>>,
-    /// The export to invoke, resolved once on the component rather than per call.
     pub export: ComponentExportIndex,
-    /// Number of results the export returns.
     pub results: usize,
 }
 
-/// Why a fresh call did not return the callee's results.
+/// Why a dispatched call did not return its callee's results.
+///
+/// An error from [`Dispatcher::invoke`](crate::Dispatcher::invoke) downcasts
+/// to it when the call reached its callee.
 #[derive(Debug)]
 pub enum InvokeError {
     /// The wall-clock bound elapsed; the callee task was aborted.
@@ -64,28 +64,11 @@ impl std::error::Error for InvokeError {
     }
 }
 
-/// Instantiate `call`'s component on a fresh store built at `ctx` and invoke
-/// its export with `args`, returning the results.
-///
-/// The callee's store carries `ctx` (so nested hops count against the same
-/// chain) and, when `bound` is given, the call must finish within it. The
-/// store is dropped when the call completes (instance-per-call).
-///
-/// # Errors
-///
-/// Returns [`InvokeError::Timeout`] when `bound` elapses, [`InvokeError::Handle`]
-/// when a result carries a store-bound handle, [`InvokeError::Trap`] when
-/// instantiation, export resolution, or the call fails, and
-/// [`InvokeError::Join`] when the callee task panics or is cancelled.
+// The callee's store carries `ctx`, so nested hops count against the same
+// chain, and drops when the call ends (instance-per-call). A root call's
+// `slot` admits it for as long as that store lives, however the callee task
+// ends.
 pub async fn call_fresh<B: Send + 'static>(
-    call: FreshCall<B>, args: Vec<Val>, ctx: ChainCtx, bound: Option<Duration>,
-) -> Result<Vec<Val>, InvokeError> {
-    call_admitted(call, None, args, ctx, bound).await
-}
-
-// `call_fresh` for a root call, which `slot` admits for as long as the
-// callee's store lives, however the callee task ends
-pub async fn call_admitted<B: Send + 'static>(
     call: FreshCall<B>, slot: Option<Slot>, args: Vec<Val>, ctx: ChainCtx, bound: Option<Duration>,
 ) -> Result<Vec<Val>, InvokeError> {
     // own task, so the caller cannot starve the callee and an abandoned caller
@@ -103,7 +86,7 @@ pub async fn call_admitted<B: Send + 'static>(
             .map_err(explain_full_pool)?;
         let func = instance
             .get_func(&mut callee.store, call.export)
-            .context("export resolved at serve time vanished")?;
+            .context("export resolved before instantiation vanished")?;
         let mut out = vec![Val::Bool(false); call.results];
         func.call_async(&mut callee.store, &args, &mut out).await.map_err(explain_full_pool)?;
         Ok::<_, anyhow::Error>(out)

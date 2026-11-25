@@ -1,39 +1,20 @@
 //! The seam between the guest registry and guest→guest linking.
 //!
-//! The registry owns guest lifecycle; how a guest's linked imports are
-//! satisfied and its linked exports served is behind [`LinkSeam`]. A
-//! deployment built without omnia's `link` feature installs [`NoLinks`]. One
-//! built with it installs an implementation that polyfills, serves, and
-//! routes calls over a transport.
-
-use std::sync::Arc;
+//! The registry owns guest lifecycle, and [`LinkSeam`] decides how a guest's
+//! linked imports are satisfied. A deployment built without omnia's `link`
+//! feature installs [`NoLinks`]. One built with it installs an implementation
+//! whose polyfilled imports call through the calling store's
+//! [`Dispatcher`](crate::Dispatcher).
 
 use anyhow::Result;
+use wasmtime::Engine;
 use wasmtime::component::{Component, Linker};
-use wasmtime::{Engine, Store};
 
-use crate::chain::ChainCtx;
-use crate::host::FutureResult;
 use crate::registry::{Guest, GuestId};
 use crate::source::LoadedGuest;
 use crate::store::StoreCtx;
 
-/// Builds a fresh, fully configured store for one guest over the backend
-/// bundle `B`, per served invocation, at the chain context the invocation
-/// runs at.
-#[doc(hidden)]
-pub type StoreFactory<B> = Arc<dyn Fn(ChainCtx) -> Store<StoreCtx<B>> + Send + Sync>;
-
 /// Guest→guest linking as the registry drives it, over the backend bundle `B`.
-///
-/// Endpoints move through two stages. [`serve`](Self::serve) runs *outside*
-/// the registry's lifecycle gate and writes only pending state;
-/// [`publish`](Self::publish), [`discard`](Self::discard) and
-/// [`remove`](Self::remove) run *under* the gate's write guard, so a guest's
-/// registry entry and its live endpoint change as one step. A call path never
-/// reads pending state and reads live state under the seam's own lock, not the
-/// gate: a call racing a deregister may complete against the departing
-/// instance, exactly as an in-flight invocation does.
 #[doc(hidden)]
 pub trait LinkSeam<B: 'static>: Send + Sync + 'static {
     /// Polyfill every bootstrap guest's link imports onto the shared linker,
@@ -57,16 +38,12 @@ pub trait LinkSeam<B: 'static>: Send + Sync + 'static {
         component: &Component,
     ) -> Result<()>;
 
-    /// Serve `guest`'s linked exports, parking the result pending until it is
-    /// published or discarded.
-    fn serve(&self, factory: StoreFactory<B>, guest: &Guest<B>) -> FutureResult<()>;
-
     /// Refuse `guest` when a linked function it shares with a guest in
     /// `standing` has another signature.
     ///
     /// The registry calls it as a late guest is published, passing every
-    /// guest then registered, under the gate's write guard. It must not call
-    /// back into the registry. At assembly, each boot guest is checked
+    /// guest then registered, under the guest map's write lock. It must not
+    /// call back into the registry. At assembly, each boot guest is checked
     /// against the boot guests before it.
     ///
     /// # Errors
@@ -74,22 +51,6 @@ pub trait LinkSeam<B: 'static>: Send + Sync + 'static {
     /// Returns an error naming both guests and the function when the two
     /// signatures differ.
     fn check(&self, guest: &Guest<B>, standing: &[&Guest<B>]) -> Result<()>;
-
-    /// Move `id`'s pending endpoint live; a no-op when nothing is pending.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if `id` already has a live endpoint.
-    fn publish(&self, id: &GuestId) -> Result<()>;
-
-    /// Drop `id`'s pending endpoint.
-    fn discard(&self, id: &GuestId);
-
-    /// Drop `id`'s live endpoint; in-flight invocations complete.
-    fn remove(&self, id: &GuestId);
-
-    /// Drop every pending and live endpoint.
-    fn shutdown(&self);
 }
 
 /// The seam of a deployment built without omnia's `link` feature.
@@ -111,21 +72,7 @@ impl<B: 'static> LinkSeam<B> for NoLinks {
         Ok(())
     }
 
-    fn serve(&self, _factory: StoreFactory<B>, _guest: &Guest<B>) -> FutureResult<()> {
-        Box::pin(async { Ok(()) })
-    }
-
     fn check(&self, _guest: &Guest<B>, _standing: &[&Guest<B>]) -> Result<()> {
         Ok(())
     }
-
-    fn publish(&self, _id: &GuestId) -> Result<()> {
-        Ok(())
-    }
-
-    fn discard(&self, _id: &GuestId) {}
-
-    fn remove(&self, _id: &GuestId) {}
-
-    fn shutdown(&self) {}
 }

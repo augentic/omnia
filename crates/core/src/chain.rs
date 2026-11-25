@@ -57,7 +57,7 @@ pub struct ChainPolicy {
 impl ChainPolicy {
     /// Enter a dispatch from `caller`, bounding the chain's nesting depth;
     /// returns the context the dispatched call runs at (depth plus the
-    /// inherited wall-clock policy), to be carried to the serve side.
+    /// inherited wall-clock policy), which the callee's store carries.
     ///
     /// Depth is per call chain (A->B->C, each awaited to completion before the
     /// caller returns), so concurrent, unrelated chains never contend for the

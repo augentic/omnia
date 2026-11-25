@@ -3,11 +3,11 @@
 //! Boots the two-guest `guest-link` deployment, then registers a third guest
 //! (`extra`, absent from the manifest) at run time via `Runtime::register`.
 //! The `router` reaches it through the same host-mediated link dispatch as
-//! any manifest target — `run-to("extra", ...)` — proving serve-at-register
-//! end to end. The manifest names its guests by path, so each loads at its
-//! first use: the router when `call_router` first resolves it, and
-//! `responder` inside the relay when the router first calls it. Build the
-//! guests first (see README.md), then:
+//! any manifest target — `run-to("extra", ...)` — so a guest registered at
+//! run time is reachable end to end. The manifest names its guests by path,
+//! so each loads at its first use: the router when `call_router` first
+//! resolves it, and `responder` inside the relay when the router first calls
+//! it. Build the guests first (see README.md), then:
 //!
 //!   cargo run --example guest-link-register
 
@@ -36,7 +36,6 @@ cfg_select! {
                 .build::<()>()
                 .await
                 .context("building deployment")?;
-            // `assemble` also wires the host-mediated link serve side.
             let runtime = deployment.assemble(()).await?;
 
             // absent from the manifest; an install pipeline would verify the

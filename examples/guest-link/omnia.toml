@@ -3,10 +3,9 @@
 # Two guests share one runtime. `router` imports `example:link/echo`, an
 # interface outside the runtime's own `wasi:` and `omnia:` namespaces, so the
 # host does not satisfy it natively: the runtime core polyfills it onto the
-# shared linker and, at startup, serves every guest's linked exports, so
-# calling the import dispatches by in-memory routing to `responder`, which
-# exports it. Nothing declares the seam — each component says what it
-# imports and exports.
+# shared linker, so calling the import dispatches to `responder`, which
+# exports it, on a fresh instance. Nothing declares the seam — each component
+# says what it imports and exports.
 #
 # The runtime core stays domain-agnostic: the relay sees only the opaque
 # interface string `example:link/echo` and opaque guest names.

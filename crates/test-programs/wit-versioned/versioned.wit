@@ -1,0 +1,18 @@
+// `ops` at two patch versions of one package, which wasmtime's
+// semver-compatible lookup takes for one interface. Kept in its own directory,
+// with 0.1.0 under `deps`, because one directory holds one version of a
+// package.
+package omnia-test:versioned@0.1.1;
+
+interface ops {
+    /// Echo `message` tagged with `target`.
+    ping: func(target: string, message: string) -> string;
+}
+
+/// Imports `ops` at 0.1.0 and exports it at 0.1.1, so its own call to `ping`
+/// names an interface it does not export.
+world versioned {
+    import omnia-test:versioned/ops@0.1.0;
+    export ops;
+    export poke: func(message: string) -> string;
+}

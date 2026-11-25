@@ -878,7 +878,7 @@ async fn plugins_unlinked() {
     );
     let detail = format!("{error:#}");
     assert!(
-        detail.contains("guest `noseam` is registered but exports no linked interface"),
+        detail.contains("guest `noseam` exports no interface `omnia-test:link/ops`"),
         "the trap diagnoses the unlinked target: {detail}"
     );
     runtime.shutdown();
