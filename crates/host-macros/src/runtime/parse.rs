@@ -9,7 +9,6 @@ use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
 use syn::{Expr, Ident, Path, Result, Token};
 
-/// Deployment drive mode parsed from `runtime!({ ... })`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Mode {
     #[default]
@@ -18,7 +17,6 @@ pub enum Mode {
 }
 
 impl Mode {
-    /// The `omnia::Mode` path this mode expands to.
     pub fn tokens(self) -> proc_macro2::TokenStream {
         match self {
             Self::Server => quote::quote!(omnia::Mode::Server),
@@ -27,12 +25,10 @@ impl Mode {
     }
 }
 
-/// Configuration for the runtime macro.
 pub struct Config {
     pub mode: Mode,
     pub host_entries: Vec<HostEntry>,
-    /// The `manifest:` path expression, when the deployment is a manifest
-    /// file rather than inline keys.
+    // set when the deployment is a manifest file rather than inline keys
     pub manifest_file: Option<Expr>,
     pub manifest: ManifestSpec,
 }
@@ -251,10 +247,8 @@ fn parse_bracketed_list<T: Parse>(input: ParseStream) -> Result<Vec<T>> {
     Ok(Punctuated::<T, Token![,]>::parse_terminated(&list)?.into_iter().collect())
 }
 
-/// One `Host: Backend` wiring from the `hosts: { ... }` block, optionally
-/// carrying compiled-in connect options: `Host: Backend(options)` lowers to
-/// `Connect::connect_with(options)` instead of the env-sourced
-/// `Connect::connect()`.
+// `Host: Backend(options)` lowers to `Connect::connect_with(options)` in place of
+// the env-sourced `Connect::connect()`.
 pub struct HostEntry {
     pub host: Path,
     pub backend: Path,
@@ -291,17 +285,12 @@ impl Parse for HostEntry {
     }
 }
 
-/// Inline manifest keys (`guests`, `mounts`, `env`, `plugins`) parsed from
-/// `runtime!({ ... })`; mirrors the `omnia::Manifest` schema.
+// Mirrors the `omnia::Manifest` schema.
 #[derive(Default)]
 pub struct ManifestSpec {
-    /// The `guests:` list — every component the deployment may run.
     pub guests: Vec<GuestSpec>,
     pub mounts: Vec<MountSpec>,
-    /// The `env: { .. }` block — the host variables every guest sees.
     pub env: Option<EnvSpec>,
-    /// The `plugins: { .. }` block — the package store, the routing of
-    /// every package source, and what a guest loaded at run time reaches.
     pub plugins: Option<PluginsSpec>,
 }
 
@@ -314,10 +303,8 @@ impl ManifestSpec {
     }
 }
 
-/// The `env: { inherit: [...] }` block.
 pub struct EnvSpec {
-    /// The `inherit:` names, each a whole variable name or a prefix that
-    /// ends in `*`.
+    // each a whole variable name, or a prefix that ends in `*`
     pub inherit: Vec<Expr>,
 }
 
@@ -346,16 +333,12 @@ impl Parse for EnvSpec {
     }
 }
 
-/// The `plugins: { store: ..., registries: ..., grants: { .. } }` block.
 pub struct PluginsSpec {
-    /// The `store:` path expression — the directory every package is kept
-    /// in; a leading `~/` expands against `$HOME` at start-up.
+    // a leading `~/` expands against `$HOME` at start-up
     pub store: Option<Expr>,
-    /// The `registries:` expression — the wasm-pkg configuration (TOML) that
-    /// routes package sources, typically an `include_str!`.
+    // the wasm-pkg configuration (TOML), typically an `include_str!`
     pub registries: Option<Expr>,
-    /// The `grants:` block — what a guest loaded at run time by path or
-    /// package reaches, within its loader's grants.
+    // what a guest loaded at run time reaches, within its loader's grants
     pub grants: Option<GrantsSpec>,
 }
 
@@ -420,18 +403,15 @@ fn parse_kv_block(
     Ok(brace.span.join())
 }
 
-/// One `{ path: ..., name: ..., routes: { ... }, command: true }` (or
-/// `{ package: ..., digest: ... }`) guest entry, with an optional
-/// `grants: { .. }` block.
 pub struct GuestSpec {
     pub source: GuestSource,
     pub routes: GuestRoutesSpec,
     pub command: bool,
-    /// Span of the `command:` key, for cross-key diagnostics.
+    // for cross-key diagnostics
     pub command_span: Option<Span>,
-    /// The `digest:` pin, decoded from its `sha256:<hex>` literal.
+    // decoded from its `sha256:<hex>` literal
     pub digest: Option<[u8; DIGEST_LEN]>,
-    /// The `grants:` block; absent, the guest reaches everything.
+    // absent, the guest reaches everything
     pub grants: Option<GrantsSpec>,
 }
 
@@ -551,19 +531,16 @@ const fn nibble(digit: u8) -> Option<u8> {
     }
 }
 
-/// Where a guest entry's component comes from.
 pub enum GuestSource {
-    /// A `path:` embedded with `include_bytes!` — a string literal or a macro
-    /// such as `concat!(env!(..), ..)`; the file's stem names the guest
-    /// unless `name:` does.
+    // embedded with `include_bytes!`, so `path` is a string literal or a macro
+    // such as `concat!(env!(..), ..)`, and the file's stem names the guest
+    // unless `name` does
     Embedded { path: Expr, name: Option<Expr> },
-    /// A `package:` reference the runtime fetches at the guest's first use;
-    /// the reference without its version names the guest unless `name:`
-    /// does.
+    // fetched at the guest's first use, and named by the reference without its
+    // version unless `name` does
     Package { reference: Expr, name: Option<Expr> },
 }
 
-/// One `{ name: ..., path: ..., writable: ... }` mount entry.
 pub struct MountSpec {
     pub name: Expr,
     pub path: Expr,
@@ -602,8 +579,7 @@ impl Parse for MountSpec {
     }
 }
 
-/// Per-trigger route pattern lists from a guest entry's `routes: { ... }`
-/// block; the containing guest is the implicit target.
+// The containing guest is every route's implicit target.
 #[derive(Default)]
 pub struct GuestRoutesSpec {
     pub http: Vec<Expr>,
@@ -637,20 +613,13 @@ impl Parse for GuestRoutesSpec {
     }
 }
 
-/// A guest's `grants: { .. }` block of `env`, `mounts`, `hosts`, `guests`, and `interfaces` lists.
-///
-/// An omitted list grants nothing, as a manifest's grants table does.
+// An omitted list grants nothing, as a manifest's grants table does.
 #[derive(Default)]
 pub struct GrantsSpec {
-    /// The host variables the guest sees.
     pub env: Vec<Expr>,
-    /// The mounts preopened into the guest, by name.
     pub mounts: Vec<Expr>,
-    /// The hosts the guest's outbound requests reach, by host pattern.
     pub hosts: Vec<Expr>,
-    /// The guests the guest calls over a link or loads, by name.
     pub guests: Vec<Expr>,
-    /// The packages the guest may import code from.
     pub interfaces: Vec<Expr>,
 }
 

@@ -35,6 +35,7 @@ Unreleased
 - **Two unmarked command guests fail:** when two or more boot guests export `wasi:cli/run` and none is marked `command = true`, command mode fails naming them and advising the mark. It failed with "trigger `cli` has 2 capable guests … but no routes", which sent the operator to routes the cli trigger cannot take ([#448](https://github.com/augentic/omnia/issues/448)).
 - **The generated `main` runs `compile`:** `<runtime> compile <wasm> [-o <path>] [-t <triple>]` compiles under the compile-affecting settings its environment sets, so a `run` under the same environment loads the artifact. A runtime built without omnia's `jit` feature refuses it, naming the feature. It was refused as "the generated `main` only supports `run`" ([#448](https://github.com/augentic/omnia/issues/448)).
 - **A call through `Runtime::dispatcher()` takes a slot:** each call is a root invocation, so it waits at a full concurrency gate and counts against `MAX_CONCURRENT_INVOCATIONS`, freeing its slot once the callee's store drops. A store's own dispatcher takes none. A host-side caller that holds a slot while it dispatches waits on itself at a full gate, so it drops the slot first ([#448](https://github.com/augentic/omnia/issues/448)).
+- **`EPOCH_TICK_MS=0` fails startup:** a deployment that sets it stops, as one that sets `GUEST_TIMEOUT_MS=0` does. 0.38 raised it to 1 ms ([#451](https://github.com/augentic/omnia/issues/451)).
 
 ### Fixed
 

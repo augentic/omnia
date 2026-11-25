@@ -15,9 +15,8 @@ mod session;
 mod tool_host;
 mod workspace;
 
+#[expect(missing_docs, reason = "the WIT documents not every re-exported field and variant")]
 mod generated {
-    #![allow(missing_docs, reason = "wasmtime bindgen output")]
-
     pub use omnia_wasi_types::Error;
 
     pub use super::completion_impl::ModelHandle;

@@ -9,7 +9,7 @@
 //! ahead-of-time compiler goes through, [`CompileOptions::configure`], which
 //! is what lets the loading engine accept a pre-compiled artifact.
 
-use std::num::{NonZeroUsize, ParseIntError};
+use std::num::NonZeroUsize;
 use std::time::Duration;
 
 use anyhow::{Result, bail};
@@ -39,7 +39,7 @@ pub struct RuntimeOptions {
     #[env(from = "HTTP_STREAM_TIMEOUT_MS", with = crate::env::millis)]
     pub http_stream_timeout: Option<Duration>,
     /// Epoch-increment interval, also the CPU-bound guest yield granularity (`EPOCH_TICK_MS`, default 10ms, min 1ms).
-    #[env(from = "EPOCH_TICK_MS", default = "10", with = parse_tick)]
+    #[env(from = "EPOCH_TICK_MS", default = "10", with = crate::env::millis)]
     pub epoch_tick: Duration,
     /// Maximum linear-memory size a guest may grow to, in bytes (`MAX_MEMORY_BYTES`, default 256 `MiB`).
     #[env(from = "MAX_MEMORY_BYTES", default = "268435456")]
@@ -391,11 +391,6 @@ impl From<&RuntimeOptions> for Config {
     }
 }
 
-// clamped so the ticker interval can never be zero
-fn parse_tick(value: &str) -> Result<Duration, ParseIntError> {
-    crate::env::millis(value).map(|tick| tick.max(Duration::from_millis(1)))
-}
-
 fn parse_enabled(value: &str) -> Result<Enabled, &'static str> {
     match value.trim().to_ascii_lowercase().as_str() {
         "auto" => Ok(Enabled::Auto),
@@ -617,13 +612,9 @@ mod tests {
 
     #[test]
     fn zero_tick() {
-        let options = RuntimeOptions {
-            pooling: false,
-            epoch_tick: Duration::ZERO,
-            ..RuntimeOptions::default()
-        };
-
-        let error = options.validate().expect_err("a zero tick is refused");
+        let error =
+            RuntimeOptions::load_from(|name| (name == "EPOCH_TICK_MS").then(|| "0".to_owned()))
+                .expect_err("a zero tick is refused");
         assert!(error.to_string().contains("EPOCH_TICK_MS"), "{error}");
     }
 }

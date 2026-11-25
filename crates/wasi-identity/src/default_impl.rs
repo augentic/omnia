@@ -84,7 +84,6 @@ struct TokenManager {
     options: Arc<ConnectOptions>,
     // keyed by normalized scopes: a token minted for one scope set is never
     // handed out for another
-    // TODO: change to use wasi-keyvalue for distributed caching
     cache: Arc<Mutex<HashMap<Vec<String>, CachedToken>>>,
 }
 

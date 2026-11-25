@@ -15,8 +15,7 @@ pub struct Codegen {
     pub backends_ty: TokenStream,
     pub backends_def: TokenStream,
     pub main_options: TokenStream,
-    /// The compiled-in `omnia::ManifestSource`; absent when the invocation
-    /// declares neither `manifest:` nor inline manifest keys.
+    // absent when the invocation declares neither `manifest:` nor inline manifest keys
     pub manifest: Option<TokenStream>,
 }
 

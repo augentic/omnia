@@ -13,9 +13,8 @@ mod store_impl;
 mod transfer;
 mod uploads_impl;
 
+#[expect(clippy::empty_enums, reason = "bindgen writes the unremapped `upload` as an empty enum")]
 mod generated {
-    #![allow(missing_docs, clippy::empty_enums, reason = "wasmtime bindgen output")]
-
     pub use omnia_wasi_types::Error;
 
     pub use super::container_impl::ContainerHandle;

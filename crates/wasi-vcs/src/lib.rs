@@ -15,8 +15,6 @@ mod workspace_impl;
 mod workspaces_impl;
 
 mod generated {
-    #![allow(missing_docs, reason = "wasmtime bindgen output")]
-
     pub use omnia_wasi_types::Error;
 
     pub use super::workspace_impl::WorkspaceHandle;

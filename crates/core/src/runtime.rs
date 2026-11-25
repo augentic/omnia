@@ -393,36 +393,31 @@ impl<B: Backends> Runtime<B> {
         let digest = verified.digest();
 
         // seat them, or settle with the registration that got there first
-        match self.seat(id.clone(), verified, grants.clone()).await {
-            Ok(guest) => Ok(guest),
-            Err(SeatError::Occupied) => {
-                let standing = self.registry().get(&id).ok_or_else(|| {
-                    GuestError::Internal(format!(
-                        "guest `{id}` was admitted by a racing load and deregistered before it \
-                         could be attested"
-                    ))
-                })?;
-                match policy {
-                    Policy::CallerNamed { .. } if standing.digest() != digest => {
-                        Err(GuestError::Conflict {
-                            found: digest,
-                            detail: format!(
-                                "guest `{id}` is active under other bytes ({}, not {digest})",
-                                standing.digest()
-                            ),
-                        })
-                    }
-                    Policy::CallerNamed { grants, .. } if standing.grants().as_ref() != grants => {
-                        Err(GuestError::Denied(format!(
-                            "guest `{id}` is active under other grants than this admission names"
-                        )))
-                    }
-                    Policy::Declared(_) | Policy::CallerNamed { .. } => Ok(standing),
-                }
+        if let Some(guest) = self.seat(id.clone(), verified, grants.clone()).await? {
+            return Ok(guest);
+        }
+        let standing = self.registry().get(&id).ok_or_else(|| {
+            GuestError::Internal(format!(
+                "guest `{id}` was admitted by a racing load and deregistered before it could be \
+                 attested"
+            ))
+        })?;
+        match policy {
+            Policy::CallerNamed { .. } if standing.digest() != digest => {
+                Err(GuestError::Conflict {
+                    found: digest,
+                    detail: format!(
+                        "guest `{id}` is active under other bytes ({}, not {digest})",
+                        standing.digest()
+                    ),
+                })
             }
-            Err(SeatError::Denied(reason)) => Err(GuestError::Denied(reason)),
-            Err(SeatError::Invalid(reason)) => Err(GuestError::Invalid(reason)),
-            Err(SeatError::Internal(reason)) => Err(GuestError::Internal(reason)),
+            Policy::CallerNamed { grants, .. } if standing.grants().as_ref() != grants => {
+                Err(GuestError::Denied(format!(
+                    "guest `{id}` is active under other grants than this admission names"
+                )))
+            }
+            Policy::Declared(_) | Policy::CallerNamed { .. } => Ok(standing),
         }
     }
 
@@ -660,15 +655,12 @@ impl<B: Backends> Runtime<B> {
         };
         self.admits(&id, &policy)?;
         let found = verified.digest();
-        match self.seat(id.clone(), verified, grants).await {
-            Ok(_) => Ok(()),
-            Err(SeatError::Occupied) => Err(GuestError::Conflict {
+        match self.seat(id.clone(), verified, grants).await? {
+            Some(_) => Ok(()),
+            None => Err(GuestError::Conflict {
                 found,
                 detail: format!("guest `{id}` is already registered"),
             }),
-            Err(SeatError::Denied(reason)) => Err(GuestError::Denied(reason)),
-            Err(SeatError::Invalid(reason)) => Err(GuestError::Invalid(reason)),
-            Err(SeatError::Internal(reason)) => Err(GuestError::Internal(reason)),
         }
     }
 
@@ -677,45 +669,47 @@ impl<B: Backends> Runtime<B> {
     // pre-instantiate against the shared host set, wire the host-mediated
     // link serve side, then publish entry and endpoint as one lifecycle
     // transition, so no dispatch resolves the entry and misses the endpoint
-    // or vice versa. Seats of one identity run one at a time, so a seat that
-    // races another settles as occupied once the other publishes, or seats
-    // its own bytes when the other fails.
+    // or vice versa. `None` means an earlier or racing registration holds the
+    // identity. Seats of one identity run one at a time, so a seat that races
+    // another returns `None` once the other publishes, or seats its own bytes
+    // when the other fails.
     async fn seat(
         &self, id: GuestId, verified: Verified, grants: Grants,
-    ) -> Result<Arc<Guest<B>>, SeatError> {
+    ) -> Result<Option<Arc<Guest<B>>>, GuestError> {
         let registry = self.registry();
 
         // hold the identity, then check it is free; the publish below re-checks transactionally
         let _seating = self.inner.seats.hold(&id).await;
         if registry.get(&id).is_some() {
-            return Err(SeatError::Occupied);
+            return Ok(None);
         }
 
         let digest = verified.digest();
         let component = component(registry.engine(), verified)
             .await
-            .map_err(|error| SeatError::Invalid(format!("validating `{id}`: {error:#}")))?;
+            .map_err(|error| GuestError::Invalid(format!("validating `{id}`: {error:#}")))?;
         ensure_granted(&id, &component, registry.engine(), &grants)
-            .map_err(|error| SeatError::Denied(format!("{error:#}")))?;
+            .map_err(|error| GuestError::Denied(format!("{error:#}")))?;
         let instance_pre = registry
             .instantiate_late(&id, &component)
-            .map_err(|error| SeatError::Invalid(format!("pre-instantiating `{id}`: {error:#}")))?;
+            .map_err(|error| GuestError::Invalid(format!("pre-instantiating `{id}`: {error:#}")))?;
         let guest = Arc::new(Guest::local(id.clone(), instance_pre, digest, grants));
 
         // serve as a pending endpoint, then publish endpoint and entry as one step
         registry.seam().serve(self.store_factory(&guest), &guest).await.map_err(|error| {
-            SeatError::Internal(format!("serving `{id}` seam exports: {error:#}"))
+            GuestError::Internal(format!("serving `{id}` seam exports: {error:#}"))
         })?;
-        registry.publish(Arc::clone(&guest)).map_err(|error| match error {
-            PublishError::Occupied => SeatError::Occupied,
-            PublishError::Skew(error) => SeatError::Invalid(format!("{error:#}")),
-            PublishError::Transport(error) => {
-                SeatError::Internal(format!("publishing `{id}`: {error:#}"))
+        match registry.publish(Arc::clone(&guest)) {
+            Ok(()) => {
+                tracing::debug!(guest = %id, "guest registered");
+                Ok(Some(guest))
             }
-        })?;
-
-        tracing::debug!(guest = %id, "guest registered");
-        Ok(guest)
+            Err(PublishError::Occupied) => Ok(None),
+            Err(PublishError::Skew(error)) => Err(GuestError::Invalid(format!("{error:#}"))),
+            Err(PublishError::Transport(error)) => {
+                Err(GuestError::Internal(format!("publishing `{id}`: {error:#}")))
+            }
+        }
     }
 
     /// Remove a late guest — one registered at run time, or a declared guest
@@ -833,16 +827,6 @@ struct RuntimeInner<B: 'static> {
     seats: Seats,
     hop_warning: Once,
     stop: watch::Sender<bool>,
-}
-
-// How seating verified bytes as a guest failed.
-enum SeatError {
-    // an earlier or racing registration holds the identity
-    Occupied,
-    // the component imports code from a package its grants do not reach
-    Denied(String),
-    Invalid(String),
-    Internal(String),
 }
 
 /// [`Dispatcher`] over the runtime's shared state.

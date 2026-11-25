@@ -40,7 +40,7 @@ On the `run` grammar the flags are the host's, global to the command (`bin -v ru
 | `WASI_MAX_IO_SIZE`   | unset (64 KiB)        | Largest single file or socket read or write the host performs for a guest. A larger value moves a large file in fewer calls. |
 | `MAX_FUEL`           | `0` (off)             | Per-invocation fuel budget; `0` disables metering. Compile-affecting. |
 | `MAX_DISPATCH_DEPTH` | `8`                   | Maximum nesting depth for host-mediated calls between guests.         |
-| `EPOCH_TICK_MS`      | `10`                  | Epoch-increment interval; the yield granularity for CPU-bound guests. |
+| `EPOCH_TICK_MS`      | `10`                  | Epoch-increment interval; the yield granularity for CPU-bound guests. `0` is refused. |
 | `WASM_BACKTRACE`     | `false`               | Attach guest backtraces to trap errors.                               |
 | `ASYNC_STACK_ZEROING` | `false`              | Zero async (fiber) stacks before reuse, so no data lingers between guest invocations that share a recycled stack; costs a wipe per reuse. |
 
