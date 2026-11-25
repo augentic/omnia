@@ -168,7 +168,7 @@ An HTTP/1.1 request with an absolute-form URI still needs a `Host`. A conforming
 
 ### The HTTP trigger answers `503 Service Unavailable` with `Retry-After: 1`
 
-Every slot of the [concurrency gate](reference/configuration.md#concurrency-gate) is held, so the trigger refused the request before it instantiated a guest. It counts each refusal on `invocations_refused`. A WebSocket event is refused at the same point, and fails naming `MAX_CONCURRENT_INVOCATIONS`. Message deliveries waiting for a slot are served first, so a backlog of them keeps HTTP refused until it drains, which `invocations_waiting` shows. Raise `POOL_MAX_INSTANCES`, and `MAX_CONCURRENT_INVOCATIONS` with it where it is set, if the host has the memory. A probe of `HTTP_HEALTH_PATH` takes no slot, so it still answers `200`.
+Every slot of the [concurrency gate](reference/configuration.md#concurrency-gate) is held, so the trigger refused the request before it instantiated a guest. It counts each refusal on `invocations_refused`. A WebSocket event is refused at the same point, and fails naming `MAX_CONCURRENT_INVOCATIONS`. Message deliveries waiting for a slot are served first, which `invocations_waiting` shows. No more than `MESSAGING_MAX_IN_FLIGHT` hold or wait for one, and lowering it leaves HTTP more of the gate. Raise `POOL_MAX_INSTANCES`, and `MAX_CONCURRENT_INVOCATIONS` with it where it is set, if the host has the memory. A probe of `HTTP_HEALTH_PATH` takes no slot, so it still answers `200`.
 
 ### `the instance pool is full`
 

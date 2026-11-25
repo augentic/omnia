@@ -137,8 +137,7 @@ impl<B: Backends> Runtime<B> {
             &parts.rust_log,
             crate::telemetry::ansi(),
         );
-        let options = parts.registry.options();
-        let gate = options.max_concurrent_invocations.unwrap_or(options.pool_max_instances);
+        let gate = parts.registry.options().concurrent_invocations();
 
         Self::with_inner(Arc::new(RuntimeInner {
             name: parts.name,

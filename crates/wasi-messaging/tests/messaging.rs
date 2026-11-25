@@ -1,26 +1,31 @@
-//! End-to-end tests for `omnia:messaging`: every scenario runs a real guest
-//! component from `crates/test-programs` through the omnia runtime over the
+//! End-to-end tests for `omnia:messaging`: the scenarios run real guest
+//! components from `crates/test-programs` through the omnia runtime over the
 //! in-memory broker. Command exports are driven through `wasi:cli/run`; the
 //! `incoming-handler` export is driven in-process through
 //! [`MessagingHandler`], bypassing the backend's delivery loop, and once
 //! through the default broker's own [`Endpoint::consume`]. The guest asserts
 //! what it observes across the boundary (and traps on failure); the host
 //! side asserts what reached the broker, from a subscription opened before
-//! the guest runs, and the typed outcome the handler returns.
+//! the guest runs, and the typed outcome the handler returns. The bound
+//! [`dispatch`] keeps is asserted over a scripted [`Handler`] alone, since no
+//! guest sees a message the loop has not read.
 
 #![cfg(not(target_arch = "wasm32"))]
 
+use std::num::NonZeroUsize;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use futures::{FutureExt as _, StreamExt as _};
+use futures::future::{self, BoxFuture};
+use futures::{FutureExt as _, StreamExt as _, stream};
 use omnia::{ExitStatus, GuestEntry, Host, Runtime, RuntimeOptions, SourceSpec};
 use omnia_test::host::{Backends, Deployment, precompiled};
 use omnia_wasi_messaging::{
     Endpoint, Error, FutureResult, HandleError, Handler, Message, MessagingClient,
-    MessagingHandler, Metadata, Reply, WasiMessaging,
+    MessagingHandler, Metadata, Reply, WasiMessaging, dispatch,
 };
 use omnia_wasi_otel::WasiOtel;
+use tokio::sync::mpsc;
 
 // Every guest program in `crates/test-programs` must have a matching test
 // here; a new program without one fails to compile.
@@ -293,6 +298,42 @@ async fn queued_delivery() {
     runtime.shutdown();
 }
 
+// Unset, messaging's share is half the gate. Two of the five deliveries hold
+// slots and three wait off the gate, so a request still finds one free.
+#[tokio::test]
+async fn delivery_burst() {
+    const TIMEOUT: Duration = Duration::from_millis(200);
+
+    let deployment = sole(test_programs::MESSAGING_HANDLE_SLEEP)
+        .options(RuntimeOptions {
+            max_concurrent_invocations: Some(4),
+            ..RuntimeOptions::default()
+        })
+        .guest_timeout(TIMEOUT);
+    let runtime = boot(&deployment, Backends::defaults().await).await;
+    let handler = handler(&runtime);
+    assert_eq!(handler.max_in_flight().get(), 2);
+
+    // the check lands midway through the first two deliveries
+    let burst = future::join_all((0..5).map(|_| handler.handle(order("orders"))));
+    let check = async {
+        tokio::time::sleep(TIMEOUT / 2).await;
+        let gate = runtime.invocations();
+        assert_eq!((gate.in_flight, gate.waiting), (2, 0), "{gate:?}");
+        assert!(runtime.try_slot().is_some(), "a request finds a slot");
+    };
+    let (outcomes, ()) = tokio::join!(burst, check);
+
+    for outcome in outcomes {
+        assert!(
+            matches!(outcome, Err(HandleError::TimedOut(timeout)) if timeout == TIMEOUT),
+            "unexpected outcome: {outcome:?}"
+        );
+    }
+
+    runtime.shutdown();
+}
+
 // A topic no route matches has nothing to run: the message is dropped with `Ok`.
 #[tokio::test]
 async fn no_route() {
@@ -412,6 +453,42 @@ async fn default_consume() {
 
     consumer.abort();
     runtime.shutdown();
+}
+
+// passes each message it is handed to the test and never finishes with it
+struct Stalled(mpsc::UnboundedSender<Message>);
+
+impl Handler for Stalled {
+    fn handle(&self, message: Message) -> BoxFuture<'static, Result<(), HandleError>> {
+        self.0.send(message).expect("the test holds the receiver");
+        future::pending().boxed()
+    }
+
+    fn max_in_flight(&self) -> NonZeroUsize {
+        NonZeroUsize::new(2).expect("two is not zero")
+    }
+}
+
+// The transport stays open with a third order queued, which `dispatch` leaves
+// unread while the handler holds the two it takes.
+#[tokio::test]
+async fn stalled_handler() {
+    let (sender, mut handed) = mpsc::unbounded_channel();
+    let orders = stream::iter((0..3).map(|_| order("orders"))).chain(stream::pending());
+    let consumer = tokio::spawn(dispatch(Box::pin(orders), Arc::new(Stalled(sender))));
+
+    for _ in 0..2 {
+        tokio::time::timeout(Duration::from_secs(5), handed.recv())
+            .await
+            .expect("an order reaches the handler")
+            .expect("dispatch holds the handler");
+    }
+    assert!(
+        tokio::time::timeout(Duration::from_millis(200), handed.recv()).await.is_err(),
+        "a third order reached the handler"
+    );
+
+    consumer.abort();
 }
 
 #[tokio::test]

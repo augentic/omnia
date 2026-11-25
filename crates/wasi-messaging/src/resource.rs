@@ -3,6 +3,7 @@
 
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::num::NonZeroUsize;
 use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
 use std::sync::Arc;
@@ -23,9 +24,11 @@ pub type Subscriptions = Pin<Box<dyn Stream<Item = Message> + Send>>;
 pub trait Endpoint: Debug + Send + Sync + 'static {
     /// Deliver every incoming message to `handler` until the transport gives up.
     ///
-    /// The backend owns the delivery loop: how many messages are with
-    /// `handler` at once, in what order, and what each outcome means for the
-    /// message (committed, redelivered, or fatal). A transport with no
+    /// The backend owns the delivery loop: in what order messages reach
+    /// `handler`, and what each outcome means for the message (committed,
+    /// redelivered, or fatal). It keeps no more than
+    /// [`max_in_flight`](Handler::max_in_flight) messages with `handler` at
+    /// once, and leaves the rest with the transport. A transport with no
     /// completion semantics hands its stream to [`dispatch`].
     ///
     /// Returning, with `Ok` or `Err`, ends the messaging server: a consumer
@@ -64,6 +67,12 @@ pub trait Handler: Send + Sync + 'static {
     /// topic. The host logs and counts every failure before returning it, so
     /// a backend only decides what the failure means for the message.
     fn handle(&self, message: Message) -> BoxFuture<'static, Result<(), HandleError>>;
+
+    /// The most messages the handler takes at once.
+    ///
+    /// A backend keeps no more than this with [`handle`](Self::handle), and
+    /// leaves the rest with its transport until an earlier one is handled.
+    fn max_in_flight(&self) -> NonZeroUsize;
 }
 
 /// Why a message was not handled.
@@ -108,18 +117,21 @@ impl From<types::Settle> for HandleError {
 /// Deliver a message stream to `handler`, one task per message, until it ends.
 ///
 /// The delivery loop for a transport with no completion semantics: nothing
-/// is held back or redelivered, so a failed outcome is finished with once
-/// the handler has logged and counted it. Returns when the stream ends and
-/// every message in flight has been handled.
+/// is redelivered, so a failed outcome is finished with once the handler has
+/// logged and counted it. The stream is read only while fewer than
+/// [`max_in_flight`](Handler::max_in_flight) messages are with the handler.
+/// Returns when the stream ends and every message in flight has been
+/// handled.
 ///
 /// # Errors
 ///
 /// Returns an error if a handler task panics.
 pub async fn dispatch(mut stream: Subscriptions, handler: Arc<dyn Handler>) -> anyhow::Result<()> {
+    let limit = handler.max_in_flight().get();
     let mut tasks = JoinSet::new();
     loop {
         tokio::select! {
-            message = stream.next() => {
+            message = stream.next(), if tasks.len() < limit => {
                 let Some(message) = message else { break };
                 tasks.spawn(handler.handle(message));
             }
@@ -132,8 +144,8 @@ pub async fn dispatch(mut stream: Subscriptions, handler: Arc<dyn Handler>) -> a
     Ok(())
 }
 
-// The handler has logged and counted a failed outcome, and this loop holds
-// nothing back; only a panicked task is left to report.
+// The handler has logged and counted a failed outcome, and this loop
+// redelivers nothing; only a panicked task is left to report.
 fn reap(finished: Result<Result<(), HandleError>, JoinError>) -> anyhow::Result<()> {
     finished.map(drop).context("messaging handler task panicked")
 }
