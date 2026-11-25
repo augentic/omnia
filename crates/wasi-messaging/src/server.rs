@@ -1,6 +1,7 @@
 //! The messaging trigger, whose [`MessagingHandler`] routes each delivery to a
 //! guest by topic.
 
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -8,6 +9,7 @@ use anyhow::{Result, anyhow};
 use futures::FutureExt as _;
 use futures::future::BoxFuture;
 use omnia_core::{ChainCtx, PatternRoutes, Provides, Runtime, TriggerRouter, telemetry};
+use tokio::sync::Semaphore;
 use tracing::{Instrument, info_span, instrument};
 use wasmtime::AsContextMut as _;
 
@@ -50,6 +52,10 @@ where
     state: Runtime<B>,
     component: Arc<str>,
     routing: Arc<TriggerRouter<PatternRoutes>>,
+    in_flight: NonZeroUsize,
+    // messaging's share of the gate: a delivery past it waits here, off the
+    // gate, so a backlog never shuts out HTTP or WebSocket
+    share: Arc<Semaphore>,
 }
 
 impl<B> MessagingHandler<B>
@@ -75,10 +81,13 @@ where
         if routing.is_inert() {
             return Ok(None);
         }
+        let in_flight = runtime.options().messaging_in_flight();
         Ok(Some(Self {
             state: runtime.clone(),
             component: Arc::from(runtime.name()),
             routing: Arc::new(routing),
+            in_flight,
+            share: Arc::new(Semaphore::new(in_flight.get())),
         }))
     }
 
@@ -88,10 +97,12 @@ where
     /// no handler in this deployment. Every message is counted, and every
     /// failure logged and counted, before it is returned. A routed message
     /// waits for a slot of the runtime's [concurrency gate](Runtime::slot)
-    /// before its guest loads, however long that takes. The guest receives
-    /// the delivery with its `deadline` set to the instant the guest timeout
-    /// expires, counted from when the slot was taken, and its metadata as the
-    /// backend delivered it.
+    /// before its guest loads, however long that takes. No more than
+    /// [`max_in_flight`](Handler::max_in_flight) messages hold or wait for a
+    /// slot at once, and one past them waits its turn off the gate. The
+    /// guest receives the delivery with its `deadline` set to the instant the
+    /// guest timeout expires, counted from when the slot was taken, and its
+    /// metadata as the backend delivered it.
     ///
     /// # Errors
     ///
@@ -124,7 +135,8 @@ where
             return Ok(());
         };
 
-        // wait for a slot of the gate
+        // wait for a place in messaging's share, then a slot of the gate
+        let _place = self.share.acquire().await.expect("the share is never closed");
         let slot = self.state.slot().await;
 
         // a routed guest that fails to load is an error, never a panic
@@ -184,6 +196,10 @@ where
     fn handle(&self, message: Message) -> BoxFuture<'static, Result<(), HandleError>> {
         let handler = self.clone();
         async move { handler.handle(message).await }.boxed()
+    }
+
+    fn max_in_flight(&self) -> NonZeroUsize {
+        self.in_flight
     }
 }
 

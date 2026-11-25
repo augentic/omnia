@@ -77,6 +77,9 @@ pub struct RuntimeOptions {
     /// Most invocations the triggers and the command driver run at once, each holding one slot of the concurrency gate (`MAX_CONCURRENT_INVOCATIONS`, unset: `POOL_MAX_INSTANCES`, min 1).
     #[env(from = "MAX_CONCURRENT_INVOCATIONS")]
     pub max_concurrent_invocations: Option<u32>,
+    /// Most message deliveries holding or waiting for a slot of the concurrency gate at once (`MESSAGING_MAX_IN_FLIGHT`, unset: half the gate, rounded up, min 1); see [`messaging_in_flight`](Self::messaging_in_flight).
+    #[env(from = "MESSAGING_MAX_IN_FLIGHT")]
+    pub messaging_max_in_flight: Option<u32>,
     /// Enable the pooling instance allocator (`POOLING`, default `true`).
     #[env(from = "POOLING", default = "true")]
     pub pooling: bool,
@@ -178,6 +181,8 @@ impl RuntimeOptions {
     /// - [`http_stream_timeout`](Self::http_stream_timeout) is set to zero;
     /// - [`max_concurrent_invocations`](Self::max_concurrent_invocations) is
     ///   set to zero;
+    /// - [`messaging_max_in_flight`](Self::messaging_max_in_flight) is set to
+    ///   zero, or exceeds the [gate](Self::concurrent_invocations);
     /// - with [`pooling`](Self::pooling) on,
     ///   [`max_concurrent_invocations`](Self::max_concurrent_invocations)
     ///   exceeds [`pool_max_instances`](Self::pool_max_instances);
@@ -203,6 +208,17 @@ impl RuntimeOptions {
             bail!(
                 "MAX_CONCURRENT_INVOCATIONS must be at least 1; unset it for one slot per pooled \
                  instance"
+            );
+        }
+        if self.messaging_max_in_flight == Some(0) {
+            bail!("MESSAGING_MAX_IN_FLIGHT must be at least 1; unset it for half the gate");
+        }
+        if let Some(share) = self.messaging_max_in_flight
+            && share > self.concurrent_invocations()
+        {
+            bail!(
+                "MESSAGING_MAX_IN_FLIGHT ({share}) exceeds the concurrency gate ({})",
+                self.concurrent_invocations()
             );
         }
         if !self.pooling {
@@ -235,6 +251,28 @@ impl RuntimeOptions {
         }
 
         Ok(())
+    }
+
+    /// The slots the concurrency gate holds: `MAX_CONCURRENT_INVOCATIONS`, or
+    /// one for each of `POOL_MAX_INSTANCES`.
+    #[must_use]
+    pub fn concurrent_invocations(&self) -> u32 {
+        self.max_concurrent_invocations.unwrap_or(self.pool_max_instances)
+    }
+
+    /// The message deliveries that hold or wait for a slot of the gate at
+    /// once: `MESSAGING_MAX_IN_FLIGHT`, or half the
+    /// [gate](Self::concurrent_invocations), rounded up.
+    ///
+    /// The messaging trigger holds a delivery past it off the gate, so a
+    /// backlog of deliveries leaves the rest of the gate to HTTP and
+    /// WebSocket.
+    #[must_use]
+    pub fn messaging_in_flight(&self) -> NonZeroUsize {
+        let share = self
+            .messaging_max_in_flight
+            .unwrap_or_else(|| self.concurrent_invocations().div_ceil(2));
+        NonZeroUsize::new(share as usize).unwrap_or(NonZeroUsize::MIN)
     }
 
     /// The core instances the pool holds: `POOL_TOTAL_CORE_INSTANCES`, or
@@ -503,6 +541,43 @@ mod tests {
             ..options
         };
         unpooled.validate().expect("a gate wider than an unused pool stands");
+    }
+
+    #[test]
+    fn zero_share() {
+        let options = RuntimeOptions {
+            pooling: false,
+            messaging_max_in_flight: Some(0),
+            ..RuntimeOptions::default()
+        };
+
+        let error = options.validate().expect_err("a zero share is refused");
+        assert!(error.to_string().contains("MESSAGING_MAX_IN_FLIGHT"), "{error}");
+    }
+
+    // the gate stands with pooling off, so it bounds the share either way
+    #[test]
+    fn wide_share() {
+        let options = RuntimeOptions {
+            max_concurrent_invocations: Some(4),
+            messaging_max_in_flight: Some(5),
+            ..RuntimeOptions::default()
+        };
+
+        let error = options.validate().expect_err("a share wider than the gate is refused");
+        assert!(
+            error
+                .to_string()
+                .contains("MESSAGING_MAX_IN_FLIGHT (5) exceeds the concurrency gate (4)"),
+            "{error}"
+        );
+
+        let unpooled = RuntimeOptions {
+            pooling: false,
+            ..options
+        };
+        let error = unpooled.validate().expect_err("a share wider than the gate is refused");
+        assert!(error.to_string().contains("MESSAGING_MAX_IN_FLIGHT (5)"), "{error}");
     }
 
     #[test]

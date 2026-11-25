@@ -55,13 +55,13 @@ The hops in flight are the calls between guests one invocation holds open at onc
 The gate's gauges, and its one counter, read as follows:
 
 - `invocations_in_flight` is how many slots are held. Pinned at the gate's size, the gate is what limits throughput.
-- `invocations_waiting` is how many message deliveries and command runs wait for a slot. Waiters take freed slots in the order they arrived, ahead of any request, so HTTP and WebSocket are refused while it stays above zero.
+- `invocations_waiting` is how many message deliveries and command runs wait for a slot. Waiters take freed slots in the order they arrived, ahead of any request, so HTTP and WebSocket are refused while it stays above zero. No more than `MESSAGING_MAX_IN_FLIGHT` deliveries hold or wait for a slot. One past them waits off the gate, where this gauge does not count it.
 - `invocations_refused` counts the HTTP requests and WebSocket events refused at a full gate. HTTP answers each with `503`.
 
 A slot is held for as long as its invocation runs:
 
 - A command's run holds one from start to exit, so a long-running command leaves one fewer for the triggers serving beside it.
-- A guest that waits on another delivery in the same deployment, such as a reply its own messaging trigger handles, holds its slot while it waits. When every slot is held by such a guest, the deliveries they wait on queue until the guests time out.
+- A guest that waits on another delivery in the same deployment, such as a reply its own messaging trigger handles, holds its slot while it waits. When such guests hold every slot, or messaging's whole share of `MESSAGING_MAX_IN_FLIGHT`, the deliveries they wait on queue until the guests time out.
 
 The table and stack pools are mapped when the engine is built, four tables and two stacks for each instance. A host with strict overcommit is charged for the whole mapping, about 625 MiB of tables and 4 GiB of stacks at the defaults.
 
