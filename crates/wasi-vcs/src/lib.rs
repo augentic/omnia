@@ -38,9 +38,10 @@ mod generated {
 }
 
 use std::fmt::Debug;
+use std::sync::Arc;
 
 pub use omnia_core::FutureResult;
-use omnia_core::{Host, HostCtx, HostView, Provides, StoreCtx};
+use omnia_core::{Grants, Host, HostCtx, HostView, Provides, StoreCtx};
 use wasmtime::component::Linker;
 
 use self::generated::omnia::vcs::types::Host as TypesHost;
@@ -86,6 +87,14 @@ impl<B: Provides<Self>> Host<B> for WasiVcs {
 /// - A lookup reads [`Error::NotFound`] as finding nothing.
 /// - What these methods cannot express fails with `unsupported`: a `log`
 ///   with no base, and a bookmark precondition.
+///
+/// [`clone_repo`](Self::clone_repo), [`fetch`](Self::fetch), and
+/// [`push`](Self::push) take the [`Grants`] of the store's guest,
+/// [`Grants::all`] for a guest without a grants table. A backend refuses
+/// each address the call would dial, and each redirect it would follow,
+/// whose host [`Grants::allows_host`] refuses. The call fails with
+/// [`Error::Denied`] before anything connects. A local address names no
+/// host, so [`Grants::hosts`] does not hold it.
 ///
 /// A backend picks the case of a failure by returning an [`Error`] inside
 /// its `anyhow` error. The guest sees:
@@ -149,10 +158,15 @@ pub trait VcsClient: Debug + Send + Sync + 'static {
     /// A clone of `url` at `at`.
     ///
     /// A place that holds anything is [`Error::Exists`].
-    fn clone_repo(&self, url: String, at: Place, options: CloneOptions) -> FutureResult<()>;
+    fn clone_repo(
+        &self, url: String, at: Place, options: CloneOptions, grants: Arc<Grants>,
+    ) -> FutureResult<()>;
 
     /// Bring `remote`'s commits and bookmarks into the repository at `repo`.
-    fn fetch(&self, repo: Place, remote: String) -> FutureResult<()>;
+    ///
+    /// `remote` is a name the repository records. Any other, an address
+    /// included, is [`Error::NotFound`] naming it.
+    fn fetch(&self, repo: Place, remote: String, grants: Arc<Grants>) -> FutureResult<()>;
 
     /// Point the bookmark `name` at `revision` in the repository at `repo`.
     fn label(&self, repo: Place, name: String, revision: String) -> FutureResult<()>;
@@ -170,9 +184,12 @@ pub trait VcsClient: Debug + Send + Sync + 'static {
 
     /// Send the bookmark `label` and the commits it reaches to `remote`.
     ///
-    /// A remote bookmark the push would move backwards is
-    /// [`Error::Diverged`].
-    fn push(&self, repo: Place, remote: String, label: String) -> FutureResult<()>;
+    /// `remote` is a name the repository records. Any other, an address
+    /// included, is [`Error::NotFound`] naming it. A remote bookmark the
+    /// push would move backwards is [`Error::Diverged`].
+    fn push(
+        &self, repo: Place, remote: String, label: String, grants: Arc<Grants>,
+    ) -> FutureResult<()>;
 }
 
 impl From<Error> for generated::Error {

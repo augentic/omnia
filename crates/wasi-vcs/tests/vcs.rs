@@ -15,7 +15,7 @@ use anyhow::anyhow;
 use cap_std::ambient_authority;
 use cap_std::fs::{Dir, MetadataExt as _};
 use futures::FutureExt as _;
-use omnia::{ExitStatus, Mount};
+use omnia::{ExitStatus, Grants, GuestEntry, Mount};
 use omnia_test::host::{Backends, Deployment, scratch};
 use omnia_wasi_vcs::{
     Change, ChangeKind, CloneOptions, Entry, Error, FutureResult, Merged, Place, Rule, VcsClient,
@@ -57,9 +57,10 @@ async fn run_guest_args(wasm: &str, mounts: Vec<Mount>, args: &[&str]) -> Record
 // holds.
 const LONG: usize = 1001;
 
-// Records every call with the host path its place resolved to, and answers
-// from a fixed script keyed on the place's last segment and on the names a
-// call carries:
+// Records every call with the host path its place resolved to, and the
+// grants each `clone_repo`, `fetch`, and `push` carried. It answers from a
+// fixed script keyed on the place's last segment and on the names a call
+// carries:
 //
 // - `head` at `plain` is no repository, and at `unborn` finds no commit;
 // - `init` at `existing`, and `add` and `clone_repo` at `taken`, find the
@@ -77,6 +78,7 @@ const LONG: usize = 1001;
 #[derive(Clone, Debug, Default)]
 struct Recorder {
     calls: Arc<Mutex<Vec<String>>>,
+    grants: Arc<Mutex<Vec<Grants>>>,
 }
 
 impl Recorder {
@@ -86,6 +88,14 @@ impl Recorder {
 
     fn calls(&self) -> Vec<String> {
         self.calls.lock().clone()
+    }
+
+    fn record_grants(&self, grants: &Grants) {
+        self.grants.lock().push(grants.clone());
+    }
+
+    fn grants(&self) -> Vec<Grants> {
+        self.grants.lock().clone()
     }
 }
 
@@ -273,8 +283,11 @@ impl VcsClient for Recorder {
         .boxed()
     }
 
-    fn clone_repo(&self, url: String, at: Place, options: CloneOptions) -> FutureResult<()> {
+    fn clone_repo(
+        &self, url: String, at: Place, options: CloneOptions, grants: Arc<Grants>,
+    ) -> FutureResult<()> {
         self.record(format!("clone {url} {} depth={:?}", held(&at), options.depth));
+        self.record_grants(&grants);
         let name = named(&at);
         async move {
             if name == "taken" {
@@ -285,8 +298,9 @@ impl VcsClient for Recorder {
         .boxed()
     }
 
-    fn fetch(&self, repo: Place, remote: String) -> FutureResult<()> {
+    fn fetch(&self, repo: Place, remote: String, grants: Arc<Grants>) -> FutureResult<()> {
         self.record(format!("fetch {} {remote}", held(&repo)));
+        self.record_grants(&grants);
         async { Ok(()) }.boxed()
     }
 
@@ -320,8 +334,11 @@ impl VcsClient for Recorder {
         .boxed()
     }
 
-    fn push(&self, repo: Place, remote: String, label: String) -> FutureResult<()> {
+    fn push(
+        &self, repo: Place, remote: String, label: String, grants: Arc<Grants>,
+    ) -> FutureResult<()> {
         self.record(format!("push {} {remote} {label}", held(&repo)));
+        self.record_grants(&grants);
         async move {
             if remote == "moved" {
                 return Err(Error::Diverged(label).into());
@@ -394,6 +411,27 @@ async fn vcs_flow() {
             format!("head {sub}"),
         ]
     );
+
+    // a guest with no grants table dials under `Grants::all`
+    assert_eq!(recorder.grants(), vec![Grants::all(); 4]);
+}
+
+#[tokio::test]
+async fn vcs_grants() {
+    let project = scratch();
+    let grants = Grants::all().hosts(["example.test"]);
+    let recorder = Recorder::default();
+    let guest =
+        GuestEntry::new("guest", test_programs::VCS_GRANTS).command().grants(grants.clone());
+    let status = Deployment::new()
+        .entry(guest)
+        .mount(project.mount(true))
+        .run_host::<WasiVcs, _>(Backends::defaults().await.vcs(recorder.clone()))
+        .await
+        .expect("guest runs");
+    assert_eq!(status, ExitStatus::SUCCESS, "guest `{}` failed", test_programs::VCS_GRANTS);
+
+    assert_eq!(recorder.grants(), vec![grants; 3]);
 }
 
 #[tokio::test]

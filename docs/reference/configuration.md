@@ -208,9 +208,10 @@ Field notes:
   - `hosts` — the hosts the guest reaches out to. The list holds:
     - each outbound `wasi:http` request, and each redirect `HttpDefault` follows, which fail with `http-request-denied` before anything connects;
     - a model worker's `egress`, whose every entry must lie within the list, or the completion is `denied`;
-    - the `registry` an `omnia:plugins` `release` load names, which is `denied` before anything is fetched.
+    - the `registry` an `omnia:plugins` `release` load names, which is `denied` before anything is fetched;
+    - each address an `omnia:vcs` `clone`, `fetch`, or `push` dials, and each redirect its backend follows, which are `denied` before anything connects.
 
-    An entry is a host name (`api.example.com`), `*.suffix` for a domain and every host beneath it, or `*` for every host name. It carries no scheme, port, or path, is not an IP literal, and does not end in a numeric label (`2130706433`, `example.1`), which reads as an IP address. Matching ignores case. The list matches plain host names alone, `*` included, so a host spelled as an address, or one ending in a `.`, is refused under any list. The remotes `omnia:vcs` dials are not held. [Security Model](../security-model.md#what-omnia-does-not-protect-against) says what a granted name can still lead to.
+    An entry is a host name (`api.example.com`), `*.suffix` for a domain and every host beneath it, or `*` for every host name. It carries no scheme, port, or path, is not an IP literal, and does not end in a numeric label (`2130706433`, `example.1`), which reads as an IP address. Matching ignores case. The list matches plain host names alone, `*` included, so a host spelled as an address, or one ending in a `.`, is refused under any list. [Security Model](../security-model.md#what-omnia-does-not-protect-against) says what a granted name can still lead to.
   - `guests` — the guests the guest calls or loads, by name. The list holds:
     - each link call, which fails before its target loads, naming the caller and the target;
     - each `omnia:plugins` load, which is `denied` before anything is read or fetched. A load is held by the name it registers under: the declared name, a path's file stem, or a release's reference without its version.

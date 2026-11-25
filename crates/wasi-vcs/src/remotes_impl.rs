@@ -18,8 +18,9 @@ impl<B: Send + 'static> HostWithStore<StoreCtx<B>> for WasiVcs {
         }
         let workspace = WorkspaceHandle::resolve(accessor, &at, Intent::Create)?;
         let options = CloneOptions { depth };
-        let made =
-            workspace.call(accessor, |client, place| client.clone_repo(url, place, options)).await;
+        let made = workspace
+            .dial(accessor, |client, place, grants| client.clone_repo(url, place, options, grants))
+            .await;
         match laid(made)? {
             Ok(()) => Ok(Ok(workspace.push(accessor)?)),
             Err(occupied) => Ok(Err(occupied)),
@@ -32,7 +33,9 @@ impl<B: Send + 'static> HostWithStore<StoreCtx<B>> for WasiVcs {
     ) -> Result<(), Error> {
         let workspace = WorkspaceHandle::lookup(accessor, &workspace)?;
         workspace.writable()?;
-        Ok(workspace.call(accessor, |client, place| client.fetch(place, remote)).await?)
+        Ok(workspace
+            .dial(accessor, |client, place, grants| client.fetch(place, remote, grants))
+            .await?)
     }
 
     async fn bookmark(
@@ -60,7 +63,9 @@ impl<B: Send + 'static> HostWithStore<StoreCtx<B>> for WasiVcs {
         let workspace = WorkspaceHandle::lookup(accessor, &workspace)?;
         workspace.writable()?;
         let pushed = workspace
-            .call(accessor, |client, place| client.push(place, remote.clone(), name.clone()))
+            .dial(accessor, |client, place, grants| {
+                client.push(place, remote.clone(), name.clone(), grants)
+            })
             .await;
         match pushed {
             Ok(()) => Ok(Ok(())),

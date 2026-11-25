@@ -1,7 +1,9 @@
 //! The `omnia:vcs/workspace` host bindings, and the handle every interface
 //! opens.
 
-use omnia_core::{HostView, StoreCtx};
+use std::sync::Arc;
+
+use omnia_core::{Grants, HostView, StoreCtx};
 use wasmtime::component::{Access, Accessor, Resource};
 
 use crate::generated::omnia::vcs::types::{
@@ -88,6 +90,19 @@ impl WorkspaceHandle {
         call: impl FnOnce(&dyn VcsClient, Place) -> FutureResult<R>,
     ) -> Result<R, BackendError> {
         let answer = accessor.with(|mut store| call(store.get().client, self.place.clone()));
+        answer.await.map_err(BackendError::typed)
+    }
+
+    // as `call`, handing the backend the grants of the store's guest to hold
+    // what the call dials
+    pub async fn dial<B, R>(
+        &self, accessor: &Accessor<StoreCtx<B>, WasiVcs>,
+        call: impl FnOnce(&dyn VcsClient, Place, Arc<Grants>) -> FutureResult<R>,
+    ) -> Result<R, BackendError> {
+        let answer = accessor.with(|mut store| {
+            let grants = store.data_mut().grants();
+            call(store.get().client, self.place.clone(), grants)
+        });
         answer.await.map_err(BackendError::typed)
     }
 }

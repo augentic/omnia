@@ -103,12 +103,13 @@ impl Grants {
     /// - an outbound `wasi:http` request, and each redirect the default
     ///   backend follows for it;
     /// - an `egress` entry of a model worker grant;
-    /// - the registry of a plugin load.
+    /// - the registry of a plugin load;
+    /// - each address an `omnia:vcs` clone, fetch, or push dials, and each
+    ///   redirect its backend follows.
     ///
-    /// The remote an `omnia:vcs` clone names is not held. Under a list the
-    /// guest reaches plain host names alone, so an IP address in any
-    /// spelling, or a name that ends in `.`, matches no entry, `*` included.
-    /// Names compare without regard to ASCII case.
+    /// Under a list the guest reaches plain host names alone, so an IP
+    /// address in any spelling, or a name that ends in `.`, matches no entry,
+    /// `*` included. Names compare without regard to ASCII case.
     #[must_use]
     pub fn hosts<S: Into<String>>(mut self, patterns: impl IntoIterator<Item = S>) -> Self {
         let patterns = patterns.into_iter().map(|pattern| pattern.into().to_ascii_lowercase());

@@ -86,7 +86,8 @@ pub enum Error {
     /// A working copy holds pending changes where none may.
     #[error("pending changes: {}", .0.join(", "))]
     Pending(Vec<String>),
-    /// The remote refused the caller, or wants credentials it was not given.
+    /// The guest's grants refuse an address the call would dial, or the
+    /// remote refused the caller or wants credentials it was not given.
     #[error("denied: {0}")]
     Denied(String),
     /// The remote could not be reached, or did not answer.
