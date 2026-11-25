@@ -569,6 +569,11 @@ path = "programs/vcs/flow.rs"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "vcs_grants"
+path = "programs/vcs/grants.rs"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "vcs_locations"
 path = "programs/vcs/locations.rs"
 crate-type = ["cdylib"]

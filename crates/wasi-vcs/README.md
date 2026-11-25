@@ -24,6 +24,11 @@ SDK's `vcs` module binds, over one `VcsClient` per backend.
   mount that the host holds for the whole call. A guest that rearranges its
   tree meanwhile cannot redirect the call, and the backend never sees a
   descriptor.
+- `clone`, `fetch`, and `push` hand the backend the guest's grants. It
+  refuses each address the call would dial, and each redirect it would
+  follow, whose host the guest's `hosts` refuse, with `denied` before
+  anything connects. A `fetch` or `push` remote is a name the repository
+  records, so an address there is `not-found`.
 - A lookup that finds nothing is `none`, not an error. That covers a
   revision, a bookmark, a remote's bookmark, and the `head` of a workspace
   with no commits.
@@ -42,7 +47,8 @@ SDK's `vcs` module binds, over one `VcsClient` per backend.
   bookmark, and pushes. `WasiVcs` serves both.
 - A backend picks a failure's case by returning an `omnia_wasi_vcs::Error`:
   - `NotARepository` and `NotFound` are `not-found`;
-  - `Denied` is `denied`, for a remote that refuses the caller;
+  - `Denied` is `denied`, for an address the guest's grants refuse, or a
+    remote that refuses the caller;
   - `Access` is `unavailable`, for a remote that cannot be reached;
   - `Exists` is the `occupied` outcome of `init`, `add`, and `clone`;
   - `Pending` is a merge's `unmerged` outcome;
