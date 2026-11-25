@@ -19,8 +19,8 @@ use crate::{
 /// Where every guest's stdout and stderr go when a deployment redirects
 /// them: one shared stream pair, each store opening a fresh writer onto it.
 ///
-/// Unset on a [`StoreConfig`], a guest inherits the process streams. A test
-/// host sets a pair of memory pipes to read a command guest's envelope.
+/// Unset, a guest inherits the process streams. A test host sets a pair of
+/// memory pipes to read a command guest's envelope.
 #[derive(Clone)]
 pub struct Stdio {
     /// The guest's stdout.
@@ -48,101 +48,52 @@ impl fmt::Debug for Stdio {
     }
 }
 
-/// The per-store construction inputs for [`StoreBase::new`].
-///
-/// `guest`, `grants`, `options`, `dispatcher`, and `chain` say what the
-/// store is for. Each of the rest has a `None` or empty value a hand-built
-/// store context can pass: empty argv, no mounts, an empty environment.
 pub struct StoreConfig<'a> {
-    /// The guest the store is built for.
     pub guest: GuestId,
-    /// What of the deployment the guest reaches; [`Grants::all`] for a
-    /// hand-built store context.
     pub grants: Arc<Grants>,
-    /// Runtime options; caps linear-memory growth at
-    /// [`RuntimeOptions::max_memory_bytes`] and each file or socket read or
-    /// write at [`RuntimeOptions::wasi_max_io_size`].
     pub options: &'a RuntimeOptions,
-    /// Type-erased host->guest dispatcher: a fresh handle to the owning
-    /// [`Runtime`](crate::Runtime) so any host->guest call lands a new
-    /// instance.
+    // a fresh handle to the owning runtime, so any host→guest call lands a
+    // new instance
     pub dispatcher: Arc<dyn Dispatcher>,
-    /// The dispatch-chain context the guest runs at: a root for a trigger or
-    /// the command driver, the context [`ChainPolicy::enter`] derived for a
-    /// dispatched callee.
-    ///
-    /// [`ChainPolicy::enter`]: crate::ChainPolicy::enter
     pub chain: ChainCtx,
-    /// The command's argv (`args[0]` is the program name), for the command
-    /// run's store; `None`, an empty argv, for every other store.
+    // the command's argv, `args[0]` the program name, which only the command
+    // run's store is given; `None` is an empty argv
     pub args: Option<Arc<Vec<String>>>,
-    /// Mount registry preopened into the guest sandbox; `None` for
-    /// deployments without `[[mount]]`s.
-    pub mounts: Option<Arc<MountRegistry>>,
-    /// The guest's complete environment; `None` gives the guest an empty one.
-    pub env: Option<Arc<Vec<(String, String)>>>,
-    /// Where the guest's stdout and stderr go; `None` inherits the process
-    /// streams.
+    // the mounts the guest's grants reach, preopened into its sandbox
+    pub mounts: Arc<MountRegistry>,
+    // the guest's complete environment
+    pub env: Arc<Vec<(String, String)>>,
+    // `None` inherits the process streams
     pub stdio: Option<Stdio>,
-    /// The runtime's installed extensions; [`Extensions::new`] for hand-built
-    /// store contexts, where a capability that reads its extension refuses.
     pub extensions: Extensions,
 }
 
 /// The fixed per-store state shared by every guest store context.
 ///
-/// Construction policy (WASI inheritance, argv, and the memory limit) lives in
-/// [`StoreBase::new`] so it is documented and unit-testable instead of being
-/// inlined in [`Runtime::enter`](crate::Runtime::enter).
+/// Only the runtime builds one. A host binding reads it through the
+/// accessors of [`StoreCtx`].
 pub struct StoreBase {
-    /// The guest this store runs.
-    pub guest: GuestId,
-    /// What of the deployment this store's guest reaches.
-    pub grants: Arc<Grants>,
-    /// The store's WASI resource table.
-    pub table: ResourceTable,
-    /// The store's WASI context (the guest environment, inherited stdin,
-    /// host stdout/stderr).
-    pub wasi: WasiCtx,
-    /// The per-guest memory limiter the runtime installs on every [`Store`].
-    ///
-    /// [`Store`]: wasmtime::Store
-    pub limits: StoreLimits,
-    /// Type-erased host->guest dispatcher; a fresh handle to the owning
-    /// runtime. Inert unless a host binding reaches for it.
-    pub dispatcher: Arc<dyn Dispatcher>,
-    /// The dispatch-chain context this store's guest runs at. A link relay
-    /// reads it to derive the callee's.
-    pub chain: ChainCtx,
-    /// Mount registry: the startup-validated mounts the guest's grants reach,
-    /// also preopened into [`wasi`](Self::wasi). A consuming host crate reads
-    /// it to match a lent `descriptor` back to its mount by directory
-    /// identity. Empty unless the deployment configures `[[mount]]`s.
-    pub mounts: Arc<MountRegistry>,
-    /// Handle to the runtime's installed extensions, the state slot a
-    /// capability crate's host binding reaches for. Empty in hand-built
-    /// store contexts.
-    pub extensions: Extensions,
+    pub(crate) guest: GuestId,
+    pub(crate) grants: Arc<Grants>,
+    pub(crate) table: ResourceTable,
+    pub(crate) wasi: WasiCtx,
+    pub(crate) limits: StoreLimits,
+    pub(crate) dispatcher: Arc<dyn Dispatcher>,
+    // a link relay derives the callee's chain from it
+    pub(crate) chain: ChainCtx,
+    // the mounts preopened into `wasi`, so a lent descriptor can be matched
+    // back to its mount by directory identity
+    pub(crate) mounts: Arc<MountRegistry>,
+    pub(crate) extensions: Extensions,
 }
 
 impl StoreBase {
-    /// Build the fixed per-store state for a single guest invocation, applying
-    /// the WASI construction policy shared by every deployment.
-    ///
-    /// Applies the guest environment (the [`env`](StoreConfig::env) pairs,
-    /// none when unset), inherits stdin, wires stdout/stderr to the
-    /// [`stdio`](StoreConfig::stdio) pair when set and the host streams
-    /// otherwise, applies the configured argv, caps each file or socket read
-    /// or write at [`RuntimeOptions::wasi_max_io_size`] when set, and caps
-    /// linear-memory growth.
     #[must_use]
-    pub fn new(config: StoreConfig<'_>) -> Self {
-        let mounts = config.mounts.unwrap_or_default();
+    pub(crate) fn new(config: StoreConfig<'_>) -> Self {
+        let mounts = config.mounts;
 
         let mut wasi_builder = WasiCtxBuilder::new();
-        if let Some(env) = &config.env {
-            wasi_builder.envs(env);
-        }
+        wasi_builder.envs(&config.env);
         wasi_builder.inherit_stdin();
         match config.stdio {
             Some(stdio) => {

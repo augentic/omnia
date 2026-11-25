@@ -14,7 +14,6 @@ use std::sync::{Arc, Once, Weak};
 use anyhow::Result;
 use tokio::sync::watch;
 use wasmtime::Store;
-use wasmtime::component::InstancePre;
 
 use self::admission::{Loads, Seats};
 pub use self::enter::Entered;
@@ -24,10 +23,10 @@ use crate::artifact::component;
 use crate::digest::Digest;
 use crate::extensions::Extensions;
 use crate::mount::MountRegistry;
-use crate::registry::{Guest, GuestId, HttpRoutes, PublishError, TriggerRouter, ensure_granted};
+use crate::registry::{Guest, GuestId, PublishError, ensure_granted};
 use crate::seam::StoreFactory;
 use crate::source::{AcquireError, RegistrySource, Source, SourceSpec, Verified};
-use crate::store::Stdio;
+use crate::store::{Stdio, StoreConfig};
 use crate::{
     Backends, ChainCtx, Dispatcher, Grants, Registry, RuntimeOptions, StoreBase, StoreCtx,
 };
@@ -67,6 +66,7 @@ impl From<ExitStatus> for std::process::ExitCode {
 }
 
 /// Inputs to [`Runtime::from_parts`].
+#[doc(hidden)]
 pub struct RuntimeParts<B: 'static> {
     /// Deployment name read by trigger servers and the bootstrap log.
     pub name: Arc<str>,
@@ -84,10 +84,6 @@ pub struct RuntimeParts<B: 'static> {
     /// the runtime has no registry client (omnia built without the `loader`
     /// feature), where every package guest's first use fails.
     pub packages: Option<Arc<dyn RegistrySource>>,
-    /// The deployment's wasm-pkg client configuration (TOML), resolved to its
-    /// contents: how a package source is routed to a registry. `None` when
-    /// the deployment declares none, where every package source is refused.
-    pub registry_config: Option<String>,
     /// The run's tracing directives — its verbosity flag composed with the
     /// process `RUST_LOG` ([`telemetry::directives`](crate::telemetry::directives))
     /// — set as every guest's `RUST_LOG`.
@@ -110,7 +106,7 @@ pub struct RuntimeParts<B: 'static> {
 /// bundle.
 pub struct Runtime<B: 'static> {
     inner: Arc<RuntimeInner<B>>,
-    // built once so `store()` hands out clones instead of one per store
+    // the stores' dispatcher, built once so each store context takes a clone
     dispatcher: Arc<dyn Dispatcher>,
 }
 
@@ -118,6 +114,7 @@ impl<B: Backends> Runtime<B> {
     fn with_inner(inner: Arc<RuntimeInner<B>>) -> Self {
         let dispatcher = Arc::new(RuntimeDispatcher {
             inner: Arc::clone(&inner),
+            root: false,
         });
         Self { inner, dispatcher }
     }
@@ -126,6 +123,7 @@ impl<B: Backends> Runtime<B> {
     ///
     /// The guests' linked exports are not served yet: run
     /// [`serve_links`](Self::serve_links) before the first dispatch.
+    #[doc(hidden)]
     #[must_use]
     pub fn from_parts(parts: RuntimeParts<B>) -> Self {
         // the environment as it stands; a non-UTF-8 pair cannot cross `wasi:cli`
@@ -148,7 +146,6 @@ impl<B: Backends> Runtime<B> {
             backends: parts.backends,
             packages: parts.packages,
             command_guest: parts.command_guest,
-            registry_config: parts.registry_config,
             env: Arc::new(env),
             inherit: parts.inherit,
             stdio: parts.stdio,
@@ -167,14 +164,6 @@ impl<B: Backends> Runtime<B> {
     #[must_use]
     pub fn mounts(&self) -> &MountRegistry {
         &self.inner.mounts
-    }
-
-    /// The deployment's wasm-pkg client configuration (TOML), resolved to its
-    /// contents, for the guest loader to route package sources through;
-    /// `None` when the deployment declares none.
-    #[must_use]
-    pub fn registry_config(&self) -> Option<&str> {
-        self.inner.registry_config.as_deref()
     }
 
     /// The guest `id` names, loaded from its declared source on first use.
@@ -441,31 +430,6 @@ impl<B: Backends> Runtime<B> {
         &self.inner.name
     }
 
-    /// Build the HTTP trigger's [`TriggerRouter`] over this runtime's
-    /// registry and static route table so the boot-time routing decision
-    /// lives in one place.
-    ///
-    /// `probe` resolves a guest's typed handler indices; a loaded guest is
-    /// capable exactly when it succeeds. A route may also name a declared
-    /// guest, probed when its first request loads it.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if a route names a guest that neither exports the
-    /// handler nor is declared, or two or more guests export it with no
-    /// routes.
-    pub fn http_trigger_router<I, E, F>(&self, probe: F) -> Result<TriggerRouter<HttpRoutes>>
-    where
-        F: FnMut(&InstancePre<StoreCtx<B>>) -> std::result::Result<I, E>,
-    {
-        TriggerRouter::build(
-            self.registry(),
-            "http",
-            self.registry().routes().http().clone(),
-            probe,
-        )
-    }
-
     /// The command-mode guest identity (the manifest entry marked
     /// `command = true`), if any.
     #[must_use]
@@ -501,12 +465,19 @@ impl<B: Backends> Runtime<B> {
         }
     }
 
-    /// The cached host→guest dispatch capability — the same handle
-    /// every store context carries, for host-side callers (tests,
-    /// embedders) that invoke a guest export directly.
+    /// A host→guest dispatch capability for a caller outside any guest.
+    ///
+    /// Each call through it is a root invocation. It waits for a
+    /// [slot](Self::slot) of the concurrency gate, as a trigger does, and
+    /// frees it once the callee's store has dropped. The handle a store
+    /// context carries serves calls beneath a root that holds a slot, so it
+    /// takes none.
     #[must_use]
     pub fn dispatcher(&self) -> Arc<dyn Dispatcher> {
-        Arc::clone(&self.dispatcher)
+        Arc::new(RuntimeDispatcher {
+            inner: Arc::clone(&self.inner),
+            root: true,
+        })
     }
 
     /// Runtime options from the environment.
@@ -541,15 +512,15 @@ impl<B: Backends> Runtime<B> {
             (Arc::new(mounts), Arc::new(crate::store::granted_env(&self.inner.env, grants)))
         };
         StoreCtx {
-            base: StoreBase::new(crate::StoreConfig {
+            base: StoreBase::new(StoreConfig {
                 guest: guest.id().clone(),
                 grants: Arc::clone(grants),
                 options: self.options(),
                 dispatcher: Arc::clone(&self.dispatcher),
                 chain,
                 args,
-                mounts: Some(mounts),
-                env: Some(env),
+                mounts,
+                env,
                 stdio: self.inner.stdio.clone(),
                 extensions: self.inner.extensions.clone(),
             }),
@@ -610,17 +581,17 @@ impl<B: Backends> Runtime<B> {
     /// Drive the deployment's `wasi:cli/run` command once, returning the
     /// guest's exit status.
     ///
-    /// The run's store is the only one given the command's argv,
-    /// [`RuntimeParts::args`]. A guest it calls or loads sees none.
+    /// The run's store is the only one given the command's argv. A guest it
+    /// calls or loads sees none.
     ///
     /// The run waits for a [slot](Self::slot) of the concurrency gate, as a
     /// message delivery does, and holds it for as long as it runs.
     ///
     /// # Errors
     ///
-    /// Returns an error if the command guest is not registered, routing is
-    /// ambiguous, the guest cannot be instantiated, or the command traps
-    /// without a guest exit code.
+    /// Returns an error if the marked command guest fails to resolve, two or
+    /// more guests export `wasi:cli/run` and none is marked, the guest cannot
+    /// be instantiated, or the command traps without a guest exit code.
     pub async fn run_command(&self) -> Result<ExitStatus> {
         command::drive(self).await
     }
@@ -794,6 +765,7 @@ impl<B: Backends> Runtime<B> {
     ///
     /// Returns an error if a guest's export cannot be served, or a served guest
     /// already has an endpoint (`serve_links` ran twice).
+    #[doc(hidden)]
     pub async fn serve_links(&self) -> Result<()> {
         let registry = self.registry();
         let seam = registry.seam();
@@ -845,8 +817,6 @@ struct RuntimeInner<B: 'static> {
     packages: Option<Arc<dyn RegistrySource>>,
     // absent, command mode routes to the sole static `wasi:cli/run` exporter
     command_guest: Option<GuestId>,
-    // for an embedder that installs the loader capability by hand
-    registry_config: Option<String>,
     // every store's environment, taken once at assembly
     env: Arc<Vec<(String, String)>>,
     // what caller-named grants' `env` entries are checked against
@@ -879,12 +849,19 @@ enum SeatError {
 /// `Arc<dyn Dispatcher>` inside [`Runtime`] does not create a reference cycle.
 pub struct RuntimeDispatcher<B: 'static> {
     inner: Arc<RuntimeInner<B>>,
+    // a root call takes a slot of the gate; a store's calls run beneath a
+    // root that holds one, and would deadlock a full gate waiting on their own
+    root: bool,
 }
 
 impl<B: Backends> RuntimeDispatcher<B> {
     /// Rehydrate a full runtime handle for a dispatched call.
     pub fn runtime(&self) -> Runtime<B> {
         Runtime::with_inner(Arc::clone(&self.inner))
+    }
+
+    pub(crate) const fn root(&self) -> bool {
+        self.root
     }
 }
 

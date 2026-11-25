@@ -17,7 +17,7 @@ use std::path::Path;
 use std::sync::{Arc, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use anyhow::{Context as _, Result, bail, ensure};
-pub use routing::{CliRoutes, HttpRoutes, PatternRoutes, Resolver, Routes, TriggerRouter};
+pub use routing::{HttpRoutes, PatternRoutes, Resolver, Routes, TriggerRouter};
 use wasmtime::Engine;
 use wasmtime::component::types::ComponentItem;
 use wasmtime::component::{Component, InstancePre, Linker};
@@ -109,12 +109,10 @@ pub struct Guest<B: 'static> {
 }
 
 impl<B: 'static> Guest<B> {
-    /// Create a guest backed by a local pre-instantiated component, recording
-    /// the content digest of the bytes it was loaded from so the attestation
-    /// lives and dies with the registry entry itself, the names the
-    /// component exports, and the grants it runs under.
+    // the digest is of the bytes the guest was loaded from, so the
+    // attestation lives and dies with the registry entry itself
     #[must_use]
-    pub fn local(
+    pub(crate) fn local(
         id: GuestId, instance_pre: InstancePre<StoreCtx<B>>, digest: Digest, grants: Grants,
     ) -> Self {
         let component = instance_pre.component();
@@ -182,6 +180,7 @@ enum Target<B: 'static> {
 }
 
 /// Inputs to [`Registry::assemble`], over the backend bundle `B`.
+#[doc(hidden)]
 pub struct RegistryParts<B: 'static> {
     /// The shared engine.
     pub engine: Engine,
@@ -252,6 +251,7 @@ impl<B: 'static> Registry<B> {
     /// repeats, the seam's [`check`](LinkSeam::check) refuses a pair of
     /// loaded guests, or a route targets a guest that is neither loaded nor
     /// declared.
+    #[doc(hidden)]
     pub fn assemble(parts: RegistryParts<B>) -> Result<Self> {
         let RegistryParts {
             engine,

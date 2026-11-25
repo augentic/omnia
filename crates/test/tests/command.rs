@@ -107,6 +107,25 @@ async fn queued_command() {
     runtime.shutdown();
 }
 
+// The cli trigger takes no routes, so the refusal of two unmarked exporters
+// sends the operator to the mark.
+#[tokio::test]
+async fn unmarked_commands() {
+    let err = Deployment::new()
+        .guest("exit_map", exit_map())
+        .guest("blocking", test_programs::COMMAND_BLOCKING)
+        .run(Backends::defaults().await, |deployment| {
+            deployment.host::<WasiOtel>()?;
+            Ok(())
+        })
+        .await
+        .expect_err("neither exporter is marked");
+    let text = format!("{err:#}");
+    for needle in ["2 guests export wasi:cli/run", "blocking", "exit_map", "command = true"] {
+        assert!(text.contains(needle), "`{needle}` missing from: {text}");
+    }
+}
+
 // A captured deployment answers what the guest wrote beside its status: the
 // rendered answer on stdout, the refusal's envelope on stderr, and each
 // stream empty where the guest wrote nothing to it.

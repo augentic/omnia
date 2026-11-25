@@ -5,8 +5,8 @@
 package omnia-test:link;
 
 interface ops {
-    /// Echo `message` tagged with `target` — the guest the default selector
-    /// dispatches to, forwarded through to the export unchanged.
+    /// Echo `message` tagged with `target` — the guest the relay dispatches
+    /// to, forwarded through to the export unchanged.
     ping: func(target: string, message: string) -> string;
 
     /// The async-typed dual of `ping`.
@@ -24,6 +24,12 @@ interface tokens {
     }
 
     take: func(w: option<wrapped>);
+}
+
+/// A function whose leading parameter is a number, so a call to it names no
+/// guest for the relay to dispatch to.
+interface counter {
+    count: func(n: u32) -> u32;
 }
 
 /// Serves `ops`; no trigger of its own, reachable only via dispatch.
@@ -63,6 +69,12 @@ world full {
 world handle {
     import tokens;
     export poke: func();
+}
+
+/// Imports `counter`, whose every call the relay refuses for want of a target.
+world anonymous {
+    import counter;
+    export poke: func(message: string) -> string;
 }
 
 /// Requests plugin loads through `omnia:plugins/loader` and drives the

@@ -4,9 +4,8 @@
 //! on opaque identities and route strings only, never on domain concepts.
 //!
 //! [`RouteTable`] is one table generic over a [`MatchStrategy`]; the aliases
-//! [`HttpRoutes`] (longest-prefix), [`PatternRoutes`] (NATS-style tokens, also
-//! driving websocket routes), and [`CliRoutes`] (exact subcommand) select the
-//! policy.
+//! [`HttpRoutes`] (longest-prefix) and [`PatternRoutes`] (NATS-style tokens,
+//! also driving websocket routes) select the policy.
 //!
 //! [`Router`] layers the capability-based default routing of the guest-registry
 //! design over a table: with no routes configured a sole handler exporter among
@@ -102,16 +101,6 @@ fn topic_matches(topic: &str, pattern: &str) -> bool {
     topic_tokens.next().is_none()
 }
 
-/// Exact string matching, used for CLI subcommands.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct ExactMatch;
-
-impl MatchStrategy for ExactMatch {
-    fn matches(key: &str, pattern: &str) -> bool {
-        pattern == key
-    }
-}
-
 /// A per-trigger route table resolving a routing key to a target identity,
 /// generic over its [`MatchStrategy`].
 #[derive(Clone, Debug, Default)]
@@ -156,13 +145,6 @@ pub type HttpRoutes = RouteTable<PrefixMatch>;
 /// routes.
 pub type PatternRoutes = RouteTable<PatternMatch>;
 
-/// Exact-match CLI subcommand route table.
-///
-/// CLI route parsing is not yet wired, so this table is empty today and a sole
-/// `wasi:cli/run` exporter is the catch-all; the type exists so the `cli`
-/// trigger routes through the same machinery as every other trigger.
-pub type CliRoutes = RouteTable<ExactMatch>;
-
 /// The per-trigger route tables a registry carries, aggregated from the
 /// manifest guests' `routes` lists.
 #[derive(Clone, Debug, Default)]
@@ -170,20 +152,16 @@ pub struct Routes {
     http: HttpRoutes,
     messaging: PatternRoutes,
     websocket: PatternRoutes,
-    cli: CliRoutes,
 }
 
 impl Routes {
     /// Assemble the per-trigger tables.
     #[must_use]
-    pub const fn new(
-        http: HttpRoutes, messaging: PatternRoutes, websocket: PatternRoutes, cli: CliRoutes,
-    ) -> Self {
+    pub const fn new(http: HttpRoutes, messaging: PatternRoutes, websocket: PatternRoutes) -> Self {
         Self {
             http,
             messaging,
             websocket,
-            cli,
         }
     }
 
@@ -205,20 +183,10 @@ impl Routes {
         &self.websocket
     }
 
-    /// The CLI (subcommand) route table.
-    #[must_use]
-    pub const fn cli(&self) -> &CliRoutes {
-        &self.cli
-    }
-
     /// Iterate every identity any route targets across all triggers — used to
     /// validate routes name registered guests.
     pub fn targets(&self) -> impl Iterator<Item = &GuestId> {
-        self.http
-            .targets()
-            .chain(self.messaging.targets())
-            .chain(self.websocket.targets())
-            .chain(self.cli.targets())
+        self.http.targets().chain(self.messaging.targets()).chain(self.websocket.targets())
     }
 }
 

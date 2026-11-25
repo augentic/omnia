@@ -25,7 +25,7 @@ use omnia_core::{
 #[cfg(feature = "loader")]
 use omnia_core::{Grants, RegistrySource};
 #[cfg(feature = "link")]
-use omnia_link::{FirstArgSelector, GuestSelector, InProcessLinks};
+use omnia_link::InProcessLinks;
 #[cfg(feature = "loader")]
 use omnia_plugin::{FsStore, NoStore, Plugins, RegistryClient, WasiPlugins};
 
@@ -126,7 +126,7 @@ impl DeploymentBuilder {
     /// [`Runtime::register`](omnia_core::Runtime::register).
     ///
     /// This only relaxes the "at least one guest" check — static trigger
-    /// routing (HTTP/messaging/websocket/CLI) is built at boot; registered
+    /// routing (HTTP/messaging/websocket) is built at boot; registered
     /// guests are reachable via host-mediated link dispatch and host→guest
     /// [`Dispatcher::invoke`](omnia_core::Dispatcher::invoke).
     #[must_use]
@@ -231,6 +231,7 @@ impl DeploymentBuilder {
         manifest.expand_home()?;
 
         // read once, so a bad configuration fails startup rather than the first load
+        #[cfg(feature = "loader")]
         let registry_config = manifest.registry_config()?;
 
         // an operator `COMPONENT` override wins over the program name
@@ -296,10 +297,7 @@ impl DeploymentBuilder {
 
         // host-mediated dispatch only with `link`
         let seam: Arc<dyn LinkSeam<B>> = cfg_select! {
-            feature = "link" => Arc::new(InProcessLinks::new(
-                Arc::new(FirstArgSelector),
-                ChainPolicy::from(&options),
-            )),
+            feature = "link" => Arc::new(InProcessLinks::new(ChainPolicy::from(&options))),
             _ => Arc::new(omnia_core::NoLinks),
         };
 
@@ -317,11 +315,11 @@ impl DeploymentBuilder {
             mode: self.mode,
             allow_empty: self.allow_empty,
             command_guest: manifest.command_guest(),
-            registry_config,
             #[cfg(feature = "loader")]
             loader: Loader {
                 store,
                 registry: None,
+                config: registry_config,
                 grants: manifest.plugins.map_or_else(Grants::all, |plugins| plugins.grants),
             },
             rust_log,
@@ -358,7 +356,7 @@ fn engine_and_linker<B: Send + 'static>(
 
 /// A compiled set of WebAssembly components with their shared Linker over the
 /// backend bundle `B`, ready to be [`host`]ed against WASI interfaces and
-/// assembled into a [`Registry`].
+/// [assembled](Self::assemble) into a [`Runtime`].
 ///
 /// [`host`]: Self::host
 pub struct Deployment<B: 'static> {
@@ -377,8 +375,6 @@ pub struct Deployment<B: 'static> {
     mode: Mode,
     allow_empty: bool,
     command_guest: Option<GuestId>,
-    // one document despite the public plural key
-    registry_config: Option<String>,
     #[cfg(feature = "loader")]
     loader: Loader,
     // every store's `RUST_LOG`
@@ -397,18 +393,6 @@ impl<B: Backends> Deployment<B> {
     pub fn host<H: Host<B>>(&mut self) -> Result<&mut Self> {
         H::add_to_linker(&mut self.linker)?;
         Ok(self)
-    }
-
-    /// Override the host-mediated dispatch [`GuestSelector`].
-    ///
-    /// Defaults to [`FirstArgSelector`] — the runtime core's "first call argument is the
-    /// identity" strategy. Chainable.
-    #[cfg(feature = "link")]
-    pub fn selector(&mut self, selector: impl GuestSelector) -> &mut Self {
-        // the seam holds only selector and policy until assembly, so rebuilding loses nothing
-        self.seam =
-            Arc::new(InProcessLinks::new(Arc::new(selector), ChainPolicy::from(&self.options)));
-        self
     }
 
     /// Select where package sources are acquired — the manifest's
@@ -453,38 +437,17 @@ impl<B: Backends> Deployment<B> {
         &self.args
     }
 
-    /// Assemble the guest [`Registry`].
-    ///
-    /// Consumes the deployment: pre-instantiation of the boot guests happens
-    /// once, here, after all hosts are linked — so no host can be linked
-    /// after the guests are frozen; a declared guest pre-instantiates against
-    /// the same linker when its first use loads it. Per call only a fresh
-    /// instantiate on a new store remains. With the `link` feature, every
-    /// import a guest makes outside the runtime's own namespaces is relayed
-    /// to the guest exporting it; without it, such an import is unresolved
-    /// and pre-instantiation fails.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if a relayed import cannot be polyfilled, a component
-    /// cannot be pre-instantiated, or the registry cannot be assembled.
-    pub fn into_registry(self) -> Result<Registry<B>> {
-        Registry::assemble(RegistryParts {
-            engine: self.engine,
-            linker: self.linker,
-            options: self.options,
-            loaded: self.guests,
-            declared: self.declared,
-            routes: self.routes,
-            seam: self.seam,
-            allow_empty: self.allow_empty,
-        })
-    }
-
     /// Assemble this deployment into a [`Runtime`]: the guest loader host
     /// joins the linked hosts, the registry pre-instantiates the boot guests
     /// and tables the declared ones, the loader's grant installs, then the
     /// serve side of every boot guest's linked exports is wired.
+    ///
+    /// Assembly consumes the deployment, so every host is linked before a
+    /// guest pre-instantiates. A declared guest pre-instantiates against the
+    /// same linker when its first use loads it. With the `link` feature,
+    /// every import a guest makes outside the runtime's own namespaces is
+    /// relayed to the guest exporting it. Without it, such an import is
+    /// unresolved and assembly fails.
     ///
     /// The loader host is linked here, beside WASI, whenever omnia is built
     /// with the `loader` feature; wasmtime wires it only into worlds that
@@ -509,7 +472,7 @@ impl<B: Backends> Deployment<B> {
         #[cfg(feature = "loader")]
         let (deployment, loader) = deployment.with_loader_host()?;
         #[cfg(feature = "loader")]
-        let registry = loader.registry(deployment.registry_config.as_deref())?;
+        let registry = loader.registry()?;
 
         // name what reaches everything, so an operator sees what grants would
         // narrow, warning once another guest declares some
@@ -542,7 +505,6 @@ impl<B: Backends> Deployment<B> {
                 feature = "loader" => Some(registry),
                 _ => None,
             },
-            registry_config: deployment.registry_config.clone(),
             rust_log: deployment.rust_log.clone(),
             inherit: deployment.inherit.clone(),
             stdio: deployment.stdio.clone(),
@@ -566,6 +528,19 @@ impl<B: Backends> Deployment<B> {
         let loader = std::mem::take(&mut self.loader);
         Ok((self, loader))
     }
+
+    fn into_registry(self) -> Result<Registry<B>> {
+        Registry::assemble(RegistryParts {
+            engine: self.engine,
+            linker: self.linker,
+            options: self.options,
+            loaded: self.guests,
+            declared: self.declared,
+            routes: self.routes,
+            seam: self.seam,
+            allow_empty: self.allow_empty,
+        })
+    }
 }
 
 cfg_select! {
@@ -575,6 +550,8 @@ cfg_select! {
             store: Option<PathBuf>,
             // `None` installs a `RegistryClient` over the store and the deployment's `registries`
             registry: Option<Arc<dyn RegistrySource>>,
+            // the `registries` configuration, one document despite the public plural key
+            config: Option<String>,
             // what a guest loaded by path or package runs under, within its loader's
             grants: Grants,
         }
@@ -584,16 +561,18 @@ cfg_select! {
                 Self {
                     store: None,
                     registry: None,
+                    config: None,
                     grants: Grants::all(),
                 }
             }
         }
 
         impl Loader {
-            fn registry(&self, config: Option<&str>) -> Result<Arc<dyn RegistrySource>> {
+            fn registry(&self) -> Result<Arc<dyn RegistrySource>> {
                 if let Some(registry) = &self.registry {
                     return Ok(Arc::clone(registry));
                 }
+                let config = self.config.as_deref();
                 Ok(match &self.store {
                     Some(root) => Arc::new(RegistryClient::from_toml(config, FsStore::open(root))?),
                     None => Arc::new(RegistryClient::from_toml(config, NoStore)?),

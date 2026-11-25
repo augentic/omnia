@@ -21,6 +21,7 @@ use crate::store::StoreCtx;
 /// Builds a fresh, fully configured store for one guest over the backend
 /// bundle `B`, per served invocation, at the chain context the invocation
 /// runs at.
+#[doc(hidden)]
 pub type StoreFactory<B> = Arc<dyn Fn(ChainCtx) -> Store<StoreCtx<B>> + Send + Sync>;
 
 /// Guest→guest linking as the registry drives it, over the backend bundle `B`.
@@ -33,6 +34,7 @@ pub type StoreFactory<B> = Arc<dyn Fn(ChainCtx) -> Store<StoreCtx<B>> + Send + S
 /// reads pending state and reads live state under the seam's own lock, not the
 /// gate: a call racing a deregister may complete against the departing
 /// instance, exactly as an in-flight invocation does.
+#[doc(hidden)]
 pub trait LinkSeam<B: 'static>: Send + Sync + 'static {
     /// Polyfill every bootstrap guest's link imports onto the shared linker,
     /// before pre-instantiation.
@@ -91,6 +93,7 @@ pub trait LinkSeam<B: 'static>: Send + Sync + 'static {
 }
 
 /// The seam of a deployment built without omnia's `link` feature.
+#[doc(hidden)]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct NoLinks;
 

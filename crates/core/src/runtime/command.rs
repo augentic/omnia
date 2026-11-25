@@ -10,21 +10,21 @@ use wasmtime_wasi::p3::bindings::{Command, CommandPre};
 
 use super::{ExitStatus, Runtime};
 use crate::host::Backends;
-use crate::registry::{Guest, GuestId, TriggerRouter};
+use crate::registry::{Guest, GuestId};
 
 /// Run the command guest once, after the [`Runtime`] is assembled.
 ///
 /// A guest marked `command = true` in the manifest resolves through
 /// [`Runtime::guest`], so a declared guest loads here by being run. Without
 /// a marked guest, the sole `wasi:cli/run` exporter among the guests loaded
-/// at boot is the catch-all; a deployment with no exporter is inert and
-/// exits `0`.
+/// at boot runs; a deployment with no exporter is inert and exits `0`.
 ///
 /// # Errors
 ///
 /// Returns an error if the explicit command guest is neither registered nor
-/// declared or fails to load, routing is ambiguous, the guest cannot be
-/// instantiated, or the command traps without a guest exit code.
+/// declared or fails to load, two or more boot guests export `wasi:cli/run`
+/// and none is marked, the guest cannot be instantiated, or the command traps
+/// without a guest exit code.
 pub async fn drive<B: Backends>(runtime: &Runtime<B>) -> Result<ExitStatus> {
     if let Some(id) = runtime.command_guest() {
         let id = id.clone();
@@ -35,25 +35,27 @@ pub async fn drive<B: Backends>(runtime: &Runtime<B>) -> Result<ExitStatus> {
         return run_guest(runtime, &id, &guest).await;
     }
 
-    let routing = TriggerRouter::build(
-        runtime.registry(),
-        "cli",
-        runtime.registry().routes().cli().clone(),
-        |pre| CommandPre::new(pre.clone()).map(|_| ()),
-    )?;
-    // a command runtime with nothing to run exits clean, but the operator should hear
-    if routing.is_inert() {
-        tracing::warn!("no guest exports wasi:cli/run; cli trigger inert");
-        return Ok(ExitStatus::SUCCESS);
+    let commands: Vec<Arc<Guest<B>>> = runtime
+        .registry()
+        .guests()
+        .filter(|guest| CommandPre::new(guest.instance_pre().clone()).is_ok())
+        .collect();
+    match commands.as_slice() {
+        [] => {
+            tracing::warn!("no guest exports wasi:cli/run; command mode is inert");
+            Ok(ExitStatus::SUCCESS)
+        }
+        [guest] => run_guest(runtime, guest.id(), guest).await,
+        many => {
+            let names = many.iter().map(|guest| guest.id().as_str()).collect::<Vec<_>>();
+            bail!(
+                "{} guests export wasi:cli/run ({}); mark one `command = true` to choose the \
+                 command guest",
+                many.len(),
+                names.join(", ")
+            )
+        }
     }
-    let Some(guest_id) = routing.catch_all() else {
-        bail!("multiple wasi:cli/run guests; mark one `command = true` to disambiguate");
-    };
-    let guest = runtime
-        .guest(guest_id)
-        .await
-        .with_context(|| format!("resolving the routed guest `{guest_id}`"))?;
-    run_guest(runtime, guest_id, &guest).await
 }
 
 async fn run_guest<B: Backends>(

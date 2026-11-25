@@ -14,20 +14,17 @@ mod entry;
 mod lifecycle;
 pub use anyhow;
 pub use futures;
-#[doc(inline)]
-pub use omnia_cli::{Cli, Command, Parser};
 #[cfg(feature = "jit")]
 #[doc(inline)]
 pub use omnia_compile as compile;
 #[doc(inline)]
 pub use omnia_core::{
-    AcquireError, Backends, ChainCtx, ChainPolicy, CliRoutes, CompileOptions, Connect, Digest,
-    Dispatcher, Entered, ExitStatus, Extensions, FromEnv, FutureResult, Grants, Guest, GuestError,
-    GuestId, HasTable, Host, HostCtx, HostView, HttpRoutes, Invocations, LevelFilter, LinkSeam,
-    MountRegistry, NoLinks, NoOptions, PatternRoutes, Policy, Provides, Proxy, Registry,
-    RegistryParts, RegistrySource, ResolvedPreopen, Routes, Runtime, RuntimeOptions, RuntimeParts,
-    Slot, Source, SourceSpec, Stdio, StoreBase, StoreConfig, StoreCtx, StoreFactory, Telemetry,
-    TriggerRouter, Verified, WeakRuntime, env, get_cloned, telemetry,
+    AcquireError, Backends, ChainCtx, ChainPolicy, CompileOptions, Connect, Digest, Dispatcher,
+    Entered, ExitStatus, Extensions, FromEnv, FutureResult, Grants, Guest, GuestError, GuestId,
+    HasTable, Host, HostCtx, HostView, HttpRoutes, Invocations, LevelFilter, MountRegistry,
+    NoOptions, PatternRoutes, Policy, Provides, Proxy, Registry, RegistrySource, ResolvedPreopen,
+    Routes, Runtime, RuntimeOptions, Slot, Source, SourceSpec, Stdio, StoreBase, StoreCtx,
+    Telemetry, TriggerRouter, Verified, WeakRuntime, env, get_cloned, telemetry,
 };
 #[doc(hidden)]
 pub use omnia_core::{tokio, wasmtime, wasmtime_wasi};
@@ -35,7 +32,7 @@ pub use omnia_core::{tokio, wasmtime, wasmtime_wasi};
 pub use omnia_host_macros::runtime;
 #[cfg(feature = "link")]
 #[doc(inline)]
-pub use omnia_link::{FirstArgSelector, GuestSelector, InProcessLinks, is_host};
+pub use omnia_link::is_host;
 #[cfg(feature = "loader")]
 #[doc(inline)]
 pub use omnia_plugin::{

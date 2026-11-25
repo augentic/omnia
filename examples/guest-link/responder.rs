@@ -22,7 +22,7 @@ struct Responder;
 export!(Responder);
 
 impl exports::example::link::echo::Guest for Responder {
-    // `target` is the selector's identity, forwarded unchanged
+    // `target` is the identity the host routed on, forwarded unchanged
     fn echo(target: String, message: String) -> String {
         format!("{target} echoes: {message}")
     }

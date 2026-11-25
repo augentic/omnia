@@ -34,8 +34,8 @@ pub async fn component(engine: &Engine, verified: Verified) -> Result<Component>
 
 // Appended to every pre-compiled deserialization failure: the usual cause is a
 // compile-affecting settings mismatch, not corruption.
-const SETTINGS_HINT: &str = "the artifact must be built with the same compile-affecting settings \
-                             used by `omnia compile` (MAX_FUEL, BRANCH_HINTING, \
+const SETTINGS_HINT: &str = "the artifact must be compiled under the compile-affecting settings \
+                             this runtime runs with (MAX_FUEL, BRANCH_HINTING, \
                              MEMORY_RESERVATION, MEMORY_GUARD_SIZE)";
 
 // The base build has no compiler and refuses raw wasm; `jit` adds the compile
@@ -69,8 +69,8 @@ fn load(engine: &Engine, bytes: &[u8]) -> Result<Component> {
             bail!("the artifact is a pre-compiled core module, not a component")
         }
         None => bail!(
-            "compiling raw wasm requires the `jit` feature; pre-compile the component with \
-             `omnia compile` instead"
+            "compiling raw wasm requires the `jit` feature; pre-compile the component with the \
+             `compile` subcommand of a runtime built with `jit`"
         ),
     }
 }

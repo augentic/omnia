@@ -4,7 +4,7 @@
 //! implementation the host satisfies at runtime. The host polyfills that import
 //! on the shared `Linker` so invoking it:
 //!
-//! 1. extracts a target identity from the call via a [`GuestSelector`],
+//! 1. reads the target identity from the call's leading string argument,
 //! 2. refuses a target outside the caller's
 //!    [`guests`](omnia_core::Grants::guests) grant, before the target loads,
 //! 3. rejects any resource handle attempting to cross the seam,
@@ -23,22 +23,22 @@
 //! opaque string, resolving opaque [`GuestId`]s — the seam never parses a
 //! consumer scheme. Arguments and results travel as wasmtime
 //! [`Val`](wasmtime::component::Val)s lifted from the caller and lowered into
-//! the callee, with no codec in between; the selector runs in the polyfill on
-//! those lifted values, so it sees typed parameters. Sync-typed functions are
-//! registered with `func_new_async`; async-typed (`async func`) ones with
-//! `func_new_concurrent`; both share one body whose only read of the caller's
-//! store is a snapshot of its identity, grants, and chain context. The
-//! callee's store is built from that chain context. See
-//! `docs/Architecture.md` (The Guest Registry) for the full design.
+//! the callee, with no codec in between. The leading argument names the
+//! target and is forwarded too, since caller and callee share one interface.
+//! A call whose leading argument is not a string is refused. Sync-typed
+//! functions are registered with `func_new_async`; async-typed
+//! (`async func`) ones with `func_new_concurrent`; both share one body whose
+//! only read of the caller's store is a snapshot of its identity, grants,
+//! and chain context. The callee's store is built from that chain context.
+//! See `docs/Architecture.md` (The Guest Registry) for the full design.
 //!
-//! [`InProcessLinks`] is the [`LinkSeam`] the registry drives when omnia is
+//! [`InProcessLinks`] is the `LinkSeam` the registry drives when omnia is
 //! built with its `link` feature.
 
 #![cfg(not(target_arch = "wasm32"))]
 
 mod polyfill;
 mod route;
-mod selector;
 mod serve;
 mod signature;
 
@@ -55,7 +55,6 @@ use wasmtime::component::{Component, Linker};
 
 use self::polyfill::{Caller, WiredLinks};
 use self::route::Routes;
-pub use self::selector::{FirstArgSelector, GuestSelector};
 
 /// The runtime's own namespaces.
 ///
@@ -69,11 +68,9 @@ pub fn is_host(interface: &str) -> bool {
 
 /// Guest→guest linking by in-memory routing to a fresh callee instance.
 ///
-/// Holds the selector strategy, the chain policy (depth and wall-clock
-/// bounds), the route table, and the functions the bootstrap polyfilled onto
-/// the shared linker.
+/// Holds the chain policy (depth and wall-clock bounds), the route table,
+/// and the functions the bootstrap polyfilled onto the shared linker.
 pub struct InProcessLinks {
-    selector: Arc<dyn GuestSelector>,
     policy: ChainPolicy,
     routes: Routes,
     // the bootstrap wiring; a late guest polyfills on a linker clone against a copy
@@ -81,13 +78,13 @@ pub struct InProcessLinks {
 }
 
 impl InProcessLinks {
-    /// Create the seam under `policy`. The route table starts empty; the
-    /// registry serves and publishes each guest's route through the
-    /// [`LinkSeam`] methods.
+    /// Create the seam under `policy`.
+    ///
+    /// The route table starts empty. The registry serves and publishes each
+    /// guest's route through the seam.
     #[must_use]
-    pub fn new(selector: Arc<dyn GuestSelector>, policy: ChainPolicy) -> Self {
+    pub fn new(policy: ChainPolicy) -> Self {
         Self {
-            selector,
             policy,
             routes: Routes::default(),
             wired: Mutex::new(WiredLinks::new()),
@@ -97,7 +94,6 @@ impl InProcessLinks {
     // What every polyfilled import captures for its per-call dispatch.
     fn caller(&self) -> Arc<Caller> {
         Arc::new(Caller {
-            selector: Arc::clone(&self.selector),
             policy: self.policy,
             routes: self.routes.clone(),
         })

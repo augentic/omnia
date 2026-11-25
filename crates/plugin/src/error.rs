@@ -44,11 +44,11 @@ pub enum LoadError {
 
 impl LoadError {
     // A runtime that linked the loader host but installed no `Plugins`
-    // extension: one assembled by hand from parts.
+    // extension, which `Deployment::assemble` always installs.
     pub(crate) fn no_plugins(from: impl fmt::Display) -> Self {
         Self::Unsupported(format!(
-            "this runtime has no guest loader installed; loading `{from}` needs \
-             `Plugins::install` on the assembled runtime"
+            "this runtime has no guest loader installed; loading `{from}` needs a runtime \
+             assembled by `Deployment::assemble`"
         ))
     }
 }

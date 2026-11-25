@@ -98,7 +98,7 @@ Only `in-process` is a valid `[transport] default`. Remove `unix`/`nats`/`quic` 
 
 ### `guest ... is the package ..., but this runtime was built without the loader feature`
 
-A manifest declares a `source.package` guest, but the runtime has no registry client to fetch it with. Packages are fetched through omnia's `loader` feature; enable it on the `omnia` dependency (`features = ["loader"]`), or give the guest a `source.path`. The run-time twin, `... has no registry to fetch it from`, is the same gap reached through an embedder's own `RuntimeParts` with `packages: None`.
+A manifest declares a `source.package` guest, but the runtime has no registry client to fetch it with. Packages are fetched through omnia's `loader` feature; enable it on the `omnia` dependency (`features = ["loader"]`), or give the guest a `source.path`.
 
 ### `guest ... imports code from packages its grants do not reach: add ... to its interfaces`
 
@@ -117,7 +117,7 @@ A grants table holds an entry the deployment cannot honour, and the message name
 - a `guests` entry that is empty or holds a `*` before its end, where a guest name or a prefix of one ending in `*` belongs;
 - an `interfaces` entry that names an interface (`wasi:http/types`), a version (`wasi:http@0.3.0`), or a bare namespace (`wasi`), where a package (`wasi:http`) or a prefix such as `wasi:*` belongs.
 
-Startup refuses a manifest's table, and refuses `[plugins.grants]` for the same entries as `` `[plugins.grants]` is invalid ``. `Runtime::register` and `Runtime::admit` refuse an embedder's as `invalid`, and `Plugins::install` refuses the loader's.
+Startup refuses a manifest's table, and refuses `[plugins.grants]` for the same entries as `` `[plugins.grants]` is invalid ``. `Runtime::register` and `Runtime::admit` refuse an embedder's as `invalid`, and `Deployment::assemble` refuses the loader's.
 
 ### `guest ... is active under other grants than this admission names`
 
@@ -265,8 +265,8 @@ The cursor backend requires a workspace: the host must mount a directory (`[[mou
 
 ### A pre-compiled `.bin` fails to load
 
-Compile-affecting options must match between `compile` and `run`: `MAX_FUEL`, `MEMORY_RESERVATION`, `MEMORY_GUARD_SIZE`, `BRANCH_HINTING`, `DEBUG_SYMBOLS`, `GENERATE_ADDRESS_MAP`. The compiler takes them as an explicit `CompileOptions` — `CompileOptions::default()` is the runtime's environment defaults — so check what the compile passed against what the runtime's environment sets, and recompile with the production values or align the runtime's environment with them. The artifact must also be for the runtime's target: a compile that named no `target` produced an artifact for the machine it ran on.
+Compile-affecting options must match between `compile` and `run`: `MAX_FUEL`, `MEMORY_RESERVATION`, `MEMORY_GUARD_SIZE`, `BRANCH_HINTING`, `DEBUG_SYMBOLS`, `GENERATE_ADDRESS_MAP`. The `compile` subcommand reads them from its own environment, and the library compiler takes them as an explicit `CompileOptions` — `CompileOptions::default()` is the runtime's environment defaults — so check what the compile ran under against what the runtime's environment sets, and recompile with the production values or align the runtime's environment with them. The artifact must also be for the runtime's target: a compile that named no `target` produced an artifact for the machine it ran on.
 
-### `compile` prints an error from my `runtime!` binary
+### `` `compile` needs omnia's `jit` feature, which this runtime was built without ``
 
-The generated `main` handles only `run`. Expose compilation via a hand-written `main` that calls `omnia::compile` — see the [CLI reference](reference/cli.md#compile-jit-feature).
+The runtime was built without omnia's default `jit` feature, so it carries no compiler. Compile with a build of the same runtime that keeps `jit`, under the settings the loading runtime runs with (see [A pre-compiled `.bin` fails to load](#a-pre-compiled-bin-fails-to-load)), and load the `.bin` here.
