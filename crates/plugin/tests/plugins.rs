@@ -15,10 +15,12 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use std::path::{Path, PathBuf};
+use std::pin::pin;
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Context as _, Result, bail};
 use omnia::futures::future::BoxFuture;
+use omnia::futures::poll;
 use omnia::wasmtime::Engine;
 use omnia::wasmtime::component::Val;
 use omnia::{
@@ -1506,9 +1508,10 @@ async fn faulted(wasm: &str, args: &[&str]) -> Vec<String> {
 }
 
 // A registry source scripted per package: `fault:<case>@1.0.0` fails with
-// that case, whose detail is the case's name, and the echoer package serves
-// the echoer. It records every package it is asked for, then yields before
-// it answers, so a load racing another arrives while the first acquires.
+// that case, whose detail is the case's name, `fault:panic@1.0.0` panics,
+// and the echoer package serves the echoer. It records every package it is
+// asked for, then yields before it answers, so a load racing another arrives
+// while the first acquires.
 #[derive(Clone, Default)]
 struct Faulting {
     asked: Arc<Mutex<Vec<String>>>,
@@ -1536,6 +1539,7 @@ impl RegistrySource for Faulting {
                 Some("invalid") => Err(AcquireError::Invalid(detail)),
                 Some("unsupported") => Err(AcquireError::Unsupported(detail)),
                 Some("unavailable") => Err(AcquireError::Unavailable(detail)),
+                Some("panic") => panic!("the source panicked"),
                 _ if package == ECHOER_PACKAGE => {
                     Ok(std::fs::read(test_programs::LINK_ECHOER).expect("reading the echoer"))
                 }
@@ -1556,7 +1560,9 @@ async fn unsupported_release() {
 }
 
 // Two first uses of a declared package race while its source fails: they
-// share the one acquisition, and each reports the source's error.
+// share the one acquisition, and each reports the source's error. The
+// failure is not kept, so a first use after the load ends acquires afresh,
+// even while an earlier one has yet to take the failure.
 #[tokio::test]
 async fn racing_failure() {
     const PACKAGE: &str = "fault:unavailable@1.0.0";
@@ -1567,16 +1573,53 @@ async fn racing_failure() {
     deployment.registry_source(source.clone());
     let runtime =
         deployment.assemble(Backends::defaults().await).await.expect("assembling runtime");
+    let load = || runtime.load(declared("fault:unavailable"), None);
 
-    let loads: [_; 2] = tokio::join!(
-        runtime.load(declared("fault:unavailable"), None),
-        runtime.load(declared("fault:unavailable"), None)
-    )
-    .into();
+    let loads: [_; 2] = tokio::join!(load(), load()).into();
     for loaded in loads {
         assert!(matches!(&loaded, Err(LoadError::Unavailable(_))), "{loaded:?}");
     }
     assert_eq!(source.asked(), [PACKAGE], "the racing loads shared one acquisition");
+
+    // an earlier first use still holds the ended load when the next arrives
+    let mut earlier = pin!(load());
+    assert!(poll!(&mut earlier).is_pending(), "the earlier first use began a load");
+    load().await.expect_err("the load the two share fails");
+    assert_eq!(source.asked(), [PACKAGE; 2], "the second first use joined the load");
+    load().await.expect_err("a load of its own fails");
+    assert_eq!(source.asked(), [PACKAGE; 3], "the ended load was not joined");
+    earlier.await.expect_err("the earlier first use takes the failure it shared");
+
     assert_eq!(recorded(&runtime, "fault:unavailable"), Registered::Absent);
+    runtime.shutdown();
+}
+
+// Two first uses of a declared package race while its source panics: each is
+// told the load panicked, from the one acquisition, and the next first use
+// acquires afresh.
+#[tokio::test]
+async fn racing_panic() {
+    const PACKAGE: &str = "fault:panic@1.0.0";
+
+    let source = Faulting::default();
+    let manifest = path_requester(test_programs::PLUGINS_LOAD).guest(GuestEntry::package(PACKAGE));
+    let mut deployment = deployment(manifest, &[]).await.expect("building deployment");
+    deployment.registry_source(source.clone());
+    let runtime =
+        deployment.assemble(Backends::defaults().await).await.expect("assembling runtime");
+    let load = || runtime.load(declared("fault:panic"), None);
+
+    let loads: [_; 2] = tokio::join!(load(), load()).into();
+    for loaded in loads {
+        assert!(
+            matches!(&loaded, Err(LoadError::Other(detail)) if detail.contains("panicked")),
+            "{loaded:?}"
+        );
+    }
+    assert_eq!(source.asked(), [PACKAGE], "the racing loads shared one acquisition");
+
+    load().await.expect_err("the source panics again");
+    assert_eq!(source.asked(), [PACKAGE; 2], "the next first use acquired afresh");
+    assert_eq!(recorded(&runtime, "fault:panic"), Registered::Absent);
     runtime.shutdown();
 }

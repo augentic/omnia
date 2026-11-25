@@ -2,86 +2,52 @@
 //! per guest identity.
 
 use std::collections::{HashMap, HashSet};
+use std::panic::AssertUnwindSafe;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use futures::future::{BoxFuture, FutureExt as _, Shared, WeakShared};
 use tokio::sync::Notify;
 
-use crate::registry::GuestId;
+use super::GuestError;
+use crate::registry::{Guest, GuestId};
 
-type Load<T> = BoxFuture<'static, T>;
+type Loaded<B> = Result<Arc<Guest<B>>, GuestError>;
+type Load<B> = BoxFuture<'static, Loaded<B>>;
 
-// The first-use loads in flight, one per identity. Each is held weakly, so it
-// runs while any caller still awaits it and is dropped with the last one.
-pub(super) struct Loads<T> {
-    state: Arc<Mutex<State<T>>>,
-}
+// The first-use loads in flight, one per declared guest. Each is held weakly,
+// so it runs while any caller still awaits it and is dropped with the last
+// one. No entry is removed: a deployment declares a fixed set of guests, and
+// a weak entry keeps neither a guest nor the runtime alive.
+pub(super) struct Loads<B: 'static>(Mutex<HashMap<GuestId, WeakShared<Load<B>>>>);
 
-struct State<T> {
-    next: u64,
-    running: HashMap<GuestId, Running<T>>,
-}
-
-struct Running<T> {
-    token: u64,
-    load: WeakShared<Load<T>>,
-}
-
-impl<T: Clone + Send + Sync + 'static> Loads<T> {
-    // a strong handle is never dropped under the lock: the last one drops the
-    // load, and its `Loading` takes the lock
-    pub(super) fn join(&self, id: &GuestId, start: impl FnOnce() -> Load<T>) -> Shared<Load<T>> {
-        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
-        if let Some(load) = state.running.get(id).and_then(|running| running.load.upgrade()) {
-            return load;
+impl<B: 'static> Loads<B> {
+    // A load that has ended is never joined, so the first use after a failure
+    // loads afresh. A panic in `load` ends it as an error each waiter takes:
+    // left to unwind, it would poison the load and leave a waiter asleep.
+    pub(super) fn join(
+        &self, id: &GuestId, load: impl Future<Output = Loaded<B>> + Send + 'static,
+    ) -> Shared<Load<B>> {
+        let mut loads = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let running = loads.get(id).and_then(WeakShared::upgrade);
+        if let Some(running) = running.filter(|running| running.peek().is_none()) {
+            return running;
         }
 
-        let token = state.next;
-        state.next += 1;
-        let loading = Loading {
-            state: Arc::clone(&self.state),
-            id: id.clone(),
-            token,
-        };
-        let body = start();
-        let load = async move {
-            let _loading = loading;
-            body.await
-        }
-        .boxed()
-        .shared();
+        let panicked = GuestError::Internal(format!("loading guest `{id}` panicked"));
+        let load = AssertUnwindSafe(load)
+            .catch_unwind()
+            .map(|caught| caught.unwrap_or(Err(panicked)))
+            .boxed()
+            .shared();
         let weak = load.downgrade().expect("a load not yet polled has not completed");
-        state.running.insert(id.clone(), Running { token, load: weak });
+        loads.insert(id.clone(), weak);
         load
     }
 }
 
-impl<T> Default for Loads<T> {
+impl<B: 'static> Default for Loads<B> {
     fn default() -> Self {
-        Self {
-            state: Arc::new(Mutex::new(State {
-                next: 0,
-                running: HashMap::new(),
-            })),
-        }
-    }
-}
-
-// Removes its load's entry however the load ends: finished, or dropped by its
-// last caller. A newer load can take the entry of one its callers abandoned
-// before this runs, so only the entry under its own token goes.
-struct Loading<T> {
-    state: Arc<Mutex<State<T>>>,
-    id: GuestId,
-    token: u64,
-}
-
-impl<T> Drop for Loading<T> {
-    fn drop(&mut self) {
-        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
-        if state.running.get(&self.id).is_some_and(|running| running.token == self.token) {
-            state.running.remove(&self.id);
-        }
+        Self(Mutex::default())
     }
 }
 

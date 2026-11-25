@@ -156,8 +156,8 @@ impl Plugins {
     /// - [`LoadError::Unsupported`] for a package the runtime cannot fetch.
     /// - [`LoadError::Unavailable`] when the mount, the store, or the
     ///   registry did not produce the bytes.
-    /// - [`LoadError::Other`] when the registration failed or the runtime
-    ///   has shut down.
+    /// - [`LoadError::Other`] when the registration failed, the runtime has
+    ///   shut down, or a declared guest's load panicked.
     pub async fn load(
         &self, from: Location, pin: Option<Digest>, caller: &Grants,
     ) -> Result<Result<Plugin, LoadConflict>, LoadError> {

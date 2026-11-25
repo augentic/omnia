@@ -12,7 +12,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Once, Weak};
 
 use anyhow::Result;
-use futures::FutureExt as _;
 use tokio::sync::watch;
 use wasmtime::Store;
 use wasmtime::component::InstancePre;
@@ -208,7 +207,8 @@ impl<B: Backends> Runtime<B> {
     /// - [`GuestError::Invalid`] when the bytes miss the pin, are a
     ///   pre-compiled artifact where raw wasm alone is admitted, or do not
     ///   load as a component.
-    /// - [`GuestError::Internal`] when the registration failed.
+    /// - [`GuestError::Internal`] when the registration failed, or the load
+    ///   panicked.
     pub async fn guest(&self, id: &GuestId) -> Result<Arc<Guest<B>>, GuestError> {
         let registry = self.registry();
         if let Some(guest) = registry.get(id) {
@@ -219,8 +219,8 @@ impl<B: Backends> Runtime<B> {
         }
 
         let (runtime, owned) = (self.clone(), id.clone());
-        let start = move || async move { runtime.load_declared(&owned).await }.boxed();
-        self.inner.loads.join(id, start).await
+        let load = async move { runtime.load_declared(&owned).await };
+        self.inner.loads.join(id, load).await
     }
 
     // The load every first use of a declared guest joins while it runs. It
@@ -853,7 +853,7 @@ struct RuntimeInner<B: 'static> {
     // whose guests finished between its looks
     stores_built: AtomicU64,
     gate: Gate,
-    loads: Loads<Result<Arc<Guest<B>>, GuestError>>,
+    loads: Loads<B>,
     seats: Seats,
     hop_warning: Once,
     stop: watch::Sender<bool>,
@@ -966,7 +966,7 @@ pub enum GuestError {
         /// What did not hold.
         detail: String,
     },
-    /// The registration itself failed.
+    /// The registration itself failed, or a first-use load panicked.
     #[error("{0}")]
     Internal(String),
 }
