@@ -266,6 +266,22 @@ async fn messaging_handle_sleep() {
     runtime.shutdown();
 }
 
+// The guest sleeps two seconds, its guest timeout here, and the paused clock
+// fires its sleep and its deadline on one tick. A call that returns as its
+// deadline passes has returned in time.
+#[tokio::test(start_paused = true)]
+async fn sleep_to_deadline() {
+    const SLEEP: Duration = Duration::from_secs(2);
+
+    let deployment = sole(test_programs::MESSAGING_HANDLE_SLEEP).guest_timeout(SLEEP);
+    let runtime = boot(&deployment, Backends::defaults().await).await;
+    let handler = handler(&runtime);
+
+    handler.handle(order("orders")).await.expect("the guest returns at its deadline");
+
+    runtime.shutdown();
+}
+
 // The guest's timeout counts from when its delivery takes a slot, so a delivery
 // that waited one timeout for the gate still runs a whole timeout after it.
 #[tokio::test]

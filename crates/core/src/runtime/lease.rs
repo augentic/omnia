@@ -9,6 +9,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use futures::future::OptionFuture;
 use tokio::sync::watch;
+use tokio::task::coop::unconstrained;
 use tokio::time::{Instant, sleep};
 use wasmtime::component::Instance;
 
@@ -162,11 +163,16 @@ impl<B: Backends> Lease<B> {
         // does not reliably fire a timer raced inside `run_concurrent`
         loop {
             let expiry = (*armed.borrow_and_update()).map(Arm::expiry);
+
+            // a call that returns as the deadline passes has returned in time,
+            // and one that spends the task's coop budget cannot starve the timer
             tokio::select! {
                 biased;
-                Ok(()) = armed.changed() => {}
-                Some(limit) = OptionFuture::from(expiry) => return Err(LeaseError::Timeout(limit)),
                 outcome = &mut run => return outcome,
+                Ok(()) = unconstrained(armed.changed()) => {}
+                Some(limit) = unconstrained(OptionFuture::from(expiry)) => {
+                    return Err(LeaseError::Timeout(limit));
+                }
             }
         }
     }

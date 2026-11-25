@@ -31,4 +31,4 @@ omnia = { path = "../omnia" }
 omnia-test = { path = "../test", default-features = false, features = ["host"] }
 omnia-wasi-otel = { path = "../wasi-otel" }
 test-programs.workspace = true
-tokio = { workspace = true, features = ["macros", "rt"] }
+tokio = { workspace = true, features = ["macros", "rt", "test-util"] }
