@@ -39,8 +39,8 @@ Notes:
 wasi-keyvalue/
 ├── src/
 │   ├── lib.rs            # bindgen!, #[derive(HostCtx)] WasiKeyValue, Host impl
-│   ├── bucket_impl.rs    # omnia:keyvalue/bucket Host* impls on the table-held BucketHandle
-│   ├── store_impl.rs     # omnia:keyvalue/store Host* impls on HostView<'_, dyn KeyValueClient>
+│   ├── bucket_impl.rs    # omnia:keyvalue/bucket Host*WithStore impls on WasiKeyValue, over the table-held BucketHandle
+│   ├── store_impl.rs     # omnia:keyvalue/store Host*WithStore impls on WasiKeyValue
 │   ├── keys_impl.rs      # ... one file per WIT interface
 │   ├── resource.rs       # the Bucket trait a backend implements
 │   └── default_impl.rs   # KeyValueDefault backend
@@ -50,7 +50,7 @@ wasi-keyvalue/
         └── types.wit   # omnia:types, copied from wasi-types by wit-sync
 ```
 
-`lib.rs` declares the host type and derives `HostCtx` on it with `#[host_ctx(client = KeyValueClient)]`, which emits the `HasData` and `HostCtx` impls that let a `runtime!` bundle serve it; its view is the library `HostView<'_, dyn KeyValueClient>` — `{ client, table }` — the `*_impl.rs` files implement the generated `Host*` traits on. Its `bindgen!` maps `omnia:types` onto `omnia_wasi_types`, so every host returns the one `omnia_wasi_types::Error`. See [Extending Omnia](../Architecture.md#extending-omnia) for the chain from backend to linker.
+`lib.rs` declares the host type and derives `HostCtx` on it with `#[host_ctx(client = KeyValueClient)]`, which emits the `HasData` and `HostCtx` impls that let a `runtime!` bundle serve it; its view is the library `HostView<'_, dyn KeyValueClient>`, `{ client, table }`. Its `bindgen!` maps `omnia:types` onto `omnia_wasi_types`, so every host returns the one `omnia_wasi_types::Error`, and its `store` flag puts every function in a generated `Host*WithStore` trait. The `*_impl.rs` files implement those on `WasiKeyValue`, and a function borrows the view through `Accessor::with`. See [Extending Omnia](../Architecture.md#extending-omnia) for the chain from backend to linker.
 
 ## Supporting crates
 
@@ -60,4 +60,4 @@ wasi-keyvalue/
 | `omnia-sdk` | Guest SDK: `Handler`, `Context`, `Handlers`, the HTTP and messaging routers, the command façade (`parse`, `Command`, `Response`), each transport's `export!` macro, errors with their status/exit map, the generated bindings for every `omnia:*` interface with their helpers, and MCP. Features: `http` (default), `command` |
 | `omnia-guest-macros` | `#[instrument]`, and the `Settings` and `FromRow` derives |
 | `omnia-wasi-types` | `omnia:types`, the WIT types every interface shares |
-| `omnia-host-macros` | `runtime!` macro (use via `omnia::runtime!`) and `#[derive(HostCtx)]` (use via `omnia_core::HostCtx`, or `omnia::HostCtx` with `crate = omnia`) |
+| `omnia-host-macros` | `runtime!` macro (use via `omnia::runtime!`), `#[derive(HostCtx)]` (use via `omnia_core::HostCtx`, or `omnia::HostCtx` with `crate = omnia`), and `#[derive(FromEnv)]` (use via `omnia_core::FromEnv`, or `omnia::FromEnv` with `crate = omnia`) |

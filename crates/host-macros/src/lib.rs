@@ -38,8 +38,8 @@ pub fn runtime(input: TokenStream) -> TokenStream {
 ///
 /// The derive emits `wasmtime::component::HasData` with
 /// `Data<'a> = omnia_core::HostView<'a, dyn Client>` and `omnia_core::HostCtx`
-/// with `Borrow<'a> = &'a dyn Client`. The host implements its bindgen
-/// `Host*` traits on `HostView<'_, dyn Client>`.
+/// with `Borrow<'a> = &'a dyn Client`. The host's bindgen `Host*WithStore`
+/// functions borrow that view inside `Accessor::with`.
 ///
 /// The type must be non-generic and name exactly one `client`.
 ///

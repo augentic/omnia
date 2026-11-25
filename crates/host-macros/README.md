@@ -36,7 +36,7 @@ omnia::runtime!({
 });
 ```
 
-Each key is a **host type** from a `omnia-wasi-*` crate (`WasiHttp`, `WasiKeyValue`, ...); each value is a **backend type** implementing that interface's context trait — an in-tree default (`HttpDefault`, `KeyValueDefault`, ...) or a production client from the [`omnia-backends`](https://github.com/augentic/omnia-backends) repo.
+Each key is a **host type** from a `omnia-wasi-*` crate (`WasiHttp`, `WasiKeyValue`, ...); each value is a **backend type** implementing that interface's client trait (`KeyValueClient` for `WasiKeyValue`) — an in-tree default (`HttpDefault`, `KeyValueDefault`, ...) or a production client from the [`omnia-backends`](https://github.com/augentic/omnia-backends) repo.
 
 A backend may carry a connect-options expression — `WasiBlobStore: Filesystem(opts)` lowers to `Connect::connect_with(opts)` instead of the env-sourced `Connect::connect()`, compiling the configuration in. Rows sharing a backend type share one connection, so their options must be written identically on every row (or omitted on every row); empty parentheses are rejected.
 
@@ -111,11 +111,11 @@ impl omnia::ConnectAll for Backends {
 
 ### Bundle accessor impls
 
-For each `hosts:` row, the macro emits one uniform `omnia::Provides<Ctx>` impl exposing the bundle's backend field; `omnia::StoreCtx::view` turns it into the host's linker-facing view. The impl is keyed by the host type itself — its `omnia::HostCtx` impl carries the borrow shape, so no names are derived from the host and third-party hosts wire the same way.
+For each `hosts:` row, the macro emits one uniform `omnia::Provides` impl exposing the bundle's backend field; `omnia::StoreCtx::view` turns it into the host's linker-facing view. The impl is keyed by the host type itself (`Provides<WasiKeyValue>` for the row `WasiKeyValue: Redis`) — its `omnia::HostCtx` impl carries the borrow shape, so no names are derived from the host and third-party hosts wire the same way.
 
 ### `main` entry point
 
-A `#[tokio::main]` `main` that delegates to `omnia::main::<Backends, Hooks>` with the invoking crate's package name as the program name (telemetry's component name and, in command mode, the command guest's `argv[0]`), where `Hooks` is a generated `pub struct` implementing `omnia::Wiring<B>` for every bundle `B` that `Provides` each declared host's context (the generated `Backends` among them): `Wiring::link` runs inside `omnia::Runtime::new` to link hosts before backends connect and the registry assembles; `Wiring::serve` launches each trigger host's `run`. The guest loader is not wired by the macro: `omnia::Deployment::assemble` links its host and installs the deployment's policy for every runtime alike. The host runtime is the library `omnia::Runtime<Backends>`; the macro does not emit a runtime type of its own.
+A `#[tokio::main]` `main` that delegates to `omnia::main::<Backends, Hooks>` with the invoking crate's package name as the program name (telemetry's component name and, in command mode, the command guest's `argv[0]`), where `Hooks` is a generated `pub struct` implementing `omnia::Wiring<B>` for every bundle `B` that `Provides` each declared host (the generated `Backends` among them): `Wiring::link` links every declared host into the deployment's linker before `omnia::Deployment::assemble`; `Wiring::serve` runs every declared host's `run`, which only a trigger host overrides. The guest loader is not wired by the macro: `omnia::Deployment::assemble` links its host and installs the deployment's policy for every runtime alike. The host runtime is the library `omnia::Runtime<Backends>`; the macro does not emit a runtime type of its own.
 
 The generated `main` handles the `run` subcommand only; to expose `compile`, write a custom `main` that calls `omnia::compile`.
 
@@ -149,10 +149,10 @@ impl<B: Provides<Self>> Host<B> for WasiKeyValue {
 }
 ```
 
-For a host over `Wasi<Service>Ctx` the derive emits:
+For a host over the client trait `<Service>Client` the derive emits:
 
-- **`wasmtime::component::HasData`** for the host, naming `omnia_core::HostView<'a, dyn Wasi<Service>Ctx>` as its `Data`: `pub struct HostView { pub client: &'a dyn Wasi<Service>Ctx, pub table: &'a mut ResourceTable }`, the borrowed view the bindgen `Host*` traits are implemented on. A host function reaches its backend through `client` and WIT resources through `table`; the view implements `omnia_core::HasTable`, so `omnia_core::get_cloned` looks a resource up on it.
-- **`omnia_core::HostCtx`** for the host — `Borrow<'a> = &'a dyn Wasi<Service>Ctx`, and `view` assembling the view from the borrow and the store's resource table. The derived view leaves out the guest's `Grants`, which `view` also receives.
+- **`wasmtime::component::HasData`** for the host, naming `omnia_core::HostView<'a, dyn <Service>Client>` as its `Data`: `pub struct HostView { pub client: &'a dyn <Service>Client, pub table: &'a mut ResourceTable }`, the borrowed view a host function reaches inside `Accessor::with`. The host's functions are its bindgen `Host*WithStore` impls, and each reaches its backend through `client` and WIT resources through `table`. The view takes the generated `Host*` traits as empty impls, and implements `omnia_core::HasTable`, so `omnia_core::get_cloned` looks a resource up through the accessor.
+- **`omnia_core::HostCtx`** for the host — `Borrow<'a> = &'a dyn <Service>Client`, and `view` assembling the view from the borrow and the store's resource table. The derived view leaves out the guest's `Grants`, which `view` also receives.
 
 The type must be non-generic and name exactly one `client`. A host with another borrow shape implements `HostCtx` by hand: `WasiHttp` borrows a `dyn HttpBorrow` and assembles the view type `wasmtime-wasi-http` owns, holding its outbound requests to the guest's `hosts` grant.
 
@@ -175,7 +175,8 @@ StoreCtx<Backends>                       one per guest store
    |  WasiKeyValue::view(backends.borrow(), &mut base.table, &base.grants)
    v
 HostView<'_, dyn KeyValueClient>         #[host_ctx(client = KeyValueClient)]: the host's HasData::Data
-   |  bindgen Host* impls on the view; Host::add_to_linker(linker, StoreCtx::view::<Self>)
+   |  Host::add_to_linker(linker, StoreCtx::view::<Self>);
+   |  the host's Host*WithStore impls borrow the view through Accessor::with
    v
 wasmtime Linker                          omnia:keyvalue/* resolved for the guest
 ```

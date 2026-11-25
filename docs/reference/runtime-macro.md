@@ -217,7 +217,7 @@ The invocation expands to a private `runtime` module and re-exports five items f
 | ---- | ----- | --- |
 | `main` | `#[tokio::main] fn main() -> ExitCode` | The binary's entry point: connects the declared backends from the environment and drives the compiled-in deployment. |
 | `run` | blocking `fn run(DeploymentBuilder) -> Result<ExitStatus>` | Build the builder, then mount the runtime in-process from a binary with its own argument surface. |
-| `Hooks` | `pub struct Hooks` implementing `omnia::Wiring<B>` | The generated wiring — `link`, `serve` — generic over any bundle `B` that `Provides` each declared host's context. |
+| `Hooks` | `pub struct Hooks` implementing `omnia::Wiring<B>` | The generated wiring — `link`, `serve` — generic over any bundle `B` that `Provides` each declared host. |
 | `manifest` | `fn manifest() -> ManifestSource` | The compiled-in deployment (`manifest:` path or inline keys), for a test to overlay. |
 | `run_with` | `async fn run_with<B>(DeploymentBuilder, B) -> Result<ExitStatus>` | Build the builder, then drive the deployment through `Hooks` over a bundle already in hand; nothing connects. |
 
