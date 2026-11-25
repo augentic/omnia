@@ -1,9 +1,9 @@
 //! Host-originated dynamic dispatch into guest exports.
 //!
 //! The host→guest counterpart of guest→guest linking: a host binding invokes a
-//! *known* guest's export by identity, with no selector or declared link
-//! interface involved. The hop is depth-counted and wall-clock-bounded exactly
-//! like a guest→guest hop, and is driven by the same [`call_fresh`] primitive.
+//! *known* guest's export by identity, with no selector involved. The hop is
+//! depth-counted and wall-clock-bounded exactly like a guest→guest hop, and is
+//! driven by the same [`call_fresh`] primitive.
 
 use anyhow::{Context as _, Result, bail};
 use futures::FutureExt as _;
@@ -24,7 +24,7 @@ use crate::value::handle_kind;
 /// hop is entered from `caller`, the chain context of the store the host
 /// binding serves. The target is instantiated *fresh* on a new store and the
 /// matching export invoked directly, so the callee can never re-enter its
-/// caller and needs no declared link interface for `interface`.
+/// caller, and `interface` may be any export, whatever its namespace.
 ///
 /// `args` and the returned values are plain `Val`s; a store-bound handle on
 /// either side is rejected.
@@ -86,10 +86,11 @@ where
 /// A host→guest call capability, type-erased so a host binding can invoke a
 /// guest without naming the concrete [`Runtime`].
 ///
-/// The `runtime!` macro threads an `Arc<dyn Dispatcher>` into each store
-/// context so any host binding gets dynamic host→guest calls for free. It
-/// carries no consumer vocabulary — a consumer owns its own verb names and
-/// return shapes and composes this generic seam.
+/// Every store context the runtime builds carries one, so a host binding
+/// reaches it through [`StoreCtx::dispatcher`](crate::StoreCtx::dispatcher)
+/// and gets dynamic host→guest calls for free. It carries no consumer
+/// vocabulary — a consumer owns its own verb names and return shapes and
+/// composes this generic seam.
 pub trait Dispatcher: Send + Sync + 'static {
     /// Invoke `target`'s `interface`/`func` with `args`, returning the typed
     /// results. The target is instantiated *fresh* (instance-per-call), the hop

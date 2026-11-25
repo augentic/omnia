@@ -4,7 +4,7 @@
 //! satisfied and its linked exports served is behind [`LinkSeam`]. A
 //! deployment built without omnia's `link` feature installs [`NoLinks`]. One
 //! built with it installs an implementation that polyfills, serves, and
-//! routes calls over a transport, whatever link interfaces it declares.
+//! routes calls over a transport.
 
 use std::sync::Arc;
 
@@ -34,8 +34,8 @@ pub type StoreFactory<B> = Arc<dyn Fn(ChainCtx) -> Store<StoreCtx<B>> + Send + S
 /// gate: a call racing a deregister may complete against the departing
 /// instance, exactly as an in-flight invocation does.
 pub trait LinkSeam<B: 'static>: Send + Sync + 'static {
-    /// Polyfill the declared link imports of every bootstrap guest onto the
-    /// shared linker, before pre-instantiation.
+    /// Polyfill every bootstrap guest's link imports onto the shared linker,
+    /// before pre-instantiation.
     ///
     /// # Errors
     ///

@@ -119,7 +119,7 @@ pub trait Connect: Sized + Sync + Send {
 
 ### WASI Interface Crates (`crates/wasi-*`)
 
-Each interface crate provides a host implementation and, with one exception, a default backend. Its guest bindings live in `omnia-sdk`:
+Each interface crate is host-only: it provides a host implementation and, with one exception, a default backend. Its guest bindings live in `omnia-sdk`:
 
 | Crate            | Interface         | Purpose                            | Default backend                           |
 | ---------------- | ----------------- | ---------------------------------- | ----------------------------------------- |
@@ -132,25 +132,10 @@ Each interface crate provides a host implementation and, with one exception, a d
 | `wasi-config`    | `omnia:config`    | Runtime configuration              | `ConfigDefault` — the variables `CONFIG_KEYS` names |
 | `wasi-vault`     | `omnia:vault`     | Secrets management                 | `VaultDefault` — in-memory                |
 | `wasi-identity`  | `omnia:identity`  | Identity/OAuth tokens              | `IdentityDefault` — OAuth2 client flow    |
-| `wasi-otel`      | Custom            | Guest OpenTelemetry export         | `OtelDefault` — log-only                  |
+| `wasi-otel`      | `omnia:otel`      | Guest OpenTelemetry export         | `OtelDefault` — log-only                  |
 | `wasi-websocket` | `omnia:websocket` | WebSocket connections (trigger)    | `WebSocketDefault` — tungstenite server   |
 | `wasi-model`     | `omnia:model`     | Model completions with grants      | `ModelDefault` — deterministic echo       |
 | `wasi-vcs`       | `omnia:vcs`       | Version control over lent mounts   | none — `omnia-git` in `omnia-backends`    |
-
-Conditional compilation lets one crate serve both sides — guests get bindings on `wasm32`, hosts get the implementation on native:
-
-```rust
-cfg_select! {
-    target_arch = "wasm32" => {
-        mod guest;
-        pub use guest::*;
-    }
-    _ => {
-        mod host;
-        pub use host::*;
-    }
-}
-```
 
 Each crate's `wit/` directory holds the [WIT](https://component-model.bytecodealliance.org/design/wit.html) interface definitions, with a copy of each package they use under `wit/deps/` that `mise run wit-sync` keeps in step with its owner. Every `omnia:*` package is also published to the `omnia.host` wasm-pkg registry, as the [WIT Packages](reference/wit-packages.md) reference describes.
 
@@ -238,24 +223,29 @@ The consolidated list is in [Configuration](reference/configuration.md); individ
 ```text
 omnia/
 ├── crates/
-│   ├── omnia/              # Composition root (assembly, lifecycle, optional crates, runtime!)
-│   ├── core/         # Live-runtime SDK (engine, registry, dispatch, stores, subscriber)
-│   ├── link/         # Guest-to-guest dispatch (InProcessLinks; re-exported by omnia behind `link`)
-│   ├── sdk/          # Guest SDK (Handler/Context/Handlers, HTTP/messaging/command adapters, errors, capabilities, MCP)
-│   ├── guest-macros/       # #[instrument] proc macro
-│   ├── host-macros/        # runtime! proc-macro
-│   ├── plugin/       # Plugins capability (loader host + acquisition; re-exported by omnia)
-│   ├── cli/          # Leaf `run` grammar (re-exported by omnia)
-│   └── wasi-*/             # WASI interface implementations
+│   ├── omnia/                  # Composition root (assembly, lifecycle, optional crates, runtime!)
+│   ├── core/                   # Live-runtime SDK (engine, registry, dispatch, stores, subscriber)
+│   ├── link/                   # Guest-to-guest dispatch (InProcessLinks; re-exported by omnia behind `link`)
+│   ├── sdk/                    # Guest SDK (Handler/Context/Handlers, HTTP/messaging/command adapters, errors, capabilities, MCP, the generated bindings)
+│   ├── guest-macros/           # #[instrument], #[derive(Settings)], #[derive(FromRow)]
+│   ├── host-macros/            # runtime!, #[derive(HostCtx)], #[derive(FromEnv)]
+│   ├── plugin/                 # Plugins capability (loader host + acquisition; re-exported by omnia)
+│   ├── cli/                    # Leaf `run` grammar (re-exported by omnia)
+│   ├── compile/                # Ahead-of-time guest compiler (the compile-affecting settings and the artifact the runtime deserializes)
+│   ├── test/                   # Test doubles, runtime harness, and wasm fixture pipeline
+│   ├── test-programs/          # Guest scenario programs driven by the e2e test suites
+│   └── wasi-*/                 # WASI interface implementations
 │       ├── src/
-│       │   ├── guest.rs    # Guest bindings (wasm32)
-│       │   └── host/       # Host implementation + default backend (native)
-│       └── wit/            # WIT interface definitions
-├── examples/               # One guest + runtime pair per capability
+│       │   ├── lib.rs          # bindgen!, the <Name>Client trait, the Wasi<Name> host
+│       │   ├── *_impl.rs       # Impls of the generated Host* traits, one file per WIT interface
+│       │   └── default_impl.rs # <Name>Default, the in-tree backend
+│       └── wit/                # WIT interface definitions
+├── examples/                   # One guest + runtime pair per capability
 │   └── <example>/
-│       ├── guest.rs        # Guest code (→ .wasm)
-│       └── runtime.rs      # Host code (→ native binary)
-└── docs/                   # This documentation
+│       ├── guest.rs            # Guest code (→ .wasm)
+│       └── runtime.rs          # Host code (→ native binary)
+├── xtask/                      # Keeps the omnia:* WIT in step with its copies, the omnia-sdk bindings, and the registry
+└── docs/                       # This documentation
 ```
 
 Production backends live in the sibling [`omnia-backends`](https://github.com/augentic/omnia-backends) repository, one crate per service, each implementing `Connect` plus the relevant `XxxClient` traits.

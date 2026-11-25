@@ -11,13 +11,20 @@ use syn::{DeriveInput, parse_macro_input};
 
 /// Generates the runtime infrastructure based on the configuration.
 ///
-/// # Example
+/// # Examples
 ///
 /// ```rust,ignore
+/// use omnia_redis::Client as Redis;
+/// use omnia_wasi_http::{HttpDefault, WasiHttp};
+/// use omnia_wasi_keyvalue::WasiKeyValue;
+/// use omnia_wasi_otel::{OtelDefault, WasiOtel};
+///
 /// omnia::runtime!({
-///     omnia_wasi_http: WasiHttp,
-///     omnia_wasi_otel: DefaultOtel,
-///     omnia_wasi_blobstore: MongoDb,
+///     hosts: {
+///         WasiHttp: HttpDefault,
+///         WasiOtel: OtelDefault,
+///         WasiKeyValue: Redis,
+///     }
 /// });
 /// ```
 #[proc_macro]
