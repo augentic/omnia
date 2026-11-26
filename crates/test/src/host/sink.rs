@@ -4,7 +4,7 @@
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
-use futures::future::{self, ready};
+use futures::future::ready;
 use futures::{FutureExt as _, stream};
 use omnia_wasi_identity::{AccessToken, Identity, IdentityClient};
 use omnia_wasi_messaging::{self as messaging, Handler, Message, MessagingClient};
@@ -73,9 +73,10 @@ impl MessagingClient for Sink {
 }
 
 impl messaging::Endpoint for Sink {
-    // a consumer never ends on purpose, and nothing arrives at this one
-    fn consume(&self, _handler: Arc<dyn Handler>) -> messaging::FutureResult<()> {
-        future::pending().boxed()
+    // nothing arrives at this consumer, so it has nothing to drain once the
+    // host stops
+    fn consume(&self, handler: Arc<dyn Handler>) -> messaging::FutureResult<()> {
+        handler.stopped().map(Ok).boxed()
     }
 
     fn send(&self, topic: String, mut message: Message) -> messaging::FutureResult<()> {

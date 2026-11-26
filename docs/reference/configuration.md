@@ -52,7 +52,7 @@ On the `run` grammar the flags are the host's, global to the command (`bin -v ru
 | `HTTP_HEALTH_PATH`       | unset (none)   | Path a probe requests, such as `/healthz`. The trigger answers it `200` without entering a guest. It is matched exactly and answered before the request's `Host` is checked, so it wins over a guest route that covers it, and a path below it goes to the guest. A request path starts with `/` and holds no `?`, `#`, or whitespace, and startup refuses any other value. See [Readiness and health](../guides/deployment.md#readiness-and-health). |
 | `HTTP_STREAM_TIMEOUT_MS` | unset (no cap) | Wall-clock cap on an HTTP response body, counted from when its head is sent. A body still streaming at the cap is cut, and the client sees it fail rather than end. Unset, a body streams for as long as the guest writes it. `0` is refused. |
 
-`HTTP_ADDR` and `HTTP_HEALTH_PATH` are the fields of `omnia_wasi_http::ServerOptions`. The trigger's server reads them from the environment alone, while an in-process caller passes them to `HttpHandler::with_options`.
+`HTTP_ADDR` and `HTTP_HEALTH_PATH` are the fields of `omnia_wasi_http::ServerOptions`. The trigger's server reads them from the environment alone, while an in-process caller passes them to `HttpHandler::with_options`. `HttpHandler::serve` serves a listener its caller has bound, so it reads no `HTTP_ADDR`.
 
 ### Instance pooling
 
@@ -92,12 +92,12 @@ Further tunables mirror wasmtime's pooling configuration one-to-one: `POOL_MEMOR
 Each invocation a trigger runs holds one slot of the gate, from before its guest is instantiated until its instance is back in the pool. That includes a trigger an embedder runs itself, since `Runtime::lease` and `Runtime::try_lease` take the slot. A guest loads before its invocation takes one, so a guest's first load holds no slot. A command's run holds one for as long as it runs, and a call an embedder makes through `Runtime::dispatcher` holds one until its callee's instance is back in the pool. When every slot is held:
 
 - HTTP answers `503` with `Retry-After: 1`. A probe of [`HTTP_HEALTH_PATH`](#http-trigger) takes no slot, so it still answers `200`.
-- A WebSocket event fails before its guest is instantiated.
+- A WebSocket event fails before its guest is instantiated. It is lost: nothing goes back to the peer, and nothing redelivers it.
 - A message delivery waits for a slot, and its guest timeout counts from when it takes one. No more than `MESSAGING_MAX_IN_FLIGHT` deliveries load their guest, wait for a slot, or hold one at once. One past them waits its turn off the gate, so HTTP and WebSocket keep the rest of it.
 - A command's run waits for a slot.
 - A call through `Runtime::dispatcher` waits for a slot.
 
-An invocation the gate admits can still find the pool full. Calls between guests take instances outside the gate, and a set `POOL_TOTAL_*` may leave no room for the freed slots a batched decommit holds back. HTTP answers such a request `503` with `Retry-After: 1` as well, logs the cause at `warn`, and does not count it on `invocations_refused`. A WebSocket event and a message delivery fail as they do whenever their guest cannot be instantiated.
+An invocation the gate admits can still find the pool full. Calls between guests take instances outside the gate, and a set `POOL_TOTAL_*` may leave no room for the freed slots a batched decommit holds back. HTTP answers such a request `503` with `Retry-After: 1` as well, logs the cause at `warn`, and counts it on `processing_errors`, not on `invocations_refused`. A WebSocket event and a message delivery fail as they do whenever their guest cannot be instantiated.
 
 A call from one guest to another takes no slot, since the invocation at the root of its chain holds one. It still takes an instance from the pool. A deployment whose guests call other guests, including guests they load through `omnia:plugins/loader`, sets the gate below `POOL_MAX_INSTANCES` to leave those instances room. [Pool sizing](../guides/performance-tuning.md#2-pool-sizing) gives the formula. While the variable is unset and pooling is on, the first call between guests logs a warning.
 

@@ -47,6 +47,15 @@ pub trait Host<B: Backends>: Send + Sync {
     fn add_to_linker(linker: &mut Linker<StoreCtx<B>>) -> Result<()>;
 
     /// Run the host until shutdown.
+    ///
+    /// A trigger server takes no new work once [`Runtime::stop`] is called.
+    /// It waits for the work it already holds, then returns. A capability
+    /// host returns at once.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a trigger server cannot start, if its transport
+    /// ends before the stop, or if its backend fails while it drains.
     fn run(_runtime: &Runtime<B>) -> impl Future<Output = Result<()>> + Send {
         async { Ok(()) }
     }

@@ -2,13 +2,15 @@
 //! components from `crates/test-programs` through the omnia runtime over the
 //! in-memory broker. Command exports are driven through `wasi:cli/run`; the
 //! `incoming-handler` export is driven in-process through
-//! [`MessagingHandler`], bypassing the backend's delivery loop, and once
-//! through the default broker's own [`Endpoint::consume`]. The guest asserts
-//! what it observes across the boundary (and traps on failure); the host
-//! side asserts what reached the broker, from a subscription opened before
-//! the guest runs, and the typed outcome the handler returns. The bound
-//! [`dispatch`] keeps is asserted over a scripted [`Handler`] alone, since no
-//! guest sees a message the loop has not read.
+//! [`MessagingHandler`], bypassing the backend's delivery loop, and through
+//! the default broker's own [`Endpoint::consume`]. The trigger's server runs
+//! only where it alone decides the outcome: a stop mid-delivery, and a
+//! consumer that ends. The guest asserts what it observes across the
+//! boundary (and traps on failure); the host side asserts what reached the
+//! broker, from a subscription opened before the guest runs, and the typed
+//! outcome the handler returns. The bound [`dispatch`] keeps is asserted over
+//! a scripted [`Handler`] alone, since no guest sees a message the loop has
+//! not read.
 
 #![cfg(not(target_arch = "wasm32"))]
 
@@ -552,6 +554,56 @@ async fn default_consume() {
     runtime.shutdown();
 }
 
+// The stop lands while the guest pauses over `slow`. Its reply still goes
+// out, the request published after the stop is never read, and `run`
+// returns once the delivery is done.
+#[tokio::test]
+async fn stop_in_flight() {
+    let backends = Backends::defaults().await;
+    let broker = backends.messaging.clone();
+    let mut stream = broker.subscribe();
+    let guest = std::fs::read(test_programs::MESSAGING_REPLYING).expect("guest bytes");
+    let deployment =
+        Deployment::new().entry(GuestEntry::new("guest", guest).route_messaging("slow"));
+    let runtime = boot(&deployment, backends).await;
+    let built = runtime.stores_built();
+
+    let stop = async {
+        let first = request("slow", b"first", Some("slow.reply"));
+        broker.send("slow".to_owned(), first).await.expect("published");
+        in_flight(&runtime).await;
+        runtime.stop();
+        let second = request("slow", b"second", Some("slow.reply"));
+        broker.send("slow".to_owned(), second).await.expect("published");
+    };
+    let (outcome, ()) = tokio::join!(WasiMessaging::run(&runtime), stop);
+    outcome.expect("a stopped server returns Ok");
+
+    // the broker carried both requests, and the guest answered the first alone
+    let mut carried = Vec::new();
+    while let Ok(Some(message)) =
+        tokio::time::timeout(Duration::from_millis(100), stream.next()).await
+    {
+        carried.push((message.topic, message.payload));
+    }
+    let expected = [("slow", "first"), ("slow", "second"), ("slow.reply", "first")]
+        .map(|(topic, payload)| (topic.to_owned(), payload.as_bytes().to_vec()));
+    assert_eq!(carried, expected);
+    assert_eq!(runtime.stores_built(), built + 1);
+
+    runtime.shutdown();
+}
+
+// resolves once an invocation holds a slot of the concurrency gate
+async fn in_flight(runtime: &Runtime<Backends>) {
+    let held = async {
+        while runtime.invocations().in_flight == 0 {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    };
+    tokio::time::timeout(Duration::from_secs(5), held).await.expect("an invocation takes a slot");
+}
+
 // passes each message it is handed to the test and never finishes with it
 struct Stalled(mpsc::UnboundedSender<Message>);
 
@@ -563,6 +615,10 @@ impl Handler for Stalled {
 
     fn max_in_flight(&self) -> NonZeroUsize {
         NonZeroUsize::new(2).expect("two is not zero")
+    }
+
+    fn stopped(&self) -> BoxFuture<'static, ()> {
+        future::pending().boxed()
     }
 }
 

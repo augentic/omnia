@@ -29,7 +29,11 @@ where
         return Ok(());
     };
     let client = handler.client().await?;
-    client.consume(Arc::new(handler)).await?;
+    let consumed = client.consume(Arc::new(handler)).await;
+    if state.stopped().now_or_never().is_some() {
+        return consumed;
+    }
+    consumed?;
 
     // a consumer never ends on purpose: a backend that gives up on its
     // transport returns, and the process must exit for the orchestrator to
@@ -42,7 +46,8 @@ where
 ///
 /// The server hands one to the backend's [`Endpoint::consume`] as the
 /// [`Handler`]; tests drive it directly with a constructed [`Message`],
-/// bypassing the broker.
+/// bypassing the broker. Its [`stopped`](Handler::stopped) resolves once the
+/// runtime [stops](Runtime::stop).
 #[derive(Clone)]
 pub struct MessagingHandler<B>
 where
@@ -209,5 +214,10 @@ where
 
     fn max_in_flight(&self) -> NonZeroUsize {
         self.in_flight
+    }
+
+    fn stopped(&self) -> BoxFuture<'static, ()> {
+        let state = self.state.clone();
+        async move { state.stopped().await }.boxed()
     }
 }

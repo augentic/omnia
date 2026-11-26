@@ -3,9 +3,10 @@
 
 use std::sync::Arc;
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, bail};
 use futures::StreamExt;
 use omnia_core::{LeaseError, PatternRoutes, Provides, Runtime, TriggerRouter, telemetry};
+use tokio::task::JoinSet;
 use tracing::{Instrument, info_span, instrument};
 use wasmtime::AsContextMut as _;
 
@@ -28,14 +29,30 @@ where
 
     // subscribe once: a broadcast receiver only sees what arrives after it subscribes
     let mut events = handler.events().await?;
+    let mut handling = JoinSet::new();
 
-    while let Some(event) = events.next().await {
-        let handler = handler.clone();
-        tokio::spawn(async move {
-            _ = handler.handle(event).await;
-        });
+    // take events until the runtime stops: a stream that ends first has lost
+    // its transport, and the process must exit for the orchestrator to
+    // restart it rather than idle looking healthy
+    loop {
+        tokio::select! {
+            biased;
+            () = state.stopped() => break,
+            Some(_) = handling.join_next() => {}
+            event = events.next() => {
+                let Some(event) = event else {
+                    bail!("websocket event stream ended for: {}", state.name());
+                };
+                let handler = handler.clone();
+                handling.spawn(async move {
+                    _ = handler.handle(event).await;
+                });
+            }
+        }
     }
 
+    // the events taken before the stop finish before the server returns
+    while handling.join_next().await.is_some() {}
     Ok(())
 }
 

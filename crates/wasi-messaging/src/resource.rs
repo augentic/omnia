@@ -22,7 +22,8 @@ pub type Subscriptions = Pin<Box<dyn Stream<Item = Message> + Send>>;
 
 /// Stateful handle to a messaging transport endpoint.
 pub trait Endpoint: Debug + Send + Sync + 'static {
-    /// Deliver every incoming message to `handler` until the transport gives up.
+    /// Deliver every incoming message to `handler` until it stops or the
+    /// transport gives up.
     ///
     /// The backend owns the delivery loop: in what order messages reach
     /// `handler`, and what each outcome means for the message (committed,
@@ -31,9 +32,14 @@ pub trait Endpoint: Debug + Send + Sync + 'static {
     /// once, and leaves the rest with the transport. A transport with no
     /// completion semantics hands its stream to [`dispatch`].
     ///
-    /// Returning, with `Ok` or `Err`, ends the messaging server: a consumer
-    /// never ends on purpose, and the process exits for its orchestrator to
-    /// restart it.
+    /// Once [`stopped`](Handler::stopped) resolves, the backend hands
+    /// `handler` nothing more. It waits for the messages it has handed over,
+    /// then returns `Ok`. A message it pulled but did not hand over stays with
+    /// the transport.
+    ///
+    /// Returning before the stop, with `Ok` or `Err`, ends the messaging
+    /// server: a consumer never ends on purpose, and the process exits for
+    /// its orchestrator to restart it.
     ///
     /// # Errors
     ///
@@ -73,6 +79,12 @@ pub trait Handler: Send + Sync + 'static {
     /// A backend keeps no more than this with [`handle`](Self::handle), and
     /// leaves the rest with its transport until an earlier one is handled.
     fn max_in_flight(&self) -> NonZeroUsize;
+
+    /// Resolves once the handler takes no more messages.
+    ///
+    /// A backend hands [`handle`](Self::handle) nothing more once it
+    /// resolves. A future made after the stop resolves at once.
+    fn stopped(&self) -> BoxFuture<'static, ()>;
 }
 
 /// Why a message was not handled.
@@ -114,28 +126,33 @@ impl From<types::Settle> for HandleError {
     }
 }
 
-/// Deliver a message stream to `handler`, one task per message, until it ends.
+/// Deliver a message stream to `handler`, one task per message, until it ends
+/// or the handler stops.
 ///
 /// The delivery loop for a transport with no completion semantics: nothing
 /// is redelivered, so a failed outcome is finished with once the handler has
 /// logged and counted it. The stream is read only while fewer than
-/// [`max_in_flight`](Handler::max_in_flight) messages are with the handler.
-/// Returns when the stream ends and every message in flight has been
-/// handled.
+/// [`max_in_flight`](Handler::max_in_flight) messages are with the handler,
+/// and not at all once it has [stopped](Handler::stopped). A message left
+/// unread is lost with the stream. Returns when the stream ends or the
+/// handler stops, once every message in flight has been handled.
 ///
 /// # Errors
 ///
 /// Returns an error if a handler task panics.
 pub async fn dispatch(mut stream: Subscriptions, handler: Arc<dyn Handler>) -> anyhow::Result<()> {
     let limit = handler.max_in_flight().get();
+    let mut stopped = handler.stopped();
     let mut tasks = JoinSet::new();
     loop {
         tokio::select! {
+            biased;
+            () = &mut stopped => break,
+            Some(finished) = tasks.join_next() => reap(finished)?,
             message = stream.next(), if tasks.len() < limit => {
                 let Some(message) = message else { break };
                 tasks.spawn(handler.handle(message));
             }
-            Some(finished) = tasks.join_next() => reap(finished)?,
         }
     }
     while let Some(finished) = tasks.join_next().await {

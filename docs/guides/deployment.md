@@ -100,6 +100,30 @@ An HTTP deployment can also answer a probe itself. Set [`HTTP_HEALTH_PATH`](../r
 
 Not ready is a refused connection. On shutdown the trigger drops its listener before in-flight requests drain, so a probe made after that point is refused rather than answered.
 
+## Shutdown
+
+A server stops on `SIGTERM` or `SIGINT`. The first signal logs one line at `info`:
+
+```text
+waiting for in-flight tasks to exit; send another signal to quit immediately
+```
+
+Each trigger then takes no new work and waits for the work it already holds:
+
+- HTTP accepts no more connections and drops its listener. Each open connection finishes the request it is serving, then closes.
+- Messaging takes no more messages from its transport, and each delivery it has taken runs to completion, its reply included. A message it has not taken is left to the transport. A durable one such as Kafka redelivers it after the restart, and the in-memory broker and NATS core lose it.
+- WebSocket takes no more events from its backend, and each event it has taken runs to completion.
+
+The process exits 0 once every trigger has drained. A second signal quits at once, abandoning whatever is still in flight, and also exits 0.
+
+How long the drain takes depends on what is in flight at the stop:
+
+- An invocation holding a slot of the [concurrency gate](../reference/configuration.md#concurrency-gate) ends within [`GUEST_TIMEOUT_MS`](../reference/configuration.md#guest-limits). Its default of 30 s is also Kubernetes' default grace period.
+- A message delivery taken before the stop but still waiting for a slot takes one as others end, so a saturated gate drains for longer.
+- An HTTP response body is bounded only by [`HTTP_STREAM_TIMEOUT_MS`](../reference/configuration.md#http-trigger), which is unset by default, so a streaming response holds the drain open until it ends.
+
+An orchestrator whose grace period ends first kills the process mid-drain, cutting off whatever is still in flight.
+
 ## Production checklist
 
 - [ ] Release build; consider AOT (`compile`) plus a `jit`-less host for fastest, smallest deployments
@@ -107,6 +131,7 @@ Not ready is a refused connection. On shutdown the trigger drops its listener be
 - [ ] `GUEST_TIMEOUT_MS`, `MAX_MEMORY_BYTES` sized for your workload ([tuning guide](performance-tuning.md))
 - [ ] `RUST_LOG=info` and `OTEL_EXPORTER_OTLP_ENDPOINT` set
 - [ ] Readiness keyed on the `omnia ready` log line, TCP on `HTTP_ADDR`, or an HTTP probe on `HTTP_HEALTH_PATH`
+- [ ] Orchestrator grace period (`terminationGracePeriodSeconds` on Kubernetes) longer than `GUEST_TIMEOUT_MS`, plus `HTTP_STREAM_TIMEOUT_MS` where responses stream ([shutdown](#shutdown))
 - [ ] Mounts limited to the directories guests actually need, read-only unless writes are required ([security model](../security-model.md))
 - [ ] `[env] inherit` (or `--env`) names each host variable guests read, since they see no other ([configuration](../reference/configuration.md#deployment-manifest-omniatoml))
 - [ ] `CONFIG_KEYS`, or the keys the runtime compiles in, names each host variable guests read through `omnia:config`, since `ConfigDefault` serves no other ([configuration](../reference/configuration.md#default-backends))
