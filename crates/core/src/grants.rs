@@ -103,7 +103,8 @@ impl Grants {
     /// - an outbound `wasi:http` request, and each redirect the default
     ///   backend follows for it;
     /// - an `egress` entry of a model worker grant;
-    /// - the registry of a plugin load;
+    /// - each request and redirect of a fetch from the registry a plugin load
+    ///   names;
     /// - each address an `omnia:vcs` clone, fetch, or push dials, and each
     ///   redirect its backend follows.
     ///

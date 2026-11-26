@@ -64,6 +64,10 @@ A guest named a `release` with a `registry` other than the one the deployment's 
 
 A guest named a `release` with a `registry` whose host its `hosts` grant does not reach, so the load is `denied` before anything is fetched. Add the registry's host to the loading guest's `hosts`, or drop the registry and let the deployment's routing pick one. A registry spelled as an address, or ending in a `.`, is refused under any list, `*` included. A `registry` that is not a host name with an optional `:port` is `invalid`, as `registry ... is not a valid name`, whatever the grants.
 
+### `registry ... leads to ..., a host the loading guest's grants do not reach`
+
+A guest named a `release` with a `registry` its `hosts` grant reaches, and the fetch led to a host the grant does not: the OCI host the registry's metadata names, the token realm a `401` names, or a redirect. The load is `denied` before anything connects to that host. One registry often spans several hosts. `omnia.host` redirects its metadata to `augentic.io`, which names `ghcr.io`, and `ghcr.io` redirects each layer to `pkg-containers.githubusercontent.com`, so a guest that loads from `omnia.host` lists all four. To list none, route the namespace in the deployment's `registries` and drop the load's `registry`: the registry the deployment's routing picks is held to the routing alone.
+
 ### `the loading guest's grants reach no guest ..., which ... names`
 
 A guest called `omnia:plugins/loader.load`, and its grants table's `guests` list leaves out the name the source registers under: the declared name, a path's file stem, or a release's reference without its version. The load is `denied` before anything is read or fetched, whatever the source. A table that leaves out `guests` reaches no guest. Add the name, or a prefix of it that ends in `*`, to the loading guest's `guests`. A loading guest that was itself loaded by path or release runs under `[plugins.grants]` within its own loader's grants, so add the name to both.

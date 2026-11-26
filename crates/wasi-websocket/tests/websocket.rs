@@ -16,7 +16,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use futures::future::BoxFuture;
 use futures::{FutureExt as _, SinkExt as _, StreamExt as _};
 use omnia::{
-    AcquireError, ExitStatus, FutureResult, GuestEntry, GuestId, Provides, RegistrySource,
+    AcquireError, ExitStatus, FutureResult, Grants, GuestEntry, GuestId, Provides, RegistrySource,
     RuntimeOptions,
 };
 use omnia_test::host::Deployment;
@@ -205,11 +205,16 @@ struct SlowRegistry {
 
 impl RegistrySource for SlowRegistry {
     fn acquire<'a>(
-        &'a self, package: &'a str, endpoint: Option<&'a str>,
+        &'a self, package: &'a str, endpoint: Option<&'a str>, grants: &'a Grants,
     ) -> BoxFuture<'a, Result<Vec<u8>, AcquireError>> {
         Box::pin(async move {
             assert_eq!(package, DEADLINE_ECHO_PACKAGE);
             assert_eq!(endpoint, None, "a declared package names no registry of its own");
+            assert_eq!(
+                *grants,
+                Grants::all(),
+                "a declared package is the deployment's word, held to no guest's grants"
+            );
             tokio::time::sleep(self.delay).await;
             Ok(self.bytes.clone())
         })

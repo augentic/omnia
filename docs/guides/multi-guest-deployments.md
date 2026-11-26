@@ -158,7 +158,7 @@ interfaces = [                         # the packages it imports code from
 Once a guest has a table, a list the table leaves out grants nothing, `interfaces` included. Each list is held where the access happens:
 
 - `env` filters the guest's environment, and `mounts` its preopens and the paths it may load a component from, so it never sees what it was not granted.
-- `hosts` refuses an outbound `wasi:http` request, or a redirect, to a host outside it before anything connects. It holds a model worker's `egress`, and the registry a plugin load names, the same way. It matches host names alone, so `*` reaches every name and never an address.
+- `hosts` refuses an outbound `wasi:http` request, or a redirect, to a host outside it before anything connects. It holds a model worker's `egress` the same way, and the registry a plugin load names at every request and redirect of its fetch. It matches host names alone, so `*` reaches every name and never an address.
 - `guests` refuses a link call to a guest outside it before that guest loads, and an `omnia:plugins` load that registers under a name outside it before anything is read.
 - `interfaces` refuses a component that imports code from a package outside it when the guest is admitted, naming every such package at once. Name each package rather than writing `wasi:*`, which would grant `wasi:http`, and with it outbound requests to its `hosts`, to a guest that serves no HTTP.
 
