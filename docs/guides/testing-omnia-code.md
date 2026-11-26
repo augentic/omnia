@@ -36,6 +36,7 @@ A handler test boots the guest's own component over `Backends`, swaps in a scrip
 - `send(&runtime, request)` serves one HTTP request and answers the reply with its body collected.
 - `deliver(&runtime, topic, payload)` delivers one message and answers the `HandleError` the guest settles it with.
 - `precompiled(path)` compiles the component ahead of time once, so a suite that boots per test pays for one compile.
+- `Metrics::install()`, called once before the first boot, records the runtime's own metrics in memory, and `count(name)` reads back a counter such as `processing_errors`.
 
 ```rust,ignore
 use omnia_test::host::{Backends, Deployment, MatchedHttp, Sink, precompiled, send};

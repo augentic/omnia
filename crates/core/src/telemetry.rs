@@ -559,7 +559,9 @@ pub fn count_event(service: &str) {
 /// `processing_errors`.
 ///
 /// A failed message delivery passes its `topic`, which the count carries
-/// beside `service`.
+/// beside `service`. A refusal at the concurrency gate is not a failure.
+/// [`Runtime::try_lease`](crate::Runtime::try_lease) counts it on
+/// `invocations_refused`.
 pub fn count_error(service: &str, topic: Option<&str>) {
     if let Some(metrics) = METRICS.get() {
         metrics.error(service, topic);

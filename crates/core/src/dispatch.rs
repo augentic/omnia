@@ -70,7 +70,12 @@ where
         export: func_idx,
         results: func_ty.results().count(),
     };
-    let slot = if root { Some(runtime.slot().await) } else { None };
+    let slot = if root {
+        Some(runtime.slot().await)
+    } else {
+        runtime.warn_unsized_gate();
+        None
+    };
     call_fresh(call, slot, args, ctx, bound)
         .await
         .with_context(|| format!("dispatching `{interface}/{func}` to guest `{target}`"))

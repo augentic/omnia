@@ -129,19 +129,8 @@ where
             let service = service_fn(move |request| {
                 let handler = handler.clone();
                 async move {
-                    let response = handler.handle(request).await.unwrap_or_else(|e| {
-                        tracing::error!("Error proxying request: {e}");
-                        internal_error()
-                    });
-
-                    // track server error responses
-                    if response.status() >= StatusCode::INTERNAL_SERVER_ERROR {
-                        telemetry::count_error(&handler.component, None);
-                        tracing::error!(
-                            service = %handler.component,
-                            error = format!("{response:?}"),
-                        );
-                    }
+                    let response =
+                        handler.handle(request).await.unwrap_or_else(|_| internal_error());
                     Ok::<_, Infallible>(response)
                 }
             });
@@ -263,6 +252,11 @@ where
     ///   takes a slot but the instance pool has
     ///   [no room](omnia_core::LeaseError::PoolFull) for its guest.
     ///
+    /// Every failure is logged and counted on the `processing_errors` counter
+    /// before it is returned: each error, and each response of status `500` or
+    /// above, a full pool's `503` included. A full gate's `503` counts on
+    /// `invocations_refused` alone, and is logged at `debug`.
+    ///
     /// A request target is malformed when the request:
     /// - carries no `Host`, unless it is HTTP/2 with an `:authority`;
     /// - carries more than one `Host`, or one that does not parse;
@@ -288,6 +282,38 @@ where
     /// be converted. In-process callers see these as `Err`; only the server
     /// loop maps them to `500`.
     pub async fn handle<T>(&self, request: http::Request<T>) -> Result<http::Response<OutgoingBody>>
+    where
+        T: Body<Data = Bytes> + Send + 'static,
+        T::Error: Into<wasmtime_wasi_http::Error>,
+    {
+        let answered = match self.answer(request).await {
+            Err(error) if error.is::<Refused>() => {
+                tracing::debug!(service = %self.component, "{error}; returning 503");
+                return Ok(unavailable());
+            }
+            answered => answered,
+        };
+
+        // count every failure; `answer` logs a failed response where it decides it
+        match &answered {
+            Ok(response) if response.status() >= StatusCode::INTERNAL_SERVER_ERROR => {
+                telemetry::count_error(&self.component, None);
+            }
+            Ok(_) => {}
+            Err(error) => {
+                telemetry::count_error(&self.component, None);
+                tracing::error!(
+                    service = %self.component,
+                    error = format!("{error:#}"),
+                    "issue processing request"
+                );
+            }
+        }
+        answered
+    }
+
+    // `handle`'s outcome, with a full gate reported as `Refused`
+    async fn answer<T>(&self, request: http::Request<T>) -> Result<http::Response<OutgoingBody>>
     where
         T: Body<Data = Bytes> + Send + 'static,
         T::Error: Into<wasmtime_wasi_http::Error>,
@@ -330,7 +356,7 @@ where
 
         // a full gate is a 503, answered before a store is built
         let Some(lease) = self.state.try_lease(guest) else {
-            return Ok(unavailable());
+            return Err(Refused.into());
         };
 
         // the guest reads the deadline its lease enforces as `x-deadline`,
@@ -369,12 +395,24 @@ where
         // the body's drop ends the task from here on
         guest_task.detach_all();
         tracing::debug!("received response: {response:?}");
+        if response.status() >= StatusCode::INTERNAL_SERVER_ERROR {
+            tracing::error!(
+                service = %self.component,
+                status = %response.status(),
+                "guest answered with a server error"
+            );
+        }
 
         Ok(response)
     }
 }
 
-// The one report a guest's task makes to `handle`, before its body streams.
+// a request refused at a full gate, which counts on `invocations_refused` alone
+#[derive(Debug, thiserror::Error)]
+#[error("every slot of the concurrency gate (MAX_CONCURRENT_INVOCATIONS) is held")]
+struct Refused;
+
+// The one report a guest's task makes to `answer`, before its body streams.
 enum Head {
     Sent(hyper::Response<OutgoingBody>),
     Failed(anyhow::Error),
@@ -417,6 +455,7 @@ where
                     Ok(Err(error)) | Err(LeaseError::Enter(error)) => Head::Failed(error),
                     Err(LeaseError::PoolFull(error)) => Head::PoolFull(error),
                     Err(LeaseError::Timeout(_)) => Head::TimedOut,
+                    Err(error) => Head::Failed(error.into()),
                 },
             };
             if !matches!(head, Head::Sent(_)) {
@@ -441,6 +480,7 @@ where
                         "response body outlived HTTP_STREAM_TIMEOUT_MS; cutting it"
                     );
                 }
+                Err(error) => tracing::error!("http guest task error: {error:#}"),
             }
         });
     }

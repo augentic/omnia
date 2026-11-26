@@ -24,6 +24,7 @@ futures-util.workspace = true
 getrandom.workspace = true
 omnia-core.workspace = true
 omnia-wasi-types.workspace = true
+thiserror.workspace = true
 tokio = { workspace = true, features = ["sync", "time"] }
 tokio-stream.workspace = true
 tokio-tungstenite.workspace = true

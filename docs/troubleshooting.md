@@ -174,9 +174,9 @@ An HTTP/1.1 request with an absolute-form URI still needs a `Host`. A conforming
 
 The trigger refused the request before its guest ran, for one of two reasons.
 
-Every slot of the [concurrency gate](reference/configuration.md#concurrency-gate) is held, so the trigger refused the request before it instantiated a guest. It counts each refusal on `invocations_refused`. A WebSocket event is refused at the same point, and fails naming `MAX_CONCURRENT_INVOCATIONS`. Message deliveries waiting for a slot are served first, which `invocations_waiting` shows. No more than `MESSAGING_MAX_IN_FLIGHT` hold or wait for one, and lowering it leaves HTTP more of the gate. Raise `POOL_MAX_INSTANCES`, and `MAX_CONCURRENT_INVOCATIONS` with it where it is set, if the host has the memory. A probe of `HTTP_HEALTH_PATH` takes no slot, so it still answers `200`.
+Every slot of the [concurrency gate](reference/configuration.md#concurrency-gate) is held, so the trigger refused the request before it instantiated a guest. It counts each refusal on `invocations_refused`, not on `processing_errors`, and logs it at `debug`. A WebSocket event is refused at the same point, and fails naming `MAX_CONCURRENT_INVOCATIONS`. Message deliveries waiting for a slot are served first, which `invocations_waiting` shows. No more than `MESSAGING_MAX_IN_FLIGHT` hold or wait for one, and lowering it leaves HTTP more of the gate. Raise `POOL_MAX_INSTANCES`, and `MAX_CONCURRENT_INVOCATIONS` with it where it is set, if the host has the memory. A probe of `HTTP_HEALTH_PATH` takes no slot, so it still answers `200`.
 
-Or the request took a slot, but the instance pool had no room for its guest. The trigger logs `the instance pool is full` at `warn`, naming the guest, and does not count the request on `invocations_refused`. The [next entry](#the-instance-pool-is-full) gives the causes.
+Or the request took a slot, but the instance pool had no room for its guest. The trigger logs `the instance pool is full` at `warn`, naming the guest, and counts the request on `processing_errors`, not on `invocations_refused`. The [next entry](#the-instance-pool-is-full) gives the causes.
 
 ### `the instance pool is full`
 

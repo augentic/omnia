@@ -6,7 +6,7 @@ pipeline for code built on omnia.
 | Feature | Carries | Depends on |
 | ------- | ------- | ---------- |
 | `contract` | Behaviour rows every backend of `omnia:keyvalue`, `omnia:blobstore`, `omnia:sql`, or `omnia:docstore` meets, run by a guest component | `omnia-sdk` |
-| `host` | `Deployment`, `Backends`, the scripted and recording backends, `send` and `deliver`, `precompiled`, `Scratch` — the component runtime harness | `omnia` and the `wasi-*` host crates |
+| `host` | `Deployment`, `Backends`, the scripted and recording backends, `send` and `deliver`, `precompiled`, `Metrics`, `Scratch` — the component runtime harness | `omnia` and the `wasi-*` host crates, `opentelemetry_sdk`, `tracing-subscriber` |
 | `build` | `Components` — the nested wasm32 build and `gen.rs` generator for a `build.rs` | `std` only |
 
 There is no default feature: a consumer names the rung it uses. A handler is

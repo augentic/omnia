@@ -185,6 +185,9 @@ where
                 Err(HandleError::Unavailable(format!("instantiating `{guest_id}`: {error:#}")))
             }
             Err(LeaseError::Timeout(limit)) => Err(HandleError::TimedOut(limit)),
+            Err(error) => {
+                Err(HandleError::Unavailable(format!("invoking `{guest_id}`: {error:#}")))
+            }
         }
     }
 

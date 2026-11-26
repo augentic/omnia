@@ -548,15 +548,12 @@ impl<B: Backends> Runtime<B> {
     pub(crate) fn store_factory(&self, guest: &Arc<Guest<B>>) -> StoreFactory<B> {
         let runtime = self.clone();
         let guest = Arc::clone(guest);
-        Arc::new(move |chain| {
-            runtime.warn_unsized_gate();
-            runtime.build_store(runtime.store_ctx(&guest, chain, None))
-        })
+        Arc::new(move |chain| runtime.build_store(runtime.store_ctx(&guest, chain, None)))
     }
 
     // A hop's instance takes no slot, so a gate as wide as the pool lets hops
     // fill the pool before the gate refuses anything.
-    fn warn_unsized_gate(&self) {
+    pub(crate) fn warn_unsized_gate(&self) {
         let options = self.options();
         if !options.pooling || options.max_concurrent_invocations.is_some() {
             return;
