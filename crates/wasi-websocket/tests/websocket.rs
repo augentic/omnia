@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use futures::future::BoxFuture;
-use futures::{FutureExt as _, SinkExt as _, StreamExt as _, stream};
+use futures::{FutureExt as _, SinkExt as _, StreamExt as _};
 use omnia::{
     AcquireError, ExitStatus, FutureResult, Grants, GuestEntry, GuestId, Host, Provides,
     RegistrySource, Runtime, RuntimeOptions,
@@ -27,6 +27,7 @@ use omnia_wasi_websocket::{
     WebSocketHandler,
 };
 use tokio::net::TcpStream;
+use tokio::sync::watch;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
@@ -251,44 +252,79 @@ async fn in_flight<B: omnia::Backends>(runtime: &Runtime<B>) {
     tokio::time::timeout(Duration::from_secs(5), held).await.expect("an invocation takes a slot");
 }
 
-// an event stream that has already ended, as a backend that gave up on its
-// transport presents one
+// wraps the default backend and ends its event stream once `ended` is set, as
+// a backend that loses its transport mid-run does
 #[derive(Clone, Debug)]
-struct Ended;
+struct Ended {
+    inner: WebSocketDefault,
+    ended: watch::Receiver<bool>,
+}
 
 impl WebSocketClient for Ended {
     fn endpoint(&self) -> FutureResult<Arc<dyn Endpoint>> {
-        async { Ok(Arc::new(Self) as Arc<dyn Endpoint>) }.boxed()
+        let endpoint = self.clone();
+        async move { Ok(Arc::new(endpoint) as Arc<dyn Endpoint>) }.boxed()
     }
 }
 
 impl Endpoint for Ended {
     fn events(&self) -> FutureResult<Events> {
-        async { Ok(Box::pin(stream::empty()) as Events) }.boxed()
+        let events = self.inner.events();
+        let mut ended = self.ended.clone();
+        async move {
+            let cut = async move {
+                let _ = ended.wait_for(|&done| done).await;
+            };
+            Ok(Box::pin(events.await?.take_until(cut)) as Events)
+        }
+        .boxed()
     }
 
-    fn send(&self, _event: Event, _sockets: Option<Vec<String>>) -> FutureResult<()> {
-        unreachable!("no event reaches the guest to answer")
+    fn send(&self, event: Event, sockets: Option<Vec<String>>) -> FutureResult<()> {
+        self.inner.send(event, sockets)
+    }
+
+    fn broadcast(&self, event: Event, except: Vec<String>) -> FutureResult<()> {
+        self.inner.broadcast(event, except)
+    }
+
+    fn exists(&self, connection: String) -> FutureResult<bool> {
+        self.inner.exists(connection)
     }
 }
 
-// An event stream that ends is a server failure, as an ended consumer is for
-// messaging, so the process exits for its orchestrator to restart it.
+// The event stream ends while the guest pauses over `slow`. Its echo still
+// reaches the peer, the message sent after is never read, and `run` then
+// fails so the orchestrator restarts the process.
 #[tokio::test]
 async fn events_end() {
+    let (server, addr, _) = serve().await;
+    let (end, ended) = watch::channel(false);
     let runtime = Deployment::new()
         .guest("guest", test_programs::WEBSOCKET_HANDLER_ECHO)
-        .boot(Backends::new(Ended), |deployment| {
+        .boot(Backends::new(Ended { inner: server, ended }), |deployment| {
             deployment.host::<WasiWebSocket>()?;
             deployment.host::<WasiOtel>()?;
             Ok(())
         })
         .await
         .expect("runtime boots");
+    let built = runtime.stores_built();
+    let mut peer = connect(addr).await;
 
-    let error =
-        WasiWebSocket::run(&runtime).await.expect_err("an ended event stream fails the server");
+    let cut = async {
+        peer.send(Message::text("slow")).await.expect("the peer sends");
+        in_flight(&runtime).await;
+        end.send_replace(true);
+        peer.send(Message::text("late")).await.expect("the peer sends");
+    };
+    let (outcome, ()) = tokio::join!(WasiWebSocket::run(&runtime), cut);
+    let error = outcome.expect_err("an ended event stream fails the server");
     assert!(format!("{error:#}").contains("event stream ended"), "unexpected error: {error:#}");
+
+    assert_eq!(receive(&mut peer).await, Message::text("slow"));
+    quiet(&mut peer).await;
+    assert_eq!(runtime.stores_built(), built + 1);
 
     runtime.shutdown();
 }
