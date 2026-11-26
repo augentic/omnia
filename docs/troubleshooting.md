@@ -180,9 +180,9 @@ Or the request took a slot, but the instance pool had no room for its guest. The
 
 ### `the instance pool is full`
 
-An instance found no free slot of a kind it takes, which the end of the message names, such as `memory stripe 0`. An HTTP request answers `503` and logs it at `warn`. A link call and a command's run fail with it in the error chain. Its causes are:
+An instance found no free slot of a resource it takes. The message names the resource and the variable that sizes it, such as `POOL_TOTAL_MEMORIES` for linear memories. An HTTP request answers `503` and logs it at `warn`. A link call and a command's run fail with it in the error chain. Its causes are:
 
-- **Calls between guests.** A call from one guest to another takes an instance but no slot of the gate, and with `MAX_CONCURRENT_INVOCATIONS` unset the gate is as wide as the pool, so the triggers' own invocations can take every instance. Set `MAX_CONCURRENT_INVOCATIONS` below `POOL_MAX_INSTANCES` by the margin [Pool sizing](guides/performance-tuning.md#2-pool-sizing) works out, or raise `POOL_MAX_INSTANCES`.
+- **Calls between guests.** A call from one guest to another takes an instance but no slot of the gate, and with `MAX_CONCURRENT_INVOCATIONS` unset the gate is as wide as the pool, so the triggers' own invocations can take every component instance. Set `MAX_CONCURRENT_INVOCATIONS` below `POOL_MAX_INSTANCES` by the margin [Pool sizing](guides/performance-tuning.md#2-pool-sizing) works out, or raise `POOL_MAX_INSTANCES`.
 - **A batched decommit with a set total.** Above a `POOL_DECOMMIT_BATCH_SIZE` of 1, freed slots wait to be reset before they are reused. A set `POOL_TOTAL_*` is used as is, without the [decommit margin](reference/configuration.md#instance-pooling) the unset totals add. Add the margin to it, or set the batch back to 1.
 - **A total below what the guests take.** A component composed from several modules takes more memories, tables, or core instances than the [totals](reference/configuration.md#instance-pooling) allow for. Set the `POOL_TOTAL_*` it needs.
 

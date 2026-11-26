@@ -7,7 +7,7 @@
 use std::time::Duration;
 
 use omnia::{ExitStatus, GuestId, RuntimeOptions, SourceSpec};
-use omnia_test::host::{Backends, Deployment, Run, precompiled};
+use omnia_test::host::{Backends, Deployment, Metrics, Run, precompiled};
 use omnia_wasi_otel::WasiOtel;
 
 test_programs::foreach_command!();
@@ -80,6 +80,7 @@ async fn command_blocking() {
 // full gate rather than failing.
 #[tokio::test]
 async fn queued_command() {
+    let metrics = Metrics::install();
     let runtime = Deployment::new()
         .guest("cli", exit_map())
         .args(["ok"])
@@ -96,7 +97,7 @@ async fn queued_command() {
 
     // with the only slot held, the run waits for it
     let guest = runtime.guest(&GuestId::from("cli")).await.expect("the guest loads");
-    let lease = runtime.try_lease(guest).expect("the gate is empty");
+    let lease = runtime.try_lease(guest, "test").expect("the gate is empty");
     let release = async {
         tokio::time::sleep(Duration::from_millis(100)).await;
         assert_eq!(runtime.invocations().waiting, 1);
@@ -104,6 +105,12 @@ async fn queued_command() {
     };
     let ((), status) = tokio::join!(release, runtime.run_command());
     assert_eq!(status.expect("command runs"), ExitStatus::SUCCESS);
+
+    // the run asks for its slot just after the hold starts, so its one wait
+    // spans most of the hold's 100 ms
+    let waited = metrics.observations("invocations_wait_time");
+    assert_eq!(waited.count, 1);
+    assert!(waited.sum >= 0.05, "{waited:?}");
 
     runtime.shutdown();
 }

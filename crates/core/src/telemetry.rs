@@ -27,9 +27,10 @@
 use std::env;
 use std::io::IsTerminal;
 use std::sync::{Mutex, OnceLock, PoisonError};
+use std::time::Duration;
 
 use anyhow::{Result, anyhow};
-use opentelemetry::metrics::{Counter, Gauge, Meter};
+use opentelemetry::metrics::{Counter, Gauge, Histogram, Meter};
 use opentelemetry::trace::TracerProvider;
 use opentelemetry::{InstrumentationScope, KeyValue, global};
 use opentelemetry_otlp::{
@@ -534,10 +535,19 @@ pub fn record_invocations(sample: &Invocations) {
     }
 }
 
-// one invocation of `service` the gate turned away, on `invocations_refused`
-pub(crate) fn count_refused(service: &str) {
+// one invocation of `service` the gate turned away from `trigger`, on
+// `invocations_refused`
+pub(crate) fn count_refused(service: &str, trigger: &'static str) {
     if let Some(metrics) = METRICS.get() {
-        metrics.refused(service);
+        metrics.refused(service, trigger);
+    }
+}
+
+// how long one invocation of `service` waited for a slot, on
+// `invocations_wait_time`
+pub(crate) fn record_wait(service: &str, waited: Duration) {
+    if let Some(metrics) = METRICS.get() {
+        metrics.wait(service, waited);
     }
 }
 
@@ -577,10 +587,16 @@ struct Metrics {
     invocations_in_flight: Gauge<u64>,
     invocations_waiting: Gauge<u64>,
     invocations_refused: Counter<u64>,
+    invocations_wait_time: Histogram<f64>,
     message_counter: Counter<u64>,
     event_counter: Counter<u64>,
     processing_errors: Counter<u64>,
 }
+
+// in seconds, since the SDK's default boundaries suit milliseconds and would
+// put nearly every wait in the first bucket
+const WAIT_BOUNDARIES: [f64; 13] =
+    [0.0001, 0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0];
 
 impl Metrics {
     // the global provider once a build settles: omnia's own when it
@@ -619,6 +635,12 @@ impl Metrics {
                 "invocations_refused",
                 "Invocations refused because every slot of the concurrency gate was held",
             ),
+            invocations_wait_time: meter
+                .f64_histogram("invocations_wait_time")
+                .with_description("Time an invocation waited for a slot of the concurrency gate")
+                .with_unit("s")
+                .with_boundaries(WAIT_BOUNDARIES.to_vec())
+                .build(),
             message_counter: counter("message_counter", "Messages delivered to the runtime"),
             event_counter: counter("event_counter", "Websocket events delivered to the runtime"),
             processing_errors: counter(
@@ -641,8 +663,15 @@ impl Metrics {
         self.invocations_waiting.record(sample.waiting as u64, &[]);
     }
 
-    fn refused(&self, service: &str) {
-        self.invocations_refused.add(1, &[KeyValue::new("service", service.to_owned())]);
+    fn refused(&self, service: &str, trigger: &'static str) {
+        let attributes =
+            [KeyValue::new("service", service.to_owned()), KeyValue::new("trigger", trigger)];
+        self.invocations_refused.add(1, &attributes);
+    }
+
+    fn wait(&self, service: &str, waited: Duration) {
+        let service = KeyValue::new("service", service.to_owned());
+        self.invocations_wait_time.record(waited.as_secs_f64(), &[service]);
     }
 
     fn message(&self, service: &str) {

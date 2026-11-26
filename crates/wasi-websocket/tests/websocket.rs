@@ -188,7 +188,7 @@ async fn full_gate() {
 
     // with the only slot held, the event fails before a store is built
     let guest = runtime.guest(&GuestId::from("guest")).await.expect("the guest loads");
-    let lease = runtime.try_lease(guest).expect("the gate is empty");
+    let lease = runtime.try_lease(guest, "test").expect("the gate is empty");
     let built = runtime.stores_built();
     let refused = handler.handle(ping.clone()).await.expect_err("the gate is full");
     assert!(format!("{refused:#}").contains("MAX_CONCURRENT_INVOCATIONS"), "{refused:#}");
@@ -199,8 +199,9 @@ async fn full_gate() {
     handler.handle(ping).await.expect("handled");
     assert_eq!(receive(&mut peer).await, Message::text("ping"));
 
-    // the refusal counts as refused, never as a failure, and both deliveries count
-    assert_eq!(metrics.count("invocations_refused"), 1);
+    // the refusal counts as refused under its trigger, never as a failure, and
+    // both deliveries count
+    assert_eq!(metrics.count_with("invocations_refused", "trigger", "websocket"), 1);
     assert_eq!(metrics.count("processing_errors"), 0);
     assert_eq!(metrics.count("event_counter"), 2);
 

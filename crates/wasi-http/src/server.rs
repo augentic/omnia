@@ -41,6 +41,9 @@ pub type OutgoingBody = UnsyncBoxBody<Bytes, anyhow::Error>;
 // the header omnia-sdk's `Metadata` reads a guest's deadline from
 const DEADLINE: &str = "x-deadline";
 
+// the trigger's name, as its routing and the gate's refusals report it
+const TRIGGER: &str = "http";
+
 /// Options for the HTTP trigger's server.
 ///
 /// [`HttpHandler::new`] loads them from the environment, and
@@ -175,7 +178,7 @@ where
         // declared guest is probed when its first request loads it
         let routing = TriggerRouter::build(
             runtime.registry(),
-            "http",
+            TRIGGER,
             runtime.registry().routes().http().clone(),
             ServiceIndices::new,
         )?;
@@ -380,7 +383,7 @@ where
             )?;
 
         // a full gate is a 503, answered before a store is built
-        let Some(lease) = self.state.try_lease(guest) else {
+        let Some(lease) = self.state.try_lease(guest, TRIGGER) else {
             return Err(Refused.into());
         };
 

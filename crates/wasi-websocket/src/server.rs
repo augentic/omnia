@@ -15,6 +15,9 @@ use crate::generated::WebsocketIndices;
 use crate::generated::omnia::websocket::types;
 use crate::resource::{Event, Events};
 
+// the trigger's name, as its routing and the gate's refusals report it
+const TRIGGER: &str = "websocket";
+
 #[instrument("websocket-server", skip(state))]
 pub async fn run<B>(state: &Runtime<B>) -> Result<()>
 where
@@ -90,7 +93,7 @@ where
         // declared guest is probed when its first event loads it
         let routing = TriggerRouter::build(
             runtime.registry(),
-            "websocket",
+            TRIGGER,
             runtime.registry().routes().websocket().clone(),
             WebsocketIndices::new,
         )?;
@@ -175,7 +178,7 @@ where
             )?;
 
         // a full gate fails the event, and its deadline counts from the slot
-        let Some(lease) = self.state.try_lease(guest) else {
+        let Some(lease) = self.state.try_lease(guest, TRIGGER) else {
             return Err(Refused.into());
         };
         event.deadline = lease.deadline_millis();

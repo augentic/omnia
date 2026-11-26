@@ -11,14 +11,13 @@ use futures::future::OptionFuture;
 use tokio::sync::watch;
 use tokio::task::coop::unconstrained;
 use tokio::time::{Instant, sleep};
-use wasmtime::PoolConcurrencyLimitError;
 use wasmtime::component::Instance;
 
 use super::Runtime;
 use super::enter::Entered;
 use super::gate::{Invocations, Slot};
 use crate::host::Backends;
-use crate::invoke::explain_full_pool;
+use crate::invoke::{PoolExhausted, explain_full_pool};
 use crate::registry::Guest;
 use crate::telemetry;
 
@@ -29,7 +28,8 @@ impl<B: Backends> Runtime<B> {
     /// [guest timeout](crate::RuntimeOptions::guest_timeout), counted from
     /// the moment the slot is taken. Waiters are served in the order they
     /// arrive, and a freed slot goes to one before
-    /// [`try_lease`](Self::try_lease) sees it.
+    /// [`try_lease`](Self::try_lease) sees it. The wait is recorded on the
+    /// `invocations_wait_time` histogram, in seconds.
     pub async fn lease(&self, guest: Arc<Guest<B>>) -> Lease<B> {
         let slot = self.slot().await;
         self.server_lease(guest, slot)
@@ -37,11 +37,13 @@ impl<B: Backends> Runtime<B> {
 
     /// Admit an invocation of `guest` if a slot is free, or return `None` at once.
     ///
-    /// A refusal counts on the `invocations_refused` counter. The deadline
-    /// of a lease taken here counts from now, as for [`lease`](Self::lease).
+    /// `trigger` names the trigger the invocation is for, such as `http`. A
+    /// refusal counts on the `invocations_refused` counter under it. The
+    /// deadline of a lease taken here counts from now, as for
+    /// [`lease`](Self::lease).
     #[must_use]
-    pub fn try_lease(&self, guest: Arc<Guest<B>>) -> Option<Lease<B>> {
-        let slot = self.try_slot()?;
+    pub fn try_lease(&self, guest: Arc<Guest<B>>, trigger: &'static str) -> Option<Lease<B>> {
+        let slot = self.try_slot(trigger)?;
         Some(self.server_lease(guest, slot))
     }
 
@@ -71,13 +73,16 @@ impl<B: Backends> Runtime<B> {
     }
 
     pub(crate) async fn slot(&self) -> Slot {
-        self.inner.gate.take().await
+        let asked = Instant::now();
+        let slot = self.inner.gate.take().await;
+        telemetry::record_wait(self.name(), asked.elapsed());
+        slot
     }
 
-    pub(crate) fn try_slot(&self) -> Option<Slot> {
+    pub(crate) fn try_slot(&self, trigger: &'static str) -> Option<Slot> {
         let slot = self.inner.gate.try_take();
         if slot.is_none() {
-            telemetry::count_refused(self.name());
+            telemetry::count_refused(self.name(), trigger);
         }
         slot
     }
@@ -257,7 +262,8 @@ pub enum LeaseError {
     ///
     /// The concurrency gate admitted the invocation, but the pool had no free
     /// slot of a kind the instance takes. A retry can succeed once another
-    /// invocation ends.
+    /// invocation ends. The error downcasts to [`PoolExhausted`], which names
+    /// the resource the pool ran out of.
     #[error(transparent)]
     PoolFull(anyhow::Error),
     /// The deadline passed before the call returned.
@@ -269,8 +275,7 @@ pub enum LeaseError {
 
 impl LeaseError {
     pub(super) fn from_instantiation(error: wasmtime::Error) -> Self {
-        let full = error.is::<PoolConcurrencyLimitError>();
         let error = explain_full_pool(error);
-        if full { Self::PoolFull(error) } else { Self::Enter(error) }
+        if error.is::<PoolExhausted>() { Self::PoolFull(error) } else { Self::Enter(error) }
     }
 }
