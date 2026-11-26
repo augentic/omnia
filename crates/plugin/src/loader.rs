@@ -61,7 +61,8 @@ impl<B: Backends> PluginLoader for Runtime<B> {
 /// - a path to the read-only mount beneath which it lies, of those the
 ///   loading guest reaches;
 /// - a package to the registry the deployment routes it to, or to the one
-///   the load names when the loading guest's grants reach its host.
+///   the load names when the loading guest's grants reach its host and every
+///   host its fetch leads to.
 ///
 /// It admits the bytes it finds there through the runtime's one admission
 /// body. A guest loaded by path or package runs under the deployment's
@@ -124,12 +125,13 @@ impl Plugins {
     /// - A path or package is acquired inside the deployment's grant: a path
     ///   beneath a mount `caller` reaches, and a package from a registry the
     ///   load names only when `caller`'s [`hosts`](Grants::hosts) reach that
-    ///   registry's host. It is admitted through the runtime's one admission
-    ///   body as caller-named bytes: held to `pin` when one is given, raw
-    ///   wasm alone, under the name the location derives, which no entry of
-    ///   the deployment may declare. The guest runs under the deployment's
-    ///   `[plugins.grants]`, within `caller`. A name already
-    ///   active under the same bytes and grants is attested.
+    ///   registry's host and every host its fetch leads to. It is admitted
+    ///   through the runtime's one admission body as caller-named bytes: held
+    ///   to `pin` when one is given, raw wasm alone, under the name the
+    ///   location derives, which no entry of the deployment may declare. The
+    ///   guest runs under the deployment's `[plugins.grants]`, within
+    ///   `caller`. A name already active under the same bytes and grants is
+    ///   attested.
     ///
     /// Idempotent on (name, digest). A path or package whose bytes miss
     /// `pin`, or whose name is active under other bytes, loads nothing and
@@ -147,7 +149,8 @@ impl Plugins {
     ///   - a path beneath a mount `caller` does not reach, beneath a writable
     ///     mount, or one the filesystem refuses to read;
     ///   - a registry named for a package the deployment routes elsewhere;
-    ///   - a registry named whose host `caller` does not reach;
+    ///   - a registry named whose host, or a host its fetch leads to, `caller`
+    ///     does not reach;
     ///   - a component importing code from a package its grants do not
     ///     reach.
     /// - [`LoadError::Invalid`] for a declared name with a pin, a malformed
@@ -193,7 +196,7 @@ impl Plugins {
                 if let Some(endpoint) = endpoint {
                     check_registry(endpoint, caller)?;
                 }
-                self.admission.acquire(package, endpoint.as_deref()).await?
+                self.admission.acquire(package, endpoint.as_deref(), caller).await?
             }
         };
 

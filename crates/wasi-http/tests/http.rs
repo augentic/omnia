@@ -744,11 +744,16 @@ struct SlowRegistry {
 
 impl RegistrySource for SlowRegistry {
     fn acquire<'a>(
-        &'a self, package: &'a str, endpoint: Option<&'a str>,
+        &'a self, package: &'a str, endpoint: Option<&'a str>, grants: &'a Grants,
     ) -> BoxFuture<'a, Result<Vec<u8>, AcquireError>> {
         Box::pin(async move {
             assert_eq!(package, ECHO_PACKAGE);
             assert_eq!(endpoint, None, "a declared package names no registry of its own");
+            assert_eq!(
+                *grants,
+                Grants::all(),
+                "a declared package is the deployment's word, held to no guest's grants"
+            );
             self.asked.fetch_add(1, Ordering::SeqCst);
             tokio::time::sleep(self.delay).await;
             Ok(self.bytes.clone())

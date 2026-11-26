@@ -20,10 +20,10 @@ pub trait Admission: Send + Sync + 'static {
     fn guest(&self, id: &GuestId) -> BoxFuture<'static, Result<Plugin, GuestError>>;
 
     /// The bytes the exact `package` reference names, fetched through the
-    /// runtime's registry source — from `endpoint` when the deployment's
-    /// routing leaves the namespace open.
+    /// runtime's registry source — from `endpoint`, held to `grants`, when
+    /// the deployment's routing leaves the namespace open.
     fn acquire(
-        &self, package: &str, endpoint: Option<&str>,
+        &self, package: &str, endpoint: Option<&str>, grants: &Grants,
     ) -> BoxFuture<'static, Result<Vec<u8>, GuestError>>;
 
     /// Admit caller-named `bytes` as `id`, held to `pin` and running under
@@ -53,12 +53,13 @@ impl<B: Backends> Admission for WeakRuntime<B> {
     }
 
     fn acquire(
-        &self, package: &str, endpoint: Option<&str>,
+        &self, package: &str, endpoint: Option<&str>, grants: &Grants,
     ) -> BoxFuture<'static, Result<Vec<u8>, GuestError>> {
         let weak = self.clone();
         let spec = SourceSpec::package(package);
         let endpoint = endpoint.map(str::to_owned);
-        async move { live(&weak)?.acquire(&spec, endpoint.as_deref()).await }.boxed()
+        let grants = grants.clone();
+        async move { live(&weak)?.acquire(&spec, endpoint.as_deref(), &grants).await }.boxed()
     }
 
     fn admit_bytes(

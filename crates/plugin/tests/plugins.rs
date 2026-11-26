@@ -14,6 +14,8 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
+mod support;
+
 use std::path::{Path, PathBuf};
 use std::pin::pin;
 use std::sync::{Arc, Mutex};
@@ -31,6 +33,8 @@ use omnia::{
 };
 use omnia_test::host::{Backends, Scratch, precompiled, scratch};
 use omnia_wasi_otel::WasiOtel;
+
+use self::support::{ADDRESS, Exchange, Loopback, METADATA, NAME, not_found, redirect};
 
 // Every guest program in `crates/test-programs/programs/plugins` must have a
 // matching test here; a new program without one fails to compile.
@@ -807,13 +811,16 @@ async fn endpoint_unrouted() {
 }
 
 // The registry a load names is held to the loading guest's `hosts` before
-// anything is fetched. A malformed one is invalid whether or not the grants
-// list hosts, and `*` reaches no address however it is spelled.
+// anything is fetched, and so is every hop its fetch makes. A malformed one
+// is invalid whether or not the grants list hosts, and `*` reaches no
+// address however it is spelled.
 #[tokio::test]
 async fn endpoint_hosts() {
     let scratch = scratch();
     stage_package(scratch.path(), ECHOER_PACKAGE, test_programs::LINK_ECHOER);
-    let registries = RegistryConfig::contents(local_backend_toml(scratch.path()));
+    let loopback = Loopback::serve().await;
+    let registries =
+        RegistryConfig::contents(local_backend_toml(scratch.path()) + &loopback.toml());
     let requester = |wasm: &str, grants: Grants| {
         let source = precompiled(wasm).expect("the requester precompiles");
         let entry = GuestEntry::new("requester", source).command().grants(grants);
@@ -840,6 +847,21 @@ async fn endpoint_hosts() {
         let status = run(manifest, &rows.join(&"--")).await.expect("deployment runs");
         assert_eq!(status, ExitStatus::SUCCESS, "the requester's assertions all held");
     }
+
+    // the loopback redirects the layer to its address, a hop the grants refuse
+    let echoer = std::fs::read(test_programs::LINK_ECHOER).expect("reading the echoer");
+    let layer = format!("/v2/test/echoer/blobs/{}", Digest::of(&echoer));
+    loopback.script([
+        Exchange::new(NAME, METADATA, not_found()),
+        Exchange::new(NAME, "/v2/test/echoer/manifests/1.0.0", support::manifest(&echoer)),
+        Exchange::new(NAME, layer, redirect(&loopback.url(ADDRESS, "/layer"))),
+    ]);
+    let release = format!("release@{}", loopback.name());
+    let manifest = requester(test_programs::PLUGINS_REFUSED, Grants::all().hosts([NAME]));
+    let row = [release.as_str(), ECHOER_PACKAGE, "denied", "leads to `127.0.0.1`"];
+    let status = run(manifest, &row).await.expect("deployment runs");
+    assert_eq!(status, ExitStatus::SUCCESS, "the requester's assertions all held");
+    loopback.finish();
 }
 
 // Loading a name that is already active attests it — a boot guest from
@@ -1528,7 +1550,7 @@ impl Faulting {
 
 impl RegistrySource for Faulting {
     fn acquire<'a>(
-        &'a self, package: &'a str, endpoint: Option<&'a str>,
+        &'a self, package: &'a str, endpoint: Option<&'a str>, _grants: &'a Grants,
     ) -> BoxFuture<'a, Result<Vec<u8>, AcquireError>> {
         Box::pin(async move {
             assert_eq!(endpoint, None, "the loads name no registry");

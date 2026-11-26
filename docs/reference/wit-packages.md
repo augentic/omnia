@@ -33,7 +33,7 @@ Reference for the `omnia:*` WIT packages Omnia publishes to the `omnia.host` was
 
 ## Consuming a package
 
-`omnia.host` serves the registry metadata that points wkg at `ghcr.io/augentic/omnia/<name>`, at `/.well-known/wasm-pkg/registry.json`:
+`omnia.host` redirects its registry metadata, at `/.well-known/wasm-pkg/registry.json`, to `augentic.io`, which serves the document that points wkg at `ghcr.io/augentic/omnia/<name>`:
 
 ```json
 { "preferredProtocol": "oci", "oci": { "registry": "ghcr.io", "namespacePrefix": "augentic/" } }

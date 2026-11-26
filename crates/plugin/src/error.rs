@@ -22,6 +22,8 @@ pub enum LoadError {
     /// - a path beneath a writable mount, or beneath a mount the loading
     ///   guest does not reach;
     /// - a path or package deriving a name the deployment declares;
+    /// - a package whose fetch from the registry the load names leads to a
+    ///   host the loading guest does not reach;
     /// - a component importing code from a package its grants do not reach.
     #[error("denied: {0}")]
     Denied(String),

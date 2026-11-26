@@ -1,20 +1,29 @@
-//! Acquisition over wasm-pkg-client's `local` backend, store first: a stored
-//! release served with no registry, a fetched one verified and written once,
-//! what the store never reads, configuration routing, the registry a load
-//! names, and unrouted packages — all offline.
+//! Acquisition, store first, over wasm-pkg-client's `local` backend and a
+//! loopback registry: a stored release served with no registry, a fetched
+//! one verified and written once, what the store never reads, configuration
+//! routing, the registry a load names and every hop its fetch makes, and
+//! unrouted packages — all offline.
 
 #![cfg(not(target_arch = "wasm32"))]
 
+mod support;
+
 use std::path::{Path, PathBuf};
 
+use hyper::StatusCode;
 use omnia::wasmtime::Engine;
-use omnia::{AcquireError, CompileOptions};
+use omnia::{AcquireError, CompileOptions, Digest, Grants};
 use omnia_plugin::{
     FsStore, NoStore, PackageStore, Reference, RegistryClient, RegistrySource as _,
 };
+use serde_json::json;
 use tempfile::TempDir;
 use tokio::task::JoinSet;
 use wasm_pkg_client::{Config, Registry};
+
+use self::support::{
+    ADDRESS, Exchange, Loopback, METADATA, NAME, Reply, manifest, not_found, redirect, reply,
+};
 
 const PACKAGE: &str = "test:adapter@1.0.0";
 // the file the store keeps `PACKAGE` under
@@ -93,7 +102,7 @@ async fn registry_fetch() {
     stage(registry.path(), PACKAGE, b"component bytes");
     let acquirer = registry_acquirer(registry.path());
 
-    let bytes = acquirer.acquire(PACKAGE, None).await.expect("acquires");
+    let bytes = acquirer.acquire(PACKAGE, None, &Grants::all()).await.expect("acquires");
     assert_eq!(bytes, b"component bytes");
 }
 
@@ -108,17 +117,17 @@ async fn fetch_through_store() {
     let acquirer = RegistryClient::new(routed_to(registry.path()), FsStore::open(store.path()));
 
     assert!(!store.path().join(STORED).exists(), "the store starts empty");
-    let bytes = acquirer.acquire(PACKAGE, None).await.expect("fetches");
+    let bytes = acquirer.acquire(PACKAGE, None, &Grants::all()).await.expect("fetches");
     assert_eq!(bytes, b"first bytes");
     let stored = std::fs::read(store.path().join(STORED)).expect("the release was written");
     assert_eq!(stored, b"first bytes", "under the reference's `_` spelling");
 
     stage(registry.path(), PACKAGE, b"second bytes");
-    let bytes = acquirer.acquire(PACKAGE, None).await.expect("serves the store");
+    let bytes = acquirer.acquire(PACKAGE, None, &Grants::all()).await.expect("serves the store");
     assert_eq!(bytes, b"first bytes", "the stored release is final");
 
     std::fs::remove_file(store.path().join(STORED)).expect("removing the stored release");
-    let bytes = acquirer.acquire(PACKAGE, None).await.expect("fetches again");
+    let bytes = acquirer.acquire(PACKAGE, None, &Grants::all()).await.expect("fetches again");
     assert_eq!(bytes, b"second bytes", "removing the file is the refresh");
 }
 
@@ -130,9 +139,12 @@ async fn stored_without_registry() {
     std::fs::write(store.path().join(STORED), b"copied bytes").expect("copying into the store");
     let acquirer = RegistryClient::new(Config::empty(), FsStore::open(store.path()));
 
-    let bytes = acquirer.acquire(PACKAGE, None).await.expect("the store answers");
+    let bytes = acquirer.acquire(PACKAGE, None, &Grants::all()).await.expect("the store answers");
     assert_eq!(bytes, b"copied bytes");
-    let bytes = acquirer.acquire(PACKAGE, Some(UNROUTABLE_REGISTRY)).await.expect("still answers");
+    let bytes = acquirer
+        .acquire(PACKAGE, Some(UNROUTABLE_REGISTRY), &Grants::all())
+        .await
+        .expect("still answers");
     assert_eq!(bytes, b"copied bytes", "a stored release is served whatever registry is named");
 }
 
@@ -146,7 +158,8 @@ async fn off_reference_names() {
     }
     let acquirer = RegistryClient::new(Config::empty(), FsStore::open(store.path()));
 
-    let error = acquirer.acquire(PACKAGE, None).await.expect_err("nothing stored answers");
+    let error =
+        acquirer.acquire(PACKAGE, None, &Grants::all()).await.expect_err("nothing stored answers");
     assert!(
         matches!(&error, AcquireError::NotFound(detail) if detail.contains("no registry routes") && detail.contains(STORED)),
         "the refusal names the file the store would read: {error:?}"
@@ -165,7 +178,10 @@ async fn unrouted_package() {
     add_local_registry(&mut config, DEFAULT_REGISTRY, registry.path());
     let acquirer = RegistryClient::new(config, FsStore::open(store.path()));
 
-    let error = acquirer.acquire(PACKAGE, None).await.expect_err("nothing routes the package");
+    let error = acquirer
+        .acquire(PACKAGE, None, &Grants::all())
+        .await
+        .expect_err("nothing routes the package");
     let root = store.path().display().to_string();
     assert!(
         matches!(&error, AcquireError::NotFound(detail) if detail.contains("no registry routes") && detail.contains("`test` namespace") && detail.contains(&root) && detail.contains(STORED)),
@@ -174,7 +190,10 @@ async fn unrouted_package() {
     assert!(!store.path().join(STORED).exists(), "nothing was written");
 
     let storeless = RegistryClient::new(Config::empty(), NoStore);
-    let error = storeless.acquire(PACKAGE, None).await.expect_err("nothing routes the package");
+    let error = storeless
+        .acquire(PACKAGE, None, &Grants::all())
+        .await
+        .expect_err("nothing routes the package");
     assert!(
         matches!(&error, AcquireError::NotFound(detail) if detail.contains("no store is attached")),
         "refusal says no store could hold it: {error:?}"
@@ -191,7 +210,8 @@ async fn precompiled_release() {
     stage(registry.path(), PACKAGE, &precompiled(registry.path()));
     let acquirer = RegistryClient::new(routed_to(registry.path()), FsStore::open(store.path()));
 
-    let error = acquirer.acquire(PACKAGE, None).await.expect_err("pre-compiled is refused");
+    let error =
+        acquirer.acquire(PACKAGE, None, &Grants::all()).await.expect_err("pre-compiled is refused");
     assert!(
         matches!(&error, AcquireError::Invalid(detail) if detail.contains("pre-compiled")),
         "refusal: {error:?}"
@@ -199,7 +219,8 @@ async fn precompiled_release() {
     assert!(!store.path().join(STORED).exists(), "nothing was written");
 
     stage(registry.path(), PACKAGE, b"raw bytes");
-    let bytes = acquirer.acquire(PACKAGE, None).await.expect("the raw release fetches");
+    let bytes =
+        acquirer.acquire(PACKAGE, None, &Grants::all()).await.expect("the raw release fetches");
     assert_eq!(bytes, b"raw bytes");
 }
 
@@ -211,7 +232,10 @@ async fn unreadable_store() {
     std::fs::write(&root, b"a file where the store root should be").expect("writing the file");
     let acquirer = RegistryClient::new(Config::empty(), FsStore::open(&root));
 
-    let error = acquirer.acquire(PACKAGE, None).await.expect_err("the store cannot be read");
+    let error = acquirer
+        .acquire(PACKAGE, None, &Grants::all())
+        .await
+        .expect_err("the store cannot be read");
     assert!(matches!(error, AcquireError::Unavailable(_)), "unavailable: {error:?}");
 }
 
@@ -265,7 +289,10 @@ async fn concurrent_puts() {
 async fn network_failure() {
     let acquirer = RegistryClient::new(defaulting_to(UNROUTABLE_REGISTRY), NoStore);
 
-    let error = acquirer.acquire(PACKAGE, None).await.expect_err("the registry is unreachable");
+    let error = acquirer
+        .acquire(PACKAGE, None, &Grants::all())
+        .await
+        .expect_err("the registry is unreachable");
     assert!(
         matches!(&error, AcquireError::Unavailable(detail) if detail.contains("resolving")),
         "resolution failure: {error:?}"
@@ -296,11 +323,13 @@ async fn config_routing() {
     add_local_registry(&mut config, "pinned.test", pinned_root.path());
     let acquirer = RegistryClient::new(config, NoStore);
 
-    let unmapped = acquirer.acquire(PACKAGE, None).await.expect("default acquires");
+    let unmapped = acquirer.acquire(PACKAGE, None, &Grants::all()).await.expect("default acquires");
     assert_eq!(unmapped, b"default registry bytes", "an unmapped namespace falls to the default");
-    let namespaced = acquirer.acquire("acme:ledger@2.1.0", None).await.expect("acme acquires");
+    let namespaced =
+        acquirer.acquire("acme:ledger@2.1.0", None, &Grants::all()).await.expect("acme acquires");
     assert_eq!(namespaced, b"acme registry bytes", "a mapped namespace routes past the default");
-    let pinned = acquirer.acquire("acme:pinned@1.0.0", None).await.expect("pinned acquires");
+    let pinned =
+        acquirer.acquire("acme:pinned@1.0.0", None, &Grants::all()).await.expect("pinned acquires");
     assert_eq!(pinned, b"pinned registry bytes", "a package override beats its namespace");
 }
 
@@ -326,10 +355,13 @@ async fn named_endpoint() {
     add_local_registry(&mut unrouted, "acme.test", acme_root.path());
     add_local_registry(&mut unrouted, "named.test", named_root.path());
     let acquirer = RegistryClient::new(unrouted, FsStore::open(store.path()));
-    let bytes = acquirer.acquire(PACKAGE, Some("named.test")).await.expect("named acquires");
+    let bytes = acquirer
+        .acquire(PACKAGE, Some("named.test"), &Grants::all())
+        .await
+        .expect("named acquires");
     assert_eq!(bytes, b"named registry bytes", "an unrouted namespace takes the named registry");
     let unnamed = acquirer
-        .acquire(PACKAGE, None)
+        .acquire(PACKAGE, None, &Grants::all())
         .await
         .expect_err("the named registry routed nothing beyond its load");
     assert!(
@@ -337,7 +369,7 @@ async fn named_endpoint() {
         "refusal: {unnamed:?}"
     );
     let routed = acquirer
-        .acquire("acme:ledger@2.1.0", Some("named.test"))
+        .acquire("acme:ledger@2.1.0", Some("named.test"), &Grants::all())
         .await
         .expect_err("a routed namespace is not re-routed");
     assert!(
@@ -345,7 +377,7 @@ async fn named_endpoint() {
         "refusal names both registries: {routed:?}"
     );
     let same = acquirer
-        .acquire("acme:ledger@2.1.0", Some("acme.test"))
+        .acquire("acme:ledger@2.1.0", Some("acme.test"), &Grants::all())
         .await
         .expect("naming the routed registry agrees with it");
     assert_eq!(same, b"acme registry bytes");
@@ -353,7 +385,7 @@ async fn named_endpoint() {
         .expect("the routed release was written");
     assert_eq!(stored, b"acme registry bytes");
     let malformed = acquirer
-        .acquire("other:tool@1.0.0", Some("not a registry"))
+        .acquire("other:tool@1.0.0", Some("not a registry"), &Grants::all())
         .await
         .expect_err("a malformed registry name is refused");
     assert!(
@@ -366,7 +398,7 @@ async fn named_endpoint() {
     add_local_registry(&mut defaulted, "named.test", named_root.path());
     let acquirer = RegistryClient::new(defaulted, NoStore);
     let error = acquirer
-        .acquire(PACKAGE, Some("named.test"))
+        .acquire(PACKAGE, Some("named.test"), &Grants::all())
         .await
         .expect_err("a default registry routes every namespace");
     assert!(
@@ -375,28 +407,206 @@ async fn named_endpoint() {
     );
 }
 
+// the release the loopback serves, under `PACKAGE`
+const CONTENT: &[u8] = b"loopback component bytes";
+const MANIFEST: &str = "/v2/test/adapter/manifests/1.0.0";
+
+// Every way the loopback serves the release, fetched first under a grant of
+// its host name alone and then under every host. A fetch with a hop to the
+// address is refused at that hop, before it connects, and succeeds once every
+// host is granted. The rest succeed under both. A realm is sent the
+// deployment's credentials for the registry and no others.
+#[tokio::test]
+async fn registry_hops() {
+    let loopback = Loopback::serve().await;
+    let config = Config::from_toml(&loopback.toml()).expect("the loopback's settings parse");
+    let acquirer = RegistryClient::new(config, NoStore);
+    let named = loopback.name();
+    let held = Grants::all().hosts([NAME]);
+
+    for fetch in Fetch::ALL {
+        let mut exchanges = fetch.exchanges(&loopback);
+        let refused = exchanges.iter().position(|exchange| exchange.host == ADDRESS);
+        exchanges.truncate(refused.unwrap_or(exchanges.len()));
+        loopback.script(exchanges);
+        let fetched = acquirer.acquire(PACKAGE, Some(&named), &held).await;
+        if refused.is_some() {
+            let needle = format!("registry `{named}` leads to `{ADDRESS}`");
+            assert!(
+                matches!(&fetched, Err(AcquireError::Denied(detail)) if detail.contains(&needle)),
+                "{fetch:?} is refused at the hop to the address: {fetched:?}"
+            );
+        } else {
+            assert_eq!(fetched.expect("fetches"), CONTENT, "{fetch:?}");
+        }
+        loopback.finish();
+
+        loopback.script(fetch.exchanges(&loopback));
+        let fetched = acquirer.acquire(PACKAGE, Some(&named), &Grants::all()).await;
+        assert_eq!(fetched.expect("fetches under every host"), CONTENT, "{fetch:?}");
+        loopback.finish();
+    }
+
+    let credentials = "auth = { username = \"omnia\", password = \"secret\" }\n";
+    let config = Config::from_toml(&format!("{}{credentials}", loopback.toml()))
+        .expect("the loopback's settings parse");
+    let acquirer = RegistryClient::new(config, NoStore);
+    loopback.script([
+        Exchange::new(NAME, METADATA, not_found()),
+        Exchange::new(NAME, MANIFEST, challenge(&loopback.url(NAME, "/token"))),
+        Exchange {
+            authorization: Some("Basic b21uaWE6c2VjcmV0".to_owned()),
+            ..Exchange::new(NAME, "/token", token())
+        },
+        bearer(Exchange::new(NAME, MANIFEST, manifest(CONTENT))),
+        bearer(Exchange::new(NAME, layer(""), content())),
+    ]);
+    let fetched = acquirer.acquire(PACKAGE, Some(&named), &held).await;
+    assert_eq!(fetched.expect("fetches with the deployment's credentials"), CONTENT);
+    loopback.finish();
+}
+
+// How the loopback serves `CONTENT`: what its metadata says, and where a
+// realm or a redirect sends the fetch.
+#[derive(Clone, Copy, Debug)]
+enum Fetch {
+    NoMetadata,
+    PrefixedMetadata,
+    MetadataRedirect,
+    MetadataHost,
+    TokenRealm,
+    ManifestRedirect,
+    LayerRedirect,
+}
+
+impl Fetch {
+    const ALL: [Self; 7] = [
+        Self::NoMetadata,
+        Self::PrefixedMetadata,
+        Self::MetadataRedirect,
+        Self::MetadataHost,
+        Self::TokenRealm,
+        Self::ManifestRedirect,
+        Self::LayerRedirect,
+    ];
+
+    // every exchange the fetch makes once every host is granted
+    fn exchanges(self, loopback: &Loopback) -> Vec<Exchange> {
+        let address = |path: &str| loopback.url(ADDRESS, path);
+        match self {
+            Self::NoMetadata => vec![
+                Exchange::new(NAME, METADATA, not_found()),
+                Exchange::new(NAME, MANIFEST, manifest(CONTENT)),
+                Exchange::new(NAME, layer(""), content()),
+            ],
+            Self::PrefixedMetadata => vec![
+                Exchange::new(
+                    NAME,
+                    METADATA,
+                    metadata(&json!({
+                        "preferredProtocol": "oci",
+                        "oci": { "registry": loopback.name(), "namespacePrefix": "acme/" },
+                    })),
+                ),
+                Exchange::new(NAME, "/v2/acme/test/adapter/manifests/1.0.0", manifest(CONTENT)),
+                Exchange::new(NAME, layer("acme/"), content()),
+            ],
+            Self::MetadataRedirect => vec![
+                Exchange::new(NAME, METADATA, redirect(&address(METADATA))),
+                Exchange::new(ADDRESS, METADATA, not_found()),
+                Exchange::new(NAME, MANIFEST, manifest(CONTENT)),
+                Exchange::new(NAME, layer(""), content()),
+            ],
+            Self::MetadataHost => vec![
+                Exchange::new(
+                    NAME,
+                    METADATA,
+                    metadata(&json!({ "oci": { "registry": loopback.authority(ADDRESS) } })),
+                ),
+                Exchange::new(ADDRESS, MANIFEST, manifest(CONTENT)),
+                Exchange::new(ADDRESS, layer(""), content()),
+            ],
+            Self::TokenRealm => vec![
+                Exchange::new(NAME, METADATA, not_found()),
+                Exchange::new(NAME, MANIFEST, challenge(&address("/token"))),
+                Exchange::new(ADDRESS, "/token", token()),
+                bearer(Exchange::new(NAME, MANIFEST, manifest(CONTENT))),
+                bearer(Exchange::new(NAME, layer(""), content())),
+            ],
+            Self::ManifestRedirect => vec![
+                Exchange::new(NAME, METADATA, not_found()),
+                Exchange::new(NAME, MANIFEST, redirect(&address(MANIFEST))),
+                Exchange::new(ADDRESS, MANIFEST, manifest(CONTENT)),
+                Exchange::new(NAME, layer(""), content()),
+            ],
+            Self::LayerRedirect => vec![
+                Exchange::new(NAME, METADATA, not_found()),
+                Exchange::new(NAME, MANIFEST, manifest(CONTENT)),
+                Exchange::new(NAME, layer(""), redirect(&address("/layer"))),
+                Exchange::new(ADDRESS, "/layer", content()),
+            ],
+        }
+    }
+}
+
+// the path of `CONTENT`'s layer, under a repository `prefix`
+fn layer(prefix: &str) -> String {
+    format!("/v2/{prefix}test/adapter/blobs/{}", Digest::of(CONTENT))
+}
+
+fn content() -> Reply {
+    reply(StatusCode::OK, &[], CONTENT)
+}
+
+fn metadata(document: &serde_json::Value) -> Reply {
+    reply(StatusCode::OK, &[("content-type", "application/json")], document.to_string())
+}
+
+fn challenge(realm: &str) -> Reply {
+    let challenge = format!("Bearer realm=\"{realm}\",service=\"loopback\"");
+    reply(StatusCode::UNAUTHORIZED, &[("www-authenticate", &challenge)], "")
+}
+
+fn token() -> Reply {
+    reply(StatusCode::OK, &[("content-type", "application/json")], r#"{"token":"t0ken"}"#)
+}
+
+// `exchange`, carrying the token `token` issues
+fn bearer(exchange: Exchange) -> Exchange {
+    Exchange {
+        authorization: Some("Bearer t0ken".to_owned()),
+        ..exchange
+    }
+}
+
 #[tokio::test]
 async fn unresolvable_packages() {
     let registry = TempDir::new().expect("registry dir");
     stage(registry.path(), PACKAGE, b"component bytes");
     let acquirer = registry_acquirer(registry.path());
 
-    let unversioned =
-        acquirer.acquire("test:adapter", None).await.expect_err("exact version is mandatory");
+    let unversioned = acquirer
+        .acquire("test:adapter", None, &Grants::all())
+        .await
+        .expect_err("exact version is mandatory");
     assert!(
         matches!(&unversioned, AcquireError::Invalid(detail) if detail.contains("exact version")),
         "refusal: {unversioned:?}"
     );
 
-    let latest =
-        acquirer.acquire("test:adapter@latest", None).await.expect_err("nothing resolves latest");
+    let latest = acquirer
+        .acquire("test:adapter@latest", None, &Grants::all())
+        .await
+        .expect_err("nothing resolves latest");
     assert!(
         matches!(&latest, AcquireError::Invalid(detail) if detail.contains("exact semver version")),
         "refusal: {latest:?}"
     );
 
-    let absent =
-        acquirer.acquire("test:absent@1.0.0", None).await.expect_err("an absent package fails");
+    let absent = acquirer
+        .acquire("test:absent@1.0.0", None, &Grants::all())
+        .await
+        .expect_err("an absent package fails");
     assert!(
         matches!(absent, AcquireError::NotFound(_)),
         "an authoritative miss is not found: {absent:?}"

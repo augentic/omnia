@@ -402,6 +402,9 @@ impl<B: Backends> Deployment<B> {
     /// [`RegistryClient`] over the deployment's package store (`plugins.store`,
     /// else none) routed by its `plugins.registries` configuration.
     /// Chainable.
+    ///
+    /// A source of your own holds a fetch from the registry a load names to
+    /// the [`Grants`] [`RegistrySource::acquire`] is handed.
     #[cfg(feature = "loader")]
     pub fn registry_source(&mut self, registry: impl RegistrySource) -> &mut Self {
         self.loader.registry = Some(Arc::new(registry));

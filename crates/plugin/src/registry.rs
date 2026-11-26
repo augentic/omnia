@@ -1,16 +1,20 @@
-//! Registry acquisition over [wasm-pkg-client], store first.
+//! Registry acquisition, store first, over [wasm-pkg-client] or a fetch held
+//! to the loading guest's grants.
 //!
 //! [wasm-pkg-client]: https://github.com/bytecodealliance/wasm-pkg-tools
+
+mod named;
 
 use std::io;
 
 use anyhow::{Context as _, Result};
 use futures::future::BoxFuture;
 use futures::{FutureExt as _, TryStreamExt as _};
-use omnia_core::{AcquireError, Digest};
+use omnia_core::{AcquireError, Digest, Grants};
 use wasm_pkg_client::{Client, Config, ContentStream, PackageRef, Registry, RegistryMapping};
 use wasmtime::Engine;
 
+use self::named::Named;
 use crate::source::RegistrySource;
 use crate::store::{NoStore, PackageStore, Reference};
 
@@ -25,6 +29,21 @@ use crate::store::{NoStore, PackageStore, Reference};
 /// that registry alone, and a load naming another is refused; one it routes
 /// nowhere is fetched from the registry the load names, and refused, naming
 /// the namespace and the store, when it names none.
+///
+/// A fetch from the registry a load names is held to the [`Grants`]
+/// [`acquire`](RegistrySource::acquire) is passed. Each request it would
+/// make fails with [`AcquireError::Denied`], before anything connects, when
+/// the grants do not reach its host:
+///
+/// - the registry's `/.well-known/wasm-pkg/registry.json` metadata;
+/// - the manifest and layer, at the OCI host that metadata names;
+/// - the token realm a `401` names;
+/// - every redirect any of them answers with.
+///
+/// Such a fetch speaks OCI alone. It authenticates with the deployment's
+/// `[registry."<name>".oci]` settings alone, never the process environment
+/// or a Docker credential store. A registry the deployment serves with the
+/// `local` backend is read from disk and makes no request.
 ///
 /// The store keeps the deployment's word alone. A release the configuration
 /// routed is written to the store once — final until removed — while one
@@ -111,7 +130,7 @@ impl<S: PackageStore> RegistryClient<S> {
     }
 
     async fn acquire(
-        &self, package: &str, endpoint: Option<&str>,
+        &self, package: &str, endpoint: Option<&str>, grants: &Grants,
     ) -> Result<Vec<u8>, AcquireError> {
         let reference: Reference = package
             .parse()
@@ -130,7 +149,7 @@ impl<S: PackageStore> RegistryClient<S> {
 
         // then the registry the deployment routes it to, or the load names
         let origin = self.registry(&reference, endpoint)?;
-        let bytes = self.fetch(&reference, origin.registry()).await?;
+        let bytes = self.fetch(&reference, &origin, grants).await?;
 
         // SECURITY: only the deployment's routing writes the store; a release
         // a load fetched from a registry it named would otherwise be served to
@@ -159,12 +178,40 @@ impl<S: PackageStore> RegistryClient<S> {
         Ok(bytes)
     }
 
-    // Resolve the release, stream its content, and hold the bytes to the
-    // registry's digest; raw wasm alone leaves here, so nothing pre-compiled
-    // is ever stored.
+    // Fetch the release and hold its bytes to the registry's digest; raw wasm
+    // alone leaves here, so nothing pre-compiled is ever stored.
     async fn fetch(
-        &self, reference: &Reference, registry: &Registry,
+        &self, reference: &Reference, origin: &Origin, grants: &Grants,
     ) -> Result<Vec<u8>, AcquireError> {
+        let (bytes, expected) = match origin {
+            Origin::Named(registry) if !self.serves_locally(registry) => {
+                Named::new(&self.config, registry, grants)?.fetch(reference).await?
+            }
+            Origin::Routed(registry) | Origin::Named(registry) => {
+                self.pull(reference, registry).await?
+            }
+        };
+
+        let resolved = Digest::of(&bytes);
+        if resolved != expected {
+            // the registry misdelivered; a retry may serve honest bytes
+            return Err(AcquireError::Unavailable(format!(
+                "package `{reference}` content hashes to {resolved}, not the registry digest \
+                 {expected}"
+            )));
+        }
+        if Engine::detect_precompiled(&bytes).is_some() {
+            return Err(AcquireError::Invalid(format!(
+                "package `{reference}` is pre-compiled, but a package admits raw wasm alone"
+            )));
+        }
+        Ok(bytes)
+    }
+
+    // Resolve the release and stream its content over wasm-pkg-client.
+    async fn pull(
+        &self, reference: &Reference, registry: &Registry,
+    ) -> Result<(Vec<u8>, Digest), AcquireError> {
         let package = reference.package();
         let client = self.client(package, registry);
         let release = client
@@ -183,21 +230,14 @@ impl<S: PackageStore> RegistryClient<S> {
         let bytes = collect(content).await.map_err(|error| {
             AcquireError::Unavailable(format!("reading `{reference}`: {error}"))
         })?;
+        Ok((bytes, expected))
+    }
 
-        let resolved = Digest::of(&bytes);
-        if resolved != expected {
-            // the registry misdelivered; a retry may serve honest bytes
-            return Err(AcquireError::Unavailable(format!(
-                "package `{reference}` content hashes to {resolved}, not the registry digest \
-                 {expected}"
-            )));
-        }
-        if Engine::detect_precompiled(&bytes).is_some() {
-            return Err(AcquireError::Invalid(format!(
-                "package `{reference}` is pre-compiled, but a package admits raw wasm alone"
-            )));
-        }
-        Ok(bytes)
+    // A registry the deployment serves from disk makes no request the grants
+    // could hold.
+    fn serves_locally(&self, registry: &Registry) -> bool {
+        self.config.registry_config(registry).and_then(|settings| settings.default_backend())
+            == Some("local")
     }
 }
 
@@ -211,9 +251,9 @@ impl Default for RegistryClient<NoStore> {
 
 impl<S: PackageStore> RegistrySource for RegistryClient<S> {
     fn acquire<'a>(
-        &'a self, package: &'a str, endpoint: Option<&'a str>,
+        &'a self, package: &'a str, endpoint: Option<&'a str>, grants: &'a Grants,
     ) -> BoxFuture<'a, Result<Vec<u8>, AcquireError>> {
-        self.acquire(package, endpoint).boxed()
+        self.acquire(package, endpoint, grants).boxed()
     }
 }
 

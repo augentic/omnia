@@ -285,19 +285,28 @@ impl Source {
 
 /// Registry acquisition policy — how a [`SourceSpec::Package`] source is
 /// fetched.
+///
+/// [`acquire`](Self::acquire) takes the [`Grants`] of the loading guest, and
+/// [`Grants::all`] for a declared package's first use. A source refuses each
+/// request a fetch from the `endpoint` a load names would make, and each
+/// redirect it would follow, whose host [`Grants::allows_host`] refuses. The
+/// fetch fails with [`AcquireError::Denied`] before anything connects to that
+/// host. A fetch from the registry the deployment's routing picks is the
+/// deployment's word, so the grants do not hold it.
 pub trait RegistrySource: Send + Sync + 'static {
     /// Produce the raw component bytes for the exact `package` reference.
     ///
     /// The bytes come from `endpoint` when the load names one and the
     /// deployment's routing leaves the package's namespace open, and from
-    /// that routing otherwise.
+    /// that routing otherwise. A fetch from `endpoint` is held to `grants`.
     ///
     /// # Errors
     ///
     /// - [`AcquireError::NotFound`] when nothing routes the package, or no
     ///   store or registry holds the release.
     /// - [`AcquireError::Denied`] when the routing forbids the fetch, such as
-    ///   an `endpoint` other than the registry the namespace is routed to.
+    ///   an `endpoint` other than the registry the namespace is routed to, or
+    ///   when a fetch from `endpoint` leads to a host `grants` do not reach.
     /// - [`AcquireError::Invalid`] when the reference or the `endpoint` is
     ///   malformed, or the bytes are not raw wasm.
     /// - [`AcquireError::Unsupported`] for a valid request this source
@@ -305,7 +314,7 @@ pub trait RegistrySource: Send + Sync + 'static {
     /// - [`AcquireError::Unavailable`] when the store or the registry did
     ///   not produce the bytes.
     fn acquire<'a>(
-        &'a self, package: &'a str, endpoint: Option<&'a str>,
+        &'a self, package: &'a str, endpoint: Option<&'a str>, grants: &'a Grants,
     ) -> BoxFuture<'a, Result<Vec<u8>, AcquireError>>;
 }
 
@@ -316,7 +325,8 @@ pub enum AcquireError {
     /// release.
     #[error("not-found: {0}")]
     NotFound(String),
-    /// The deployment's routing forbids the fetch.
+    /// The deployment's routing forbids the fetch, or the fetch leads to a
+    /// host the loading guest's grants do not reach.
     #[error("denied: {0}")]
     Denied(String),
     /// The request is malformed, or the bytes are not raw wasm.

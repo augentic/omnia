@@ -20,8 +20,16 @@ workspace = true
 anyhow.workspace = true
 cap-std.workspace = true
 futures.workspace = true
+http-auth.workspace = true
 omnia-core.workspace = true
 omnia-wasi-types.workspace = true
+# `rustls-no-provider`, as in `omnia-wasi-http`: a fetch from a registry a
+# load names installs `ring` as the process provider before it builds a client.
+reqwest = { workspace = true, features = ["rustls-no-provider", "system-proxy"] }
+rustls.workspace = true
+secrecy.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["fs", "rt"] }
 tracing.workspace = true
@@ -29,10 +37,16 @@ wasm-pkg-client.workspace = true
 wasmtime = { workspace = true, features = ["runtime"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+# The loopback registry the suites fetch from.
+bytes.workspace = true
+http-body-util.workspace = true
+hyper = { workspace = true, features = ["http1", "server"] }
+hyper-util = { workspace = true, features = ["tokio"] }
 omnia = { path = "../omnia", features = ["loader", "link"] }
 omnia-test = { path = "../test", default-features = false, features = ["host"] }
 omnia-wasi-otel = { path = "../wasi-otel" }
 serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
 tempfile.workspace = true
 test-programs.workspace = true
-tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread"] }

@@ -222,16 +222,18 @@ impl<B: Backends> Runtime<B> {
         let Some(entry) = registry.declared(id) else {
             return Err(GuestError::Unregistered(id.clone()));
         };
-        let bytes = self.acquire(entry.spec(), None).await?;
+        let bytes = self.acquire(entry.spec(), None, &Grants::all()).await?;
         self.admit_bytes(id.clone(), bytes, Policy::Declared(entry)).await
     }
 
     /// The bytes a source names, acquired as its kind demands: embedded
     /// bytes copied, a path read, a package fetched through the deployment's
     /// registry source — from `endpoint` when the load names one and the
-    /// deployment's routing leaves the package's namespace open. Nothing is
-    /// verified here; [`admit_bytes`](Self::admit_bytes) does that under the
-    /// caller's [`Policy`].
+    /// deployment's routing leaves the package's namespace open. A fetch from
+    /// `endpoint` is held to `grants`, the loading guest's, as
+    /// [`RegistrySource`] states. Nothing is verified here;
+    /// [`admit_bytes`](Self::admit_bytes) does that under the caller's
+    /// [`Policy`].
     ///
     /// # Errors
     ///
@@ -245,7 +247,7 @@ impl<B: Backends> Runtime<B> {
     /// - [`GuestError::Unavailable`] when the file, the store, or the
     ///   registry did not produce the bytes.
     pub async fn acquire(
-        &self, spec: &SourceSpec, endpoint: Option<&str>,
+        &self, spec: &SourceSpec, endpoint: Option<&str>, grants: &Grants,
     ) -> Result<Vec<u8>, GuestError> {
         match spec {
             SourceSpec::Package(package) => {
@@ -255,7 +257,7 @@ impl<B: Backends> Runtime<B> {
                          client; build omnia with the `loader` feature"
                     )));
                 };
-                packages.acquire(package, endpoint).await.map_err(|error| match error {
+                packages.acquire(package, endpoint, grants).await.map_err(|error| match error {
                     AcquireError::NotFound(reason) => GuestError::NotFound(reason),
                     AcquireError::Denied(reason) => GuestError::Denied(reason),
                     AcquireError::Invalid(reason) => GuestError::Invalid(reason),
