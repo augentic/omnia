@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Context, Result, anyhow};
 use futures::StreamExt;
 use omnia_core::{LeaseError, PatternRoutes, Provides, Runtime, TriggerRouter, telemetry};
 use tracing::{Instrument, info_span, instrument};
@@ -31,14 +31,8 @@ where
 
     while let Some(event) = events.next().await {
         let handler = handler.clone();
-
         tokio::spawn(async move {
-            telemetry::count_event(&handler.component);
-
-            if let Err(e) = handler.handle(event).await {
-                telemetry::count_error(&handler.component, None);
-                tracing::error!(service = %handler.component, error = %e);
-            }
+            _ = handler.handle(event).await;
         });
     }
 
@@ -98,6 +92,11 @@ where
     /// timeout expires, counted from when the event took its slot of the
     /// gate. A guest's error leaves the connection open.
     ///
+    /// Every event is counted on the `event_counter` counter, and every
+    /// failure logged and counted on `processing_errors`, before it is
+    /// returned. An event refused at a full gate counts on
+    /// `invocations_refused` alone, and is logged at `debug`.
+    ///
     /// # Errors
     ///
     /// Returns an error if the event names no connection or carries text that
@@ -106,6 +105,28 @@ where
     /// if the guest cannot be instantiated, traps, or times out, or if the
     /// guest returns an error.
     pub async fn handle(&self, event: Event) -> Result<()> {
+        telemetry::count_event(&self.component);
+
+        let handled = self.deliver(event).await;
+        match &handled {
+            Err(error) if error.is::<Refused>() => {
+                tracing::debug!(service = %self.component, "{error}");
+            }
+            Err(error) => {
+                telemetry::count_error(&self.component, None);
+                tracing::error!(
+                    service = %self.component,
+                    error = format!("{error:#}"),
+                    "issue processing event"
+                );
+            }
+            Ok(()) => {}
+        }
+        handled
+    }
+
+    // `handle`'s outcome, with a full gate reported as `Refused`
+    async fn deliver(&self, event: Event) -> Result<()> {
         // an event the guest could not answer is refused before routing
         let mut event = types::Event::try_from(event)
             .map_err(|error| anyhow!("refusing a websocket event: {error}"))?;
@@ -135,10 +156,7 @@ where
 
         // a full gate fails the event, and its deadline counts from the slot
         let Some(lease) = self.state.try_lease(guest) else {
-            bail!(
-                "refusing a websocket event: every slot of the concurrency gate \
-                 (MAX_CONCURRENT_INVOCATIONS) is held"
-            );
+            return Err(Refused.into());
         };
         event.deadline = lease.deadline_millis();
 
@@ -165,6 +183,7 @@ where
             Err(timeout @ LeaseError::Timeout(_)) => {
                 Err(anyhow::Error::from(timeout).context("websocket handler timed out"))
             }
+            Err(error) => Err(error.into()),
         }
     }
 
@@ -174,3 +193,11 @@ where
         endpoint.await?.events().await
     }
 }
+
+// an event refused at a full gate, which counts on `invocations_refused` alone
+#[derive(Debug, thiserror::Error)]
+#[error(
+    "refusing a websocket event: every slot of the concurrency gate \
+     (MAX_CONCURRENT_INVOCATIONS) is held"
+)]
+struct Refused;

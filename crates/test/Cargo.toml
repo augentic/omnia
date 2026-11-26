@@ -26,7 +26,7 @@ contract = [
     "dep:serde_json",
 ]
 # The component runtime harness: `Deployment`, `Backends`, the scripted and recording
-# backends, the `send`/`deliver` triggers, and `Scratch`.
+# backends, the `send`/`deliver` triggers, `Metrics`, and `Scratch`.
 host = [
     "dep:anyhow",
     "dep:bytes",
@@ -50,7 +50,10 @@ host = [
     "dep:omnia-wasi-vault",
     "dep:omnia-wasi-vcs",
     "dep:omnia-wasi-websocket",
+    "dep:opentelemetry",
+    "dep:opentelemetry_sdk",
     "dep:tempfile",
+    "dep:tracing-subscriber",
 ]
 # The std-only wasm32 fixture pipeline for a consumer's `build.rs`.
 build = []
@@ -81,7 +84,10 @@ omnia-wasi-sql = { workspace = true, optional = true }
 omnia-wasi-vault = { workspace = true, optional = true }
 omnia-wasi-vcs = { workspace = true, optional = true }
 omnia-wasi-websocket = { workspace = true, optional = true }
+opentelemetry = { workspace = true, optional = true, features = ["metrics"] }
+opentelemetry_sdk = { workspace = true, optional = true, features = ["metrics", "testing"] }
 tempfile = { workspace = true, optional = true }
+tracing-subscriber = { workspace = true, optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 anyhow.workspace = true

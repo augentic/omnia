@@ -2419,10 +2419,13 @@ dependencies = [
  "omnia-wasi-vault",
  "omnia-wasi-vcs",
  "omnia-wasi-websocket",
+ "opentelemetry",
+ "opentelemetry_sdk",
  "serde_json",
  "tempfile",
  "test-programs",
  "tokio",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -2501,6 +2504,7 @@ dependencies = [
  "rustls",
  "serde_json",
  "test-programs",
+ "thiserror 2.0.21",
  "tokio",
  "tracing",
  "wasmtime",
@@ -2686,6 +2690,7 @@ dependencies = [
  "omnia-wasi-otel",
  "omnia-wasi-types",
  "test-programs",
+ "thiserror 2.0.21",
  "tokio",
  "tokio-stream",
  "tokio-tungstenite",

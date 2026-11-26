@@ -32,6 +32,7 @@ omnia-core.workspace = true
 # before building a client (see `default_impl.rs`).
 reqwest = { workspace = true, features = ["http2", "rustls-no-provider", "stream", "system-proxy"] }
 rustls.workspace = true
+thiserror.workspace = true
 tokio = { workspace = true, features = ["macros", "net", "rt", "sync", "time"] }
 tracing.workspace = true
 wasmtime = { workspace = true, features = ["component-model-async"] }

@@ -19,7 +19,7 @@ use omnia::{
     AcquireError, ExitStatus, FutureResult, Grants, GuestEntry, GuestId, Provides, RegistrySource,
     RuntimeOptions,
 };
-use omnia_test::host::Deployment;
+use omnia_test::host::{Deployment, Metrics};
 use omnia_wasi_otel::{OtelClient, OtelDefault, WasiOtel};
 use omnia_wasi_websocket::{
     Endpoint, Error, Event, Events, WasiWebSocket, WebSocketClient, WebSocketDefault,
@@ -106,6 +106,7 @@ async fn quiet(peer: &mut Peer) {
 
 #[tokio::test]
 async fn websocket_handler_echo() {
+    let metrics = Metrics::install();
     let (server, addr, mut events) = serve().await;
     // The handler guest exports no `wasi:cli/run`: boot without driving it
     // and dispatch the backend's events through the trigger's in-process
@@ -126,12 +127,14 @@ async fn websocket_handler_echo() {
     // an event that names no connection never reaches the guest
     let anonymous = handler.handle(Event::new(b"ping".to_vec())).await;
     assert!(anonymous.is_err(), "an anonymous event is refused");
+    assert_eq!(metrics.count("processing_errors"), 1);
 
     // the guest's own refusal comes back as the handler's error
     let mut first = connect(addr).await;
     first.send(Message::text("")).await.expect("first sends");
     let refused = handler.handle(next(&mut events).await).await.expect_err("refused");
     assert!(format!("{refused:#}").contains("an empty message"), "{refused:#}");
+    assert_eq!(metrics.count("processing_errors"), 2);
 
     // text comes back to its sender as text
     first.send(Message::text("ping")).await.expect("first sends");
@@ -150,11 +153,15 @@ async fn websocket_handler_echo() {
 
     quiet(&mut first).await;
     quiet(&mut second).await;
+
+    // every event counts, whether or not it was handled
+    assert_eq!(metrics.count("event_counter"), 4);
     runtime.shutdown();
 }
 
 #[tokio::test]
 async fn full_gate() {
+    let metrics = Metrics::install();
     let (server, addr, mut events) = serve().await;
     let runtime = Deployment::new()
         .guest("guest", test_programs::WEBSOCKET_HANDLER_ECHO)
@@ -189,6 +196,11 @@ async fn full_gate() {
     drop(lease);
     handler.handle(ping).await.expect("handled");
     assert_eq!(receive(&mut peer).await, Message::text("ping"));
+
+    // the refusal counts as refused, never as a failure, and both deliveries count
+    assert_eq!(metrics.count("invocations_refused"), 1);
+    assert_eq!(metrics.count("processing_errors"), 0);
+    assert_eq!(metrics.count("event_counter"), 2);
 
     quiet(&mut peer).await;
     runtime.shutdown();

@@ -25,7 +25,7 @@ use hyper::service::service_fn;
 use omnia::{
     AcquireError, ExitStatus, Grants, GuestEntry, GuestId, RegistrySource, RuntimeOptions,
 };
-use omnia_test::host::{Backends, Deployment};
+use omnia_test::host::{Backends, Deployment, Metrics};
 use omnia_wasi_config::WasiConfig;
 use omnia_wasi_http::{HttpHandler, ServerOptions, WasiHttp};
 use omnia_wasi_otel::WasiOtel;
@@ -570,6 +570,7 @@ async fn health_path() {
 // is unread fills a gate of one.
 #[tokio::test]
 async fn full_gate() {
+    let metrics = Metrics::install();
     let guest = std::fs::read(test_programs::HTTP_INCOMING_ECHO).expect("guest bytes");
     let runtime = Deployment::new()
         .entry(GuestEntry::new("guest", guest).route_http("/echo"))
@@ -610,6 +611,10 @@ async fn full_gate() {
     assert_eq!(refused.headers()[RETRY_AFTER], "1");
     assert_eq!(runtime.stores_built(), built);
 
+    // the refusal counts as refused, never as a failure
+    assert_eq!(metrics.count("invocations_refused"), 1);
+    assert_eq!(metrics.count("processing_errors"), 0);
+
     // the probe takes no slot
     let probe = Request::get("/healthz").body(Full::new(Bytes::new())).expect("request");
     let response = handler.handle(probe).await.expect("handled");
@@ -634,6 +639,7 @@ async fn full_gate() {
 // pool full.
 #[tokio::test]
 async fn full_pool() {
+    let metrics = Metrics::install();
     let guest = std::fs::read(test_programs::HTTP_INCOMING_ECHO).expect("guest bytes");
     let runtime = Deployment::new()
         .entry(GuestEntry::new("guest", guest).route_http("/echo"))
@@ -664,6 +670,10 @@ async fn full_pool() {
     // the gate admitted the request, and its slot is free again
     assert!(runtime.stores_built() > built);
     assert_eq!(runtime.invocations().in_flight, 0);
+
+    // a full pool counts as a failure, never as a refusal
+    assert_eq!(metrics.count("processing_errors"), 1);
+    assert_eq!(metrics.count("invocations_refused"), 0);
 
     runtime.shutdown();
 }
@@ -723,6 +733,7 @@ async fn http_incoming_stream() {
 async fn stalled_guest() {
     const GUEST_TIMEOUT: Duration = Duration::from_secs(1);
 
+    let metrics = Metrics::install();
     let guest = std::fs::read(test_programs::HTTP_INCOMING_STREAM).expect("guest bytes");
     let runtime = Deployment::new()
         .entry(GuestEntry::new("guest", guest).route_http("/stream"))
@@ -766,6 +777,10 @@ async fn stalled_guest() {
         .await
         .expect("the slot frees once the guest times out");
     drop(freed);
+
+    // the timeout counts as a failure, and the dropped request counts nothing
+    assert_eq!(metrics.count("processing_errors"), 1);
+    assert_eq!(metrics.count("invocations_refused"), 0);
 
     runtime.shutdown();
 }

@@ -248,6 +248,7 @@ impl Bound {
 
 /// Why a leased invocation did not return its call's output.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum LeaseError {
     /// The guest could not be instantiated.
     #[error(transparent)]
