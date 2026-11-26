@@ -93,8 +93,20 @@ impl<B: Provides<Self>> Host<B> for WasiVcs {
 /// [`Grants::all`] for a guest without a grants table. A backend refuses
 /// each address the call would dial, and each redirect it would follow,
 /// whose host [`Grants::allows_host`] refuses. The call fails with
-/// [`Error::Denied`] before anything connects. A local address names no
-/// host, so [`Grants::hosts`] does not hold it.
+/// [`Error::Denied`] before anything connects.
+///
+/// A local address names no host, so the guest's mounts hold it instead. A
+/// backend locates each one a call would dial through [`Place::locate`], a
+/// push's for writing, and dials only the directory it located:
+///
+/// - one outside the mounts the guest holds, or a push's beneath no writable
+///   mount, is [`Error::Denied`] before anything runs;
+/// - one beneath a mount that holds no repository is [`Error::NotFound`];
+/// - each further directory the dial reaches, such as the repository a
+///   `.git` file names, is located the same way.
+///
+/// A backend that runs a program at a place holds what the program reaches
+/// to the same mounts, or says in its own docs that it does not.
 ///
 /// A backend picks the case of a failure by returning an [`Error`] inside
 /// its `anyhow` error. The guest sees:

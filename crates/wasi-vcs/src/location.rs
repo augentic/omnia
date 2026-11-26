@@ -17,6 +17,7 @@ use omnia_core::MountRegistry;
 use wasmtime_wasi::filesystem::Descriptor;
 
 use super::generated::omnia::vcs::types::{Error, Location};
+use crate::Error as BackendError;
 
 /// The place a guest's `location` resolved to: an open directory beneath an
 /// authorized mount.
@@ -27,17 +28,21 @@ use super::generated::omnia::vcs::types::{Error, Location};
 /// every await. The handle is the authority: a guest can rename, remove, or
 /// link anything beneath its mount at any moment, so a backend works through
 /// [`dir`](Self::dir) and never reopens [`path`](Self::path).
+///
+/// A place carries the mounts its guest holds. A backend holds every other
+/// directory a call reaches to them through [`locate`](Self::locate).
 #[derive(Clone)]
 pub struct Place {
     dir: Arc<Dir>,
     path: PathBuf,
     writable: bool,
+    mounts: Arc<MountRegistry>,
 }
 
 impl Place {
     // Resolve a lent location into the place beneath its mount.
     pub(crate) fn resolve(
-        descriptor: &Descriptor, registry: &MountRegistry, location: &Location, intent: Intent,
+        descriptor: &Descriptor, registry: &Arc<MountRegistry>, location: &Location, intent: Intent,
     ) -> Result<Self, Error> {
         let Descriptor::Dir(root) = descriptor else {
             return Err(Error::Denied("a location root must be a directory".to_owned()));
@@ -59,6 +64,7 @@ impl Place {
                 dir: Arc::clone(&mount.dir),
                 path: mount.host_path.clone(),
                 writable: mount.writable,
+                mounts: Arc::clone(registry),
             });
         }
         check_subpath(subpath)?;
@@ -67,6 +73,66 @@ impl Place {
             dir: Arc::new(dir),
             path: mount.host_path.join(subpath),
             writable: mount.writable,
+            mounts: Arc::clone(registry),
+        })
+    }
+
+    /// The directory at `path`, held to the [`mounts`](Self::mounts) the
+    /// guest holds.
+    ///
+    /// A backend locates each directory a call reaches beyond the place
+    /// itself, a local address included, before anything reads it.
+    ///
+    /// - A relative `path` is joined to this place's [`path`](Self::path).
+    /// - `path` is placed by directory identity, so a symlink that leads out
+    ///   of the mounts places it outside them.
+    /// - With `write`, `path` must lie beneath a writable mount.
+    /// - The directory is opened through its mount's handle, so a symlink
+    ///   swapped in meanwhile cannot lead the open out.
+    ///
+    /// # Errors
+    ///
+    /// - [`BackendError::Denied`], naming `path`, when it lies beneath no
+    ///   mount the guest holds, whether or not it exists, or beneath no
+    ///   writable one where `write` needs it, or leads out of its mount as it
+    ///   opens;
+    /// - [`BackendError::NotFound`], naming `path`, when nothing at `path`
+    ///   beneath a mount the guest holds is a directory;
+    /// - [`BackendError::Other`] when `path` cannot be placed.
+    pub fn locate(&self, path: &Path, write: bool) -> Result<Self, BackendError> {
+        let shown = path.display();
+        let joined = self.path.join(path);
+        let unplaced =
+            |err: anyhow::Error| BackendError::Other(format!("placing {shown}: {err:#}"));
+
+        // beneath a held mount, and a writable one for a write
+        let found = self.mounts.beneath(&joined, |mount| mount.writable || !write);
+        let Some((mount, rest)) = found.map_err(unplaced)? else {
+            let held = write && self.mounts.beneath(&joined, |_| true).map_err(unplaced)?.is_some();
+            let why = if held { "beneath no writable mount" } else { "outside the guest's mounts" };
+            return Err(BackendError::Denied(format!("{shown} lies {why}")));
+        };
+
+        // the directory itself, opened through the mount's handle
+        let (dir, path) = if rest.as_os_str().is_empty() {
+            (Arc::clone(&mount.dir), mount.host_path.clone())
+        } else {
+            let dir = mount.dir.open_dir(&rest).map_err(|err| match err.kind() {
+                io::ErrorKind::NotFound | io::ErrorKind::NotADirectory => {
+                    BackendError::NotFound(format!("{shown} holds no directory"))
+                }
+                io::ErrorKind::PermissionDenied => {
+                    BackendError::Denied(format!("{shown} leads out of its mount"))
+                }
+                _ => BackendError::Other(format!("opening {shown}: {err}")),
+            })?;
+            (Arc::new(dir), mount.host_path.join(&rest))
+        };
+        Ok(Self {
+            dir,
+            path,
+            writable: mount.writable,
+            mounts: Arc::clone(&self.mounts),
         })
     }
 
@@ -90,8 +156,16 @@ impl Place {
         &self.path
     }
 
-    pub(crate) const fn writable(&self) -> bool {
+    /// Whether the place lies beneath a writable mount.
+    #[must_use]
+    pub const fn writable(&self) -> bool {
         self.writable
+    }
+
+    /// The mounts the store's guest holds, as its grants narrow them.
+    #[must_use]
+    pub fn mounts(&self) -> &MountRegistry {
+        &self.mounts
     }
 }
 
