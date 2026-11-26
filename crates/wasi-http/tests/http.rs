@@ -630,6 +630,44 @@ async fn full_gate() {
     runtime.shutdown();
 }
 
+// The pool holds no linear memory, so every request the gate admits finds the
+// pool full.
+#[tokio::test]
+async fn full_pool() {
+    let guest = std::fs::read(test_programs::HTTP_INCOMING_ECHO).expect("guest bytes");
+    let runtime = Deployment::new()
+        .entry(GuestEntry::new("guest", guest).route_http("/echo"))
+        .options(RuntimeOptions {
+            pool_total_memories: Some(0),
+            ..RuntimeOptions::default()
+        })
+        .boot(Backends::defaults().await, |deployment| {
+            deployment.host::<WasiHttp>()?;
+            deployment.host::<WasiOtel>()?;
+            Ok(())
+        })
+        .await
+        .expect("runtime boots");
+    let handler = HttpHandler::new(&runtime)
+        .expect("http routes consistent")
+        .expect("the guest exports the http handler");
+
+    let built = runtime.stores_built();
+    let request = Request::get("/echo?message=refused")
+        .header(HOST, "echo.test")
+        .body(Full::new(Bytes::new()))
+        .expect("request");
+    let response = handler.handle(request).await.expect("handled");
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(response.headers()[RETRY_AFTER], "1");
+
+    // the gate admitted the request, and its slot is free again
+    assert!(runtime.stores_built() > built);
+    assert_eq!(runtime.invocations().in_flight, 0);
+
+    runtime.shutdown();
+}
+
 #[tokio::test]
 async fn http_incoming_stream() {
     const STREAM_TIMEOUT: Duration = Duration::from_millis(200);

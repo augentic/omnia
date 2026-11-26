@@ -161,7 +161,7 @@ where
             .await;
         match handled {
             Ok(handled) => handled,
-            Err(LeaseError::Enter(error)) => Err(error),
+            Err(LeaseError::Enter(error) | LeaseError::PoolFull(error)) => Err(error),
             Err(timeout @ LeaseError::Timeout(_)) => {
                 Err(anyhow::Error::from(timeout).context("websocket handler timed out"))
             }

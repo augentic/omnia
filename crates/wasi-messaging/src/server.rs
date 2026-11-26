@@ -181,7 +181,7 @@ where
             .await;
         match handled {
             Ok(handled) => handled,
-            Err(LeaseError::Enter(error)) => {
+            Err(LeaseError::Enter(error) | LeaseError::PoolFull(error)) => {
                 Err(HandleError::Unavailable(format!("instantiating `{guest_id}`: {error:#}")))
             }
             Err(LeaseError::Timeout(limit)) => Err(HandleError::TimedOut(limit)),

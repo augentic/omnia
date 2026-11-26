@@ -259,7 +259,9 @@ where
     /// - `500` for a guest that times out, cannot be loaded at its first use,
     ///   or is no longer registered;
     /// - `503`, with `Retry-After: 1`, when every slot of the runtime's
-    ///   [concurrency gate](Runtime::try_lease) is held.
+    ///   [concurrency gate](Runtime::try_lease) is held, or when the request
+    ///   takes a slot but the instance pool has
+    ///   [no room](omnia_core::LeaseError::PoolFull) for its guest.
     ///
     /// A request target is malformed when the request:
     /// - carries no `Host`, unless it is HTTP/2 with an `:authority`;
@@ -281,9 +283,10 @@ where
     ///
     /// # Errors
     ///
-    /// Returns an error if the guest cannot be instantiated, traps, returns an
-    /// error, or yields a response that cannot be converted. In-process
-    /// callers see these as `Err`; only the server loop maps them to `500`.
+    /// Returns an error if the guest cannot be instantiated for any reason but
+    /// a full pool, traps, returns an error, or yields a response that cannot
+    /// be converted. In-process callers see these as `Err`; only the server
+    /// loop maps them to `500`.
     pub async fn handle<T>(&self, request: http::Request<T>) -> Result<http::Response<OutgoingBody>>
     where
         T: Body<Data = Bytes> + Send + 'static,
@@ -352,6 +355,10 @@ where
         let response = match receiver.await {
             Ok(Head::Sent(response)) => response,
             Ok(Head::Failed(error)) => return Err(error),
+            Ok(Head::PoolFull(error)) => {
+                tracing::warn!(guest = %guest_id, "{error:#}; returning 503");
+                return Ok(unavailable());
+            }
             Ok(Head::TimedOut) => {
                 tracing::error!(service = %self.component, "guest handler timed out");
                 return Ok(internal_error());
@@ -371,6 +378,7 @@ where
 enum Head {
     Sent(hyper::Response<OutgoingBody>),
     Failed(anyhow::Error),
+    PoolFull(anyhow::Error),
     TimedOut,
 }
 
@@ -407,6 +415,7 @@ where
                 ended = &mut invocation => match ended {
                     Ok(Ok(())) => Head::Failed(no_response()),
                     Ok(Err(error)) | Err(LeaseError::Enter(error)) => Head::Failed(error),
+                    Err(LeaseError::PoolFull(error)) => Head::PoolFull(error),
                     Err(LeaseError::Timeout(_)) => Head::TimedOut,
                 },
             };
@@ -423,7 +432,7 @@ where
             // the body, bounded from its head while `HTTP_STREAM_TIMEOUT_MS` is set
             match invocation.await {
                 Ok(Ok(())) => {}
-                Ok(Err(error)) | Err(LeaseError::Enter(error)) => {
+                Ok(Err(error)) | Err(LeaseError::Enter(error) | LeaseError::PoolFull(error)) => {
                     tracing::error!("http guest task error: {error:#}");
                 }
                 Err(LeaseError::Timeout(limit)) => {

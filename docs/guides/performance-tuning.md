@@ -50,24 +50,32 @@ The [concurrency gate](../reference/configuration.md#concurrency-gate) admits `M
 POOL_MAX_INSTANCES >= MAX_CONCURRENT_INVOCATIONS x (1 + hops in flight per invocation)
 ```
 
-The hops in flight are the calls between guests one invocation holds open at once: one for a guest that calls one other guest, two for A calling B calling C. Unset, the gate is as wide as the pool, which suits a deployment whose guests make no such calls. A call that finds the pool full fails at once, with `the instance pool is full`.
+The hops in flight are the calls between guests one invocation holds open at once: one for a guest that calls one other guest, two for A calling B calling C. Unset, the gate is as wide as the pool, which suits a deployment whose guests make no such calls. At a raised `POOL_DECOMMIT_BATCH_SIZE`, that holds only while the pool's totals include the [decommit margin](#3-batched-decommit), as the unset ones do. A call that finds the pool full fails at once, with `the instance pool is full`. An HTTP request the gate admitted but the pool has no room for is answered `503`, and the host logs the same message at `warn`.
 
 The gate's gauges, and its one counter, read as follows:
 
 - `invocations_in_flight` is how many slots are held. Pinned at the gate's size, the gate is what limits throughput.
 - `invocations_waiting` is how many message deliveries and command runs wait for a slot. Waiters take freed slots in the order they arrived, ahead of any request, so HTTP and WebSocket are refused while it stays above zero. No more than `MESSAGING_MAX_IN_FLIGHT` deliveries hold or wait for a slot. One past them waits off the gate, where this gauge does not count it.
-- `invocations_refused` counts the HTTP requests and WebSocket events refused at a full gate. HTTP answers each with `503`.
+- `invocations_refused` counts the HTTP requests and WebSocket events refused at a full gate. HTTP answers each with `503`. It does not count a request the gate admitted but the pool had no room for, which HTTP answers `503` too.
 
 A slot is held for as long as its invocation runs:
 
 - A command's run holds one from start to exit, so a long-running command leaves one fewer for the triggers serving beside it.
 - A guest that waits on another delivery in the same deployment, such as a reply its own messaging trigger handles, holds its slot while it waits. When such guests hold every slot, or messaging's whole share of `MESSAGING_MAX_IN_FLIGHT`, the deliveries they wait on queue until the guests time out.
 
-The table and stack pools are mapped when the engine is built, four tables and two stacks for each instance. A host with strict overcommit is charged for the whole mapping, about 625 MiB of tables and 4 GiB of stacks at the defaults.
+The table and stack pools are mapped when the engine is built, four tables and two stacks for each instance. A host with strict overcommit is charged for the whole mapping, about 625 MiB of tables and 4 GiB of stacks at the defaults. A raised `POOL_DECOMMIT_BATCH_SIZE` maps the [decommit margin](#3-batched-decommit)'s tables too, and its stacks while `ASYNC_STACK_ZEROING` is on.
 
 ### 3. Batched decommit
 
-`POOL_DECOMMIT_BATCH_SIZE` (default 16) batches slot decommits to amortise syscalls; on Linux a whole batch flushes in a single `process_madvise` call. Set to 1 to decommit each slot immediately, or raise it at high request rates.
+`POOL_DECOMMIT_BATCH_SIZE` (default 1) is how many freed pool slots a thread queues before it resets them together. At 1, a slot is reset as its instance is dropped, before the invocation's slot of the [concurrency gate](../reference/configuration.md#concurrency-gate) is freed.
+
+A batch saves syscalls only on Linux 6.14 or later, where a whole batch resets in one `process_madvise` call if seccomp allows it. wasmtime stops calling `process_madvise` for good once it is refused, as some container seccomp profiles refuse it, and then resets each slot on its own. Raise the batch only where a measurement shows a gain.
+
+A raised batch holds freed slots back from reuse until their batch resets. The unset `POOL_TOTAL_*` add the [decommit margin](../reference/configuration.md#instance-pooling) to cover them: min(cores, 16) × (`POOL_DECOMMIT_BATCH_SIZE` − 1) more memories and tables, and as many stacks while `ASYNC_STACK_ZEROING` is on. Each extra memory reserves the address space of a pooled memory, which is `MEMORY_RESERVATION` (4 GiB on a 64-bit host) or `POOL_MAX_MEMORY_BYTES` if larger, plus `MEMORY_GUARD_SIZE` (32 MiB).
+
+```bash
+POOL_DECOMMIT_BATCH_SIZE=16   # with 16 or more cores, 240 more memories and tables
+```
 
 ### 4. Linux-specific options
 

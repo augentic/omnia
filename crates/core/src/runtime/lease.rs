@@ -11,12 +11,14 @@ use futures::future::OptionFuture;
 use tokio::sync::watch;
 use tokio::task::coop::unconstrained;
 use tokio::time::{Instant, sleep};
+use wasmtime::PoolConcurrencyLimitError;
 use wasmtime::component::Instance;
 
 use super::Runtime;
 use super::enter::Entered;
 use super::gate::{Invocations, Slot};
 use crate::host::Backends;
+use crate::invoke::explain_full_pool;
 use crate::registry::Guest;
 use crate::telemetry;
 
@@ -127,8 +129,9 @@ impl<B: Backends> Lease<B> {
     ///
     /// # Errors
     ///
-    /// - [`LeaseError::Enter`] when the guest cannot be instantiated, such as
-    ///   when the instance pool is full.
+    /// - [`LeaseError::Enter`] when the guest cannot be instantiated.
+    /// - [`LeaseError::PoolFull`] when the instance pool has no room for the
+    ///   guest's instance.
     /// - [`LeaseError::Timeout`] when the deadline passes before `call`
     ///   returns.
     ///
@@ -154,7 +157,7 @@ impl<B: Backends> Lease<B> {
                 Root::Server { .. } => runtime.enter(&guest, slot).await,
                 Root::Command => runtime.enter_command(&guest, slot).await,
             };
-            let (entered, instance) = entered.map_err(LeaseError::Enter)?;
+            let (entered, instance) = entered?;
             Ok(call(entered, instance, bound).await)
         };
         let mut run = pin!(run);
@@ -246,12 +249,27 @@ impl Bound {
 /// Why a leased invocation did not return its call's output.
 #[derive(Debug, thiserror::Error)]
 pub enum LeaseError {
-    /// The guest could not be instantiated, such as when the instance pool is full.
+    /// The guest could not be instantiated.
     #[error(transparent)]
     Enter(anyhow::Error),
+    /// The instance pool had no room for the guest's instance.
+    ///
+    /// The concurrency gate admitted the invocation, but the pool had no free
+    /// slot of a kind the instance takes. A retry can succeed once another
+    /// invocation ends.
+    #[error(transparent)]
+    PoolFull(anyhow::Error),
     /// The deadline passed before the call returned.
     ///
     /// It carries the limit the deadline was armed with last.
     #[error("timed out after {0:?}")]
     Timeout(Duration),
+}
+
+impl LeaseError {
+    pub(super) fn from_instantiation(error: wasmtime::Error) -> Self {
+        let full = error.is::<PoolConcurrencyLimitError>();
+        let error = explain_full_pool(error);
+        if full { Self::PoolFull(error) } else { Self::Enter(error) }
+    }
 }
