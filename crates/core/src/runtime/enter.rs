@@ -4,15 +4,13 @@
 
 use std::sync::Arc;
 
-use anyhow::Result;
 use wasmtime::component::Instance;
 use wasmtime::{AsContext, AsContextMut, Store, StoreContext, StoreContextMut};
 
-use super::Runtime;
 use super::gate::Slot;
+use super::{LeaseError, Runtime};
 use crate::chain::ChainCtx;
 use crate::host::Backends;
-use crate::invoke::explain_full_pool;
 use crate::registry::Guest;
 use crate::store::StoreCtx;
 
@@ -20,14 +18,14 @@ impl<B: Backends> Runtime<B> {
     // a server chain root's store, whose guest sees no arguments
     pub(super) async fn enter(
         &self, guest: &Guest<B>, slot: Slot,
-    ) -> Result<(Entered<B>, Instance)> {
+    ) -> Result<(Entered<B>, Instance), LeaseError> {
         self.instantiate(guest, self.store_ctx(guest, ChainCtx::server(), None), slot).await
     }
 
     // the only store given the command's arguments
     pub(super) async fn enter_command(
         &self, guest: &Guest<B>, slot: Slot,
-    ) -> Result<(Entered<B>, Instance)> {
+    ) -> Result<(Entered<B>, Instance), LeaseError> {
         let args = Some(Arc::clone(&self.inner.args));
         self.instantiate(guest, self.store_ctx(guest, ChainCtx::command(), args), slot).await
     }
@@ -36,7 +34,7 @@ impl<B: Backends> Runtime<B> {
     // instantiation drops the store before the slot
     async fn instantiate(
         &self, guest: &Guest<B>, data: StoreCtx<B>, slot: Slot,
-    ) -> Result<(Entered<B>, Instance)> {
+    ) -> Result<(Entered<B>, Instance), LeaseError> {
         let mut entered = Entered {
             store: self.build_store(data),
             _slot: slot,
@@ -45,7 +43,7 @@ impl<B: Backends> Runtime<B> {
             .instance_pre()
             .instantiate_async(&mut entered.store)
             .await
-            .map_err(explain_full_pool)?;
+            .map_err(LeaseError::from_instantiation)?;
         tracing::debug!(guest = %guest.id(), "component instantiated");
         Ok((entered, instance))
     }

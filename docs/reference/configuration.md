@@ -69,14 +69,16 @@ The pooling allocator recycles instance slots so per-request instantiation stays
 
 The pool's totals follow `POOL_MAX_INSTANCES` unless set:
 
-| Variable                    | Default                  |
-| --------------------------- | ------------------------ |
-| `POOL_TOTAL_CORE_INSTANCES` | 4 × `POOL_MAX_INSTANCES` |
-| `POOL_TOTAL_TABLES`         | 4 × `POOL_MAX_INSTANCES` |
-| `POOL_TOTAL_MEMORIES`       | `POOL_MAX_INSTANCES`     |
-| `POOL_TOTAL_STACKS`         | 2 × `POOL_MAX_INSTANCES` |
+| Variable                    | Default                                                                              |
+| --------------------------- | ------------------------------------------------------------------------------------ |
+| `POOL_TOTAL_CORE_INSTANCES` | 4 × `POOL_MAX_INSTANCES`                                                             |
+| `POOL_TOTAL_TABLES`         | 4 × `POOL_MAX_INSTANCES`, plus the decommit margin                                   |
+| `POOL_TOTAL_MEMORIES`       | `POOL_MAX_INSTANCES`, plus the decommit margin                                       |
+| `POOL_TOTAL_STACKS`         | 2 × `POOL_MAX_INSTANCES`, plus the decommit margin while `ASYNC_STACK_ZEROING` is on |
 
 These fit a guest built from one module, as an `omnia-sdk` guest is. It takes three core instances, one memory, and two tables. It runs on one stack, and takes a second while it blocks in a call and the host completes another of its calls. A component composed from several modules takes more of each, so a deployment that runs one sets the `POOL_TOTAL_*` totals it needs.
+
+The decommit margin, `RuntimeOptions::decommit_margin`, covers the freed slots wasmtime holds back from reuse while it [batches their resets](../guides/performance-tuning.md#3-batched-decommit). wasmtime keeps one queue of freed slots for each core, up to 16, and each queue holds back up to `POOL_DECOMMIT_BATCH_SIZE` − 1 of them, so the margin is min(cores, 16) × (`POOL_DECOMMIT_BATCH_SIZE` − 1). It is 0 at the default batch of 1. A stack is held back only while `ASYNC_STACK_ZEROING` is on. A set `POOL_TOTAL_*` is used as is, so a deployment that sets one and raises the batch adds the margin itself.
 
 Further tunables mirror wasmtime's pooling configuration one-to-one: `POOL_MEMORY_KEEP_RESIDENT`, `POOL_TABLE_KEEP_RESIDENT`, `POOL_ASYNC_STACK_KEEP_RESIDENT`, `POOL_DECOMMIT_BATCH_SIZE`, `POOL_PAGEMAP_SCAN`, and per-component/per-module limits. See `crates/core/src/options.rs` for the authoritative list with doc comments.
 
@@ -94,6 +96,8 @@ Each invocation a trigger runs holds one slot of the gate, from before its guest
 - A message delivery waits for a slot, and its guest timeout counts from when it takes one. No more than `MESSAGING_MAX_IN_FLIGHT` deliveries load their guest, wait for a slot, or hold one at once. One past them waits its turn off the gate, so HTTP and WebSocket keep the rest of it.
 - A command's run waits for a slot.
 - A call through `Runtime::dispatcher` waits for a slot.
+
+An invocation the gate admits can still find the pool full. Calls between guests take instances outside the gate, and a set `POOL_TOTAL_*` may leave no room for the freed slots a batched decommit holds back. HTTP answers such a request `503` with `Retry-After: 1` as well, logs the cause at `warn`, and does not count it on `invocations_refused`. A WebSocket event and a message delivery fail as they do whenever their guest cannot be instantiated.
 
 A call from one guest to another takes no slot, since the invocation at the root of its chain holds one. It still takes an instance from the pool. A deployment whose guests call other guests, including guests they load through `omnia:plugins/loader`, sets the gate below `POOL_MAX_INSTANCES` to leave those instances room. [Pool sizing](../guides/performance-tuning.md#2-pool-sizing) gives the formula. While the variable is unset and pooling is on, the first call between guests logs a warning.
 

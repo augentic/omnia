@@ -172,11 +172,19 @@ An HTTP/1.1 request with an absolute-form URI still needs a `Host`. A conforming
 
 ### The HTTP trigger answers `503 Service Unavailable` with `Retry-After: 1`
 
+The trigger refused the request before its guest ran, for one of two reasons.
+
 Every slot of the [concurrency gate](reference/configuration.md#concurrency-gate) is held, so the trigger refused the request before it instantiated a guest. It counts each refusal on `invocations_refused`. A WebSocket event is refused at the same point, and fails naming `MAX_CONCURRENT_INVOCATIONS`. Message deliveries waiting for a slot are served first, which `invocations_waiting` shows. No more than `MESSAGING_MAX_IN_FLIGHT` hold or wait for one, and lowering it leaves HTTP more of the gate. Raise `POOL_MAX_INSTANCES`, and `MAX_CONCURRENT_INVOCATIONS` with it where it is set, if the host has the memory. A probe of `HTTP_HEALTH_PATH` takes no slot, so it still answers `200`.
+
+Or the request took a slot, but the instance pool had no room for its guest. The trigger logs `the instance pool is full` at `warn`, naming the guest, and does not count the request on `invocations_refused`. The [next entry](#the-instance-pool-is-full) gives the causes.
 
 ### `the instance pool is full`
 
-A call from one guest to another found every instance of the pool taken. Such a call takes an instance but no slot of the gate, and with `MAX_CONCURRENT_INVOCATIONS` unset the gate is as wide as the pool, so the triggers' own invocations can take every instance. Set `MAX_CONCURRENT_INVOCATIONS` below `POOL_MAX_INSTANCES` by the margin [Pool sizing](guides/performance-tuning.md#2-pool-sizing) works out, or raise `POOL_MAX_INSTANCES`.
+An instance found no free slot of a kind it takes, which the end of the message names, such as `memory stripe 0`. An HTTP request answers `503` and logs it at `warn`. A link call and a command's run fail with it in the error chain. Its causes are:
+
+- **Calls between guests.** A call from one guest to another takes an instance but no slot of the gate, and with `MAX_CONCURRENT_INVOCATIONS` unset the gate is as wide as the pool, so the triggers' own invocations can take every instance. Set `MAX_CONCURRENT_INVOCATIONS` below `POOL_MAX_INSTANCES` by the margin [Pool sizing](guides/performance-tuning.md#2-pool-sizing) works out, or raise `POOL_MAX_INSTANCES`.
+- **A batched decommit with a set total.** Above a `POOL_DECOMMIT_BATCH_SIZE` of 1, freed slots wait to be reset before they are reused. A set `POOL_TOTAL_*` is used as is, without the [decommit margin](reference/configuration.md#instance-pooling) the unset totals add. Add the margin to it, or set the batch back to 1.
+- **A total below what the guests take.** A component composed from several modules takes more memories, tables, or core instances than the [totals](reference/configuration.md#instance-pooling) allow for. Set the `POOL_TOTAL_*` it needs.
 
 ### A streamed HTTP response fails part way
 

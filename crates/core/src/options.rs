@@ -104,13 +104,13 @@ pub struct RuntimeOptions {
     /// Maximum core instances held by the pooling allocator (`POOL_TOTAL_CORE_INSTANCES`, unset: four per `POOL_MAX_INSTANCES`); see [`total_core_instances`](Self::total_core_instances).
     #[env(from = "POOL_TOTAL_CORE_INSTANCES")]
     pub pool_total_core_instances: Option<u32>,
-    /// Maximum linear memories held by the pooling allocator (`POOL_TOTAL_MEMORIES`, unset: `POOL_MAX_INSTANCES`); see [`total_memories`](Self::total_memories).
+    /// Maximum linear memories held by the pooling allocator (`POOL_TOTAL_MEMORIES`, unset: `POOL_MAX_INSTANCES` plus the [decommit margin](Self::decommit_margin)); see [`total_memories`](Self::total_memories).
     #[env(from = "POOL_TOTAL_MEMORIES")]
     pub pool_total_memories: Option<u32>,
-    /// Maximum tables held by the pooling allocator (`POOL_TOTAL_TABLES`, unset: four per `POOL_MAX_INSTANCES`); see [`total_tables`](Self::total_tables).
+    /// Maximum tables held by the pooling allocator (`POOL_TOTAL_TABLES`, unset: four per `POOL_MAX_INSTANCES` plus the [decommit margin](Self::decommit_margin)); see [`total_tables`](Self::total_tables).
     #[env(from = "POOL_TOTAL_TABLES")]
     pub pool_total_tables: Option<u32>,
-    /// Maximum async stacks held by the pooling allocator (`POOL_TOTAL_STACKS`, unset: two per `POOL_MAX_INSTANCES`); see [`total_stacks`](Self::total_stacks).
+    /// Maximum async stacks held by the pooling allocator (`POOL_TOTAL_STACKS`, unset: two per `POOL_MAX_INSTANCES`, plus the [decommit margin](Self::decommit_margin) while `ASYNC_STACK_ZEROING` is on); see [`total_stacks`](Self::total_stacks).
     #[env(from = "POOL_TOTAL_STACKS")]
     pub pool_total_stacks: Option<u32>,
     /// Max core instances per component (`POOL_MAX_CORE_INSTANCES_PER_COMPONENT`, unset: Wasmtime default).
@@ -134,8 +134,8 @@ pub struct RuntimeOptions {
     /// Max metadata size per component instance, in bytes (`POOL_MAX_COMPONENT_INSTANCE_SIZE`, unset: Wasmtime default 1 `MiB`).
     #[env(from = "POOL_MAX_COMPONENT_INSTANCE_SIZE")]
     pub pool_max_component_instance_size: Option<usize>,
-    /// Slots batched per decommit to amortise syscalls; on Linux a whole batch flushes in one `process_madvise` (`POOL_DECOMMIT_BATCH_SIZE`, default 16).
-    #[env(from = "POOL_DECOMMIT_BATCH_SIZE", default = "16")]
+    /// Freed pool slots queued before they are reset together, in one `process_madvise` on Linux 6.14+ where seccomp allows it (`POOL_DECOMMIT_BATCH_SIZE`, default 1); above 1, the unset pool totals add the [decommit margin](Self::decommit_margin).
+    #[env(from = "POOL_DECOMMIT_BATCH_SIZE", default = "1")]
     pub pool_decommit_batch_size: usize,
     /// Use the Linux `PAGEMAP_SCAN` ioctl for cheaper memory reset (`POOL_PAGEMAP_SCAN`, `auto`/`yes`/`no`, default `no`).
     #[env(from = "POOL_PAGEMAP_SCAN", default = "no", with = parse_enabled)]
@@ -289,26 +289,53 @@ impl RuntimeOptions {
     }
 
     /// The linear memories the pool holds: `POOL_TOTAL_MEMORIES`, or one for
-    /// each of `POOL_MAX_INSTANCES`.
+    /// each of `POOL_MAX_INSTANCES` plus the [decommit margin](Self::decommit_margin).
     #[must_use]
     pub fn total_memories(&self) -> u32 {
-        self.pool_total_memories.unwrap_or(self.pool_max_instances)
+        self.pool_total_memories
+            .unwrap_or_else(|| self.pool_max_instances.saturating_add(self.decommit_margin()))
     }
 
     /// The tables the pool holds: `POOL_TOTAL_TABLES`, or four for each of
-    /// `POOL_MAX_INSTANCES`.
+    /// `POOL_MAX_INSTANCES` plus the [decommit margin](Self::decommit_margin).
     #[must_use]
     pub fn total_tables(&self) -> u32 {
-        self.pool_total_tables
-            .unwrap_or_else(|| self.pool_max_instances.saturating_mul(TABLES_PER_INSTANCE))
+        self.pool_total_tables.unwrap_or_else(|| {
+            self.pool_max_instances
+                .saturating_mul(TABLES_PER_INSTANCE)
+                .saturating_add(self.decommit_margin())
+        })
     }
 
     /// The async stacks the pool holds: `POOL_TOTAL_STACKS`, or two for each
     /// of `POOL_MAX_INSTANCES`.
+    ///
+    /// A stack's reset waits in the decommit queue only while
+    /// [`async_stack_zeroing`](Self::async_stack_zeroing) is on, so only then
+    /// does an unset total add the [decommit margin](Self::decommit_margin).
     #[must_use]
     pub fn total_stacks(&self) -> u32 {
-        self.pool_total_stacks
-            .unwrap_or_else(|| self.pool_max_instances.saturating_mul(STACKS_PER_INSTANCE))
+        self.pool_total_stacks.unwrap_or_else(|| {
+            let stacks = self.pool_max_instances.saturating_mul(STACKS_PER_INSTANCE);
+            if self.async_stack_zeroing {
+                stacks.saturating_add(self.decommit_margin())
+            } else {
+                stacks
+            }
+        })
+    }
+
+    /// The freed pool slots wasmtime may hold back from reuse while it batches their resets.
+    ///
+    /// wasmtime keeps one queue of freed slots for each core, up to 16, and
+    /// each queue holds up to `POOL_DECOMMIT_BATCH_SIZE - 1` before it resets
+    /// them. The margin is 0 at a batch of 1.
+    #[must_use]
+    pub fn decommit_margin(&self) -> u32 {
+        let queues =
+            std::thread::available_parallelism().map_or(1, NonZeroUsize::get).min(DECOMMIT_QUEUES);
+        let held = queues.saturating_mul(self.pool_decommit_batch_size.saturating_sub(1));
+        u32::try_from(held).unwrap_or(u32::MAX)
     }
 }
 
@@ -319,6 +346,9 @@ const TABLES_PER_INSTANCE: u32 = 4;
 // a guest blocked in a call keeps its stack while wasmtime completes another
 // of its calls on a second
 const STACKS_PER_INSTANCE: u32 = 2;
+
+// wasmtime's decommit queues: one for each core, up to this many
+const DECOMMIT_QUEUES: usize = 16;
 
 // compile-affecting settings through `configure`, then the runtime-only ones
 impl From<&RuntimeOptions> for Config {
@@ -358,7 +388,7 @@ impl From<&RuntimeOptions> for Config {
             .table_keep_resident(options.pool_table_keep_resident)
             .async_stack_keep_resident(options.pool_async_stack_keep_resident)
             .max_unused_warm_slots(options.pool_max_unused_warm_slots)
-            // batching amortises the per-teardown decommit syscalls
+            // a batch holds freed slots back from reuse; the unset totals cover them
             .decommit_batch_size(options.pool_decommit_batch_size)
             // linux-only fast memory reset; `Auto` falls back where unsupported
             .pagemap_scan(options.pool_pagemap_scan);
@@ -400,10 +430,12 @@ fn parse_enabled(value: &str) -> Result<Enabled, &'static str> {
     }
 }
 
-// The totals and the refusals are pure over the options. The pool a runtime
-// builds from them is exercised by every suite that boots one.
+// The totals and the refusals are pure over the options and the host's core
+// count. The pool a runtime builds from them is exercised by every suite that
+// boots one.
 #[cfg(test)]
 mod tests {
+    use std::num::NonZeroUsize;
     use std::time::Duration;
 
     use super::RuntimeOptions;
@@ -441,11 +473,50 @@ mod tests {
         assert_eq!(options.total_stacks(), 11);
     }
 
+    // wasmtime keeps one decommit queue for each core, up to 16
+    #[test]
+    fn batched_totals() {
+        let queues = std::thread::available_parallelism().map_or(1, NonZeroUsize::get).min(16);
+        let margin = u32::try_from(queues * 15).expect("the margin fits a u32");
+        let batched = RuntimeOptions {
+            pool_decommit_batch_size: 16,
+            ..options(10)
+        };
+
+        assert_eq!(batched.decommit_margin(), margin);
+        assert_eq!(batched.total_core_instances(), 40);
+        assert_eq!(batched.total_memories(), 10 + margin);
+        assert_eq!(batched.total_tables(), 40 + margin);
+        assert_eq!(batched.total_stacks(), 20);
+
+        let zeroing = RuntimeOptions {
+            async_stack_zeroing: true,
+            ..batched
+        };
+        assert_eq!(zeroing.total_stacks(), 20 + margin);
+
+        let set = RuntimeOptions {
+            pool_total_memories: Some(8),
+            pool_total_tables: Some(9),
+            pool_total_stacks: Some(11),
+            ..zeroing
+        };
+        assert_eq!(set.total_memories(), 8);
+        assert_eq!(set.total_tables(), 9);
+        assert_eq!(set.total_stacks(), 11);
+    }
+
     #[test]
     fn saturating_totals() {
-        let options = options(u32::MAX);
+        let options = RuntimeOptions {
+            pool_decommit_batch_size: usize::MAX,
+            async_stack_zeroing: true,
+            ..options(u32::MAX)
+        };
 
+        assert_eq!(options.decommit_margin(), u32::MAX);
         assert_eq!(options.total_core_instances(), u32::MAX);
+        assert_eq!(options.total_memories(), u32::MAX);
         assert_eq!(options.total_tables(), u32::MAX);
         assert_eq!(options.total_stacks(), u32::MAX);
     }
