@@ -4,8 +4,9 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
-use futures::StreamExt;
+use futures::{FutureExt as _, StreamExt};
 use omnia_core::{LeaseError, PatternRoutes, Provides, Runtime, TriggerRouter, telemetry};
+use tokio::task::JoinSet;
 use tracing::{Instrument, info_span, instrument};
 use wasmtime::AsContextMut as _;
 
@@ -28,15 +29,34 @@ where
 
     // subscribe once: a broadcast receiver only sees what arrives after it subscribes
     let mut events = handler.events().await?;
+    let mut handling = JoinSet::new();
 
-    while let Some(event) = events.next().await {
-        let handler = handler.clone();
-        tokio::spawn(async move {
-            _ = handler.handle(event).await;
-        });
+    // take events until the runtime stops or the stream ends
+    loop {
+        tokio::select! {
+            biased;
+            () = state.stopped() => break,
+            Some(_) = handling.join_next() => {}
+            event = events.next() => {
+                let Some(event) = event else { break };
+                let handler = handler.clone();
+                handling.spawn(async move {
+                    _ = handler.handle(event).await;
+                });
+            }
+        }
     }
 
-    Ok(())
+    // the events already taken finish before the server returns
+    while handling.join_next().await.is_some() {}
+    if state.stopped().now_or_never().is_some() {
+        return Ok(());
+    }
+
+    // a stream never ends on purpose: a backend that gives up on its
+    // transport closes it, and the process must exit for the orchestrator to
+    // restart it rather than idle looking healthy
+    Err(anyhow!("websocket event stream ended for: {}", state.name()))
 }
 
 /// In-process `omnia:websocket/incoming-handler` dispatcher: routes an event

@@ -1,10 +1,11 @@
 //! End-to-end tests for `wasi:http`: every scenario runs a real guest
 //! component from `crates/test-programs` through the omnia runtime. Outgoing
 //! scenarios are command guests against a test-owned loopback origin; the
-//! incoming scenario is a handler guest driven in-process through
-//! [`HttpHandler`], bypassing the socket. The guest asserts what it observes
-//! across the boundary (and traps on failure); the host side asserts what
-//! reached the origin and what the handler answered.
+//! incoming scenarios are handler guests driven in-process through
+//! [`HttpHandler`], bypassing the socket, but for a stop mid-request, which
+//! [`HttpHandler::serve`] serves on a loopback listener. The guest asserts
+//! what it observes across the boundary (and traps on failure); the host side
+//! asserts what reached the origin and what the handler answered.
 
 #![cfg(not(target_arch = "wasm32"))]
 
@@ -23,7 +24,7 @@ use hyper::body::Incoming;
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use omnia::{
-    AcquireError, ExitStatus, Grants, GuestEntry, GuestId, RegistrySource, RuntimeOptions,
+    AcquireError, ExitStatus, Grants, GuestEntry, GuestId, RegistrySource, Runtime, RuntimeOptions,
 };
 use omnia_test::host::{Backends, Deployment, Metrics};
 use omnia_wasi_config::WasiConfig;
@@ -783,6 +784,62 @@ async fn stalled_guest() {
     assert_eq!(metrics.count("invocations_refused"), 0);
 
     runtime.shutdown();
+}
+
+// The stop lands while the guest pauses over `/stream/slow`. The request it
+// has read is still answered, a connection made after the stop is refused,
+// and `serve` returns once the connection closes.
+#[tokio::test]
+async fn stop_in_flight() {
+    let guest = std::fs::read(test_programs::HTTP_INCOMING_STREAM).expect("guest bytes");
+    let runtime = Deployment::new()
+        .entry(GuestEntry::new("guest", guest).route_http("/stream"))
+        .boot(Backends::defaults().await, |deployment| {
+            deployment.host::<WasiHttp>()?;
+            deployment.host::<WasiOtel>()?;
+            Ok(())
+        })
+        .await
+        .expect("runtime boots");
+    let handler = HttpHandler::new(&runtime)
+        .expect("http routes consistent")
+        .expect("the guest exports the http handler");
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("binding loopback");
+    let addr = listener.local_addr().expect("listener address");
+    let built = runtime.stores_built();
+    let serving = tokio::spawn(async move { handler.serve(listener).await });
+
+    let mut client = TcpStream::connect(addr).await.expect("the server accepts");
+    client
+        .write_all(b"GET /stream/slow HTTP/1.1\r\nhost: stream.test\r\n\r\n")
+        .await
+        .expect("the request is sent");
+    in_flight(&runtime).await;
+    runtime.stop();
+
+    let mut response = String::new();
+    tokio::time::timeout(Duration::from_secs(10), client.read_to_string(&mut response))
+        .await
+        .expect("the connection closes")
+        .expect("the response reads");
+    assert!(response.starts_with("HTTP/1.1 200 OK\r\n"), "{response}");
+    assert!(response.ends_with("\r\n\r\nslow"), "{response}");
+
+    assert!(TcpStream::connect(addr).await.is_err(), "a connection after the stop is refused");
+    serving.await.expect("the server task joins").expect("a stopped server returns Ok");
+    assert_eq!(runtime.stores_built(), built + 1);
+
+    runtime.shutdown();
+}
+
+// resolves once an invocation holds a slot of the concurrency gate
+async fn in_flight(runtime: &Runtime<Backends>) {
+    let held = async {
+        while runtime.invocations().in_flight == 0 {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    };
+    tokio::time::timeout(Duration::from_secs(5), held).await.expect("an invocation takes a slot");
 }
 
 const ECHO_PACKAGE: &str = "test:echo@1.0.0";

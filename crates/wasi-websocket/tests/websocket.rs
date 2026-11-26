@@ -2,10 +2,11 @@
 //! component from `crates/test-programs` through the omnia runtime. Command
 //! exports are driven through `wasi:cli/run`; the `incoming-handler` export
 //! is driven in-process through [`WebSocketHandler`], with the events the
-//! default backend raises for real peers on a loopback port. The guest
-//! asserts what it observes across the boundary (and traps on failure); the
-//! host side asserts what each peer receives, and what reached a faulting
-//! backend.
+//! default backend raises for real peers on a loopback port. The trigger's
+//! server runs only where it alone decides the outcome: a stop mid-event, and
+//! an event stream that ends. The guest asserts what it observes across the
+//! boundary (and traps on failure); the host side asserts what each peer
+//! receives, and what reached a faulting backend.
 
 #![cfg(not(target_arch = "wasm32"))]
 
@@ -16,8 +17,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use futures::future::BoxFuture;
 use futures::{FutureExt as _, SinkExt as _, StreamExt as _};
 use omnia::{
-    AcquireError, ExitStatus, FutureResult, Grants, GuestEntry, GuestId, Provides, RegistrySource,
-    RuntimeOptions,
+    AcquireError, ExitStatus, FutureResult, Grants, GuestEntry, GuestId, Host, Provides,
+    RegistrySource, Runtime, RuntimeOptions,
 };
 use omnia_test::host::{Deployment, Metrics};
 use omnia_wasi_otel::{OtelClient, OtelDefault, WasiOtel};
@@ -26,6 +27,7 @@ use omnia_wasi_websocket::{
     WebSocketHandler,
 };
 use tokio::net::TcpStream;
+use tokio::sync::watch;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
@@ -203,6 +205,127 @@ async fn full_gate() {
     assert_eq!(metrics.count("event_counter"), 2);
 
     quiet(&mut peer).await;
+    runtime.shutdown();
+}
+
+// The stop lands while the guest pauses over `slow`. Its echo still reaches
+// the peer, the message sent after the stop is never read, and `run` returns
+// once the event is handled.
+#[tokio::test]
+async fn stop_in_flight() {
+    let (server, addr, _) = serve().await;
+    let runtime = Deployment::new()
+        .guest("guest", test_programs::WEBSOCKET_HANDLER_ECHO)
+        .boot(Backends::new(server), |deployment| {
+            deployment.host::<WasiWebSocket>()?;
+            deployment.host::<WasiOtel>()?;
+            Ok(())
+        })
+        .await
+        .expect("runtime boots");
+    let built = runtime.stores_built();
+    let mut peer = connect(addr).await;
+
+    let stop = async {
+        peer.send(Message::text("slow")).await.expect("the peer sends");
+        in_flight(&runtime).await;
+        runtime.stop();
+        peer.send(Message::text("late")).await.expect("the peer sends");
+    };
+    let (outcome, ()) = tokio::join!(WasiWebSocket::run(&runtime), stop);
+    outcome.expect("a stopped server returns Ok");
+
+    assert_eq!(receive(&mut peer).await, Message::text("slow"));
+    quiet(&mut peer).await;
+    assert_eq!(runtime.stores_built(), built + 1);
+
+    runtime.shutdown();
+}
+
+// resolves once an invocation holds a slot of the concurrency gate
+async fn in_flight<B: omnia::Backends>(runtime: &Runtime<B>) {
+    let held = async {
+        while runtime.invocations().in_flight == 0 {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    };
+    tokio::time::timeout(Duration::from_secs(5), held).await.expect("an invocation takes a slot");
+}
+
+// wraps the default backend and ends its event stream once `ended` is set, as
+// a backend that loses its transport mid-run does
+#[derive(Clone, Debug)]
+struct Ended {
+    inner: WebSocketDefault,
+    ended: watch::Receiver<bool>,
+}
+
+impl WebSocketClient for Ended {
+    fn endpoint(&self) -> FutureResult<Arc<dyn Endpoint>> {
+        let endpoint = self.clone();
+        async move { Ok(Arc::new(endpoint) as Arc<dyn Endpoint>) }.boxed()
+    }
+}
+
+impl Endpoint for Ended {
+    fn events(&self) -> FutureResult<Events> {
+        let events = self.inner.events();
+        let mut ended = self.ended.clone();
+        async move {
+            let cut = async move {
+                let _ = ended.wait_for(|&done| done).await;
+            };
+            Ok(Box::pin(events.await?.take_until(cut)) as Events)
+        }
+        .boxed()
+    }
+
+    fn send(&self, event: Event, sockets: Option<Vec<String>>) -> FutureResult<()> {
+        self.inner.send(event, sockets)
+    }
+
+    fn broadcast(&self, event: Event, except: Vec<String>) -> FutureResult<()> {
+        self.inner.broadcast(event, except)
+    }
+
+    fn exists(&self, connection: String) -> FutureResult<bool> {
+        self.inner.exists(connection)
+    }
+}
+
+// The event stream ends while the guest pauses over `slow`. Its echo still
+// reaches the peer, the message sent after is never read, and `run` then
+// fails so the orchestrator restarts the process.
+#[tokio::test]
+async fn events_end() {
+    let (server, addr, _) = serve().await;
+    let (end, ended) = watch::channel(false);
+    let runtime = Deployment::new()
+        .guest("guest", test_programs::WEBSOCKET_HANDLER_ECHO)
+        .boot(Backends::new(Ended { inner: server, ended }), |deployment| {
+            deployment.host::<WasiWebSocket>()?;
+            deployment.host::<WasiOtel>()?;
+            Ok(())
+        })
+        .await
+        .expect("runtime boots");
+    let built = runtime.stores_built();
+    let mut peer = connect(addr).await;
+
+    let cut = async {
+        peer.send(Message::text("slow")).await.expect("the peer sends");
+        in_flight(&runtime).await;
+        end.send_replace(true);
+        peer.send(Message::text("late")).await.expect("the peer sends");
+    };
+    let (outcome, ()) = tokio::join!(WasiWebSocket::run(&runtime), cut);
+    let error = outcome.expect_err("an ended event stream fails the server");
+    assert!(format!("{error:#}").contains("event stream ended"), "unexpected error: {error:#}");
+
+    assert_eq!(receive(&mut peer).await, Message::text("slow"));
+    quiet(&mut peer).await;
+    assert_eq!(runtime.stores_built(), built + 1);
+
     runtime.shutdown();
 }
 

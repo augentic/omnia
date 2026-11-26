@@ -55,7 +55,7 @@ The hops in flight are the calls between guests one invocation holds open at onc
 The gate's gauges, and its one counter, read as follows:
 
 - `invocations_in_flight` is how many slots are held. Pinned at the gate's size, the gate is what limits throughput.
-- `invocations_waiting` is how many message deliveries, command runs, and calls through `Runtime::dispatcher` wait for a slot. Waiters take freed slots in the order they arrived, ahead of any request, so HTTP and WebSocket are refused while it stays above zero. No more than `MESSAGING_MAX_IN_FLIGHT` deliveries hold or wait for a slot. One past them waits off the gate, where this gauge does not count it.
+- `invocations_waiting` is how many invocations wait for a slot: message deliveries, command runs, calls through `Runtime::dispatcher`, and the `Runtime::lease` calls of a trigger an embedder runs itself. Waiters take freed slots in the order they arrived, ahead of any request, so HTTP and WebSocket are refused while it stays above zero. No more than `MESSAGING_MAX_IN_FLIGHT` deliveries hold or wait for a slot. One past them waits off the gate, where this gauge does not count it.
 - `invocations_refused` counts the HTTP requests and WebSocket events refused at a full gate, and `processing_errors` does not count them. HTTP answers each with `503`. A request the gate admitted but the pool had no room for counts on `processing_errors` instead, though HTTP answers it `503` too.
 
 A slot is held for as long as its invocation runs:

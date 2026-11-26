@@ -1,15 +1,20 @@
 //! An `omnia:websocket/incoming-handler` guest: asserts the event it is handed
 //! carries the deadline the host set, no metadata and no route, and refuses
 //! an empty text. Any other message goes back to its sender in its own kind,
-//! and to every other open connection through `broadcast`.
+//! and to every other open connection through `broadcast`. A text `slow` goes
+//! back after a pause of 300ms.
 
 #![cfg(target_arch = "wasm32")]
 
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::thread;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use omnia_sdk::exports::websocket::incoming_handler::Guest;
 use omnia_sdk::websocket::types::{Client, Error, Event, Message};
 use omnia_sdk::websocket::{broadcast, connections};
+
+// long enough for the host to stop while the guest waits
+const PAUSE: Duration = Duration::from_millis(300);
 
 struct WebSocket;
 omnia_sdk::exports::websocket::export!(WebSocket);
@@ -24,6 +29,9 @@ impl Guest for WebSocket {
 
         if matches!(&event.message, Message::Text(text) if text.is_empty()) {
             return Err(Error::Invalid("an empty message".to_owned()));
+        }
+        if matches!(&event.message, Message::Text(text) if text == "slow") {
+            thread::sleep(PAUSE);
         }
 
         let client = Client::connect("default".to_owned()).await?;

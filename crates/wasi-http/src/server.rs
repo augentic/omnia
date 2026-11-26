@@ -49,6 +49,9 @@ const DEADLINE: &str = "x-deadline";
 #[env(validate = Self::validate)]
 pub struct ServerOptions {
     /// The address the server listens on (`HTTP_ADDR`, default `0.0.0.0:8080`).
+    ///
+    /// [`HttpHandler::serve`] serves a listener its caller has bound, and
+    /// reads no address.
     #[env(from = "HTTP_ADDR", default = "0.0.0.0:8080")]
     pub addr: String,
     /// The path a probe requests, answered `200` without entering a guest (`HTTP_HEALTH_PATH`, unset: none).
@@ -96,52 +99,7 @@ where
 
     let addr = &handler.options.addr;
     let listener = TcpListener::bind(addr).await.with_context(|| format!("binding {addr}"))?;
-    let addr = listener.local_addr().context("reading http listener address")?;
-    tracing::info!("{} http server listening on: {addr}", handler.component);
-
-    // built once, cloned per connection
-    let builder = auto::Builder::new(TokioExecutor::new());
-    let mut connections = JoinSet::new();
-
-    // listen for requests until terminated
-    loop {
-        let (stream, _) = tokio::select! {
-            () = state.stopped() => break,
-            Some(_) = connections.join_next(), if !connections.is_empty() => continue,
-            accepted = listener.accept() => match accepted {
-                Ok(conn) => conn,
-                Err(error) => {
-                    // a transient accept error must not tear down the server
-                    tracing::error!(%error, "accept error");
-                    continue;
-                }
-            },
-        };
-        if let Err(error) = stream.set_nodelay(true) {
-            tracing::warn!(%error, "failed to set TCP_NODELAY");
-        }
-        let stream = TokioIo::new(stream);
-        let handler = handler.clone();
-        let builder = builder.clone();
-        let state = state.clone();
-
-        connections.spawn(async move {
-            let service = service_fn(move |request| {
-                let handler = handler.clone();
-                async move {
-                    let response =
-                        handler.handle(request).await.unwrap_or_else(|_| internal_error());
-                    Ok::<_, Infallible>(response)
-                }
-            });
-            let conn = builder.serve_connection_with_upgrades(stream, service);
-            drive_connection(conn, &state, auto::UpgradeableConnection::graceful_shutdown).await;
-        });
-    }
-
-    drop(listener);
-    while connections.join_next().await.is_some() {}
-    Ok(())
+    handler.serve(listener).await
 }
 
 async fn drive_connection<B, F, G, E>(conn: F, state: &Runtime<B>, graceful: G)
@@ -153,11 +111,12 @@ where
 {
     let mut conn = pin!(conn);
     let result = tokio::select! {
-        result = conn.as_mut() => result,
+        biased;
         () = state.stopped() => {
             graceful(conn.as_mut());
             conn.await
         }
+        result = conn.as_mut() => result,
     };
     if let Err(e) = result {
         tracing::error!("connection error: {e:?}");
@@ -167,8 +126,9 @@ where
 /// In-process `wasi:http/handler` dispatcher: routes a request to a
 /// guest, instantiates it, and invokes the export.
 ///
-/// The server loop drives one over accepted connections; tests drive it
-/// directly with a constructed request, bypassing the socket.
+/// [`serve`](Self::serve) drives one over the connections a listener
+/// accepts; tests drive [`handle`](Self::handle) directly with a constructed
+/// request, bypassing the socket.
 #[derive(Clone)]
 pub struct HttpHandler<B>
 where
@@ -233,6 +193,71 @@ where
         }))
     }
 
+    /// Serve HTTP connections from `listener` until the runtime stops.
+    ///
+    /// Each request goes to [`handle`](Self::handle), and one it fails is
+    /// answered `500`. The [address](ServerOptions::addr) in the handler's
+    /// options is not read, since the caller has bound `listener` already.
+    ///
+    /// Once [`Runtime::stop`] is called, it accepts no more connections and
+    /// drops `listener`, so a new connection is refused. It shuts each open
+    /// connection down gracefully, answering the requests it has read, and
+    /// returns once every connection has closed.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the listener's address cannot be read.
+    pub async fn serve(&self, listener: TcpListener) -> Result<()> {
+        let addr = listener.local_addr().context("reading http listener address")?;
+        tracing::info!("{} http server listening on: {addr}", self.component);
+
+        // built once, cloned per connection
+        let builder = auto::Builder::new(TokioExecutor::new());
+        let mut connections = JoinSet::new();
+
+        // listen for requests until terminated
+        loop {
+            let (stream, _) = tokio::select! {
+                biased;
+                () = self.state.stopped() => break,
+                Some(_) = connections.join_next(), if !connections.is_empty() => continue,
+                accepted = listener.accept() => match accepted {
+                    Ok(conn) => conn,
+                    Err(error) => {
+                        // a transient accept error must not tear down the server
+                        tracing::error!(%error, "accept error");
+                        continue;
+                    }
+                },
+            };
+            if let Err(error) = stream.set_nodelay(true) {
+                tracing::warn!(%error, "failed to set TCP_NODELAY");
+            }
+            let stream = TokioIo::new(stream);
+            let handler = self.clone();
+            let builder = builder.clone();
+            let state = self.state.clone();
+
+            connections.spawn(async move {
+                let service = service_fn(move |request| {
+                    let handler = handler.clone();
+                    async move {
+                        let response =
+                            handler.handle(request).await.unwrap_or_else(|_| internal_error());
+                        Ok::<_, Infallible>(response)
+                    }
+                });
+                let conn = builder.serve_connection_with_upgrades(stream, service);
+                drive_connection(conn, &state, auto::UpgradeableConnection::graceful_shutdown)
+                    .await;
+            });
+        }
+
+        drop(listener);
+        while connections.join_next().await.is_some() {}
+        Ok(())
+    }
+
     /// Forward a request to the routed guest and return its response.
     ///
     /// A request for the [health path](ServerOptions::health_path) is answered
@@ -279,8 +304,8 @@ where
     ///
     /// Returns an error if the guest cannot be instantiated for any reason but
     /// a full pool, traps, returns an error, or yields a response that cannot
-    /// be converted. In-process callers see these as `Err`; only the server
-    /// loop maps them to `500`.
+    /// be converted. In-process callers see these as `Err`; only
+    /// [`serve`](Self::serve) maps them to `500`.
     pub async fn handle<T>(&self, request: http::Request<T>) -> Result<http::Response<OutgoingBody>>
     where
         T: Body<Data = Bytes> + Send + 'static,
