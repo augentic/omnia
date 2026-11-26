@@ -38,7 +38,7 @@ pub use self::host::{
     Backends, Connect, FromEnv, FutureResult, HasTable, Host, HostCtx, HostView, NoOptions,
     Provides, Proxy, get_cloned,
 };
-pub use self::invoke::InvokeError;
+pub use self::invoke::{InvokeError, PoolExhausted, PoolResource};
 pub use self::mount::{MountRegistry, ResolvedPreopen};
 pub use self::options::RuntimeOptions;
 pub use self::registry::{

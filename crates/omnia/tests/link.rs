@@ -859,7 +859,7 @@ async fn queued_dispatch() {
 
     // with the only slot held, the dispatch waits for it
     let echoer = runtime.guest(&GuestId::from("echoer")).await.expect("resolving the guest");
-    let lease = runtime.try_lease(echoer).expect("the gate is empty");
+    let lease = runtime.try_lease(echoer, "test").expect("the gate is empty");
     let release = async {
         tokio::time::sleep(Duration::from_millis(100)).await;
         assert_eq!(runtime.invocations().waiting, 1);

@@ -22,10 +22,10 @@ pub use omnia_core::{
     AcquireError, Backends, Bound, ChainCtx, ChainPolicy, CompileOptions, Connect, Digest,
     Dispatcher, Entered, ExitStatus, Extensions, FromEnv, FutureResult, Grants, Guest, GuestError,
     GuestId, HasTable, Host, HostCtx, HostView, HttpRoutes, Invocations, Lease, LeaseError,
-    LevelFilter, MountRegistry, NoOptions, PatternRoutes, Policy, Provides, Proxy, Registry,
-    RegistrySource, ResolvedPreopen, Routes, Runtime, RuntimeOptions, Source, SourceSpec, Stdio,
-    StoreBase, StoreCtx, Telemetry, TriggerRouter, Verified, WeakRuntime, env, get_cloned,
-    telemetry,
+    LevelFilter, MountRegistry, NoOptions, PatternRoutes, Policy, PoolExhausted, PoolResource,
+    Provides, Proxy, Registry, RegistrySource, ResolvedPreopen, Routes, Runtime, RuntimeOptions,
+    Source, SourceSpec, Stdio, StoreBase, StoreCtx, Telemetry, TriggerRouter, Verified,
+    WeakRuntime, env, get_cloned, telemetry,
 };
 #[doc(hidden)]
 pub use omnia_core::{tokio, wasmtime, wasmtime_wasi};

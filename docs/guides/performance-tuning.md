@@ -50,13 +50,14 @@ The [concurrency gate](../reference/configuration.md#concurrency-gate) admits `M
 POOL_MAX_INSTANCES >= MAX_CONCURRENT_INVOCATIONS x (1 + hops in flight per invocation)
 ```
 
-The hops in flight are the calls between guests one invocation holds open at once: one for a guest that calls one other guest, two for A calling B calling C. Unset, the gate is as wide as the pool, which suits a deployment whose guests make no such calls. At a raised `POOL_DECOMMIT_BATCH_SIZE`, that holds only while the pool's totals include the [decommit margin](#3-batched-decommit), as the unset ones do. A call that finds the pool full fails at once, with `the instance pool is full`. An HTTP request the gate admitted but the pool has no room for is answered `503`, and the host logs the same message at `warn`.
+The hops in flight are the calls between guests one invocation holds open at once: one for a guest that calls one other guest, two for A calling B calling C. Unset, the gate is as wide as the pool, which suits a deployment whose guests make no such calls. At a raised `POOL_DECOMMIT_BATCH_SIZE`, that holds only while the pool's totals include the [decommit margin](#3-batched-decommit), as the unset ones do. A call that finds the pool full fails at once with `the instance pool is full`, naming what ran out and the variable that sizes it. An HTTP request the gate admitted but the pool has no room for is answered `503`, and the host logs the same message at `warn`.
 
-The gate's gauges, and its one counter, read as follows:
+The gate's gauges, counter, and histogram read as follows:
 
 - `invocations_in_flight` is how many slots are held. Pinned at the gate's size, the gate is what limits throughput.
 - `invocations_waiting` is how many invocations wait for a slot: message deliveries, command runs, calls through `Runtime::dispatcher`, and the `Runtime::lease` calls of a trigger an embedder runs itself. Waiters take freed slots in the order they arrived, ahead of any request, so HTTP and WebSocket are refused while it stays above zero. No more than `MESSAGING_MAX_IN_FLIGHT` deliveries hold or wait for a slot. One past them waits off the gate, where this gauge does not count it.
-- `invocations_refused` counts the HTTP requests and WebSocket events refused at a full gate, and `processing_errors` does not count them. HTTP answers each with `503`. A request the gate admitted but the pool had no room for counts on `processing_errors` instead, though HTTP answers it `503` too.
+- `invocations_wait_time` is how long each of those invocations waited for its slot, in seconds, recorded as it takes the slot. A slot that was free records a wait near zero. HTTP and WebSocket are refused rather than wait, so they record nothing on it. Where the gauge shows how many wait at each sample, the histogram shows how long each waited.
+- `invocations_refused` counts the HTTP requests and WebSocket events refused at a full gate, and `processing_errors` does not count them. Its `trigger` attribute names the trigger that refused each: `http`, `websocket`, or the name a trigger an embedder runs itself passes to `Runtime::try_lease`. HTTP answers each refusal with `503`. A request the gate admitted but the pool had no room for counts on `processing_errors` instead, though HTTP answers it `503` too.
 
 A slot is held for as long as its invocation runs:
 

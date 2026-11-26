@@ -78,7 +78,7 @@ Everything is environment variables — backend connection strings, runtime limi
 Two variables deserve attention in production:
 
 - `RUST_LOG` — a server defaults to `warn`; set at least `info` (or start the binary with `-v`) so startup, readiness, and trigger-server logs are emitted.
-- `OTEL_EXPORTER_OTLP_ENDPOINT` — point at your collector; the host exports traces and metrics with no further wiring. The runtime's own metrics — the `pool_*` occupancy gauges, the concurrency gate's `invocations_*` gauges and counter, `message_counter`, `event_counter`, and `processing_errors` — export whatever `RUST_LOG` is, as does every metric a backend or a guest records, including through a `tracing` event's `monotonic_counter.`, `counter.`, `histogram.`, or `gauge.` field. Unset (and no per-signal `OTEL_EXPORTER_OTLP_*_ENDPOINT`), nothing is exported — guest telemetry included.
+- `OTEL_EXPORTER_OTLP_ENDPOINT` — point at your collector; the host exports traces and metrics with no further wiring. The runtime's own metrics — the `pool_*` occupancy gauges, the concurrency gate's `invocations_*` gauges, counter, and histogram, `message_counter`, `event_counter`, and `processing_errors` — export whatever `RUST_LOG` is, as does every metric a backend or a guest records, including through a `tracing` event's `monotonic_counter.`, `counter.`, `histogram.`, or `gauge.` field. Unset (and no per-signal `OTEL_EXPORTER_OTLP_*_ENDPOINT`), nothing is exported — guest telemetry included.
 
 ## Readiness and health
 

@@ -11,7 +11,10 @@ use bytes::Bytes;
 use http::header::CONTENT_TYPE;
 use http::{Method, Request, Response, StatusCode};
 use omnia::wasmtime::component::{ResourceTable, Val};
-use omnia::{Digest, ExitStatus, Grants, GuestEntry, GuestId, HostCtx, Runtime, SourceSpec};
+use omnia::{
+    Digest, ExitStatus, Grants, GuestEntry, GuestId, HostCtx, LeaseError, PoolExhausted,
+    PoolResource, Runtime, RuntimeOptions, SourceSpec,
+};
 use omnia_test::host::sql::{Field, Row, Value};
 use omnia_test::host::{
     Asked, Backends, Deployment, Ended, FixedIdentity, HandleError, MatchedHttp, STATE_BUCKET,
@@ -190,6 +193,64 @@ async fn link_pair() {
     let answer = call(&runtime, "full", "poke", "hi").await.expect("dispatch");
     assert_eq!(answer, "echoer pong: hi");
     runtime.shutdown();
+}
+
+// Each total starves one resource the guest's instance takes, and the lease
+// fails naming that resource and the variable that sizes it. A table total
+// below one module's tables fails the guest's compile instead, so tables
+// take a total of one, below what the whole instance takes.
+#[tokio::test]
+async fn full_pool() {
+    let starved = [
+        (
+            PoolResource::CoreInstances,
+            RuntimeOptions {
+                pool_total_core_instances: Some(0),
+                ..RuntimeOptions::default()
+            },
+        ),
+        (
+            PoolResource::Memories,
+            RuntimeOptions {
+                pool_total_memories: Some(0),
+                ..RuntimeOptions::default()
+            },
+        ),
+        (
+            PoolResource::Tables,
+            RuntimeOptions {
+                pool_total_tables: Some(1),
+                ..RuntimeOptions::default()
+            },
+        ),
+        (
+            PoolResource::Stacks,
+            RuntimeOptions {
+                pool_total_stacks: Some(0),
+                ..RuntimeOptions::default()
+            },
+        ),
+    ];
+    for (resource, options) in starved {
+        let runtime = Deployment::new()
+            .guest("echoer", test_programs::LINK_ECHOER)
+            .options(options)
+            .boot(Backends::defaults().await, |_| Ok(()))
+            .await
+            .expect("deployment boots");
+        let guest = runtime.guest(&GuestId::from("echoer")).await.expect("the guest loads");
+
+        let outcome = runtime.lease(guest).await.invoke(async |_, _, _| ()).await;
+        let Err(LeaseError::PoolFull(error)) = outcome else {
+            panic!("no {resource:?} ran out: {outcome:?}");
+        };
+        let exhausted =
+            error.downcast_ref::<PoolExhausted>().expect("the error names the resource");
+        assert_eq!(exhausted.resource(), Some(resource));
+        assert!(format!("{error:#}").contains(resource.variable()), "{error:#}");
+
+        runtime.shutdown();
+    }
 }
 
 // A path guest's `digest` pin is checked at its first use — here the command

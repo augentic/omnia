@@ -612,8 +612,8 @@ async fn full_gate() {
     assert_eq!(refused.headers()[RETRY_AFTER], "1");
     assert_eq!(runtime.stores_built(), built);
 
-    // the refusal counts as refused, never as a failure
-    assert_eq!(metrics.count("invocations_refused"), 1);
+    // the refusal counts as refused under its trigger, never as a failure
+    assert_eq!(metrics.count_with("invocations_refused", "trigger", "http"), 1);
     assert_eq!(metrics.count("processing_errors"), 0);
 
     // the probe takes no slot

@@ -301,7 +301,7 @@ async fn queued_delivery() {
 
     // the test holds the only slot for one timeout, and the delivery waits
     let guest = runtime.guest(&GuestId::from("guest")).await.expect("the guest loads");
-    let lease = runtime.try_lease(guest).expect("the gate is empty");
+    let lease = runtime.try_lease(guest, "test").expect("the gate is empty");
     let started = Instant::now();
     let release = async {
         tokio::time::sleep(TIMEOUT).await;
@@ -343,7 +343,7 @@ async fn delivery_burst() {
         tokio::time::sleep(TIMEOUT / 2).await;
         let gate = runtime.invocations();
         assert_eq!((gate.in_flight, gate.waiting), (2, 0), "{gate:?}");
-        assert!(runtime.try_lease(guest).is_some(), "a request finds a slot");
+        assert!(runtime.try_lease(guest, "http").is_some(), "a request finds a slot");
     };
     let (outcomes, ()) = tokio::join!(burst, check);
 
