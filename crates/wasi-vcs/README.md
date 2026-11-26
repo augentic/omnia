@@ -29,6 +29,16 @@ SDK's `vcs` module binds, over one `VcsClient` per backend.
   follow, whose host the guest's `hosts` refuse, with `denied` before
   anything connects. A `fetch` or `push` remote is a name the repository
   records, so an address there is `not-found`.
+- A local address, a path or a `file://` URL, is held to the guest's mounts
+  instead. The backend locates each one the call would dial through
+  `Place::locate`, and each further directory the dial reaches, such as
+  the repository a `.git` file names:
+  - one outside the mounts the guest holds, or a push's beneath no writable
+    mount, is `denied` before anything runs;
+  - one beneath a mount that holds no repository is `not-found`.
+
+  A backend that runs a program at a place holds what the program reaches
+  to the same mounts, or says in its own docs that it does not.
 - A lookup that finds nothing is `none`, not an error. That covers a
   revision, a bookmark, a remote's bookmark, and the `head` of a workspace
   with no commits.
@@ -47,8 +57,8 @@ SDK's `vcs` module binds, over one `VcsClient` per backend.
   bookmark, and pushes. `WasiVcs` serves both.
 - A backend picks a failure's case by returning an `omnia_wasi_vcs::Error`:
   - `NotARepository` and `NotFound` are `not-found`;
-  - `Denied` is `denied`, for an address the guest's grants refuse, or a
-    remote that refuses the caller;
+  - `Denied` is `denied`, for an address the guest's grants or mounts
+    refuse, or a remote that refuses the caller;
   - `Access` is `unavailable`, for a remote that cannot be reached;
   - `Exists` is the `occupied` outcome of `init`, `add`, and `clone`;
   - `Pending` is a merge's `unmerged` outcome;

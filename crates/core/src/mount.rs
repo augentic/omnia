@@ -157,8 +157,34 @@ impl MountRegistry {
     /// Returns an error if no ancestor of `path` exists, or one cannot be
     /// identified.
     pub fn beneath_writable(&self, path: &Path) -> Result<Option<&Mount>> {
-        let lineage = Self::ancestry(path)?;
-        Ok(self.entries.iter().find(|mount| mount.writable && lineage.contains(&mount.identity)))
+        Ok(self.beneath(path, |mount| mount.writable)?.map(|(mount, _)| mount))
+    }
+
+    /// The nearest mount `keep` admits that `path` lies at or beneath, with
+    /// the rest of `path` below that mount's root.
+    ///
+    /// Told by directory identity, as
+    /// [`beneath_writable`](Self::beneath_writable) is. A symlink in `path`
+    /// is followed, so one that leads into another mount places `path` there.
+    /// What lies below `path`'s nearest existing ancestor is kept as spelled.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if no ancestor of `path` exists, or one cannot be
+    /// identified.
+    pub fn beneath(
+        &self, path: &Path, keep: impl Fn(&Mount) -> bool,
+    ) -> Result<Option<(&Mount, PathBuf)>> {
+        let lineage = Lineage::of(path)?;
+        for (dir, identity) in &lineage.dirs {
+            let found =
+                self.entries.iter().find(|mount| mount.identity == *identity && keep(mount));
+            if let Some(mount) = found {
+                let rest = lineage.resolved.strip_prefix(dir).unwrap_or(&lineage.resolved);
+                return Ok(Some((mount, rest.to_path_buf())));
+            }
+        }
+        Ok(None)
     }
 
     /// The `(device, inode)` identity of `path`'s nearest existing ancestor
@@ -171,6 +197,19 @@ impl MountRegistry {
     /// Returns an error if no ancestor of `path` exists, or one cannot be
     /// identified.
     pub fn ancestry(path: &Path) -> Result<Vec<(u64, u64)>> {
+        Ok(Lineage::of(path)?.dirs.into_iter().map(|(_, identity)| identity).collect())
+    }
+}
+
+// Where a path stands: resolved through its nearest existing ancestor, with
+// each directory from that ancestor up and its identity, nearest first.
+struct Lineage {
+    resolved: PathBuf,
+    dirs: Vec<(PathBuf, (u64, u64))>,
+}
+
+impl Lineage {
+    fn of(path: &Path) -> Result<Self> {
         let absolute = std::path::absolute(path)
             .with_context(|| format!("placing {} in the current directory", path.display()))?;
         let existing = absolute
@@ -179,14 +218,20 @@ impl MountRegistry {
             .with_context(|| format!("no ancestor of {} exists", absolute.display()))?;
         let canonical =
             existing.canonicalize().with_context(|| format!("resolving {}", existing.display()))?;
-        canonical
+        let dirs = canonical
             .ancestors()
             .map(|dir| {
                 let meta = std::fs::metadata(dir)
                     .with_context(|| format!("identifying {}", dir.display()))?;
-                Ok((meta.dev(), meta.ino()))
+                Ok((dir.to_path_buf(), (meta.dev(), meta.ino())))
             })
-            .collect()
+            .collect::<Result<_>>()?;
+        let below = absolute.strip_prefix(existing).unwrap_or_else(|_| Path::new(""));
+        let resolved = below.components().fold(canonical, |mut resolved, part| {
+            resolved.push(part);
+            resolved
+        });
+        Ok(Self { resolved, dirs })
     }
 }
 

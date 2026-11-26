@@ -7,8 +7,9 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
+use std::collections::BTreeMap;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::anyhow;
@@ -36,7 +37,10 @@ async fn run_guest(wasm: &str, mounts: Vec<Mount>) -> Recorder {
 }
 
 async fn run_guest_args(wasm: &str, mounts: Vec<Mount>, args: &[&str]) -> Recorder {
-    let recorder = Recorder::default();
+    run_over(Recorder::default(), wasm, mounts, args).await
+}
+
+async fn run_over(recorder: Recorder, wasm: &str, mounts: Vec<Mount>, args: &[&str]) -> Recorder {
     let backends = Backends::defaults().await.vcs(recorder.clone());
     let status = Deployment::new()
         .guest("guest", wasm)
@@ -58,9 +62,11 @@ async fn run_guest_args(wasm: &str, mounts: Vec<Mount>, args: &[&str]) -> Record
 const LONG: usize = 1001;
 
 // Records every call with the host path its place resolved to, and the
-// grants each `clone_repo`, `fetch`, and `push` carried. It answers from a
-// fixed script keyed on the place's last segment and on the names a call
-// carries:
+// grants and mounts each `clone_repo`, `fetch`, and `push` carried. It
+// locates each local address a call would dial, as a backend does: a
+// `clone_repo` `url` with no `://`, and the address its script records for
+// a remote. It answers from a fixed script keyed on the place's last
+// segment and on the names a call carries:
 //
 // - `head` at `plain` is no repository, and at `unborn` finds no commit;
 // - `init` at `existing`, and `add` and `clone_repo` at `taken`, find the
@@ -79,9 +85,19 @@ const LONG: usize = 1001;
 struct Recorder {
     calls: Arc<Mutex<Vec<String>>>,
     grants: Arc<Mutex<Vec<Grants>>>,
+    mounts: Arc<Mutex<Vec<String>>>,
+    remotes: Arc<BTreeMap<String, PathBuf>>,
 }
 
 impl Recorder {
+    fn with_remotes<'a>(remotes: impl IntoIterator<Item = (&'a str, PathBuf)>) -> Self {
+        let remotes = remotes.into_iter().map(|(name, address)| (name.to_owned(), address));
+        Self {
+            remotes: Arc::new(remotes.collect()),
+            ..Self::default()
+        }
+    }
+
     fn record(&self, call: String) {
         self.calls.lock().push(call);
     }
@@ -90,12 +106,29 @@ impl Recorder {
         self.calls.lock().clone()
     }
 
-    fn record_grants(&self, grants: &Grants) {
+    fn record_dial(&self, grants: &Grants, place: &Place) {
         self.grants.lock().push(grants.clone());
+        let names: Vec<&str> =
+            place.mounts().entries().iter().map(|mount| mount.name.as_str()).collect();
+        self.mounts.lock().push(names.join(" "));
     }
 
     fn grants(&self) -> Vec<Grants> {
         self.grants.lock().clone()
+    }
+
+    fn mounts(&self) -> Vec<String> {
+        self.mounts.lock().clone()
+    }
+
+    fn locate(&self, at: &Place, address: &Path, write: bool) -> Result<(), Error> {
+        let place = at.locate(address, write)?;
+        self.record(format!("located {}", held(&place)));
+        Ok(())
+    }
+
+    fn locate_remote(&self, repo: &Place, remote: &str, write: bool) -> Result<(), Error> {
+        self.remotes.get(remote).map_or(Ok(()), |address| self.locate(repo, address, write))
     }
 }
 
@@ -287,9 +320,12 @@ impl VcsClient for Recorder {
         &self, url: String, at: Place, options: CloneOptions, grants: Arc<Grants>,
     ) -> FutureResult<()> {
         self.record(format!("clone {url} {} depth={:?}", held(&at), options.depth));
-        self.record_grants(&grants);
+        self.record_dial(&grants, &at);
+        let located =
+            if url.contains("://") { Ok(()) } else { self.locate(&at, Path::new(&url), false) };
         let name = named(&at);
         async move {
+            located?;
             if name == "taken" {
                 return Err(Error::Exists(name).into());
             }
@@ -300,8 +336,9 @@ impl VcsClient for Recorder {
 
     fn fetch(&self, repo: Place, remote: String, grants: Arc<Grants>) -> FutureResult<()> {
         self.record(format!("fetch {} {remote}", held(&repo)));
-        self.record_grants(&grants);
-        async { Ok(()) }.boxed()
+        self.record_dial(&grants, &repo);
+        let located = self.locate_remote(&repo, &remote, false);
+        async move { Ok(located?) }.boxed()
     }
 
     fn label(&self, repo: Place, name: String, revision: String) -> FutureResult<()> {
@@ -338,8 +375,10 @@ impl VcsClient for Recorder {
         &self, repo: Place, remote: String, label: String, grants: Arc<Grants>,
     ) -> FutureResult<()> {
         self.record(format!("push {} {remote} {label}", held(&repo)));
-        self.record_grants(&grants);
+        self.record_dial(&grants, &repo);
+        let located = self.locate_remote(&repo, &remote, true);
         async move {
+            located?;
             if remote == "moved" {
                 return Err(Error::Diverged(label).into());
             }
@@ -412,26 +451,93 @@ async fn vcs_flow() {
         ]
     );
 
-    // a guest with no grants table dials under `Grants::all`
+    // a guest with no grants table dials under `Grants::all`, holding every mount
     assert_eq!(recorder.grants(), vec![Grants::all(); 4]);
+    assert_eq!(recorder.mounts(), vec![". ws ws/sub"; 4]);
 }
 
 #[tokio::test]
 async fn vcs_grants() {
     let project = scratch();
-    let grants = Grants::all().hosts(["example.test"]);
-    let recorder = Recorder::default();
+    let hidden = scratch();
+    fs::create_dir(hidden.path().join("origin")).expect("creating the hidden repository");
+    let grants = Grants::all().hosts(["example.test"]).mounts(["."]);
+    let recorder = Recorder::with_remotes([("hidden", hidden.path().join("origin"))]);
     let guest =
         GuestEntry::new("guest", test_programs::VCS_GRANTS).command().grants(grants.clone());
     let status = Deployment::new()
         .entry(guest)
         .mount(project.mount(true))
+        .mount(hidden.mount_as("hidden", true))
         .run_host::<WasiVcs, _>(Backends::defaults().await.vcs(recorder.clone()))
         .await
         .expect("guest runs");
     assert_eq!(status, ExitStatus::SUCCESS, "guest `{}` failed", test_programs::VCS_GRANTS);
 
-    assert_eq!(recorder.grants(), vec![grants; 3]);
+    // every place held the one mount the grants name, so `hidden` located nothing
+    assert_eq!(recorder.grants(), vec![grants; 4]);
+    assert_eq!(recorder.mounts(), vec!["."; 4]);
+    assert!(!recorder.calls().iter().any(|call| call.starts_with("located")));
+}
+
+#[tokio::test]
+async fn vcs_addresses() {
+    // the mount sits one level down, so the repository beside it is outside every mount
+    let outside = scratch();
+    let project = outside.path().join("project");
+    let repo = outside.path().join("repo");
+    for dir in [project.join("origin"), repo.clone()] {
+        fs::create_dir_all(dir).expect("creating a repository");
+    }
+    let readonly = scratch();
+    fs::create_dir(readonly.path().join("origin")).expect("creating the read-only repository");
+
+    let recorder = Recorder::with_remotes([
+        ("inside", project.join("origin")),
+        ("outside", repo.clone()),
+        ("readonly", readonly.path().join("origin")),
+    ]);
+    let mount = Mount {
+        name: ".".to_owned(),
+        path: project.clone(),
+        writable: true,
+    };
+    let (repo, missing) = (shown(&repo), shown(&outside.path().join("missing")));
+    let recorder = run_over(
+        recorder,
+        test_programs::VCS_ADDRESSES,
+        vec![mount, readonly.mount_as("ro", false)],
+        &[&repo, &missing],
+    )
+    .await;
+
+    // only the addresses beneath the mounts located a place
+    let [refused, clone, origin] =
+        ["refused", "clone", "origin"].map(|subpath| shown(&project.join(subpath)));
+    let ro_origin = shown(&readonly.path().join("origin"));
+    assert_eq!(
+        recorder.calls(),
+        [
+            format!("clone {repo} {refused} depth=None"),
+            format!("clone {missing} {refused} depth=None"),
+            format!("clone ../escape {refused} depth=None"),
+            format!("clone ../absent {refused} depth=None"),
+            format!("clone ../origin {clone} depth=None"),
+            format!("located {origin}"),
+            format!("fetch {clone} inside"),
+            format!("located {origin}"),
+            format!("fetch {clone} outside"),
+            format!("fetch {clone} readonly"),
+            format!("located {ro_origin}"),
+            format!("push {clone} readonly main"),
+            format!("push {clone} inside main"),
+            format!("located {origin}"),
+        ]
+    );
+    assert!(
+        fs::symlink_metadata(project.join("escape")).is_ok_and(|meta| meta.is_symlink()),
+        "the guest planted `escape` through the mount"
+    );
 }
 
 #[tokio::test]
