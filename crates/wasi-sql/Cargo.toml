@@ -29,7 +29,7 @@ jiff.workspace = true
 omnia-core.workspace = true
 omnia-wasi-types.workspace = true
 parking_lot = { workspace = true, optional = true }
-rusqlite = { version = "0.43.0", features = ["bundled"], optional = true }
+rusqlite = { version = "0.43.0", features = ["bundled", "hooks", "limits"], optional = true }
 tokio = { workspace = true, features = ["rt", "sync"] }
 tracing.workspace = true
 wasmtime = { workspace = true, features = ["component-model-async"] }

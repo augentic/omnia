@@ -13,8 +13,11 @@ use anyhow::{Context, Result, ensure};
 use futures::FutureExt;
 use omnia_core::Connect;
 use parking_lot::{Condvar, Mutex};
+use rusqlite::config::DbConfig;
+use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
+use rusqlite::limits::Limit;
 use rusqlite::types::{Value as SqliteValue, ValueRef};
-use rusqlite::{Connection as SqliteConnection, ErrorCode, Statement as SqliteStatement};
+use rusqlite::{Connection as SqliteConnection, ErrorCode, Statement as SqliteStatement, ffi};
 use tracing::instrument;
 
 use crate::resource::{Connection, FutureResult};
@@ -72,6 +75,16 @@ fn var(key: &str) -> Result<Option<String>> {
 /// Every handle on a database shares its connection. While a transaction is
 /// open, a call on any other handle waits for it to end, and fails with
 /// [`Error::Unavailable`] after five seconds.
+///
+/// It refuses, with [`Error::Denied`], the statements that reach a file
+/// beyond its database:
+///
+/// - `ATTACH` and `DETACH`;
+/// - `VACUUM`, which attaches the database it writes;
+/// - `PRAGMA temp_store_directory` and `PRAGMA data_store_directory`.
+///
+/// It runs in `SQLite`'s defensive mode, so ordinary SQL cannot corrupt a
+/// database file.
 #[derive(Debug, Clone)]
 pub struct SqlDefault {
     // keyed by upper-cased name
@@ -90,7 +103,7 @@ impl Connect for SqlDefault {
         let mut databases = HashMap::new();
         for (name, uri) in declared {
             tracing::debug!("opening SQLite database `{name}` at: {uri}");
-            let conn = SqliteConnection::open(uri)
+            let conn = open_confined(uri)
                 .with_context(|| format!("failed to open SQLite database `{name}`"))?;
             let database = Arc::new(Database::new(name.to_owned(), conn));
             let replaced = databases.insert(name.to_ascii_uppercase(), database);
@@ -115,6 +128,40 @@ impl SqlClient for SqlDefault {
             Ok(Arc::new(SqliteConn::new(database)) as Arc<dyn Connection>)
         }
         .boxed()
+    }
+}
+
+// A connection that reaches no file beyond its own database, and whose schema
+// ordinary SQL cannot corrupt.
+fn open_confined(uri: &str) -> rusqlite::Result<SqliteConnection> {
+    let mut conn = SqliteConnection::open(uri)?;
+    conn.authorizer(Some(authorize))?;
+    conn.set_limit(Limit::SQLITE_LIMIT_ATTACHED, 0)?;
+    conn.set_db_config(DbConfig::SQLITE_DBCONFIG_DEFENSIVE, true)?;
+    Ok(conn)
+}
+
+// The pragmas that move where `SQLite` writes files, for every connection in
+// the process.
+const HOST_PRAGMAS: [&str; 2] = ["temp_store_directory", "data_store_directory"];
+
+// `SQLite` names an attached file only when the statement spells it as a
+// literal, so `ATTACH` and `DETACH` are refused by action code. `VACUUM`
+// attaches the database it writes, so it is refused with them.
+fn authorize(context: AuthContext<'_>) -> Authorization {
+    match context.action {
+        AuthAction::Attach { .. }
+        | AuthAction::Detach { .. }
+        | AuthAction::Unknown {
+            code: ffi::SQLITE_ATTACH | ffi::SQLITE_DETACH,
+            ..
+        } => Authorization::Deny,
+        AuthAction::Pragma { pragma_name, .. }
+            if HOST_PRAGMAS.iter().any(|name| pragma_name.eq_ignore_ascii_case(name)) =>
+        {
+            Authorization::Deny
+        }
+        _ => Authorization::Allow,
     }
 }
 
@@ -331,11 +378,15 @@ fn control(did: &str) -> anyhow::Error {
 }
 
 // `SQLITE_BUSY` and `SQLITE_LOCKED` mean another connection holds the
-// database, so a later call may succeed.
+// database, so a later call may succeed. `SQLITE_AUTH` is a statement the
+// connection refuses, which `VACUUM` reports only when it runs.
 fn failure(err: rusqlite::Error, context: &str) -> anyhow::Error {
     match err.sqlite_error_code() {
         Some(ErrorCode::DatabaseBusy | ErrorCode::DatabaseLocked) => {
             Error::Unavailable(format!("{context}: {err}")).into()
+        }
+        Some(ErrorCode::AuthorizationForStatementDenied) => {
+            Error::Denied(format!("{context}: {err}")).into()
         }
         _ => anyhow::Error::new(err).context(context.to_owned()),
     }
@@ -374,13 +425,17 @@ fn execute(conn: &SqliteConnection, sql: &str, params: &[Value]) -> Result<u64> 
     Ok(if conn.total_changes() == before { 0 } else { conn.changes() })
 }
 
-// a statement that does not prepare or bind is the caller's to fix
+// a statement that does not prepare or bind is the caller's to fix, unless
+// the connection refuses it
 fn prepare<'conn>(
     conn: &'conn SqliteConnection, sql: &str, params: &[Value],
 ) -> Result<SqliteStatement<'conn>> {
-    let mut stmt = conn
-        .prepare(sql)
-        .map_err(|err| Error::Invalid(format!("failed to prepare statement: {err}")))?;
+    let mut stmt = conn.prepare(sql).map_err(|err| match err.sqlite_error_code() {
+        Some(ErrorCode::AuthorizationForStatementDenied) => {
+            failure(err, "failed to prepare statement")
+        }
+        _ => Error::Invalid(format!("failed to prepare statement: {err}")).into(),
+    })?;
     bind(&mut stmt, params)
         .map_err(|err| Error::Invalid(format!("failed to bind parameters: {err:#}")))?;
     Ok(stmt)

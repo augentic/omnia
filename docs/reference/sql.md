@@ -90,6 +90,12 @@ The host passes all other SQL through to the database. SQL outside the portable 
 - A statement that returns rows, such as one with a `RETURNING` clause, runs through `query`.
 - `INSERT ... ON CONFLICT (...) DO NOTHING` and `DO UPDATE` run on both.
 
+The SQLite backend refuses, with `denied`, a statement that reaches a file beyond its database:
+
+- `ATTACH` and `DETACH`;
+- `VACUUM`, which attaches the database it writes;
+- `PRAGMA temp_store_directory` and `PRAGMA data_store_directory`.
+
 ## Portable limits
 
 Every backend accepts a portable name, statement, and row, and may reject any other as `invalid`:

@@ -4,6 +4,8 @@
 //!
 //! - Most scenarios run against the in-memory `SQLite` default, and the suite
 //!   asserts what persisted in the shared database after the run.
+//! - `sql_confinement` names a scratch directory to the guest, and the suite
+//!   asserts that nothing reached it.
 //! - `sql_backend_defaults` runs against a scripted backend that implements
 //!   only the `Connection` methods without a default, and the suite asserts
 //!   every call that reached it.
@@ -16,7 +18,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use omnia::{Connect as _, ExitStatus};
-use omnia_test::host::{Backends, Deployment};
+use omnia_test::host::{Backends, Deployment, scratch};
 use omnia_wasi_sql::{
     ConnectOptions, Connection, Error, Field, FutureResult, Row, SqlClient, SqlDefault, Statement,
     Value, WasiSql,
@@ -117,6 +119,22 @@ async fn sql_bindings() {
     // Persisted state: the declared name is its own database, which holds
     // only what the guest wrote through it.
     assert_eq!(names(&sql, "second").await, ["delta", "gamma"]);
+}
+
+#[tokio::test]
+async fn sql_confinement() {
+    let scratch = scratch();
+    let status = Deployment::new()
+        .guest("guest", test_programs::SQL_CONFINEMENT)
+        .args([scratch.path().display().to_string()])
+        .run_host::<WasiSql, _>(Backends::defaults().await.sql(in_memory(&[]).await))
+        .await
+        .expect("guest runs");
+    assert_eq!(status, ExitStatus::SUCCESS, "guest `confinement` failed");
+
+    let reached: Vec<_> =
+        std::fs::read_dir(scratch.path()).expect("reading the scratch directory").collect();
+    assert!(reached.is_empty(), "the guest reached {reached:?}");
 }
 
 const DATE: &str = "2024-02-29";

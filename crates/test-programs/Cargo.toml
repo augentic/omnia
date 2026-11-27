@@ -519,6 +519,11 @@ path = "programs/sql/bindings.rs"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "sql_confinement"
+path = "programs/sql/confinement.rs"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "sql_database"
 path = "programs/sql/database.rs"
 crate-type = ["cdylib"]

@@ -46,7 +46,9 @@ Implements `omnia:sql`, the interface the SDK's `sql` module binds, over one
 - **Default**: `SqlDefault`, over `rusqlite`'s bundled `SQLite`, in memory
   (`:memory:`) or on file. Every handle on a database shares one
   connection. While a transaction is open, a call on any other handle waits
-  for it to end, and fails with `unavailable` after five seconds.
+  for it to end, and fails with `unavailable` after five seconds. It refuses,
+  as `denied`, any statement that reaches a file beyond its database, and
+  runs in `SQLite`'s defensive mode.
 
 ## Configuration
 
