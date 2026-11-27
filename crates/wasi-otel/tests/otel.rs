@@ -2,21 +2,33 @@
 //! component from `crates/test-programs` through the omnia runtime against an
 //! inline backend, which records what it is handed or fails it by name. The
 //! suite proves the guest-side telemetry flush delivers spans across the
-//! boundary without stalling the export task.
+//! boundary without stalling the export task. The `collector_*` rows run the
+//! default backend instead, against an OTLP collector on a loopback port.
 
 #![cfg(not(target_arch = "wasm32"))]
 
+use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use futures::FutureExt as _;
-use omnia::{ExitStatus, FutureResult, LevelFilter, Provides, Telemetry};
+use omnia::{ExitStatus, FutureResult, LevelFilter, Provides, Telemetry, telemetry};
 use omnia_test::host::{Deployment, deliver};
 use omnia_wasi_messaging::WasiMessaging;
-use omnia_wasi_otel::{Error, OtelClient, WasiOtel};
+use omnia_wasi_otel::{Error, OtelClient, OtelDefault, WasiOtel};
 use omnia_wasi_websocket::{Event, WasiWebSocket, WebSocketHandler};
-use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
-use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
+use opentelemetry_proto::tonic::collector::metrics::v1::metrics_service_server::{
+    MetricsService, MetricsServiceServer,
+};
+use opentelemetry_proto::tonic::collector::metrics::v1::{
+    ExportMetricsServiceRequest, ExportMetricsServiceResponse,
+};
+use opentelemetry_proto::tonic::collector::trace::v1::trace_service_server::{
+    TraceService, TraceServiceServer,
+};
+use opentelemetry_proto::tonic::collector::trace::v1::{
+    ExportTraceServiceRequest, ExportTraceServiceResponse,
+};
 use opentelemetry_proto::tonic::common::v1::any_value::Value as AnyValue;
 use opentelemetry_proto::tonic::common::v1::{self as common, ArrayValue, KeyValueList};
 use opentelemetry_proto::tonic::metrics::v1::exemplar::Value as ExemplarValue;
@@ -29,6 +41,12 @@ use opentelemetry_proto::tonic::metrics::v1::{
 use opentelemetry_proto::tonic::trace::v1::span::SpanKind;
 use opentelemetry_proto::tonic::trace::v1::status::StatusCode;
 use opentelemetry_proto::tonic::trace::v1::{ResourceSpans, Span};
+use tokio::net::TcpListener;
+use tokio::sync::watch;
+use tonic::metadata::MetadataMap;
+use tonic::transport::Server;
+use tonic::transport::server::TcpIncoming;
+use tonic::{Request, Response, Status};
 
 // Every guest program in `crates/test-programs` must have a matching test
 // here; a new program without one fails to compile.
@@ -683,4 +701,199 @@ async fn otel_error_codes() {
         exported,
         ["not-found", "denied", "invalid", "unsupported", "unavailable", "other", "unavailable"]
     );
+}
+
+// An OTLP collector on a loopback port, serving until the test's runtime ends.
+// It records each export with its metadata as it arrives, the host's own
+// exports included, and answers only once its gate opens.
+#[derive(Clone)]
+struct Collector {
+    traces: Arc<Mutex<Vec<(MetadataMap, ExportTraceServiceRequest)>>>,
+    metrics: Arc<Mutex<Vec<(MetadataMap, ExportMetricsServiceRequest)>>>,
+    gate: watch::Receiver<bool>,
+}
+
+impl Collector {
+    async fn serve() -> (Self, SocketAddr, watch::Sender<bool>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("binding a loopback port");
+        let address = listener.local_addr().expect("the port's address");
+        let (open, gate) = watch::channel(false);
+        let collector = Self {
+            traces: Arc::default(),
+            metrics: Arc::default(),
+            gate,
+        };
+        tokio::spawn(
+            Server::builder()
+                .add_service(TraceServiceServer::new(collector.clone()))
+                .add_service(MetricsServiceServer::new(collector.clone()))
+                .serve_with_incoming(TcpIncoming::from(listener)),
+        );
+        (collector, address, open)
+    }
+
+    async fn answer<T: Default>(&self) -> Result<Response<T>, Status> {
+        let mut gate = self.gate.clone();
+        gate.wait_for(|open| *open).await.map_err(|_closed| Status::unavailable("gate dropped"))?;
+        Ok(Response::new(T::default()))
+    }
+
+    // the span exports carrying a span named `name`
+    fn traces_with(&self, name: &str) -> Vec<(MetadataMap, ExportTraceServiceRequest)> {
+        self.traces
+            .lock()
+            .expect("traces lock")
+            .iter()
+            .filter(|(_, export)| {
+                export
+                    .resource_spans
+                    .iter()
+                    .flat_map(|resource| &resource.scope_spans)
+                    .flat_map(|scope| &scope.spans)
+                    .any(|span| span.name == name)
+            })
+            .cloned()
+            .collect()
+    }
+
+    // the metric exports carrying a metric named `name`
+    fn metrics_with(&self, name: &str) -> Vec<(MetadataMap, ExportMetricsServiceRequest)> {
+        self.metrics
+            .lock()
+            .expect("metrics lock")
+            .iter()
+            .filter(|(_, export)| {
+                export
+                    .resource_metrics
+                    .iter()
+                    .flat_map(|resource| &resource.scope_metrics)
+                    .flat_map(|scope| &scope.metrics)
+                    .any(|metric| metric.name == name)
+            })
+            .cloned()
+            .collect()
+    }
+}
+
+#[tonic::async_trait]
+impl TraceService for Collector {
+    async fn export(
+        &self, request: Request<ExportTraceServiceRequest>,
+    ) -> Result<Response<ExportTraceServiceResponse>, Status> {
+        let (metadata, _, export) = request.into_parts();
+        self.traces.lock().expect("traces lock").push((metadata, export));
+        self.answer().await
+    }
+}
+
+#[tonic::async_trait]
+impl MetricsService for Collector {
+    async fn export(
+        &self, request: Request<ExportMetricsServiceRequest>,
+    ) -> Result<Response<ExportMetricsServiceResponse>, Status> {
+        let (metadata, _, export) = request.into_parts();
+        self.metrics.lock().expect("metrics lock").push((metadata, export));
+        self.answer().await
+    }
+}
+
+fn collector_telemetry(address: SocketAddr) {
+    Telemetry::new("otel-e2e")
+        .filter("info")
+        .endpoint(format!("http://{address}"))
+        .build()
+        .expect("telemetry installs");
+}
+
+// the flush blocks, so it runs beside the runtime serving the collector
+async fn flush_within(bound: Duration) {
+    tokio::time::timeout(bound, tokio::task::spawn_blocking(telemetry::flush))
+        .await
+        .expect("the flush ends within its bound")
+        .expect("the flush completes");
+}
+
+// The guest runs while the collector holds every answer, under a timeout that
+// outlasts the run's deadline, so an export the guest waited on fails the run.
+#[tokio::test]
+async fn collector_withheld() {
+    // SAFETY: nextest runs each test in a process of its own, so no other
+    // thread reads the environment while it is written.
+    #[expect(
+        unsafe_code,
+        reason = "the export's headers and timeout are the process environment's"
+    )]
+    unsafe {
+        std::env::set_var("OTEL_EXPORTER_OTLP_HEADERS", "x-omnia-suite=withheld");
+        std::env::set_var("OTEL_EXPORTER_OTLP_TIMEOUT", "600000");
+    }
+    let (collector, address, open) = Collector::serve().await;
+    collector_telemetry(address);
+
+    run(test_programs::OTEL_RAW_EXPORT, None, OtelDefault).await;
+    open.send(true).expect("the collector holds the gate");
+    flush_within(Duration::from_secs(60)).await;
+
+    // the guest's export of each signal, apart from the host's own
+    let traces = collector.traces_with("raw");
+    let [(span_metadata, traces)] = traces.as_slice() else {
+        panic!("one guest span export, got {}", traces.len());
+    };
+    let metrics = collector.metrics_with("temperature");
+    let [(metric_metadata, metrics)] = metrics.as_slice() else {
+        panic!("one guest metric export, got {}", metrics.len());
+    };
+    for metadata in [span_metadata, metric_metadata] {
+        let header = metadata.get("x-omnia-suite").and_then(|value| value.to_str().ok());
+        assert_eq!(header, Some("withheld"));
+    }
+
+    let [resource_spans] = traces.resource_spans.as_slice() else {
+        panic!("one resource, got {}", traces.resource_spans.len());
+    };
+    let [resource_metrics] = metrics.resource_metrics.as_slice() else {
+        panic!("one resource, got {}", metrics.resource_metrics.len());
+    };
+    for resource in [&resource_spans.resource, &resource_metrics.resource] {
+        let attributes = &resource.as_ref().expect("the host's resource").attributes;
+        let service = AnyValue::StringValue("otel-e2e".into());
+        assert_eq!(attribute(attributes, "service.name"), Some(&service));
+    }
+
+    let spans: Vec<_> = resource_spans
+        .scope_spans
+        .iter()
+        .flat_map(|scope| &scope.spans)
+        .map(|span| span.name.as_str())
+        .collect();
+    assert_eq!(spans, ["raw"]);
+    let metrics: Vec<_> = resource_metrics
+        .scope_metrics
+        .iter()
+        .flat_map(|scope| &scope.metrics)
+        .map(|metric| metric.name.as_str())
+        .collect();
+    assert_eq!(metrics, ["temperature", "total", "durations", "spread"]);
+}
+
+// Nothing listens on the port, so every export fails. The host's two
+// exporters each retry for up to the timeout, one after the other, which the
+// flush's bound allows; the default timeout is ten seconds.
+#[tokio::test]
+async fn collector_down() {
+    const TIMEOUT: Duration = Duration::from_secs(1);
+
+    // SAFETY: nextest runs each test in a process of its own, so no other
+    // thread reads the environment while it is written.
+    #[expect(unsafe_code, reason = "the export's timeout is the process environment's")]
+    unsafe {
+        std::env::set_var("OTEL_EXPORTER_OTLP_TIMEOUT", TIMEOUT.as_millis().to_string());
+    }
+    let closed = std::net::TcpListener::bind("127.0.0.1:0")
+        .and_then(|listener| listener.local_addr())
+        .expect("a loopback port");
+    collector_telemetry(closed);
+
+    run(test_programs::OTEL_RAW_EXPORT, None, OtelDefault).await;
+    flush_within(5 * TIMEOUT).await;
 }

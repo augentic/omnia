@@ -67,7 +67,7 @@ Most deployments only touch the `runtime!` macro; a hand-written runtime instead
 The runtime and its included services are configured via environment variables:
 
 - **`RUST_LOG`**: The tracing filter for the whole process, host console and guests alike (e.g., `info`, `debug`, `omnia_core=trace`); unset means `info` for a command runtime and `warn` for a server. Each `-v` steps the level up from that default and each `-q` down; a flag displaces only `RUST_LOG`'s bare level, and its targeted directives (`omnia_core=trace`, `tower=off`) stay in force on top — `omnia::telemetry::directives` is the composition. The console layer alone refines the runtime's own crates (`omnia`, `omnia_core`, `omnia_link`, `omnia_plugin`) to step from a server's `warn` in either mode (`Telemetry::runtime_level`), so a command shows its guests' progress at `info` and the runtime's from `-v`; a `RUST_LOG` directive naming one of them stands, and spans, exported events, and every guest follow the filter unrefined. Noisy dependencies (`hyper`, `h2`, `tower`, `tonic`, `opentelemetry`, `opentelemetry_sdk`, `omnia_wasi_otel`) are always muted.
-- **`OTEL_EXPORTER_OTLP_ENDPOINT`**: OTLP gRPC endpoint for exporting host traces and metrics — OpenTelemetry's own variable, with `OTEL_EXPORTER_OTLP_{TRACES,METRICS}_ENDPOINT` taking precedence per signal. A signal with no endpoint has no exporter, so a run with no collector exports nothing (guest spans included) rather than retrying against `localhost:4317`.
+- **`OTEL_EXPORTER_OTLP_ENDPOINT`**: OTLP gRPC endpoint for the host's traces and metrics and the guest telemetry `OtelDefault` forwards — OpenTelemetry's own variable, with `OTEL_EXPORTER_OTLP_{TRACES,METRICS}_ENDPOINT` taking precedence per signal. A signal with no endpoint exports nothing, host or guest, rather than retrying against `localhost:4317`. `OTEL_EXPORTER_OTLP_HEADERS`, `OTEL_EXPORTER_OTLP_TIMEOUT`, and `OTEL_EXPORTER_OTLP_INSECURE` apply to both, and an `https://` endpoint fails startup.
 
 ## Logging and telemetry
 
@@ -76,13 +76,13 @@ During startup, `omnia` installs the host's telemetry via `Telemetry`: the `trac
 ```rust,ignore
 use omnia::Telemetry;
 
-// Omit `endpoint` for OpenTelemetry's own endpoint resolution.
+// Omit `endpoint` to resolve it from the `OTEL_EXPORTER_OTLP_*` variables.
 Telemetry::new("my-service")
     .endpoint("http://localhost:4317")
     .build()?;
 ```
 
-Initialization is idempotent: the first `build` in the process installs the subscriber and providers, and later calls are no-ops that reuse them, so an embedder installing a subscriber itself and the runtime's own startup never conflict. Telemetry is batch-exported; the runtime flushes it at the end of every run so it survives fast command-mode exits, and embedders driving work themselves can call `omnia::telemetry::flush()` before the process exits. OpenTelemetry's `OTEL_EXPORTER_OTLP_*` variables select the collector, and with none of them set no exporter is attached (the providers still publish, so guest telemetry still carries the resource and joins the tracer's spans; `flush` has nothing to wait on). The subscriber's filter always mutes the `opentelemetry`, `opentelemetry_sdk`, `tonic`, and `tower` targets, so an exporter that cannot reach its collector never reaches the console either.
+Initialization is idempotent: the first `build` in the process installs the subscriber and providers, and later calls are no-ops that reuse them, so an embedder installing a subscriber itself and the runtime's own startup never conflict. Telemetry is batch-exported; the runtime flushes it at the end of every run so it survives fast command-mode exits, and embedders driving work themselves can call `omnia::telemetry::flush()` before the process exits. OpenTelemetry's `OTEL_EXPORTER_OTLP_*` variables select each signal's collector, headers, and timeout once. The host's exporters and the guest telemetry `OtelDefault` forwards share one channel to it, on a runtime thread of their own, and the guests' route publishes even under an embedder's subscriber. `flush` also waits, for at most a signal's timeout, for the guest telemetry queued before it. With no endpoint set nothing is exported: the providers still publish, so guest spans still carry the resource and join the tracer's spans, and `flush` has nothing to wait on. The subscriber's filter always mutes the `opentelemetry`, `opentelemetry_sdk`, `tonic`, and `tower` targets, so an exporter that cannot reach its collector never reaches the console either.
 
 ## Architecture
 

@@ -35,14 +35,21 @@ exports through, over one `OtelClient` per backend.
 
 ## Backend
 
-- **Default**: `OtelDefault` logs how many spans and metrics each export
-  carries, at `debug`, and sends them nowhere. It is for development only.
+- **Default**: `OtelDefault` sends guest telemetry to the collector the
+  host's own telemetry goes to. It uses the endpoint, headers, and timeout
+  the `OTEL_EXPORTER_OTLP_*` variables configure for the signal, over the
+  host's channel. Each export is queued and sent in the background in one
+  attempt, so a slow or absent collector never holds a guest.
+  - With no endpoint for the signal, it drops the telemetry and answers
+    `ok`.
+  - When the signal's queue already holds 16 mebibytes, it answers
+    `unavailable`.
+- Any other `OtelClient` takes its place in the host's `runtime!`.
 
 ## Configuration
 
-- **`OTEL_EXPORTER_OTLP_ENDPOINT`**: The gRPC endpoint for the OpenTelemetry collector, for the host's own spans and — through [`omnia-opentelemetry`](https://github.com/augentic/omnia-backends/tree/main/crates/opentelemetry) — the guest telemetry it receives. Unset, the host attaches no exporter, and `OtelDefault` (below) drops guest telemetry whatever is set.
-
-- **Production**: [`omnia-opentelemetry`](https://github.com/augentic/omnia-backends/tree/main/crates/opentelemetry) (OTLP gRPC collector export) — a one-line swap in the host, guests untouched (see the [Production Backends guide](https://github.com/augentic/omnia/blob/main/docs/guides/production-backends.md)).
+- **`OTEL_EXPORTER_OTLP_ENDPOINT`**: The gRPC endpoint of the OpenTelemetry collector, for the host's own telemetry and, through `OtelDefault`, the guests'. `OTEL_EXPORTER_OTLP_{TRACES,METRICS}_ENDPOINT` take precedence for their signal. Unset, nothing is exported, host or guest.
+- **`OTEL_EXPORTER_OTLP_HEADERS`** and **`OTEL_EXPORTER_OTLP_TIMEOUT`**: The headers and the timeout of every export, with the same per-signal forms. Export is plain-text gRPC, so an `https://` endpoint fails startup. The [Configuration reference](https://github.com/augentic/omnia/blob/main/docs/reference/configuration.md#general) lists every variable.
 
 ## Usage
 

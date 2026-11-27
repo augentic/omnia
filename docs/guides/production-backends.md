@@ -15,11 +15,10 @@ The in-tree `*Default` backends make development friction-free, but production d
 | `omnia-azure-table` | Azure Table Storage | docstore |
 | `omnia-azure-vault` | Azure Key Vault | vault |
 | `omnia-azure-id` | Azure Managed Identity | identity |
-| `omnia-opentelemetry` | OpenTelemetry Collector (OTLP gRPC) | otel |
 | `omnia-genai` | LLM provider APIs (OpenAI, Anthropic, Gemini, ...) | model |
 | `omnia-cursor` | `cursor-sdk-bridge` | model |
 
-The model backends (`genai`, `cursor`) are covered in [Model Completions and MCP](model-completions.md).
+The model backends (`genai`, `cursor`) are covered in [Model Completions and MCP](model-completions.md). Guest telemetry needs no production backend: `OtelDefault` sends it to the collector the host's own telemetry goes to.
 
 ## Swapping a backend
 
@@ -64,7 +63,7 @@ Every backend reads its connection settings from environment variables at startu
 | Azure Table | `AZURE_STORAGE_ACCOUNT`, `AZURE_STORAGE_KEY`, optional `AZURE_TABLE_ENDPOINT` (Azurite) |
 | Azure Key Vault | `AZURE_KEYVAULT_URL` + Azure credentials |
 | Azure Identity | `IDENTITY_CLIENT_ID` (the user-assigned identity behind `default`; unset, the system-assigned one); named identities via `IDENTITY_NAMES` + `IDENTITY_CLIENT_ID__<NAME>` |
-| OpenTelemetry | `OTEL_EXPORTER_OTLP_ENDPOINT` (unset exports nothing) |
+| OpenTelemetry | none of its own: the runtime reads `OTEL_EXPORTER_OTLP_ENDPOINT` and the other `OTEL_EXPORTER_OTLP_*` variables, and `OtelDefault` sends guest telemetry to that collector (see [Configuration](../reference/configuration.md#general)) |
 
 Each crate's README in the `omnia-backends` repository documents its complete variable set.
 

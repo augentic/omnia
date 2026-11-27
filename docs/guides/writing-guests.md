@@ -304,7 +304,7 @@ As text the envelope is `error[<code>]: <message>` followed by `hint: <hint>` wh
 
 - Arguments after `--` on the host command line arrive as the command guest's argv (`args[0]` is the program name, supplied by the runtime). A guest the command calls or loads sees none, so it takes its input in the call.
 - The host runtime must be built with `mode: command` — see [Composing a Runtime](composing-a-runtime.md).
-- The telemetry lifecycle imports `omnia:otel`, so the deployment links `WasiOtel` (the no-op `OtelDefault` suffices).
+- The telemetry lifecycle imports `omnia:otel`, so the deployment links `WasiOtel` (`OtelDefault` suffices).
 
 `examples/cli` is the runnable pair: `greet`, `add`, `env`, and a `fail [CLASS]` verb that returns each error class so the exit map can be observed.
 

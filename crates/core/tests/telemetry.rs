@@ -1,7 +1,8 @@
-//! The runtime's own metrics under a subscriber the process installed first.
+//! The runtime's own metrics, and the resource guest telemetry carries, under
+//! a subscriber the process installed first.
 
 use omnia_core::{Telemetry, telemetry};
-use opentelemetry::{KeyValue, global};
+use opentelemetry::{Key, KeyValue, Value, global};
 use opentelemetry_sdk::metrics::data::{AggregatedMetrics, Metric, MetricData, ScopeMetrics};
 use opentelemetry_sdk::metrics::{InMemoryMetricExporter, SdkMeterProvider};
 use tracing_subscriber::util::SubscriberInitExt;
@@ -9,10 +10,8 @@ use wasmtime::{
     Config, Engine, InstanceAllocationStrategy, PoolingAllocationConfig, PoolingAllocatorMetrics,
 };
 
-// a tokio runtime, since an OTLP endpoint in the environment makes the build
-// spawn its exporters' channel
-#[tokio::test]
-async fn installed_subscriber() {
+#[test]
+fn installed_subscriber() {
     tracing_subscriber::registry().init();
     telemetry::count_message("early");
 
@@ -20,6 +19,12 @@ async fn installed_subscriber() {
     let provider = SdkMeterProvider::builder().with_periodic_exporter(exporter.clone()).build();
     global::set_meter_provider(provider.clone());
     Telemetry::new("installed-subscriber").build().expect("telemetry builds");
+
+    let resource = telemetry::resource().expect("the resource publishes");
+    assert_eq!(
+        resource.get(&Key::from_static_str("service.name")),
+        Some(Value::from("installed-subscriber"))
+    );
 
     telemetry::record_pool(&idle_pool());
     telemetry::count_message("orders");
