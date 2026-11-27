@@ -53,6 +53,19 @@ fn run_mounts() {
 
     let error = usage(run(&["bin", "run", "x.wasm", "--mount", "path=x,bogus=1"], None, false));
     assert!(error.contains("unknown mount key `bogus`"), "{error}");
+
+    let repeated = [
+        ("a,path=b", "path"),
+        ("path=a,path=b", "path"),
+        ("path=a,name=x,name=y", "name"),
+        ("path=a,writable,writable=false", "writable"),
+        ("path=a,b", "path"),
+        ("a,b", "path"),
+    ];
+    for (spec, key) in repeated {
+        let error = usage(run(&["bin", "run", "x.wasm", "--mount", spec], None, false));
+        assert!(error.contains(&format!("sets the {key} more than once")), "{spec}: {error}");
+    }
 }
 
 #[test]

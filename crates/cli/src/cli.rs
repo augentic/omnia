@@ -99,24 +99,21 @@ impl FromStr for MountArg {
     fn from_str(spec: &str) -> Result<Self> {
         let mut path: Option<PathBuf> = None;
         let mut name: Option<String> = None;
-        let mut writable = false;
+        let mut writable = None;
 
         for token in spec.split(',').map(str::trim).filter(|token| !token.is_empty()) {
             match token.split_once('=') {
-                Some(("path", value)) => path = Some(PathBuf::from(value)),
-                Some(("name", value)) => name = Some(value.to_owned()),
+                Some(("path", value)) => set_once(&mut path, PathBuf::from(value), "path", spec)?,
+                Some(("name", value)) => set_once(&mut name, value.to_owned(), "name", spec)?,
                 Some(("writable", value)) => {
-                    writable = value.parse().with_context(|| {
+                    let parsed = value.parse().with_context(|| {
                         format!("mount `writable` expects a bool, got `{value}`")
                     })?;
+                    set_once(&mut writable, parsed, "writable", spec)?;
                 }
                 Some((key, _)) => bail!("unknown mount key `{key}` in `--mount {spec}`"),
-                None if token == "writable" => writable = true,
-                None => {
-                    if path.replace(PathBuf::from(token)).is_some() {
-                        bail!("mount `--mount {spec}` sets the path more than once");
-                    }
-                }
+                None if token == "writable" => set_once(&mut writable, true, "writable", spec)?,
+                None => set_once(&mut path, PathBuf::from(token), "path", spec)?,
             }
         }
 
@@ -125,7 +122,15 @@ impl FromStr for MountArg {
         Ok(Self {
             name: name.unwrap_or_else(|| ".".to_owned()),
             host_path: path,
-            writable,
+            writable: writable.unwrap_or(false),
         })
     }
+}
+
+fn set_once<T>(slot: &mut Option<T>, value: T, key: &str, spec: &str) -> Result<()> {
+    if slot.is_some() {
+        bail!("mount `--mount {spec}` sets the {key} more than once");
+    }
+    *slot = Some(value);
+    Ok(())
 }
