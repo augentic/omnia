@@ -155,6 +155,8 @@ Honest limits, so you can layer the right controls on top:
 - **Denial of service via legitimate traffic** is bounded per invocation, but request admission (rate limiting, auth) is upstream of the runtime.
 - **Side channels** (timing, cache) are out of scope, as for most wasm runtimes.
 
+Beyond these limits, known vulnerabilities that are not yet fixed are the open issues labelled `security` in [omnia](https://github.com/augentic/omnia/issues?q=is%3Aissue%20is%3Aopen%20label%3Asecurity) and [omnia-backends](https://github.com/augentic/omnia-backends/issues?q=is%3Aissue%20is%3Aopen%20label%3Asecurity). The [security policy](https://github.com/augentic/.github/blob/main/SECURITY.md) says how to report a new one.
+
 ## Defence-in-depth checklist
 
 - [ ] Treat manifests and every artifact they name — pre-compiled ones above all — as trusted operator inputs; never build either from untrusted data

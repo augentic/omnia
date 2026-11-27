@@ -82,6 +82,10 @@ Unreleased
 - Count an HTTP request or WebSocket event refused at a full concurrency gate on `invocations_refused` alone, and log it at `debug`. HTTP also counted each such `503` on `processing_errors` and logged it at `error`, and WebSocket did the same for each refused event, so a saturated gate read as failing guests ([#482](https://github.com/augentic/omnia/issues/482)).
 - Drain messaging and WebSocket on the first shutdown signal, as HTTP does. Each went on taking messages or events after the signal and never returned, so the process ran until a second signal or the orchestrator's kill, and either one cut off the work in flight. Each now takes no more work, waits for what it holds, and returns. Every trigger also checks for the stop before it takes more work, so none takes a connection, message, or event that arrives with the stop ([#473](https://github.com/augentic/omnia/issues/473)).
 
+### Security
+
+- Confine `SqlDefault` to the database it opened. Through `ATTACH`, `VACUUM INTO`, or `PRAGMA temp_store_directory`, a guest could read, write, or create a SQLite file anywhere the host user can. Each now fails with `denied`. So do a plain `VACUUM`, which SQLite runs through an attached database, and `PRAGMA data_store_directory`. The connection also runs in SQLite's defensive mode, so ordinary SQL cannot corrupt the schema. Every `omnia-wasi-sql` release up to 0.38.1 is affected ([#519](https://github.com/augentic/omnia/issues/519)).
+
 ---
 
 Release notes for previous releases can be found on the respective release branches of the repository.
