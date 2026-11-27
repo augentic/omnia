@@ -26,7 +26,8 @@ path=<host-path>[,name=<guest-name>][,writable]
 
 - `name` defaults to `.` — the name `preopens.get-directories()` reports to the guest.
 - Mounts are read-only unless `writable` (or `writable=true`) is present.
-- A bare token is shorthand for the path: `--mount workspace` and `--mount workspace,writable` are valid.
+- A bare token counts as `path`: `--mount workspace` and `--mount workspace,writable` are valid.
+- Each key appears at most once. A second `path`, `name`, or `writable` is refused.
 - CLI mount paths resolve against the current working directory; manifest mount paths resolve against the manifest's directory.
 
 ### Examples
