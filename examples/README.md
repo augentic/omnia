@@ -74,6 +74,6 @@ omnia::runtime!({
 });
 ```
 
-Some demos bind those production backends directly and live in the [`omnia-backends`](https://github.com/augentic/omnia-backends) repo — for example the [`cursor`](https://github.com/augentic/omnia-backends/tree/main/examples/cursor) end-to-end demo, whose guest calls `omnia-cursor` for a live completion while serving its own MCP docs tools over HTTP (the same pattern as the in-tree [`mcp`](mcp) guest). These need extra setup: credentials, CLI tools, or network access.
+Demos that bind production backends or need external services live in the [`omnia-backends`](https://github.com/augentic/omnia-backends) repo. The [`cursor`](https://github.com/augentic/omnia-backends/tree/main/examples/cursor) demo's guest asks `omnia-cursor` for a live completion and answers the model's function-tool call. The [`otel`](https://github.com/augentic/omnia-backends/tree/main/examples/otel) demo sends guest spans and metrics through a collector to Jaeger and Prometheus. These need extra setup: credentials, CLI tools, containers, or network access.
 
 For a complete application-scale service built on these patterns, see [`omnia-exemplar`](https://github.com/augentic/omnia-exemplar).

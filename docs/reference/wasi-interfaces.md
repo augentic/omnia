@@ -15,7 +15,7 @@ Every capability Omnia exposes to guests, its interface crate, the zero-config d
 | Configuration | `wasi-config` | `WasiConfig` | `ConfigDefault` — a snapshot of the host variables `CONFIG_KEYS` names (default none) | — |
 | Secrets vault | `wasi-vault` | `WasiVault` | `VaultDefault` — in-memory, serving the lockers `VAULT_LOCKERS` declares (default `default`) | `omnia-azure-vault` |
 | Identity/OAuth | `wasi-identity` | `WasiIdentity` | `IdentityDefault` — OAuth2 client flow for the identity `default` (`IDENTITY_CLIENT_ID`, `IDENTITY_CLIENT_SECRET`, `IDENTITY_TOKEN_URL`) | `omnia-azure-id` |
-| Observability | `wasi-otel` | `WasiOtel` | `OtelDefault` — log-only, no export | `omnia-opentelemetry` |
+| Observability | `wasi-otel` | `WasiOtel` | `OtelDefault` — sends guest telemetry to the host's collector (`OTEL_EXPORTER_OTLP_ENDPOINT`), and drops it when none is set | — |
 | WebSockets | `wasi-websocket` | `WasiWebSocket` † | `WebSocketDefault` — tungstenite server (`WEBSOCKET_ADDR`, default `0.0.0.0:80`) | — |
 | Model completions | `wasi-model` | `WasiModel` | `ModelDefault` — deterministic echo, serving the models `MODEL_NAMES` declares (default `default`); what an echo cannot honour, such as a schema format, is `unsupported` | `omnia-genai`, `omnia-cursor` |
 | Version control | `wasi-vcs` | `WasiVcs` | — none | `omnia-git` |

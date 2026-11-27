@@ -1,60 +1,60 @@
-//! Default no-op implementation for `omnia:otel`
-//!
-//! This is a lightweight implementation for development use only.
-//! It logs telemetry data but doesn't export it anywhere.
-//! For production use, use the `omnia-opentelemetry` backend.
+//! The default `omnia:otel` backend, which sends guest telemetry to the
+//! host's own collector.
+
+use std::future::{Future, ready};
 
 use anyhow::Result;
 use futures::FutureExt;
+use omnia_core::telemetry::{self, Forwarded};
 use omnia_core::{Connect, FutureResult};
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
-use tracing::instrument;
 
-use crate::OtelClient;
+use crate::{Error, OtelClient};
 
-/// Default implementation for `omnia:otel`.
+/// The default `omnia:otel` backend, which sends guest telemetry to the
+/// host's collector.
+///
+/// A guest's spans and metrics go where the host's own do: the endpoint,
+/// headers, and timeout the `OTEL_EXPORTER_OTLP_*` variables configure for
+/// the signal, over the same channel. Each export is queued and sent in the
+/// background, so a slow or absent collector never holds a guest.
+///
+/// - With no endpoint for the signal, the telemetry is dropped and the export
+///   succeeds.
+/// - A full queue fails the export with [`Error::Unavailable`].
+/// - An export over 4 `MiB` fails with [`Error::Invalid`].
 #[derive(Debug, Clone)]
 pub struct OtelDefault;
 
 impl Connect for OtelDefault {
     type ConnectOptions = omnia_core::NoOptions;
 
-    // `skip_all`: recording the unit `NoOptions` would otherwise trip
-    // `clippy::used_underscore_binding` on the expanded `_options`.
-    #[instrument(skip_all)]
-    async fn connect_with(_options: Self::ConnectOptions) -> Result<Self> {
-        tracing::debug!("Initializing no-op OTel exporter");
-        tracing::warn!("Using no-op OTel exporter - will log but not export");
-        Ok(Self)
+    fn connect_with(_options: Self::ConnectOptions) -> impl Future<Output = Result<Self>> {
+        ready(Ok(Self))
     }
 }
 
-// logs what it is handed, for development use only
 impl OtelClient for OtelDefault {
     fn export_traces(&self, request: ExportTraceServiceRequest) -> FutureResult<()> {
-        async move {
-            let span_count = request
-                .resource_spans
-                .iter()
-                .map(|rs| rs.scope_spans.iter().map(|ss| ss.spans.len()).sum::<usize>())
-                .sum::<usize>();
-            tracing::debug!("No-op OTel exporter: would export {span_count} spans");
-            Ok(())
-        }
-        .boxed()
+        ready(answer(telemetry::forward_traces(request))).boxed()
     }
 
     fn export_metrics(&self, request: ExportMetricsServiceRequest) -> FutureResult<()> {
-        async move {
-            let metric_count = request
-                .resource_metrics
-                .iter()
-                .map(|rm| rm.scope_metrics.iter().map(|sm| sm.metrics.len()).sum::<usize>())
-                .sum::<usize>();
-            tracing::debug!("No-op OTel exporter: would export {metric_count} metrics");
-            Ok(())
+        ready(answer(telemetry::forward_metrics(request))).boxed()
+    }
+}
+
+// a run without a collector chose to drop telemetry, which is no failure of the guest's
+fn answer(forwarded: Forwarded) -> Result<()> {
+    match forwarded {
+        Forwarded::Queued | Forwarded::NoCollector => Ok(()),
+        Forwarded::Full => {
+            Err(Error::Unavailable("the host's telemetry queue is full".to_owned()).into())
         }
-        .boxed()
+        Forwarded::TooLarge => {
+            Err(Error::Invalid("the telemetry is over the 4 MiB one export carries".to_owned())
+                .into())
+        }
     }
 }

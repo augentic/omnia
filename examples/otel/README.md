@@ -4,7 +4,7 @@ Demonstrates OpenTelemetry instrumentation for WebAssembly guests using `wasi-ot
 
 ## Quick Start
 
-The quick start uses the default implementation of the wasi-otel host backend. This is a no-op implementation for development use only as it logs telemetry data but doesn't export it anywhere.
+The runtime wires the default `OtelDefault` backend, and the quick start sets no collector, so the guest's telemetry goes nowhere. Set `OTEL_EXPORTER_OTLP_ENDPOINT` to a collector's address and the guest's spans and metrics export with the host's own. The runtime needs no change.
 
 ```bash
 make example otel
@@ -26,42 +26,6 @@ cargo run --example otel -- -v run ./target/wasm32-wasip3/debug/examples/otel_wa
 curl --header 'Content-Type: application/json' -d '{"text":"hello"}' http://localhost:8080
 ```
 
-## Using an OpenTelemetry Collector Backend
+## Collector, Jaeger, and Prometheus
 
-To use an OpenTelemetry Collector backend, you need to set the `OTEL_EXPORTER_OTLP_ENDPOINT` environment variable to the address of the OpenTelemetry Collector.
-
-## Prerequisites
-
-Start an OpenTelemetry Collector instance:
-
-```bash
-docker run -d --name otelcol -p 4317:4317 otel/opentelemetry-collector
-```
-
-Modify the runtime.rs file to use the OpenTelemetry Collector backend:
-
-```rust,ignore
-...
-use omnia_opentelemetry::Client as Otel;
-
-omnia::runtime!({
-    hosts: {
-        WasiHttp: HttpDefault,
-        WasiOtel: Otel,
-    }
-});
-...
-```
-
-```bash
-export OTEL_EXPORTER_OTLP_ENDPOINT="http://localhost:4317"
-cargo run --example otel -- -v run ./target/wasm32-wasip3/debug/examples/otel_wasm.wasm
-```
-
-
-
-## Cleanup
-
-```bash
-docker rm -f otelcol
-```
+To see a guest's spans in Jaeger and its metrics in Prometheus, run the [`otel` example in `omnia-backends`](https://github.com/augentic/omnia-backends/tree/main/examples/otel). It brings its own collector stack.

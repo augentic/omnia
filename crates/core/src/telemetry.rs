@@ -6,15 +6,19 @@
 //! [`directives`]. It governs the console and the span exporter, never a
 //! metric ([`filter`](Telemetry::filter)), and the console alone may refine
 //! the runtime's own crates beneath it
-//! ([`runtime_level`](Telemetry::runtime_level)). A signal's exporter
-//! attaches only when an OTLP endpoint is configured for it, so a run with no
-//! collector exports nothing rather than retrying against one.
+//! ([`runtime_level`](Telemetry::runtime_level)). A signal exports only
+//! when an OTLP endpoint is configured for it, so a run with no collector
+//! exports nothing rather than retrying against one.
+//!
+//! Guest telemetry handed to [`forward_traces`] and [`forward_metrics`] goes
+//! to the host's collector for the signal, over the channel the host's own
+//! exporter uses, whichever subscriber the process runs.
 //!
 //! Telemetry is process-global: the first [`Telemetry::build`] installs the
 //! subscriber and the providers, and later builds in the same process are
-//! no-ops that reuse the first initialization. Batch exporters queue
-//! telemetry, so call [`flush`] before a fast process exit; the runtime does
-//! this at the end of every drive.
+//! no-ops that reuse the first initialization. Batch exporters and the guest
+//! queues hold telemetry, so call [`flush`] before a fast process exit; the
+//! runtime does this at the end of every drive.
 //!
 //! The runtime records its own metrics on OpenTelemetry instruments.
 //! [`record_pool`] samples the instance pool and [`record_invocations`] the
@@ -23,6 +27,8 @@
 //! settles, to the global meter provider as it then stands. That is omnia's
 //! own when the build installs it, and the one the process published
 //! otherwise. A metric recorded before then is dropped.
+
+mod collector;
 
 use std::env;
 use std::io::IsTerminal;
@@ -33,10 +39,6 @@ use anyhow::{Result, anyhow};
 use opentelemetry::metrics::{Counter, Gauge, Histogram, Meter};
 use opentelemetry::trace::TracerProvider;
 use opentelemetry::{InstrumentationScope, KeyValue, global};
-use opentelemetry_otlp::{
-    MetricExporter, OTEL_EXPORTER_OTLP_ENDPOINT, OTEL_EXPORTER_OTLP_METRICS_ENDPOINT,
-    OTEL_EXPORTER_OTLP_TRACES_ENDPOINT, SpanExporter, WithExportConfig,
-};
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
 use opentelemetry_sdk::metrics::SdkMeterProvider;
@@ -51,9 +53,12 @@ use tracing_subscriber::util::{SubscriberInitExt, TryInitError};
 use tracing_subscriber::{EnvFilter, Registry};
 use wasmtime::PoolingAllocatorMetrics;
 
+use self::collector::{Flush, Targets, Transport};
+pub use self::collector::{Forwarded, forward_metrics, forward_traces};
 use crate::Invocations;
 
 static SETTLED: Mutex<bool> = Mutex::new(false);
+static RESOURCE: OnceLock<Resource> = OnceLock::new();
 static PROVIDERS: OnceLock<Providers> = OnceLock::new();
 static METRICS: OnceLock<Metrics> = OnceLock::new();
 
@@ -90,9 +95,13 @@ impl Telemetry {
     }
 
     /// Sets the OTLP gRPC endpoint both signals export to; empty is unset.
+    ///
+    /// It wins over every `OTEL_EXPORTER_OTLP_*` endpoint variable. Export
+    /// carries no TLS, so an `https://` endpoint fails
+    /// [`build`](Self::build), as does a schemeless one unless
+    /// `OTEL_EXPORTER_OTLP_INSECURE` is `true`.
     #[must_use]
     pub fn endpoint(mut self, endpoint: impl Into<String>) -> Self {
-        // empty would override the exporter's own `OTEL_EXPORTER_OTLP_*` resolution
         let endpoint = endpoint.into();
         self.endpoint = (!endpoint.is_empty()).then_some(endpoint);
         self
@@ -143,10 +152,15 @@ impl Telemetry {
     /// Installs the subscriber as the process's global `tracing` subscriber
     /// and publishes the OpenTelemetry providers process-wide.
     ///
+    /// The resource and the guests' route to the collector publish whether
+    /// or not the subscriber installs, so [`forward_traces`] and
+    /// [`forward_metrics`] export beside a subscriber of the process's own.
+    ///
     /// # Errors
     ///
-    /// Returns an error if the filter directives do not parse or an exporter
-    /// cannot be constructed.
+    /// Returns an error if the filter directives do not parse, an endpoint is
+    /// not a plain-text `http://` URI, or the exporters or the runtime they
+    /// run on cannot be started.
     pub fn build(self) -> Result<()> {
         let mut settled = SETTLED.lock().unwrap_or_else(PoisonError::into_inner);
         if *settled {
@@ -156,27 +170,39 @@ impl Telemetry {
         let directives =
             self.filter.unwrap_or_else(|| directives(None, self.fallback, rust_log().as_deref()));
 
-        let exports = exports(self.endpoint.as_deref(), |name| env::var(name).ok());
-        let providers = Providers::build(&self.name, self.endpoint.as_deref(), exports)?;
-        let tracer = providers.tracer.tracer(self.name);
-
         // console to stderr, since stdout is the guest's; plain text off a terminal or under `NO_COLOR`
         let console = console(&directives, self.runtime, std::io::stderr, ansi())?;
-
         let run = filter(&directives)?;
         let level = run.max_level_hint().unwrap_or(LevelFilter::TRACE);
+
+        // one transport for the host's exporters and the guests' queues
+        let targets = Targets::resolve(self.endpoint.as_deref(), |name| env::var(name).ok())?;
+        let transport = Transport::start(&targets)?;
+        let resource = resource_for(&self.name);
+        let providers = match Providers::build(&resource, &transport) {
+            Ok(providers) => providers,
+            Err(error) => {
+                transport.shutdown();
+                return Err(error);
+            }
+        };
+        let tracer = providers.tracer.tracer(self.name);
         let subscriber = subscriber(run, console, tracer, providers.meter.clone());
+
+        // guest telemetry forwards whichever subscriber the process runs
+        transport.publish()?;
+        RESOURCE.set(resource).map_err(|_resource| anyhow!("telemetry resource already set"))?;
 
         // publish the providers only once the subscriber referencing them is installed
         match install(subscriber, level) {
             Ok(()) => {
                 providers.publish()?;
-                if exports != Exports::ALL {
+                if targets.traces.is_none() || targets.metrics.is_none() {
                     tracing::debug!(
-                        traces = exports.traces,
-                        metrics = exports.metrics,
+                        traces = targets.traces.is_some(),
+                        metrics = targets.metrics.is_some(),
                         "no OTLP endpoint (`OTEL_EXPORTER_OTLP_ENDPOINT`); an unexported \
-                         signal is dropped"
+                         signal is dropped, host and guest alike"
                     );
                 }
             }
@@ -196,47 +222,26 @@ fn rust_log() -> Option<String> {
     env::var("RUST_LOG").ok()
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct Exports {
-    traces: bool,
-    metrics: bool,
-}
-
-impl Exports {
-    const ALL: Self = Self {
-        traces: true,
-        metrics: true,
-    };
-}
-
-fn exports(endpoint: Option<&str>, env: impl Fn(&str) -> Option<String>) -> Exports {
-    fn set(value: Option<impl AsRef<str>>) -> bool {
-        value.is_some_and(|value| !value.as_ref().is_empty())
-    }
-    let shared = set(endpoint) || set(env(OTEL_EXPORTER_OTLP_ENDPOINT));
-
-    Exports {
-        traces: shared || set(env(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT)),
-        metrics: shared || set(env(OTEL_EXPORTER_OTLP_METRICS_ENDPOINT)),
-    }
-}
-
 struct Providers {
-    resource: Resource,
     tracer: SdkTracerProvider,
     meter: SdkMeterProvider,
 }
 
 impl Providers {
-    // Built whatever exports: guest telemetry carries the resource, guest
-    // spans join the tracer's, and a provider with no processor or reader
-    // drops what it gets.
-    fn build(name: &str, endpoint: Option<&str>, exports: Exports) -> Result<Self> {
-        let resource = resource_for(name);
+    // Built whatever exports: guest spans join the tracer's, and a provider
+    // with no processor or reader drops what it gets.
+    fn build(resource: &Resource, transport: &Transport) -> Result<Self> {
+        let mut tracer = SdkTracerProvider::builder().with_resource(resource.clone());
+        if let Some(exporter) = transport.span_exporter()? {
+            tracer = tracer.with_batch_exporter(exporter);
+        }
+        let mut meter = SdkMeterProvider::builder().with_resource(resource.clone());
+        if let Some(exporter) = transport.metric_exporter()? {
+            meter = meter.with_periodic_exporter(exporter);
+        }
         Ok(Self {
-            tracer: build_traces(endpoint, resource.clone(), exports.traces)?,
-            meter: build_metrics(endpoint, resource.clone(), exports.metrics)?,
-            resource,
+            tracer: tracer.build(),
+            meter: meter.build(),
         })
     }
 
@@ -261,34 +266,6 @@ fn resource_for(name: &str) -> Resource {
             KeyValue::new("instrumentation.provider", "opentelemetry"),
         ])
         .build()
-}
-
-fn build_traces(
-    endpoint: Option<&str>, resource: Resource, export: bool,
-) -> Result<SdkTracerProvider> {
-    let mut provider = SdkTracerProvider::builder().with_resource(resource);
-    if export {
-        let mut exporter = SpanExporter::builder().with_tonic();
-        if let Some(endpoint) = endpoint {
-            exporter = exporter.with_endpoint(endpoint);
-        }
-        provider = provider.with_batch_exporter(exporter.build()?);
-    }
-    Ok(provider.build())
-}
-
-fn build_metrics(
-    endpoint: Option<&str>, resource: Resource, export: bool,
-) -> Result<SdkMeterProvider> {
-    let mut provider = SdkMeterProvider::builder().with_resource(resource);
-    if export {
-        let mut exporter = MetricExporter::builder().with_tonic();
-        if let Some(endpoint) = endpoint {
-            exporter = exporter.with_endpoint(endpoint);
-        }
-        provider = provider.with_periodic_exporter(exporter.build()?);
-    }
-    Ok(provider.build())
 }
 
 // the refinement is per-layer so it never disables a span
@@ -485,13 +462,16 @@ fn colour(terminal: bool, no_color: Option<&str>) -> bool {
     terminal && no_color.is_none_or(str::is_empty)
 }
 
-/// Flush batched telemetry to the exporters.
+/// Flush batched telemetry to the exporters, and wait for the guests'.
 ///
-/// A no-op when telemetry was never installed.
+/// Guest telemetry queued before the call is waited for at most the
+/// signal's export timeout. A no-op when telemetry was never installed.
 pub fn flush() {
+    let guests = Flush::begin();
     if let Some(providers) = PROVIDERS.get() {
         flush_providers(&providers.tracer, &providers.meter);
     }
+    guests.wait();
 }
 
 // force-flush rather than shut down, so export continues and repeated flushes are safe
@@ -508,12 +488,13 @@ fn settle(signal: &str, result: OTelSdkResult) {
     }
 }
 
-/// Returns the OpenTelemetry [`Resource`] telemetry was installed with.
+/// Returns the OpenTelemetry [`Resource`] the host's telemetry carries.
 ///
-/// `None` when telemetry has not been installed.
+/// `None` until [`Telemetry::build`] runs, which publishes it whether or not
+/// its subscriber installs.
 #[must_use]
 pub fn resource() -> Option<&'static Resource> {
-    PROVIDERS.get().map(|providers| &providers.resource)
+    RESOURCE.get()
 }
 
 /// Records one sample of the instance pool's occupancy on the `pool_*` gauges.
@@ -762,74 +743,6 @@ mod tests {
             assert_eq!(
                 refine("info,[cli-run]=trace", LevelFilter::WARN),
                 "info,[cli-run]=trace,omnia::=warn,omnia_core=warn,omnia_link=warn,omnia_plugin=warn"
-            );
-        }
-    }
-
-    // the environment is a closure, never the process's
-    mod exports {
-        use super::super::{Exports, exports};
-
-        fn env(set: &'static [&'static str]) -> impl Fn(&str) -> Option<String> {
-            move |name| set.contains(&name).then(|| "http://collector:4317".to_owned())
-        }
-
-        #[test]
-        fn nothing_configured() {
-            assert_eq!(
-                exports(None, env(&[])),
-                Exports {
-                    traces: false,
-                    metrics: false
-                }
-            );
-        }
-
-        #[test]
-        fn builder_endpoint() {
-            assert_eq!(exports(Some("http://collector:4317"), env(&[])), Exports::ALL);
-        }
-
-        // an `=` left in a profile attaches nothing
-        #[test]
-        fn empty_endpoints() {
-            let empty = |_: &str| Some(String::new());
-            assert_eq!(
-                exports(Some(""), empty),
-                Exports {
-                    traces: false,
-                    metrics: false
-                }
-            );
-            assert_eq!(
-                exports(Some(""), env(&["OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"])),
-                Exports {
-                    traces: true,
-                    metrics: false
-                }
-            );
-        }
-
-        #[test]
-        fn shared_env_endpoint() {
-            assert_eq!(exports(None, env(&["OTEL_EXPORTER_OTLP_ENDPOINT"])), Exports::ALL);
-        }
-
-        #[test]
-        fn per_signal_endpoint() {
-            assert_eq!(
-                exports(None, env(&["OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"])),
-                Exports {
-                    traces: true,
-                    metrics: false
-                }
-            );
-            assert_eq!(
-                exports(None, env(&["OTEL_EXPORTER_OTLP_METRICS_ENDPOINT"])),
-                Exports {
-                    traces: false,
-                    metrics: true
-                }
             );
         }
     }
