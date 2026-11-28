@@ -1,12 +1,14 @@
 //! A FIFO-scripted `ModelClient` recording every request.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 
+use cap_std::ambient_authority;
+use cap_std::fs::{Dir, MetadataExt as _};
 use futures::FutureExt as _;
 use omnia_wasi_model::{
-    Answer, Budget, Exhausted, Format, FutureResult, Limits, ModelClient, Request, Tool, ToolHost,
-    WorkerGrant,
+    Answer, Budget, Exhausted, Format, FutureResult, Lend, Limits, ModelClient, Request, Tool,
+    ToolHost, WorkerGrant,
 };
 
 use crate::{Exchange, Script, Seen, SeenFormat, SeenWorker};
@@ -94,7 +96,7 @@ impl Completion {
 pub struct ScriptedModel {
     script: Script<Seen, Completion>,
     exchanges: Arc<Mutex<Vec<Exchange>>>,
-    lent: Arc<Mutex<Vec<Option<PathBuf>>>>,
+    lent: Arc<Mutex<Vec<Option<Lent>>>>,
     limits: Limits,
 }
 
@@ -216,14 +218,17 @@ impl ScriptedModel {
         self.exchanges.lock().expect("exchanges lock").clone()
     }
 
-    /// The host path of the workspace lent to each completion, in call order
-    /// (`None` when nothing was lent or the lend was refused).
+    /// The workspace lent to each completion, in call order (`None` when
+    /// nothing was lent or the lend was refused).
+    ///
+    /// Each is recorded once the completion's steps have run, so a lend the
+    /// guest rearranged meanwhile is recorded as the backend then held it.
     ///
     /// # Panics
     ///
     /// Panics if the lend lock is poisoned.
     #[must_use]
-    pub fn lent(&self) -> Vec<Option<PathBuf>> {
+    pub fn lent(&self) -> Vec<Option<Lent>> {
         self.lent.lock().expect("lent lock").clone()
     }
 
@@ -249,6 +254,34 @@ impl ScriptedModel {
 }
 
 impl ScriptedModel {
+    async fn answer(
+        &self, request: &Request, tool_host: &Arc<dyn ToolHost>,
+    ) -> anyhow::Result<Answer> {
+        loop {
+            let turn = self.turn(request)?;
+            self.drive(tool_host, turn.steps).await?;
+            if !request.check {
+                return Ok(turn.answer);
+            }
+
+            let outcome = tool_host.check(turn.answer.answer.clone()).await?;
+            self.exchanges.lock().expect("exchanges lock").push(Exchange {
+                tool: CHECK_TOOL.to_owned(),
+                arguments: turn.answer.answer.clone(),
+                outcome: outcome.clone().map(|()| String::new()),
+            });
+            match outcome {
+                Ok(()) => return Ok(turn.answer),
+                // the next scripted answer is the corrected attempt; none left is
+                // the budget, typed so the host surfaces `exhausted`
+                Err(correction) if self.script.remaining() == 0 => {
+                    return Err(Exhausted::new(Budget::Responses, correction).into());
+                }
+                Err(_) => {}
+            }
+        }
+    }
+
     // A guest completing past the script sees a backend failure, not a host
     // panic inside the wasmtime call; `try_next` records the overrun.
     fn turn(&self, request: &Request) -> anyhow::Result<Completion> {
@@ -315,32 +348,12 @@ impl Default for ScriptedModel {
 
 impl ModelClient for ScriptedModel {
     fn complete(&self, request: Request, tool_host: Arc<dyn ToolHost>) -> FutureResult<Answer> {
-        self.lent.lock().expect("lent lock").push(tool_host.local_path().map(Path::to_path_buf));
         let this = self.clone();
         async move {
-            loop {
-                let turn = this.turn(&request)?;
-                this.drive(&tool_host, turn.steps).await?;
-                if !request.check {
-                    return Ok(turn.answer);
-                }
-
-                let outcome = tool_host.check(turn.answer.answer.clone()).await?;
-                this.exchanges.lock().expect("exchanges lock").push(Exchange {
-                    tool: CHECK_TOOL.to_owned(),
-                    arguments: turn.answer.answer.clone(),
-                    outcome: outcome.clone().map(|()| String::new()),
-                });
-                match outcome {
-                    Ok(()) => return Ok(turn.answer),
-                    // the next scripted answer is the corrected attempt; none left is
-                    // the budget, typed so the host surfaces `exhausted`
-                    Err(correction) if this.script.remaining() == 0 => {
-                        return Err(Exhausted::new(Budget::Responses, correction).into());
-                    }
-                    Err(_) => {}
-                }
-            }
+            let answered = this.answer(&request, &tool_host).await;
+            let lent = tool_host.lend().map(Lent::of).transpose()?;
+            this.lent.lock().expect("lent lock").push(lent);
+            answered
         }
         .boxed()
     }
@@ -348,6 +361,47 @@ impl ModelClient for ScriptedModel {
     fn limits(&self) -> Limits {
         self.limits
     }
+}
+
+/// The workspace lent to one completion, as its backend held it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Lent {
+    /// The lent directory's `(device, inode)`, which no rename or link
+    /// beneath the mount changes.
+    pub identity: (u64, u64),
+    /// Whether the lend lies beneath a writable mount.
+    pub writable: bool,
+}
+
+impl Lent {
+    /// The lend a test expects of the directory at `path`.
+    ///
+    /// # Panics
+    ///
+    /// Panics when no directory at `path` can be opened.
+    #[must_use]
+    #[track_caller]
+    pub fn at(path: impl AsRef<Path>, writable: bool) -> Self {
+        let path = path.as_ref();
+        let identity = Dir::open_ambient_dir(path, ambient_authority())
+            .and_then(|dir| identity(&dir))
+            .unwrap_or_else(|err| panic!("reading the directory at {}: {err}", path.display()));
+        Self { identity, writable }
+    }
+
+    fn of(lend: &Lend) -> anyhow::Result<Self> {
+        let identity = identity(lend.dir())
+            .map_err(|err| anyhow::anyhow!("reading the lent directory: {err}"))?;
+        Ok(Self {
+            identity,
+            writable: lend.writable(),
+        })
+    }
+}
+
+fn identity(dir: &Dir) -> std::io::Result<(u64, u64)> {
+    let meta = dir.dir_metadata()?;
+    Ok((meta.dev(), meta.ino()))
 }
 
 const CHECK_TOOL: &str = "check";

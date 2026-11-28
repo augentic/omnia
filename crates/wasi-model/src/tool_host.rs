@@ -3,6 +3,8 @@ use std::fmt::Debug;
 pub use omnia_core::FutureResult;
 use serde::Serialize;
 
+use crate::Lend;
+
 /// Host-side capabilities for one completion, lent to backends that need them.
 pub trait ToolHost: Debug + Send + Sync {
     /// Run one of the request's tools through the completion's session.
@@ -36,9 +38,13 @@ pub trait ToolHost: Debug + Send + Sync {
     /// Accumulate an edit against the session's base tree.
     fn write(&self, path: String, bytes: Vec<u8>) -> FutureResult<()>;
 
-    /// The absolute host path of the lent workspace, when one was lent for
-    /// this completion and resolved to an authorized mount.
-    fn local_path(&self) -> Option<&std::path::Path> {
+    /// The workspace lent for this completion, when one was lent and resolved
+    /// to an authorized mount.
+    ///
+    /// A backend whose processes work in it binds them to [`Lend::dir`],
+    /// never to [`Lend::path`], and lets them write it only where
+    /// [`Lend::writable`] holds.
+    fn lend(&self) -> Option<&Lend> {
         None
     }
 }

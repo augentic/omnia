@@ -30,6 +30,7 @@ contract = [
 host = [
     "dep:anyhow",
     "dep:bytes",
+    "dep:cap-std",
     "dep:futures",
     "dep:http",
     "dep:http-body-util",
@@ -67,6 +68,7 @@ serde_json = { workspace = true, optional = true }
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 anyhow = { workspace = true, optional = true }
 bytes = { workspace = true, optional = true }
+cap-std = { workspace = true, optional = true }
 futures = { workspace = true, optional = true }
 http = { workspace = true, optional = true }
 http-body-util = { workspace = true, optional = true }

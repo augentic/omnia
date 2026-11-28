@@ -8,7 +8,7 @@
 //! reopening the subpath beneath it so the lend can never escape the mount.
 
 use std::io::{self, Read as _};
-use std::path::{Component, Path, PathBuf};
+use std::path::{Component, Path};
 use std::sync::Arc;
 
 use anyhow::{Context as _, anyhow, ensure};
@@ -19,7 +19,7 @@ use tokio::task::spawn_blocking;
 use wasmtime_wasi::filesystem::Descriptor;
 
 use super::tool_host::DirEntry;
-use super::{Error, Location};
+use super::{Error, Lend, Location};
 
 const MAX_READ_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_WRITE_BYTES: usize = 4 * 1024 * 1024;
@@ -27,15 +27,13 @@ const MAX_LIST_ENTRIES: usize = 4096;
 
 // A resolved workspace mount.
 pub struct Workspace {
-    dir: Arc<Dir>,
-    local_path: PathBuf,
-    writable: bool,
+    lend: Lend,
 }
 
 impl Workspace {
     #[must_use]
-    pub fn local_path(&self) -> &Path {
-        &self.local_path
+    pub const fn lend(&self) -> &Lend {
+        &self.lend
     }
 
     pub fn read(&self, path: String) -> FutureResult<Vec<u8>> {
@@ -78,7 +76,7 @@ impl Workspace {
     }
 
     pub fn write(&self, path: String, bytes: Vec<u8>) -> FutureResult<()> {
-        if !self.writable {
+        if !self.lend.writable() {
             return future::err(anyhow!("workspace is read-only")).boxed();
         }
         self.with_dir(move |dir| {
@@ -90,7 +88,7 @@ impl Workspace {
     fn with_dir<R: Send + 'static>(
         &self, f: impl FnOnce(&Dir) -> anyhow::Result<R> + Send + 'static,
     ) -> FutureResult<R> {
-        let dir = Arc::clone(&self.dir);
+        let dir = Arc::clone(self.lend.shared());
         async move { spawn_blocking(move || f(&dir)).await? }.boxed()
     }
 }
@@ -114,9 +112,7 @@ pub fn resolve(
     let subpath = &location.subpath;
     if subpath.is_empty() {
         return Ok(Workspace {
-            dir: Arc::clone(&entry.dir),
-            local_path: entry.host_path.clone(),
-            writable: entry.writable,
+            lend: Lend::new(Arc::clone(&entry.dir), entry.host_path.clone(), entry.writable),
         });
     }
 
@@ -131,9 +127,7 @@ pub fn resolve(
     })?;
 
     Ok(Workspace {
-        dir: Arc::new(dir),
-        local_path: entry.host_path.join(subpath),
-        writable: entry.writable,
+        lend: Lend::new(dir, entry.host_path.join(subpath), entry.writable),
     })
 }
 
