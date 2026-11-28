@@ -8,9 +8,11 @@ A lightweight Rust runtime and SDK for WebAssembly (`wasm32-wasip3`) components,
 Omnia can be used for standalone [WASI](https://wasi.dev/) guest development and as the runtime for the [Emery codegen framework](https://github.com/augentic/emery), running agent-generated code in a sandbox that provides controlled access to real infrastructure.
 
 > [!WARNING]
-> **Pre-release software.** While Omnia is usable today, it is still under active development. Expect breaking changes and check [`RELEASES.md`](RELEASES.md) before upgrading.
+> **Pre-release, pre-hardening software.** While Omnia is usable today, it is still under active development. Expect breaking changes and check [`RELEASES.md`](RELEASES.md) before upgrading.
 >
-> The runtime has not had an independent security audit. Report a vulnerability [privately through GitHub](https://github.com/augentic/omnia/security/advisories/new), as the [security policy](https://github.com/augentic/.github/blob/main/SECURITY.md) describes. Until `1.0`, a confirmed vulnerability is tracked as a public `security` issue and fixed on `main`, with no published advisories, CVEs, or backports. Read the [security model](docs/security-model.md) before running untrusted code.
+> The runtime has not yet been hardened or independently audited for security. Do not rely on it as the only isolation boundary around hostile code or untrusted input. Layer host and network controls around it, and read the [security model](docs/security-model.md) before running untrusted code.
+>
+> Report a vulnerability [privately through GitHub](https://github.com/augentic/omnia/security/advisories/new), as the [security policy](https://github.com/augentic/.github/blob/main/SECURITY.md) describes. Until `1.0`, a confirmed vulnerability is tracked as a public `security` issue and fixed on `main`, with no published advisories, CVEs, or backports.
 
 ## Quick start
 

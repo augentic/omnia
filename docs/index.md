@@ -1,10 +1,12 @@
 <div class="hero">
 <div class="eyebrow">Omnia Developer Guide</div>
-<h1 class="hero-title">Sandboxed guests, production hosts</h1>
+<h1 class="hero-title">Sandboxed guests, pluggable hosts</h1>
 
-Omnia is a lightweight runtime for WebAssembly (WASI) components built on [wasmtime](https://github.com/bytecodealliance/wasmtime). Application code compiles to a sandboxed **guest**; a native **host** provides HTTP, storage, messaging, SQL, model completions, and more through standard WASI interfaces. The same guest runs unchanged against in-memory defaults on a laptop or production services in deployment.
+Omnia is a lightweight runtime for WebAssembly (WASI) components built on [wasmtime](https://github.com/bytecodealliance/wasmtime). Application code compiles to a sandboxed **guest**; a native **host** provides HTTP, storage, messaging, SQL, model completions, and more through standard WASI interfaces. The same guest runs unchanged against in-memory defaults on a laptop or real services in deployment.
 
 <div class="meta-row">
+
+<span class="meta-chip"><strong>Status</strong> pre-release, pre-hardening</span>
 
 <span class="meta-chip"><strong>Runtime</strong> wasmtime + WASI P3</span>
 
@@ -15,6 +17,11 @@ Omnia is a lightweight runtime for WebAssembly (WASI) components built on [wasmt
 </div>
 
 </div>
+
+> [!WARNING]
+> **Pre-release, pre-hardening software.** Omnia is under active development, and it has not yet been hardened or independently audited for security. Expect breaking changes before `1.0`, and do not rely on Omnia as the only isolation boundary around hostile code. Read the [Security Model](security-model.md) before running untrusted guests.
+>
+> Swapping an in-memory default for a real service such as Redis or Postgres changes what a guest talks to, not how hardened the runtime is. Until `1.0`, a confirmed vulnerability is tracked as a public `security` issue and fixed on `main`, with no published advisories, CVEs, or backports. The [security policy](https://github.com/augentic/.github/blob/main/SECURITY.md) says how to report one privately.
 
 <div class="proof-strip">
   <div class="proof-item">

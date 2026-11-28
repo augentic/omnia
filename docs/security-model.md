@@ -2,6 +2,11 @@
 
 Omnia exists to run untrusted or semi-trusted code — including agent-generated code — safely alongside real infrastructure. This page explains what the sandbox guarantees, how capabilities are granted, and, just as importantly, what the runtime does *not* protect against.
 
+> [!WARNING]
+> **Pre-release, pre-hardening software.** This page describes the trust boundary Omnia is designed to hold and the controls it enforces today. Omnia is under active development before `1.0`, and it has not yet been hardened or independently audited for security. Read each guarantee below as intended behaviour, not proven isolation, and do not rely on Omnia as the only boundary around hostile code.
+>
+> Report a vulnerability privately, as the [security policy](https://github.com/augentic/.github/blob/main/SECURITY.md) describes. Until `1.0`, a confirmed vulnerability in omnia or omnia-backends is tracked as a public issue labelled `security` and fixed on `main`, with no published advisories, CVEs, or backports. The open ones are linked at the end of [What Omnia does not protect against](#what-omnia-does-not-protect-against).
+
 ## The trust boundary
 
 The boundary sits between the **guest** (WebAssembly, untrusted) and the **host** (native, trusted). Everything a guest can do, it does through a WASI interface the host explicitly linked; everything else is unreachable by construction:
@@ -155,7 +160,7 @@ Honest limits, so you can layer the right controls on top:
 - **Denial of service via legitimate traffic** is bounded per invocation, but request admission (rate limiting, auth) is upstream of the runtime.
 - **Side channels** (timing, cache) are out of scope, as for most wasm runtimes.
 
-Beyond these limits, known vulnerabilities that are not yet fixed are the open issues labelled `security` in [omnia](https://github.com/augentic/omnia/issues?q=is%3Aissue%20is%3Aopen%20label%3Asecurity) and [omnia-backends](https://github.com/augentic/omnia-backends/issues?q=is%3Aissue%20is%3Aopen%20label%3Asecurity). The [security policy](https://github.com/augentic/.github/blob/main/SECURITY.md) says how to report a new one.
+Beyond these limits, known vulnerabilities that are not yet fixed are the open issues labelled `security` in [omnia](https://github.com/augentic/omnia/issues?q=is%3Aissue%20is%3Aopen%20label%3Asecurity) and [omnia-backends](https://github.com/augentic/omnia-backends/issues?q=is%3Aissue%20is%3Aopen%20label%3Asecurity).
 
 ## Defence-in-depth checklist
 
