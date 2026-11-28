@@ -309,7 +309,9 @@ struct Root {
 
 // Refuses a writable mount that shares or nests a read-only mount's
 // directory: written through one view, its files would load through the
-// other. Directories are told apart by identity, not path.
+// other. The registry already refuses any mount at or beneath a writable
+// one, so what reaches here is a writable mount beneath a read-only one.
+// Directories are told apart by identity, not path.
 fn roots(mounts: &MountRegistry) -> anyhow::Result<Vec<Root>> {
     // identify each mount's directory and the directories above it
     let lineages = mounts

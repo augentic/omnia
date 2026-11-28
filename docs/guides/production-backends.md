@@ -2,6 +2,9 @@
 
 The in-tree `*Default` backends make development friction-free, but production deployments usually need real infrastructure. The [`omnia-backends`](https://github.com/augentic/omnia-backends) repository provides drop-in implementations of the same WASI interfaces against real services. Swapping one in changes a single line in your host runtime — guests are untouched.
 
+> [!WARNING]
+> *Production* here means a real service in place of an in-memory default, not a hardened release. Omnia and `omnia-backends` are both pre-release, pre-hardening software, and neither has yet been hardened or independently audited for security. Read the [Security Model](../security-model.md) before a deployment runs untrusted guests.
+
 ## What's available
 
 | Backend crate | Service | WASI interface(s) |

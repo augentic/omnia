@@ -1,7 +1,7 @@
 //! A per-test scratch directory.
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use omnia::Mount;
 use tempfile::TempDir;
@@ -17,13 +17,17 @@ use tempfile::TempDir;
 /// assert_eq!(scratch.read("in/config.toml"), Some(b"answer = 42".to_vec()));
 /// ```
 #[derive(Debug)]
-pub struct Scratch(TempDir);
+pub struct Scratch {
+    path: PathBuf,
+    _dir: TempDir,
+}
 
 impl Scratch {
-    /// The directory path.
+    /// The directory's canonical path, as a mount over it reports its host
+    /// path.
     #[must_use]
     pub fn path(&self) -> &Path {
-        self.0.path()
+        &self.path
     }
 
     /// A [`Mount`] preopening this directory into the guest sandbox as `.`.
@@ -66,8 +70,11 @@ impl Scratch {
 ///
 /// # Panics
 ///
-/// Panics if the directory cannot be created.
+/// Panics if the directory cannot be created or resolved.
 #[must_use]
 pub fn scratch() -> Scratch {
-    Scratch(tempfile::Builder::new().prefix("omnia-test-").tempdir().expect("creating scratch dir"))
+    let dir =
+        tempfile::Builder::new().prefix("omnia-test-").tempdir().expect("creating scratch dir");
+    let path = dir.path().canonicalize().expect("resolving scratch dir");
+    Scratch { path, _dir: dir }
 }

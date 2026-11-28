@@ -2,6 +2,9 @@
 
 This guide covers taking a host runtime from `cargo run` to production: release builds, ahead-of-time compilation, container images, backing services, and readiness detection.
 
+> [!WARNING]
+> Omnia is pre-release, pre-hardening software. It has not yet been hardened or independently audited for security. Before a deployment runs untrusted guests or serves untrusted traffic, read the [Security Model](../security-model.md) and layer host and network controls around the runtime.
+
 ## What you ship
 
 An Omnia deployment is two artifacts:

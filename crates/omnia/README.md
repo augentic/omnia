@@ -4,6 +4,10 @@ The Omnia Wasm runtime provides a thin wrapper around [`wasmtime`](https://githu
 
 It allows you to declaratively assemble a runtime that provides specific capabilities (like HTTP, Key-Value, Messaging) to guest components, backed by real host implementations.
 
+> **Warning — Pre-release, pre-hardening software.** Omnia is under active development, and it has not yet been hardened or independently audited for security. Expect breaking changes before `1.0`, and do not rely on Omnia as the only isolation boundary around hostile code. Read the [security model](https://github.com/augentic/omnia/blob/main/docs/security-model.md) before running untrusted guests.
+>
+> Report a vulnerability privately, as the [security policy](https://github.com/augentic/.github/blob/main/SECURITY.md) describes. Until `1.0`, a confirmed vulnerability is tracked as a public `security` issue and fixed on `main`, with no published advisories, CVEs, or backports.
+
 ## Quick Start
 
 Use the `runtime!` macro to declare which WASI interfaces (`hosts`) and backends your host runtime needs. It generates the backend bundle (and its host-view accessors) over the library `StoreCtx`, the `Runtime` wiring, the WASI links, the trigger servers, and a `main` that parses the CLI and serves.

@@ -76,6 +76,10 @@ A guest called `omnia:plugins/loader.load`, and its grants table's `guests` list
 
 A guest named a component `path` beneath a mount the deployment marks `writable`. A component loads from a read-only mount alone — what a guest can write, it cannot run. Mount the code directory read-only and keep the guest's state under a mount of its own; the two may not share or nest directories (`writable mount ... shares its directory with the read-only mount ...` at startup, judged by directory identity, so a bind mount or firmlink of the code directory counts as it).
 
+### `the ... mount ... lies at or beneath the writable mount ...: a guest writing through ... could rearrange it`
+
+The deployment mounts a directory at or beneath a writable mount's directory, whatever the inner mount's permission. A guest writing through the writable mount could rename, remove, or link anything beneath it. Directories are judged by identity, so a bind mount, a firmlink, or a second name for the writable directory counts as it. Give the inner directory a place outside the writable mount, or mount the outer one read-only. Read-only mounts may nest.
+
 ### `... is a guest this deployment declares, bound by its entry alone`
 
 A guest named a `path` or `release` whose derived name — the path's file stem, the reference without its version — is a `[[guest]]` the deployment declares, whether or not that guest has loaded yet; or an embedder called `Runtime::register` or `Runtime::admit` under such a name. A declared name is bound by its entry alone, on every admission path, so nothing a caller names can seat other bytes under it: load the guest as `declared(name)`, or rename the file or the entry so the two no longer collide.

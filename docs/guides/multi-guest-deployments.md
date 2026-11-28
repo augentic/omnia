@@ -105,6 +105,8 @@ let workspace = directories.iter().find_map(|(dir, name)| (name == ".").then_som
 
 The [`model`](../../examples/model/) example lends a mounted workspace to a model backend this way.
 
+Mounts are fixed at startup. Each mount's path is canonicalised and its directory opened once, and every guest's preopen is that open directory, so moving or relinking the path while guests run changes nothing they see. A mount at or beneath a writable mount's directory is refused at startup, whatever its own permission, because a guest writing through the writable mount could rearrange it. Read-only mounts may nest.
+
 A read-only mount is also where the guest loader (`omnia:plugins/loader`, behind the `loader` feature) reads a component a guest whose grants reach the mount names by path; a writable mount never is, and a writable mount that shares or nests a read-only mount's directory is refused at startup. Mount code read-only and give state a mount of its own — see the [security model](../security-model.md#guest-requested-plugin-loading-omniapluginsloader).
 
 ## Guests calling guests

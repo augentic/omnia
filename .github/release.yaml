@@ -11,3 +11,10 @@ changelog:
     authors:
       - dependabot
       - dependabot[bot]
+  categories:
+    - title: Security
+      labels:
+        - security
+    - title: Other Changes
+      labels:
+        - "*"

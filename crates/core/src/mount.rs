@@ -4,37 +4,39 @@
 //! `[[mount]]` so a guest can read or edit a mounted directory tree. Two
 //! host-side artefacts back that capability:
 //!
-//! - [`ResolvedPreopen`] — a mount resolved to an absolute host path plus
-//!   writability, applied per store via [`WasiCtxBuilder::preopened_dir`].
+//! - [`ResolvedPreopen`] — a mount as the deployment declares it: a host path
+//!   plus writability, opened once into the [`MountRegistry`].
 //! - [`MountRegistry`] — the host-side source of truth that maps a lent
 //!   `wasi:filesystem` descriptor back to its mount by directory identity. It is
 //!   built once at startup (opening each directory and capturing its identity),
 //!   then shared read-only across every store. The registry — never the
 //!   descriptor — supplies the resolved handle: a cap-std [`Dir`] for bounded
-//!   operations and the absolute host path.
+//!   operations and the canonical host path.
+//!
+//! Every store's `wasi:filesystem` preopens are the handles the registry
+//! opened, so no store reopens a mount's path while guests run.
 //!
 //! A `wasi:filesystem` `Descriptor` is path-less by design (cap-std exposes no
 //! API to recover a host path from a `Dir`), so the absolute path *must* come
 //! from this registry, keyed by descriptor identity. Resolving a guest-lent
 //! `borrow<descriptor>` into a usable handle is the job of the host crate that
 //! defines that grant (e.g. `wasi-model`'s workspace tools), not of this crate.
-//!
-//! [`WasiCtxBuilder::preopened_dir`]: wasmtime_wasi::WasiCtxBuilder::preopened_dir
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use anyhow::{Context as _, Result};
+use anyhow::{Context as _, Result, bail};
 use cap_fs_ext::MetadataExt as _;
 use cap_std::ambient_authority;
 use cap_std::fs::Dir;
+use wasmtime_wasi::{FsPerms, OpenMode};
 
-/// A preopen mount resolved to an absolute host path and writability, ready
-/// to be opened into the guest sandbox and recorded in the [`MountRegistry`].
+/// A preopen mount resolved to a host path and writability, ready to be
+/// opened into the guest sandbox and recorded in the [`MountRegistry`].
 ///
-/// Writability maps to WASI filesystem permissions only at the preopen call
-/// site, keeping wasmtime types out of the mount API.
+/// Writability maps to WASI filesystem permissions when the registry opens
+/// the mount, keeping wasmtime types out of the mount API.
 #[derive(Clone, Debug)]
 pub struct ResolvedPreopen {
     /// Guest-visible name returned by `preopens.get-directories()`.
@@ -60,13 +62,13 @@ impl ResolvedPreopen {
 /// A single resolved mount: one record in the [`MountRegistry`].
 ///
 /// Holds the cap-std [`Dir`] for bounded `read`/`list`/`write` confined to the
-/// mount, plus the absolute `host_path` of the mount root. A lent descriptor is
-/// matched back to this entry by directory identity (`identity`).
+/// mount, plus the canonical `host_path` of the mount root. A lent descriptor
+/// is matched back to this entry by directory identity (`identity`).
 #[derive(Clone)]
 pub struct Mount {
     /// Guest-visible name returned by `preopens.get-directories()`.
     pub name: String,
-    /// Absolute host path of the mount root.
+    /// Canonical host path of the mount root.
     pub host_path: PathBuf,
     /// Host-side capability handle to the mount root.
     pub dir: Arc<Dir>,
@@ -75,6 +77,8 @@ pub struct Mount {
     /// Directory identity `(device, inode)`, used to match a lent descriptor
     /// back to this entry.
     pub identity: (u64, u64),
+    // what every store's preopens serve, one descriptor shared by them all
+    pub(crate) preopen: wasmtime_wasi::filesystem::Dir,
 }
 
 /// The host-side registry of authorized mounts.
@@ -90,41 +94,94 @@ pub struct MountRegistry {
 }
 
 impl MountRegistry {
-    /// Open every resolved preopen, capturing its directory identity, and build
-    /// the registry: the startup fail-fast gate for a mount whose host path
-    /// cannot be opened as a directory.
+    /// Open every resolved preopen and build the registry, the startup gate
+    /// for a mount that cannot be served safely.
     ///
-    /// Preopens sharing a guest-visible name collapse to the last, so a CLI
-    /// `--mount` layered after a manifest `[[mount]]` overrides it rather than
-    /// being shadowed by wasi-libc's first-match resolution; the discarded
-    /// mount's host path is never opened.
+    /// - Each host path is canonicalised, so the path a mount reports passes
+    ///   through no symlink a guest could replace.
+    /// - Each directory is opened once. Every store preopens that handle, so
+    ///   a mount stays the directory it was at startup whatever moves to its
+    ///   path.
+    /// - Preopens sharing a guest-visible name collapse to the last, so a CLI
+    ///   `--mount` layered after a manifest `[[mount]]` overrides it rather
+    ///   than being shadowed by wasi-libc's first-match resolution. The
+    ///   discarded mount's host path is never opened.
+    /// - A mount at or beneath another writable mount is refused, told by
+    ///   directory identity, since a guest writing through the outer mount
+    ///   could rearrange the inner one.
     ///
     /// # Errors
     ///
-    /// Returns an error if a mount's host path cannot be opened as a directory
-    /// or its metadata cannot be read.
+    /// Returns an error if a mount's host path cannot be resolved or opened
+    /// as a directory, if its metadata cannot be read, or if it lies at or
+    /// beneath another writable mount.
     pub fn open(preopens: Vec<ResolvedPreopen>) -> Result<Self> {
         let preopens = dedup_last_wins(preopens);
         let mut entries = Vec::with_capacity(preopens.len());
         for preopen in preopens {
-            let dir = Dir::open_ambient_dir(&preopen.host_path, ambient_authority()).with_context(
-                || format!("opening mount `{}` at {}", preopen.name, preopen.host_path.display()),
-            )?;
+            let host_path = std::fs::canonicalize(&preopen.host_path).with_context(|| {
+                format!("resolving mount `{}` at {}", preopen.name, preopen.host_path.display())
+            })?;
+            let dir =
+                Dir::open_ambient_dir(&host_path, ambient_authority()).with_context(|| {
+                    format!("opening mount `{}` at {}", preopen.name, host_path.display())
+                })?;
             let meta = dir
                 .dir_metadata()
                 .with_context(|| format!("reading metadata for mount `{}`", preopen.name))?;
+            let preopen_dir = dir
+                .try_clone()
+                .with_context(|| format!("sharing mount `{}`", preopen.name))?
+                .into_std_file();
+            let (perms, mode) = if preopen.writable {
+                (FsPerms::ReadWrite, OpenMode::READ | OpenMode::WRITE)
+            } else {
+                (FsPerms::ReadOnly, OpenMode::READ)
+            };
             entries.push(Mount {
                 name: preopen.name,
-                host_path: preopen.host_path,
+                host_path,
                 dir: Arc::new(dir),
                 writable: preopen.writable,
                 identity: (meta.dev(), meta.ino()),
+                preopen: wasmtime_wasi::filesystem::Dir::new(preopen_dir, perms, mode, false),
             });
         }
-        Ok(Self { entries })
+
+        let registry = Self { entries };
+        registry.refuse_nested()?;
+        Ok(registry)
     }
 
-    /// The registered mounts — the WASI preopens to apply to each store.
+    // A guest writing through a writable mount can rename, remove, or link
+    // anything beneath it, so it could rearrange another mount there for
+    // whatever reads that mount by path. A mount is compared with the others
+    // by position, so one sharing a writable mount's directory is refused too.
+    fn refuse_nested(&self) -> Result<()> {
+        for (index, mount) in self.entries.iter().enumerate() {
+            let lineage = Self::ancestry(&mount.host_path).with_context(|| {
+                format!("resolving mount `{}` at {}", mount.name, mount.host_path.display())
+            })?;
+            let outer = self.entries.iter().enumerate().find(|(other, outer)| {
+                *other != index && outer.writable && lineage.contains(&outer.identity)
+            });
+            if let Some((_, outer)) = outer {
+                let access = if mount.writable { "writable" } else { "read-only" };
+                bail!(
+                    "the {access} mount `{}` ({}) lies at or beneath the writable mount `{}` \
+                     ({}): a guest writing through `{}` could rearrange it",
+                    mount.name,
+                    mount.host_path.display(),
+                    outer.name,
+                    outer.host_path.display(),
+                    outer.name
+                );
+            }
+        }
+        Ok(())
+    }
+
+    /// The registered mounts, which every store serves as its WASI preopens.
     #[must_use]
     pub fn entries(&self) -> &[Mount] {
         &self.entries

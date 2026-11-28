@@ -2,6 +2,10 @@
 
 `omnia-sdk` is the SDK for writing an Omnia guest, a WASI component that serves HTTP requests, messaging deliveries, and command lines. It carries the generated bindings for every `omnia:*` interface, typed helpers over them, and a router that binds a guest's handlers to its exports.
 
+> **Warning — Pre-release, pre-hardening software.** `omnia-sdk` and the Omnia runtime its guests run on are under active development, and neither has yet been hardened or independently audited for security. Expect breaking changes before `1.0`, and do not rely on the runtime as the only isolation boundary around hostile guests. Read the [security model](https://github.com/augentic/omnia/blob/main/docs/security-model.md) before running untrusted code.
+>
+> Report a vulnerability privately, as the [security policy](https://github.com/augentic/.github/blob/main/SECURITY.md) describes. Until `1.0`, a confirmed vulnerability is tracked as a public `security` issue and fixed on `main`, with no published advisories, CVEs, or backports.
+
 ## Quick start
 
 A handler is an `async fn`. It reaches the host through an interface module, here `keyvalue`. Register it on `Handlers`, close the handlers with `into_router()`, and bind the router fn with `http::export!`.
