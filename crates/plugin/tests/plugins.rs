@@ -698,7 +698,7 @@ async fn escaping_link() {
 
 // A writable mount that shares or nests a read-only mount's directory
 // refuses at assembly, naming both: written through one view, a component
-// would load through the other. Mounts of one permission nest freely.
+// would load through the other. Read-only mounts nest freely.
 #[tokio::test]
 async fn overlapping_mounts() {
     let scratch = scratch();
@@ -723,11 +723,9 @@ async fn overlapping_mounts() {
         assert!(detail.contains("read-only mount"), "{detail}");
     }
 
-    for writable in [false, true] {
-        let manifest = path_requester(test_programs::PLUGINS_LOAD)
-            .mounts([scratch.mount(writable), out(writable)]);
-        boot(manifest, &[]).await.expect("same-permission mounts may nest").shutdown();
-    }
+    let manifest =
+        path_requester(test_programs::PLUGINS_LOAD).mounts([scratch.mount(false), out(false)]);
+    boot(manifest, &[]).await.expect("read-only mounts may nest").shutdown();
 }
 
 // macOS firmlinks the data volume at `/System/Volumes/Data`, the one second

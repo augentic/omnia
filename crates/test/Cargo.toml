@@ -130,5 +130,9 @@ name = "grants"
 required-features = ["host"]
 
 [[test]]
+name = "mount"
+required-features = ["host"]
+
+[[test]]
 name = "http_cache"
 required-features = ["host"]

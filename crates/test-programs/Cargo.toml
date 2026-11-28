@@ -424,6 +424,11 @@ path = "programs/model/workspace_tools.rs"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "mount_held"
+path = "programs/mount/held.rs"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "otel_axum_handler"
 path = "programs/otel/axum_handler.rs"
 crate-type = ["cdylib"]

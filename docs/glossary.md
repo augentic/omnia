@@ -52,7 +52,7 @@ The runtime's map from each opaque guest identity (`GuestId`) to a pre-instantia
 
 ### Mount
 
-A host directory preopened into every guest sandbox its [grants](#grants) reach (`[[mount]]` in the manifest, the macro's `mounts:` list, or `--mount` on the CLI). Read-only unless marked writable; the guest sees it under its guest-visible name via `wasi:filesystem` preopens. A read-only mount is also a root the [guest loader](#guest-loader) reads a component from when a guest whose grants reach it names a path beneath it; a writable mount never is, and one that shares or nests a read-only mount's directory is refused at startup. Mounts dedup by name, last wins, before any directory opens — how a test overlays a binary's `.` root.
+A host directory preopened into every guest sandbox its [grants](#grants) reach (`[[mount]]` in the manifest, the macro's `mounts:` list, or `--mount` on the CLI). Read-only unless marked writable; the guest sees it under its guest-visible name via `wasi:filesystem` preopens, each the directory opened at startup. A mount at or beneath a writable mount's directory is refused at startup, so only read-only mounts nest. A read-only mount is also a root the [guest loader](#guest-loader) reads a component from when a guest whose grants reach it names a path beneath it; a writable mount never is, and one that shares or nests a read-only mount's directory is refused at startup. Mounts dedup by name, last wins, before any directory opens — how a test overlays a binary's `.` root.
 
 ### Dispatch (host-mediated)
 

@@ -4,12 +4,16 @@
 //! `WasiView`, and assembles every host's linker-facing view
 //! ([`StoreCtx::view`]) from the bundle's [`Provides`] impls.
 
+mod preopens;
+
 use std::fmt;
 use std::sync::Arc;
 
+use anyhow::Result;
+use wasmtime::component::Linker;
 use wasmtime::{StoreLimits, StoreLimitsBuilder};
 use wasmtime_wasi::cli::StdoutStream;
-use wasmtime_wasi::{FsPerms, ResourceTable, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
+use wasmtime_wasi::{ResourceTable, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 
 use crate::{
     ChainCtx, Dispatcher, Extensions, Grants, GuestId, HostCtx, MountRegistry, Provides,
@@ -81,8 +85,8 @@ pub struct StoreBase {
     pub(crate) dispatcher: Arc<dyn Dispatcher>,
     // a link relay derives the callee's chain from it
     pub(crate) chain: ChainCtx,
-    // the mounts preopened into `wasi`, so a lent descriptor can be matched
-    // back to its mount by directory identity
+    // the mounts the store's preopens serve, which a lent descriptor is
+    // matched back to by directory identity
     pub(crate) mounts: Arc<MountRegistry>,
     pub(crate) extensions: Extensions,
 }
@@ -108,19 +112,6 @@ impl StoreBase {
         }
         if let Some(size) = config.options.wasi_max_io_size {
             wasi_builder.max_io_size(size);
-        }
-
-        // preopen each mount; one removed mid-run is skipped, with no ambient fallback
-        for entry in mounts.entries() {
-            let perms = if entry.writable { FsPerms::ReadWrite } else { FsPerms::ReadOnly };
-            if let Err(error) = wasi_builder.preopened_dir(&entry.host_path, &entry.name, perms) {
-                tracing::warn!(
-                    %error,
-                    name = %entry.name,
-                    path = %entry.host_path.display(),
-                    "failed to preopen mount; guest will not see it",
-                );
-            }
         }
 
         Self {
@@ -207,6 +198,23 @@ impl<B> StoreCtx<B> {
     #[must_use]
     pub const fn chain(&self) -> ChainCtx {
         self.base.chain
+    }
+}
+
+impl<B: Send + 'static> StoreCtx<B> {
+    /// Link the WASI interfaces every guest imports into `linker`.
+    ///
+    /// Each store's `wasi:filesystem` preopens are the directories its
+    /// [`mounts`](Self::mounts) opened at startup. A store never reopens a
+    /// mount's path, so a guest that replaces a mount's directory on the host
+    /// cannot redirect what the next store preopens.
+    ///
+    /// # Errors
+    ///
+    /// Returns the linking error from wasmtime-wasi's generated bindings.
+    pub fn add_wasi_to_linker(linker: &mut Linker<Self>) -> Result<()> {
+        wasmtime_wasi::p3::add_to_linker(linker)?;
+        preopens::add_to_linker(linker)
     }
 }
 

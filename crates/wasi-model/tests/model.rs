@@ -633,6 +633,31 @@ async fn model_workspace_subpath() {
     assert_eq!(model.lent(), [Some(nested)]);
 }
 
+// The mount is spelled through a symlink, as an operator's `current` link
+// would be. The backend is lent the directory the link led to at startup,
+// so the path it works through passes no link a guest could replace.
+#[cfg(unix)]
+#[tokio::test]
+async fn symlinked_workspace() {
+    let workspace = scratch();
+    let nested = workspace.path().join("nested");
+    fs::create_dir(&nested).expect("creating nested dir");
+    fs::write(nested.join("seed.txt"), "hello").expect("seeding nested workspace");
+    let links = scratch();
+    let current = links.path().join("current");
+    std::os::unix::fs::symlink(workspace.path(), &current).expect("linking the workspace");
+
+    let mount = Mount {
+        name: ".".to_owned(),
+        path: current,
+        writable: true,
+    };
+    let model =
+        run_scripted(test_programs::MODEL_WORKSPACE_SUBPATH, vec![mount], workspace_turn()).await;
+
+    assert_eq!(model.lent(), [Some(nested)]);
+}
+
 #[tokio::test]
 async fn model_workspace_readonly() {
     let workspace = scratch();
