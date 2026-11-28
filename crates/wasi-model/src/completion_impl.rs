@@ -18,7 +18,8 @@ use crate::session::{
 use crate::tool_host::DirEntry;
 use crate::workspace::{self, Workspace};
 use crate::{
-    Answer, Error, Exhausted, FutureResult, ModelClient, Request, ToolHost, ToolOutcome, WasiModel,
+    Answer, Error, Exhausted, FutureResult, Lend, ModelClient, Request, ToolHost, ToolOutcome,
+    WasiModel,
 };
 
 // The host's side of a guest's `model` handle: the name the guest opened,
@@ -192,17 +193,15 @@ impl ToolHost for BoundToolHost {
         self.with_workspace("write", path, move |workspace, path| workspace.write(path, bytes))
     }
 
-    fn local_path(&self) -> Option<&std::path::Path> {
-        self.workspace.as_ref().map(Workspace::local_path)
+    fn lend(&self) -> Option<&Lend> {
+        self.workspace.as_ref().map(Workspace::lend)
     }
 }
 
 // Manual because the session and workspace internals (channels, capability
-// handles) carry no useful state to print; the lent path is the identity.
+// handles) carry no useful state to print; the lend's path is the identity.
 impl fmt::Debug for BoundToolHost {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("BoundToolHost")
-            .field("workspace", &self.workspace.as_ref().map(Workspace::local_path))
-            .finish_non_exhaustive()
+        f.debug_struct("BoundToolHost").field("workspace", &self.lend()).finish_non_exhaustive()
     }
 }

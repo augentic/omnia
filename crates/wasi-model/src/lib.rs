@@ -10,6 +10,7 @@
 mod answer;
 mod completion_impl;
 mod default_impl;
+mod lend;
 mod request;
 mod session;
 mod tool_host;
@@ -54,6 +55,7 @@ pub use self::generated::omnia::model::types::{
     Budget, Effort, Format, Grants, Location, Message, Role, Schema, WorkerGrant, WorkspaceGrant,
 };
 use self::generated::omnia::model::{completion, types};
+pub use self::lend::Lend;
 pub use self::request::{Function, Generation, Request, Tool};
 pub use self::session::Limits;
 pub use self::tool_host::*;

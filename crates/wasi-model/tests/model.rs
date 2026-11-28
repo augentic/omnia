@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use futures::FutureExt as _;
 use omnia::{Connect as _, ExitStatus, GuestEntry, Mount};
-use omnia_test::host::{Backends, Deployment, ScriptedModel, scratch};
+use omnia_test::host::{Backends, Deployment, Lent, ScriptedModel, scratch};
 use omnia_test::{Exchange, SeenFormat, SeenWorker};
 use omnia_wasi_model::{
     Answer, Budget, ConnectOptions, Error, Exhausted, Format, FutureResult, Grants, Limits,
@@ -554,8 +554,8 @@ async fn model_workspace_tools() {
             .await;
 
     // The host-injected tools read the seed and listed the root and a
-    // subdirectory; the write landed on the real filesystem, and
-    // `local_path` resolved to this mount.
+    // subdirectory; the write landed on the real filesystem, and the backend
+    // was lent this mount.
     assert_eq!(
         model.exchanges(),
         [
@@ -566,7 +566,7 @@ async fn model_workspace_tools() {
         ]
     );
     assert_eq!(fs::read_to_string(workspace.path().join("out.txt")).expect("out.txt"), "written");
-    assert_eq!(model.lent(), [Some(workspace.path().to_path_buf())]);
+    assert_eq!(model.lent(), [Some(Lent::at(workspace.path(), true))]);
 }
 
 #[tokio::test]
@@ -630,12 +630,11 @@ async fn model_workspace_subpath() {
     assert_eq!(model.exchanges(), workspace_exchanges());
     assert_eq!(fs::read_to_string(nested.join("out.txt")).expect("nested/out.txt"), "written");
     assert!(!workspace.path().join("out.txt").exists(), "write stays under the subpath");
-    assert_eq!(model.lent(), [Some(nested)]);
+    assert_eq!(model.lent(), [Some(Lent::at(&nested, true))]);
 }
 
 // The mount is spelled through a symlink, as an operator's `current` link
-// would be. The backend is lent the directory the link led to at startup,
-// so the path it works through passes no link a guest could replace.
+// would be. The backend is lent the directory the link led to at startup.
 #[cfg(unix)]
 #[tokio::test]
 async fn symlinked_workspace() {
@@ -655,7 +654,43 @@ async fn symlinked_workspace() {
     let model =
         run_scripted(test_programs::MODEL_WORKSPACE_SUBPATH, vec![mount], workspace_turn()).await;
 
-    assert_eq!(model.lent(), [Some(nested)]);
+    assert_eq!(model.lent(), [Some(Lent::at(&nested, true))]);
+}
+
+// The guest moves the lent `tree` aside and links its name out of the mount
+// while the backend holds the lend. The backend still holds the directory it
+// was lent, and its write after the swap lands there.
+#[tokio::test]
+async fn model_workspace_swap() {
+    let scratch = scratch();
+    let tree = scratch.path().join("mount").join("tree");
+    fs::create_dir_all(&tree).expect("creating the lent tree");
+    let escape = scratch.path().join("escape");
+    fs::create_dir(&escape).expect("creating the directory beside the mount");
+    let lent = Lent::at(&tree, true);
+
+    let model = ScriptedModel::answering(["done"])
+        .calling(0, [("swap", "{}")])
+        .writing(0, "out.txt", "written");
+    let mount = Mount {
+        name: ".".to_owned(),
+        path: scratch.path().join("mount"),
+        writable: true,
+    };
+    let model = run_scripted(test_programs::MODEL_WORKSPACE_SWAP, vec![mount], model).await;
+
+    assert_eq!(
+        model.exchanges(),
+        [workspace_exchange("swap", "{}", "swapped"), workspace_exchange("write", "out.txt", "")]
+    );
+    assert_eq!(model.lent(), [Some(lent)]);
+    let held = scratch.path().join("mount").join("held").join("out.txt");
+    assert_eq!(fs::read_to_string(held).expect("held/out.txt"), "written");
+    assert_eq!(
+        fs::read_dir(&escape).expect("reading escape").count(),
+        0,
+        "nothing passed the link"
+    );
 }
 
 #[tokio::test]
@@ -669,6 +704,7 @@ async fn model_workspace_readonly() {
     )
     .await;
     assert_eq!(model.exchanges(), [workspace_exchanges()[0].clone()], "the write fails hard");
+    assert_eq!(model.lent(), [Some(Lent::at(workspace.path(), false))]);
 }
 
 // ------------------------------------------------------------------------

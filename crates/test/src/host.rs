@@ -22,7 +22,7 @@ pub use backends::{Backends, NoVcs, STATE_BUCKET};
 pub use deployment::{Captured, Deployment, Run};
 pub use http::{MatchedHttp, Recorded};
 pub use metrics::{Metrics, Observations};
-pub use model::{Completion, ScriptedModel, Step};
+pub use model::{Completion, Lent, ScriptedModel, Step};
 pub use omnia_wasi_messaging::HandleError;
 pub use precompiled::precompiled;
 pub use scratch::{Scratch, scratch};

@@ -2404,6 +2404,7 @@ version = "0.39.0"
 dependencies = [
  "anyhow",
  "bytes",
+ "cap-std",
  "futures",
  "http",
  "http-body-util",
